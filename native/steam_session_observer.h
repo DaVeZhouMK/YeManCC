@@ -1,7 +1,7 @@
 #pragma once
 // Shared, event-driven Steam session observer. No WMI polling, no recurring timer.
 #include <windows.h>
-#include <tlhelp32.h>
+#include "process_inventory.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -9,6 +9,7 @@
 #include <functional>
 #include <mutex>
 #include <map>
+#include <memory>
 #include <string>
 #include <thread>
 #include "steam_window_event_budget.h"
@@ -72,6 +73,7 @@ inline HANDLE verifiedProcess(DWORD pid, const std::wstring& root, ULONGLONG* cr
     if (!pid || root.empty()) return nullptr;
     HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!h) return nullptr;
+    std::unique_ptr<void, decltype(&CloseHandle)> owned(h, &CloseHandle);
     wchar_t image[32768]; DWORD length = static_cast<DWORD>(std::size(image));
     FILETIME birth{}, exit{}, kernel{}, user{};
     bool ok = QueryFullProcessImageNameW(h, 0, image, &length) && GetProcessTimes(h, &birth, &exit, &kernel, &user) &&
@@ -81,25 +83,20 @@ inline HANDLE verifiedProcess(DWORD pid, const std::wstring& root, ULONGLONG* cr
         std::replace(path.begin(), path.end(), L'/', L'\\');
         ok = _wcsicmp(path.c_str(), (root + L"\\steam.exe").c_str()) == 0;
     }
-    if (!ok) { CloseHandle(h); return nullptr; }
+    if (!ok) return nullptr;
     *created = (static_cast<ULONGLONG>(birth.dwHighDateTime) << 32) | birth.dwLowDateTime;
-    return h;
+    return owned.release();
 }
 // Tri-state process observation for display only: 1=running, 0=confirmed absent,
 // -1=unknown. Enumeration failures must never be presented as "Steam stopped".
 inline int probeSteamPresence() {
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return -1;
-    int presence = -1;
-    PROCESSENTRY32W pe{sizeof(pe)};
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (_wcsicmp(pe.szExeFile, L"steam.exe") == 0) { presence = 1; break; }
-        } while (Process32NextW(snap, &pe));
-        if (presence != 1 && GetLastError() == ERROR_NO_MORE_FILES) presence = 0;
-    } else if (GetLastError() == ERROR_NO_MORE_FILES) presence = 0;
-    CloseHandle(snap);
-    return presence;
+    try {
+        const auto topology = processInventory::read();
+        if (!topology || topology->status != processInventory::Status::Complete) return -1;
+        for (const auto& row : topology->rows) if (!_wcsicmp(row.name.c_str(), L"steam.exe")) return 1;
+        return 0;
+    } catch (...) { return -1; } // Discovery failure is Unknown, never stopped.
+
 }
 class Observer {
     const std::wstring registryPath; // Alternate key is used by isolated Win32 tests only.
@@ -121,6 +118,7 @@ class Observer {
     // not consent to write registry state or a recurring process scan.
     inline static thread_local Observer* windowObserver = nullptr;
     static void CALLBACK windowEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD) {
+        try {
         auto* self = windowObserver;
         if (!self || !window || object != OBJID_WINDOW || child != CHILDID_SELF || GetAncestor(window, GA_ROOT) != window) return;
         const auto session = self->sessionSnapshot();
@@ -155,6 +153,9 @@ class Observer {
             self->windowPoked = true; self->windowPokedAt = now; SetEvent(self->pokeEvent);
         }
         if (self->uiChanged) self->uiHints.request(now);
+        } catch (...) {
+            // A failed notification is not action authority. A later event may retry.
+        }
     }
     struct WindowSubscription {
         HWINEVENTHOOK hook = nullptr, names = nullptr;
@@ -172,6 +173,14 @@ class Observer {
         HANDLE notify = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         HKEY key = nullptr;
         HANDLE process = nullptr;
+        struct RunResources {
+            HANDLE& notify; HKEY& key; HANDLE& process;
+            ~RunResources() {
+                if (process) CloseHandle(process);
+                if (key) RegCloseKey(key);
+                if (notify) CloseHandle(notify);
+            }
+        } resources{notify, key, process};
         Session previous;
         bool havePrevious = false, armed = false;
         DWORD previousRegisteredPid = 0;
@@ -210,21 +219,20 @@ class Observer {
                 if (process) next.pid = registeredPid;
                 else if (!next.root.empty()) {
                     // Discovery only on startup/notification/user action, never on an idle clock.
-                    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-                    if (snap != INVALID_HANDLE_VALUE) {
-                        PROCESSENTRY32W pe{sizeof(pe)};
-                        if (Process32FirstW(snap, &pe)) do {
-                            if (_wcsicmp(pe.szExeFile, L"steam.exe")) continue;
+                    std::shared_ptr<const processInventory::Snapshot> topology;
+                    try { topology = processInventory::read(); } catch (...) {}
+                    if (topology && topology->status == processInventory::Status::Complete) {
+                        for (const auto& row : topology->rows) {
+                            if (_wcsicmp(row.name.c_str(), L"steam.exe")) continue;
                             ULONGLONG birth = 0;
-                            HANDLE candidate = verifiedProcess(pe.th32ProcessID, next.root, &birth);
+                            HANDLE candidate = verifiedProcess(row.pid, next.root, &birth);
                             if (!candidate) continue;
                             if (process) { // Ambiguous same-install sessions: do not guess.
                                 CloseHandle(candidate); CloseHandle(process); process = nullptr;
                                 next.pid = 0; next.created = 0; break;
                             }
-                            process = candidate; next.pid = pe.th32ProcessID; next.created = birth;
-                        } while (Process32NextW(snap, &pe));
-                        CloseHandle(snap);
+                            process = candidate; next.pid = row.pid; next.created = birth;
+                        }
                     }
                 }
             }
@@ -271,9 +279,6 @@ class Observer {
             if (result == WAIT_OBJECT_0 + 1 && openWindow.exchange(false)) retries.begin(GetTickCount64());
             inspect(result == WAIT_OBJECT_0 + 1);
         }
-        if (process) CloseHandle(process);
-        if (key) RegCloseKey(key);
-        if (notify) CloseHandle(notify);
     }
 public:
     explicit Observer(std::wstring keyPath = L"Software\\Valve\\Steam") : registryPath(std::move(keyPath)) {}

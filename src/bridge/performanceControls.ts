@@ -2,19 +2,39 @@ import type { FrameRatePair, FrameRateSetting } from './frameRateModel';
 /** Shared continuous controls. Legacy named tiers are migration inputs only. */
 export type ControlSide = 'ac' | 'dc';
 export type ControlMode = 'auto' | 'manual';
+export type ManualPowerScheme = 'yeman' | 'besteff' | 'bal' | 'bestperf';
+export const CONTROL_POWER_SCHEMES = [{ value: 'yeman', label: '野蛮' }, { value: 'besteff', label: '节能' }, { value: 'bal', label: '平滑' }, { value: 'bestperf', label: '高性能' }] as const;
 export type ControlCoreMode = 'bigFirst' | 'bigOnly' | 'littleFirst' | 'littleOnly';
+/** ON releases YMCC's per-game restriction; it never enables SMT in firmware. */
+export function normalizeHyperThreadMode(value: unknown): 'default' | 'off' {
+  return value === 'off' ? 'off' : 'default';
+}
 export type SavingLevel = 'none' | 'small' | 'medium' | 'large' | 'aggressive';
 export interface ContinuousSideControls {
   mode: ControlMode;
   tdp: number;
+  /** Repaired display data is not a valid hardware target until explicitly corrected. */
+  tdpValid?: false;
   tdpCeiling: number;
   auto: { bias: number; saving: SavingLevel; coreSplit: number; coreLow: ControlCoreMode; coreHigh: ControlCoreMode };
   manual: { frequencyMHz: number; unlimited: boolean; aggressiveness: number; turbo: boolean; coreMode: ControlCoreMode };
+}
+export type ControlPowerSchemes = Record<ControlSide, ManualPowerScheme>;
+export function normalizeControlPowerSchemes(value: unknown): ControlPowerSchemes {
+  const raw = value && typeof value === 'object' ? value as Partial<ControlPowerSchemes> : {};
+  const pick = (side: ControlSide): ManualPowerScheme => CONTROL_POWER_SCHEMES.some(option => option.value === raw[side]) ? raw[side]! : 'yeman';
+  return { ac: pick('ac'), dc: pick('dc') };
+}
+/** Same intent key for the sole writer's completion and its resident observer. */
+export function performanceConsumptionSignature(owner: unknown[], identity: string, side: ControlSide,
+  frameDemand: number | boolean, bank: unknown, powerScheme: ManualPowerScheme): string {
+  return JSON.stringify([owner, identity, side, frameDemand, bank, powerScheme], (key, value) => key === 'fpsTarget' ? undefined : value);
 }
 export interface ContinuousControls { version: 1; ac: ContinuousSideControls; dc: ContinuousSideControls }
 export type ContinuousSidePatch = Partial<Omit<ContinuousSideControls, 'auto' | 'manual'>> & {
   auto?: Partial<ContinuousSideControls['auto']>;
   manual?: Partial<ContinuousSideControls['manual']>;
+  powerScheme?: ManualPowerScheme;
   hyperThreadMode?: 'default' | 'on' | 'off';
   frameRate?: FrameRateSetting;
 };
@@ -23,6 +43,8 @@ export interface ContinuousPerformanceIdentity {
   processCreated: string; generation: number; revision: string;
 }
 export interface ContinuousPerformanceSnapshot {
+  /** Global remembered choice for the edited power side; never EXE-owned. */
+  powerScheme: ManualPowerScheme;
   /** Present only for a frame-rate edit; actual original RTSS apply receipt. */
   frameRateApplied?: boolean;
   /** Receipt from this invocation of the original TDP writer; never inferred from saved watts. */
@@ -59,9 +81,12 @@ export function defaultContinuousBank(side: ControlSide, template: PerformanceTe
 }
 export function normalizeContinuousBank(value: unknown, side: ControlSide, fallback = defaultContinuousBank(side)): ContinuousSideControls {
   const r = record(value), a = record(r.auto), m = record(r.manual);
-  const ceiling = snap(r.tdpCeiling, fallback.tdpCeiling, 1, APPLICATION_TDP_MAX);
-  return { mode: r.mode === 'auto' || r.mode === 'manual' ? r.mode : fallback.mode,
-    tdp: snap(r.tdp, fallback.tdp, 1, ceiling), tdpCeiling: ceiling,
+  const ceilingValid = r.tdpCeiling === undefined || typeof r.tdpCeiling === 'number' && Number.isFinite(r.tdpCeiling) && r.tdpCeiling >= 2;
+  const targetValid = value === undefined || typeof r.tdp === 'number' && Number.isFinite(r.tdp) && r.tdp >= 2;
+  const invalid = r.tdpValid === false || !targetValid || !ceilingValid;
+  const ceiling = snap(ceilingValid ? r.tdpCeiling : undefined, fallback.tdpCeiling, 2, APPLICATION_TDP_MAX);
+  return { ...(invalid ? { tdpValid: false as const } : {}), mode: r.mode === 'auto' || r.mode === 'manual' ? r.mode : fallback.mode,
+    tdp: snap(targetValid ? r.tdp : undefined, fallback.tdp, 2, ceiling), tdpCeiling: ceiling,
     auto: { bias: snap(a.bias, fallback.auto.bias, 0, 100, 5),
       saving: SAVING_LEVELS.includes(a.saving) ? a.saving : fallback.auto.saving,
       coreSplit: snap(a.coreSplit, fallback.auto.coreSplit, 0, ceiling),
@@ -74,22 +99,28 @@ export function normalizeContinuousBank(value: unknown, side: ControlSide, fallb
       coreMode: cores.includes(m.coreMode) ? m.coreMode : fallback.manual.coreMode } };
 }
 export function normalizeContinuousControls(value: unknown, fallback?: ContinuousControls): ContinuousControls {
-  const r = record(value); return { version: 1, ac: normalizeContinuousBank(r.ac, 'ac', fallback?.ac), dc: normalizeContinuousBank(r.dc, 'dc', fallback?.dc) };
+  const r = record(value), supplied = Object.keys(r).length > 0;
+  return { version: 1, ac: normalizeContinuousBank(r.ac ?? (supplied ? {} : undefined), 'ac', fallback?.ac), dc: normalizeContinuousBank(r.dc ?? (supplied ? {} : undefined), 'dc', fallback?.dc) };
 }
 /** A patch cannot change the inactive side, game identity, or unrelated settings. */
-export function patchContinuousBank(bank: ContinuousSideControls, patch: ContinuousSidePatch, side: ControlSide): ContinuousSideControls {
+export function patchContinuousBank(bank: ContinuousSideControls, patch: ContinuousSidePatch, side: ControlSide, powerScheme: ManualPowerScheme = 'yeman'): ContinuousSideControls {
   const r = record(patch);
-  const allowed = ['mode', 'tdp', 'tdpCeiling', 'auto', 'manual', 'hyperThreadMode', 'frameRate'];
+  const allowed = ['mode', 'tdp', 'tdpCeiling', 'auto', 'manual', 'hyperThreadMode', 'frameRate', 'powerScheme'];
   if (Object.keys(r).some(k => !allowed.includes(k))) throw new Error('不支持的性能参数');
   for (const [obj, keys] of [[r, ['tdp', 'tdpCeiling']], [record(r.auto), ['bias', 'coreSplit']], [record(r.manual), ['frequencyMHz', 'aggressiveness']]] as const) {
     for (const key of keys) if (key in obj && (typeof obj[key] !== 'number' || !Number.isFinite(obj[key]))) throw new Error('性能参数必须为有效数值');
   }
+  for (const key of ['tdp', 'tdpCeiling']) if (key in r && r[key] < 2) throw new Error('TDP 参数不能低于 2W；错误值不会钳成最低瓦数');
   for (const key of ['turbo', 'unlimited']) if (r.manual?.[key] !== undefined && typeof r.manual[key] !== 'boolean') throw new Error('无效的 CPU 开关');
   if (r.frameRate && (!Number.isInteger(r.frameRate.fps) || (r.frameRate.fps !== 0 && (r.frameRate.fps < 15 || r.frameRate.fps > 300)))) throw new Error('帧率目标应为关闭锁帧或15–300 FPS');
   if (r.mode !== undefined && !['auto', 'manual'].includes(r.mode)) throw new Error('无效的调度模式');
+  if (r.powerScheme !== undefined && !CONTROL_POWER_SCHEMES.some(option => option.value === r.powerScheme)) throw new Error('无效的电源方案');
+  const mode = r.mode ?? bank.mode, scheme = r.powerScheme ?? powerScheme;
+  if (mode === 'manual' && scheme !== 'yeman' && (r.auto !== undefined || Object.keys(record(r.manual)).length > 0))
+    throw new Error('此电源方案由 Windows 管理 CPU，仅可调节 TDP 和帧率');
   if (r.auto?.saving !== undefined && !SAVING_LEVELS.includes(r.auto.saving)) throw new Error('无效的浮动策略');
   for (const v of [r.auto?.coreLow, r.auto?.coreHigh, r.manual?.coreMode]) if (v !== undefined && !cores.includes(v)) throw new Error('无效的核心方案');
-  return normalizeContinuousBank({ ...bank, ...r, auto: { ...bank.auto, ...r.auto }, manual: { ...bank.manual, ...r.manual } }, side, bank);
+  return normalizeContinuousBank({ ...bank, ...r, ...('tdp' in r ? { tdpValid: undefined } : {}), auto: { ...bank.auto, ...r.auto }, manual: { ...bank.manual, ...r.manual } }, side, bank);
 }
 /** The user's bias directly sets the CPU policy, including with no FPS/GPU data or floating disabled. */
 export function automaticCpuControls(bank: ContinuousSideControls) {
@@ -132,9 +163,23 @@ export function stepContinuousFloat(bank: ContinuousSideControls, state: Continu
   const probeLimitMHz = 100 + Math.round(bank.auto.bias / 50) * 100;
   const next: ContinuousFloatState = { ...state, action: 'hold' };
   if (bank.auto.saving === 'none') return { ...next, stable: 0 };
-  if (!(sample.target > 0) || !(sample.fps! > 0) || !Number.isFinite(sample.fps)) return { ...next, stable: 0 };
+  const holdMs = 5000, trial = state.trial;
+  const undo = (): ContinuousFloatState => ({ ...next, watts: trial!.watts, frequencyMHz: trial!.frequencyMHz,
+    aggressiveness: trial!.aggressiveness, trial: null, stable: 0, probeMHz: 100,
+    cpuBlockedUntil: trial!.axis === 'cpu' ? now + 30000 : state.cpuBlockedUntil,
+    tdpBlockedUntil: trial!.axis === 'tdp' ? now + 30000 : state.tdpBlockedUntil,
+    recoverUntil: now + holdMs, action: 'rollback' });
+  const floor = Math.max(sample.minimum, Math.floor(bank.tdp * (1 - rule.ratio)));
+  // A transient accepted value cannot redefine the saving floor. Roll back
+  // that experiment even if the FPS source disappeared after the write.
+  if (trial?.axis === 'tdp' && state.watts < floor) return undo();
+  const validFps = sample.target > 0 && sample.fps! > 0 && Number.isFinite(sample.fps);
   const at = sample.observedAt ?? now;
-  if (!Number.isFinite(at) || at > now || now - at >= 6000 || at <= (state.observedAt ?? -1)) return next;
+  const fresh = Number.isFinite(at) && at <= now && now - at < 6000 && at > (state.observedAt ?? -1);
+  if (!validFps || !fresh) {
+    if (trial && now - trial.at >= 10000) return undo();
+    return validFps ? next : { ...next, stable: 0 };
+  }
   next.observedAt = at;
   const gpuKnown = percent(sample.gpuBusy), cpuKnown = percent(sample.cpuBusy);
   if (!gpuKnown) { next.gpuBusy = false; next.gpuObservedAt = undefined; }
@@ -144,12 +189,6 @@ export function stepContinuousFloat(bank: ContinuousSideControls, state: Continu
   }
   const fps = sample.fps!, low = sample.low! > 0 && Number.isFinite(sample.low) ? sample.low : null;
   const bad = fps < sample.target - Math.max(2, sample.target * .05);
-  const holdMs = 5000, trial = state.trial;
-  const undo = (): ContinuousFloatState => ({ ...next, watts: trial!.watts, frequencyMHz: trial!.frequencyMHz,
-    aggressiveness: trial!.aggressiveness, trial: null, stable: 0, probeMHz: 100,
-    cpuBlockedUntil: trial!.axis === 'cpu' ? now + 30000 : state.cpuBlockedUntil,
-    tdpBlockedUntil: trial!.axis === 'tdp' ? now + 30000 : state.tdpBlockedUntil,
-    recoverUntil: now + holdMs, action: 'rollback' });
   if (trial) {
     if (fps < trial.fps - Math.max(2, trial.fps * .03)) return undo();
     if (now - trial.at < holdMs) return { ...next, action: 'observe' };
@@ -200,7 +239,6 @@ export function stepContinuousFloat(bank: ContinuousSideControls, state: Continu
   if (now >= (state.cpuBlockedUntil ?? 0) && sample.cpuBusy! < 75 && (next.gpuBusy || bank.auto.bias >= 50)) {
     const attempt = probeCpu(); if (attempt.trial) return attempt;
   }
-  const floor = Math.max(sample.minimum, Math.floor(bank.tdp * (1 - rule.ratio)));
   if (state.watts > floor && now >= (state.tdpBlockedUntil ?? 0)) return probe('tdp', { watts: Math.max(floor, state.watts - Math.max(1, Math.ceil(bank.tdp * rule.stepPct))) });
   if (now >= (state.cpuBlockedUntil ?? 0) && sample.cpuBusy! < 75) return probeCpu();
   return next;

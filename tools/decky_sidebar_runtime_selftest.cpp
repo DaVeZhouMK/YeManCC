@@ -98,6 +98,25 @@ int main() {
     }
     for(HANDLE event:{oldEntered,oldRelease,cancelEntered,cancelRelease,newBeginning,newPreflight})CloseHandle(event);
     CloseHandle(entered);CloseHandle(cancel);
+    // The final-cleanup policy borrows this real worker's wait. It must run
+    // without further window events and release the finite wait after its cap.
+    {
+        Runtime deferred;ymcc::deckysidebar::Config config;
+        std::atomic<unsigned> observed{0},cancelled{0};HANDLE finished=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        config.executable=L"NEVER-LAUNCH.exe";config.home=L"NO-WRITE";
+        config.launchAdmission=[] {return ymcc::deckysidebar::LaunchAdmission{false,"decky-context-already-loaded",false};};
+        config.preflight=[] {return std::string("test-no-launch");};
+        config.connectionRecovery=[&] {if(++observed==3)SetEvent(finished);};
+        config.connectionRecoveryTimeout=[&] {return observed<3?20ul:INFINITE;};
+        config.cancelConnectionRecovery=[&]{++cancelled;};
+        deferred.initialize(std::move(config));deferred.observeSteam(1);deferred.setEnabled(true);
+        const bool completed=WaitForSingleObject(finished,1000)==WAIT_OBJECT_0;
+        const auto capped=observed.load();Sleep(80);const auto idle=observed.load();
+        deferred.shutdown();CloseHandle(finished);
+        check(completed&&capped==3&&idle==3,"existing worker delivers deferred cleanup waits then becomes idle without process launch");
+        check(deferred.snapshot().pid==0,"deferred recovery never launches a fixture Loader");
+        check(cancelled>0,"OFF/exit synchronously latches final-cleanup cancellation before worker join");
+    }
     std::cout << "YMCC Decky sidebar native no-launch tests passed: " << checks << "\n";
 }
 

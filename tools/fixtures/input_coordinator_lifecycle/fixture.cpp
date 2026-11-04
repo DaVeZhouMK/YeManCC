@@ -55,6 +55,44 @@ static bool fixtureFullPipe=false;
 static std::function<void()> fixtureLateHideAfterEmptyDecision;
 // Deterministic BUS preemption at an existing log I/O endpoint, never a product hook.
 static std::function<void()> fixtureLateHideDuringDecision;
+// Opt-in ROG131128 ports only. The product worker/helper/guards remain real.
+// A successful existing hide seam may establish a fake, exactly-owned journal;
+// the cycle leaf records the request/ACK and never touches a physical device.
+static bool fixtureRogInitialIdentityEnabled=false,fixtureRogInitialDiscoveryComplete=true;
+static unsigned fixtureRogInitialDiscoveryReads=0;
+static std::function<void()> fixtureRogInitialDiscoveryCallback;
+static std::string fixtureRogInitialShape="valid";
+struct HidHidePhysicalIdentity;
+static bool fixtureRogInitialDiscovery(std::vector<HidHidePhysicalIdentity>&,bool*);
+static bool fixtureRogDeferredJournalSeed=false,fixtureRogDeferredCycleEnabled=false;
+static bool fixtureRogPartialEnabled=false;
+static std::string fixtureRogPartialShape="valid";
+static unsigned fixtureRogPartialStage=0,fixtureRogPartialSnapshotReads=0;
+static std::function<void()> fixtureRogPartialAfterFirst,fixtureRogPartialDuringRetry;
+static std::function<void(unsigned)> fixtureRogPartialDuringSnapshot;
+struct HidHideVisibilitySnapshot;
+static bool fixtureRogPartialSnapshot(HidHideVisibilitySnapshot&);
+
+// Switch-recovery only: actual Start supplies the transaction to this hide I/O leaf.
+static bool fixtureSwitchOwnedHideSeed=false;
+static std::function<void()> fixtureSwitchSourceAtEnsure;
+static std::string fixtureRogDeferredCycleResult="success";
+static nlohmann::json fixtureRogDeferredHideRecords=nlohmann::json::array();
+static nlohmann::json fixtureRogDeferredCycles=nlohmann::json::array();
+static std::function<void()> fixtureRogDeferredAfterHide,fixtureRogDeferredCycleCallback;
+static bool fixtureRogDeferredHideSeam(bool,const std::string&,bool);
+static bool fixtureRogDeferredCycle(const std::wstring&,const char*,DWORD);
+static int fixtureRogDeferredPortKind=0;
+static nlohmann::json fixtureRogDeferredPortQueries=nlohmann::json::array();
+static std::function<void()> fixtureRogDeferredPortCallback;
+static int fixtureRogDeferredUsbPortKind(const std::string& root){
+ if(!fixtureRogDeferredCycleEnabled){++forbiddenIo;throw std::logic_error("unexpected-USB-topology-query");}
+ fixtureRogDeferredPortQueries.push_back({{"root",root},{"portKind",fixtureRogDeferredPortKind}});
+ auto callback=std::move(fixtureRogDeferredPortCallback);fixtureRogDeferredPortCallback={};if(callback)callback();
+ return fixtureRogDeferredPortKind;
+}
+
+
 // Opt-in archived cold-start regression. Only private files and controlled OS
 // observations; real ColdEnvironment, Session/store, owner queue and Host pipe.
 static bool fixtureColdArchive=false;
@@ -153,6 +191,101 @@ static bool fixtureGpdPostHidePhysicalIdentities(std::vector<HidHidePhysicalIden
 #undef YMCC_FOCUS_RECOVERY_PORTS
 #include "main.inert.cpp"
 #undef GetExitCodeProcess
+
+static const std::string& fixtureRogDeferredRoot(){
+ static const std::string root="USB\\VID_0B05&PID_1B4C\\FIXTURE_ROG131128";return root;
+}
+// Fixture state for the existing hide I/O port (or an explicitly retained
+// journal setup), not a replacement for the product refresh helper.
+static void fixtureRogDeferredSeedJournal(const std::string& transactionId){
+ HidHidePhysicalIdentity source;source.resolved=true;source.vendorId=0x0b05;source.productId=0x1b4c;
+ source.usagePage=1;source.usage=5;
+ source.deviceInstanceId="HID\\VID_0B05&PID_1B4C&MI_02\\FIXTURE_ROG131128_GAMEPAD";
+ source.sourcePath=source.deviceInstanceId;source.baseContainerDeviceInstanceId=fixtureRogDeferredRoot();
+ auto& journal=g_hidHideVisibilityJournal;journal=HidHideVisibilityJournal{};
+ journal.active=true;journal.transactionId=transactionId;journal.physical=source;
+ journal.physicalSources={source};journal.hiddenByUs={U2W(source.baseContainerDeviceInstanceId),U2W(source.deviceInstanceId)};
+ journal.before.valid=true;journal.before.cloaking=false;
+}
+static bool fixtureRogDeferredHideSeam(bool success,const std::string& transactionId,bool powerCycle){
+ if(fixtureRogPartialEnabled && t_inputHostDeferredPhysicalHideWrite){
+  fixtureRogDeferredHideRecords.push_back({{"success",fixtureRogPartialStage>0},{"powerCycle",powerCycle},{"transactionId",transactionId},{"clock",startProtectionClock}});
+  if(!fixtureRogPartialStage){
+   fixtureRogDeferredSeedJournal(transactionId);auto& j=g_hidHideVisibilityJournal;
+   j.physical.physicalIdentity=j.physical.deviceInstanceId+"|"+j.physical.baseContainerDeviceInstanceId;j.physicalSources={j.physical};
+   fixtureRogPartialStage=1;
+   auto callback=std::move(fixtureRogPartialAfterFirst);fixtureRogPartialAfterFirst={};if(callback)callback();
+   return false; // explicit half-completed hide OS result, never an ordinary failed-hide journal
+  }
+  ++fixtureRogPartialStage;
+  auto callback=std::move(fixtureRogPartialDuringRetry);fixtureRogPartialDuringRetry={};if(callback)callback();
+  return fixtureRogPartialShape!="retry-failed";
+ }
+
+ if(fixtureSwitchOwnedHideSeed&&success){fixtureRogDeferredSeedJournal(transactionId);
+  // Native-only fixture owns an event, not a real managed process. Supply
+  // this explicit environment identity at the successful HELLO/hide boundary;
+  // the production capture/publish/epoch/run validators remain unmodified.
+  g_inputHostHostInstanceId="fixture-native-event-"+std::to_string(g_inputHostEpoch)+"-"+g_inputHostRunId;
+  auto& journal=g_hidHideVisibilityJournal;journal.physical.physicalIdentity=journal.physical.deviceInstanceId;
+  journal.physicalSources={journal.physical};}
+ if(!fixtureRogDeferredJournalSeed || !t_inputHostDeferredPhysicalHideWrite)return success;
+ fixtureRogDeferredHideRecords.push_back({{"success",success},{"powerCycle",powerCycle},
+  {"transactionId",transactionId},{"clock",startProtectionClock}});
+ // Failed hides must not invent a journal or an owned root.
+ if(success){fixtureRogDeferredSeedJournal(transactionId);
+  auto callback=std::move(fixtureRogDeferredAfterHide);fixtureRogDeferredAfterHide={};if(callback)callback();}
+ return success;
+}
+static bool fixtureRogPartialSnapshot(HidHideVisibilitySnapshot& value){
+ ++fixtureRogPartialSnapshotReads;const bool after=fixtureRogPartialStage>1;
+ value={};value.valid=true;value.cloaking=true;value.inverseRaw="--inv-off";
+ value.applications={hidHideCurrentModulePath()};
+ const auto& j=g_hidHideVisibilityJournal;
+ value.hidden={U2W(j.physical.deviceInstanceId)};
+ if((after&&fixtureRogPartialShape!="retry-failed") || fixtureRogPartialShape=="already-complete")value.hidden.push_back(U2W(j.physical.baseContainerDeviceInstanceId));
+ if(fixtureRogPartialShape=="none-hidden")value.hidden.clear();
+ if(fixtureRogPartialShape=="root-only"&&!after)value.hidden={U2W(j.physical.baseContainerDeviceInstanceId)};
+ if(fixtureRogPartialShape=="cloak-off" || (after&&fixtureRogPartialShape=="after-cloak-off"))value.cloaking=false;
+ if(fixtureRogPartialShape=="app-missing" || (after&&fixtureRogPartialShape=="after-app-missing"))value.applications.clear();
+ if(fixtureRogPartialShape=="inverse-unknown")value.inverseRaw.clear();
+ if(fixtureRogPartialShape=="inverse-on")value.inverseRaw="--inv-on";
+ if(after&&fixtureRogPartialShape=="after-still-missing")value.hidden={U2W(j.physical.deviceInstanceId)};
+ if(fixtureRogPartialShape=="invalid")value.valid=false;
+ if(fixtureRogPartialDuringSnapshot)fixtureRogPartialDuringSnapshot(fixtureRogPartialSnapshotReads);
+ return fixtureRogPartialShape!="unknown" && !(after&&fixtureRogPartialShape=="after-unknown");
+}
+static bool fixtureRogDeferredCycle(const std::wstring& root,const char* phase,DWORD budget){
+ if(!fixtureRogDeferredCycleEnabled){++forbiddenIo;throw std::logic_error("unexpected-physical-cycle");}
+ ymStartSeamTrace(std::string("hidhide-cycle:")+(phase?phase:""));
+ const auto* debt=t_inputHostDeferredPhysicalHideWrite;
+ fixtureRogDeferredCycles.push_back({{"root",W2U(root)},{"phase",phase?phase:""},{"budgetMs",budget},
+  {"clockBefore",startProtectionClock},{"result",fixtureRogDeferredCycleResult},
+  {"tlsDebt",debt!=nullptr},{"deadline",debt?debt->deadline:0},{"requestId",debt?debt->requestId:0},
+  {"executionDeadline",g_inputHostSwitchRecoveryStartDeadline},
+  {"executionRequestId",g_inputHostSwitchRecoveryStartRequestId},{"executionPower",g_inputHostSwitchRecoveryStartPower}});
+ auto callback=std::move(fixtureRogDeferredCycleCallback);fixtureRogDeferredCycleCallback={};if(callback)callback();
+ fixtureRogDeferredCycles.back()["clockAfter"]=startProtectionClock;
+ fixtureRogDeferredCycles.back()["sourceLockedAfter"]=g_xinputPhysicalSourceLocked;
+ fixtureRogDeferredCycles.back()["sourceMaskAfter"]=static_cast<unsigned>(g_xinputConnectedMask & g_xinputPhysicalSourceMask);
+ return fixtureRogDeferredCycleResult=="success";
+}
+
+static bool fixtureRogInitialDiscovery(std::vector<HidHidePhysicalIdentity>& out,bool* complete){
+ ++fixtureRogInitialDiscoveryReads;HidHidePhysicalIdentity source;
+ source.resolved=true;source.vendorId=0x0b05;source.productId=0x1b4c;source.usagePage=1;source.usage=5;
+ source.deviceInstanceId="HID\\VID_0B05&PID_1B4C&MI_05&IG_00\\INITIAL_GAME";
+ source.baseContainerDeviceInstanceId="USB\\VID_0B05&PID_1B4C\\INITIAL_ROOT";
+ source.sourcePath=source.deviceInstanceId;source.physicalIdentity="initial-ROG-physical-identity";
+ if(fixtureRogInitialShape=="other-PID")source.productId=0xffff;
+ if(fixtureRogInitialShape=="empty-identity")source.physicalIdentity.clear();
+ if(fixtureRogInitialShape=="virtual")source.deviceInstanceId="ROOT\\VIGEMBUS\\0000";
+ out={source};if(fixtureRogInitialShape=="multiple")out.push_back(source);
+ if(fixtureRogInitialShape=="empty")out.clear();
+ if(complete)*complete=fixtureRogInitialDiscoveryComplete;
+ auto callback=std::move(fixtureRogInitialDiscoveryCallback);fixtureRogInitialDiscoveryCallback={};if(callback)callback();
+ return !out.empty();
+}
 
 static const std::string& fixtureGpdPostHideRoot(){
  static const std::string value="USB\\VID_045E&PID_028E\\GPD-WIN5-ROOT";return value;
@@ -298,6 +431,16 @@ static void fixtureResetSwitchAudit(){
  audit.throttledCount=0;audit.settleLoggedReason.clear();audit.throttleLoggedWindow=0;
 }
 static void seed(){
+ inputHostDeferredPhysicalHideClear(); // fresh fixture process; never used as evidence of physical return
+ fixtureRogInitialIdentityEnabled=false;fixtureRogInitialDiscoveryComplete=true;fixtureRogInitialDiscoveryReads=0;fixtureRogInitialDiscoveryCallback={};fixtureRogInitialShape="valid";
+ fixtureSwitchOwnedHideSeed=false;fixtureSwitchSourceAtEnsure={};
+ fixtureRogDeferredJournalSeed=fixtureRogDeferredCycleEnabled=false;fixtureRogDeferredCycleResult="success";
+ fixtureRogPartialEnabled=false;fixtureRogPartialShape="valid";fixtureRogPartialStage=fixtureRogPartialSnapshotReads=0;fixtureRogPartialAfterFirst={};fixtureRogPartialDuringRetry={};fixtureRogPartialDuringSnapshot={};
+ fixtureRogDeferredHideRecords=json::array();fixtureRogDeferredCycles=json::array();
+ fixtureRogDeferredAfterHide={};fixtureRogDeferredCycleCallback={};
+ fixtureRogDeferredPortKind=0;fixtureRogDeferredPortQueries=json::array();fixtureRogDeferredPortCallback={};
+ g_hidHideCycleInFlight=false;g_hidHideCycleBusySinceTick=0;
+
  fixtureTargetReturnIndependentCase();
  fixtureResetSwitchAudit();
  fixtureExitSweep=false;fixtureExitSweepLists=fixtureExitSweepUnhides=fixtureExitSweepCloakOffs=0;
@@ -498,15 +641,22 @@ static void recordReadCases(){
 #include "worker_cost_cases.inc"
 
 static void switchRecoveryCases(){
- const auto prepare=[&](){
+ const auto prepare=[&](const std::string& persona="steamdeck"){
   seed();g_machineIdentity.family=YmccFamily::AsusRogAllyX;g_machineIdentity.manufacturer="ASUSTEK COMPUTER INC.";g_machineIdentity.product="ROG Ally X";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;
   g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_externalPriorityVirtualSuspended=false;g_shortcutRecordingActive=false;
   g_inputHostRecoveryEpisodeAttempts=0;g_inputHostRecoveryLastStartTick=0;g_inputHostRecoveryRolling[0]=0;g_inputHostRecoveryRolling[1]=0;g_inputHostRecoveryRollingNext=0;g_inputHostRecoveryTerminalLogged=false;g_inputHostRecoveryPending=false;g_inputHostRecoveryIntentReset=false;g_inputHostTupleHealPending=false;g_inputHostRecoveryFallbackState=0;g_inputCaptureStop=false;g_inputHostRecoveryDeferredUntil=0;g_inputHostRecoveryHealth.clear();g_inputHostHealthySinceTick=0;
   {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);g_inputHostLifecycleWorkQueue.clear();g_inputHostLifecycleWorkRequested=false;}
-  auto base=targetDocument("steamdeck",1);check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump()),"recovery private logical SteamDeck target seeded");
+  g_hidHideVisibilityJournal={};
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);g_inputHostOwnedVisibilityReadback={};
+   ymcc::inputHost::switchVerificationRuntime::acceptedSource={};
+   ymcc::inputHost::switchVerificationRuntime::rogReturnBaseline={};
+   ymcc::inputHost::switchVerificationRuntime::rogOffSignal={};
+   ymcc::inputHost::switchVerificationRuntime::rogOffSuccessReceipt={};}
+  g_realStickTest.virtualTargetPersona=persona;
+  auto base=targetDocument(persona,1);check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump()),"recovery private logical SteamDeck target seeded");
   cases.back()["lifecycleVersion"]=ymcc::VirtualStartProtection::lifecycleVersion;
   cases.back()["fallbackMaxAttempts"]=ymcc::VirtualStartProtection::fallbackMaxAttempts;
-  g_virtualStartProtection.admit("steamdeck",startProtectionClock);fixtureXinputSourceLive=true;g_xinputAdmittedMask=1;g_xinputPhysicalSourceMask=1;g_xinputConnectedMask=1;
+  g_virtualStartProtection.admit(persona,startProtectionClock);fixtureXinputSourceLive=true;g_xinputAdmittedMask=1;g_xinputPhysicalSourceMask=1;g_xinputConnectedMask=1;
   auto sample=fullPipeReadNow(1);{std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);g_inputCaptureGamepadSnapshot=sample;}
  };
  const auto readVerifiedCurrent=[&](int family=1){auto sample=fullPipeReadNow(family);std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
@@ -531,6 +681,64 @@ static void switchRecoveryCases(){
   check(g_inputHostTransportFault&&result.value("hostSubmission",std::string{})!="frame-accepted","actual SUBMIT_FRAME timeout produces the scoped cleanup token");
   g_startEntrySeam.pipeFailCommand.clear();fixtureStartupTransportError=ERROR_SUCCESS;fixtureFrameFirstAck=true;
  };
+ // Controlled physical read/cache endpoints only. Admission, fault predicates,
+ // verification, offers, maintenance, Stop, return cleanup and Start stay real.
+ const auto selectLocalPhysicalSource=[&](){
+  std::scoped_lock lock(g_gamepadReadMx,g_hidHidePhysicalIdentityMx);
+  HidHidePhysicalIdentity source;source.resolved=true;source.vendorId=0x0b05;source.productId=0x1b4c;source.usagePage=1;source.usage=5;
+  source.deviceInstanceId="HID\\VID_0B05&PID_1B4C&MI_02\\FIXTURE_ROG131128_GAMEPAD";
+  source.sourcePath=source.deviceInstanceId;source.physicalIdentity=source.deviceInstanceId;source.baseContainerDeviceInstanceId=fixtureRogDeferredRoot();
+  g_hidHidePhysicalIdentity=source;g_xinputPrimarySlot=0;g_xinputSemanticSlot=0;
+  g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=g_xinputAdmittedMask=g_xinputConnectedMask=g_xinputPreTargetSlots=1;
+  g_xinputSlotUnknownMask=g_xinputVirtualEndpointMask=0;g_xinputSourceReconfirmMask=0;g_xinputSlotReprobeMask=0;
+  g_xinputSlotIdentityResolvedEpoch[0]=g_xinputSlotIdentityEpoch.load();
+  g_xinputPreTargetBoundaryScanned=true;g_xinputBoundaryScanEpoch=g_xinputTopologyEpoch.load();fixtureXinputSourceLive=true;
+ };
+ const auto acceptLocalFrames=[&](){json ack;
+  for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){auto sample=readVerifiedCurrent();if(n==kInputHostFreshNeutralFramesRequired)sample.pad.wButtons=XINPUT_GAMEPAD_A;ack=fullPipeSubmitSource(sample,true,false);}
+  check(ack.value("hostSubmission",std::string{})=="frame-accepted"&&!ack.value("focusIsolationSemanticNeutral",true)&&g_inputHostActive,
+   "local visibility scenario consumes an actual current physical source frame ACK");
+ };
+ const auto startLocalOwned=[&](const std::string& persona="steamdeck",bool acceptFrames=true){
+  prepare(persona);fixtureSwitchOwnedHideSeed=true;fixtureRogDeferredCycleEnabled=true;fixtureFrameFirstAck=acceptFrames;fixtureSwitchSourceAtEnsure=selectLocalPhysicalSource;selectLocalPhysicalSource();
+  check(inputHostStart(),"local visibility scenario starts its actual owned prepared target");
+  check(traced("hidhide-apply")&&g_inputHostProcess&&g_inputHostHello&&g_inputHostPrepared&&g_inputHostNeutralized&&
+   g_inputHostBoundPersona==persona&&g_inputHostBoundPowerGeneration==currentPowerGeneration()&&g_hidHideVisibilityJournal.active&&
+   g_hidHideVisibilityJournal.transactionId==g_inputHostRunId&&!g_hidHideVisibilityJournal.physical.deviceInstanceId.empty()&&
+   !g_hidHideVisibilityJournal.physical.baseContainerDeviceInstanceId.empty()&&!g_hidHideVisibilityJournal.hiddenByUs.empty(),
+   "actual Start hide leaf binds nonempty physical identity root owned paths and its exact current run transaction");
+  if(acceptFrames)acceptLocalFrames();
+  return g_virtualStartProtection.view(startProtectionClock);
+ };
+ const auto captureLocalReadback=[&](){std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  const auto stamp=inputHostCaptureOwnedVisibilityReadbackLocked();
+  check(stamp.requestId==g_virtualStartProtection.view(startProtectionClock).requestId&&stamp.hostEpoch==g_inputHostEpoch&&
+   stamp.power==currentPowerGeneration()&&stamp.runId==g_inputHostRunId&&stamp.persona==g_inputHostBoundPersona&&
+   stamp.configRevision==g_inputHostConfigRevision&&stamp.intentRevision==g_inputHostVirtualIntentRevision.load()&&
+   stamp.transactionId==g_hidHideVisibilityJournal.transactionId&&!stamp.deviceInstanceId.empty()&&!stamp.physicalRoot.empty()&&
+   stamp.deviceInstanceId==g_hidHideVisibilityJournal.physical.deviceInstanceId&&stamp.physicalRoot==g_hidHideVisibilityJournal.physical.baseContainerDeviceInstanceId&&
+   !stamp.targets.empty()&&stamp.targets==g_hidHideVisibilityJournal.hiddenByUs&&stamp.startedAt,
+   "actual readback capture stamps the complete current Host request configuration journal identity and owned target set");
+  return stamp;
+ };
+ const auto publishLocalReadback=[&](bool missing=true,bool readback=true,bool cloakOn=true){
+  auto stamp=captureLocalReadback();auto hidden=stamp.targets;if(missing&&!hidden.empty())hidden.erase(hidden.begin());
+  const bool published=inputHostPublishOwnedVisibilityReadback(stamp,readback,hidden,cloakOn,GetTickCount64());
+  check(published,"current stamped owned visibility readback publishes outside the Host lock");
+  cases.back()["readbacks"].push_back({{"requestId",stamp.requestId},{"hostEpoch",stamp.hostEpoch},{"power",stamp.power},
+   {"runId",stamp.runId},{"persona",stamp.persona},{"transactionId",stamp.transactionId},{"physicalId",stamp.deviceInstanceId},
+   {"physicalRoot",stamp.physicalRoot},{"ownedTargets",stamp.targets},{"startedAt",stamp.startedAt},{"readback",readback},{"missing",missing},{"cloakOn",cloakOn}});
+ };
+ const auto offerLocal=[&](std::uint64_t ticket,InputHostSwitchLocalFault kind){std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  const auto commands=g_inputHostSequence;const auto io=forbiddenIo;const auto reads=inertXinputReads;
+  check(inputHostSwitchLocalFaultCurrentLocked(ticket)==kind,"actual current local fault predicate classifies exact owned obligation");
+  check(g_inputHostSequence==commands&&forbiddenIo==io&&inertXinputReads==reads,"local fault classification performs no command or device read");
+  inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SUCCESS,false,kind);
+  check(g_inputHostSwitchRecovery.pending&&g_inputHostSwitchRecovery.localFault==kind&&g_inputHostSwitchRecovery.error==ERROR_SUCCESS&&
+   !g_inputHostSwitchRecovery.tupleFault&&!g_inputHostTransportFault&&!g_inputHostTupleFault.requestId,
+   "local obligation offers the original recovery owner without fabricated tuple or transport failure");
+ };
+ const auto finishLocalCase=[&](){cases.back()["events"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["cleanup"]=cleanup();fixtureFrameFirstAck=false;};
  {
  cases.push_back({{"name","central-switch-lifecycle-version-and-single-fallback-clock"}});
  using Cycle=ymcc::VirtualStartProtection;Cycle cycle;const Cycle::Tick admittedAt=100000,candidateAt=admittedAt+2500;
@@ -1077,6 +1285,241 @@ static void switchRecoveryCases(){
  if(changed&&oldHandle&&oldHandle!=g_inputHostProcess)CloseHandle(oldHandle);
  fixtureFrameFirstAck=false;
  }
+ // Bounded common-self-heal cases extend this original mode only.
+ {
+ cases.push_back({{"name","actual-local-owned-hidden-missing-single-fallback"}});
+ const auto candidate=startLocalOwned();const auto ticket=candidate.requestId;const auto power=currentPowerGeneration();
+ const auto deadline=startProtectionClock+candidate.remainingMs;const auto settings=ymSettingsReadRaw(YM_SETTINGS_FILE);
+ publishLocalReadback();offerLocal(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+ check(g_inputHostSwitchRecovery.deadline==deadline,"owned visibility offer preserves the original thirty-second deadline");
+ startProtectionClock+=9999;readVerifiedCurrent();publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);
+ check(stopCount()==0&&createCount()==1&&queuedRecoveryCount()==0&&!g_inputHostSwitchRecovery.spent&&
+  g_inputHostRecoveryEpisodeAttempts.load()==0&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0&&
+  g_virtualStartProtection.view(startProtectionClock).locked,
+  "owned hidden loss at9999 holds the original inspection with no queue Stop Start or budget charge");
+ ++startProtectionClock;readVerifiedCurrent();publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1&&g_inputHostRecoveryEpisodeAttempts.load()==0,
+  "owned hidden loss queues exactly one original recovery token at10000 before charging");
+ inputHostPerformSwitchRecovery(ticket);
+ if(g_inputHostSwitchRecovery.awaitingCleanup)fullPipeQuarantineProbe();
+ fullPipeDrainQueuedLifecycle();
+ check(stopCount()==1&&createCount()==2&&traced("stop:switch-recovery")&&g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized&&
+  g_inputHostSwitchRecovery.spent&&g_inputHostRecoveryEpisodeAttempts.load()==1&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==1,
+  "actual owned hidden loss performs one serialized Stop cleanup and Start with one shared and central charge");
+ const auto stopped=std::find(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),"stop:switch-recovery");
+ check(stopped!=g_startEntrySeam.trace.end()&&std::find(stopped,g_startEntrySeam.trace.end(),"create-process")!=g_startEntrySeam.trace.end(),
+  "owned hidden fallback Stops its old target before creating the replacement Host");
+ check(currentPowerGeneration()==power&&ymSettingsReadRaw(YM_SETTINGS_FILE)==settings&&
+  g_virtualStartProtection.view(startProtectionClock).requestId==ticket&&g_inputHostSwitchRecovery.deadline==deadline&&
+  g_virtualStartProtection.view(startProtectionClock).remainingMs==20000,
+  "owned hidden recovery keeps player intent power ticket settings and original remaining budget");
+ publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryOfferLocked(ticket,power,ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(stopCount()==1&&createCount()==2&&g_inputHostRecoveryEpisodeAttempts.load()==1&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==1,
+  "spent owned hidden recovery cannot repeat after a second current missing-target readback");
+ publishLocalReadback(false);acceptLocalFrames();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();}
+ check(g_virtualStartProtection.view(startProtectionClock).phase=="success"&&!g_virtualStartProtection.view(startProtectionClock).locked,
+  "actual replacement accepted frame and healthy stamped readback finish the original verification");
+ timeline("owned-hidden-single-fallback-final");finishLocalCase();
+ }
+ for(const std::string condition:{"unknown-readback","cloak-off-only","journal-selected-identity-mismatch"}){
+ cases.push_back({{"name",std::string("actual-local-owned-hidden-guard/")+condition}});
+ const auto candidate=startLocalOwned();const auto ticket=candidate.requestId;
+ publishLocalReadback(condition!="cloak-off-only",condition!="unknown-readback",condition!="cloak-off-only");
+ if(condition=="journal-selected-identity-mismatch"){
+  std::lock_guard<std::mutex> lock(g_hidHidePhysicalIdentityMx);g_hidHidePhysicalIdentity.physicalIdentity+="-selected-other";
+ }
+ const auto commands=g_inputHostSequence;const auto io=forbiddenIo;const auto reads=inertXinputReads;
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::None,
+   "unknown readback cloak-off alone or a different selected physical identity cannot diagnose an owned hidden fault");
+  inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+  inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);
+ check(g_inputHostSequence==commands&&forbiddenIo==io&&inertXinputReads==reads,
+  "rejected local visibility evidence performs no command or physical observation");
+ noRecovery("rejected local visibility evidence produces zero queues Stops Starts reservations or attempts");
+ finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-local-offer-unknown-holds-healthy-resolves-sticky"}});
+ const auto candidate=startLocalOwned();const auto ticket=candidate.requestId;
+ const auto deadline=startProtectionClock+candidate.remainingMs;
+ publishLocalReadback();offerLocal(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+ startProtectionClock+=candidate.verificationRemainingMs;readVerifiedCurrent();publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1,"current local fault queues its original fallback after inspection");
+ // A failed read replaces authority with UNKNOWN; it cannot mean repaired.
+ publishLocalReadback(true,false,true);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::None&&
+   !inputHostSwitchLocalFaultResolvedLocked(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing),
+   "failed owned readback is neither a current fault nor positive resolution");}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.pending&&!g_inputHostSwitchRecovery.resolved&&
+  !g_inputHostSwitchRecovery.spent&&stopCount()==0&&createCount()==1&&g_inputHostRecoveryEpisodeAttempts.load()==0&&
+  g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+  "queued UNKNOWN evidence holds the exact unspent offer with no Stop or charge");
+ // Ordinary readback observes all owned paths before the next queued dispatch.
+ publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1,"still-current missing targets requeue only the retained offer");
+ publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultResolvedLocked(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing),
+   "fresh actual owned-path readback proves ordinary repair before dispatch");}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.resolved&&!g_inputHostSwitchRecovery.pending&&
+  !g_inputHostSwitchRecovery.queued&&!g_inputHostSwitchRecovery.spent&&!g_inputHostSwitchRecoveryPending.load()&&
+  g_inputHostSwitchRecovery.localFault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing&&g_inputHostSwitchRecovery.deadline==deadline,
+  "ordinary repair cancels queued IO while retaining resolved ticket fault metadata and original deadline");
+ // Keep verification locked: the second fault must be genuinely current when
+ // Offer refuses renewal, rather than being rejected only by a final request.
+ publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::OwnedHiddenTargetMissing,
+   "same-ticket duplicate test has genuine newly missing owned paths");
+  inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+  inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.resolved&&!g_inputHostSwitchRecovery.pending&&
+  queuedRecoveryCount()==0&&stopCount()==0&&createCount()==1&&g_inputHostRecoveryEpisodeAttempts.load()==0&&
+  g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+  "resolved original ticket cannot renew a local offer or consume Stop Start or budget");
+ finishLocalCase();
+ }
+ for(const std::string condition:{"same-transaction-target-mutation","stale-request","stale-power"}){
+ cases.push_back({{"name",std::string("actual-owned-readback-publication-rejected/")+condition}});
+ const auto candidate=startLocalOwned();const auto originalHost=g_inputHostProcess;const auto originalEpoch=g_inputHostEpoch;
+ const auto originalRun=g_inputHostRunId;const auto originalPower=currentPowerGeneration();const auto transaction=g_hidHideVisibilityJournal.transactionId;
+ const auto stamp=captureLocalReadback();const auto commands=g_inputHostSequence;
+ if(condition=="same-transaction-target-mutation"){
+  std::lock_guard<InputHostMutex> lock(g_inputHostMx);g_hidHideVisibilityJournal.hiddenByUs.push_back(L"USB\\VID_0B05&PID_1B4C\\CHANGED_OWNED_TARGET");
+ }
+ if(condition=="stale-request"){
+  startProtectionClock+=ymcc::VirtualStartProtection::maxMs;
+  check(g_virtualStartProtection.admit("steamdeck",startProtectionClock).accepted,"stale publication test admits a genuinely newer player request");
+ }
+ if(condition=="stale-power")g_powerGeneration=originalPower+1;
+ const bool published=inputHostPublishOwnedVisibilityReadback(stamp,true,{},true,GetTickCount64());
+ check(!published,"actual publisher rejects changed target set request or power after the query captured its stamp");
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);const auto ticket=g_virtualStartProtection.view(startProtectionClock).requestId;
+  check(!g_inputHostOwnedVisibilityReadback.requestId&&inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::None,
+   "rejected old publication cannot set authoritative current missing-target evidence");
+  inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+  inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostProcess==originalHost&&g_inputHostEpoch==originalEpoch&&g_inputHostRunId==originalRun&&
+  g_hidHideVisibilityJournal.transactionId==transaction&&g_inputHostSequence==commands,
+  "publication rejection preserves the same actual Host run epoch transaction and command count");
+ noRecovery("stale or mutated readback causes zero recovery queue Stop Start reservation or episode attempt");
+ g_powerGeneration=originalPower;finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-owned-readback-older-query-and-start-freshness"}});
+ const auto candidate=startLocalOwned();const auto older=captureLocalReadback();
+ ++fixturePowerClockOffset;const auto newer=captureLocalReadback();auto hidden=newer.targets;hidden.erase(hidden.begin());
+ check(inputHostPublishOwnedVisibilityReadback(newer,true,hidden,true,GetTickCount64()),"newer actual query publishes missing owned targets");
+ check(!inputHostPublishOwnedVisibilityReadback(older,true,older.targets,true,GetTickCount64()),"late healthy old query cannot overwrite newer missing-target authority");
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(candidate.requestId)==InputHostSwitchLocalFault::OwnedHiddenTargetMissing&&
+   !inputHostSwitchLocalFaultResolvedLocked(candidate.requestId,InputHostSwitchLocalFault::OwnedHiddenTargetMissing),
+   "older healthy query cannot clear a newer current owned fault");}
+ ++fixturePowerClockOffset;const auto healthy=captureLocalReadback();
+ check(inputHostPublishOwnedVisibilityReadback(healthy,true,healthy.targets,true,GetTickCount64()),"fresh newer query publishes positively healthy owned paths");
+ check(!inputHostPublishOwnedVisibilityReadback(newer,true,hidden,true,GetTickCount64()),"late old missing query cannot replace newer healthy authority");
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(candidate.requestId)==InputHostSwitchLocalFault::None&&
+   inputHostSwitchLocalFaultResolvedLocked(candidate.requestId,InputHostSwitchLocalFault::OwnedHiddenTargetMissing),
+   "older missing query cannot create a current fault after newer positive readback");}
+ const auto slow=captureLocalReadback();fixturePowerClockOffset+=1001;readVerifiedCurrent();
+ check(inputHostPublishOwnedVisibilityReadback(slow,true,hidden,true,GetTickCount64()),"same-contract slow query may publish its original start and actual completion");
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(candidate.requestId)==InputHostSwitchLocalFault::None&&
+   !inputHostSwitchLocalFaultResolvedLocked(candidate.requestId,InputHostSwitchLocalFault::OwnedHiddenTargetMissing),
+   "fresh completion cannot rescue over1000ms query-start evidence or count as healthy resolution");}
+ noRecovery("old-query and stale-start publication tests perform zero recovery work or charge");finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-deferred-hide-current-known-source-and-unknown-guards"}});prepare();fixtureFrameFirstAck=true;
+ g_machineIdentity.product="RC73XA";check(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Rog,"deferred scenario uses an actual registered ROG board identity");
+ fixtureXinputSourceLive=false;
+ {std::scoped_lock lock(g_gamepadReadMx,g_hidHidePhysicalIdentityMx);
+  g_hidHidePhysicalIdentity={};g_xinputPhysicalSourceLocked=false;
+  g_xinputAdmittedMask=g_xinputConnectedMask=g_xinputPhysicalSourceMask=g_xinputPreTargetSlots=0;
+  g_xinputSourceReconfirmMask=0;g_xinputSlotReprobeMask=0;}
+ {std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);g_inputCaptureGamepadSnapshot={};}
+ check(inputHostStart()&&g_inputHostHello&&g_inputHostPrepared&&g_inputHostNeutralized&&!g_hidHideVisibilityJournal.active,
+  "actual ROG source-pending Start prepares its target without manufacturing an owned hide journal");
+ const auto pending=g_virtualStartProtection.view(startProtectionClock);const auto ticket=pending.requestId;
+ check(inputHostDeferredPhysicalHideCurrent(g_inputHostEpoch,g_inputHostRunId,currentPowerGeneration(),"steamdeck",startProtectionClock),
+  "actual Start arms the current exact run epoch power persona and deadline hide obligation");
+ selectLocalPhysicalSource();acceptLocalFrames();const auto candidate=g_virtualStartProtection.view(startProtectionClock);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);const char* missing=nullptr;
+  check(!ymcc::inputHost::switchVerificationRuntime::currentOutputProvenLocked(candidate,&missing)&&
+   missing&&std::string(missing)=="current-deferred-physical-hide-unfinished",
+   "current deferred obligation blocks local success despite an actual fresh accepted current-source report");}
+ offerLocal(ticket,InputHostSwitchLocalFault::DeferredPhysicalHide);
+ // The controlled read endpoint now reports another incarnation while the
+ // actual selected/admitted physical slot remains slot0.
+ auto mismatch=readVerifiedCurrent();mismatch.primarySlot=1;
+ {std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);g_inputCaptureGamepadSnapshot=mismatch;}
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::None&&
+   !inputHostSwitchLocalFaultResolvedLocked(ticket,InputHostSwitchLocalFault::DeferredPhysicalHide),
+   "fresh read from a different selected-slot incarnation cannot diagnose or resolve deferred hide");}
+ {std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);g_inputCaptureGamepadSnapshot={};}
+ startProtectionClock+=candidate.verificationRemainingMs;
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);const char* missing=nullptr;
+  check(inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::None&&
+   !inputHostSwitchLocalFaultResolvedLocked(ticket,InputHostSwitchLocalFault::DeferredPhysicalHide)&&
+   !ymcc::inputHost::switchVerificationRuntime::currentOutputProvenLocked(g_virtualStartProtection.view(startProtectionClock),&missing)&&
+   missing&&std::string(missing)=="current-deferred-physical-hide-unfinished",
+   "no fresh source leaves pending debt unresolved and success blocked without inferring a fault");
+  inputHostSwitchVerificationMaintenanceLocked();inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);
+ check(g_virtualStartProtection.view(startProtectionClock).locked&&g_virtualStartProtection.view(startProtectionClock).phase=="verifying"&&
+  g_inputHostSwitchRecovery.pending&&!g_inputHostSwitchRecovery.queued&&!g_inputHostSwitchRecovery.spent&&queuedRecoveryCount()==0&&
+  stopCount()==0&&createCount()==1&&g_inputHostRecoveryEpisodeAttempts.load()==0&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+  "post-inspection UNKNOWN deferred source holds original verification and offer with no queue Stop Start or budget");
+ finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-queued-local-fallback-original-deadline-no-io"}});
+ const auto candidate=startLocalOwned();const auto ticket=candidate.requestId;const auto deadline=startProtectionClock+candidate.remainingMs;
+ publishLocalReadback();offerLocal(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+ startProtectionClock+=candidate.verificationRemainingMs;readVerifiedCurrent();publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1,"deadline case has actual queued local fallback before expiry");
+ const auto commands=g_inputHostSequence;startProtectionClock=deadline;
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ const auto expired=g_virtualStartProtection.view(startProtectionClock);
+ check(expired.requestId==ticket&&expired.remainingMs==0&&expired.phase=="expired"&&expired.fallbackAttempts==0&&
+  g_inputHostRecoveryEpisodeAttempts.load()==0&&g_inputHostSequence==commands&&stopCount()==0&&createCount()==1&&
+  !g_inputHostSwitchRecovery.pending&&!g_inputHostSwitchRecoveryPending.load()&&queuedRecoveryCount()==0&&g_inputHostSwitchRecovery.deadline==deadline,
+  "queued local fallback at original thirty-second deadline cannot Stop send commands charge or renew request time");
+ finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-owned-local-fault-before-first-frame-starts-original-inspection"}});
+ const auto initial=startLocalOwned("steamdeck",false);const auto deadline=startProtectionClock+initial.remainingMs;
+ check(initial.phase=="pending"&&!initial.verificationPending&&g_inputHostPrepared&&g_inputHostNeutralized&&!g_inputHostActive,
+  "actual completed target without first frame has not invented an execution success receipt");
+ publishLocalReadback();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();}
+ const auto candidate=g_virtualStartProtection.view(startProtectionClock);
+ check(candidate.requestId==initial.requestId&&candidate.phase=="verifying"&&candidate.candidateOutcome=="failure"&&
+  candidate.verificationRemainingMs==10000&&g_inputHostSwitchRecovery.pending&&
+  g_inputHostSwitchRecovery.localFault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing&&g_inputHostSwitchRecovery.deadline==deadline,
+  "actual known visibility failure supplies Tc before any accepted frame while retaining the original deadline");
+ check(stopCount()==0&&createCount()==1&&g_inputHostRecoveryEpisodeAttempts.load()==0&&candidate.fallbackAttempts==0,
+  "fault observation before the first frame performs no Stop Start or charge inside execution inspection");
+ finishLocalCase();
+ }
  cases.push_back({{"name","actual-unique-OFF-verification-exit"}});prepare();
  startProtectionClock+=30000;g_virtualStartProtection.admit("disabled",startProtectionClock);g_realStickTest.virtualTargetEnabled=false;g_realStickTest.virtualTargetPersona="disabled";
  inputHostStop("virtual-target-disabled");const auto closing=g_virtualStartProtection.view(startProtectionClock);
@@ -1092,7 +1535,7 @@ static void switchRecoveryCases(){
  fixtureXinputSourceLive=false;g_inputHostSwitchRecovery={};g_inputHostSwitchRecoveryPending=false;
 }
 int wmain(int argc,wchar_t**argv){try{
- if(argc!=3&&argc!=4)return 2;const std::wstring mode=argv[2];if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixturePersistOffCheckpoints=mode==L"off-lifecycle";if(fixturePersistOffCheckpoints){std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);}fixtureOffCheckpoint("consumer-entry");fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
+ if(argc!=3&&argc!=4)return 2;const std::wstring mode=argv[2];if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixturePersistOffCheckpoints=mode==L"off-lifecycle"||mode==L"switch-recovery";if(fixturePersistOffCheckpoints){std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);}fixtureOffCheckpoint("consumer-entry");fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
  g_msiControllerTraceInventoryForTest=[](){return json{{"known",false},{"scope","offline"}};};g_msiControllerOfficialStackForTest=[](){return json{{"scope","offline"},{"modeWriterProven",false}};};
  bool expectedFailure=false,ok=false;
  if(mode==L"entry"||mode==L"mutation1"||mode==L"mutation2"){const int mutation=mode==L"entry"?0:mode==L"mutation1"?1:2;expectedFailure=mutation!=0;ok=msiStartOrderEntrySelfTest(mutation);}

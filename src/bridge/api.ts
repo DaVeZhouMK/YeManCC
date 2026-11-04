@@ -28,8 +28,8 @@ export const fs = {
     invoke<string | null>('fs.getFileIcon', { path }, { timeoutMs: 6000 }),
   // Fan small-file reads opt into a complete, size-bounded native range receipt.
   // Other consumers retain the existing command and default waiting behavior.
-  readTextFile: (path: string, maxBytes = 1 << 20, options?: { timeoutMs?: number; bounded?: boolean }): Promise<string> => {
-    if (!options?.bounded) return invoke<string>('fs.readTextFile', { path, maxBytes }, options);
+  readTextFile: (path: string, maxBytes = 1 << 20, options?: { timeoutMs?: number; bounded?: boolean; textEncoding?: 'windows-config' }): Promise<string> => {
+    if (!options?.bounded) return invoke<string>('fs.readTextFile', { path, maxBytes, ...(options?.textEncoding ? { textEncoding: options.textEncoding } : {}) }, options);
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return Promise.reject(new Error('FILE_READ_LIMIT_INVALID'));
     return invoke<{ content: string; offset: number; size: number }>('fs.readTextRange',
       { path, offset: 0, maxBytes }, { timeoutMs: options.timeoutMs }).then(receipt => {
@@ -44,8 +44,8 @@ export const fs = {
   writeTextFile: (path: string, content: string) =>
     invoke<boolean>('fs.writeTextFile', { path, content }),
   // 原子写：native 端先写临时文件再 MoveFileEx 替换；替换失败必须 reject，禁止 UI 将未落盘状态视为成功。
-  writeTextFileAtomic: async (path: string, content: string, timeoutMs?: number): Promise<void> => {
-    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content }, { timeoutMs });
+  writeTextFileAtomic: async (path: string, content: string, timeoutMs?: number, windowsConfig?: { expectedContent: string | null }): Promise<void> => {
+    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content, ...(windowsConfig ? { textEncoding: 'windows-config', expectedContent: windowsConfig.expectedContent } : {}) }, { timeoutMs });
     if (!ok) throw new Error(`原子写入失败: ${path}`);
   },
   exists: (path: string, timeoutMs?: number) => invoke<boolean>('fs.exists', { path }, { timeoutMs }),
@@ -65,7 +65,7 @@ export const settingsStore = {
   // Native owns the effective PowerControl root, including the supported override.
   location: () => invoke<{ directory: string; file: string; backup: string }>('settings.location', {}, { timeoutMs: 10000 }),
   reset: (path: string, defaults: Record<string, unknown>) => invoke<{ ok: boolean; backups: string[]; protectedDataRecovered: boolean }>('settings.reset', { path, defaults, confirm: 'reset-application-settings' }, { timeoutMs: 15000 }),
-  read: (path: string, stamp: string | null) => invoke<{ stamp: string; unchanged: boolean; content?: string }>('settings.read', { path, stamp }),
+  read: (path: string, stamp: string | null) => invoke<{ stamp: string; unchanged: boolean; content?: string; readFault?: string }>('settings.read', { path, stamp }),
   write: (path: string, content: string, transaction?: { baseline: Record<string, any>; initialize?: boolean; expectedInputRevision?: number }) =>
     invoke<boolean | { ok: boolean; content: string; reason?: string; startProtection?: VirtualStartProtectionState }>('settings.write', { path, content, ...transaction }),
 };
@@ -111,19 +111,26 @@ export const losslessRuntime = {
     'lossless.ensureScaling', request, {timeoutMs:13000}),
 };
 
+export interface ShellIntentAdmission {
+  expectedPowerGeneration:number;
+  expectedMirrorPeer?:{connection:string;runId:string;connectionRevision:number};
+}
 export const shell = {
-  run: (program: string, args: string[] = [], timeoutMs = 30000, tdpObservation?: TdpObservationContext) => {
+  run: (program: string, args: string[] = [], timeoutMs = 30000, tdpObservation?: TdpObservationContext, intentAdmission?: ShellIntentAdmission) => {
+    if(intentAdmission!==undefined&&(!intentAdmission||!Number.isSafeInteger(intentAdmission.expectedPowerGeneration)||intentAdmission.expectedPowerGeneration<=0))throw Error('SHELL_INTENT_INVALID_GENERATION');
     const nativeTimeout = Math.max(100, Math.min(600000, Math.round(timeoutMs)));
     // Native 负责终止超时进程树；前端只提供稍晚的保险超时，避免响应链异常时 Promise 永久悬挂。
     return invoke<RunResult>(
       'shell.run',
-      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}) },
+      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}), ...(intentAdmission===undefined?{}:{expectedPowerGeneration:intentAdmission.expectedPowerGeneration,...(intentAdmission.expectedMirrorPeer===undefined?{}:{expectedMirrorPeer:intentAdmission.expectedMirrorPeer})}) },
       { timeoutMs: nativeTimeout + 5000 },
     );
   },
   open: (url: string) => invoke<boolean>('shell.open', { url }),
   execute: (program: string, args: string[] = []) =>
     invoke<boolean>('shell.execute', { program, args }),
+  // 复用原生返回桌面动作，回执只表示 Win+D 输入已被接受。
+  returnDesktop: () => invoke<boolean>('shell.returnDesktop', {}, { timeoutMs: 6000 }),
   // Windows 程序切换：native 在受超时监管的独立进程中调用系统 Shell API。
   taskView: () => invoke<boolean>('shell.taskView', { requestedAtUnixMs: Date.now() }, { timeoutMs: 6000 }),
   taskViewWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('shell.taskView', evidence, { timeoutMs: 6000 }),
@@ -137,6 +144,7 @@ export interface RtssReloadResult {
   win32Error?: number;
   path?: string;
   errorCode?: string;
+  bridgeCode?: number;
   bridgeState?: string;
   bridgeMaintenanceDeferred?: boolean;
 }
@@ -144,6 +152,9 @@ export interface RtssReloadResult {
 // Profile SDK calls run in a disposable helper (never loaded into YMCC).
 // Layout loads run inside RTSS via its client plugin and return a completion ACK.
 export const rtss = {
+  setAffinityExact: (pid: number, processCreated: string, path: string) => invoke<{
+    ok: boolean; matched: boolean; applied: boolean; error: number; reason: string;
+  }>('rtss.setAffinityExact', { pid, processCreated, path }, { timeoutMs: 5000 }),
   reloadProfiles: (dllPath: string) =>
     invoke<RtssReloadResult>('rtss.reloadProfiles', { dllPath }),
   prepareOverlay: (dir: string, powerControlDir: string) =>
@@ -230,8 +241,12 @@ export interface LedFeedbackCapabilities {
   presetDeclared?: boolean;
   presetImplemented?: boolean;
   presetReason?: string;
-  /** HC DeviceCapabilities.DynamicLightingSecondLEDColor（ROG 无此位，隐藏副颜色）。 */
+  /** 常规效果的副色能力；氛围分区由 ledEffects 单独授予两色。 */
   supportsSecondColor?: boolean;
+  /** 总库确认当前灯效速度由固件固定。 */
+  lightingFixedSpeed?: boolean;
+  /** 预设仍消费副色（如标志灯／功能键），与普通双色能力分别判断。 */
+  presetSupportsSecondColor?: boolean;
   vibrationAvailable: boolean;
   physicalPrimarySlot: number;
   /** 不可用原因（可空），供 UI 直显与支持反馈。 */
@@ -454,7 +469,21 @@ export const tray = {
   setTooltip: (tip: string) => invoke<boolean>('tray.setTooltip', { tip }),
 };
 
+export interface NativeProcessInstance {
+  pid: number;
+  name: string;
+  path: string;
+  processCreated: string;
+}
+export interface NativeProcessObservation {
+  known: boolean;
+  processes: NativeProcessInstance[];
+  error?: number;
+  generation?: string;
+  observedAt?: string;
+}
 export const proc = {
+  identities: (names: string[]) => invoke<NativeProcessObservation>('proc.identities', { names }, { timeoutMs: 5000 }),
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
   findExact: (path: string) => invoke<{ found: boolean; pid: number }>('proc.findExact', { path }, { timeoutMs: 5000 }),
   terminateTree: (pid: number, timeoutMs?: number) => invoke<{ ok: boolean; attempted: number; terminated: number }>('process.terminateTree', { pid }, { timeoutMs }),

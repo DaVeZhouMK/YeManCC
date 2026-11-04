@@ -3,22 +3,27 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
+const chartsOnly=process.argv.includes('--charts-storm-only');
 const root=process.cwd(),require=createRequire(path.join(root,'package.json'));
 const {build}=require('esbuild');
+const chartSource=chartsOnly&&process.env.YMCC_CHARTS_SOURCE?path.resolve(process.env.YMCC_CHARTS_SOURCE):path.join(root,'src/bridge/steamCharts.ts');
+const fixtureRecords=[];
 const apiSource=fs.readFileSync(path.join(root,'src/bridge/api.ts'),'utf8');
 const apiNames=[...apiSource.matchAll(/export (?:const|function) (\w+)/g)].map(m=>m[1]);
 const fakeApi=apiNames.map(name=>['fs','settingsStore'].includes(name)?'':`export const ${name}=new Proxy({}, {get:(_target,key)=>(...args)=>{const fn=globalThis.__fixture.services[${JSON.stringify(name)}]?.[key];if(fn)return fn(...args);throw Error('Forbidden native operation: ${name}.'+String(key))}});`).join('\n')+String.raw`
 const fx=globalThis.__fixture;
 export const fs={
- exists:async p=>fx.files.has(p),
- readTextFile:async (p,n)=>{await Promise.resolve();fx.reads.push(p);if(fx.readHook)return fx.readHook(p,n);if(!fx.files.has(p))throw Error('missing fixture');return fx.files.get(p)},
- mkdir:async()=>true,
+ exists:async p=>fx.existsHook?fx.existsHook(p):fx.files.has(p)||fx.dirs.has(p),
+ readTextFile:async (p,n,options)=>{await Promise.resolve();fx.reads.push(p);if(fx.readHook)return fx.readHook(p,n,options);if(!fx.files.has(p))throw Error('missing fixture');const raw=fx.files.get(p);const bytes=typeof raw==='string'?new TextEncoder().encode(raw):raw;if(fx.charts&&n&&bytes.byteLength>n)throw Error('FILE_READ_LIMIT_EXCEEDED');return typeof raw==='string'?raw:new TextDecoder('utf-8',{fatal:true}).decode(raw)},
+ stat:async p=>{fx.statReads.push(p);if(fx.statHook)return fx.statHook(p);if(fx.dirs.has(p))return {size:0,modified:1,isDir:true,isFile:false};if(!fx.files.has(p))throw Error('Not found: '+p);const raw=fx.files.get(p);return {size:typeof raw==='string'?new TextEncoder().encode(raw).byteLength:raw.byteLength,modified:fx.fileTimes.get(p)||1,isDir:false,isFile:true}},
+ mkdir:async p=>{if(fx.mkdirHook)return fx.mkdirHook(p);fx.dirs.add(p);return true},
  remove:async p=>fx.files.delete(p),
- readDir:async p=>fx.services.fs?.readDir?fx.services.fs.readDir(p):[],
+ readDir:async p=>{if(fx.services.fs?.readDir)return fx.services.fs.readDir(p);if(!fx.charts)return [];if(!fx.dirs.has(p))throw Error('Not found: '+p);const prefix=p+'\\',names=new Map();for(const [file,isDir]of [...[...fx.files.keys()].map(v=>[v,false]),...[...fx.dirs].map(v=>[v,true])])if(file.startsWith(prefix)&&!file.slice(prefix.length).includes('\\'))names.set(file.slice(prefix.length),{name:file.slice(prefix.length),isDir,isFile:!isDir});return [...names.values()]},
  writeTextFile:async(p,s)=>{fx.files.set(p,s);fx.writes.push({path:p,content:s});return true},
- writeTextFileAtomic:async(p,s)=>{if(fx.atomicHook)await fx.atomicHook(p,s);fx.files.set(p,s);fx.writes.push({path:p,content:s});},
- rename:async(a,b)=>{if(!fx.files.has(a))return false;fx.files.set(b,fx.files.get(a));fx.files.delete(a);fx.renames.push({from:a,to:b});return true;},
+ writeTextFileAtomic:async(p,s)=>{if(fx.atomicHook&&(await fx.atomicHook(p,s))===false)throw Error('atomic false receipt');fx.files.set(p,s);fx.writes.push({path:p,content:s});},
+ rename:async(a,b)=>{if(fx.renameHook){const result=await fx.renameHook(a,b);if(result!==undefined)return result;}if(!fx.files.has(a)){if(!fx.charts)return false;throw Error('rename source missing');}fx.files.set(b,fx.files.get(a));fx.files.delete(a);fx.renames.push({from:a,to:b});return true;},
 };
 function object(v){return v!==null&&typeof v==='object'&&!Array.isArray(v)}
 function delta(current,base,next){
@@ -46,24 +51,32 @@ export const settingsStore={read:async(p,known)=>{
 }};
 `;
 async function fixture(imports){
- const result=await build({stdin:{contents:imports,resolveDir:root,loader:'ts'},bundle:true,external:['vue'],format:'cjs',platform:'node',write:false,alias:{'@':path.join(root,'src')},plugins:[{name:'strict-memory-api',setup(b){b.onLoad({filter:/api\.ts$/},()=>({contents:fakeApi,loader:'ts'}));b.onLoad({filter:/ipc\.ts$/},()=>({contents:`export const isNativeRuntime=false;export const invoke=async(c,a)=>{const f=globalThis.__fixture.ipc[c];if(!f)throw Error('Forbidden fixture IPC '+c);return f(a)};export const on=()=>()=>{};export const notify=()=>{};`,loader:'ts'}));}}]});
- const data={stats:0,commitHook:null,atomicHook:null,ipc:{},files:new Map(),reads:[],writes:[],renames:[],failWrite:false,readHook:null,services:{}};
+ const result=await build({stdin:{contents:imports,resolveDir:root,loader:'ts'},bundle:true,external:['vue'],format:'cjs',platform:'node',write:false,metafile:true,alias:{'@':path.join(root,'src')},plugins:[{name:'strict-memory-api',setup(b){b.onLoad({filter:/steamCharts\.ts$/},()=>({contents:fs.readFileSync(chartSource,'utf8'),loader:'ts',resolveDir:path.join(root,'src/bridge')}));b.onLoad({filter:/api\.ts$/},()=>({contents:fakeApi,loader:'ts'}));b.onLoad({filter:/ipc\.ts$/},()=>({contents:`export const isNativeRuntime=false;export const invoke=async(c,a)=>{const f=globalThis.__fixture.ipc[c];if(!f)throw Error('Forbidden fixture IPC '+c);return f(a)};export const on=()=>()=>{};export const notify=()=>{};`,loader:'ts'}));}}]});
+ const data={charts:chartsOnly,existsHook:null,dirs:new Set(),fileTimes:new Map(),statReads:[],statHook:null,mkdirHook:null,renameHook:null,stats:0,commitHook:null,atomicHook:null,ipc:{},files:new Map(),reads:[],writes:[],renames:[],failWrite:false,readHook:null,services:{}};
  const local=new Map(),events=[];const module={exports:{}};
- const context={Audio:class{addEventListener(){}removeAttribute(){}load(){}pause(){}play(){return Promise.resolve()}},module,exports:module.exports,require,console,process:{env:{NODE_ENV:'production'},platform:'win32',version:process.version},structuredClone,TextEncoder,TextDecoder,URL,performance,setTimeout,clearTimeout,setInterval,clearInterval,__fixture:data,
+ const clock={now:Date.now(),next:0,timers:new Map()};
+ const timer=(fn,ms=0)=>{const id=++clock.next;clock.timers.set(id,{at:clock.now+ms,fn});return id};
+ class ClockDate extends Date {constructor(...args){super(...(args.length?args:[clock.now]))}static now(){return clock.now}}
+ const advance=async ms=>{const until=clock.now+ms;for(let i=0;i<512;++i){await ticks();const due=[...clock.timers].filter(([,v])=>v.at<=until).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;clock.now=Math.max(clock.now,due[1].at);clock.timers.delete(due[0]);due[1].fn();}clock.now=until;await ticks()};
+ const context={btoa,Audio:class{addEventListener(){}removeAttribute(){}load(){}pause(){}play(){return Promise.resolve()}},module,exports:module.exports,require,console,process:{env:{NODE_ENV:'production'},platform:'win32',version:process.version},structuredClone,TextEncoder,TextDecoder,URL,performance,setTimeout,clearTimeout,setInterval,clearInterval,__fixture:data,
  document:{visibilityState:'visible',addEventListener(){},removeEventListener(){},querySelector(){return null}},
  window:{location:{hash:'#/schedule'},addEventListener(){},removeEventListener(){},dispatchEvent(e){events.push(e);return true},setTimeout,clearTimeout},
  CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},
  localStorage:{getItem:k=>local.get(k)??null,setItem:(k,v)=>local.set(k,String(v)),removeItem:k=>local.delete(k)},
  };
+ if(chartsOnly)Object.assign(context,{Date:ClockDate,setTimeout:timer,clearTimeout:id=>clock.timers.delete(id)});
  vm.runInNewContext(result.outputFiles[0].text,context,{filename:'memory-only-global-config.cjs'});
+ const bundle=result.outputFiles[0].text;
+ fixtureRecords.push({inputs:Object.keys(result.metafile.inputs),bundleSha256:createHash('sha256').update(bundle).digest('hex'),data});
+ if(chartsOnly&&process.env.YMCC_GLOBAL_CONFIG_REPORT){const dir=path.join(path.dirname(process.env.YMCC_GLOBAL_CONFIG_REPORT),'bundles');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,String(fixtureRecords.length)+'.cjs'),bundle);}
  const repo=module.exports.repo;
- const initial=repo.normalizeSettings({tdp:{tdpMax:37,fpsLimit:75,float:{target:120,profile:'none',tdpStrategy:'none'}}});
- data.files.set(repo.SETTINGS_FILE,JSON.stringify(initial));
- return {...module.exports,data,initial,events};
+ const initial=repo?.normalizeSettings({tdp:{tdpMax:37,fpsLimit:75,float:{target:120,profile:'none',tdpStrategy:'none'}}});
+ if(repo)data.files.set(repo.SETTINGS_FILE,JSON.stringify(initial));
+ return {...module.exports,data,initial,events,advance,clock,compiled:{inputs:Object.keys(result.metafile.inputs),sha256:createHash('sha256').update(result.outputFiles[0].text).digest('hex')}};
 }
 const base=`export * as repo from './src/bridge/settingsRepository';`;
 const cases=[];
-async function check(name,run){try{await run();cases.push({name,ok:true});console.log('PASS '+name)}catch(e){cases.push({name,ok:false,error:e.message});console.log('FAIL '+name+': '+e.message)}}
+async function check(name,run){if(chartsOnly&&!/chart/i.test(name))return;try{await run();cases.push({name,ok:true});console.log('PASS '+name)}catch(e){cases.push({name,ok:false,error:e.message});console.log('FAIL '+name+': '+e.message)}}
 const ticks=async()=>{for(let i=0;i<12;i++)await Promise.resolve()};
 await check('coalesced initial settings readers own different snapshots',async()=>{
  const f=await fixture(base);const [a,b]=await Promise.all([f.repo.loadSettings(),f.repo.loadSettings()]);
@@ -133,17 +146,17 @@ await check('a rejected LOCALAPPDATA lookup is retried instead of permanently ca
 });
 function seedChart(f){
  const source=fs.readFileSync(path.join(root,'src/bridge/steamCharts.ts'),'utf8').match(/const STEAM_FEATURED_URL = '([^']+)'/)[1];
- const dir=path.win32.dirname(f.repo.SETTINGS_FILE);f.data.services.app={powerControlDir:async()=>dir};
+ const dir=f.repo?path.win32.dirname(f.repo.SETTINGS_FILE):'Q:\\ChartsFixture\\PowerControl';f.data.dirs.add(dir);f.data.dirs.add(dir+'\\SteamCharts');f.data.services.app={powerControlDir:async()=>dir};
  const items=Array.from({length:5},(_,i)=>({rank:i+1,appId:i+1,name:'cached-'+i,url:'https://store.steampowered.com/app/'+(i+1),imageUrl:'https://fixture.invalid/image.png',fallbackImageUrl:'https://fixture.invalid/fallback.png'}));
  f.data.files.set(dir+'\\SteamCharts\\steam.json',JSON.stringify({schemaVersion:2,mode:'steam',source,refreshedAt:new Date().toISOString(),period:'fixture',items}));
 }
 await check('concurrent Steam chart readers cannot mutate each others item records',async()=>{
- const f=await fixture(base+`export * as charts from './src/bridge/steamCharts';`);seedChart(f);
+ const f=await fixture((chartsOnly?'':base)+`export * as charts from './src/bridge/steamCharts';`);seedChart(f);
  const [a,b]=await Promise.all([f.charts.loadSteamCharts('steam'),f.charts.loadSteamCharts('steam')]);
  a.items[0].name='caller-mutation';assert.equal(b.items[0].name,'cached-0','coalesced chart callers share mutable item records');
 });
 await check('forced chart refresh does not silently reuse an in-flight ordinary cache hit',async()=>{
- const f=await fixture(base+`export * as charts from './src/bridge/steamCharts';`);seedChart(f);let requests=0;
+ const f=await fixture((chartsOnly?'':base)+`export * as charts from './src/bridge/steamCharts';`);seedChart(f);let requests=0;
  f.data.services.http={request:async()=>{requests++;return {status:200,body:JSON.stringify({top_sellers:{items:Array.from({length:5},(_,i)=>({id:i+1,name:'online-'+i,large_capsule_image:'https://fixture.invalid/image.png',small_capsule_image:'https://fixture.invalid/fallback.png'}))}})}}};
  const ordinary=f.charts.loadSteamCharts('steam');const forced=f.charts.loadSteamCharts('steam',true);await ordinary;
  const result=await forced;assert.equal(result.fromCache,false,'manual refresh reused an ordinary cache-only request');assert.equal(requests,1);
@@ -221,7 +234,7 @@ await check('Lossless Scaling backup failure prevents a main replacement',async(
  const f=await fixture(base+`export * as quick from './src/bridge/quickapp';`);f.data.services.shell={run:async()=>({exitCode:0,stdout:'Q:/LocalData',stderr:''})};const file=path.win32.normalize('Q:/LocalData/Lossless Scaling/Settings.xml'),original='<Settings>\n  <GameProfiles>\n  </GameProfiles>\n</Settings>';f.data.files.set(file,original);f.data.atomicHook=async p=>{if(p.endsWith('.ymccbak'))throw Error('backup denied')};await assert.rejects(f.quick.ensureLsProfile('Q:/a.exe'),/backup denied/);assert.equal(f.data.files.get(file),original);
 });
 await check('forced chart online fixture actually parses fresh records',async()=>{
- const f=await fixture(base+`export * as charts from './src/bridge/steamCharts';`);seedChart(f);f.data.services.http={request:async()=>({status:200,body:JSON.stringify({top_sellers:{items:Array.from({length:5},(_,i)=>({id:100+i,name:'online-'+i,large_capsule_image:'https://fixture.invalid/image.png'}))}})})};const result=await f.charts.loadSteamCharts('steam',true);assert.equal(result.fromCache,false);assert.equal(result.items[0].appId,100);assert.equal(result.items[0].name,'online-0');
+ const f=await fixture((chartsOnly?'':base)+`export * as charts from './src/bridge/steamCharts';`);seedChart(f);f.data.services.http={request:async()=>({status:200,body:JSON.stringify({top_sellers:{items:Array.from({length:5},(_,i)=>({id:100+i,name:'online-'+i,large_capsule_image:'https://fixture.invalid/image.png'}))}})})};const result=await f.charts.loadSteamCharts('steam',true);assert.equal(result.fromCache,false);assert.equal(result.items[0].appId,100);assert.equal(result.items[0].name,'online-0');
 });
 await check('updater initialization is coalesced and retries after IPC failure',async()=>{
  const f=await fixture(base+`export * as updater from './src/bridge/updateManager';`);let attempts=0;f.data.ipc['app.updateState']=async()=>{attempts++;if(attempts===1)throw Error('transient');return {phase:'downloaded',stage:'install',version:'99.0.0',sha256:'A'.repeat(64)}};
@@ -264,7 +277,41 @@ await check('unreadable remembered power configuration does not run system power
  const f=await fixture(base+`export * as yeman from './src/bridge/yeman';`);f.data.readHook=async()=>{throw Error('sharing denied')};await assert.rejects(f.yeman.reconcileRememberedPowerScheme(),/读取配置文件失败/);assert.equal(f.data.writes.length,0);
 });
 
-const report={scope:'global config/cache only; no fan/input feature changes; memory-only IPC',passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases};
+
+const chartImports=()=> (chartsOnly?'':base)+"export * as charts from './src/bridge/steamCharts';";
+const online=(name='network',start=100)=>({status:200,body:JSON.stringify({top_sellers:{items:Array.from({length:5},(_,i)=>({id:start+i,name:name+'-'+i,large_capsule_image:'https://fixture.invalid/img.png'}))}})});
+const chartFile=f=>[...f.data.files.keys()].find(p=>p.endsWith('\\SteamCharts\\steam.json'));
+const configureOnline=(f,name='network',start=100)=>{f.data.services.http={request:async()=>online(name,start)}};
+async function settled(f,p){let value,error,done=false;p.then(v=>{value=v;done=true},e=>{error=e;done=true});for(let i=0;i<32&&!done;++i){await ticks();if(!done)await f.advance(1000)}assert.ok(done,'charts consumer remained pending after bounded virtual deadline');if(error)throw error;return value}
+async function chartFixture(){const f=await fixture(chartImports());seedChart(f);configureOnline(f);return f}
+await check('charts storm 64 readers merge one disk snapshot with independent records',async()=>{const f=await chartFixture();let n=0;f.data.services.http={request:async()=>{n++;return online()}};const values=await Promise.all(Array.from({length:64},()=>f.charts.loadSteamCharts('steam')));values[0].items[0].name='mutation';assert.equal(values[63].items[0].name,'cached-0');assert.equal(f.data.reads.filter(p=>p===chartFile(f)).length,1);assert.equal(n,0)});
+await check('charts storm no-cache offline returns empty usable state',async()=>{const f=await chartFixture();f.data.files.delete(chartFile(f));f.data.services.http={request:async()=>{throw Error('fake-offline')}};const r=await settled(f,f.charts.loadSteamCharts('steam'));assert.equal(r.items.length,0);assert.equal(r.stale,true);assert.equal(r.cachePersisted,false);assert.ok(r.error)});
+await check('charts storm fresh network survives failed cache write then explicit retry',async()=>{const f=await chartFixture();const file=chartFile(f),old=f.data.files.get(file);f.data.atomicHook=async()=>{throw Error('fake-write-denied')};let r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.fromCache,false);assert.equal(r.cachePersisted,false);assert.ok(r.error);assert.equal(f.data.files.get(file),old);f.data.atomicHook=null;r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.cachePersisted,true);assert.equal(JSON.parse(f.data.files.get(file)).items[0].name,'network-0')});
+await check('charts storm root failure never binds C default and retries after recovery',async()=>{const f=await chartFixture();let calls=0;f.data.services.app.powerControlDir=async()=>{calls++;if(calls===1)throw Error('location-denied');return 'Q:\\ChartsFixture\\PowerControl'};let r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.cachePersisted,false);assert.equal(f.data.writes.length,0);r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.cachePersisted,true);assert.ok(calls>=2);assert.ok(f.data.writes.every(w=>w.path.startsWith('Q:')))});
+await check('charts storm invalid roots never write or create fallback',async()=>{for(const dir of ['','relative','C:\\','Q:\\ok\\..\\escape','Q:\\bad:ads','\\\\server\\share']){const f=await chartFixture();f.data.services.app.powerControlDir=async()=>dir;const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.cachePersisted,false);assert.equal(f.data.writes.length,0)}});
+await check('charts storm duplicate ranks app ids and far future dates never consumed',async()=>{for(const kind of ['rank','appId','future']){const f=await chartFixture(),file=chartFile(f);const raw=JSON.parse(f.data.files.get(file));if(kind==='future')raw.refreshedAt='2099-01-01T00:00:00Z';else raw.items[1][kind]=raw.items[0][kind];f.data.files.set(file,JSON.stringify(raw));const r=await settled(f,f.charts.loadSteamCharts('steam'));assert.equal(r.fromCache,false);assert.equal(r.items[0].name,'network-0')}});
+await check('charts storm future schema original stays byte-exact and unconsumed',async()=>{const f=await chartFixture(),file=chartFile(f);const raw=JSON.parse(f.data.files.get(file));raw.schemaVersion=99;raw.future={keep:7};const bytes=JSON.stringify(raw);f.data.files.set(file,bytes);const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.fromCache,false);assert.equal(r.cachePersisted,false);assert.equal(f.data.files.get(file),bytes);assert.equal(f.data.renames.length,0)});
+await check('charts storm corrupt and oversize originals renamed as raw bytes before rebuilding',async()=>{for(const raw of ['{',new Uint8Array(2*1024*1024+1).fill(255)]){const f=await chartFixture(),file=chartFile(f);f.data.files.set(file,raw);const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.cachePersisted,true);const kept=f.data.renames.find(v=>v.from===file);assert.ok(kept,'bad raw original not retained');assert.deepEqual(f.data.files.get(kept.to),raw);assert.equal(JSON.parse(f.data.files.get(file)).items[0].name,'network-0')}});
+await check('charts storm refused read is unknown and never renamed or overwritten',async()=>{const f=await chartFixture(),file=chartFile(f),raw=f.data.files.get(file);f.data.readHook=async p=>{if(p===file)throw Error('ACCESS_DENIED');return f.data.files.get(p)};const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.cachePersisted,false);assert.equal(f.data.files.get(file),raw);assert.equal(f.data.renames.length,0)});
+await check('charts storm hanging read releases active load and old continuation cannot write',async()=>{const f=await chartFixture(),file=chartFile(f),old=f.data.files.get(file);let release;f.data.readHook=p=>p===file?new Promise(resolve=>{release=resolve}):Promise.resolve(f.data.files.get(p));const first=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(first.items[0].name,'network-0');f.data.readHook=null;configureOnline(f,'retry',200);const second=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(second.items[0].name,'retry-0');assert.equal(second.cachePersisted,true);release(old);await ticks();assert.equal(JSON.parse(f.data.files.get(file)).items[0].name,'retry-0')});
+await check('charts storm timed out HTTP cannot late write and next force succeeds',async()=>{const f=await chartFixture(),file=chartFile(f);let release;f.data.services.http={request:()=>new Promise(resolve=>{release=resolve})};const first=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(first.items[0].name,'cached-0');configureOnline(f,'newer',200);const next=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(next.cachePersisted,true);release(online('late-old',300));await ticks();assert.equal(JSON.parse(f.data.files.get(file)).items[0].name,'newer-0')});
+await check('charts storm hanging location and write are bounded and explicitly retriable',async()=>{for(const kind of ['location','write']){const f=await chartFixture();let release;if(kind==='location')f.data.services.app.powerControlDir=()=>new Promise(resolve=>{release=resolve});else f.data.atomicHook=()=>new Promise(resolve=>{release=resolve});const first=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(first.items[0].name,'network-0');assert.equal(first.cachePersisted,false);if(kind==='location')f.data.services.app.powerControlDir=async()=> 'Q:\\ChartsFixture\\PowerControl';else f.data.atomicHook=null;configureOnline(f,'retried',200);const next=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(next.items[0].name,'retried-0');assert.equal(next.cachePersisted,true);release(kind==='location'?'Q:\\ChartsFixture\\PowerControl':undefined);await ticks();assert.equal(JSON.parse(f.data.files.get(chartFile(f))).items[0].name,'retried-0')}});
+await check('charts storm another writer changed snapshot cannot be claimed persisted',async()=>{const f=await chartFixture(),file=chartFile(f);let external;f.data.services.http={request:async()=>{external=JSON.parse(f.data.files.get(file));external.items[0].name='external-writer';external=JSON.stringify(external);f.data.files.set(file,external);return online()}};const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.cachePersisted,false);assert.equal(f.data.files.get(file),external)});
+await check('charts storm bad rename receipt does not report durable cache success',async()=>{const f=await chartFixture(),file=chartFile(f),old=f.data.files.get(file);f.data.renameHook=async()=>false;const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.cachePersisted,false);assert.equal(f.data.files.get(file),old)});
+
+
+await check('charts storm 64 forced callers behind ordinary cache share one HTTP refresh',async()=>{const f=await chartFixture();let n=0;f.data.services.http={request:async()=>{n++;return online()}};const ordinary=f.charts.loadSteamCharts('steam');const pending=Array.from({length:64},()=>f.charts.loadSteamCharts('steam',true));assert.equal((await ordinary).fromCache,true);const values=await Promise.all(pending);assert.equal(n,1);assert.equal(values[0].fromCache,false);values[0].items[0].name='mutated';assert.equal(values[63].items[0].name,'network-0')});
+await check('charts storm cache stat and mkdir failures never fake persisted success',async()=>{for(const type of ['stat','mkdir','exists']){const f=await chartFixture();if(type==='stat')f.data.statHook=async()=>({size:0,modified:1,isDir:'yes',isFile:false});if(type==='mkdir'){f.data.dirs.delete('Q:\\ChartsFixture\\PowerControl\\SteamCharts');f.data.mkdirHook=async()=>false}if(type==='exists')f.data.existsHook=async()=>null;const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'network-0');assert.equal(r.cachePersisted,false);assert.ok(r.error)}});
+await check('charts storm failed raw backup leaves original and can explicitly retry',async()=>{const f=await chartFixture(),file=chartFile(f);f.data.files.set(file,'');f.data.renameHook=async()=>{throw Error('fake-rename-denied')};let r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.cachePersisted,false);assert.equal(f.data.files.get(file),'');f.data.renameHook=null;r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.cachePersisted,true);const old=f.data.renames.find(x=>x.from===file);assert.ok(old);assert.equal(f.data.files.get(old.to),'')});
+await check('charts storm pending canonical rename is bounded and fences later internal commits',async()=>{const f=await chartFixture();let release;f.data.renameHook=()=>new Promise(resolve=>{release=resolve});const first=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(first.cachePersisted,false);configureOnline(f,'newer',200);const second=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(second.items[0].name,'newer-0');assert.equal(second.cachePersisted,false);f.data.renameHook=null;release(undefined);await ticks();configureOnline(f,'final',300);const final=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(final.cachePersisted,true);assert.equal(JSON.parse(f.data.files.get(chartFile(f))).items[0].name,'final-0')});
+await check('charts storm SteamDeck ranks hydrate only complete unique identities',async()=>{for(const bad of [false,true]){const f=await chartFixture();const ranks=Array.from({length:20},(_,i)=>({rank:i+1,appid:i+1000}));if(bad)ranks[1].rank=1;let requests=0;f.data.services.http={request:async url=>{requests++;if(url.includes('GetMostPlayed'))return {status:200,body:JSON.stringify({response:{ranks}})};return {status:200,body:JSON.stringify(Object.fromEntries(ranks.map(x=>[x.appid,{success:true,data:{name:'deck-'+x.appid,header_image:'https://fixture.invalid/img.png'}}])))}}};const r=await settled(f,f.charts.loadSteamCharts('steamdeck',true));assert.equal(r.items.length,bad?0:20);assert.equal(r.cachePersisted,!bad);if(!bad)assert.equal(requests,2)}});
+await check('charts storm oversize HTTP and cache timestamp retain trusted old or empty result',async()=>{const f=await chartFixture();f.data.services.http={request:async()=>({status:200,body:' '.repeat(8*1024*1024+1)})};const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'cached-0');assert.equal(r.stale,true);assert.ok(r.error)});
+
+
+await check('charts storm malformed HTTP status cannot become persisted ranking',async()=>{for(const status of [undefined,'200',NaN]){const f=await chartFixture();f.data.services.http={request:async()=>({...online(),status})};const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'cached-0');assert.equal(r.fromCache,true);assert.ok(r.error);assert.equal(f.data.writes.length,0)}});
+
+const report={selection:chartsOnly?'charts-storm-only':'all-original',scope:chartsOnly?'SteamCharts original consumer only; memory VM APIs and fake HTTP':'global config/cache only; no fan/input feature changes; memory-only IPC',passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases};
+if(chartsOnly){const pin=p=>({path:p,sha256:createHash('sha256').update(fs.readFileSync(p)).digest('hex')});report.sourceIdentity={chart:pin(chartSource),harness:pin(path.join(root,'tools/global_cache_config_selftest.mjs')),http:pin(path.join(root,'src/bridge/steamHttp.ts')),apiDeclaration:pin(path.join(root,'src/bridge/api.ts')),fakeApiSha256:createHash('sha256').update(fakeApi).digest('hex'),tools:[process.execPath,require.resolve('esbuild'),path.join(root,'node_modules/@esbuild/win32-x64/esbuild.exe')].map(pin)};report.fixtures=fixtureRecords.map((x,i)=>({ordinal:i+1,bundleSha256:x.bundleSha256,inputs:x.inputs,reads:x.data.reads,statReads:x.data.statReads,writes:x.data.writes.map(w=>({path:w.path,sha256:createHash('sha256').update(w.content).digest('hex')})),renames:x.data.renames,files:[...x.data.files].map(([p,v])=>({path:p,sha256:createHash('sha256').update(v).digest('hex')}))}));report.forbiddenOperations={realFs:0,network:0,native:0,steam:0,processActions:0,settingsAssertions:0};}
 console.log(JSON.stringify(report,null,2));if(process.env.YMCC_GLOBAL_CONFIG_REPORT)fs.writeFileSync(process.env.YMCC_GLOBAL_CONFIG_REPORT,JSON.stringify(report,null,2)+'\n');
 if(report.failed)process.exitCode=1;
 

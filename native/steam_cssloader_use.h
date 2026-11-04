@@ -2,6 +2,7 @@
 #include "steam_cssloader_guard.h"
 #include "steam_cssloader_editor.h"
 #include "steam_cssloader_launch.h"
+#include "steam_cssloader_inventory.h"
 #include <stdexcept>
 #include <sddl.h>
 #include <wincrypt.h>
@@ -39,8 +40,8 @@ inline void verifyResidentControl(const std::wstring& script) {
         std::string text(static_cast<size_t>(size.QuadPart), '\0'); DWORD read = 0;
         if (!ReadFile(handle.value, text.data(), static_cast<DWORD>(text.size()), &read, nullptr) || read != text.size()) throw std::runtime_error("CSS resident component read incomplete");
         const bool entry = file == script;
-        if (entry ? text.find("ResidentBackendPolicy=3") == std::string::npos || text.find("AutomaticResultProtocol=2") == std::string::npos || text.find("ManualObservationProtocol=1") == std::string::npos
-                  : file == module ? text.find("function Start-ResidentAppearanceBackend") == std::string::npos
+        if (entry ? text.find("SharedProcessQueryProtocol=1") == std::string::npos || text.find("ResidentBackendPolicy=3") == std::string::npos || text.find("AutomaticResultProtocol=2") == std::string::npos || text.find("ManualObservationProtocol=1") == std::string::npos
+                  : file == module ? text.find("function Start-ResidentAppearanceBackend") == std::string::npos || text.find("AppearanceProcessQueryProtocol=2") == std::string::npos
                   : text.find("AppearanceRenderProtocol=4") == std::string::npos || text.find("function Get-AppearanceVariableDefaults") == std::string::npos)
             throw std::runtime_error("CSS resident component version mismatch; update PowerControl together with YMCC");
     }
@@ -161,32 +162,29 @@ public:
             if (WaitForSingleObject(*it, 0) == WAIT_OBJECT_0) { CloseHandle(*it); it = adopted_.erase(it); }
             else ++it;
         }
-        deckylaunch::Handle snapshot;
-        snapshot.value = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snapshot.value == INVALID_HANDLE_VALUE) { snapshot.value = nullptr; throw std::runtime_error("CSS use snapshot unavailable"); }
-        PROCESSENTRY32W entry{sizeof(entry)};
-        if (!Process32FirstW(snapshot.value, &entry)) throw std::runtime_error("CSS use snapshot unreadable");
+        const auto topology = processInventory::read();
+        if (!topology || topology->status != processInventory::Status::Complete)
+            throw std::runtime_error("CSS shared process inventory unavailable");
         DWORD ourSession = 0;
         if (!ProcessIdToSessionId(GetCurrentProcessId(), &ourSession)) throw std::runtime_error("CSS use session unverified");
-        do {
-            if (_wcsicmp(entry.szExeFile, L"CssLoader-Standalone-Headless.exe")) continue;
+        for (const auto& entry : topology->rows) {
+            if (_wcsicmp(entry.name.c_str(), L"CssLoader-Standalone-Headless.exe")) continue;
             DWORD targetSession = 0;
-            if (!ProcessIdToSessionId(entry.th32ProcessID, &targetSession) || targetSession != ourSession) continue;
+            if (!ProcessIdToSessionId(entry.pid, &targetSession) || targetSession != ourSession) continue;
             deckylaunch::Handle process;
-            process.value = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            process.value = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid);
             if (!process.value) { ++unverified_; continue; }
             if (!steamcss::ownProcess(process.value)) continue; // Never another user or an inaccessible PID.
             wchar_t image[32768]{}; DWORD size = static_cast<DWORD>(std::size(image));
             if (!QueryFullProcessImageNameW(process.value, 0, image, &size) || _wcsicmp(image, executable.c_str()) ||
                 WaitForSingleObject(process.value, 0) != WAIT_TIMEOUT) continue;
             if (std::any_of(adopted_.begin(), adopted_.end(), [&](HANDLE existing) {
-                return GetProcessId(existing) == entry.th32ProcessID && WaitForSingleObject(existing, 0) == WAIT_TIMEOUT;
+                return GetProcessId(existing) == entry.pid && WaitForSingleObject(existing, 0) == WAIT_TIMEOUT;
             })) continue;
             if (adopted_.size() >= 128) throw std::runtime_error("CSS use process limit");
             // Observation handles carry no terminate or Job assignment rights.
             adopted_.push_back(process.value); process.value = nullptr;
-        } while (Process32NextW(snapshot.value, &entry));
-        if (GetLastError() != ERROR_NO_MORE_FILES) throw std::runtime_error("CSS use snapshot incomplete");
+        }
     }
     Cleanup close() { return close(hasWork() ? editorState() : steamcsseditor::State::Absent); }
     Cleanup close(steamcsseditor::State editor) {
@@ -203,6 +201,10 @@ public:
 struct Ticket { uint64_t token = 0; DWORD pid = 0; ULONGLONG birth = 0; std::wstring backend; };
 class Runtime {
     std::mutex lifecycle_, mutex_;
+    steamcssinventory::Bridge inventory_;
+    std::function<bool()> inventoryAllowed_;
+    std::function<ULONGLONG()> powerGeneration_;
+    ULONGLONG usePowerGeneration_ = 0, confirmedPowerGeneration_ = 0;
     Group group_; steamsession::Session session_, observed_, confirmedSession_; bool observationKnown_ = false, residentConfirmed_ = false;
     std::wstring script_, link_, backend_;
     HANDLE completed_ = nullptr;
@@ -303,8 +305,14 @@ class Runtime {
         catch (const HelperLaunchError& error) { emit(stage, error.detail); }
         catch (...) { Cleanup failure; failure.error = ERROR_NOT_READY; failure.launchStage = "use-precondition-or-exception"; emit(stage, failure); }
     }
+    bool lifecycleAllowed() const {
+        try { return !inventoryAllowed_ || inventoryAllowed_(); } catch (...) { return false; }
+    }
+    bool currentUsePower() const {
+        try { return !powerGeneration_ || usePowerGeneration_ == powerGeneration_(); } catch (...) { return false; }
+    }
     bool captureAllowed() const {
-        return steam_ && !backend_.empty() && WaitForSingleObject(steam_, 0) == WAIT_TIMEOUT &&
+        return lifecycleAllowed() && currentUsePower() && steam_ && !backend_.empty() && WaitForSingleObject(steam_, 0) == WAIT_TIMEOUT &&
             (!observationKnown_ || steamcss::sameSession(session_, observed_));
     }
     Cleanup clearLocked(bool = false, bool allowManualCompletion = true, bool editorTookOver = false) {
@@ -352,7 +360,7 @@ class Runtime {
         return copy;
     }
     Ticket beginLocked(const steamsession::Session& session, bool manual) {
-        if (!wake_ || !stop_ || WaitForSingleObject(stop_, 0) != WAIT_TIMEOUT) throw std::runtime_error("CSS use stopped");
+        if (!wake_ || !stop_ || WaitForSingleObject(stop_, 0) != WAIT_TIMEOUT || !lifecycleAllowed()) throw std::runtime_error("CSS use lifecycle unavailable");
         if (observationKnown_ && !steamcss::sameSession(session, observed_)) throw std::runtime_error("CSS use Steam event changed");
         const auto configured = steamcss::readLink(link_);
         if (!configured.error.empty()) throw std::runtime_error("CSS use link invalid");
@@ -369,7 +377,7 @@ class Runtime {
             } else if(active.phase!="missing") throw std::runtime_error("CSS active owner unverified");
         }
         if (backend.empty()) backend = L"C:\\SOFT\\CSSLoader Desktop\\CssLoader-Standalone-Headless.exe";
-        if (token_ && _wcsicmp(backend.c_str(), backend_.c_str()) == 0 && steamcss::sameSession(session, session_) && WaitForSingleObject(steam_, 0) == WAIT_TIMEOUT) {
+        if (token_ && _wcsicmp(backend.c_str(), backend_.c_str()) == 0 && steamcss::sameSession(session, session_) && captureAllowed()) {
             if (manual && (helper_ || automaticAfterEnsure_)) {
                 try { cancelAutomaticLocked(); } catch (...) { emitHelperFailure("automatic-cancel-failed"); clearLocked(true); throw; }
             }
@@ -389,12 +397,13 @@ class Runtime {
             verifyFile(script_, L"steam-appearance.ps1");
             group_.open(); group_.adopt(backend);
             session_ = session; backend_ = backend; token_ = ++generation_;
+            usePowerGeneration_ = powerGeneration_ ? powerGeneration_() : 0;
             holdUntil_ = GetTickCount64() + minimumHold_; due_ = GetTickCount64() + lifetime_;
             SetEvent(wake_); emit("begin", group_.describe()); return {token_, session.pid, session.created, backend_};
         } catch (...) { clearLocked(); throw; }
     }
     HANDLE launchLocked(uint64_t token, bool automatic, bool startBackend = false, bool verifyOnly = false) {
-        if (!token || token != token_ || !steam_ || WaitForSingleObject(steam_, 0) != WAIT_TIMEOUT || GetTickCount64() >= due_)
+        if (!token || token != token_ || !captureAllowed() || GetTickCount64() >= due_)
             throw HelperLaunchError("lease-expired", ERROR_INVALID_STATE);
         // Ensure and trusted resource/DOM helpers retain the same verified host
         // identity. CSS has its own launch policy; Decky's shell-token route
@@ -407,6 +416,8 @@ class Runtime {
         auto command = L"\"" + exe + L"\" -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"" + script_ +
             L"\" -Action " + (automatic ? L"Automatic -SessionPid " + std::to_wstring(session_.pid) +
                 L" -SessionBirth " + std::to_wstring(session_.created) : std::wstring(L"Ensure")) + L" -BackendPath \"" + backend_ + L"\"";
+        command += L" -ProcessQuery \"" + inventory_.name() + L"\"";
+        if (!automatic) command += L" -SessionPid " + std::to_wstring(session_.pid) + L" -SessionBirth " + std::to_wstring(session_.created);
         if (automatic) {
             const auto names = openAutoEventsLocked();
             command += L" -ReadyEvent \"" + names.first + L"\" -IdleEvent \"" + names.second + L"\" -GateTimeoutMs " +
@@ -452,16 +463,28 @@ class Runtime {
                   if (token_ && !ensure_ && !autoReady_ && (idlePending_ || releasePending_)) next = std::min(next, holdUntil_);
                   const auto now = GetTickCount64(); timeout = now >= next ? 0 : static_cast<DWORD>(next - now);
               } }
-            HANDLE handles[6]{stop_, wake_}; DWORD count = 2;
+            HANDLE handles[7]{stop_, wake_}; DWORD count = 2;
+            const auto inventoryIndex = count; handles[count++] = inventory_.event();
             if (steam.value) handles[count++] = steam.value;
             if (helper.value) handles[count++] = helper.value;
             if (ensure.value) handles[count++] = ensure.value;
             if (ready.value) handles[count++] = ready.value;
             const auto result = WaitForMultipleObjects(count, handles, FALSE, timeout);
             if (result == WAIT_OBJECT_0 || result == WAIT_FAILED) break;
+            if (result == WAIT_OBJECT_0 + inventoryIndex) {
+                steamsession::Session current;
+                { std::lock_guard lock(mutex_); current = observationKnown_ ? observed_ : session_; }
+                inventory_.serve(current, !inventoryAllowed_ || inventoryAllowed_());
+                continue;
+            }
             std::lock_guard lock(mutex_);
             // A previous group's timeout/exit cannot release a newer click.
             if (generation != generation_) continue;
+            if (token_ && (!lifecycleAllowed() || !currentUsePower())) {
+                residentConfirmed_ = false; confirmedSession_ = {};
+                Cleanup status; status.error = ERROR_INVALID_STATE; status.launchStage = "use-lifecycle-changed";
+                emit("use-lifecycle-changed", status); clearLocked(false, false); continue;
+            }
             if (steam_ && WaitForSingleObject(steam_, 0) == WAIT_OBJECT_0) { clearLocked(false, false); continue; }
             if (ensure_ && WaitForSingleObject(ensure_, 0) == WAIT_OBJECT_0) {
                 DWORD exitCode = 0; const bool exitKnown = GetExitCodeProcess(ensure_, &exitCode) != FALSE;
@@ -493,7 +516,7 @@ class Runtime {
                 if (!idleReleased_) status.launchStage = "automatic-helper-exited-before-idle";
                 emit(idleReleased_ ? "idle-helper-complete" : "automatic-helper-failed", status);
                 if (status.helperFailureCode == 15) { clearLocked(false, false, true); continue; }
-                if (!status.error) { confirmedSession_ = session_; residentConfirmed_ = true; clearLocked(true); continue; }
+                if (!status.error) { confirmedSession_ = session_; confirmedPowerGeneration_ = usePowerGeneration_; residentConfirmed_ = true; clearLocked(true); continue; }
                 residentConfirmed_ = false; confirmedSession_ = {};
                 // An unconfirmed DOM/status is NOT permission to end injection
                 // immediately. Keep this one use for at most one more hold,
@@ -540,9 +563,12 @@ public:
         : group_({}, std::move(editorProbe)), allowActiveBackend_(allowActiveBackend), backendPort_(backendPort) {} // Isolated fixtures use their own port/disable discovery.
     ~Runtime() { shutdown(); }
     bool initialize(std::wstring script, std::wstring link, DWORD lifetime = 180000, DWORD cleanupDelay = 4000,
-        std::function<void(const std::string&, const steamsession::Session&, const std::wstring&, const Cleanup&)> changed = {}, DWORD minimumHold = 0) {
+        std::function<void(const std::string&, const steamsession::Session&, const std::wstring&, const Cleanup&)> changed = {}, DWORD minimumHold = 0, std::function<bool()> inventoryAllowed = {}, std::function<ULONGLONG()> powerGeneration = {}) {
         std::lock_guard lifecycle(lifecycle_); if (worker_.joinable()) return true;
         std::lock_guard lock(mutex_);
+        if (!inventory_.initialize()) return false;
+        inventoryAllowed_ = std::move(inventoryAllowed); powerGeneration_ = std::move(powerGeneration);
+        usePowerGeneration_ = confirmedPowerGeneration_ = 0;
         observationKnown_ = false; observed_ = {}; residentConfirmed_ = false; confirmedSession_ = {};
         script_ = std::move(script); link_ = std::move(link); minimumHold_ = minimumHold; lifetime_ = std::max(lifetime, minimumHold_); cleanupDelay_ = cleanupDelay; changed_ = std::move(changed);
         wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -552,11 +578,23 @@ public:
         return true;
     }
     Ticket begin(const steamsession::Session& session) { std::lock_guard lock(mutex_); return beginLocked(session, true); }
-    bool invalidateForResume(const steamsession::Session& session) {
+    bool invalidateForResume(const steamsession::Session& session, bool preserveCurrentManual = true) {
         std::lock_guard lock(mutex_);
-        if (!stop_ || WaitForSingleObject(stop_, 0) != WAIT_TIMEOUT ||
-            (observationKnown_ && !steamcss::sameSession(observed_, session)) ||
-            (token_ && !steamcss::sameSession(session_, session))) return false;
+        const auto reason = !stop_ || WaitForSingleObject(stop_, 0) != WAIT_TIMEOUT ? "resume-use-worker-unavailable" :
+            observationKnown_ && !steamcss::sameSession(observed_, session) ? "resume-use-observation-changed" :
+            token_ && !steamcss::sameSession(session_, session) ? "resume-use-active-session-changed" : nullptr;
+        if (reason) {
+            Cleanup result; result.error = ERROR_INVALID_STATE; result.launchStage = reason;
+            try { if (changed_) changed_(reason, session, backend_, result); } catch (...) {}
+            return false;
+        }
+        // A user edit acquired in the CURRENT power episode owns its result.
+        // Only old-episode manual work (or bounded automatic work) is revoked.
+        if (preserveCurrentManual && token_ && !completed_ && captureAllowed()) {
+            Cleanup result; result.error = ERROR_BUSY; result.launchStage = "resume-use-manual-busy";
+            try { if (changed_) changed_("resume-use-manual-busy", session, backend_, result); } catch (...) {}
+            return false;
+        }
         // End only bounded pre-resume helpers/tickets. CSS observation handles
         // and Jobs are already non-destructive under the resident policy.
         residentConfirmed_ = false; confirmedSession_ = {};
@@ -564,7 +602,12 @@ public:
         if (wake_) SetEvent(wake_);
         return true;
     }
-    bool residentConfirmed(const steamsession::Session& session) { std::lock_guard lock(mutex_); return residentConfirmed_ && steamcss::sameSession(confirmedSession_, session); }
+    bool residentConfirmed(const steamsession::Session& session) {
+        std::lock_guard lock(mutex_);
+        try { return residentConfirmed_ && lifecycleAllowed() && (!powerGeneration_ || confirmedPowerGeneration_ == powerGeneration_()) && steamcss::sameSession(confirmedSession_, session); }
+        catch (...) { return false; }
+    }
+    std::wstring processQuery() { std::lock_guard lock(mutex_); return inventory_.name(); }
     bool ready() { std::lock_guard lock(mutex_); return stop_ && WaitForSingleObject(stop_, 0) == WAIT_TIMEOUT; }
     bool ensure(uint64_t token) {
         std::lock_guard lock(mutex_);
@@ -647,6 +690,7 @@ public:
         if (worker_.joinable()) worker_.join();
         std::lock_guard lock(mutex_); clearLocked(true, false); residentConfirmed_ = false; confirmedSession_ = {};
         if (wake_) CloseHandle(wake_); if (stop_) CloseHandle(stop_); wake_ = stop_ = nullptr;
+        inventory_.close();
     }
 };
 }

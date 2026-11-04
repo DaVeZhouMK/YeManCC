@@ -4,7 +4,8 @@
  * 性能调度/TDP/CPU/AC/DC：src/views/PerformanceScheduleView.vue；src/components/ContinuousPerformancePanel.vue；src/bridge/performanceSchedule.ts。
  * 风扇控制/曲线/交还：src/views/FanView.vue；src/bridge/fanHost.ts；FanLab/real-host/Program.cs。
  * 控制器/虚拟手柄/外置优先：src/views/ButtonMappingView.vue；src/bridge/virtualOutputStatus.ts；native/main.cpp；InputHost/Program.cs。
- * 控制器内页/快捷键/触摸板/灯光震动：src/components/ControllerShortcutsCard.vue、ScreenTouchpadsSettings.vue、ControllerFeedbackCapabilitiesCard.vue。
+ * 触控鼠标/自动鼠标名单/屏幕触控板：src/views/TouchMouseView.vue；src/components/MouseModeSettings.vue、ScreenTouchpadsSettings.vue。
+ * 控制器内页/快捷键/灯光震动：src/components/ControllerShortcutsCard.vue、ControllerFeedbackCapabilitiesCard.vue。
  * 陀螺仪/预设/校准：src/views/GyroMotionView.vue；src/bridge/gyroConfigActivation.ts、gyroCalibrationSession.ts；native/controller_motion_session.h。
  * Steam大屏/Decky/游戏库：src/views/SteamView.vue；src/bridge/steamUi.ts、deckySidebar.ts、customSteamLibrary.ts；专项入口 STEAM-UPGRADE.md。
  * 开机启动：src/views/PowerView.vue；src/bridge/inputStartupPolicy.ts；当前运行状态分别看控制器、陀螺仪、风扇页。
@@ -41,6 +42,7 @@ const PerformanceScheduleView = () => import('./views/PerformanceScheduleView.vu
 // rendering an entry is not hardware admission.
 import FanView from './views/FanView.vue';
 const CustomSteamLibraryView = () => import('./views/CustomSteamLibraryView.vue');
+const TouchMouseView = () => import('./views/TouchMouseView.vue');
 const ButtonMappingView = () => import('./views/ButtonMappingView.vue');
 const GyroMotionView = () => import('./views/GyroMotionView.vue');
 const RadialMenuView = () => import('./views/RadialMenuView.vue');
@@ -53,6 +55,7 @@ export const ROUTES = [
   { path: '/schedule', name: 'schedule', title: '性能调度', icon: 'gauge', component: PerformanceScheduleView },
   { path: '/fan', name: 'fan', title: '风扇控制', icon: 'fan', component: FanView, feature: 'fan' as const },
   { path: '/button-mapping', name: 'button-mapping', title: '控制器', icon: 'gamepad', component: ButtonMappingView, feature: 'virtual-gamepad' as const },
+  { path: '/touch-mouse', name: 'touch-mouse', title: '触控鼠标', icon: 'mouse-solid', component: TouchMouseView },
   { path: '/gyro-motion', name: 'gyro-motion', title: '陀螺仪', icon: 'rotate', component: GyroMotionView, feature: 'gyro-motion' as const },
   { path: '/steam', name: 'steam', title: 'Steam大屏', icon: 'steam', component: SteamView },
   { path: '/power', name: 'power', title: '开机模式', icon: 'startup', component: PowerView },

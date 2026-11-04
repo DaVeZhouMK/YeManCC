@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedOn": "2026-10-20",
+  "updatedOn": "2026-11-03",
   "authority": "direct-human-user",
   "objective": "Complete unified library consumption for capabilities already enabled in YMCC, then close this integration batch; record inactive capability gaps without wiring them.",
   "rule": "Product-enabled capability with an existing actual consumer is eligible. A frozen HC declaration, compiled candidate, simulated success or catalog row alone does not establish product activation.",
@@ -61,6 +61,50 @@
       "libraryDomains": [
         "battery"
       ]
+    },
+    {
+      "id": "performance.tdp",
+      "name": "TDP调度",
+      "libraryDomains": [
+        "tdp"
+      ],
+      "userAdmission": "2026-10-31 explicit local UXTU upgrade and reconnect to the existing unified model capability library",
+      "existingConsumers": [
+        "native/main.cpp::tdpExecutionCapability",
+        "src/bridge/yeman.ts::setTdp",
+        "PowerControl/pawnio/YeManTdpCtl.py::amd_set_with/intel_set_pawn"
+      ],
+      "scope": "Existing TDP engine and CPU-based policy binding; manual CCD affinity and static CPU offset have separate explicit Settings admissions below; automatic voltage scheduling and legacy startup restoration remain off.",
+      "authorityDecision": "performance.tdp-local-uxtu-library",
+      "libraryAcceptance": "PENDING_CURRENT_UPGRADE_EVIDENCE"
+    },
+    {
+      "id": "performance.ccd-affinity",
+      "name": "手动CCD进程亲和性",
+      "libraryDomains": [
+        "tdp"
+      ],
+      "authorityDecision": "performance.manual-ccd-cpu-offset-library",
+      "existingConsumers": [
+        "native/main.cpp::cpu.topology/cpu.setCcdMode",
+        "src/bridge/cpuctl.ts::CCD_MANUAL_CONTROL_ACTIVE"
+      ],
+      "scope": "Existing explicit Settings apply only; live Windows L3 topology and supported/available/processor-group representability gate; no physical CCD power-off.",
+      "libraryAcceptance": "SOURCE_BINDING_OBSERVED_CONSUMER_EVIDENCE_SEPARATE"
+    },
+    {
+      "id": "performance.cpu-voltage-offset",
+      "name": "手动CPU电压偏移",
+      "libraryDomains": [
+        "tdp"
+      ],
+      "authorityDecision": "performance.manual-ccd-cpu-offset-library",
+      "existingConsumers": [
+        "PowerControl/pawnio/YeManTdpCtl.py::amd_uv_set_with/intel_uv_set_pawn",
+        "src/bridge/cpuctl.ts::CPU_VOLTAGE_OFFSET_ACTIVE"
+      ],
+      "scope": "Existing explicit Settings CPU all-core CO or Intel core/cache offset only; CPU identity and current runtime/firmware receipts required. No GPU/SA/per-core activation or startup/automatic reapply.",
+      "libraryAcceptance": "ORDERED_CANDIDATE_SOURCE_SCHEMA_CONSUMER_AND_BINARY_EVIDENCE_SEPARATE"
     }
   ],
   "additionalEnabledCapabilityAdmission": {
@@ -90,11 +134,17 @@
   ],
   "preservedBoundaries": {
     "cpuGpuMetadataOnly": true,
-    "independentCpuTdpConsumerUnchanged": true,
+    "independentCpuTdpConsumerUnchanged": false,
     "furtherDllTrimmingDeferred": true,
     "thirdPartyOriginalLibrariesRetained": true,
     "sourceMergeOwner": "existing coordinator",
-    "hardwareAndDeploymentAuthorizationUnchanged": true
+    "hardwareAndDeploymentAuthorizationUnchanged": true,
+    "tdpSharedCapabilityDataConnected": true,
+    "tdpHcDeclaredLimitsApplied": false,
+    "tdpExistingEngineRetained": true,
+    "tdpOnlyExplicitException": "Historical2026-10-31 TDP-only admission retained;2026-11-03 explicitly confirms existing manual CCD/CPU-offset consumer data in this same policy. Frozen HC CPU/GPU declarations remain metadata.",
+    "legacyCoreAndVoltageSchedulingRemainInactive": true,
+    "manualCcdAffinityAndCpuOffsetAlreadyEnabled": true
   },
   "finiteExistingCandidates": [
     {
@@ -140,5 +190,86 @@
     "physicalAcceptanceSeparate": true,
     "wholeProcessCpuSavingsRequireMeasurements": true
   },
-  "stoppingRule": "No new inactive features, protocols, providers, UI or DLL replacement to improve apparent coverage. Resolve the existing enabled-consumer gaps, reconcile current receipts, and close the batch."
+  "stoppingRule": "No new inactive features, protocols, providers, UI or DLL replacement to improve apparent coverage. Resolve the existing enabled-consumer gaps, reconcile current receipts, and close the batch.",
+  "sourceOnlyModelUpgrade": {
+    "authorizedOn": "2026-10-31",
+    "authority": "direct-human-user-goal",
+    "objective": "Import latest HC model capabilities as pure code through the sole YMCC total library while retaining frozen HC source/runtime.",
+    "entry": "capabilities/HC-UPSTREAM-UPGRADE.json",
+    "newModelsWithinExistingEnabledDomainsAuthorized": true,
+    "newRuntimeDlls": false,
+    "automaticallyEnableInactiveFeatures": false,
+    "userExcludedUiStillExcluded": true,
+    "newDeviceRestartPermissions": false,
+    "fullCapabilityMigrationComplete": false
+  },
+  "tdpIntegration": {
+    "status": "AUTHORIZED_INTEGRATION_IN_PROGRESS",
+    "authorizedOn": "2026-10-31",
+    "authorityDecision": "performance.tdp-local-uxtu-library",
+    "capabilityId": "performance.tdp",
+    "libraryDomain": "tdp",
+    "contract": "capabilities/TDP-INTEGRATION.md",
+    "policy": "capabilities/uxtu-tdp-policy.json",
+    "replaceScheduler": false,
+    "addHcCpuCalls": false,
+    "applyHcDeclaredLimits": false,
+    "coreSwitch": false,
+    "voltageScheduling": false,
+    "gpuControl": false,
+    "hardwareAcceptance": false,
+    "upgradeOwnerThreadId": "01a18e11-5454-72c3-82c2-4add8d8b6179",
+    "authorized": true,
+    "authority": "direct-human-user"
+  },
+  "superXFanOnlyCurrent": {
+    "executionId": "HC-CODEX-064-ONEX-SUPERX-UMA",
+    "atHongKong": "2026-11-04T16:41:06.938518+08:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_EXPORTED_HUMAN_CLOSEOUT",
+    "soleEntry": "FanCapabilityCatalog partial in capabilities/PinnedFanSourceCatalog.cs",
+    "sourceDescriptorCount": 10,
+    "oldHcDescriptorsPreserved": 9,
+    "newModelClass": "YeManCC.SourceDevices.OneXPlayerSuperX",
+    "sourceRepository": "the-reengineers/XmaX",
+    "sourceCommit": "6d728795511c2f9f683d1757e72481236de9b23a",
+    "sourceFacts": {
+      "path": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+      "sha256": "2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027"
+    },
+    "identity": "Exact baseboard ONEXPLAYER SUPER X plus source ordinal ONE-NETBOOK vendor substring; old nine exact predicates unchanged",
+    "actualConsumer": "Existing RealHcBackend selection/curve -> existing catalog session -> PinnedUmaEcFanTransport -> UMAInterface GetEcValue/SetEcValue, raw EC16 Index Int32, Data byte; checked readback",
+    "stopBoundary": "Existing revoke/in-flight/automatic return/terminal disposal/generation ownership; retained exact cleanup debt",
+    "thermal95C": "Existing YMCC Host policy, not a Super X hardware fact",
+    "temperature": "Existing HWiNFO callback; no guessed EC temperature",
+    "tests": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\DIRECTED-VERIFICATION.json",
+      "bytes": 2017,
+      "sha256": "a605da02176eff9cddcac0d667e10c215559e58054bf5ae99cdf0208c058791b"
+    },
+    "sourceBoundComponent": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\FAN-COMPONENT-ADOPTION.json",
+      "bytes": 17131,
+      "sha256": "e5e646a52324bfd6678d0433fa1586cc99039c315e572f73ad50570f0f1883dd"
+    },
+    "ordinaryExport": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-165414\\YeManCC.zip",
+      "bytes": 110410337,
+      "sha256": "0e4be09038d463714b75515e1ddd367e9a45764fd18a671af40000dd86a4d1bb"
+    },
+    "chargingOrLightingActivated": false,
+    "hardwareIo": false,
+    "physicalAcceptance": false,
+    "wholeFamilyComplete": false,
+    "goalStatus": "active",
+    "actualUniquePassedCases": 18,
+    "passedChecks": 572,
+    "userCloseout": "Finish this batch quickly and keep edits; no next adaptation",
+    "result": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\FINAL-RESULT.json",
+      "bytes": 5267,
+      "sha256": "4f0b3a854eb42ee16c65647d0abc558feb2e644b13a054b60f2c9247ed8c687d"
+    },
+    "stopAfterCurrentBatch": true,
+    "nextBatch": null
+  }
 }

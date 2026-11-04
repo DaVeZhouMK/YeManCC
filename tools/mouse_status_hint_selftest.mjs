@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {createRequire} from 'node:module';
 export async function verifyMouseStatusHint(root) {
  const {build}=createRequire(path.join(root,'package.json'))('esbuild');
- const compiled=await build({stdin:{contents:"export {admitDesktopHudFrame} from './src/bridge/desktopHudProtocol';export {acceptMouseModeState,mouseModeState} from './src/bridge/mouseModeState';export {createMouseStatusHint,MOUSE_STATUS_HINT_MS} from './src/bridge/mouseStatusHint';export {mouseModeText} from './src/bridge/mouseModePresentation';export {normalizeMonitorOutput} from './src/bridge/monitorHudModel';export {shouldPresentShortcutFeedback} from './src/bridge/shortcutActionFeedback';",resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'browser',format:'iife',globalName:'consumer',plugins:[{name:'isolated-ipc',setup(b){b.onResolve({filter:/^\.\/ipc$/},()=>({path:'ipc',namespace:'memory'}));b.onLoad({filter:/.*/,namespace:'memory'},()=>({contents:'export const on=()=>()=>{};',loader:'js'}));}}]});
+ const compiled=await build({stdin:{contents:"export {admitDesktopHudFrame} from './src/bridge/desktopHudProtocol';export {acceptMouseModeState,watchMouseModeState,mouseModeState} from './src/bridge/mouseModeState';export {createMouseStatusHint,MOUSE_STATUS_HINT_MS} from './src/bridge/mouseStatusHint';export {mouseModeText} from './src/bridge/mouseModePresentation';export {normalizeMonitorOutput} from './src/bridge/monitorHudModel';export {shouldPresentShortcutFeedback} from './src/bridge/shortcutActionFeedback';",resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'browser',format:'iife',globalName:'consumer',plugins:[{name:'isolated-ipc',setup(b){b.onResolve({filter:/^\.\/ipc$/},()=>({path:'ipc',namespace:'memory'}));b.onLoad({filter:/.*/,namespace:'memory'},()=>({contents:'export const on=()=>()=>{};',loader:'js'}));}}]});
  const context=vm.createContext({structuredClone,setTimeout,clearTimeout});vm.runInContext(compiled.outputFiles[0].text,context);
  const {createMouseStatusHint,mouseModeText,normalizeMonitorOutput,shouldPresentShortcutFeedback}=context.consumer;
  const cases=[];const need=(v,name)=>{assert.ok(v,name);cases.push(name);};
@@ -91,5 +91,16 @@ export async function verifyMouseStatusHint(root) {
  skipped.accept(wire.mouseMode);need(skippedVisible===null,'skipped-ymcc-frame-return-settlement-silent');
  acceptMouseModeState({...base,sequence:105});skipped.accept(mouseModeState.value);need(skippedVisible?.on===true,'next-real-desktop-transition-after-skipped-ymcc-shows');
  acceptMouseModeState({...base,on:false,scene:'ymcc',sequence:103});need(mouseModeState.value.sequence===105,'stale-ymcc-event-cannot-create-visit');skipped.dispose();
+ // The navigation consumer observes the same admitted state, not raw events.
+ let suppressed=false,updates=0;const stop=context.consumer.watchMouseModeState(state=>{suppressed=state?.on===true;++updates;});
+ need(suppressed===true&&updates===1,'gamepad-observer-starts-from-admitted-state');
+ need(acceptMouseModeState({...base,on:false,scene:'ymcc',sequence:120})===true,'new-mouse-receipt-admitted');
+ need(suppressed===false,'admitted-off-immediately-releases-gamepad-suppression');
+ const beforeLate=updates;
+ need(acceptMouseModeState({...base,on:true,sequence:119})===false,'late-mouse-receipt-explicitly-rejected');
+ need(mouseModeState.value.sequence===120&&suppressed===false&&updates===beforeLate,'late-on-cannot-suppress-gamepad-after-new-off');
+ need(acceptMouseModeState({...base,on:true,sequence:121})===true&&suppressed===true,'new-on-updates-gamepad-from-shared-state');
+ need(acceptMouseModeState({...base,on:false,sequence:120})===false&&suppressed===true,'late-off-cannot-release-new-on');
+ stop();const beforeStop=updates;acceptMouseModeState({...base,on:false,sequence:122});need(updates===beforeStop,'gamepad-state-observer-disposes-without-polling');
  return {status:'PASS',cases:cases.length,matrixCases,modeMatrixCases,names:cases,consumer:'compiled-production-hint-controller-presentation-preferences-feedback;injected-clock'};
 }

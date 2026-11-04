@@ -40,9 +40,9 @@ assert(signature[0].startsWith('function ensureFanAutoStart('),
   'the auto-start entry signature must stay on one line for the simulation to strip its TypeScript types');
 signature[0] = 'function ensureFanAutoStart(reason, generation = 0) {';
 fnSource = signature.join('\n').replace(/readSettingsSection<[^<>]*>/g, 'readSettingsSection');
-assert(fnSource.includes('fanHostLifecycle.start()') && fnSource.includes('fanHostLifecycle.apply(') &&
+assert(fnSource.includes('fanHostLifecycle.start(') && fnSource.includes('fanHostLifecycle.apply(') &&
   fnSource.includes('gate.writeReady') && fnSource.includes('fanHostLifecycle.hasControlIntent'),
-'source extraction lost the production start/apply/gate/intent logic');
+'source extraction lost the production start/apply/gate/intent logic; actual recovery authority is checked at dispatch below');
 
 function state(name = 'Ready'): FanState {
   return {
@@ -124,6 +124,53 @@ class SimLauncher {
   async stop() { this.calls.push('stop'); }
 }
 
+/** Same inert owner facts, with explicit Close/exact-exit evidence for auto control. */
+class AutomaticRecoveryHost extends AutoOwnerHost {
+  owner = 1;
+  readonly trace: string[] = [];
+  readonly closedOwners: number[] = [];
+  readonly enabledOwners: number[] = [];
+  readonly eventsOwners: number[] = [];
+  overrideState: Partial<FanState> = {};
+  override snapshot(): FanState { return { ...super.snapshot(), ...this.overrideState }; }
+  override async getState() {
+    this.trace.push(this.owner + ':state');
+    return super.getState();
+  }
+  override async open() { this.trace.push(this.owner + ':open'); return super.open(); }
+  override async openEvents() {
+    this.trace.push(this.owner + ':events'); this.eventsOwners.push(this.owner); this.stateName = 'AwaitingControl';
+    return super.openEvents();
+  }
+  override async enable(nodes?: readonly FanNode[]) {
+    assert(this.opened && this.events && this.lease, 'automatic writes require actual Open/Events/lease');
+    this.trace.push(this.owner + ':enable'); this.enabledOwners.push(this.owner);
+    return super.enable(nodes);
+  }
+  override async close() {
+    this.trace.push(this.owner + ':close'); this.closedOwners.push(this.owner);
+    const snapshot = await super.close();
+    return { ...snapshot, oemRestoreConfirmed: false, oemPhysicalOwnershipConfirmed: false };
+  }
+  nextOwner() {
+    this.owner += 1; this.opened = this.events = this.closed = false; this.lease = null;
+    this.generation = this.attempt = 0; this.stateName = 'AwaitingControl'; this.powerState = 'Unknown'; this.overrideState = {};
+  }
+}
+class AutomaticRecoveryLauncher extends SimLauncher {
+  constructor(private readonly host: AutomaticRecoveryHost, private readonly adoptFirst: boolean) { super(); }
+  override async start() {
+    const process = await super.start();
+    const launches = this.calls.filter(call => call === 'start').length;
+    assert(launches <= 2, 'one automatic request cannot repeatedly replace its Host');
+    if (launches > 1) this.host.nextOwner();
+    this.host.trace.push(this.host.owner + ':launch');
+    return { ...process, pid: 4241 + this.host.owner, adopted: this.adoptFirst && launches === 1 };
+  }
+  override async stop() {
+    await super.stop(); this.host.trace.push(this.host.owner + ':exit');
+  }
+}
 /**
  * FAN-933 用的「唤醒后常驻 Host」替身：睡眠时 HC 已按顺序 Close，所以
  * `getState()` 报 Suspended + openCalled=false；只有收到一次 `/api/resume` 之后，
@@ -176,6 +223,7 @@ interface SimEnv {
   preference: boolean;
   readPreference?: () => Promise<{ fanControl?: boolean }>;
   autoApplyInputs: FanNode[][];
+  autoStartInputs: Array<{ manualRecovery?: boolean; reason?: string } | undefined>;
   featureEnabled: boolean;
   curve: FanNode[];
   logs: string[];
@@ -188,6 +236,7 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     lifecycle,
     preference: false,
     autoApplyInputs: [],
+    autoStartInputs: [],
     featureEnabled: true,
     curve: SAVED_CURVE.map((n) => ({ ...n })),
     logs,
@@ -203,10 +252,12 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     'const fanHostLifecycle = {',
     '  get hasControlIntent() { return env.lifecycle.hasControlIntent; },',
     '  get controlCancellationRevision() { return env.lifecycle.controlCancellationRevision; },',
-    '  start: () => env.lifecycle.start(),',
+    '  start: (options) => { env.autoStartInputs.push(options ? {...options} : undefined); return env.lifecycle.start(options); },',
     '  apply: (nodes) => { env.autoApplyInputs.push(nodes.map(n => ({...n}))); return env.lifecycle.apply(nodes); },',
     '};',
     'const readSettingsSection = async () => env.readPreference ? env.readPreference() : ({ fanControl: env.preference });',
+    // No scene override: these cases consume the enabled/disabled startup preference.
+    'const readBootModeFanIntent = async () => null;',
     'const getFanFeatureSettings = () => ({ featureEnabled: env.featureEnabled, preset: "balanced" });',
     'const getFanPresetCurve = () => env.curve.map((n) => ({ ...n }));',
     'const fanDiagnosticLog = (event, detail) => { env.logs.push(event + (detail ? " " + JSON.stringify(detail) : "")); };',
@@ -222,10 +273,10 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
 
 const testLifecycles = new Set<FanHostLifecycle>();
 
-function newLifecycle(adapter: FanApiAdapter, launcher: SimLauncher, resumeWaitDeadlineMs?: number): FanHostLifecycle {
-  let nativeGeneration = 0;
+function newLifecycle(adapter: FanApiAdapter, launcher: SimLauncher, resumeWaitDeadlineMs?: number, initialNativeGeneration = 0): FanHostLifecycle {
+  let nativeGeneration = initialNativeGeneration;
   let nativePhase: 'ready' | 'suspending' | 'resuming' = 'ready';
-  let nativeResumeReady = true;
+  let nativeResumeReady = initialNativeGeneration === 0;
   const lifecycle = new FanHostLifecycle({
     enabled: true,
     adapter,
@@ -594,12 +645,63 @@ async function main(): Promise<void> {
     lifecycle.observePowerBoundary('resuming', 1);
     api.setLatestResumeGeneration(1);
     await api.ensureFanAutoStart('resume', 1);
-    assert.equal(adapter.calls.filter(c => c === 'resume').length, 0, '自动启动不能制造 native 唤醒事实');
+    // An enabled preference has the same recovery authority as a click: it
+    // may ask the existing Host owner to rebuild once. This is not native
+    // write permission; the unchanged acquire/write/success negatives below
+    // must still hold while native remains Resuming without a ready receipt.
+    assert.equal(adapter.calls.filter(c => c === 'resume').length, 1, '已授权自动开启可进入一次原恢复链');
+
     assert.equal(adapter.calls.filter(c => c === 'acquire').length, 0, '未确认唤醒不得取租约');
     assert.equal(adapter.enables, 0, '未确认唤醒不得写曲线');
     assert.ok(!logs.some(l => l.includes('auto-start-applied')), '未确认唤醒不得报成功');
   });
 
+  // An enabled preference requests control with the same recovery authority as
+  // a click. The first automatic transaction must carry the saved curve through
+  // the real supported route; no second event or explicit manual retry is used.
+  for (const reason of ['boot', 'resume'] as const) for (const shape of ['resident-fault', 'adopted-half-open', 'adopted-empty'] as const)
+    await test(`AUTO-OWNER ${reason} enabled preference recovers ${shape} on its first request`, async () => {
+      const adapter = new AutomaticRecoveryHost(), launcher = new AutomaticRecoveryLauncher(adapter, shape !== 'resident-fault');
+      const lifecycle = newLifecycle(adapter, launcher, 500, reason === 'boot' ? 16860 : 0);
+      if (shape === 'resident-fault') {
+        await lifecycle.start(); // Resident identity only: no prior curve/control intent.
+        adapter.stateName = 'FaultLocked'; adapter.opened = adapter.events = false;
+      } else {
+        assert.equal(lifecycle.processId, null);
+        adapter.powerState = 'Unknown';
+        if (shape === 'adopted-half-open') {
+          adapter.opened = true; adapter.stateName = 'Open'; adapter.overrideState = { hardwareWritesObserved: true };
+        }
+      }
+      const logs: string[] = [], { env, api } = buildOrchestrator(lifecycle, logs);
+      env.preference = true;
+      if (reason === 'resume') {
+        lifecycle.setPowerGeneration(6); lifecycle.observePowerBoundary('suspending', 6);
+        lifecycle.observePowerBoundary('resuming', 6); lifecycle.observePowerBoundary('resume-ready', 6);
+        await lifecycle.resume(); api.setLatestResumeGeneration(6);
+      }
+      assert.equal(lifecycle.hasControlIntent, false, 'only the automatic preference supplies this control request');
+      await api.ensureFanAutoStart(reason, reason === 'resume' ? 6 : 0);
+      const expectedOwner = shape === 'adopted-empty' ? 1 : 2;
+      assert.equal(adapter.enables, 1, 'the first authorized automatic call must actually write');
+      assert.equal(env.autoStartInputs.length, 1);
+      assert.equal(env.autoStartInputs[0]?.manualRecovery, true, 'the extracted production auto request must actually dispatch authorized recovery');
+      assert.deepEqual(adapter.enabledNodeSets, [SAVED_CURVE]); assert.deepEqual(env.autoApplyInputs, [SAVED_CURVE]);
+      assert.deepEqual(adapter.enabledOwners, [expectedOwner]); assert.deepEqual(adapter.eventsOwners, [expectedOwner]);
+      assert.equal(adapter.calls.includes('resume'), false, 'an empty or zero-receipt shell has no resume result to invent');
+      if (shape === 'adopted-empty') {
+        assert.deepEqual(launcher.calls, ['start']); assert.deepEqual(adapter.closedOwners, []);
+      } else {
+        assert.deepEqual(adapter.closedOwners, [1]); assert.deepEqual(launcher.calls, ['start', 'stop', 'start']);
+        assert(adapter.trace.indexOf('1:close') < adapter.trace.indexOf('1:exit'));
+        assert(adapter.trace.indexOf('1:exit') < adapter.trace.indexOf('2:launch'));
+        assert(adapter.trace.indexOf('2:launch') < adapter.trace.indexOf('2:events'));
+      }
+      assert(adapter.trace.indexOf(expectedOwner + ':events') < adapter.trace.indexOf(expectedOwner + ':enable'));
+      assert.equal(lifecycle.hasControlIntent, true); assert.equal(lifecycle.phase, 'active'); assert(lifecycle.currentLease);
+      assert.ok(logs.some(log => log.includes('auto-start-applied') && log.includes('"reason":"' + reason + '"')));
+      observations.push({ reason, shape, enabledOwners: adapter.enabledOwners, closedOwners: adapter.closedOwners, trace: adapter.trace });
+    });
   for (const reason of ['boot', 'resume'] as const) for (const phase of ['read-1', 'start', 'read-2'] as const) for (const action of ['disable', 'close', 'manual-curve'] as const)
     await test(`AUTO-OWNER ${reason} ${phase} yields to ${action}`, async () => {
       const adapter = new AutoOwnerHost(), launcher = new SimLauncher(), lifecycle = newLifecycle(adapter, launcher, 250);

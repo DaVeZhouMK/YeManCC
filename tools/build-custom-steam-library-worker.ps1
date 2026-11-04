@@ -2,7 +2,9 @@
 param(
   [string]$OutputDirectory = '',
   [switch]$RunSelfTests,
-  [switch]$Publish
+  [switch]$Publish,
+  [switch]$RecordPremainTools,
+  [string]$CaptureCompilerTools = ''
 )
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell launched by pnpm/pwsh must resolve its own modules first.
@@ -12,6 +14,8 @@ if (-not $firstModulePath -or $firstModulePath.TrimEnd('\') -ine $ownModules.Tri
   $env:PSModulePath = $ownModules + ';' + $env:PSModulePath
 }
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'custom_steam_library_build_guard.ps1')
+if($CaptureCompilerTools){Write-CslCompilerTools $CaptureCompilerTools;exit 0}
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $projectRoot '..\..\Build\CustomSteamLibrary'
 }
@@ -23,8 +27,12 @@ $testArgument = if ($RunSelfTests) { 'selftest' } else { '' }
 $sourceIndex = @(Get-CustomSteamLibrarySourceIndex -ProjectRoot $projectRoot -Kind 'worker')
 $compileDirectory = Join-Path $OutputDirectory ('compile-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $compileDirectory | Out-Null
-& $env:ComSpec /d /c "`"$builder`" `"$compileDirectory`" $testArgument" 2>&1 | Tee-Object -Variable compilerOutput
-$buildExitCode = $LASTEXITCODE
+$oldToolHost=$env:YMCC_CSL_TOOL_HOST;$oldToolScript=$env:YMCC_CSL_TOOL_SCRIPT
+try {
+  if($RecordPremainTools){$env:YMCC_CSL_TOOL_HOST=(Get-Process -Id $PID).MainModule.FileName;$env:YMCC_CSL_TOOL_SCRIPT=$PSCommandPath}
+  & $env:ComSpec /d /c "`"$builder`" `"$compileDirectory`" $testArgument" 2>&1 | Tee-Object -Variable compilerOutput
+  $buildExitCode = $LASTEXITCODE
+} finally {$env:YMCC_CSL_TOOL_HOST=$oldToolHost;$env:YMCC_CSL_TOOL_SCRIPT=$oldToolScript}
 $buildLines = @($compilerOutput | ForEach-Object { [string]$_ })
 $buildLines | Set-Content -LiteralPath (Join-Path $compileDirectory 'compiler-output.log') -Encoding UTF8
 $expectedExecutables = @('SteamArtworkLab.exe')
@@ -32,6 +40,13 @@ if ($RunSelfTests) { $expectedExecutables += @('custom_steam_library_localconfig
 Assert-CustomSteamLibraryCompilation -ExitCode $buildExitCode -OutputLines $buildLines -CompilationDirectory $compileDirectory -ExpectedExecutables $expectedExecutables
 Assert-CustomSteamLibrarySourceIndex -ProjectRoot $projectRoot -Kind 'worker' -SourceIndex $sourceIndex
 foreach ($exe in $expectedExecutables) { Copy-Item -LiteralPath (Join-Path $compileDirectory $exe) -Destination (Join-Path $OutputDirectory $exe) -Force }
+if($RecordPremainTools){
+  $before=Get-Content -LiteralPath (Join-Path $compileDirectory 'compiler-tools-before.json') -Raw -Encoding UTF8|ConvertFrom-Json
+  $after=Get-Content -LiteralPath (Join-Path $compileDirectory 'compiler-tools-after.json') -Raw -Encoding UTF8|ConvertFrom-Json
+  if($before.schema -ne 1 -or $after.schema -ne 1 -or $before.kind -cne 'CSL_SELECTED_COMPILER_CONTEXT' -or $after.kind -cne $before.kind -or @($before.tools).Count -ne 5 -or ($before.tools|ConvertTo-Json -Compress) -cne ($after.tools|ConvertTo-Json -Compress)){throw 'CSL_STAGE_COMPILER_TOOLS_DRIFT'}
+  foreach($p in @($before.tools)){Assert-CslStagePin $p}
+  Write-CslStageJson (Join-Path $OutputDirectory 'PREMAIN-COMPILER-TOOLS.json') ([ordered]@{schema=1;tools=@($before.tools);before=(Get-CslStagePin (Join-Path $compileDirectory 'compiler-tools-before.json'));after=(Get-CslStagePin (Join-Path $compileDirectory 'compiler-tools-after.json'));compileLog=([IO.Path]::GetFileName($compileDirectory)+'/compiler-output.log')})
+}
 if ($RunSelfTests) {
   # Only the test executable virtualizes Steam process enumeration. The shipping
   # worker retains its actual process guard. All test writes stay in Build.

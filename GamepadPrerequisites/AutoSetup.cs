@@ -82,10 +82,10 @@ internal static partial class Program
         return ("MATCH", 0);
     }
     static string[] HidHideArguments(string log) => ["/exenoui", "/qn", "/norestart", "/L*v", log];
-    static (string Status, int ExitCode) SetupResult(string hidHide, int hidMaestroExit, bool prepare)
+    static (string Status, int ExitCode) SetupResult(string hidHide, int hidMaestroExit, bool prepare, bool usbipRebootPending = false)
     {
         // The reboot requirement survives a second dependency's failure. Details remain in the report.
-        if (hidHide == "REBOOT_REQUIRED") return ("REBOOT_REQUIRED", 3010);
+        if (usbipRebootPending || hidHide == "REBOOT_REQUIRED") return ("REBOOT_REQUIRED", 3010);
         if (hidHide == "READY" && hidMaestroExit == 0) return ("READY", 0);
         if (hidHide == "READY" && hidMaestroExit == HidMaestroPackagePreparation.InventoryUnrecognizedExit)
             return ("DRIVER_INVENTORY_UNRECOGNIZED", HidMaestroPackagePreparation.InventoryUnrecognizedExit);
@@ -236,6 +236,10 @@ internal static partial class Program
                 }
                 finally { if (gateHeld) usbipGate.ReleaseMutex(); }
             }
+            // Preserve the finite stage history in the ordinary exported report;
+            // fast SDK callbacks may finish before native reads the latest file.
+            result["usbipLifecycle"] = usbipRuntime.LifecycleEvidence;
+            Save();
             var inventory=Pnp("/enum-drivers","/format","xml");
             result["driverInventoryEvidence"]=HidMaestroPackagePreparation.CaptureInventory(report,inventory.Output,inventory.Exit,inventory.TimedOut);
             Save();
@@ -284,7 +288,7 @@ internal static partial class Program
             int hm=HidMaestroMain([prepare ? "--prepare" : "--check","--install-root",root,"--report",hmReport]);
             result["hidmaestroExit"]=hm;
             using(var detail=JsonDocument.Parse(File.ReadAllText(hmReport))) result["hidmaestro"]=detail.RootElement.GetProperty("status").GetString();
-            var final=SetupResult(hh,hm,prepare);
+            var final=SetupResult(hh,hm,prepare,usbipRuntime.RebootPending);
             status=final.Status; exit=final.ExitCode;
             // The USB/IP uninstaller independently requires reboot; do not
             // publish overall READY while its machine-wide fence is active.
@@ -329,6 +333,11 @@ internal static partial class Program
             Check(SetupResult("REBOOT_REQUIRED",hm,true)==("REBOOT_REQUIRED",3010),"HidMaestro error does not mask required reboot");
         Check(SetupResult("READY",11,true)==("DEPENDENCY_NOT_READY",11),"no reboot inferred from an unrelated failure");
         Check(SetupResult("READY",0,true)==("READY",0),"both dependencies ready admit target");
+        foreach (bool prepare in new[] { false, true }) {
+            foreach (int hm in new[] { 0, 11, 18, 19 })
+                Check(SetupResult("READY",hm,prepare,true)==("REBOOT_REQUIRED",3010),"active USB/IP install/uninstall fence survives every SDK failure/status and cannot publish Ready");
+            Check(SetupResult("READY",0,prepare,false)==("READY",0),"absent or failed USB/IP without a mutation fence does not invalidate independent UMDF preparation");
+        }
         Check(SetupResult("READY",18,true)==("DRIVER_INVENTORY_UNRECOGNIZED",18),"unrecognized inventory stays advisory and is not Ready");
         Check(SetupResult("REBOOT_REQUIRED",18,true)==("REBOOT_REQUIRED",3010),"reboot requirement still overrides advisory inspection");
         Check(SetupResult("PRESENT_NOT_READY_NO_REINSTALL",18,true)==("DEPENDENCY_NOT_READY",11),"known dependency fault is not hidden by advisory inspection");

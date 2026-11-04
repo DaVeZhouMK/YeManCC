@@ -1,5 +1,5 @@
 import type {PerformanceScalar} from '../../decky-plugin/src/performanceModel';
-import {type ContinuousPerformanceSnapshot,type ContinuousSidePatch,APPLICATION_TDP_MAX,CONTROL_CORE_OPTIONS,SAVING_RULES} from './performanceControls';
+import {type ContinuousPerformanceSnapshot,type ContinuousSidePatch,APPLICATION_TDP_MAX,CONTROL_CORE_OPTIONS,CONTROL_POWER_SCHEMES,SAVING_RULES} from './performanceControls';
 import {validPerformanceMirror,performancePatchAllowed,type PerformanceMirrorView,type PerformanceControl} from '../../decky-plugin/src/performanceModel';
 
 // Projection only: policy calculation and persistence belong to performanceSchedule.
@@ -15,19 +15,23 @@ export function performanceMirrorView(s:ContinuousPerformanceSnapshot,sourceRevi
     {key:'mode',label:'调度方式',kind:'choice',value:b.mode,presentation:'buttons',choices:[{data:'auto',label:'自动模式'},{data:'manual',label:'手动模式'}],enabled:true},
   ];
   const coreChoices=CONTROL_CORE_OPTIONS.map(o=>({data:o.value,label:o.label}));
+  const scheme=s.powerScheme??'yeman',cpuManaged=b.mode!=='manual'||scheme==='yeman';
   if(b.mode==='auto')controls.push(
     {key:'bias',label:'CPU / GPU 优先倾向',kind:'slider',value:b.auto.bias,min:0,max:100,step:5,enabled:true},
     {key:'saving',label:'节能浮动',kind:'choice',value:b.auto.saving,choices:Object.entries(SAVING_RULES).map(([data,r])=>({data,label:r.label})),enabled:true},
     {key:'coreHigh',label:'高功耗核心',kind:'choice',value:b.auto.coreHigh,choices:coreChoices,enabled:s.hybrid},
     {key:'coreLow',label:'低功耗核心',kind:'choice',value:b.auto.coreLow,choices:coreChoices,enabled:s.hybrid},
     {key:'coreSplit',label:'切换低功耗核心瓦数',kind:'slider',value:Math.min(b.auto.coreSplit,b.tdp),min:0,max:Math.min(max,b.tdp),step:1,suffix:' W',enabled:s.hybrid});
-  else controls.push(
+  else {
+    controls.push({key:'powerScheme',label:'电源方案',kind:'choice',value:scheme,choices:CONTROL_POWER_SCHEMES.map(o=>({data:o.value,label:o.value==='yeman'?'野蛮系统优化电源':o.label})),enabled:true});
+    if(cpuManaged)controls.push(
     {key:'frequencyMHz',label:'CPU 频率',kind:'slider',value:b.manual.frequencyMHz,min:800,max:7200,step:100,suffix:' MHz',enabled:!b.manual.unlimited},
     {key:'aggressiveness',label:'积极性',kind:'slider',value:b.manual.aggressiveness,min:0,max:100,step:1,suffix:'%',enabled:true},
     {key:'unlimited',label:'不限频率',kind:'toggle',value:b.manual.unlimited,group:'manualToggles',enabled:true},
     {key:'turbo',label:'睿频',kind:'toggle',value:b.manual.turbo,group:'manualToggles',enabled:true},
     {key:'coreMode',label:'大小核心',kind:'choice',value:b.manual.coreMode,choices:coreChoices,group:'manualCore',enabled:s.hybrid});
-  controls.push({key:'hyperThreadMode',label:'超线程',kind:'choice',value:s.hyperThreadMode,choices:[{data:'default',label:'系统默认'},{data:'on',label:'开启'},{data:'off',label:'关闭'}],group:b.mode==='manual'?'manualCore':undefined,enabled:s.smtAvailable&&!!s.identity.exe});
+  }
+  if(cpuManaged)controls.push({key:'hyperThreadMode',label:'超线程',kind:'choice',value:s.hyperThreadMode,choices:[{data:'default',label:'系统默认'},{data:'on',label:'开启'},{data:'off',label:'关闭'}],group:b.mode==='manual'?'manualCore':undefined,enabled:s.smtAvailable&&!!s.identity.exe});
   const view:PerformanceMirrorView={version:1,side,scope:s.identity.scope==='dedicated'?'game':'global',mode:b.mode,sourceRevision,enabled,controls};
   return validPerformanceMirror(view as unknown)?view:{...view,enabled:false,controls:[],feedback:'性能调度参数正在同步，请稍后重试'};
 }
@@ -35,7 +39,7 @@ export function performanceMirrorPatch(patch:Record<string,PerformanceScalar>,vi
   if(!performancePatchAllowed(patch,view))throw Error('性能参数已变化，请重新调节');
   const out:ContinuousSidePatch={};
   for(const [key,value]of Object.entries(patch)){
-    if(['mode','tdp'].includes(key))(out as any)[key]=value;
+    if(['mode','tdp','powerScheme'].includes(key))(out as any)[key]=value;
     else if(['bias','saving','coreSplit','coreLow','coreHigh'].includes(key))(out.auto??={})[key as keyof NonNullable<ContinuousSidePatch['auto']>]=value as never;
     else if(['frequencyMHz','unlimited','aggressiveness','turbo','coreMode'].includes(key))(out.manual??={})[key as keyof NonNullable<ContinuousSidePatch['manual']>]=value as never;
     else if(key==='hyperThreadMode')out.hyperThreadMode=value as 'default'|'on'|'off';
@@ -54,7 +58,13 @@ export function createPerformanceMirrorActions(deps:{allowed:()=>boolean;read:()
   try{const current=await deps.read();checkpoint();
    if(typeof context.controlAdmission?.performance!=='string'||performanceMirrorSource(current)!==context.controlAdmission.performance)throw Error('PERFORMANCE_MIRROR_SOURCE_CHANGED');
    const patch=performanceMirrorPatch(args.patch as Record<string,PerformanceScalar>,performanceMirrorView(current,'admitted'));
-   await gate();await deps.update(current.identity,patch,()=>{checkpoint();return true;});
+   await gate();const updated=await deps.update(current.identity,patch,()=>{checkpoint();return true;});
+   if(patch.tdp!==undefined){
+    const proof=updated.tdpWriteReceipt;
+    const confirmed=proof?.ok===true&&proof.proof==='write-ack'&&proof.requested===patch.tdp&&proof.accepted===patch.tdp;
+    const acknowledged=proof?.ok===true&&proof.proof==='write-ack'&&proof.requested===patch.tdp&&typeof proof.accepted==='number'&&Number.isFinite(proof.accepted);
+    return {saved:true,applied:confirmed,pending:!confirmed,notice:confirmed?`TDP 已确认写入 ${patch.tdp} W`:acknowledged?`TDP 目标 ${patch.tdp} W 已保存；本次写入回执为 ${proof!.accepted} W`:'TDP 目标已保存；本次硬件写入尚未确认'};
+   }
    return {saved:true,applied:true,notice:'性能调度已记忆并提交 YMCC'};
   }finally{release();}
  }};

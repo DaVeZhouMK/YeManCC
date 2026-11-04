@@ -32,6 +32,7 @@ BOOL info(HANDLE h,LPBY_HANDLE_FILE_INFORMATION out){++infos;const BOOL ok=::Get
 #define GetFileInformationByHandle ioTest::info
 #include "virtual_target_return_store.h"
 #include "virtual_target_return_session.h"
+#include "external_controller_priority_ledger.h"
 #undef CreateFileW
 #undef CloseHandle
 #undef GetFileAttributesW
@@ -40,11 +41,16 @@ BOOL info(HANDLE h,LPBY_HANDLE_FILE_INFORMATION out){++infos;const BOOL ok=::Get
 #undef MoveFileExW
 #undef ReadFile
 #undef GetFileInformationByHandle
+namespace ep=ymcc::externalpad;
 namespace tr=ymcc::targetReturn;using J=nlohmann::json;
 namespace {
+bool stormOnly=false;std::string selectedCase;
 unsigned assertions=0;J cases=J::array(),failures=J::array();std::string active;
 void check(bool condition,const std::string&label){++assertions;if(!condition)failures.push_back({{"case",active},{"assertion",label}});}
-void run(const std::string&name,const std::function<void()>&body){active=name;auto before=assertions;auto failed=failures.size();try{body();}catch(const std::exception&e){check(false,std::string("unexpected exception: ")+e.what());}check(ioTest::handles.empty(),"all store handles released after every scenario");cases.push_back({{"name",name},{"assertions",assertions-before},{"failures",failures.size()-failed}});}
+void run(const std::string&name,const std::function<void()>&body){
+ if(!selectedCase.empty()&&name!=selectedCase)return;
+ if(selectedCase.empty()&&stormOnly&&name.rfind("storm/",0)!=0&&name!="consume/exact-origin-revision"&&name!="decode/duplicate-nested-origin"&&name!="IO/failure-flush")return;
+ active=name;auto before=assertions;auto failed=failures.size();try{body();}catch(const std::exception&e){check(false,std::string("unexpected exception: ")+e.what());}check(ioTest::handles.empty(),"all store handles released after every scenario");cases.push_back({{"name",name},{"assertions",assertions-before},{"failures",failures.size()-failed}});}
 tr::Origin origin(unsigned n=1,const std::string&persona="dualsense-edge"){
  tr::Origin o;o.transactionId="tx-"+std::to_string(n);o.parent={100+n,"134368044937265940"};o.host={200+n,"134368044937266000"};o.hostInstanceId="host-"+std::to_string(n);o.runId="run-"+std::to_string(n);o.epoch=n;o.targetId="target-"+std::to_string(n);o.persona=persona;o.physicalRoot="USB\\VID_0DB0&PID_1901\\MSI";return o;
 }
@@ -80,7 +86,9 @@ int wmain(int argc,wchar_t**argv){
   const bool nativePass=nativeBuilt&&native.state==tr::LoadState::Valid&&native.record&&encoded(*native.record)==encoded(nativeExpected)&&native.record->schema==1&&native.record->obligations[0].paths.size()==2;
   std::cout<<J({{"pass",pass&&nativePass},{"mode","independent-process-read"},{"targetWitnessRoundtrip",targetPass},{"nativeOwnedSetRoundtrip",nativePass},{"obligationCount",r.record?r.record->obligations.size():0},{"historicalOnly",true}}).dump()<<"\n";return pass&&nativePass?0:1;
  }
- if(argc!=3)return 2;const std::wstring directory=argv[1];const std::wstring resultPath=argv[2];const auto file=directory+L"\\record.json";
+ if(argc==4&&std::wstring(argv[3])==L"--storm")stormOnly=true;
+ else if(argc==5&&std::wstring(argv[3])==L"--case"){const auto w=std::wstring(argv[4]);selectedCase=std::string(w.begin(),w.end());}
+ else if(argc!=3)return 2;const std::wstring directory=argv[1];const std::wstring resultPath=argv[2];const auto file=directory+L"\\record.json";
  run("roundtrip/tombstone",[]{auto r=empty();tr::Record decoded=one();auto s=encoded(r);check(tr::decode(s,decoded),"valid empty record decodes");check(decoded.obligations.empty()&&decoded.machineBinding==r.machineBinding,"explicit tombstone retains raw machine binding");check(encoded(decoded)==s,"tombstone roundtrip exact");});
  run("reserve/single-path-idempotence",[]{auto r=one();auto before=encoded(r);tr::Record c;check(tr::reservePath(r,r.revision,origin(),pathA,proof,c),"reserve duplicate accepted");check(c.revision==r.revision&&encoded(c)==before,"duplicate is idempotent without revision change");auto lower=pathA;for(auto&v:lower)if(v>='A'&&v<='Z')v=char(v-'A'+'a');check(tr::reservePath(r,r.revision,origin(),lower,proof,c),"case variant idempotent");check(c.obligations[0].paths[0].instanceId==pathA,"exact original spelling retained");check(c.obligations[0].paths.size()==1,"no speculative batch tail");});
  run("reserve/prehidden-and-unreached-rejected",[]{auto r=empty();for(const auto&p:std::vector<tr::ReservationProof>{{false,true,true},{true,false,true},{true,true,false}}){auto c=one();const auto sentinel=encoded(c);check(!tr::reservePath(r,r.revision,origin(),pathA,p,c),"missing producer authority rejects");check(encoded(c)==sentinel,"rejection preserves output");}});
@@ -120,13 +128,13 @@ int wmain(int argc,wchar_t**argv){
  run("IO/new-commit-and-exact-load",[&]{ioTest::reset();auto source=one();auto original=encoded(source);auto r=tr::store(file,source);check(r.committed(),"private record committed");check(ioTest::writes==1&&ioTest::flushes==1&&ioTest::renames==1,"write flush rename used once");auto loaded=tr::load(file,source.machineBinding);check(loaded.state==tr::LoadState::Valid&&loaded.record,"valid load");check(encoded(*loaded.record)==original&&encoded(source)==original,"exact disk content and caller unmodified");});
  for(auto [name,fault]:std::vector<std::pair<std::string,ioTest::Fault>>{{"write",ioTest::Fault::Write},{"short-write",ioTest::Fault::ShortWrite},{"flush",ioTest::Fault::Flush},{"rename",ioTest::Fault::Rename}})run("IO/failure-"+name,[&]{ioTest::reset();auto source=one();check(tr::store(file,source).committed(),"baseline committed");auto old=readRaw(file);tr::Record candidate;check(tr::consumeOrigin(source,source.revision,origin(),candidate),"consumption is only candidate");ioTest::reset(fault);auto r=tr::store(file,candidate);check(!r.committed(),"failed write not published");check(readRaw(file)==old,"old disk responsibility retained");check(encoded(source)==old,"old caller responsibility retained");check(ioTest::renames==(fault==ioTest::Fault::Rename?1U:0U),"failed write/flush never reaches publication");ioTest::reset();});
  run("IO/replace-and-tombstone",[&]{ioTest::reset();auto r=one();tr::Record c;check(tr::consumeOrigin(r,r.revision,origin(),c),"tombstone candidate");check(tr::store(file,c).committed(),"tombstone committed without deleting file");auto load=tr::load(file,c.machineBinding);check(load.state==tr::LoadState::Valid&&load.record&&load.record->obligations.empty(),"empty proved only by valid explicit tombstone");check(GetFileAttributesW(file.c_str())!=INVALID_FILE_ATTRIBUTES,"record file still exists");});
- for(auto [name,fault]:std::vector<std::pair<std::string,ioTest::Fault>>{{"read",ioTest::Fault::Read},{"short-read",ioTest::Fault::ShortRead},{"changing-info",ioTest::Fault::InfoChanged}})run("IO/retryable-"+name,[&]{ioTest::reset();check(tr::store(file,one()).committed(),"baseline");ioTest::reset(fault);auto r=tr::load(file,empty().machineBinding);check(r.state==tr::LoadState::RetryableIo&&!r.record,"IO uncertainty has no consumable record");ioTest::reset();});
+ for(auto [name,fault]:std::vector<std::pair<std::string,ioTest::Fault>>{{"read",ioTest::Fault::Read},{"short-read",ioTest::Fault::ShortRead},{"changing-info",ioTest::Fault::InfoChanged}})run("IO/retryable-"+name,[&]{ioTest::reset();raw(file,encoded(one()));check(tr::store(file,one()).committed(),"baseline");ioTest::reset(fault);auto r=tr::load(file,empty().machineBinding);check(r.state==tr::LoadState::RetryableIo&&!r.record,"IO uncertainty has no consumable record");ioTest::reset();});
  run("IO/sharing-failure-and-release",[&]{ioTest::reset();auto busy=CreateFileW(file.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(busy!=INVALID_HANDLE_VALUE,"exclusive private test file opened");auto load=tr::load(file,empty().machineBinding);check(load.state==tr::LoadState::RetryableIo&&!load.record,"real sharing failure remains unknown");check(!tr::store(file,empty()).committed(),"sharing blocks publication");check(CloseHandle(busy),"private owner released");check(tr::load(file,empty().machineBinding).state==tr::LoadState::Valid,"later explicit load succeeds without auto retry");});
  run("IO/foreign-machine-invalid",[&]{auto load=tr::load(file,"different raw identity");check(load.state==tr::LoadState::Invalid&&!load.record,"foreign machine cannot be adopted");});
  run("IO/corrupt-and-oversize",[&]{for(const auto&s:std::vector<std::string>{"",baseline.substr(0,20),std::string(tr::maxRecordBytes+1,'x')}){raw(file,s);auto load=tr::load(file,empty().machineBinding);check(load.state==tr::LoadState::Invalid&&!load.record,"bad file cannot become tombstone");}});
  run("IO/directories-and-paths",[&]{auto load=tr::load(directory,empty().machineBinding);check(load.state==tr::LoadState::Invalid&&!load.record,"directory rejected as Invalid record");check(!tr::store(directory,empty()).committed(),"directory never replaced");for(const auto&name:std::vector<std::wstring>{L"relative.json",directory+L"\\..\\record.json",directory+L"\\record.json:alternate",directory+L"\\NUL.json"}){auto bad=tr::load(name,empty().machineBinding);check(bad.state==tr::LoadState::Invalid&&!bad.record,"unsafe explicit path rejected");check(!tr::store(name,empty()).committed(),"unsafe path not written");}});
  run("IO/hardlink-rejected",[&]{raw(file,baseline);auto link=directory+L"\\hardlink.json";check(CreateHardLinkW(link.c_str(),file.c_str(),nullptr),"private hardlink fixture created");auto load=tr::load(link,empty().machineBinding);check(load.state==tr::LoadState::Invalid&&!load.record,"multiply linked record rejected");check(!tr::store(link,empty()).committed(),"hardlink not replaced");check(DeleteFileW(link.c_str()),"only private fixture hardlink removed");});
- run("IO/reparse-metadata-rejected",[&]{ioTest::reset();check(tr::store(file,one()).committed(),"baseline");for(const auto fault:{ioTest::Fault::ReparseLeaf,ioTest::Fault::ReparseParent}){ioTest::reset(fault);auto loaded=tr::load(file,empty().machineBinding);check(loaded.state==tr::LoadState::Invalid&&!loaded.record,"observed reparse metadata refuses record");auto saved=tr::store(file,empty());check(saved.state==tr::StoreState::Invalid,"observed reparse metadata refuses replacement");check(ioTest::writes==0&&ioTest::renames==0,"unsafe observation never reaches write");}ioTest::reset();});
+ run("IO/reparse-metadata-rejected",[&]{ioTest::reset();raw(file,encoded(one()));check(tr::store(file,one()).committed(),"baseline");for(const auto fault:{ioTest::Fault::ReparseLeaf,ioTest::Fault::ReparseParent}){ioTest::reset(fault);auto loaded=tr::load(file,empty().machineBinding);check(loaded.state==tr::LoadState::Invalid&&!loaded.record,"observed reparse metadata refuses record");auto saved=tr::store(file,empty());check(saved.state==tr::StoreState::Invalid,"observed reparse metadata refuses replacement");check(ioTest::writes==0&&ioTest::renames==0,"unsafe observation never reaches write");}ioTest::reset();});
  run("IO/invalid-candidate-zero-mutation",[&]{ioTest::reset();auto invalid=one();invalid.obligations[0].origin.parent.pid=0;check(!tr::store(file,invalid).committed(),"invalid candidate refused");check(ioTest::writes==0&&ioTest::flushes==0&&ioTest::renames==0,"invalid candidate invokes no file mutation");});
  run("IO/no-orphan-temporary-files",[&]{std::size_t count=0;for(const auto&item:std::filesystem::directory_iterator(directory))if(item.path().filename().wstring().find(L".tmp.")!=std::wstring::npos)++count;check(count==0,"all failed/publication temporary files cleaned");});
  run("IO/independent-process-record",[&]{auto r=one();tr::Record c;check(tr::reservePath(r,r.revision,origin(2,"elite"),pathB,proof,c),"two exact old origins");check(tr::store(directory+L"\\cross-process.json",c).committed(),"cross-process test record published");});
@@ -415,6 +423,74 @@ int wmain(int argc,wchar_t**argv){
   check(loaded.state==tr::LoadState::Valid&&loaded.record&&loaded.record->obligations[0].origin.cliWriterProtocol==1&&encoded(*loaded.record)==encoded(candidate),"actual file reload retains exact immutable protocol one");
  });
 
+
+ // Data-only fake ACKs, actual Session and real private journal files.
+ const auto journalDirectory=std::filesystem::path(directory).make_preferred().wstring();
+ const auto stormPath=[&](const std::string& name){return journalDirectory+L"\\storm-"+std::wstring(name.begin(),name.end())+L".json";};
+ const auto debtSample=[] {ep::VisibilityDebt d;d.hiddenPaths={L"HID\\VID_0DB0&PID_1901\\EXACT_A"};d.applications={L"C:\\Fixture\\fake-host.exe"};d.builtinRoot="USB\\VID_0DB0&PID_1901\\MSI";d.cloakChanged=true;return d;};
+ const auto debtBytes=[](const ep::VisibilityDebt& d){std::string text,error;if(!ep::detail::encode(d,text,error))throw std::runtime_error(error);return text;};
+ for(const auto& [label,bytes]:std::vector<std::pair<std::string,std::string>>{
+  {"empty",""},{"truncated","{"},{"wrong-root","[]"},{"duplicate",std::string("{\"schemaVersion\":1,")+encoded(one()).substr(1)},
+  {"oversized",std::string(tr::maxRecordBytes+1,'x')},
+  {"future",[&]{auto j=J::parse(encoded(one()));j["schemaVersion"]=2;return j.dump();}()},
+  {"type",[&]{auto j=J::parse(encoded(one()));j["revision"]="1";return j.dump();}()}})
+ run("storm/target-preserve-"+label,[&]{const auto p=stormPath("target-"+label);raw(p,bytes);ioTest::reset();
+  const auto loaded=tr::load(p,empty().machineBinding);check(loaded.state==tr::LoadState::Invalid&&!loaded.record,"invalid record never supplies default revision or endpoint authority");
+  {auto session=tr::Session::open(p,empty().machineBinding);check(!session.ready()&&!session.record(),"actual Session stays inactive without valid record");}
+  check(!tr::store(p,empty()).committed(),"writer cannot replace corrupt/future journal with default tombstone");check(readRaw(p)==bytes,"invalid original bytes remain exact");
+ });
+ run("storm/target-late-receipt",[&]{const auto p=stormPath("target-late");auto base=one();check(tr::store(p,base).committed(),"initial durable debt");auto loaded=tr::load(p,base.machineBinding);tr::Record late,newer;
+  check(loaded.record&&tr::consumeOrigin(*loaded.record,loaded.record->revision,origin(),late),"fake ACK creates candidate only");
+  check(tr::reservePath(*loaded.record,loaded.record->revision,origin(2,"elite"),pathB,proof,newer)&&tr::store(p,newer).committed(),"later valid duty actually published");const auto bytes=readRaw(p);
+  check(!tr::store(p,late).committed()&&readRaw(p)==bytes,"late same-next-revision ACK cannot erase newer debt");
+  check(!tr::store(p,empty()).committed()&&readRaw(p)==bytes,"default revision is not a disk CAS");
+ });
+ run("storm/target-session-consume-retry",[&]{const auto p=stormPath("session-retry");check(tr::store(p,one()).committed(),"seed known duty");
+  {auto session=tr::Session::open(p,empty().machineBinding);check(session.ready(),"real Session reads known duty");const auto old=readRaw(p);const auto rev=session.record()->revision;
+   ioTest::reset(ioTest::Fault::Rename);check(!session.consumeOrigin(rev,origin()),"clear publication fails explicitly");check(session.record()->revision==rev&&!session.record()->obligations.empty()&&readRaw(p)==old,"failed clear leaves memory/disk duty intact");
+   ioTest::reset();check(session.consumeOrigin(rev,origin()),"same explicit ACK recovers after IO fault");check(!session.consumeOrigin(rev,origin()),"late old revision rejected");}
+  const auto loaded=tr::load(p,empty().machineBinding);check(loaded.record&&loaded.record->obligations.empty(),"confirmed tombstone reread, not file absence");
+ });
+ run("storm/target-owner-source-revision",[&]{const auto p=stormPath("identity");check(tr::store(p,one()).committed(),"seed identity");auto session=tr::Session::open(p,empty().machineBinding);const auto revision=session.record()->revision;const auto before=readRaw(p);
+  for(int field=0;field<5;++field){auto wrong=origin();if(field==0)++wrong.host.pid;if(field==1)wrong.runId="other";if(field==2)wrong.physicalRoot="USB\\VID_9999&PID_9999\\OTHER";if(field==3)wrong.targetId="old";if(field==4)++wrong.epoch;check(!session.consumeOrigin(revision,wrong),"foreign fake ACK cannot consume duty");}
+  check(!session.consumeOrigin(1,origin())&&readRaw(p)==before,"default revision/identity mismatch preserves debt");
+ });
+ const auto sample=debtSample();const auto validDebt=debtBytes(sample);
+ for(const auto& [label,bytes]:std::vector<std::pair<std::string,std::string>>{
+  {"empty",""},{"truncated","{"},{"wrong-root","[]"},{"duplicate",std::string("{\"owner\":\"foreign\",")+validDebt.substr(1)},
+  {"oversized",std::string(ep::maxDebtBytes+1,'x')},{"future",[&]{auto j=J::parse(validDebt);j["version"]=2;return j.dump();}()},
+  {"wrong-owner",[&]{auto j=J::parse(validDebt);j["owner"]="foreign";return j.dump();}()},
+  {"wrong-type",[&]{auto j=J::parse(validDebt);j["cloakChanged"]="false";return j.dump();}()}})
+ run("storm/debt-preserve-"+label,[&]{const auto p=stormPath("debt-"+label);raw(p,bytes);auto known=sample;std::string error;ep::DebtLoadFailure failure;
+  check(!ep::loadDebt(p,known,error,failure)&&failure==ep::DebtLoadFailure::InvalidRecord,"bad debt stays unknown");check(debtBytes(known)==validDebt,"failed load preserves known memory debt");
+  check(!ep::saveDebt(p,ep::VisibilityDebt{},error)&&readRaw(p)==bytes,"writer cannot clear malformed/future debt");
+ });
+ run("storm/debt-clear-io-retry",[&]{const auto p=stormPath("debt-retry");std::string error;check(ep::saveDebt(p,debtSample(),error),"persist exact additions");ep::VisibilityDebt loaded;check(ep::loadDebt(p,loaded,error),"actual decoder reloads duty");const auto before=readRaw(p);
+  auto returned=loaded;returned.hiddenPaths.clear();returned.applications.clear();returned.cloakChanged=false;returned.builtinRoot.clear();
+  ioTest::reset(ioTest::Fault::Rename);check(!ep::saveDebt(p,returned,error)&&readRaw(p)==before,"failed clear retains original debt");ioTest::reset();check(ep::saveDebt(p,returned,error),"explicit clear retries after fault removal");
+  ep::VisibilityDebt after;check(ep::loadDebt(p,after,error)&&after.hiddenPaths.empty()&&!after.cloakChanged,"only successful clear rereads returned");
+ });
+ run("storm/debt-load-sharing-release",[&]{const auto p=stormPath("debt-busy");std::string error;check(ep::saveDebt(p,debtSample(),error),"seed duty");const auto old=readRaw(p);auto held=CreateFileW(p.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(held!=INVALID_HANDLE_VALUE,"own file locked");auto out=sample;ep::DebtLoadFailure failure;
+  check(!ep::loadDebt(p,out,error,failure)&&failure==ep::DebtLoadFailure::RetryableIo,"busy read is retryable unknown");check(!ep::saveDebt(p,ep::VisibilityDebt{},error),"busy unknown debt cannot clear");CloseHandle(held);check(ep::loadDebt(p,out,error,failure)&&readRaw(p)==old,"explicit read recovers after lock release");
+ });
+
+ run("storm/debt-late-snapshot-and-foreign-path",[&]{const auto p=stormPath("debt-late");std::string error;check(ep::saveDebt(p,debtSample(),error),"seed late-snapshot debt");ep::VisibilityDebt old;check(ep::loadDebt(p,old,error),"read exact snapshot");auto late=old,newer=old;
+  late.hiddenPaths.clear();late.applications.clear();late.cloakChanged=false;late.builtinRoot.clear();
+  newer.hiddenPaths.push_back(LR"(HID\VID_0DB0&PID_1901\EXACT_B)");check(ep::saveDebt(p,newer,error),"publish later owned debt");const auto bytes=readRaw(p);
+  check(!ep::saveDebt(p,late,error)&&readRaw(p)==bytes,"old acknowledged snapshot cannot erase later debt");
+  const auto foreign=stormPath("foreign-debt");raw(foreign,bytes);check(!ep::saveDebt(foreign,newer,error)&&readRaw(foreign)==bytes,"loaded path binding prevents cross-journal ACK replay");
+  ep::VisibilityDebt current;check(ep::loadDebt(p,current,error),"explicit reload reads latest debt");current.hiddenPaths.clear();current.applications.clear();current.cloakChanged=false;current.builtinRoot.clear();check(ep::saveDebt(p,current,error),"current explicit return can persist after rejected stale ACK");
+ });
+ run("storm/debt-read-failure-keeps-known",[&]{const auto p=stormPath("read-failure");std::string error;check(ep::saveDebt(p,debtSample(),error),"seed read retry");auto out=debtSample();const auto known=debtBytes(out);ep::DebtLoadFailure failure;
+  for(const auto fault:{ioTest::Fault::Read,ioTest::Fault::InfoChanged}){ioTest::reset(fault);check(!ep::loadDebt(p,out,error,failure)&&failure==ep::DebtLoadFailure::RetryableIo,"read/snapshot uncertainty is retryable");check(debtBytes(out)==known,"read failure retains known exact debt");}
+  ioTest::reset();check(ep::loadDebt(p,out,error,failure),"explicit read recovers after fault removal");
+ });
+ run("storm/target-session-exclusion-and-external-drift",[&]{const auto p=stormPath("owner-drift");check(tr::store(p,one()).committed(),"seed drift journal");
+  {auto session=tr::Session::open(p,empty().machineBinding);check(session.ready(),"first session owns sentinel");{auto busy=tr::Session::open(p,empty().machineBinding);check(!busy.ready()&&!busy.record(),"second owner has no consumable record");}
+   auto fresh=one();tr::Record changed;check(tr::reservePath(fresh,fresh.revision,origin(2,"elite"),pathB,proof,changed),"make independent fake writer data");raw(p,encoded(changed));const auto bytes=readRaw(p);
+   check(!session.consumeOrigin(session.record()->revision,origin()),"memory CAS cannot clear externally replaced disk");check(session.record()->obligations.size()==1&&readRaw(p)==bytes,"failed disk snapshot match retains memory and new disk debts");}
+  auto reopened=tr::Session::open(p,empty().machineBinding);check(reopened.ready()&&reopened.record()->obligations.size()==2,"new explicit session reads current valid state");
+ });
  J result={{"pass",failures.empty()},{"cases",cases},{"caseCount",cases.size()},{"assertions",assertions},{"failures",failures},{"realPrivateFileIo",true},{"deviceApiCalls",0},{"productMainRun",false},{"readmeAuthority","historical provenance only; caller runtime not connected"}};
  std::ofstream out(std::filesystem::path(resultPath),std::ios::binary);out<<result.dump(2)<<"\n";std::cout<<J({{"pass",failures.empty()},{"cases",cases.size()},{"assertions",assertions},{"failures",failures}}).dump()<<"\n";return failures.empty()?0:1;
 }

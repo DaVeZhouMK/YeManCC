@@ -24,15 +24,61 @@ int wmain(int argc,wchar_t**argv){try{
  std::filesystem::create_directories(root/L"steam-appearance");
  auto entry=root/L"steam-appearance.ps1",module=root/L"steam-appearance/resident.ps1",renderer=root/L"steam-appearance/idle.ps1";
  std::ofstream(renderer)<<"AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults";
- std::ofstream(entry)<<"ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1";std::ofstream(module)<<"function Start-ResidentAppearanceBackend";
+ std::ofstream(entry)<<"SharedProcessQueryProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1";std::ofstream(module)<<"AppearanceProcessQueryProtocol=2 function Start-ResidentAppearanceBackend";
  steamcssuse::verifyResidentControl(entry.wstring());check(true,"matching resident script and module pass native preflight");
  std::ofstream(entry)<<"AutomaticResultProtocol=1";bool refused=false;try{steamcssuse::verifyResidentControl(entry.wstring());}catch(...){refused=true;}check(refused,"old script is refused before it can create job-owned CSS");
- std::ofstream(entry)<<"ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1";std::filesystem::remove(module);refused=false;try{steamcssuse::verifyResidentControl(entry.wstring());}catch(...){refused=true;}check(refused,"missing resident module is refused before helper creation");
- std::ofstream(module)<<"function Start-ResidentAppearanceBackend";std::ofstream(renderer)<<"AppearanceRenderProtocol=2";
+ std::ofstream(entry)<<"SharedProcessQueryProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1";std::filesystem::remove(module);refused=false;try{steamcssuse::verifyResidentControl(entry.wstring());}catch(...){refused=true;}check(refused,"missing resident module is refused before helper creation");
+ std::ofstream(module)<<"AppearanceProcessQueryProtocol=2 function Start-ResidentAppearanceBackend";std::ofstream(renderer)<<"AppearanceRenderProtocol=2";
  refused=false;try{steamcssuse::verifyResidentControl(entry.wstring());}catch(...){refused=true;}check(refused,"old static-only render component is refused before helper creation");
  std::filesystem::remove(renderer);refused=false;try{steamcssuse::verifyResidentControl(entry.wstring());}catch(...){refused=true;}check(refused,"missing render component is refused before helper creation");
  std::ofstream(renderer)<<"AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults";
  Child css;css.value=launch(backend.wstring(),L"--dummy");
+ // The existing identity consumer also exercises the actual cross-process
+ // channel, with only owned inert helper/backend/editor processes.
+ {
+  const auto desktop=root/L"CSSLoader Desktop.exe";std::filesystem::copy_file(self(),desktop,std::filesystem::copy_options::overwrite_existing);
+  Child editor;editor.value=launch(desktop.wstring(),L"--dummy");
+  std::atomic<unsigned> served{0};
+  steamcssuse::Runtime inventoryHost(false,35821,[]{return steamcsseditor::State::Absent;});
+  check(inventoryHost.initialize(entry.wstring(),(root/L"unused-backend.path").wstring(),180000,4000,{},0,[&]{return ++served!=2;}),"actual CSS-use worker starts the protected inventory channel");
+  FILETIME birth{},exit{},kernel{},user{};GetProcessTimes(GetCurrentProcess(),&birth,&exit,&kernel,&user);
+  steamsession::Session session{L"owned-fixture",GetCurrentProcessId(),0,(ULONGLONG(birth.dwHighDateTime)<<32)|birth.dwLowDateTime};
+  inventoryHost.observeSteam(session);
+  const auto repo=std::filesystem::path(__FILE__).parent_path().parent_path();
+  wchar_t system[32768]{};GetSystemDirectoryW(system,32768);
+  const auto ps=std::filesystem::path(system)/L"WindowsPowerShell/v1.0/powershell.exe";
+  Child client;client.value=launch(ps.wstring(),L"-NoProfile -ExecutionPolicy Bypass -File \""+(repo/L"tools/steam_appearance_process_identity_selftest.ps1").wstring()+L"\" -Out \""+(root/L"bridge").wstring()+L"\" -ProcessQuery \""+inventoryHost.processQuery()+L"\" -ExpectedPid "+std::to_wstring(GetCurrentProcessId())+L" -BackendPid "+std::to_wstring(GetProcessId(css.value))+L" -EditorPid "+std::to_wstring(GetProcessId(editor.value)));
+  check(WaitForSingleObject(client.value,20000)==WAIT_OBJECT_0,"cross-process client stays inside its owned bounded lifetime");
+  DWORD code=1;GetExitCodeProcess(client.value,&code);inventoryHost.shutdown();
+  check(code==0&&served==4,"actual CSS worker serves real PS identities and rejects Unknown without private scans");
+  check(running(css.value)&&running(editor.value),"closing the inventory host retains backend and editor processes");
+ }
+
+
+ {
+  const auto steamImage=root/L"steam.exe";std::filesystem::copy_file(self(),steamImage,std::filesystem::copy_options::overwrite_existing);
+  Child steam;steam.value=launch(steamImage.wstring(),L"--dummy");FILETIME born{},exit{},kernel{},user{};
+  check(GetProcessTimes(steam.value,&born,&exit,&kernel,&user),"owned Steam identity has an exact birth receipt");
+  steamsession::Session session{root.wstring(),GetProcessId(steam.value),123,(ULONGLONG(born.dwHighDateTime)<<32)|born.dwLowDateTime};
+  const auto link=root/L"lifecycle-backend.path";{std::ofstream out(link);out<<backend.string();}
+  std::atomic<bool> allowed=false;std::atomic<ULONGLONG> power=1;unsigned launches=0;
+  steamcssuse::Runtime use(false,35821,[]{return steamcsseditor::State::Absent;});
+  check(use.initialize(entry.wstring(),link.wstring(),180000,4000,[&](const auto&stage,const auto&,const auto&,const auto&){if(stage=="ensure-helper-start"||stage=="automatic-helper-start")++launches;},0,[&]{return allowed.load();},[&]{return power.load();}),"actual use worker initializes with the shared lifecycle predicate");
+  use.observeSteam(session);bool rejected=false;try{use.begin(session);}catch(...){rejected=true;}
+  check(rejected&&launches==0,"non-Ready cannot acquire a CSS use or create a helper");
+  allowed=true;const auto ticket=use.begin(session);check(ticket.token!=0,"Ready uses the existing exact Steam and resident backend");
+  allowed=false;rejected=false;try{use.ensure(ticket.token);}catch(...){rejected=true;}
+  check(rejected&&launches==0,"a lease acquired before suspension cannot launch Ensure afterwards");
+  power=2;allowed=true;check(use.invalidateForResume(session),"committed Ready revokes the old bounded use while retaining CSS");
+  rejected=false;try{use.ensure(ticket.token);}catch(...){rejected=true;}
+  check(rejected&&launches==0&&running(css.value),"a stale pre-sleep ticket cannot survive Ready revocation");
+  const auto currentTicket=use.begin(session);
+  check(!use.invalidateForResume(session),"automatic recovery cannot revoke a new user edit in the current power generation");
+  check(use.release(currentTicket.token).ok(),"the current user edit retains its valid completion ticket");
+  const auto offTicket=use.begin(session);
+  check(use.invalidateForResume(session,false)&&use.release(offTicket.token).stale,"explicit OFF or backend loss revokes even a current edit without touching CSS");
+  use.shutdown();check(running(css.value)&&running(steam.value),"lifecycle cleanup closes only owned work and leaves both resident processes alive");
+ }
  DWORD before=0,after=0;GetProcessHandleCount(GetCurrentProcess(),&before);
  for(unsigned i=0;i<10;++i){steamcssuse::Group group({},[]{return steamcsseditor::State::Absent;});group.open();group.adopt(backend.wstring());auto result=group.close();check(result.verified==1&&result.ok()&&running(css.value),"verified existing backend survives request release");}
  {steamcssuse::Group group({},[]{return steamcsseditor::State::Absent;});group.open();Child helper;helper.value=launch(self(),L"--dummy",&group);group.adopt(backend.wstring());group.close();check(WaitForSingleObject(helper.value,2000)==WAIT_OBJECT_0,"helper job still destroys its own pending work");check(running(css.value),"helper job never owns the adopted resident CSS");}

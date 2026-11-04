@@ -1,9 +1,20 @@
-param([Parameter(Mandatory = $true)][string]$Scratch)
+param(
+    [Parameter(Mandatory = $true)][string]$Scratch,
+    [ValidateSet('x2mini','x2mini-wire','x2mini-admission','x2mini-terminal','x2mini-negative-controls')]
+    [ValidateNotNullOrEmpty()][string]$Case
+)
 $ErrorActionPreference = 'Stop'
 $fixture = $PSScriptRoot
 $repo = [IO.Path]::GetFullPath((Join-Path $fixture '../../..'))
 $taskScratch = [IO.Path]::GetFullPath($Scratch)
 New-Item -ItemType Directory -Path $taskScratch -Force | Out-Null
+# Explicit selection and legacy default are mutually exclusive. The directed
+# branch owns only scratch builds and never starts the shipping helper.
+if ($PSBoundParameters.ContainsKey('Case')) {
+    & python (Join-Path $fixture 'replay.py') --scratch $taskScratch --case $Case
+    if ($LASTEXITCODE -ne 0) { throw "directed DeviceCore replay failed: $LASTEXITCODE" }
+    return
+}
 $build = Join-Path $taskScratch 'build'
 
 function Checked([string]$Executable, [string[]]$Arguments) {
@@ -16,6 +27,8 @@ function Build-Project([string]$Project, [string]$Area, [string[]]$Properties = 
 
 # Never rewrites source locks or production pins. Drift needs explicit review.
 Checked 'python' @((Join-Path $fixture 'extract_pinned.py'), '--check')
+Checked 'python' @((Join-Path $fixture 'prepare_legacy.py'), '--scratch', $taskScratch)
+$legacySources = Join-Path $taskScratch 'legacy-isolation'
 Build-Project 'FanLab/LightSetter/DeviceCore/YeManLightDeviceCore.csproj' 'core'
 $core = Join-Path $build 'core/bin/YeManLightDeviceCore/release/YeManLightDeviceCore.dll'
 $coreHash = (Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -37,7 +50,9 @@ $replayHash = (Get-FileHash -LiteralPath $replay -Algorithm SHA256).Hash.ToLower
 $replayPins = Join-Path $taskScratch 'ReplayPins.cs'
 ('internal static class LightingAssemblyPins { internal const string StandaloneLightingSha256 = "' + $replayHash + '"; }') | Set-Content -LiteralPath $replayPins -Encoding utf8
 Build-Project 'tools/fixtures/lightsetter_devicecore/ReplayConsumer.csproj' 'replay-consumer' @("-p:ReplayPinSource=$replayPins")
-Build-Project 'tools/fixtures/lightsetter_devicecore/LegacyActionReplay.csproj' 'legacy-replay'
+Build-Project 'tools/fixtures/lightsetter_devicecore/LegacyActionReplay.csproj' 'legacy-replay' @(
+    ('-p:LegacyTestSource=' + (Join-Path $legacySources 'LegacyTests.cs')),
+    ('-p:ReplayOwnerSource=' + (Join-Path $legacySources 'PrivateOwnerLease.cs')))
 $legacy = & dotnet (Join-Path $build 'legacy-replay/bin/LegacyActionReplay/release/LightSetterLegacyActionReplay.dll')
 if ($LASTEXITCODE -ne 0) { throw 'Legacy action replay failed' }
 $legacy | Set-Content -LiteralPath (Join-Path $taskScratch 'legacy-replay-report.json') -Encoding utf8

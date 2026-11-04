@@ -78,8 +78,8 @@ inline ymcc::deckylaunch::Result create(const std::wstring& executable,std::wstr
 #include "decky_sidebar_bootstrap.h"
 #include "steam_ui_mode_observer.h"
 #include "steam_link_admission.h"
+#include "decky_sidebar_session.h"
 #include "decky_update_recovery.h"
-#include "decky_gaming_fullscreen.h"
 #include "decky_sidebar_manual_repair.h"
 #include "decky_sidebar_automatic_repair.h"
 #include <fstream>
@@ -90,9 +90,7 @@ using Session=ymcc::steamsession::Session;
 static Session steam{L"C:\\FixtureSteam",45640,12345,134368675855384222ULL};
 static std::atomic<int> fixtureSteamPresence{1};
 struct SessionFixture{Session sessionSnapshot(){return steam;}int steamPresence(){return fixtureSteamPresence.load();}}g_steamSettingsObserver;
-static ymcc::deckygaming::Observation gamingFullscreenObservation;
-static std::atomic<bool> gamingFullscreenLive{false};
-static ymcc::deckygaming::Observation deckySidebarGamingFullscreenObservation(const Session&){auto observation=gamingFullscreenObservation;observation.active=gamingFullscreenLive.load();return observation;}
+static struct {bool isolated=false;}g_aiFanMockSession;
 namespace ymcc::steamcss {enum class UiMode {BigPicture,Desktop};struct Mode{UiMode value;std::string epoch;};}
 struct CssFixture{void observeMode(const Session&,const ymcc::steamcss::Mode&){} }g_steamCssGuard;
 static std::atomic<bool>g_exitRequested{false};
@@ -125,6 +123,7 @@ static json deckySidebarEnvironment(bool prepare,const std::function<bool()>& ma
     return prepare?ymcc::deckysetup::prepare(steamRoot,home,digest,fixtureSteamPresence.load()!=0,mayPrepare):ymcc::deckysetup::inspect(steamRoot,home,digest);
 }
 /*__PREPARE_ENVIRONMENT__*/
+/*__WAKE_READY__*/
 /*__WAKE_MESSAGE__*/
 static BOOL fixtureWakePost(HWND,UINT message,WPARAM generation,LPARAM){if(message!=WM_POWER_INPUT_RECOVER||generation!=fixtureWakeGeneration)throw std::runtime_error("wrong wake follow-up boundary");++fixtureWakeInputPosts;return TRUE;}
 #define PostMessageW fixtureWakePost
@@ -133,13 +132,18 @@ static LRESULT productionWakeCommit(WPARAM w){HWND h=nullptr;
 }
 #undef PostMessageW
 static void deckySidebarPost(const std::string&,const json&){}
+static void steamWallpaperForegroundSignal(){}
+static void deckySidebarResumeManagedMode(const Session&){}
 /*__SESSION_DIAGNOSTIC__*/
-/*__GAMING_CONSENT__*/
+
 static ymcc::deckysidebar::LaunchAdmission productionAdmission(){
 /*__ADMISSION__*/
 }
 static void productionModeChanged(const Session& session,const json& state){
 /*__MODE_CHANGED__*/
+}
+static void productionStableBigPicture(const Session& session){
+/*__STABLE_BIGPICTURE__*/
 }
 int wmain(int argc,wchar_t** argv){
  if(argc==1){Sleep(15000);return 0;} // Only this exact inert test image can be launched.
@@ -267,16 +271,16 @@ int wmain(int argc,wchar_t** argv){
   {ymcc::deckyupdate::Recovery policy;check(policy.consider(steam,healthyMode,newId,true)=="updated-decky-frontend-pending","exact field mismatch admits one Decky continuation");check(policy.consider(steam,healthyMode,newId,true).empty(),"duplicate mode read cannot initiate another recovery");auto wrong=steam;wrong.root=L"C:\\OtherSteam";check(!policy.allows(wrong),"root-bound continuation");auto desktop=healthyMode;desktop["mode"]="desktop";policy.consider(steam,desktop,newId,true);check(!policy.allows(steam),"desktop exit revokes recovery");}
   {ymcc::deckyupdate::Recovery policy;auto loaderOnly=healthyMode;loaderOnly["deckyUpdateResidue"]["frontendBuildId"]=newId;loaderOnly["deckyUpdateResidue"]["loaderVersion"]="v3.2.10";
    check(policy.consider(steam,loaderOnly,newId,true,"v3.3.0")=="updated-decky-loader-pending","official Loader upgrade alone resumes even if plugin module is unchanged");}
-  {const auto account=steam.account;steam.account=0;const auto rejected=productionAdmission();steam.account=account;
-   check(!rejected.allowed&&rejected.reason=="steam-session-unconfirmed"&&rejected.retryable,"unconfirmed account blocks startup before any preparation");}
   // Full production launch-admission and shared-reader callback chain.
   g_deckySidebarRuntime.initialize({image,(scope/L"home").wstring(),[]{++preflights;return std::string{};},[](const auto& state){if(state.phase=="loader-started")++launches;}, {}, {}, {}, {}, {}, productionAdmission});
   g_deckySidebarRuntime.observeSteam(1);g_deckySidebarRuntime.setEnabled(true);
-  check(until([]{return g_deckySidebarRuntime.snapshot().reason=="ymcc-startup-observation-only";}),"old scene first reproduces observation-only wait");
-  check(preflights==0&&launches==0,"ordinary startup cannot prepare/inject/launch");
-  ymcc::steamui::ModeObserverConfig config;config.debounceMs=1;config.minimumGapMs=1;config.failureGapMs=1;std::atomic<bool> residueReady{false},freshContext{false};config.read=[&](const Session&){auto state=healthyMode;if(freshContext){state["deckyFrontendLoaded"]=false;state["modeEpoch"]="new-document:1";}if(!residueReady)state.erase("deckyUpdateResidue");return state;};config.changed=productionModeChanged;
+  check(until([]{return g_deckySidebarRuntime.snapshot().reason=="steam-ui-state-pending";}),"unconfirmed first mode waits without creating a Loader");
+  {const auto account=steam.account;steam.account=0;const auto rejected=productionAdmission();steam.account=account;
+   check(!rejected.allowed&&rejected.reason=="steam-session-unconfirmed"&&rejected.retryable,"unconfirmed account blocks startup before any preparation");}
+  check(preflights==0&&launches==0,"an already loaded document cannot prepare/inject a second official Loader");
+  ymcc::steamui::ModeObserverConfig config;config.debounceMs=1;config.minimumGapMs=1;config.failureGapMs=1;std::atomic<bool> residueReady{false},freshContext{false};config.read=[&](const Session&){auto state=healthyMode;if(freshContext){state["deckyFrontendLoaded"]=false;state["modeEpoch"]="new-document:1";}if(!residueReady)state.erase("deckyUpdateResidue");return state;};config.changed=productionModeChanged;config.stableBigPicture=productionStableBigPicture;
   g_steamModeObserver.initialize(config);g_steamModeObserver.observeSteam(steam);g_steamModeObserver.setDemand(ymcc::steamui::ModeConsumer::Decky,true);
-  check(until([]{return signals>0;}),"initial mode read completes without update evidence");check(launches==0,"first matching Big Picture baseline alone cannot start Decky");
+  check(until([]{return signals>0;}),"initial mode read completes without update evidence");check(until([]{return g_deckySidebarRuntime.snapshot().reason=="decky-context-already-loaded";}),"field regression: global recovery cannot require a special origin");check(launches==0,"first matching but already loaded Big Picture cannot reinject Decky");
   residueReady=true;g_steamModeObserver.requestRefresh(steam);
   check(until([]{return g_deckySidebarRuntime.snapshot().reason=="decky-context-already-loaded";}),"field regression: recovery grant cannot reinject the loaded Steam context");
   check(launches==0&&preflights==0,"update continuation performs zero loaded-context injection or Loader startup");
@@ -328,7 +332,7 @@ int wmain(int argc,wchar_t** argv){
   },[&]{const auto count=++retainedBinds;if(count<=2){g_deckySidebarRuntime.requestTransportRecovery();return std::string("mirror-bootstrap-ws-closed");}return std::string{};}});
   ymcc::steamui::ModeObserverConfig retainedConfig;retainedConfig.debounceMs=1;retainedConfig.minimumGapMs=1;
   std::mutex retainedModeMutex;
-  retainedConfig.read=[&](const Session&){std::lock_guard lock(retainedModeMutex);return retainedState;};retainedConfig.changed=productionModeChanged;
+  retainedConfig.read=[&](const Session&){std::lock_guard lock(retainedModeMutex);return retainedState;};retainedConfig.changed=productionModeChanged;retainedConfig.stableBigPicture=productionStableBigPicture;
   g_steamModeObserver.initialize(retainedConfig);g_steamModeObserver.observeSteam(steam);g_steamModeObserver.setDemand(ymcc::steamui::ModeConsumer::Decky,true);
   const auto retainedStarted=GetTickCount64();
   g_deckySidebarRuntime.observeSteam(1,true);g_deckySidebarRuntime.setEnabled(true);
@@ -344,11 +348,11 @@ int wmain(int argc,wchar_t** argv){
   // The official backend remains absent until an explicit repair and a fresh
   // verified document. Exercise the real ManualRepair + Runtime + mode callback.
   const auto retainedDocument=retainedState;
-  {std::lock_guard lock(retainedModeMutex);retainedState["deckyFrontendLoaded"]=false;retainedState.erase("deckyUpdateResidue");retainedState["modeEpoch"]="fixture-new-document:1";}
-  g_steamModeObserver.requestRefresh(steam);check(until([&]{return g_steamModeObserver.snapshot(steam).value("modeEpoch",std::string{})=="fixture-new-document:1";}),"fresh document observed without consent");
+  {std::lock_guard lock(retainedModeMutex);retainedState["deckyFrontendLoaded"]=false;retainedState.erase("deckyUpdateResidue");retainedState["modeEpoch"]="fixture-new-document:1";retainedState["observedAccount"]=steam.account+1u;}
+  g_steamModeObserver.requestRefresh(steam);check(until([&]{return g_steamModeObserver.snapshot(steam).value("modeEpoch",std::string{})=="fixture-new-document:1";}),"fresh document with conflicting current account is observed");
   {const auto reads=retainedAdmissionReads.load();g_deckySidebarRuntime.requestLaunchAdmissionRefresh();
-   check(until([&]{return retainedAdmissionReads>reads;}),"no-consent admission observed by owner worker");
-   check(launches==oldLaunches,"fresh document without explicit consent cannot launch retained backend");}
+   check(until([&]{return retainedAdmissionReads>reads;}),"conflicting-account admission is observed by owner worker");
+   check(launches==oldLaunches,"fresh document with conflicting account cannot launch retained backend");}
   {std::lock_guard lock(retainedModeMutex);retainedState=retainedDocument;}
   g_steamModeObserver.requestRefresh(steam);check(until([&]{return g_steamModeObserver.snapshot(steam).value("deckyFrontendLoaded",false);}),"retained document restored before explicit repair");
   check(until([]{return g_deckySidebarRuntime.snapshot().phase=="frontend-attached";}),"retained binding settles before explicit repair captures revision");
@@ -406,7 +410,7 @@ int wmain(int argc,wchar_t** argv){
   g_deckyUpdateRecovery.userEnable(steam);
   g_deckySidebarRuntime.initialize({image,(scope/L"home").wstring(),[]{++preflights;return std::string{};},[](const auto& state){if(state.phase=="loader-started")++launches;},{},{},{},{},{},productionAdmission,[]{return std::string{};},[&]{automaticOwner.observe(automaticShared,automaticDeps);}});
   ymcc::steamui::ModeObserverConfig automaticConfig;automaticConfig.debounceMs=1;automaticConfig.minimumGapMs=1;
-  automaticConfig.read=[&](const Session&){std::lock_guard lock(autoModeMutex);return autoMode;};automaticConfig.changed=productionModeChanged;
+  automaticConfig.read=[&](const Session&){std::lock_guard lock(autoModeMutex);return autoMode;};automaticConfig.changed=productionModeChanged;automaticConfig.stableBigPicture=productionStableBigPicture;
   g_steamModeObserver.initialize(automaticConfig);g_steamModeObserver.observeSteam(steam);g_steamModeObserver.setDemand(ymcc::steamui::ModeConsumer::Decky,true);
   g_deckySidebarRuntime.observeSteam(1,true);g_deckySidebarRuntime.setEnabled(true);
   check(until([&]{return automaticOwner.snapshot().value("phase",std::string{})=="manual-required";}),"actual startup with missing backend reports manual repair instead of refreshing Steam UI");
@@ -491,16 +495,16 @@ int wmain(int argc,wchar_t** argv){
     check(fixtureWakeDiagnostics.size()==1&&fixtureWakeDiagnostics[0].value("bindingRequested",false),"native owner reports the accepted binding demand");
     check(g_deckySidebarRuntime.snapshot().pid==owner&&wakePreflights==1,"committed wake preserves original owned backend without preflight or relaunch");
     for(unsigned i=0;i<20;++i)productionWakeCommit(0);
-    check(wakeBindings==1&&fixtureWakeDiagnostics.size()==21&&std::all_of(fixtureWakeDiagnostics.begin()+1,fixtureWakeDiagnostics.end(),[](const auto& d){return !d.value("bindingRequested",true);}),"duplicate committed wake notifications cannot bind again");
+    check(wakeBindings==1&&fixtureWakeDiagnostics.size()==1,"duplicate committed wake notifications cannot bind again");
     fixtureWakeGeneration=178;productionWakeCommit(1);
     check(until([&]{return wakeBindings==2;}),"next committed wake generation renews transport once");
     check(fixtureWakeEvents.back()["data"]["generation"]==178&&fixtureWakeEvents.back()["data"]["degraded"]==true,"degraded committed wake keeps truthful original power event");
     check(g_deckySidebarRuntime.snapshot().pid==owner&&wakePreflights==1,"second committed wake keeps same actual backend");
     fixtureWakeGeneration=177;productionWakeCommit(0);
-    check(!fixtureWakeDiagnostics.back().value("bindingRequested",true)&&wakeBindings==2,"older committed event cannot rebind the newer generation");
+    check(fixtureWakeDiagnostics.size()==2&&wakeBindings==2,"older committed event cannot rebind the newer generation");
     const auto eventsForHost=fixtureWakeEvents;
     g_deckySidebarRuntime.setEnabled(false);fixtureWakeGeneration=179;productionWakeCommit(0);
-    check(!g_deckySidebarRuntime.snapshot().enabled&&!g_deckySidebarRuntime.snapshot().pid&&wakeBindings==2&&!fixtureWakeDiagnostics.back().value("bindingRequested",true),"OFF remains closed after a late actual Ready event");
+    check(!g_deckySidebarRuntime.snapshot().enabled&&!g_deckySidebarRuntime.snapshot().pid&&wakeBindings==2&&fixtureWakeDiagnostics.size()==2,"OFF remains closed after a late actual Ready event");
     const json wakeReport={{"schemaVersion",1},{"passed",true},{"productionBlockExtracted",true},{"rawResumeCannotCommit",true},{"actualWindowsSleep",false},{"actualSteamActions",0},{"ownedBackendPreserved",true},{"bindingCalls",wakeBindings.load()},{"preflights",wakePreflights.load()},{"events",eventsForHost}};
     std::ofstream(scope.parent_path()/L"native-wake-commit.json")<<wakeReport.dump(2);
     g_deckySidebarRuntime.shutdown();
@@ -510,16 +514,18 @@ int wmain(int argc,wchar_t** argv){
   {
     steam.pid+=2000;steam.created-=100;g_steamLinkAdmission.observe(steam);
     json mode={{"known",true},{"running",true},{"pid",steam.pid},{"birth",std::to_string(steam.created)},{"mode","bigpicture"},{"modeEpoch","xbox-fse-document:1"},{"deckyFrontendLoaded",false}};
-    gamingFullscreenObservation={true,true,true,true};gamingFullscreenLive=false;
+    // FSE availability is deliberately not an admission prerequisite.
     const auto beforeLaunch=launches.load(),beforePreflight=preflights.load();
     g_powerLifecycle=PowerLifecycle::Ready;
-    ymcc::steamui::ModeObserverConfig fseConfig;fseConfig.debounceMs=1;fseConfig.minimumGapMs=1;fseConfig.failureGapMs=1;fseConfig.read=[&](const Session&){return mode;};fseConfig.changed=productionModeChanged;
+    ymcc::steamui::ModeObserverConfig fseConfig;fseConfig.debounceMs=1;fseConfig.minimumGapMs=1;fseConfig.failureGapMs=1;fseConfig.read=[&](const Session&){return mode;};fseConfig.changed=productionModeChanged;fseConfig.stableBigPicture=productionStableBigPicture;
     g_steamModeObserver.initialize(fseConfig);g_steamModeObserver.observeSteam(steam);g_steamModeObserver.setDemand(ymcc::steamui::ModeConsumer::Decky,true);
     g_deckySidebarRuntime.initialize({image,(scope/L"home").wstring(),[]{++preflights;return std::string{};},[](const auto& state){if(state.phase=="loader-started")++launches;},{},{},{},{},{},productionAdmission});
     g_deckySidebarRuntime.observeSteam(1,true);g_deckySidebarRuntime.setEnabled(true);
-    check(until([]{return g_deckySidebarRuntime.snapshot().reason=="ymcc-startup-observation-only";}),"Xbox inactive waits without launching on saved ON alone");
-    gamingFullscreenLive=true;g_deckySidebarRuntime.requestLaunchAdmissionRefresh();
-    check(until([&]{return launches==beforeLaunch+1&&g_deckySidebarRuntime.snapshot().pid>0;}),"Xbox full-screen field path reaches actual owned Loader consumer");
+    check(until([]{return productionAdmission().allowed;}),"verified ON+BPM no longer requires a separate FSE grant");
+    // Same exact current Big Picture recovers even when no FSE/manual/update
+    // origin event arrives. OFF, identity and loaded-context checks still apply.
+    g_deckySidebarRuntime.requestLaunchAdmissionRefresh();
+    check(until([&]{return launches==beforeLaunch+1&&g_deckySidebarRuntime.snapshot().pid>0;}),"global ON+BPM field path reaches actual owned Loader without FSE grant");
     check(preflights==beforePreflight+1&&!g_steamLinkAdmission.allows(steam),"Xbox FSE prepares once without granting shared Steam or CSS authority");
     const auto childPid=g_deckySidebarRuntime.snapshot().pid;HANDLE child=OpenProcess(SYNCHRONIZE,FALSE,childPid);check(child!=nullptr,"Xbox test holds exact owned child for observed exit");
     for(unsigned i=0;i<100;++i)g_deckySidebarRuntime.requestLaunchAdmissionRefresh();Sleep(40);
@@ -528,7 +534,7 @@ int wmain(int argc,wchar_t** argv){
     check(WaitForSingleObject(child,2000)==WAIT_OBJECT_0&&GetTickCount64()-stopAt<3000,"Xbox OFF destroys actual owned child within a bound");CloseHandle(child);
     for(unsigned i=0;i<10;++i){productionModeChanged(steam,mode);g_deckySidebarRuntime.requestLaunchAdmissionRefresh();}Sleep(40);
     check(!g_deckySidebarRuntime.snapshot().enabled&&g_deckySidebarRuntime.snapshot().pid==0&&launches==beforeLaunch+1,"late FSE events cannot resurrect explicit OFF");
-    g_steamModeObserver.shutdown();g_deckySidebarRuntime.shutdown();gamingFullscreenLive=false;gamingFullscreenObservation={};
+    g_steamModeObserver.shutdown();g_deckySidebarRuntime.shutdown();
     std::ofstream(scope.parent_path()/L"xbox-fullscreen-admission.json")<<json{{"ok",true},{"actualOwnedChildLaunches",1},{"preflights",1},{"lateEvents",10},{"zeroSteamStarts",true},{"zeroSteamModeRequests",true},{"ownedChildExitObserved",true},{"physicalFseTest",false}}.dump(2);
   }
   // Native prewarm lives in the same Runtime for every supported startup order.
@@ -553,7 +559,7 @@ int wmain(int argc,wchar_t** argv){
       std::mutex modeMutex;json routeMode={{"known",true},{"running",true},{"pid",next.pid},{"birth",std::to_string(next.created)},
         {"mode",directBigPicture?"bigpicture":"desktop"},{"modeEpoch","prewarm-route-"+std::to_string(route)+":0"},{"deckyFrontendLoaded",false}};
       ymcc::steamui::ModeObserverConfig routeConfig;routeConfig.debounceMs=1;routeConfig.minimumGapMs=1;routeConfig.failureGapMs=1;
-      routeConfig.read=[&](const Session&){std::lock_guard lock(modeMutex);return routeMode;};routeConfig.changed=productionModeChanged;
+      routeConfig.read=[&](const Session&){std::lock_guard lock(modeMutex);return routeMode;};routeConfig.changed=productionModeChanged;routeConfig.stableBigPicture=productionStableBigPicture;
       g_steamModeObserver.initialize(routeConfig);g_steamModeObserver.observeSteam(steam);g_steamModeObserver.setDemand(ymcc::steamui::ModeConsumer::Decky,true);
       std::atomic<unsigned> routeStarts{0},routeChecks{0};const auto preparedBefore=fixturePrepared.load();
       ymcc::deckysidebar::Config config{image,home.wstring(),[&]{++routeChecks;const auto state=deckySidebarEnvironment(false);return state.value("ready",false)?std::string{}:state.value("reason",std::string("fixture-prepare-failed"));},

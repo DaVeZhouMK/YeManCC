@@ -25,7 +25,7 @@ function fixture(options = {}) {
   const settings = { clientSettings:{enable_overlay:false,overlay_fps_counter_corner:0,overlay_fps_counter_detail_level:1,overlay_fps_counter_scale_factor:1,overlay_fps_counter_saturation_factor:1,overlay_fps_counter_bgopacity:1},m_CMInterface:{steamid:{GetAccountID:()=>account}},GetClientSetting(key) {assert(key in this.clientSettings);return [this.clientSettings[key],async value=>{stats.overlayWrites++;this.clientSettings[key]=value;}];} };
   const window = {controllerConfiguratorStore:s,ControllerStore:{GetControllers:()=>('controllers' in options)?options.controllers:[{eControllerType:type,nControllerIndex:index}],GetControllerTypeString:value=>value===type?'controller_neptune':'controller_generic'},settingsStore:settings};
   const steamClient={Settings:{SetSetting(){}}};
-  const fn=vm.runInNewContext(source,{window,SteamClient:steamClient,performance,setTimeout:(cb,n)=>setTimeout(cb,Math.min(n,20)),clearTimeout,console});
+  const fn=vm.runInNewContext(source,{window,get location(){return window.location;},SteamClient:steamClient,performance,setTimeout:(cb,n)=>setTimeout(cb,Math.min(n,20)),clearTimeout,console});
   const request = {operation:'mouse.set',controllerType:'controller_neptune',path:layoutPath,account,baseline:145,percent:137};
   return {fn,request,stats,s,cfg,group,window,settings,steamClient};
 }
@@ -636,5 +636,35 @@ await test('sleep account capture refuses account drift and UI steamid replaceme
 await test('sleep account capture supports uint32 upper bound and remains serialized with existing operations',async()=>{
  const f=fixture();f.settings.m_CMInterface.steamid.GetAccountID=()=>0xffffffff;const r=await f.fn({operation:'sleep.session.inspect'});assert(r.ok&&!r.mutated&&r.observedAccount===0xffffffff);
  f.window.__ymccSteamLiveBusy='other-owner';const busy=await f.fn({operation:'sleep.session.inspect'});assert(!busy.ok&&!busy.mutated&&busy.reason==='live-busy');assert.equal(f.stats.loads,0);
+});
+await test('Decky mode snapshot reads the current offline account without online/registry or business writes',async()=>{
+ const f=fixture();f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};
+ f.steamClient.UI={GetUIMode:async()=>4};f.steamClient.User={RegisterForLoginStateChange:()=>({unregister(){}}),RegisterForCurrentUserChanges:cb=>cb({strSteamID:'76561197960265770',bIsOfflineMode:true})};
+ const r=await f.fn({operation:'ui.mode.get'});assert(r.ok&&!r.mutated);assert.equal(r.observedAccount,42);assert.equal(r.deckyAccountWatchAvailable,true);
+ assert.equal(f.stats.edits+f.stats.saves+f.stats.overlayWrites,0);
+ for(const value of [0,-1,1.5,0x100000000,'42']){f.settings.m_CMInterface.steamid.GetAccountID=()=>value;const bad=await f.fn({operation:'ui.mode.get'});assert(bad.ok&&!('observedAccount' in bad),'mode stays available but invalid account cannot authorize Decky');}
+});
+await test('Decky current-user proof rejects logged-out/stale identities and reuses one native callback offline-to-online',async()=>{
+ const f=fixture();f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};f.steamClient.UI={GetUIMode:async()=>4};
+ let callback,loginCallback,registrations=0;f.steamClient.User={RegisterForLoginStateChange:cb=>{loginCallback=cb;return {unregister(){}};},RegisterForCurrentUserChanges:cb=>{registrations++;callback=cb;cb({strSteamID:'76561197960265770',bIsOfflineMode:true});}};
+ const first=await f.fn({operation:'ui.mode.get'});assert(first.deckyAccountWatchAvailable);const watch=f.window.__YMCC_DECKY_ACCOUNT_WATCH__;
+ let changes=0;const off=watch.subscribe(()=>changes++);callback({strSteamID:'76561197960265770',bIsOfflineMode:false});assert(watch.read(42));
+ await f.fn({operation:'ui.mode.get'});assert.equal(registrations,1);assert.equal(changes,1);
+ loginCallback('');assert(!watch.read(42),'logout must revoke even while old UI object exists');callback({strSteamID:'0'});assert(!watch.read(42));const out=await f.fn({operation:'ui.mode.get'});assert.equal(out.deckyAccountWatchAvailable,false);
+ for(const id of ['76561197960265771','invalid',42,'18446744073709551616']){callback({strSteamID:id});assert(!watch.read(42));}
+ callback({strSteamID:'76561197960265770',bIsOfflineMode:true});assert(watch.read(42));off();const before=changes;callback({strSteamID:'0'});assert.equal(changes,before);
+ assert.deepEqual(f.stats,{edits:0,saves:0,overlayWrites:0,loads:0});
+});
+await test('revoked bridge permits only exact retained-document provenance without restoring its old credentials',async()=>{
+ const f=fixture();f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};f.steamClient.UI={GetUIMode:async()=>4};
+ f.window.__YMCC_DECKY_FRONTEND__={active:true,buildId:'a'.repeat(64)};f.window.DeckyPluginLoader={deckyState:{publicState:()=>({versionInfo:{current:'v3.3.1'}})}};
+ f.window.__YMCC_DECKY_MIRROR__={runId:'b'.repeat(32),frontendBuildId:'a'.repeat(64),revoked:true};
+ const good=await f.fn({operation:'ui.mode.get'});assert.equal(good.deckyUpdateResidue?.frontendBuildId,'a'.repeat(64));assert.equal(f.window.__YMCC_DECKY_MIRROR__.token,undefined);
+ f.window.__YMCC_DECKY_MIRROR__.frontendBuildId='c'.repeat(64);assert.equal((await f.fn({operation:'ui.mode.get'})).deckyUpdateResidue,undefined);
+});
+await test('failed account-hook installation does not accumulate callback registrations on repeated mode reads',async()=>{
+ const f=fixture();f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};f.steamClient.UI={GetUIMode:async()=>4};let count=0;
+ f.steamClient.User={RegisterForCurrentUserChanges:cb=>{count++;cb({strSteamID:'76561197960265770'});},RegisterForLoginStateChange:()=>{throw Error('native-hook-unavailable');}};
+ for(let i=0;i<100;i++){const r=await f.fn({operation:'ui.mode.get'});assert(r.ok&&!r.deckyAccountWatchAvailable);}assert.equal(count,1);
 });
 console.log(JSON.stringify({suite:'Steam live production JS mocked',passed:results.length,cases:results,hardwareOperations:0},null,2));

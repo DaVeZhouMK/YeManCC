@@ -16,7 +16,7 @@ const emit = defineEmits<{
     </template>
     <template v-if="mode !== 'draft'">
       <button class="global-action apply-action" data-editor-action="apply" type="button" :disabled="busy || recording || !dirty || pending" @click="emit('apply')">{{ busy ? '保存中…' : '应用修改' }}</button>
-      <button class="global-action close-editor-action cancel" data-editor-action="close" type="button" aria-label="关闭页面" :disabled="busy" @click="emit('close')"><strong class="quick-key-b" aria-hidden="true">B</strong>关闭页面</button>
+      <button class="global-action close-editor-action cancel" data-editor-action="close" type="button" aria-label="关闭页面" :disabled="busy" @click="emit('close')"><span class="controller-key quick-key-b" aria-hidden="true" data-controller-key="B">B</span>关闭页面</button>
     </template>
   </div>
 </template>

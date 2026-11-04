@@ -36,8 +36,29 @@ export function validateMethodPolicy(policy){
  }
  return byName;
 }
-export function buildModelMethodConsumption({catalog,inventory,policy}){
- const byName=validateMethodPolicy(policy);
+export function validateUpstreamMethodPolicy(policy){
+ validateMethodPolicy(policy);
+ need(Array.isArray(policy.upstreamGroups)&&policy.upstreamGroups.length>0,'METHOD_UPSTREAM_POLICY_GROUPS');
+ return validateMethodPolicy({...policy,groups:[...policy.groups,...policy.upstreamGroups]});
+}
+export function buildModelMethodConsumption(inputs){return buildMethodRegistry(inputs,false);}
+export function buildPinnedUpstreamMethodConsumption({catalog,inventory,policy,pin,sourcePinSha256}){
+ need(pin?.repository==='Valkirie/HandheldCompanion'&&/^[a-f0-9]{40}$/.test(pin.commit)&&pin.pathPrefix==='HandheldCompanion/Devices/'&&pin.allGitBlobsMatched===true,'METHOD_UPSTREAM_PIN');
+ need(validHash(sourcePinSha256)&&catalog?.sourceBaseline==='HC-UPSTREAM-SOURCE-'+pin.commit&&catalog.sourceFilesIndexSha256===sourcePinSha256&&catalog.upgradeCandidate?.runtimeAdmission===false&&catalog.upgradeCandidate?.verified===false&&catalog.upgradeCandidate?.upstreamCommit===pin.commit,'METHOD_UPSTREAM_CANDIDATE_AUTHORITY');
+ need(Array.isArray(pin.deviceSourceFiles)&&Array.isArray(catalog.sourceFiles)&&pin.deviceSourceFiles.length===catalog.sourceFiles.length,'METHOD_UPSTREAM_PIN_FILES');
+ const pinned=new Map();for(const row of pin.deviceSourceFiles){need(typeof row.path==='string'&&row.path.startsWith(pin.pathPrefix)&&!pinned.has(row.path.slice(pin.pathPrefix.length))&&validHash(row.sha256),'METHOD_UPSTREAM_PIN_FILE');pinned.set(row.path.slice(pin.pathPrefix.length),row.sha256);}
+ const candidateFiles=new Set();
+ for(const row of catalog.sourceFiles){need(!candidateFiles.has(row.file),'METHOD_UPSTREAM_SOURCE_DUPLICATE:'+row.file);candidateFiles.add(row.file);need(pinned.get(row.file)===row.sha256,'METHOD_UPSTREAM_SOURCE_MISMATCH:'+row.file);}
+ need(candidateFiles.size===pinned.size,'METHOD_UPSTREAM_SOURCE_SET');
+ const registry=buildMethodRegistry({catalog,inventory,policy},true);
+ delete registry.contentSha256;
+ registry.evidenceLevel='pinned-source-inventory-classification';
+ registry.pinnedUpstream={commit:pin.commit,sourcePinSha256,fixedDeviceFiles:pin.deviceSourceFiles.length,sourceReparseRequired:true,inventoryProof:'Source file identities authenticated; separate parser provenance required.'};
+ registry.contentSha256=digest(JSON.stringify(registry));return registry;
+}
+function buildMethodRegistry({catalog,inventory,policy},upstream){
+ const byName=upstream?validateUpstreamMethodPolicy(policy):validateMethodPolicy(policy);
+ const sourcePrefix=upstream?'HandheldCompanion/Devices/':'deps/handheldcompanion-runtime/source/Devices/';
  need(catalog?.schemaVersion===1&&Array.isArray(catalog.devices)&&catalog.devices.length>0,'METHOD_CATALOG_SCHEMA');
  need(inventory&&Array.isArray(inventory.devices)&&Array.isArray(inventory.files)&&Array.isArray(inventory.issues)&&inventory.issues.length===0,'METHOD_ROSLYN_INVENTORY');
  const sourceClasses=new Map();for(const d of inventory.devices){need(!sourceClasses.has(d.name),'METHOD_ROSLYN_DUPLICATE_CLASS:'+d.name);sourceClasses.set(d.name,d);}
@@ -49,7 +70,7 @@ export function buildModelMethodConsumption({catalog,inventory,policy}){
  for(const device of catalog.devices){
   const original=sourceClasses.get(device.name);
   need(original&&!seenClasses.has(device.name),'METHOD_SOURCE_CLASS:'+device.name);seenClasses.add(device.name);
-  need(original.sourceSha256===device.declarationSha256&&original.fullName===device.sourceType&&device.deviceId==='hc.device.'+device.name&&JSON.stringify(original.chain)===JSON.stringify(device.inheritance)&&original.file===device.sourcePath.replace('deps/handheldcompanion-runtime/source/Devices/','')&&original.instantiable===device.factoryInstantiable,'METHOD_CLASS_PROOF:'+device.name);
+  need(original.sourceSha256===device.declarationSha256&&original.fullName===device.sourceType&&device.deviceId==='hc.device.'+device.name&&JSON.stringify(original.chain)===JSON.stringify(device.inheritance)&&device.sourcePath.startsWith(sourcePrefix)&&original.file===device.sourcePath.slice(sourcePrefix.length)&&original.instantiable===device.factoryInstantiable,'METHOD_CLASS_PROOF:'+device.name);
   need(sourceFiles.get(original.file)===device.sourceSha256&&Array.isArray(device.methods)&&Array.isArray(original.methods)&&device.methods.length===original.methods.length,'METHOD_DECLARATION_COUNT:'+device.name);
   const declared=[];
   for(let i=0;i<device.methods.length;i++){
@@ -65,7 +86,8 @@ export function buildModelMethodConsumption({catalog,inventory,policy}){
   }
   classes.push({deviceId:device.deviceId,deviceClass:device.consumerClass,factoryInstantiable:device.factoryInstantiable,sourceFile:device.sourcePath,sourceSha256:device.sourceSha256,inheritance:device.inheritance,declaredMethodIds:declared});
  }
- for(const name of byName.keys())need(usedNames.has(name),'METHOD_POLICY_STALE_NAME:'+name);
+ const requiredNames=upstream?policy.upstreamGroups.flatMap(g=>g.names):byName.keys();
+ for(const name of requiredNames)need(usedNames.has(name),'METHOD_POLICY_STALE_NAME:'+name);
  // Ancestor declarations are traceability only: the syntax inventory does not establish
  // access modifiers, virtual dispatch, invocation or a consumer's live hardware admission.
  const classesByName=new Map(catalog.devices.map(d=>[d.name,d]));
@@ -73,11 +95,11 @@ export function buildModelMethodConsumption({catalog,inventory,policy}){
   const entry=classes[i],own=catalog.devices[i];entry.ancestorDeviceIds=[];
   for(const name of own.inheritance??[]){if(name===own.name)continue;const parent=classesByName.get(name);need(parent,'METHOD_ANCESTOR_MISSING:'+name);entry.ancestorDeviceIds.push(parent.deviceId);}
  }
- const registry={schemaVersion:1,scope:'Frozen Devices method declarations and their consumer/dependency review obligations',sourceBaseline:catalog.sourceBaseline,sourceFilesIndexSha256:catalog.sourceFilesIndexSha256,policySha256:digest(JSON.stringify(policy)),evidenceLevel:'fresh-Roslyn-source-classification',classCount:classes.length,factoryClassCount:classes.filter(d=>d.factoryInstantiable).length,sourceFileCount:sourceFiles.size,declaredMethodCount:methods.length,distinctMethodNames:usedNames.size,groupCounts,domainCounts,kindCounts,groups:policy.groups,classes,methods,coverageMeaning:'Every source declaration is classified; references to an existing consumer domain do not certify that this exact method has executed.',runtimeAvailabilityAuthority:false,automaticExecution:false,physicalAcceptance:false,wholeProcessCpuReduction:null,goalComplete:false};
+ const registry={schemaVersion:1,scope:upstream?'Pinned upstream Devices method declarations and open consumer/dependency obligations':'Frozen Devices method declarations and their consumer/dependency review obligations',sourceBaseline:catalog.sourceBaseline,sourceFilesIndexSha256:catalog.sourceFilesIndexSha256,policySha256:digest(JSON.stringify(policy)),evidenceLevel:'fresh-Roslyn-source-classification',classCount:classes.length,factoryClassCount:classes.filter(d=>d.factoryInstantiable).length,sourceFileCount:sourceFiles.size,declaredMethodCount:methods.length,distinctMethodNames:usedNames.size,groupCounts,domainCounts,kindCounts,groups:policy.groups,classes,methods,coverageMeaning:'Every source declaration is classified; references to an existing consumer domain do not certify that this exact method has executed.',runtimeAvailabilityAuthority:false,automaticExecution:false,physicalAcceptance:false,wholeProcessCpuReduction:null,goalComplete:false};
  registry.contentSha256=digest(JSON.stringify(registry));return registry;
 }
 export function planModelMethodChanges({before,candidate,policy}){
- const byName=validateMethodPolicy(policy);need(Array.isArray(candidate?.devices),'METHOD_CANDIDATE_SCHEMA');
+ const byName=policy.upstreamGroups?validateUpstreamMethodPolicy(policy):validateMethodPolicy(policy);need(Array.isArray(candidate?.devices),'METHOD_CANDIDATE_SCHEMA');
  const flatten=catalog=>{const result=new Map(),deviceIds=new Set();for(const device of catalog.devices){need(typeof device.deviceId==='string'&&Array.isArray(device.methods),'METHOD_CANDIDATE_DEVICE');need(!deviceIds.has(device.deviceId),'METHOD_CANDIDATE_DUPLICATE_DEVICE:'+device.deviceId);deviceIds.add(device.deviceId);for(const method of device.methods){need(typeof method.name==='string'&&typeof method.signature==='string'&&method.signature,'METHOD_CANDIDATE_METHOD_SHAPE');const id=methodId(device,method);need(!result.has(id),'METHOD_CANDIDATE_DUPLICATE:'+id);result.set(id,{device,method});}}return result;};
  const old=flatten(before),next=flatten(candidate),changes=[],affected=new Set();
  for(const id of new Set([...old.keys(),...next.keys()])){

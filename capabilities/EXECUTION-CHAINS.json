@@ -49,6 +49,38 @@
         {
           "file": "capabilities/AsusFanCapabilitySession.cs",
           "anchor": "AsusFanCapabilitySession"
+        },
+        {
+          "file": "FanLab/real-host/PinnedSourceFanConsumer.cs",
+          "anchor": "OpenPinnedSourceCore"
+        },
+        {
+          "file": "FanLab/real-host/PinnedSourceFanEngine.cs",
+          "anchor": "CloseSourceSessionForLifecycle"
+        },
+        {
+          "file": "capabilities/PinnedFanSourceCatalog.cs",
+          "anchor": "AcquirePinnedFanSource"
+        },
+        {
+          "file": "src/bridge/fanApi.ts",
+          "anchor": "validSourceFanHandshake"
+        },
+        {
+          "file": "src/bridge/fanSessionEvidence.ts",
+          "anchor": "hasSafeSourceFanRelease"
+        },
+        {
+          "file": "native/fan_response_contract.h",
+          "anchor": "sourceReleaseSafe"
+        },
+        {
+          "file": "FanLab/real-host/G1FanContractAdapter.cs",
+          "anchor": "CompletionField"
+        },
+        {
+          "file": "FanLab/real-host/MiniAmdFanContractAdapter.cs",
+          "anchor": "TryNormalize"
         }
       ],
       "necessaryBoundaries": [
@@ -108,7 +140,312 @@
           "file": "capabilities/FAN-RETURN-CONSUMPTION.json",
           "anchor": "\"kind\": \"fan-return-consumption-review\""
         }
-      ]
+      ],
+      "pinnedSourceFanSoftware": {
+        "executionId": "HC-CODEX-018",
+        "status": "SOFTWARE_CONSUMER_VERIFIED_LIVE_UNKNOWN",
+        "descriptorCount": 9,
+        "entry": "capabilities/PinnedFanSourceCatalog.cs (partial FanCapabilityCatalog)",
+        "sourceCodeAdmission": true,
+        "writeAuthority": "Original authorization, lease, source generation and native power admission remain required",
+        "oldRuntimeFactoryConstructed": false,
+        "sourceConsumer": "PinnedSourceFanSelection -> PinnedSourceFanConsumer/Engine -> catalog source session/curve -> source transport",
+        "returnConsumer": "sourceFanGeneration and recoveryClaimEvidence matched; source automatic-register return plus exact terminal closure; HC and physical fields remain separate",
+        "evidence": {
+          "executionId": "HC-CODEX-018",
+          "status": "SOFTWARE_CONSUMER_VERIFIED_LIVE_UNKNOWN",
+          "sourceDescriptorCount": 9,
+          "registrationAuthority": "Existing FanCapabilityCatalog partial facade; source facts and owner shared with existing fan consumers",
+          "sourceHostOuterLifecycleIntegrated": true,
+          "oldRuntimeFactoryConstructedForSource": false,
+          "sourceModelAndRuntimeFactoryIdentitySeparated": true,
+          "defaultWriteAuthorizationUnchanged": true,
+          "sourceOnly": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-mainline-source-001\\RESULT.json",
+            "sha256": "18693c1492e4c385e880014f7ed8467d5ed5f378633e11e11bbbba63eaae71af",
+            "bytes": 88752
+          },
+          "originalLockedBinary": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-mainline-binary-001\\RESULT.json",
+            "sha256": "a8d4555b6fe156617eb24652e0b857c5bb1f832c17c935c4166ccd2c4cb3a46c",
+            "bytes": 94354
+          },
+          "actualBridge": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-source-bridge-001.stdout.log",
+            "sha256": "fd647c5dd331e90d06bb1d57e9ef3e67ca34db73f66de7f48a56f5ea605fbdbc",
+            "bytes": 218
+          },
+          "actualNative": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-native-001.stdout.log",
+            "sha256": "c347bffb97a37d08ab78f233c507378dfd79f8966b81fa0e2d45471594b265e7",
+            "bytes": 1316
+          },
+          "actualHostBuild": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\activation-actual-host-build.stdout.log",
+            "sha256": "8df4c55e9c96d016d16abddd98de7d3db9930c91d98860d904b2c6afb64e1d43",
+            "bytes": 84
+          },
+          "scope": "Pure software controls/returns/generations and approved runtime metadata; no product Main, device/port constructors, live WMI/EC, deployment, hardware effects or performance evidence",
+          "wholeGoalComplete": false,
+          "loadedPortBytes": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+          "sourceScopes": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-source-proof\\SOURCE-PROOF-SCOPES.json",
+            "sha256": "cd976daabd9980b9e0de605662488e41a9b6805404445ecd7e73eece38a36312",
+            "bytes": 833
+          }
+        },
+        "hardwareOrPerformanceAcceptance": false
+      },
+      "registeredRoutesMeaning": "Existing70 frozen HC routes; nine source descriptors are a separate unit and do not change legacy route-count semantics.",
+      "sourceChain": [
+        "existing authenticated API",
+        "exact source DMI selection before frozen factory",
+        "FanCapabilityCatalog.MatchPinnedFanSource/AcquirePinnedFanSource",
+        "source curve and shared owner/generation",
+        "existing HWiNFO freshness path",
+        "typed source WMI/SuperIO transport",
+        "automatic-register return and exact terminal retirement",
+        "source evidence parsed by fanApi/fanSessionEvidence/native fan_response_contract"
+      ],
+      "fixedMethodSourceComparison": {
+        "executionId": "HC-CODEX-019",
+        "status": "SOURCE_COMPARISON_COMPLETE_CONSUMPTION_OPEN",
+        "report": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-019-METHOD-CONSUMPTION\\FAN-METHOD-RECONCILIATION.json",
+          "sha256": "516f1ab0bfb94424c19fb2e99d5f9402dae1f0bb7a89c07fb5edef6d5f2944ad",
+          "bytes": 98156
+        },
+        "fanDeclarations": 59,
+        "unchangedDeclarations": 31,
+        "changedDeclarations": 16,
+        "noExactFrozenSignature": 12,
+        "profileFlagReturnRows": 13,
+        "methodExecutionRecertifiedThisBatch": false,
+        "wholeGoalComplete": false
+      },
+      "legacyOneXAppliedProfileSoftware": {
+        "executionId": "HC-CODEX-020",
+        "status": "SOFTWARE_ONE_X_APPLIED_PROFILE_GUARD_VERIFIED_FULL_LIBRARY_OPEN",
+        "verification": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-020-ONEX-APPLIED-FLAG\\SOFTWARE-VERIFICATION.json",
+          "sha256": "1415fddef8f629ac88bf9135b618fc548eafba6f078d65dcff0893cea1d6eeb4",
+          "bytes": 13276
+        },
+        "methodUpdate": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-020-ONEX-APPLIED-FLAG\\METHOD-CONSUMPTION-UPDATE.json",
+          "sha256": "c0df64c224587c20a0adcf77a4781cb1a2bf4be9f38e3e285164493783be098b",
+          "bytes": 1383
+        },
+        "legacyAliasesWithinExisting70": 9,
+        "sourceOnlyChecks": 1276,
+        "lockedBinaryVariantChecks": 1299,
+        "newConsumerChecksWithinEachVariant": 78,
+        "countsAreNotAdditive": true,
+        "newLegacyRoutesOrSourceDescriptors": 0,
+        "scope": "Existing OneXAcpiFanMode callback/return owner; no initial Hardware/default callback without software or debt; failed/unknown/foreign/cleanup-pending debt retained",
+        "exactPinnedA1PositiveEcMethodsExecuted": false,
+        "frozenVirtualCloseRetained": true,
+        "completeLibrary": false
+      },
+      "oneXFamilyCurrent": {
+        "executionId": "HC-CODEX-024",
+        "recordedAtUtc": "2026-11-02T04:31:53.956273+00:00",
+        "status": "G1_AND_MINIAMD_SOFTWARE_QUALIFIED_ACTUALLY_SELECTED_EXPORT_PENDING",
+        "familyConcreteFixedBranches": 17,
+        "componentId": "candidate-onex-family-20261102-r1",
+        "hostDllSha256": "a3984a2f5d04f8e5d16c2bd15d23f4a6618191218848ef6132f10f2a71f10471",
+        "backendDllSha256": "df3cbfda690631c94f81ca3da547e40f836d3eb5ffb018b14d47050980bb3289",
+        "payloadManifestSha256": "00bc90257d39d2c5c28ae3532757461b70d46c7436b64cdabe7da284b9544d85",
+        "actualPromotion": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-024-ONEX-FAMILY-FAN\\EXPORT\\PROMOTION-APPLIED.json",
+          "sha256": "b60bec9e95b073d52d8d979fcfc0c64962a5851d647e5d02244eda8f4c9969fd",
+          "bytes": 34716
+        },
+        "currentSourceAndRuntimeAudit": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-024-ONEX-FAMILY-FAN\\EXPORT\\POST-SELECTION-AUDIT.json",
+          "sha256": "2a754741ae7d49f4c0540bb7c98aac278517f4f247dd251bf4bb47ca36546309",
+          "bytes": 2654
+        },
+        "familyActualChecks": 1682,
+        "actualShippingOneXChecks": 25,
+        "scope": [
+          "shipping08a exact G1 AMD/Intel module/type/owner cold EC metadata completion",
+          "exact old MiniAMD C4/C5 writer scale100 normalization; Intel and old MiniPro255 retained",
+          "X2MiniPro independent SuperIO16/255 source route retained from023"
+        ],
+        "noNewHiddenFeatureSwitch": true,
+        "existingAdmissionAndWriteGuardsRetained": true,
+        "fixed104Frozen1048OriginalRuntime123Unchanged": true,
+        "packageSource25ForThisPayload": "NOT_RUN",
+        "completeSourceOnlyVariant": "NOT_RUN",
+        "globalFixtureParent": "NOT_RUN",
+        "exportTerminal": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-024-ONEX-FAMILY-FAN\\EXPORT\\EXPORT-TERMINAL.json",
+        "exportResultAuthoritativeOnlyWhenActuallyWritten": true,
+        "physicalAcceptance": false,
+        "all17ModelLifecycleAcceptance": false,
+        "wholeLibraryComplete": false
+      },
+      "currentLegacyCallbackGuard": {
+        "executionId": "HC-CODEX-025",
+        "status": "EXISTING_LEGACY59_CALLBACK_GUARD_SOFTWARE_SCOPE_VERIFIED_AND_ALREADY_EXPORTED",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-025-ONEX-CONSUMPTION-AUDIT\\LEGACY-PROFILE-CONSUMER-CHECKPOINT-SEAL.json",
+          "sha256": "118c93c994d33395b1b07e46bb87efce4ac5ead98efd99cc616e4e921a38af05",
+          "bytes": 11732
+        },
+        "legacyRouteAliasUnits": 59,
+        "priorOneXAliasUnits": 9,
+        "otherAliasUnits": 50,
+        "checksIncludedInActual1682": 436,
+        "countsAreNotUniqueHardwareModels": true,
+        "sourcePinCountComparedToSelectedComponent": 42,
+        "rawHcSetterOrPhysicalEffectsCertified": false,
+        "rawHostOpenEventsWithInjectedTerminalCases": 6,
+        "independentProfileProviderAliasUnitsExcluded": 11,
+        "newTestsOrBuilds": 0,
+        "currentSourceOnly": "NOT_RUN",
+        "globalParent": "NOT_RUN",
+        "wholeFamilyOrLibraryComplete": false,
+        "legacy2G1ResultConsumerAudit": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-025-ONEX-CONSUMPTION-AUDIT\\LEGACY-WRITE-RESULT-CONSUMPTION.json",
+          "sha256": "e8eb8b6fa4099d60cf0603c51a523c144de19d55ebc1babb72ca8b41cfd0f10a",
+          "bytes": 42198
+        },
+        "legacy2G1Decision": "Existing Compat software callback and physical-unknown are intentional; no proved user-path false-hardware-acceptance bug, no new result writer/consumer requested."
+      },
+      "currentSourceEntryFollowup": {
+        "executionId": "HC-CODEX-034",
+        "recordedAtUtc": "2026-11-02T10:13:05.083385+00:00",
+        "status": "LIVE_OPEN_REFUSAL_REPAIRED_FINAL_R2_CANONICAL_R16_EXPORTED_AND_INSTALLED_BUSINESS_NOT_RUN_HARDWARE_UNKNOWN",
+        "failureLog": {
+          "path": "G:\\YeManCC-Work\\日志\\其他\\YeManCC-logs-20261102-172409--飞行家x2minipro风扇无法使用-4.zip",
+          "sha256": "90b40eb3ac77e2f94183aae36af93e95ba8d729be07f34ac0374fc9b75aac584",
+          "bytes": 3328000
+        },
+        "observedFailure": "2026-11-02T09:20:30.3344974Z /api/open PINNED_FAN_EXISTING_OWNER under actual a398/00bc; then HOST_NOT_OPEN on OpenEvents and bounded recovery exhaustion",
+        "initialControlByte": "UNKNOWN; only mode != Automatic is proved by the old exception",
+        "modelScope": "Existing enabled pinned-source consumers; X2MiniPro is SuperIO16/0..255/0x44A+0x44B/0x4E+0x4F. No new model or telemetry wiring.",
+        "knownModeRule": "Use each descriptor.ControlOff and descriptor.ControlOn; a manual register bit is not exclusive foreign-process ownership. Unknown byte still refuses with observed value. No family-wide hardcoded0/1 (Nxx remains0/A5).",
+        "firstWriteObligation": "Final StepGuard+GuardTarget first; immediately record attempted effect then issue first WriteByte. Pre-write refusal only disposes, issued/partial write keeps return debt.",
+        "returnRulesRetained": [
+          "same exact catalog owner and descriptor",
+          "current permit/source generation/endpoint identity",
+          "write/readback failure leaves retirement responsibility",
+          "automatic-register observation plus exact terminal closure, not physical ownership proof"
+        ],
+        "frontendFailureResync": "Only unacknowledged failed original Open in same intent/process/session/epoch and no power operation plus safe source-resource retirement can withdraw local opened placeholder. It grants no write/lease/native Ready/current-power authority.",
+        "selectedComponent": {
+          "id": "candidate-source-entry-20261102-r2",
+          "hostSha256": "f0bbbe082157ae18de8f604191f2a7061a143dc3210fed7b4f61586e95dc75e5",
+          "backendSha256": "119b93b2ca3aaafb6a21b672f96893805f7cafecc6230fec729bfa10a3f12e9b",
+          "payloadManifestSha256": "ed11d11f1c690f6b1303ee2128765dcd5b947e55c028dddc08b12d7da037f453",
+          "sourceBundleManifestSha256": "61ca5b7cc24d862dea055370eb3c3ff509bc95b73fd44af38a01a655eadfd8aa",
+          "sourceInputsMatch": 43
+        },
+        "actualPeerProductBuild": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-X2MiniPro-Failure-20261102-172409\\COMPONENT-BUILD-R2-RECEIPT.json",
+          "sha256": "b302a04295c06c7c2db37a52de0788401dde0f5df90296693c1edc68b2dc7b52",
+          "bytes": 295
+        },
+        "peerPromotion": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-X2MiniPro-Failure-20261102-172409\\PROMOTION-R2-APPLIED.json",
+          "sha256": "0f4230755af691473266715df4d558be0b75040d43ecd1724629fd78d7db0db4",
+          "bytes": 16045
+        },
+        "sourceAndSelectedIdentity": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-034-X2MINIPRO-LIVE-CONSUMER-REFUSAL\\FINAL-R2-SELECTED-IDENTITY.json",
+          "sha256": "ab719a6933f09a341f9e997a185eaece9dbbf94b7ab6ace889f087cd5b8b0e6a",
+          "bytes": 36344
+        },
+        "businessFixtures": "NOT_RUN; source-case additions are prepared only, no old1682/25 transfer",
+        "canonicalDelivery": {
+          "status": "FINAL_R2_R16_MATCHED_CANONICAL_EXPORT_AND_INSTALLED_BYTES",
+          "verification": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-034-X2MINIPRO-LIVE-CONSUMER-REFUSAL\\R16-FINAL-R2-DELIVERY.json",
+            "sha256": "ce7832c9e9c3d0737ad3757f253d6b4b34e27ed9fb1c717b97e58bef5742b308",
+            "bytes": 195490
+          },
+          "buildExitCode": 0,
+          "packageExitCode": 0,
+          "buildId": "ca478fae9fd18e4b37d685c3325cb5f5df8f51e53b797fa12e1b173631e38a6a",
+          "exeSha256": "b7c7ba58c134f2f57bdaddd313b71e95f8b90ce9aead844658c6e40cb7ec58d3",
+          "zipSha256": "5866707e3fed5fd569cfbfb2c304c098ede783b9f34459340555578ae3d9cbaa",
+          "zipFiles": 621,
+          "fanFilesMatched": 10,
+          "installedBytesObserved": 11,
+          "settingsPreservedByReceipt": true,
+          "sourceWindowEndedAtUtc": "2026-11-02T10:05:27.2684336Z",
+          "thisLaneDeploymentExecuted": false,
+          "frontendIdentityScope": "9 current source files match prebuild and final build manifest; no immutable original frontend compiler archive in R16",
+          "newDocsNotRetroactivelyInOldBuildIdentity": true
+        },
+        "physicalFanRpmThermalAndPerformance": "NOT_VERIFIED",
+        "budget": {
+          "journal": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-021-LEGACY-FAN-PROFILE-RETURN\\PROCESS-029-onex-family-current-audit.json",
+            "sha256": "e8671b07d28dacc9bdddf65f48129d2cf44c7b317da1b2432215c21b47ad302c",
+            "bytes": 1946
+          },
+          "limitSeconds": 300,
+          "usedSeconds": 297.839466999962,
+          "remainingSeconds": 2.160533000038015,
+          "reportedPeerConservative298369454Journal": "NOT_LOCATED; not authoritative primary accounting",
+          "newBusinessTestsByThisLane": 0,
+          "reset": false
+        },
+        "sourceOnlyTemperature0470AndDutyReaders": "RECORD_ONLY_UNCONSUMED; existing HWiNFO curve input retained",
+        "wholeLibraryComplete": false
+      },
+      "superXUmaCurrent": {
+        "executionId": "HC-CODEX-064-ONEX-SUPERX-UMA",
+        "atHongKong": "2026-11-04T16:41:06.938518+08:00",
+        "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_EXPORTED_HUMAN_CLOSEOUT",
+        "soleEntry": "FanCapabilityCatalog partial in capabilities/PinnedFanSourceCatalog.cs",
+        "sourceDescriptorCount": 10,
+        "oldHcDescriptorsPreserved": 9,
+        "newModelClass": "YeManCC.SourceDevices.OneXPlayerSuperX",
+        "sourceRepository": "the-reengineers/XmaX",
+        "sourceCommit": "6d728795511c2f9f683d1757e72481236de9b23a",
+        "sourceFacts": {
+          "path": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+          "sha256": "2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027"
+        },
+        "identity": "Exact baseboard ONEXPLAYER SUPER X plus source ordinal ONE-NETBOOK vendor substring; old nine exact predicates unchanged",
+        "actualConsumer": "Existing RealHcBackend selection/curve -> existing catalog session -> PinnedUmaEcFanTransport -> UMAInterface GetEcValue/SetEcValue, raw EC16 Index Int32, Data byte; checked readback",
+        "stopBoundary": "Existing revoke/in-flight/automatic return/terminal disposal/generation ownership; retained exact cleanup debt",
+        "thermal95C": "Existing YMCC Host policy, not a Super X hardware fact",
+        "temperature": "Existing HWiNFO callback; no guessed EC temperature",
+        "tests": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\DIRECTED-VERIFICATION.json",
+          "bytes": 2017,
+          "sha256": "a605da02176eff9cddcac0d667e10c215559e58054bf5ae99cdf0208c058791b"
+        },
+        "sourceBoundComponent": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\FAN-COMPONENT-ADOPTION.json",
+          "bytes": 17131,
+          "sha256": "e5e646a52324bfd6678d0433fa1586cc99039c315e572f73ad50570f0f1883dd"
+        },
+        "ordinaryExport": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-165414\\YeManCC.zip",
+          "bytes": 110410337,
+          "sha256": "0e4be09038d463714b75515e1ddd367e9a45764fd18a671af40000dd86a4d1bb"
+        },
+        "chargingOrLightingActivated": false,
+        "hardwareIo": false,
+        "physicalAcceptance": false,
+        "wholeFamilyComplete": false,
+        "goalStatus": "active",
+        "actualUniquePassedCases": 18,
+        "passedChecks": 572,
+        "userCloseout": "Finish this batch quickly and keep edits; no next adaptation",
+        "result": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\FINAL-RESULT.json",
+          "bytes": 5267,
+          "sha256": "4f0b3a854eb42ee16c65647d0abc558feb2e644b13a054b60f2c9247ed8c687d"
+        },
+        "stopAfterCurrentBatch": true,
+        "nextBatch": null
+      }
     },
     {
       "id": "motion",
@@ -213,7 +550,7 @@
         "physicalAcceptance": false
       },
       "primaryOwnerDispatch": {
-        "status": "source-integrated;current-software-consumption-and-payload-acceptance-pending",
+        "status": "source-integrated;current-selected-software-receipts-reconciled;full-lifecycle-and-physical-pending",
         "catalog": "capabilities/HcMotionCapabilityCatalog.generated.h",
         "generator": "tools/lib/hc_motion_catalog.mjs",
         "bindingHelper": "capabilities/HcMotionCapabilityCatalog.h::primaryKind",
@@ -236,13 +573,54 @@
       "historicalSoftwareEvidenceReference": {
         "file": "capabilities/INTEGRATION-STATUS.json",
         "pointer": "/domains/4/historicalSoftwareEvidence"
+      },
+      "currentConsumptionFollowup037": {
+        "executionId": "HC-CODEX-037",
+        "recordedAtUtc": "2026-11-02T11:42:48.625274+00:00",
+        "status": "CURRENT_SELECTED_MOTION_SOFTWARE_CONSUMPTION_RECONCILED_FULL_LIFECYCLE_AND_PHYSICAL_SEPARATE",
+        "verification": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-037-MOTION-CONSUMER-AND-DEPENDENCY-BOUNDARIES\\RECENT-MOTION-CONSUMPTION-VERIFICATION.json",
+          "sha256": "e539d683e7f923716e404ae64a6de907346f84ebe1348b8e151fd9a4b2f3d576",
+          "bytes": 574815
+        },
+        "originalScopeCountsNotNewExecutions": {
+          "currentConsumerEachReleaseChecked": 114950,
+          "parserOnlyEachReleaseChecked": 373140,
+          "selectedContinuousEach": {
+            "native": 18,
+            "managedMemoryHost": 72,
+            "phases": 4
+          },
+          "continuousFaults": 10,
+          "newExecutionsByThisLane": 0
+        },
+        "sourceCurrentness": "49actual source fragments plus8actual generated source headers match current; runner and23fixtures match. Additional30current raw source snippets match prior selected continuous receipt; two diagnostics remain source-only, original frame-steering compiled whitespace caveat retained. R16 archive matches49and provider/library/typed serializer headers; not a complete Host/pipe/target lifecycle certificate.",
+        "oldD16And340224": "Historical identity only; old parser differed and oldD16 includes OXP3 old matrix. Neither old fullPASS substitutes for current selected114950 receipt.",
+        "onexScope": "Existing20types/17concrete compared; Apex upstream non-bijective mapping remains explicit blocked import with valid original matrix retained, no all-family latest physical-axis PASS.",
+        "runtimeMeaning": "Original controlled provider/callback/GamepadMotion/action/typed frame -> actual managed parser/report at memory terminal only; no hostMain/namedPipe/virtual target/driver/hardware or whole-process CPU measurement.",
+        "wholeMotionOrLibraryComplete": false,
+        "additionalContinuousSourceReview": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-037-MOTION-CONSUMER-AND-DEPENDENCY-BOUNDARIES\\ADDITIONAL-CONTINUOUS-SOURCE-REVIEW.json",
+          "sha256": "2774ba45dbd95caafe6a8c1c1b9b2d7c80921c4255d8f0181923a3ed32f01c85",
+          "bytes": 18945
+        }
       }
     },
     {
       "id": "lighting",
       "priority": 3,
       "frequency": "low-frequency-commands",
-      "status": "model-action-consumers-connected; final-evidence-pending",
+      "status": "model-action-consumers-connected; oxp3-extension-owner-software-tested-live-unknown; final-evidence-pending",
+      "reviewedExtension": {
+        "model": "HandheldCompanion.Devices.OneXPlayer3",
+        "status": "PARTIAL_OWNER_SOFTWARE_TESTED_LIVE_UNKNOWN",
+        "route": "hc-lighting-policy reviewed extension -> HcLightingCapabilityCatalog -> native extension route -> existing YeManLightSetter pure HID writer",
+        "evidence": "capabilities/HC-UPSTREAM-UPGRADE.json#/consumerEvidence/lighting",
+        "softwareGaps": [
+          "No real HID endpoint open/pending IO; physical LED/firmware UNKNOWN is separate and does not require hardware to close this software phase"
+        ],
+        "hardwareAcceptance": "UNKNOWN"
+      },
       "chain": [
         "gamepad.setLed",
         "one shared identity lookup and indexed Route",
@@ -253,7 +631,7 @@
       "consumers": [
         {
           "file": "native/main.cpp",
-          "anchor": "const auto* lightingRoute = ymcc::lighting::resolve(catalogDevice);"
+          "anchor": "ymcc::lighting::deviceId(g_machineIdentity.deviceClass)"
         },
         {
           "file": "FanLab/LightSetter/Program.cs",
@@ -305,7 +683,7 @@
       "id": "battery",
       "priority": 2,
       "frequency": "policy-commands-and-readback",
-      "status": "exact-rule-and-controller-consumers-connected",
+      "status": "exact-rule-and-controller-consumers-connected; oxp3-wmi-extension-software-tested-live-unknown",
       "consumers": [
         {
           "file": "native/BatteryHost/Policy.cs",
@@ -318,6 +696,10 @@
         {
           "file": "native/BatteryHost/Controller.cs",
           "anchor": "capability=Policy.ResolveCapability(identity)"
+        },
+        {
+          "file": "native/BatteryHost/Oxp3WmiProvider.cs",
+          "anchor": "internal sealed class Oxp3WmiProvider"
         },
         {
           "file": "native/BatteryHost/battery-routes.json",
@@ -334,7 +716,9 @@
         "battery.ui-native-recovery-consumer"
       ],
       "remainingIssues": [
-        "BATTERY-SUIPLAY-NOT-ADMITTED"
+        "BATTERY-SUIPLAY-NOT-ADMITTED",
+        "BATTERY-OXP3-LIVE-WMI-EC-UNKNOWN",
+        "BATTERY-OXP3-BYPASS-NOT-PRODUCT-EXPRESSIBLE"
       ],
       "chain": [
         "actual BatteryHost Identity",
@@ -347,6 +731,7 @@
       "necessaryBoundaries": [
         "existing exact firmware gate",
         "independent readback and stale fence",
+        "OXP3 WMI EC production adapter method/argument/response/status consumption at a controlled external method terminal, packed readback and exact SystemProduct identity",
         "software bypass hysteresis and conflict/recovery ownership"
       ],
       "observability": {
@@ -753,16 +1138,18 @@
       "currentConsumers": [
         {
           "file": "src/bridge/cpuctl.ts",
-          "anchor": "LEGACY_CCD_UNDERVOLT_ACTIVE",
-          "meaning": "existing policy retained; metadata does not activate inactive CPU features"
-        },
-        {
-          "file": "native/main.cpp",
-          "anchor": "msiG3eTdpSet",
-          "meaning": "existing independent TDP route; not registered as a metadata consumer"
+          "anchor": "CCD_MANUAL_CONTROL_ACTIVE",
+          "meaning": "Explicit Settings CCD/CPU-offset actions consume generated manual flags; legacy startup restoration and voltage scheduling remain inactive."
         }
       ],
-      "scopeDecision": "2026-10-19 user: metadata only; preserve current CPU/TDP consumption; no GPU implementation"
+      "scopeDecision": "2026-11-03 existing manual CCD affinity and static CPU offset explicitly join the same uxtu policy alongside TDP. Frozen HC CPU/GPU declarations remain reference-only; legacy startup/automatic voltage scheduling/GPU/SA/per-core activation remains excluded.",
+      "tdpIntegrationContract": "capabilities/TDP-INTEGRATION.md",
+      "scopeDecisionHistory": [
+        {
+          "observedAtHongKong": "2026-11-03T23:31:30.546563+08:00",
+          "previous": "2026-10-31: frozen HC CPU/GPU facts remain metadata; separately authorized TDP execution is maintained in the same library under domain tdp."
+        }
+      ]
     },
     {
       "id": "lifecycle-and-dependencies",
@@ -785,7 +1172,18 @@
       ],
       "remainingIssues": [
         "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION"
-      ]
+      ],
+      "currentAssemblyBoundaryReview037": {
+        "executionId": "HC-CODEX-037",
+        "status": "ACTUAL_ASSEMBLY_HELPERS_AND_CALLERS_SOURCE_REVIEW_ONLY",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-037-MOTION-CONSUMER-AND-DEPENDENCY-BOUNDARIES\\SHARED-DEPENDENCY-CONSUMER-BOUNDARIES.json",
+          "sha256": "8724f3cd53977b40d92d883da250b7e170d62c15869d11e47805f40e4ddc6b91",
+          "bytes": 6274
+        },
+        "meaning": "Snapshot is binding/provenance evidence, not lease/refcount/resource-return/unload proof. No new dependency wiring or device-owner replacement.",
+        "fullJointLifecycleComplete": false
+      }
     },
     {
       "id": "remaining-model-methods",
@@ -855,6 +1253,126 @@
         "node tools/hc_secondary_display_native_selftest.mjs --out <fresh-evidence>",
         "node tools/hc_secondary_display_pipe_selftest.mjs --out <fresh-evidence>"
       ]
+    },
+    {
+      "id": "tdp",
+      "priority": 2,
+      "frequency": "bind-static-capability-once; existing-event-and-control-scheduling",
+      "status": "tdp-and-existing-manual-cpu-source-policy-connected-current-consumer-evidence-separate",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "tdpExecutionCapability",
+          "meaning": "existing descriptor and OEM/CPU transport selection; generated policy binding requires current consumer evidence"
+        },
+        {
+          "file": "src/bridge/yeman.ts",
+          "anchor": "export async function getTdpExecutionCapability",
+          "meaning": "existing cached descriptor and shared target resolution for TDP writers"
+        },
+        {
+          "file": "PowerControl/pawnio/YeManTdpCtl.py",
+          "anchor": "def apply_tdp(",
+          "meaning": "existing CLI/daemon helper; family recipes generated from the sole policy"
+        },
+        {
+          "file": "src/bridge/cpuctl.ts",
+          "anchor": "CCD_MANUAL_CONTROL_ACTIVE",
+          "meaning": "Existing explicit Settings CCD affinity path consumes generated activation and actual native topology/admission; never infer support from domain count alone."
+        },
+        {
+          "file": "src/bridge/cpuctl.ts",
+          "anchor": "CPU_VOLTAGE_OFFSET_ACTIVE",
+          "meaning": "Existing explicit Settings static CPU offset consumes generated policy; no automatic startup or voltage schedule."
+        },
+        {
+          "file": "PowerControl/pawnio/YeManTdpCtl.py",
+          "anchor": "def amd_uv_set_with(",
+          "meaning": "AMD static all-core CO candidate consumer reads generated candidateSelection.retryOnly.mailboxStatuses=[254,255]; only current typed firmware_response with matching raw status may advance once per same-value candidate. I/O, mutex, timeout, unknown, BUSY/PREREQ stop. Runtime/software and exact packaged helper acceptance stay separate."
+        },
+        {
+          "file": "PowerControl/pawnio/YeManTdpCtl.py",
+          "anchor": "def intel_uv_set_pawn(",
+          "meaning": "Existing Intel core/cache static offset; no GPU/SA consumer."
+        }
+      ],
+      "tests": [
+        "performance.tdp-protocol-consumer",
+        "performance.tdp-frontend-consumer",
+        "performance.tdp-schedule-consumer"
+      ],
+      "remainingIssues": [
+        "TDP-CONSUMER-ACCEPTANCE"
+      ],
+      "metadata": [
+        {
+          "file": "capabilities/hc-performance-metadata.json",
+          "anchor": "reference-metadata-only"
+        },
+        {
+          "file": "capabilities/uxtu-tdp-policy.json",
+          "anchor": "ymcc.uxtu.tdp"
+        },
+        {
+          "file": "capabilities/TDP-INTEGRATION.md",
+          "anchor": "AI-NAV: TDP-TOTAL-LIBRARY"
+        }
+      ],
+      "currentConsumers": [
+        {
+          "file": "src/bridge/cpuctl.ts",
+          "anchor": "CCD_MANUAL_CONTROL_ACTIVE",
+          "meaning": "Explicit Settings CCD/CPU-offset actions consume generated manual flags; legacy startup restoration and voltage scheduling remain inactive."
+        }
+      ],
+      "scopeDecision": "2026-11-03 existing manual CCD affinity and static CPU offset explicitly join the same uxtu policy alongside TDP. Frozen HC CPU/GPU declarations remain reference-only; legacy startup/automatic voltage scheduling/GPU/SA/per-core activation remains excluded.",
+      "chain": [
+        "existing performance UI/scheduler/hotkey/boot-wake consumer",
+        "src/bridge/yeman.ts getTdpExecutionCapability / resolveTdpTarget / setTdp",
+        "native tdp.capability and same-catalog generated TDP policy",
+        "existing native MSI OEM writer OR existing YeManTdpCtl CLI/daemon",
+        "existing transport and separate operation/readback receipts"
+      ],
+      "integrationContract": "capabilities/TDP-INTEGRATION.md",
+      "necessaryBoundaries": [
+        "Exact model identity and independent CPU vendor/family identity; preserve unknowns",
+        "Application request range is not a proven machine or firmware maximum",
+        "Keep generation/deadline, ownership, suspend/resume and stop/release checks live",
+        "No automatic alternate-provider write after an uncertain result",
+        "AMD static all-core CO ordered candidates preserve existing primary and use the generated typed firmware FE/FF subset; raw status must match current firmware receipt; no replay on I/O, mutex, timeout, unknown result, BUSY/PREREQ or other rejection.",
+        "Manual CCD actual topology and single processor-group representability remain dynamic; metadata does not override native refusal."
+      ],
+      "acceptance": {
+        "sourceRegistration": "OBSERVED_NOT_ACCEPTANCE",
+        "currentConsumerSoftware": "PENDING_UPGRADE_OWNER",
+        "packagedHelperIdentity": "PENDING_UPGRADE_OWNER",
+        "ownershipCatalog": "Existing eight-feature source-bound snapshot requires review after scope/consumer changes; TDP lifecycle classification is not accepted by registration.",
+        "hardware": "NOT_RUN",
+        "cpuSavings": "NOT_MEASURED",
+        "manualCandidateSchema": "SOURCE_ONLY_PENDING_CONSUMER_AND_PACKAGED_IDENTITY",
+        "physicalVoltageEffect": "NOT_RUN",
+        "coReadback": "UNAVAILABLE"
+      },
+      "scopeDecisionHistory": [
+        {
+          "observedAtHongKong": "2026-11-03T23:31:30.546563+08:00",
+          "previous": "2026-10-31 explicit user TDP integration overrides only the earlier TDP wiring exclusion; HC CPU/GPU declarations stay reference-only; core/UV/GPU activation remains excluded."
+        }
+      ],
+      "manualChains": {
+        "ccd": [
+          "Settings explicit apply",
+          "cpuctl.ts generated manual flag and native topology admission",
+          "cpu.setCcdMode existing affinity engine"
+        ],
+        "cpuOffset": [
+          "Settings explicit apply",
+          "cpuctl.ts existing UV bridge",
+          "native/helper current request gates",
+          "same policy familyRecipes.co_commands",
+          "typed firmware receipt and existing CPU transport"
+        ]
+      }
     }
   ],
   "issues": [
@@ -990,14 +1508,33 @@
           "physicalAcceptance": false,
           "requiresNewCapability": false
         }
-      ]
+      ],
+      "currentLiveSourceEntryFollowup": {
+        "executionId": "HC-CODEX-034",
+        "status": "SOURCE_FIXED_FINAL_R2_SELECTED_BUSINESS_LIVE_OPEN",
+        "sourceRecord": "domains[fan].currentSourceEntryFollowup",
+        "notWhole17RuntimeAcceptance": true
+      }
     },
     {
       "id": "MOTION-TOTAL-BINDING",
       "status": "open",
       "domain": "motion",
-      "problem": "既有矩阵和实际处理消费者尚未全部纳入总库统一域分配",
-      "next": "95条既有Windows配方（含6条MSI/Xbox私有配方）已接原引用Bound与真实校准处理；剩余控制器来源/反馈、全来源归还与联合生命周期继续验证，物理验收另列"
+      "problem": "既有Windows/私有OEM配方已有总库绑定与当前选定软件消费证据；全来源所有权、停止归还和联合生命周期仍未完整验收",
+      "next": "95条既有Windows配方（含6条MSI/Xbox私有配方）已接原引用Bound与真实校准处理；剩余控制器来源/反馈、全来源归还与联合生命周期继续验证，物理验收另列",
+      "descriptionHistory": [
+        {
+          "recordedAtUtc": "2026-11-02T11:42:48.625274+00:00",
+          "reason": "Current actual consumers already bind library; preserve wider joint-lifecycle gaps without turning old no-binding wording into new provider wiring.",
+          "previousProblem": "既有矩阵和实际处理消费者尚未全部纳入总库统一域分配",
+          "previousNext": "95条既有Windows配方（含6条MSI/Xbox私有配方）已接原引用Bound与真实校准处理；剩余控制器来源/反馈、全来源归还与联合生命周期继续验证，物理验收另列",
+          "evidence": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-037-MOTION-CONSUMER-AND-DEPENDENCY-BOUNDARIES\\RECENT-MOTION-CONSUMPTION-VERIFICATION.json",
+            "sha256": "e539d683e7f923716e404ae64a6de907346f84ebe1348b8e151fd9a4b2f3d576",
+            "bytes": 574815
+          }
+        }
+      ]
     },
     {
       "id": "MOTION-REPEATED-RECIPE-LOOKUPS",
@@ -1010,8 +1547,8 @@
       "id": "LIGHTING-HC-LIFECYCLE",
       "status": "open",
       "domain": "lighting",
-      "problem": "除已选原生和Mini小DLL路线外，剩余灯光仍需HC助手生命周期",
-      "next": "消费拓扑确定后按实际硬件协议逐项迁出；当前不裁DLL",
+      "problem": "AYANEO3/NEXT2 native owner, fixed CEc composition and typed catalog admission were implemented in007-009; complete current lighting validation and remaining vendor/method consumption are still open.",
+      "next": "Preserve implemented007-009 routing and historical failures. Complete the original102-class/485-method enabled-consumer reconciliation. Keep managed complete-fixture TIMEOUT, current helper-catalog and lighting generator NOT_RUN, and second-color/effect UI SOURCE_EQUIVALENCE_ONLY explicit. The original240-second session is exhausted; do not reset or rerun it under another batch, transfer historical567, or infer a product hang from the insufficient remaining validation window.",
       "partialFixes": [
         {
           "scope": "seven existing G1/AOKZOE exact identities use bound connected HID lighting transport",
@@ -1020,8 +1557,116 @@
           "installationPromoted": false,
           "physicalAcceptance": false,
           "remainingVendorLifecyclesOpen": true
+        },
+        {
+          "executionId": "HC-CODEX-004",
+          "status": "SOURCE_PROTOCOL_DEPENDENCY_VERIFIED_ROUTE_OPEN",
+          "scope": "AYANEO3/NEXT2 SuperJoy stick-only protocol and software session; CEc other zones/native endpoint owner are not connected",
+          "source": "FanLab/LightSetter/AyaneoSuperJoyLighting.cs",
+          "sourceSha256": "874f0136ebf27d83d53a6bc4234808dbeb06f98b7964ca7fc539bc223ed3eda8",
+          "helperRefusal": "Program.IsSuperJoySourceModel / SUPERJOY_LIGHTING_ROUTE_NOT_CONNECTED before legacy HC load",
+          "proof": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-006-SUPERJOY-DEPENDENCY\\attempt-003\\PROCESS.json",
+          "proofSha256": "73f3959d4e928431e210b7ee5e792f3948658bf655ac4c7e319af4d7fba7acbe",
+          "originalSelftestChecks": 148,
+          "newDependencyChecks": 326,
+          "actualHelperExistingCatalogChecks": 567,
+          "runtimeRouteAdmitted": false,
+          "physicalAcceptance": false,
+          "remainingVendorLifecyclesOpen": true,
+          "compiledSourceProof": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-006-SUPERJOY-DEPENDENCY\\source-proof\\result.json",
+          "compiledSourceProofSha256": "1252f68ae8e7e41ee87212e5aebfbed40332a46d0239390632dd8bc9967bd988"
+        },
+        {
+          "executionId": "HC-CODEX-005",
+          "status": "WINDOWS_TERMINAL_OS_PIPE_VERIFIED_REAL_OWNER_OPEN",
+          "source": "FanLab/LightSetter/SuperJoyWindowsHidTransport.cs",
+          "sourceSha256": "ed7a98767133a9616b1095de45ec2a4e765dc79a5cc53f27f20fdcc6050e889e",
+          "proof": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-007-SUPERJOY-WINDOWS-TERMINAL\\attempt-001\\PROCESS.json",
+          "proofSha256": "95778ac079a9ca86ca5a762784657ad8ef4a66a12c4bcf58c6970c5970e02d3d",
+          "actualWindowsPipeChecks": 16,
+          "nativeHidOpenExecuted": false,
+          "runtimeRouteAdmitted": false,
+          "physicalAcceptance": false
+        },
+        {
+          "executionId": "HC-CODEX-006",
+          "status": "ABI2_OWNER_CONTRACT_VERIFIED_PRODUCT_CONSUMER_STILL_OPEN",
+          "nativeSource": "native/superjoy_lighting_owner.h",
+          "nativeSourceSha256": "b3b96847faadba169300dcf2276b87183cba81fc0fd10c659fe09f935944aff9",
+          "managedSource": "FanLab/LightSetter/SuperJoyOwnerLease.cs",
+          "managedSourceSha256": "79218dd7884abb76691427e1caa28670622d6f90e32dd13892cc8a8f5941d389",
+          "scenarios": 14,
+          "wireVersion": 2,
+          "intendedChildPidAndBirthBound": true,
+          "oldAbi1ForeignHelperFailureRetained": true,
+          "proof": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER\\attempt-004\\owner-results\\result.json",
+          "proofSha256": "c53bf7803ebc67bc71111c60aa946d84a51ef8224d954ec497c768f43d828529",
+          "runtimeRouteAdmitted": false,
+          "physicalAcceptance": false
+        },
+        {
+          "executionId": "HC-CODEX-007",
+          "scope": "Fixed-source CEc non-stick plus SuperJoy combined consumer",
+          "record": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\executions\\HC-CODEX-007.json",
+            "sha256": "7c9b8ea05fe3005ccec26493a21d824144ef43b370281b641167e1df15c34164",
+            "bytes": 4138
+          },
+          "historicalEvidenceNotRecertifiedBy019": true,
+          "physicalAcceptance": false
+        },
+        {
+          "executionId": "HC-CODEX-008",
+          "scope": "Actual native owner, child endpoint, power/topology/stop and helper invocation",
+          "record": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\executions\\HC-CODEX-008.json",
+            "sha256": "a7899400f3526da387631056f8bea3b610f13cb15fdd1206729566a4845b7b96",
+            "bytes": 4232
+          },
+          "historicalEvidenceNotRecertifiedBy019": true,
+          "physicalAcceptance": false
+        },
+        {
+          "executionId": "HC-CODEX-009",
+          "scope": "Typed sole-catalog SuperJoyCec admission and actual selector/shipping parser through injected terminals",
+          "record": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\executions\\HC-CODEX-009.json",
+            "sha256": "151508f924c32fa0ed4726874246f156549b87c97d353c561eed51c705537b9c",
+            "bytes": 12784
+          },
+          "historicalEvidenceNotRecertifiedBy019": true,
+          "physicalAcceptance": false
         }
-      ]
+      ],
+      "currentSoftwareEvidence": {
+        "executionId": "HC-CODEX-009",
+        "status": "PARTIAL_SOFTWARE_SCOPE_BUDGET_EXHAUSTED",
+        "verification": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-011-SUPERJOY-TYPED-CATALOG\\VERIFICATION.json",
+          "sha256": "88c211850a5d7d74420fb8e6b9a98d9e934112d75a57d5897969010e70028292",
+          "bytes": 9052
+        },
+        "gaps": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-011-SUPERJOY-TYPED-CATALOG\\GAPS.json",
+          "sha256": "c8928ddba76e34654bf8a6016368b6137b0dbef01e033a549720ebc186d5b6df",
+          "bytes": 2003
+        },
+        "budgetLedger": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-011-SUPERJOY-TYPED-CATALOG\\PROCESS.json",
+          "sha256": "d9ac6f1d7d7bd619e406d35b59a2138afcb376d3e7d836143e012399df3f5420",
+          "bytes": 4688
+        },
+        "routeCodeAdmitted": true,
+        "actualMachineSelectorAndShippingParserExercisedHistorically": true,
+        "nativeChecksHistorical": 420,
+        "sourcePolicyChecksHistorical": 42,
+        "countsAreNotAdditive": true,
+        "budgetSeconds": 240,
+        "usedSeconds": 240.02206120002666,
+        "budgetReset": false,
+        "currentSourcesRecertifiedBy019": false,
+        "wholeGoalComplete": false
+      }
     },
     {
       "id": "LIGHTING-LOW-FREQUENCY-OPTIMIZATION-DEFERRED",
@@ -1050,16 +1695,27 @@
       "id": "PERFORMANCE-OEMCPU-OEMGPU-BINDING",
       "status": "deferred-by-user-scope",
       "domain": "performance",
-      "problem": "旧计划将冻结OEMCPU/OEMGPU接入现有调度；用户现限定仅登记资料，不授权消费改线",
-      "next": "维护机型与CPU名称/型号的来源资料；缺失身份保留unknown，TDP独立，不启用GPU",
-      "resolution": "2026-10-19: metadata registration is allowed; CPU/TDP runtime rewiring and GPU implementation are outside this scope."
+      "problem": "HC OEMCPU/OEMGPU资料登记不授权其余CPU/GPU控制改线；现有TDP已单独获准接回同总库tdp域。",
+      "next": "HC CPU/GPU来源资料仍只读；TDP及既有手动CCD/CPU offset见同uxtu策略及TDP-INTEGRATION，原consumer软件/成品/硬件分别验收。GPU/SA及自动电压调度未启用。",
+      "resolution": "2026-11-03 clarifies separately enabled explicit Settings CCD affinity/static CPU offset; historical TDP-only boundary retained as history."
     },
     {
       "id": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
       "status": "open",
       "domain": "lifecycle-and-dependencies",
       "problem": "全域初始化、同设备所有权、恢复/归还及依赖尚未联合复算",
-      "next": "按实际闭环批次进行连接门与负例验收"
+      "next": "按实际闭环批次进行连接门与负例验收",
+      "currentAssemblyBoundaryReview037": {
+        "executionId": "HC-CODEX-037",
+        "status": "ACTUAL_ASSEMBLY_HELPERS_AND_CALLERS_SOURCE_REVIEW_ONLY",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-037-MOTION-CONSUMER-AND-DEPENDENCY-BOUNDARIES\\SHARED-DEPENDENCY-CONSUMER-BOUNDARIES.json",
+          "sha256": "8724f3cd53977b40d92d883da250b7e170d62c15869d11e47805f40e4ddc6b91",
+          "bytes": 6274
+        },
+        "meaning": "Snapshot is binding/provenance evidence, not lease/refcount/resource-return/unload proof. No new dependency wiring or device-owner replacement.",
+        "fullJointLifecycleComplete": false
+      }
     },
     {
       "id": "REMAINING-METHODS-CLASSIFICATION",
@@ -1077,6 +1733,20 @@
       "next": "Reconcile source and actual Windows transport/readback/recovery evidence before considering an admitted writer; do not enable from flags alone."
     },
     {
+      "id": "BATTERY-OXP3-LIVE-WMI-EC-UNKNOWN",
+      "domain": "battery",
+      "status": "open",
+      "problem": "OXP3 WMI EC 0x4A3/0x4A4 route is software-tested: the production adapter's method names, packed arguments, response/status/hex parsing and missing/malformed/failed-result paths run at a controlled in-memory method terminal, and provider/Controller use memory EC transports. WMI enumeration, live WMI/EC readback, charge cutoff and firmware/sleep semantics remain UNKNOWN.",
+      "next": "Run on real OXP3 hardware only under separate authorization; retain the software evidence and do not claim physical cutoff."
+    },
+    {
+      "id": "BATTERY-OXP3-BYPASS-NOT-PRODUCT-EXPRESSIBLE",
+      "domain": "battery",
+      "status": "open",
+      "problem": "The 0x4A4 bypass source mapping (0x00/0x01/0x0B) is implemented at the provider contract but not expressible by the current product UI.",
+      "next": "Do not add UI or default bypass; if a future product requirement exposes the mode, bind it explicitly with ownership/readback and separate acceptance."
+    },
+    {
       "id": "CONTROLLER-SOURCE-AND-INPUT-BINDING",
       "status": "open",
       "domain": "controller",
@@ -1087,9 +1757,22 @@
       "id": "CONTROLLER-MOTION-PROVIDER-BINDING",
       "status": "open",
       "domain": "controller",
-      "problem": "已有Legion运动和校准消费者，实际物理手柄来源/分银行尚未接总库；其他手柄未完成统一验收",
-      "next": "Legion四机型/两原protocol已通过总库绑定实际解码、Source/Lease/banks、Session与final/后台guard；继续MSI/Xbox等私有来源与完整生命周期，不能据4机型宣布全域完成",
-      "partialResolution": "2026-10-19: original decoder/PID predicates retained; immutable provider token carried through selected/raw/diagnostic samples and checked before retention/final consumption. Original exact family/class admission consumed from a cached total binding; no registered alias or unknown fallback expands native admission."
+      "problem": "Legion四机型/两原协议已通过总库token贯穿实际解码、Source/Lease、分bank/Session与final guard；更广当前联合生命周期及物理验收仍未完成",
+      "next": "仅补已启用实际消费者的来源失效、归还和联合生命周期缺证；已有MSI/Xbox Windows私有配方保持原消费路径。未实现或未启用的控制器provider不因旧问题文案新增接线。",
+      "partialResolution": "2026-10-19: original decoder/PID predicates retained; immutable provider token carried through selected/raw/diagnostic samples and checked before retention/final consumption. Original exact family/class admission consumed from a cached total binding; no registered alias or unknown fallback expands native admission.",
+      "descriptionHistory": [
+        {
+          "recordedAtUtc": "2026-11-02T11:42:48.625274+00:00",
+          "reason": "Current actual consumers already bind library; preserve wider joint-lifecycle gaps without turning old no-binding wording into new provider wiring.",
+          "previousProblem": "已有Legion运动和校准消费者，实际物理手柄来源/分银行尚未接总库；其他手柄未完成统一验收",
+          "previousNext": "Legion四机型/两原protocol已通过总库绑定实际解码、Source/Lease/banks、Session与final/后台guard；继续MSI/Xbox等私有来源与完整生命周期，不能据4机型宣布全域完成",
+          "evidence": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-037-MOTION-CONSUMER-AND-DEPENDENCY-BOUNDARIES\\RECENT-MOTION-CONSUMPTION-VERIFICATION.json",
+            "sha256": "e539d683e7f923716e404ae64a6de907346f84ebe1348b8e151fd9a4b2f3d576",
+            "bytes": 574815
+          }
+        }
+      ]
     },
     {
       "id": "CONTROLLER-VIRTUAL-OUTPUT-AND-HIDE-RECEIPTS",
@@ -1104,6 +1787,94 @@
       "domain": "controller",
       "problem": "Sony and Steam Deck classic source-bound software writers are connected; other feedback commands/profiles, runtime UI readiness and physical lifecycle acceptance remain open.",
       "next": "Verify current-source native/managed/serial consumers and preserve failed write/zero ownership; extend only evidenced target/provider protocols."
+    },
+    {
+      "id": "TDP-CONSUMER-ACCEPTANCE",
+      "status": "open",
+      "domain": "tdp",
+      "problem": "同策略源码接回已观察；本次实际消费者、生命周期和helper/模块交付一致性尚未完整验收。",
+      "next": "按TDP-INTEGRATION.md复用原TDP测试和身份门，保留原失败；软件、交付和硬件结果分开。"
+    },
+    {
+      "id": "FAN-FIXED-PROFILE-FLAG",
+      "status": "open",
+      "domain": "fan",
+      "problem": "Thirteen changed control declarations add the applied-profile flag or success-gated flag assignment. Fixed IDevice.Close and profile callbacks consume that flag; frozen Close performs an unconditional callback. Existing owner/return paths require exact method and generation reconciliation.",
+      "next": "Do not repeat the stale remaining10 legacy-flag task: the actual current59 callback guard and later024 binary/export evidence cover the existing callback consumer boundary. Retain the original frozen virtual Close and explicit software/physical limits. Keep 11 independent profile providers separate; only a concrete existing-consumer gap or counterexample warrants a new patch. Source-only temperature/duty and unused upstream flags are record-only under the latest human decision.",
+      "sourceReview": {
+        "executionId": "HC-CODEX-019",
+        "status": "SOURCE_COMPARISON_COMPLETE_CONSUMPTION_OPEN",
+        "report": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-019-METHOD-CONSUMPTION\\FAN-METHOD-RECONCILIATION.json",
+          "sha256": "516f1ab0bfb94424c19fb2e99d5f9402dae1f0bb7a89c07fb5edef6d5f2944ad",
+          "bytes": 98156
+        },
+        "fanDeclarations": 59,
+        "unchangedDeclarations": 31,
+        "changedDeclarations": 16,
+        "noExactFrozenSignature": 12,
+        "profileFlagReturnRows": 13,
+        "methodExecutionRecertifiedThisBatch": false,
+        "wholeGoalComplete": false
+      },
+      "notAConfirmedProductDefect": true,
+      "partialFixes": [
+        {
+          "executionId": "HC-CODEX-020",
+          "status": "SOFTWARE_ONE_X_APPLIED_PROFILE_GUARD_VERIFIED_FULL_LIBRARY_OPEN",
+          "verification": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-020-ONEX-APPLIED-FLAG\\SOFTWARE-VERIFICATION.json",
+            "sha256": "1415fddef8f629ac88bf9135b618fc548eafba6f078d65dcff0893cea1d6eeb4",
+            "bytes": 13276
+          },
+          "methodUpdate": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-020-ONEX-APPLIED-FLAG\\METHOD-CONSUMPTION-UPDATE.json",
+            "sha256": "c0df64c224587c20a0adcf77a4781cb1a2bf4be9f38e3e285164493783be098b",
+            "bytes": 1383
+          },
+          "legacyAliasesWithinExisting70": 9,
+          "sourceOnlyChecks": 1276,
+          "lockedBinaryVariantChecks": 1299,
+          "newConsumerChecksWithinEachVariant": 78,
+          "countsAreNotAdditive": true,
+          "newLegacyRoutesOrSourceDescriptors": 0,
+          "scope": "Existing OneXAcpiFanMode callback/return owner; no initial Hardware/default callback without software or debt; failed/unknown/foreign/cleanup-pending debt retained",
+          "exactPinnedA1PositiveEcMethodsExecuted": false,
+          "frozenVirtualCloseRetained": true,
+          "completeLibrary": false
+        }
+      ],
+      "legacyCallbackConsumerSoftwareClosure": {
+        "executionId": "HC-CODEX-025",
+        "status": "EXISTING_LEGACY59_CALLBACK_GUARD_SOFTWARE_SCOPE_VERIFIED_AND_ALREADY_EXPORTED",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-025-ONEX-CONSUMPTION-AUDIT\\LEGACY-PROFILE-CONSUMER-CHECKPOINT-SEAL.json",
+          "sha256": "118c93c994d33395b1b07e46bb87efce4ac5ead98efd99cc616e4e921a38af05",
+          "bytes": 11732
+        },
+        "legacyRouteAliasUnits": 59,
+        "priorOneXAliasUnits": 9,
+        "otherAliasUnits": 50,
+        "checksIncludedInActual1682": 436,
+        "countsAreNotUniqueHardwareModels": true,
+        "sourcePinCountComparedToSelectedComponent": 42,
+        "rawHcSetterOrPhysicalEffectsCertified": false,
+        "rawHostOpenEventsWithInjectedTerminalCases": 6,
+        "independentProfileProviderAliasUnitsExcluded": 11,
+        "newTestsOrBuilds": 0,
+        "currentSourceOnly": "NOT_RUN",
+        "globalParent": "NOT_RUN",
+        "wholeFamilyOrLibraryComplete": false,
+        "legacy2G1ResultConsumerAudit": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-025-ONEX-CONSUMPTION-AUDIT\\LEGACY-WRITE-RESULT-CONSUMPTION.json",
+          "sha256": "e8eb8b6fa4099d60cf0603c51a523c144de19d55ebc1babb72ca8b41cfd0f10a",
+          "bytes": 42198
+        },
+        "legacy2G1Decision": "Existing Compat software callback and physical-unknown are intentional; no proved user-path false-hardware-acceptance bug, no new result writer/consumer requested."
+      },
+      "legacyCallbackConsumerScope": "CLOSED_FOR_EXISTING59_CALLBACK_CONTRACTS",
+      "originalFullSourceMethodEquivalenceNotClaimed": true,
+      "unusedSourceMethodsDoNotBlockExistingConsumerClosure": true
     }
   ],
   "collaboration": {
@@ -1138,5 +1909,24 @@
   },
   "activeIntegrationScope": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
   "currentWorkObjective": "Complete unified library consumption for capabilities already enabled in YMCC, then close this integration batch; record inactive capability gaps without wiring them.",
-  "activeScopeComplete": false
+  "activeScopeComplete": false,
+  "currentConsumerPriorityDecision": {
+    "recordedAtUtc": "2026-11-02T05:27:19.635804+00:00",
+    "authority": "Direct human user instruction in this chat",
+    "instruction": "对不消费的不接入，任务很多，优先完成消费端",
+    "evidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-025-ONEX-CONSUMPTION-AUDIT\\USER-CONSUMERS-FIRST.json",
+      "sha256": "bc94cc0f79e7b75b8c8ecaa21b1df40d4a98beb30263f23a9943786684c66e0f",
+      "bytes": 3165
+    },
+    "eligible": "Existing real production consumers and their necessary initialization, stop/return, failure and generation dependencies.",
+    "sourceDeclarationAloneAdmitsNewConsumer": false,
+    "sourceOnlyMethodsRecordOnly": [
+      "PinnedSourceFanSession.ReadTemperature/0x0470",
+      "PinnedSourceFanSession.ReadDutyRegister"
+    ],
+    "noNewSourceReaderOrWriterOrUi": true,
+    "existingHwiNfoFanCurveConsumerRetained": true,
+    "validatedConsumedFixesMustBeSelectedAndExported": true
+  }
 }

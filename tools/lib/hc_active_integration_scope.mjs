@@ -15,7 +15,27 @@ export function planEnabledMaintenance({scope,decisions,domains,affectedDomains}
  for(const capability of scope.confirmedEnabledCapabilities){
   need(typeof capability.id==='string'&&!ids.has(capability.id)&&!excludedIds.has(capability.id),'ENABLED_ID:'+capability.id);ids.add(capability.id);
   need(Array.isArray(capability.libraryDomains)&&capability.libraryDomains.length>0,'ENABLED_DOMAINS:'+capability.id);
-  for(const id of capability.libraryDomains){need(byDomain.has(id),'UNKNOWN_DOMAIN:'+id);need(id!=='performance'||scope.preservedBoundaries?.cpuGpuMetadataOnly!==true,'PERFORMANCE_METADATA_ONLY');admitted.add(id);}
+  for(const id of capability.libraryDomains){
+   need(byDomain.has(id),'UNKNOWN_DOMAIN:'+id);
+   // AI-NAV: TDP is the explicit 2026-10-31 exception; HC CPU/GPU facts stay metadata.
+   if(id==='performance')need(false,'PERFORMANCE_METADATA_ONLY');
+   if(id==='tdp'){
+    const manualCpu=['performance.ccd-affinity','performance.cpu-voltage-offset'].includes(capability.id);
+    need((capability.id==='performance.tdp'||manualCpu)&&scope.preservedBoundaries?.cpuGpuMetadataOnly===true,'PERFORMANCE_METADATA_ONLY');
+    const tdp=scope.tdpIntegration;
+    need(tdp?.authorized===true&&tdp.authority==='direct-human-user'&&tdp.capabilityId==='performance.tdp'
+     &&tdp.libraryDomain===id
+     &&decisions.entries.some(e=>e.id===tdp.authorityDecision&&e.status==='USER_AUTHORIZED_MINIMAL_CAPABILITY_UPGRADE'),'TDP_AUTHORIZATION');
+    if(manualCpu){
+     need(scope.preservedBoundaries?.manualCcdAffinityAndCpuOffsetAlreadyEnabled===true
+      &&capability.authorityDecision==='performance.manual-ccd-cpu-offset-library'
+      &&decisions.entries.some(e=>e.id===capability.authorityDecision&&e.authority==='direct-human-user'
+       &&e.status==='USER_CONFIRMED_EXISTING_MANUAL_CONSUMERS_AND_LIBRARY_DATA'),'TDP_AUTHORIZATION');
+    }else need(tdp.authorityDecision===capability.authorityDecision,'TDP_AUTHORIZATION');
+    need(['replaceScheduler','addHcCpuCalls','applyHcDeclaredLimits','coreSwitch','voltageScheduling','gpuControl','hardwareAcceptance'].every(k=>tdp[k]===false),'TDP_BOUNDARIES');
+   }
+   admitted.add(id);
+  }
  }
  const affected=[...new Set(affectedDomains)];for(const id of affected)need(byDomain.has(id),'UNKNOWN_AFFECTED_DOMAIN:'+id);
  // Runtime/ownership dependencies still matter when an admitted capability shares them.

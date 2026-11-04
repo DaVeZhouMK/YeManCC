@@ -6,7 +6,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <iphlpapi.h>
-#include <tlhelp32.h>
+#include "process_inventory.h"
 #include "steam_session_observer.h"
 #include "steam_cssloader_mode.h"
 #include "decky_sidebar_launch.h"
@@ -118,20 +118,19 @@ inline Result probeBackend(DWORD exclude = 0, bool listenersOnly = false, unsign
     }
     if (found.value) { HANDLE lease = found.value; found.value = nullptr; return {lease, foundPid, "running", {}, false}; }
     if (listenersOnly) return {nullptr, 0, "missing", {}, false};
-    ymcc::deckylaunch::Handle snapshot;
-    snapshot.value = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot.value == INVALID_HANDLE_VALUE) { snapshot.value = nullptr; return {nullptr, 0, "blocked", "loader-processes-unverified"}; }
-    PROCESSENTRY32W entry{sizeof(entry)};
-    if (!Process32FirstW(snapshot.value, &entry)) return {nullptr, 0, "blocked", "loader-processes-unverified"};
+    // Candidate discovery belongs to YMCC's shared inventory owner. No private
+    // Toolhelp/WMI walk; fresh owner work is confined to this use/event boundary.
+    const auto topology = processInventory::read();
+    if (!topology || topology->status != processInventory::Status::Complete)
+        return {nullptr, 0, "blocked", "loader-processes-unverified"};
     DWORD ourSession = 0; if (!ProcessIdToSessionId(GetCurrentProcessId(), &ourSession)) return {nullptr, 0, "blocked", "loader-owner-unverified"};
-    do {
-        if (entry.th32ProcessID == exclude || _wcsicmp(entry.szExeFile, L"CssLoader-Standalone-Headless.exe")) continue;
+    for (const auto& entry : topology->rows) {
+        if (entry.pid == exclude || _wcsicmp(entry.name.c_str(), L"CssLoader-Standalone-Headless.exe")) continue;
         DWORD targetSession = 0;
-        if (!ProcessIdToSessionId(entry.th32ProcessID, &targetSession)) return {nullptr, 0, "blocked", "loader-owner-unverified"};
+        if (!ProcessIdToSessionId(entry.pid, &targetSession)) return {nullptr, 0, "blocked", "loader-owner-unverified"};
         if (targetSession != ourSession) continue;
-        return loaderLease(entry.th32ProcessID); // Parent/child packaging is one backend, not a second launch.
-    } while (Process32NextW(snapshot.value, &entry));
-    if (GetLastError() != ERROR_NO_MORE_FILES) return {nullptr, 0, "blocked", "loader-processes-unverified"};
+        return loaderLease(entry.pid); // PyInstaller parent/child form one family.
+    }
     return {nullptr, 0, "missing", {}, false};
 }
 class Budget {
@@ -151,6 +150,7 @@ struct State {
     DWORD pid = 0; unsigned attempts = 0;
     std::string phase = "waiting-steam", reason;
     unsigned automaticRecoveries = 0;
+    DWORD steamPid = 0; ULONGLONG steamBirth = 0;
 };
 struct Config {
     std::wstring linkFile;
@@ -162,6 +162,8 @@ struct Config {
     std::function<Result()> probeExisting; // Same read-only backend boundary; isolated fixtures replace IO.
     std::function<bool(const ymcc::steamsession::Session&)> invalidateBackend; // Revoke old helper/results; retain CSS family.
     std::function<HANDLE(const ymcc::steamsession::Session&)> confirmExisting; // Read-only, never Ensure/reapply/start.
+    std::array<DWORD, 3> resumeDelays{10000, 20000, 30000}; // Ready +10/+30/+60s; finite, never an idle poll.
+    std::function<ULONGLONG()> powerGeneration; // Reject work from an older power episode.
     DWORD crashDelayMs = 30000; // Exit-triggered one-shot; isolated fixtures shorten it.
     std::function<bool()> mayLaunch; // Existing application exit fence; never changes user consent.
     std::function<void(const State&)> changed; // Event-only UI recovery; no frontend timer.
@@ -185,13 +187,27 @@ class Runtime {
                  const std::string& reason, unsigned attempts, DWORD pid = 0, bool started = false) {
         State copy;
         { std::lock_guard lock(stateMutex_);
-          state_ = {link.enabled, session.pid != 0, started, pid, attempts, phase, reason, recoveryCount_}; copy = state_; }
+          state_ = {link.enabled, session.pid != 0, started, pid, attempts, phase, reason, recoveryCount_, session.pid, session.created}; copy = state_; }
         try { if (config_.changed) config_.changed(copy); } catch (...) {} // No observer/UI blockage.
     }
     void run() {
         HANDLE directoryEvent = INVALID_HANDLE_VALUE, backend = nullptr, idleHelper = nullptr;
         bool idleRequested = false, modeCycle = false, linkDirty = true;
+        // Keep an exact historical backend receipt for crash admission only.
+        // Current DOM readiness is revoked at sleep; that must not erase the
+        // fact that THIS same process was previously confirmed in this Steam.
+        std::pair<DWORD, ULONGLONG> confirmedBackend{};
+        const auto backendIdentity = [](HANDLE process) -> std::pair<DWORD, ULONGLONG> {
+            if (!process) return {};
+            const auto pid = GetProcessId(process); FILETIME birth{}, exit{}, kernel{}, user{};
+            if (!pid || !GetProcessTimes(process, &birth, &exit, &kernel, &user)) return {};
+            return {pid, (ULONGLONG(birth.dwHighDateTime) << 32) | birth.dwLowDateTime};
+        };
         ExitRecovery recovery(config_.crashDelayMs);
+        Budget resumeBudget(config_.resumeDelays);
+        ULONGLONG resumeGeneration = 0;
+        bool resumeNeedsFreshMode = false, resumeHelperActive = false;
+        ymcc::steamsession::Session resumeTarget;
         bool exitParked = false, recoveringExit = false, exitAwaitingReady = false, readOnlyHandoff = false, handoffModePending = false;
         ModeSample handoffMode;
         struct Cleanup {
@@ -221,19 +237,39 @@ class Runtime {
             ymcc::steamsession::Session next, confirmedSession; ModeSample confirmedMode;
             bool manualRecheck = false, uiRecheck = false, hasConfirmedMode = false, resumeRequested = false;
             ymcc::steamsession::Session resumedSession, reboundSession; bool rebindRequested = false;
+            ULONGLONG requestedGeneration = 0;
             { std::lock_guard lock(stateMutex_); if (stopping_) break; next = desired_; manualRecheck = manualRecheck_; manualRecheck_ = false; uiRecheck = uiRecheck_;
               hasConfirmedMode = modePending_; confirmedMode = pendingMode_; confirmedSession = pendingModeSession_; modePending_ = false;
-              resumeRequested = resumeRecheck_; resumedSession = resumeSession_; resumeRecheck_ = false;
+              resumeRequested = resumeRecheck_; resumedSession = resumeSession_; requestedGeneration = lastResumeGeneration_; resumeRecheck_ = false;
               rebindRequested = rebindPending_; reboundSession = rebindSession_; rebindPending_ = false; }
+            // Synchronize same-process account metadata without resetting mode,
+            // startup/crash budgets, helper ownership or the Steam observation.
+            if (initialized && sameSession(next, session)) session.account = next.account;
             // Window/Steam/helper wakes cannot change this file. Refresh on its
             // directory notification; revalidate explicitly at action boundaries.
             const auto nextLink = linkDirty ? readLink(config_.linkFile) : link;
             linkDirty = false;
+            if (!initialized || !sameSession(next, session)) confirmedBackend = {};
             if (!initialized || !sameSession(next, session) || manualRecheck) {
                 recovery.reset(); recoveryCount_ = 0; exitParked = recoveringExit = exitAwaitingReady = false;
             }
             if (!next.pid || !nextLink.enabled || !(nextLink == link)) { recovery.cancel(); recoveringExit = exitAwaitingReady = false; }
-            const bool resumeRecheck = resumeRequested && (!exitParked || exitAwaitingReady) && next.pid && nextLink.enabled && sameSession(next, resumedSession);
+            if (manualRecheck || !next.pid || !nextLink.enabled || !sameSession(next, resumeTarget) ||
+                (initialized && !(nextLink == link)) ||
+                (config_.powerGeneration && resumeGeneration != config_.powerGeneration()) ||
+                (config_.mayLaunch && !config_.mayLaunch())) {
+                resumeBudget.pause(); resumeGeneration = 0; resumeNeedsFreshMode = resumeHelperActive = false;
+            }
+            if (resumeRequested && (!exitParked || exitAwaitingReady) && next.pid && nextLink.enabled && sameSession(next, resumedSession) &&
+                (!config_.powerGeneration || requestedGeneration == config_.powerGeneration())) {
+                resumeTarget = next; resumeGeneration = requestedGeneration; resumeNeedsFreshMode = true; resumeHelperActive = false;
+                resumeBudget.begin(GetTickCount64());
+                budget.pause(); modeWindow.park(); hasConfirmedMode = false;
+                publish(nextLink, next, "waiting-steam-ui", "resume-css-settle-delay", 0);
+            }
+            const bool resumeRecheck = resumeGeneration && resumeBudget.take(GetTickCount64()) &&
+                (!exitParked || exitAwaitingReady) &&
+                next.pid && nextLink.enabled && sameSession(next, resumeTarget);
             if (resumeRecheck && exitAwaitingReady) { exitAwaitingReady = false; exitParked = false; recoveringExit = true; }
             if (resumeRecheck) {
                 // The worker invalidates the old shared mode BEFORE any ensure.
@@ -241,10 +277,11 @@ class Runtime {
                 bool requested = false; try { requested = config_.refreshMode && config_.refreshMode(next); } catch (...) {}
                 if (!requested) {
                     budget.pause(); modeWindow.reset();
-                    publish(nextLink, next, "waiting-steam-ui", "resume-mode-refresh-unavailable", 0);
+                    if (resumeBudget.timeout(GetTickCount64()) == INFINITE) resumeNeedsFreshMode = false;
+                    publish(nextLink, next, "waiting-steam-ui", "resume-mode-refresh-unavailable", resumeBudget.used());
                     continue;
                 }
-                hasConfirmedMode = false; // A pre-resume mailbox cannot confirm this generation.
+                hasConfirmedMode = false; resumeNeedsFreshMode = false; // Only a fresh shared result can confirm this generation.
             }
             if (!initialized || manualRecheck || resumeRecheck || !(nextLink == link) || !sameSession(next, session)) {
                 const bool changed = !initialized || !(nextLink == link) || !sameSession(next, session);
@@ -281,6 +318,9 @@ class Runtime {
                 // A newer click may already own the use. A refused handoff must
                 // not discard the backend HANDLE we were successfully observing.
                 if (confirmation) {
+                    // The user's later edit and read-only DOM verification now
+                    // own completion. A delayed wake cannot invalidate that use.
+                    resumeBudget.pause(); resumeGeneration = 0; resumeNeedsFreshMode = resumeHelperActive = false;
                     budget.pause(); modeWindow.park(); recovery.cancel(); waitingForMode = false;
                     exitAwaitingReady = recoveringExit = false; exitParked = true; modeCycle = false;
                     if (idleHelper) CloseHandle(idleHelper);
@@ -311,7 +351,7 @@ class Runtime {
                     publish(link, session, "waiting-appearance", exitAwaitingReady ? "loader-crash-awaiting-ready" : "loader-crash-mode-refresh-unavailable", budget.used());
                 }
             }
-            if (session.pid && link.enabled && !exitParked && config_.readMode) {
+            if (session.pid && link.enabled && !exitParked && !resumeNeedsFreshMode && config_.readMode) {
                 const bool delivered = hasConfirmedMode && sameSession(confirmedSession, session);
                 if (uiRecheck && !delivered) modeWindow.request(GetTickCount64());
                 if (delivered || modeWindow.take(GetTickCount64())) {
@@ -336,7 +376,7 @@ class Runtime {
                     }
                 }
             }
-            if (!exitParked && budget.take(GetTickCount64())) {
+            if (!exitParked && !resumeNeedsFreshMode && budget.take(GetTickCount64())) {
                 if (!(readLink(config_.linkFile) == link)) { linkDirty = true; continue; }
                 Result result;
                 try { result = config_.ensure ? config_.ensure(link, session, allowed) : probeBackend(); }
@@ -345,7 +385,7 @@ class Runtime {
                     if (result.process) CloseHandle(result.process); budget.pause();
                     publish(link, session, "canceled", "lifecycle-changed", budget.used()); continue;
                 }
-                backend = result.process;
+                closeBackend(); backend = result.process;
                 waitingForMode = result.phase == "waiting-steam-ui";
                 if (!modeCycle && !backend && result.phase == "missing" && config_.isIdle && config_.isIdle(session)) {
                     budget.pause(); result.phase = "idle"; result.reason = "appearance-applied-backend-idle";
@@ -360,9 +400,18 @@ class Runtime {
                 // an idle receipt never replenishes it; abnormal exit recovery has its own fixed cap.
                 if (startupCandidate && !idleRequested && config_.confirmIdle && allowed() && readLink(config_.linkFile) == link) {
                     idleRequested = true; budget.pause();
-                    idleHelper = config_.confirmIdle(session, !backend, modeCycle);
-                    modeCycle = false;
-                    if (idleHelper) publish(link, session, "applying", "temporary-css-use", budget.used(), result.pid, !backend);
+                    try { idleHelper = config_.confirmIdle(session, !backend, modeCycle); } catch (...) { idleHelper = nullptr; }
+                    if (idleHelper) {
+                        modeCycle = false;
+                        // A fresh helper owns a bounded use, not another wake
+                        // attempt. Wait for its real completion without consuming
+                        // retry slots, overlapping work or a zero-timeout loop.
+                        if (resumeGeneration && !resumeNeedsFreshMode) { resumeBudget.pause(); resumeHelperActive = true; }
+                        publish(link, session, "applying", "temporary-css-use", budget.used(), result.pid, !backend);
+                    } else {
+                        idleRequested = false; budget.resume(GetTickCount64());
+                        publish(link, session, "waiting-appearance", "appearance-helper-unavailable", budget.used(), result.pid);
+                    }
                 }
             }
             HANDLE handles[5]{stop_, wake_}; DWORD count = 2;
@@ -372,7 +421,7 @@ class Runtime {
             if (backend) handles[backendIndex] = backend;
             const DWORD helperIndex = idleHelper ? count++ : MAXDWORD;
             if (idleHelper) handles[helperIndex] = idleHelper;
-            const auto result = WaitForMultipleObjects(count, handles, FALSE, std::min({budget.timeout(GetTickCount64()), modeWindow.timeout(GetTickCount64()), recovery.timeout(GetTickCount64())}));
+            const auto result = WaitForMultipleObjects(count, handles, FALSE, std::min({budget.timeout(GetTickCount64()), modeWindow.timeout(GetTickCount64()), recovery.timeout(GetTickCount64()), resumeBudget.timeout(GetTickCount64())}));
             if (result == WAIT_OBJECT_0 || result == WAIT_FAILED) break;
             if (directoryIndex != MAXDWORD && result == WAIT_OBJECT_0 + directoryIndex) {
                 linkDirty = true;
@@ -381,7 +430,9 @@ class Runtime {
             }
             if (backendIndex != MAXDWORD && result == WAIT_OBJECT_0 + backendIndex) {
                 DWORD exitCode = 0; const bool exitKnown = GetExitCodeProcess(backend, &exitCode) != FALSE;
-                bool confirmed = false; try { confirmed = config_.isResidentConfirmed && config_.isResidentConfirmed(session); } catch (...) {}
+                const auto exitedIdentity = backendIdentity(backend);
+                bool confirmed = exitedIdentity.first && exitedIdentity == confirmedBackend;
+                if (!confirmed) { try { confirmed = config_.isResidentConfirmed && config_.isResidentConfirmed(session); } catch (...) {} }
                 closeBackend(); budget.pause(); modeWindow.reset(); waitingForMode = false;
                 if (config_.isIdle && config_.isIdle(session)) {
                     publish(link, session, "idle", "appearance-applied-backend-idle", budget.used());
@@ -403,6 +454,14 @@ class Runtime {
             if (helperIndex != MAXDWORD && result == WAIT_OBJECT_0 + helperIndex) {
                 CloseHandle(idleHelper); idleHelper = nullptr;
                 closeBackend(); budget.pause();
+                const bool completedResumeUse = resumeHelperActive; resumeHelperActive = false;
+                if (!allowed() || !(readLink(config_.linkFile) == link)) {
+                    readOnlyHandoff = handoffModePending = idleRequested = false;
+                    resumeBudget.pause(); resumeGeneration = 0; resumeNeedsFreshMode = false;
+                    modeWindow.reset();
+                    publish(link, session, "canceled", "helper-completion-lifecycle-changed", budget.used());
+                    continue;
+                }
                 const bool completedReadOnly = readOnlyHandoff;
                 if (completedReadOnly) {
                     readOnlyHandoff = false; exitParked = false;
@@ -414,11 +473,17 @@ class Runtime {
                     // not a recurring lookup. A failed helper never earns Ready.
                     auto resident = config_.probeExisting ? config_.probeExisting() : probeBackend(); backend = resident.process;
                     if (backend && config_.isResidentConfirmed(session)) {
+                        confirmedBackend = backendIdentity(backend);
+                        // A pre-resume helper may finish during the settle
+                        // delay. Its old DOM receipt cannot consume the new wave.
+                        if (!resumeNeedsFreshMode) { resumeBudget.pause(); resumeGeneration = 0; }
                         if (completedReadOnly) { recovery.reset(); recoveryCount_ = 0; }
                         recoveringExit = false;
-                        publish(link, session, "ready", "appearance-applied-resident", budget.used(), resident.pid);
+                        publish(link, session, resumeNeedsFreshMode ? "waiting-steam-ui" : "ready",
+                            resumeNeedsFreshMode ? "resume-css-settle-delay" : "appearance-applied-resident", budget.used(), resident.pid);
                     } else {
                         readOnlyHandoff = false; if (recoveringExit) { exitParked = true; recoveringExit = false; }
+                        if (completedResumeUse && resumeGeneration) resumeBudget.resume(GetTickCount64());
                         publish(link, session, "waiting-appearance", "appearance-unconfirmed", budget.used(), resident.pid);
                     }
                 } else if (config_.isIdle && config_.isIdle(session))
@@ -450,8 +515,12 @@ public:
     }
     void observeSteam(const ymcc::steamsession::Session& session) {
         std::lock_guard lock(stateMutex_);
-        if (sameSession(desired_, session)) return;
-        desired_ = session; modePending_ = false; if (wake_) SetEvent(wake_);
+        if (desired_ == session) return;
+        const bool processChanged = !sameSession(desired_, session);
+        // Account discovery is not a new process/startup budget. Still retain
+        // the FULL session: the shared mode owner requires the current account.
+        desired_ = session; if (processChanged) modePending_ = false;
+        if (wake_) SetEvent(wake_);
     }
     // Called on the shared WinEvent observer thread: just latch and wake.
     // Actual mode/CEF IO stays on this worker, coalesced into a finite window.

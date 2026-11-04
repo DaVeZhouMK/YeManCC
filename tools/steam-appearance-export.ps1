@@ -46,7 +46,7 @@ function Get-SteamAppearanceExportFiles([string]$PowerControl) {
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -match 'Stop-VerifiedIdleProcesses|\.Kill\('){throw 'Steam appearance resident policy forbids backend termination'}
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -notmatch 'AppearanceRenderProtocol\s*=\s*4'){throw 'Steam appearance per-theme render receipt protocol missing'}
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -notmatch 'AppearanceContextProtocol\s*=\s*1'){throw 'Steam appearance independent context protocol missing'}
-    if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\resident.ps1')) -notmatch 'AppearanceProcessQueryProtocol\s*=\s*1'){throw 'Steam appearance limited process-query protocol missing'}
+    if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\resident.ps1')) -notmatch 'AppearanceProcessQueryProtocol\s*=\s*2'){throw 'Steam appearance shared process-query protocol 2 required'}
     $renderTokens=$null;$renderErrors=$null
     $renderAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root 'steam-appearance\idle.ps1'),[ref]$renderTokens,[ref]$renderErrors)
     if($renderErrors.Count){throw 'Steam appearance renderer has syntax errors'}

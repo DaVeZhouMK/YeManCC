@@ -6,6 +6,7 @@ param(
     [uint32]$SessionPid=0,
     [string]$SessionBirth='',
     [string]$BackendPath='',
+    [string]$ProcessQuery='',
     [string]$ReadyEvent='',
     [string]$IdleEvent='',
     [ValidateRange(-1,120000)][int]$GateTimeoutMs=-1,
@@ -14,6 +15,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $script:ResidentBackendPolicy=3
+$script:SharedProcessQueryProtocol=1
 $script:ManualObservationProtocol=1
 $script:AppearanceObservationOnly=[bool]$VerifyOnly
 if($VerifyOnly -and ($Action -ne 'Automatic' -or $StartBackend)){throw 'Read-only CSS verification cannot initialize or control a backend'}
@@ -74,16 +76,14 @@ function Test-CurrentUserProcess($Process) {
     try{
         $key=[string]$Process.Id+':'+$Process.StartTime.ToUniversalTime().Ticks
         if($script:ProcessOwnerCache.ContainsKey($key)){return $script:ProcessOwnerCache[$key]}
-        $native=Get-CimInstance -ClassName Win32_Process -Filter ('ProcessId = '+[int]$Process.Id) -OperationTimeoutSec 2 -ErrorAction Stop
-        if(!$native){throw 'Process no longer exists'}
-        $identity=Invoke-CimMethod -InputObject $native -MethodName GetOwnerSid -OperationTimeoutSec 2 -ErrorAction Stop
-        if($identity.ReturnValue -ne 0 -or !$identity.Sid){throw 'Owner SID unavailable'}
-        $mine=$identity.Sid -eq $script:CurrentUserSid;$script:ProcessOwnerCache[$key]=$mine;return $mine
+        Initialize-ResidentAppearanceInterop
+        $identity=[Ymcc.CssResidentProcess]::Identity([uint32]$Process.Id,[long]$Process.StartTime.ToUniversalTime().ToFileTimeUtc())
+        $mine=$identity[1] -eq $script:CurrentUserSid;$script:ProcessOwnerCache[$key]=$mine;return $mine
     }catch{throw ('无法核实加载器/Steam 进程所属用户，未发出控制操作：'+$_.Exception.Message)}
 }
 function Get-BackendProcesses {
     # Do not use default tasklist TABLE: it truncates this 32-character image name.
-    @(Get-Process -Name 'CssLoader-Standalone-Headless' -ErrorAction SilentlyContinue|Where-Object {
+    @(Get-AppearanceBackendCandidates|Where-Object {
         if(!(Test-CurrentUserProcess $_)){return $false}
         try {$image=Get-AppearanceProcessPath $_;[IO.Path]::GetFullPath($image) -eq [IO.Path]::GetFullPath($script:BackendExe)}catch{$true}
     })
@@ -130,7 +130,7 @@ function Get-AppearanceStatus {
     $rows=@(Get-ThemeRows)
     foreach($row in $rows){$found=@($backendThemes|Where-Object name -eq $row.name);if($found.Count -eq 1 -and $found[0].enabled -is [bool]){$row.backendEnabled=$found[0].enabled}}
     $matched=$ready -and @($rows|Where-Object installed).Count -gt 0 -and @($rows|Where-Object {$_.installed -and ($null -eq $_.backendEnabled -or $_.configured -ne $_.backendEnabled)}).Count -eq 0
-    $steamRunning=@(Get-Process -Name 'steam' -ErrorAction SilentlyContinue|Where-Object {Test-CurrentUserProcess $_}).Count -gt 0
+    $steamRunning=$null -ne (Get-AppearanceSteamSession)
     # Historical idle markers cannot confirm the resident policy.
     $idle=$false
     $snapshot=[pscustomobject]@{controlProtocol=2;targetId=(Get-ThemeTargetId);revision=(Get-ThemeRevision $rows);linked=(Test-Path -LiteralPath $script:LinkFile -PathType Leaf);backendReady=$ready;backendIdle=[bool]$idle;backendProcessCount=$processCount;steamRunning=$steamRunning;configuredMatchesBackend=$matched;note=$note;themes=@($rows|Select-Object name,installed,configured,backendEnabled,parameterCount,error,renderPlan)}
@@ -279,9 +279,10 @@ function Start-AppearanceBackend {
         $state=if(Get-Command Read-PresetState -ErrorAction SilentlyContinue){Read-PresetState}else{$null}
         if($state -and $state.owned){Read-PresetBackup ([string]$state.originalBackup)|Out-Null}
         $reload=$state -and $state.pendingReload
+        $null=Update-AppearanceProcessInventory
         $existing=@(Get-BackendProcesses)
         # Refuse competing installations too, including one still opening its port.
-        $others=@(Get-Process -Name 'CssLoader-Standalone-Headless' -ErrorAction SilentlyContinue|Where-Object {Test-CurrentUserProcess $_})
+        $others=@(Get-AppearanceBackendCandidates|Where-Object {Test-CurrentUserProcess $_})
         foreach($process in $others){
             $image=Get-AppearanceProcessPath $process
             if([IO.Path]::GetFullPath($image) -ine [IO.Path]::GetFullPath($script:BackendExe)){throw 'Another CSSLoader path is active; no duplicate instance started'}

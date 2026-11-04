@@ -75,3 +75,44 @@ forbiddenIo and throw, since the ordinary100 suite must remain on its explicit
 old CLI boundary. Source-prep unit tests retain all existing mutation checks and
 verify those throw guards plus unmodified real bridge algorithms/data/Job includes.
 They prepare source only and never compile or run the full100/pipe suite.
+
+## ROG164155 active-journal Refresh closure
+
+The same consumer extracts the actual `TLS` declaration and
+`inputHostRogPartialHideSourcesCurrent`,
+`inputHostRogPartialHideTargetsCurrent` and
+`inputHostRogPartialHideConfigurationCurrent` from the selected main source.
+They are emitted verbatim in `rog-partial-hide-bindings.inc`, included in the
+compiler-input closure, and retain their source-span hashes. Common uppercase
+and inverse-state helpers are also extracted for both legacy and Apply modes.
+Default empty TLS preserves existing legacy/source-Hide behavior.
+
+`inputHostDeferredPhysicalHideWriteCurrent` is an explicitly controlled
+allowed/refused environment fact here. This compact consumer does not execute
+the real deferred-debt algorithm, late-hide worker or one-cycle quota. The
+production identity, target and configuration algorithms are never copied or
+replaced by modeled verdicts.
+
+The existing `--apply-integration-only` entry retains the original ten native
+Apply cases, historical assertions/semantic negatives and bounded selectors.
+Eleven additional cases within `applyIntegrationCases` execute the real active
+Apply -> Refresh path. A real initial Apply reserves both exact ROG paths and
+hides the child; only the root's pipe/CLI result leaves reject without applying.
+The positive continuation writes only the missing root and reuses original
+record bytes, owner and absolute deadline. Negative cases reject a re-resolved
+source, extra target, or a second configuration snapshot with invalid data,
+cloak off, missing application, inverse on or unknown. Three further second-query
+cases supply transport fault, retired pipe or refused context facts. Refusals
+check zero additional driver writes and preserved exact return duties. These
+cases grant no source-Hide rights and invoke no real Host/CLI/device/cycle.
+
+Original directed command (documented only; not run for this update):
+
+```powershell
+node tools/virtual_physical_return_runtime_selftest.mjs --out G:/YeManCC-Work/Testing/YMCC/Evidence/ROG164155-physical-return-FRESH --toolchain G:/YeManCC-Work/Build/Validation/VirtualController-Lifecycle-20261019/player-switch-lock12/production-link100 --apply-integration-only
+```
+
+Use a fresh `--out` path. The existing captured `production-link100` toolchain,
+original 60-second compile/30-second execution caps and parent budget reserve
+remain unchanged. This update was not compiled or executed; it is not a PASS
+receipt or physical-device acceptance.

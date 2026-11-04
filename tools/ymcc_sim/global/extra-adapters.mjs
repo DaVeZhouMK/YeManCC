@@ -1,5 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';
 import {assembleExtraAdapters,registrationIndexCurrent} from './extra-adapter-assembly.mjs';
+import {getMonitorOwnedCloseAdapters} from './monitor-owned-close-consumer/adapter.mjs';
+import {getGameRuleStorageAdapters} from './game-rule-storage-consumer/adapter.mjs';
 import {getRouteFallbackConsumerAdapters} from './route-fallback-consumer/adapter.mjs';
 import {getBatteryHostProcessOwnerAdapters} from './battery-host-process-owner/adapter.mjs';
 import {getMonitorNoticeLifecycleAdapter} from './monitor-notice-lifecycle/adapter.mjs';
@@ -299,12 +301,14 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 ()=>[getMonitorNoticeRealRendererAdapter(_repoRoot)],
 ()=>[...getBatteryHostProcessOwnerAdapters(_repoRoot)],
 ()=>[...getRouteFallbackConsumerAdapters(_repoRoot)],
-()=>[...getTypedAsyncRequestAdapters(_repoRoot)]];
+()=>[...getTypedAsyncRequestAdapters(_repoRoot)],
+()=>[...getMonitorOwnedCloseAdapters(_repoRoot)],
+()=>[...getGameRuleStorageAdapters(_repoRoot)]];
 
 }
 
 const extraIndexBytes=fs.readFileSync(new URL('./extra-adapter-index.json',import.meta.url));
-if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='74bd0800d3fb33e6eed80497109c1bae6600dd2858c55e181e56ad80a4e7766c')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
+if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='c3f15d5489dfba84fdf8a753eabe1eadbd934caf2063d91068b172cb1ce4e01f')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
 const extraIndex=JSON.parse(extraIndexBytes);
 export function getExtraAdapters(repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..'),{selectedIds,auditReceiptIds}={}){
  const current=registrationIndexCurrent(extraIndex,repoRoot);

@@ -15,11 +15,19 @@ const module = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(process.env.YMCC_MIRROR_CLIENT_SOURCE_OVERRIDE||path.join(root,'decky-plugin/src/mirrorClient.ts'),'utf8'), { loader:'ts',format:'cjs' }).code,
   { module,exports:module.exports,structuredClone,require: name => { if(name==='./performanceModel')return performanceModelModule;if(name==='./steamRunningContext')return contextModule.exports; throw new Error('Unexpected external dependency'); } });
 const { MirrorClient } = module.exports;
+// Consume the actual entry-point provider expression. It must reread the
+// current native window property, including a binding supplied after startup.
+const ts=require('typescript'),entryText=fs.readFileSync(path.join(root,'decky-plugin/src/index.tsx'),'utf8');
+const entryTree=ts.createSourceFile('index.tsx',entryText,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const clientDeclaration=entryTree.statements.filter(ts.isVariableStatement).flatMap(node=>[...node.declarationList.declarations]).find(node=>node.name.getText(entryTree)==='client');
+assert(clientDeclaration&&ts.isNewExpression(clientDeclaration.initializer)&&clientDeclaration.initializer.expression.getText(entryTree)==='MirrorClient','Actual entry-point MirrorClient owner missing');
+const provider=clientDeclaration.initializer.arguments[0].properties.find(node=>ts.isPropertyAssignment(node)&&node.name.getText(entryTree)==='bootstrap');
+assert(provider&&ts.isArrowFunction(provider.initializer),'Actual entry-point bootstrap provider missing');
+const readBootstrap=host=>vm.runInNewContext('('+provider.initializer.getText(entryTree)+')',{window:host});
 const cases=[];
 async function check(name,action) { try{await action();cases.push({name,status:'passed'});}catch(error){throw new Error(name+': '+error.message,{cause:error});} }
 function fixture({boot=true,steam}={}) {
   const timers=new Map(); const sockets=[];let next=0;
-  let available=boot;
   const bootstrap={endpoint:'ws://127.0.0.1:12345/mirror',token:'TEST-ONLY',runId:'run-1'};
   class Socket {
     listeners=new Map();sent=[];closed=false;
@@ -29,15 +37,131 @@ function fixture({boot=true,steam}={}) {
     close(){this.closed=true;this.listeners.get('close')?.();}
     emit(e,value){this.listeners.get(e)?.({data:typeof value==='string'?value:JSON.stringify(value)});}
   }
-  const deps={bootstrap:()=>available?bootstrap:undefined,socket:url=>new Socket(url),schedule:(action,delay)=>{const id=++next;timers.set(id,{action,delay});return id;},cancel:id=>timers.delete(id),clientId:'test-client',steam};
+  const nativeWindow={__YMCC_DECKY_MIRROR__:boot?bootstrap:undefined};
+  const deps={bootstrap:readBootstrap(nativeWindow),socket:url=>new Socket(url),schedule:(action,delay)=>{const id=++next;timers.set(id,{action,delay});return id;},cancel:id=>timers.delete(id),clientId:'test-client',steam};
   const client=new MirrorClient(deps);
   const fireDelay=delay=>{const pair=[...timers].find(([,t])=>t.delay===delay);assert.ok(pair,`No timer ${delay}`);timers.delete(pair[0]);pair[1].action();};
   const snapshot=(revision=1)=>({runId:'run-1',generation:1,revision,ready:true,game:{label:'A',identity:'app:480:pid101:birthA',fields:{acMode:{value:'balanced',supported:true,choices:[{data:'balanced',label:'平衡'}]}}},fan:{supported:true,enabled:true,preset:'soft',choices:[{data:'soft',label:'轻柔'}]}});
   const connect=()=>{client.setVisible(true);const socket=sockets.at(-1);socket.emit('open');socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:snapshot()});return socket;};
-  return {client,sockets,timers,bootstrap,fireDelay,snapshot,connect,makeBootstrapAvailable:()=>{available=true;}};
+  return {nativeWindow,client,sockets,timers,bootstrap,fireDelay,snapshot,connect,makeBootstrapAvailable:()=>{nativeWindow.__YMCC_DECKY_MIRROR__=bootstrap;}};
 }
-await check('missing bootstrap starts no discovery/network/timer',()=>{const f=fixture({boot:false});f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);});
-await check('non-loopback bootstrap rejected',()=>{const f=fixture();f.bootstrap.endpoint='ws://example.com:12345/mirror';f.client.setVisible(true);assert.equal(f.sockets.length,0);});
+// These lease assertions extend the one original missing-native-binding case.
+// They have no standalone producer, case IDs or additional parent/release gate.
+async function verifyBootstrapWaitOwnership(){
+ const flush=async()=>{for(let n=0;n<80;n++)await Promise.resolve();};
+ const verify=async(_detail,action)=>{await action();};
+await verify('binding withdrawn before queued availability callback keeps the original observation lease and spent backoff',async()=>{
+ const f=fixture({boot:false});try{let called=0;f.client.waitForBootstrap({},()=>called++);f.makeBootstrapAvailable();f.fireDelay(250);f.nativeWindow.__YMCC_DECKY_MIRROR__=undefined;await flush();assert.equal(called,0,'withdrawn native binding cannot consume one-shot notification');assert.equal(f.timers.size,1,'withdrawn binding keeps one original observation retry');assert.equal([...f.timers.values()][0].delay,1000,'withdrawn binding cannot refill spent backoff');assert.equal(f.sockets.length,0);f.makeBootstrapAvailable();f.fireDelay(1000);await flush();assert.equal(called,1);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
+});
+await verify('local-only long wait observes actual provider but grants no socket until explicit feature demand',async()=>{
+ const f=fixture({boot:false});try{
+  f.bootstrap.wallpaperProtocol=1;let notices=0;const owner={};
+  const stop=f.client.waitForBootstrap(owner,()=>{notices++;f.client.bootstrapChanged();f.client.setPassiveDemand('wallpaper',true);});
+  assert.equal(f.timers.size,1);assert.equal(f.sockets.length,0);assert.equal(f.client.waitForBootstrap(owner,()=>assert.fail('duplicate callback')),stop);
+  for(const delay of [250,1000,3000,10000,30000,30000]){assert.equal([...f.timers.values()][0].delay,delay);f.fireDelay(delay);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);}
+  f.makeBootstrapAvailable();f.fireDelay(30000);assert.equal(f.sockets.length,0);await flush();assert.equal(notices,1);assert.equal(f.sockets.length,1);
+  f.sockets[0].emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);assert.equal(f.sockets[0].sent.length,0);stop();
+ }finally{f.client.dispose();}assert.equal(f.timers.size,0);
+});
+await verify('available binding only notifies asynchronously and never activates transport by itself',async()=>{
+ const f=fixture();try{let called=0;f.client.waitForBootstrap({},()=>called++);assert.equal(called,0);assert.equal(f.sockets.length,0);await flush();assert.equal(called,1);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await verify('two waiting feature owners share one timer and releasing one keeps the original deadline',async()=>{
+ const f=fixture({boot:false});try{const seen=[];const a=f.client.waitForBootstrap({},()=>seen.push('a'));f.client.waitForBootstrap({},()=>seen.push('b'));const id=[...f.timers.keys()][0];a();assert.equal(f.timers.size,1);assert(f.timers.has(id));f.makeBootstrapAvailable();f.fireDelay(250);await flush();assert.deepEqual(seen,['b']);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
+});
+await verify('cancelled local retry delivered in the same socket epoch cannot erase a later waiter retry',async()=>{
+ const f=fixture({boot:false});try{let notices=0;const stop=f.client.waitForBootstrap({},()=>notices++),late=[...f.timers.values()][0].action;stop();assert.equal(f.timers.size,0);f.client.waitForBootstrap({},()=>notices++);const id=[...f.timers.keys()][0];assert.equal([...f.timers.values()][0].delay,1000);late();assert(f.timers.has(id));assert.equal(f.timers.size,1);f.makeBootstrapAvailable();f.fireDelay(1000);await flush();assert.equal(notices,1);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await verify('local binding wait beside a healthy HUD does not close or duplicate its socket',async()=>{
+ const f=fixture();try{f.bootstrap.hudProtocol=1;const socket=f.connect();f.client.setPassiveDemand('hud',true);f.client.setVisible(false);f.nativeWindow.__YMCC_DECKY_MIRROR__=undefined;let called=0;f.client.waitForBootstrap({},()=>called++);assert.equal(socket.closed,false);assert.equal(f.sockets.length,1);assert.equal(f.timers.size,1);f.makeBootstrapAvailable();f.fireDelay(250);await flush();assert.equal(called,1);assert.equal(socket.closed,false);assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await verify('last network owner hiding cannot revoke a separate feature binding wait',async()=>{
+ const f=fixture({boot:false});try{let called=0;f.client.setVisible(true);const late=[...f.timers.values()][0].action;f.client.waitForBootstrap({},()=>called++);f.client.setVisible(false);assert.equal(f.timers.size,1);assert.equal([...f.timers.values()][0].delay,1000);late();assert.equal(f.timers.size,1);f.makeBootstrapAvailable();f.fireDelay(1000);await flush();assert.equal(called,1);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
+});
+for(const raw of [{runId:'native-revoked',revoked:true},{endpoint:'ws://example.com:12345/mirror',token:'fake',runId:'wrong',wallpaperProtocol:1},{endpoint:'ws://127.0.0.1:0/mirror',token:'fake',runId:'wrong',wallpaperProtocol:1},{endpoint:'ws://127.0.0.1:12345/mirror',runId:'missing-token',wallpaperProtocol:1}])await verify('available OFF or invalid binding ends observation without bypassing protocol/address identity '+raw.runId+String(raw.endpoint??''),async()=>{
+ const f=fixture({boot:false});try{let called=0;f.client.waitForBootstrap({},()=>{called++;if(f.nativeWindow.__YMCC_DECKY_MIRROR__?.wallpaperProtocol===1)f.client.setPassiveDemand('wallpaper',true);});f.nativeWindow.__YMCC_DECKY_MIRROR__=raw;f.fireDelay(250);await flush();assert.equal(called,1);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await verify('one observer throwing cannot block another one-shot observer or retain timers',async()=>{
+ const f=fixture({boot:false});try{let called=0;f.client.waitForBootstrap({},()=>{throw Error('inert observer failure')});f.client.waitForBootstrap({},()=>called++);f.makeBootstrapAvailable();f.fireDelay(250);await flush();assert.equal(called,1);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
+});
+await verify('queued availability and retry callbacks cannot revive a released or disposed owner',async()=>{
+ for(const boundary of ['release','dispose']){const f=fixture({boot:false});let called=0;const stop=f.client.waitForBootstrap({},()=>called++),late=[...f.timers.values()][0].action;f.makeBootstrapAvailable();f.fireDelay(250);if(boundary==='release')stop();else f.client.dispose();await flush();late();assert.equal(called,0);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);f.client.dispose();f.client.waitForBootstrap({},()=>called++);await flush();assert.equal(called,0);}
+});
+await verify('reentrant next waiting lease survives the old availability unsubscribe',async()=>{
+ const f=fixture({boot:false});try{const owner={};let called=0,second=0;const old=f.client.waitForBootstrap(owner,()=>{called++;f.nativeWindow.__YMCC_DECKY_MIRROR__=undefined;f.client.waitForBootstrap(owner,()=>second++);});f.makeBootstrapAvailable();f.fireDelay(250);await flush();old();assert.equal(called,1);assert.equal(second,0);assert.equal(f.timers.size,1);f.makeBootstrapAvailable();f.fireDelay(1000);await flush();assert.equal(second,1);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
+});
+
+ // The native health marker revokes authority even if a mixed/stale producer
+ // accidentally leaves otherwise complete credentials on the same object.
+ for(const boundary of ['initial','connected','observational-wait']){
+  const f=fixture({boot:boundary!=='observational-wait'});
+  try{
+   f.bootstrap.wallpaperProtocol=1;
+   let notified=0,old=null;
+   if(boundary==='connected')old=f.connect();
+   if(boundary==='observational-wait')f.client.waitForBootstrap({},()=>{notified++;f.client.setPassiveDemand('wallpaper',true);});
+   f.bootstrap.revoked=true;
+   if(boundary==='initial')f.client.setVisible(true);
+   else if(boundary==='connected')f.client.bootstrapChanged();
+   else{f.makeBootstrapAvailable();f.fireDelay(250);await flush();assert.equal(notified,1);}
+   assert.equal(f.client.snapshot().connected,false);assert.equal(f.client.snapshot().snapshot,null);
+   assert.equal(f.timers.size,0);assert.equal(f.sockets.length,boundary==='connected'?1:0);
+   if(old){assert.equal(old.closed,true);old.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot(9999)});assert.equal(f.client.snapshot().connected,false);}
+   // A later explicit native grant may start a fresh transport, never the old
+   // revoked one. There is no automatic retry while revocation remains true.
+   f.bootstrap.revoked=false;f.client.bootstrapChanged();
+   const current=f.sockets.at(-1);assert(current);if(old)assert.notEqual(current,old);
+   current.emit('open');if(boundary!=='observational-wait')current.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});
+   assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+  }finally{f.client.dispose();}
+  assert.equal(f.timers.size,0);
+ }
+}
+await check('missing bootstrap uses one capped local retry and recovers after a missed native event',async()=>{
+ // The original missing-bootstrap case also owns delayed first availability:
+ // waiting must not require a second page open or a notification to arrive.
+ for(const demand of ['visible','hud','wallpaper','updater']){
+  const f=fixture({boot:false});
+  try{
+   if(demand==='visible')f.client.setVisible(true);else f.client.setPassiveDemand(demand,true);
+   assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);
+   for(const delay of [250,1000,3000,10000,30000,30000]){
+    const before=[...f.timers.keys()][0];assert.equal([...f.timers.values()][0].delay,delay);
+    // A notification storm while the native owner is still absent must not
+    // refill or postpone the original retry or open a connection.
+    for(let n=0;n<128;n++)f.client.bootstrapChanged();
+    assert.equal(f.timers.size,1);assert(f.timers.has(before));assert.equal(f.sockets.length,0);
+    f.fireDelay(delay);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);
+   }
+   const late=[...f.timers.values()][0].action;
+   f.makeBootstrapAvailable();f.bootstrap.hudProtocol=1;f.bootstrap.wallpaperProtocol=1;f.bootstrap.updaterProtocol=1;
+   f.fireDelay(30000);assert.equal(f.sockets.length,1);
+   const socket=f.sockets[0];assert.ok(socket.url.startsWith(f.bootstrap.endpoint+'?'));
+   socket.emit('open');
+   if(demand==='visible')socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});
+   assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+   late();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);
+   assert(socket.sent.every(message=>message.command==='snapshot'));
+   if(demand==='visible'){
+    const pending=f.client.mutate('fan.setEnabled',{enabled:false}),request=socket.sent.at(-1);
+    assert.equal(request.command,'fan.setEnabled');assert.equal(request.runId,f.bootstrap.runId);
+    socket.emit('message',{type:'reply',runId:f.bootstrap.runId,id:request.id,ok:true,result:{saved:true,applied:true}});
+    assert.equal((await pending).applied,true);assert.equal(socket.sent.filter(message=>message.command==='fan.setEnabled').length,1);assert.equal(f.timers.size,0);
+   }
+  }finally{f.client.dispose();}
+  assert.equal(f.timers.size,0);assert(f.sockets.every(socket=>socket.closed));
+ }
+ for(const boundary of ['hide','passive-off','dispose']){
+  const f=fixture({boot:false});
+  if(boundary==='passive-off')f.client.setPassiveDemand('wallpaper',true);else f.client.setVisible(true);
+  assert.equal(f.timers.size,1);const late=[...f.timers.values()][0].action;
+  if(boundary==='hide')f.client.setVisible(false);else if(boundary==='passive-off')f.client.setPassiveDemand('wallpaper',false);else f.client.dispose();
+  assert.equal(f.timers.size,0);f.makeBootstrapAvailable();late();f.client.bootstrapChanged();
+  assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();
+ }
+ await verifyBootstrapWaitOwnership();
+});
+await check('non-loopback bootstrap rejected',()=>{const f=fixture();f.bootstrap.endpoint='ws://example.com:12345/mirror';f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();});
 await check('one visible socket requests one snapshot, no idle polling',()=>{const f=fixture();const s=f.connect();assert.equal(s.sent.length,1);assert.equal(s.sent[0].command,'snapshot');assert.equal(f.timers.size,0);f.client.setVisible(true);assert.equal(f.sockets.length,1);f.client.dispose();});
 await check('hidden/unloaded releases socket and timers',()=>{const f=fixture();f.connect();f.client.setVisible(false);assert.equal(f.timers.size,0);assert.equal(f.sockets[0].closed,true);assert.equal(f.client.snapshot().snapshot,null);});
 await check('old view packets ignored after hide',()=>{const f=fixture();const s=f.connect();f.client.setVisible(false);s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(100)});assert.equal(f.client.snapshot().connected,false);});
@@ -53,13 +177,13 @@ await check('visible sidebar recovers beyond three failures with capped outage b
 await check('hide cancels queued reconnect',()=>{const f=fixture();const s=f.connect();s.close();f.client.setVisible(false);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,1);});
 await check('power not ready rejects changes without send',async()=>{const f=fixture();const s=f.connect();const snap=f.snapshot(2);snap.ready=false;s.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});await assert.rejects(f.client.mutate('fan.setEnabled',{enabled:true}),/当前不可操作/);assert.equal(s.sent.length,1);f.client.dispose();});
 await check('fan requests do not include game identity',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setPreset',{preset:'soft'});const req=s.sent.at(-1);assert.equal(req.identity,undefined);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true});await p;f.client.dispose();});
-await check('late native bootstrap starts cold plugin by event, no polling',()=>{const f=fixture({boot:false});f.client.setVisible(true);assert.equal(f.sockets.length,0);f.makeBootstrapAvailable();f.client.bootstrapChanged();assert.equal(f.sockets.length,1);f.client.dispose();});
+await check('late native bootstrap event replaces the cold retry immediately without duplicate work',()=>{const f=fixture({boot:false});f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);const late=[...f.timers.values()][0].action;f.makeBootstrapAvailable();f.client.bootstrapChanged();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,1);late();assert.equal(f.sockets.length,1);const socket=f.sockets[0];socket.emit('open');socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});assert.equal(f.timers.size,0);f.client.dispose();});
 await check('same native binding event cannot duplicate live connection',()=>{const f=fixture();f.connect();f.client.bootstrapChanged();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);f.client.dispose();});
 await check('new native run cancels old mutation, never replays into new host',async()=>{const f=fixture();const old=f.connect();const mutation=f.client.mutate('fan.setEnabled',{enabled:true});f.bootstrap.runId='run-2';f.bootstrap.token='NEW-TEST-TOKEN';f.client.bootstrapChanged();await assert.rejects(mutation,/连接已结束/);assert.equal(old.closed,true);assert.equal(f.sockets.length,2);f.sockets[1].emit('open');assert.equal(f.sockets[1].sent.length,1);assert.equal(f.sockets[1].sent[0].command,'snapshot');assert.equal(f.sockets[1].sent[0].runId,'run-2');f.client.dispose();});
 await check('hidden bootstrap event starts zero sockets',()=>{const f=fixture();f.client.bootstrapChanged();assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();});
 await check('late message from closed socket cannot restore connected state',()=>{const f=fixture();const old=f.connect();old.close();old.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(50)});assert.equal(f.client.snapshot().connected,false);assert.equal(f.client.snapshot().snapshot,null);f.client.dispose();});
 await check('connection owns immutable bootstrap identity, not mutable global object',()=>{const f=fixture();const old=f.connect();f.bootstrap.runId='changed-without-event';old.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(2)});assert.equal(f.client.snapshot().snapshot.runId,'run-1');f.client.dispose();});
-await check('port zero and out-of-range bootstrap are rejected',()=>{for(const port of [0,65536,99999]){const f=fixture();f.bootstrap.endpoint=`ws://127.0.0.1:${port}/mirror`;f.client.setVisible(true);assert.equal(f.sockets.length,0);f.client.dispose();}});
+await check('port zero and out-of-range bootstrap are rejected',()=>{for(const port of [0,65536,99999]){const f=fixture();f.bootstrap.endpoint=`ws://127.0.0.1:${port}/mirror`;f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();}});
 await check('Steam runtime ID getter runs once per demand, not per render or timer',()=>{let calls=0;const f=fixture({steam:()=>{calls++;return {availability:'observed',appId:'480',runningCount:1};}});const socket=f.connect();assert.equal(calls,1);assert.equal(socket.sent[0].steam.appId,'480');assert.equal(f.timers.size,0);f.client.setVisible(true);assert.equal(calls,1);f.client.dispose();});
 await check('Steam runtime getter failure cannot prevent Fan snapshot connection',()=>{const f=fixture({steam:()=>{throw new Error('Steam API changed');}});const socket=f.connect();assert.equal(socket.sent[0].steam.availability,'unavailable');assert.equal(f.client.snapshot().connected,true);f.client.dispose();});
 await check('slider accepts only the exact rendered snapshot',async()=>{const f=fixture(),s=f.connect(),expected=f.client.snapshot().snapshot;const p=f.client.mutate('fan.setPreset',{preset:'soft'},expected);const req=s.sent.at(-1);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true});await p;f.client.dispose();});
@@ -186,6 +310,99 @@ await check('context send exception clears its deadline and keeps only original 
 });
 await check('wallpaper timeout never replays an uncertain business write',async()=>{
  const f=contextFixture();try{f.client.setVisible(true);f.socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});f.context();const pending=f.client.mutate('fan.setEnabled',{enabled:true}).then(()=>null,error=>error);f.fireDelay(4000);assert.equal(typeof (await pending)?.message,'string');f.fireDelay(10000);f.fireDelay(250);const next=f.sockets.at(-1);next.emit('open');assert.equal(f.sockets.flatMap(s=>s.sent).filter(m=>m.command==='fan.setEnabled').length,1);assert.equal(next.sent.some(m=>m.command==='wallpaper.context'||m.command==='fan.setEnabled'),false);next.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot(2)});assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+
+// Field 2026-10-31: Steam's document survives a deliberate YMCC exit. Recovery
+// must reacquire a fresh native binding even if its notification was missed.
+await check('YMCC restart while both views are hidden reacquires current state without an old write',async()=>{
+ const f=fixture();f.bootstrap.wallpaperProtocol=1;
+ try{
+  const old=f.connect();f.client.setPassiveDemand('wallpaper',true);
+  assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:1,appId:'480',visible:true}),true);
+  const pending=f.client.mutate('fan.setEnabled',{enabled:false}).then(()=>null,error=>error);
+  const write=old.sent.find(m=>m.command==='fan.setEnabled');
+  const oldDeadlines=[...f.timers.values()].map(t=>t.action);
+  old.close();assert.equal(typeof (await pending)?.message,'string');
+  const retiredRetry=[...f.timers.values()][0].action;
+  f.client.setVisible(false);f.client.setPassiveDemand('wallpaper',false);
+  Object.assign(f.bootstrap,{endpoint:'ws://127.0.0.1:12346/mirror',token:'NEW-TEST-ONLY',runId:'run-restarted'});
+  // No bootstrapChanged edge: both consumers were hidden while YMCC restarted.
+  for(const callback of [...oldDeadlines,retiredRetry])callback();
+  old.emit('message',{type:'reply',runId:'run-1',id:write.id,ok:true});
+  old.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(9999)});
+  assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);
+  assert.equal(f.client.snapshot().snapshot,null);
+  f.client.setPassiveDemand('wallpaper',true);
+  const current=f.sockets.at(-1);assert.equal(f.sockets.length,2);
+  assert.ok(current.url.startsWith(f.bootstrap.endpoint+'?'));current.emit('open');
+  assert.equal(f.client.snapshot().connected,true);assert.equal(current.sent.length,0);
+  assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:2,appId:'480',visible:true}),true);
+  current.emit('message',{type:'wallpaper-ready',runId:f.bootstrap.runId,contextSeq:2,enabled:true});
+  f.client.setVisible(true);
+  const snapshot={...f.snapshot(),runId:f.bootstrap.runId,generation:2};
+  current.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot});
+  assert.equal(f.client.snapshot().snapshot.runId,'run-restarted');
+  assert.equal(f.client.snapshot().snapshot.generation,2);assert.equal(f.timers.size,0);
+  assert.equal(f.sockets.flatMap(s=>s.sent).filter(m=>m.command==='fan.setEnabled').length,1);
+ }finally{f.client.dispose();}
+ assert.equal(f.timers.size,0);
+});
+await check('background outage survives capped failures and missed native restart notification',()=>{
+ const f=contextFixture();
+ try{
+  assert.equal(f.context(),true);f.socket.close();
+  for(const delay of [250,1000,3000,10000,30000,30000]){f.fireDelay(delay);f.sockets.at(-1).close();}
+  assert.equal(f.sockets.length,7);assert.equal(f.timers.size,1);
+  Object.assign(f.bootstrap,{endpoint:'ws://127.0.0.1:12347/mirror',token:'REPLACED-TEST-ONLY',runId:'run-after-outage'});
+  f.fireDelay(30000);const current=f.sockets.at(-1);current.emit('open');
+  assert.ok(current.url.startsWith(f.bootstrap.endpoint+'?'));
+  assert.equal(f.client.snapshot().connected,true);assert.equal(current.sent.length,0);
+  for(const old of f.sockets.slice(0,-1)){
+   old.emit('open');old.emit('message',{type:'wallpaper-ready',runId:'run-1',contextSeq:1,enabled:true});old.close();
+  }
+  assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:2,appId:'480',visible:true}),true);
+  current.emit('message',{type:'wallpaper',runId:f.bootstrap.runId,contextSeq:2,appId:'480',enabled:true,entry:null});
+  assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+  assert.ok(f.sockets.flatMap(s=>s.sent).every(m=>m.command.startsWith('wallpaper.')));
+ }finally{f.client.dispose();}
+});
+await check('24 mixed restart cycles fence silent connections old replies deadlines and duplicate edges',async()=>{
+ const f=fixture();f.bootstrap.wallpaperProtocol=1;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('wallpaper',true);
+ const first=f.sockets.at(-1);first.emit('open');f.client.setVisible(true);
+ first.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});
+ try{
+  for(let cycle=0;cycle<24;cycle++){
+   const old=f.sockets.at(-1),oldRun=f.bootstrap.runId;
+   assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:cycle+1,appId:'480',visible:true}),true);
+   const pending=f.client.mutate('fan.setEnabled',{enabled:cycle%2===0}).then(()=>null,error=>error);
+   const write=old.sent.findLast(m=>m.command==='fan.setEnabled');
+   const late=[...f.timers.values()].map(t=>t.action);
+   old.close();assert.equal(typeof (await pending)?.message,'string');assert.equal(f.timers.size,1);
+   if(cycle%3===0){
+    f.fireDelay([...f.timers.values()][0].delay);
+    // A connecting Steam-side WebSocket never reaches OPEN.
+    assert.equal(f.timers.size,1);f.fireDelay(10000);
+    assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,1);
+   }
+   late.push(...[...f.timers.values()].map(t=>t.action));
+   Object.assign(f.bootstrap,{endpoint:`ws://127.0.0.1:${12400+cycle}/mirror`,token:`TEST-${cycle}`,runId:`run-cycle-${cycle}`});
+   if(cycle%2){f.client.bootstrapChanged();f.client.bootstrapChanged();}
+   else f.fireDelay([...f.timers.values()][0].delay); // Lost native event.
+   const current=f.sockets.at(-1);assert.ok(current.url.startsWith(f.bootstrap.endpoint+'?'));current.emit('open');
+   const fresh={...f.snapshot(),runId:f.bootstrap.runId,generation:cycle+2};
+   current.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:fresh});
+   assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:cycle+2,appId:'480',visible:true}),true);
+   current.emit('message',{type:'wallpaper-ready',runId:f.bootstrap.runId,contextSeq:cycle+2,enabled:true});
+   for(const callback of late)callback();
+   old.emit('message',{type:'reply',runId:oldRun,id:write.id,ok:true});
+   old.emit('message',{type:'snapshot',runId:oldRun,snapshot:{...f.snapshot(999999),runId:oldRun}});old.close();
+   assert.equal(current.closed,false);assert.equal(f.client.snapshot().connected,true);
+   assert.equal(f.client.snapshot().snapshot.runId,f.bootstrap.runId);
+   assert.equal(f.client.snapshot().snapshot.generation,cycle+2);assert.equal(f.timers.size,0);
+   assert.equal(f.sockets.flatMap(s=>s.sent).filter(m=>m.command==='fan.setEnabled').length,cycle+1);
+  }
+ }finally{f.client.dispose();}
+ assert.equal(f.timers.size,0);assert.ok(f.sockets.every(s=>s.closed));
 });
 
 fs.writeFileSync(path.resolve(task,'validation/MIRROR-CLIENT-SELFTEST.json'),JSON.stringify({project:'YMCC Decky 侧边栏',cases:cases.length,results:cases,realSockets:false,hardware:false,productionClientSource:true},null,2));console.log(`Mirror client tests passed: ${cases.length}`);

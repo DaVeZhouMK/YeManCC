@@ -562,14 +562,28 @@ if ($CustomSteamLibrarySource -ne $canonicalCustomSteamLibrarySource) {
   throw "CustomSteamLibrary source must be the formal mainline directory: $canonicalCustomSteamLibrarySource"
 }
 
+# Read identity at both boundaries, not duplicate test execution: reject known drift now;
+# retain the later check for source/payload drift during compilation.
+$preMainBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+
 # Capture current compiler inputs in fresh directories, then validate without
 # modifying the declared file/source fingerprints. No legacy lab synchronization.
 . (Join-Path $PSScriptRoot 'custom_steam_library_build_guard.ps1')
 Assert-CustomSteamLibraryMainlineIdentity -ProjectRoot $ProjectRoot
+# CSL_PREMAIN_SELECT_BEGIN
+$preMainWorkerReference = $null
+$preMainSelection = Get-CslWorkerForPackage $preMainBuildIdentity $ProjectRoot $WorkspaceRoot
+# CSL_PREMAIN_SELECT_END
 & (Join-Path $PSScriptRoot 'build-custom-steam-library-host.ps1') `
   -OutputDirectory (Join-Path $WorkspaceRoot 'Build\CustomSteamLibrary') -Publish
-& (Join-Path $PSScriptRoot 'build-custom-steam-library-worker.ps1') `
-  -OutputDirectory (Join-Path $WorkspaceRoot 'Build\CustomSteamLibrary') -Publish
+# CSL_PREMAIN_CONSUME_BEGIN
+if($preMainSelection){
+  $preMainWorkerReference = Use-CslWorkerForPackage $preMainSelection $ProjectRoot $WorkspaceRoot
+} else {
+  & (Join-Path $PSScriptRoot 'build-custom-steam-library-worker.ps1') `
+    -OutputDirectory (Join-Path $WorkspaceRoot 'Build\CustomSteamLibrary') -Publish
+}
+# CSL_PREMAIN_CONSUME_END
 Sync-CustomSteamLibraryMainline $CustomSteamLibrarySource $version | Out-Null
 
 # The ZIP envelope is manifest-driven. The legacy bridge keeps the old
@@ -827,6 +841,11 @@ foreach ($entry in $assetLock.files) {
   $assetSources[[string]$entry.component] = if ($useWorkspaceAssets) { 'workspace-assets' } else { 'verified-source-fallback' }
 }
 
+# BEGIN TDP_RUNTIME_MANIFEST_PACKAGE
+. (Join-Path $ProjectRoot 'tools\lib\tdp-runtime-manifest.ps1')
+$tdpRuntimeManifestPlan = Assert-YmccTdpRuntimeManifestPayload -ManifestPath (Join-Path $ProjectRoot 'PowerControl\pawnio\tdp-runtime-manifest.json') -PayloadRoot (Join-Path $StagingPowerControl 'pawnio') -SourceFile (Join-Path $ProjectRoot 'PowerControl\pawnio\YeManTdpCtl.py') -RecipeFile (Join-Path $ProjectRoot 'PowerControl\pawnio\YeManTdpCtl.spec')
+Copy-Item -LiteralPath $tdpRuntimeManifestPlan.ManifestPath -Destination (Join-Path $StagingPowerControl 'pawnio\tdp-runtime-manifest.json') -Force
+# END TDP_RUNTIME_MANIFEST_PACKAGE
 Assert-MonitorHudWebExport $StagingYeManCC $BuildWeb | Out-Null
 Assert-MonitorHudDeckyExport (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar') $BuildDecky | Out-Null
 $requiredProgram = @('YeManCC.exe', 'YeManRecoveryService.exe', 'YeManControllerVisibilityProbe.exe', 'YMCCRtssProfileHelper.exe', 'YMCCOverlayBridge.dll', 'index.html', 'hud-output.html', 'notice-output.html', 'app.config.json', 'version.json', 'YeMan-Support.html', 'update-manifest.json', 'decky-package.json')
@@ -879,6 +898,8 @@ foreach ($name in @('gyro-motion','virtual-gamepad')) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingPowerControl "feature-assets\$name\enabled.flag") -PathType Leaf)) { throw "Release PowerControl feature-assets\$name\enabled.flag is missing" }
 }
 $pawnioExpected = @($assetLock.files | Where-Object component -eq 'PawnIO' | ForEach-Object { ([string]$_.releasePath).Substring('pawnio/'.Length).Replace('/', '\') } | Sort-Object)
+# The validated runtime manifest ships beside the 21 locked binaries.
+$pawnioExpected = @($pawnioExpected + 'tdp-runtime-manifest.json' | Sort-Object)
 $pawnioActual = @(Get-ChildItem -LiteralPath (Join-Path $StagingPowerControl 'pawnio') -Recurse -File | ForEach-Object { Get-RelativePath (Join-Path $StagingPowerControl 'pawnio') $_.FullName } | Sort-Object)
 if (Compare-Object $pawnioExpected $pawnioActual) { throw 'PawnIO runtime does not exactly match the locked atomic file set' }
 
@@ -1282,6 +1303,7 @@ if ($TestExport) {
   Write-Output 'FIXTURE_VALIDATION=NOT_RUN: install/recovery fixtures skipped; complete payload identity and HC checks remain required.'
 } else {
   & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Package -WorkspaceRoot $WorkspaceRoot -CandidatePackage $packagePath
+  if($LASTEXITCODE -ne 0){throw ('FULL_RELEASE_PACKAGE_FIXTURE_FAILED exit='+$LASTEXITCODE)}
 }
 # Every source/build/stage/archive check passed; now publish transactionally.
 foreach ($path in $releaseItems) { Backup-ExportReleaseItem -Path $path -BackupRoot $backupRoot -WorkspaceRoot $WorkspaceRoot -Ledger $releaseLedger }
@@ -1294,6 +1316,9 @@ New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
 $publishedPackagePath = Join-Path $ReleasePackages 'YeManCC.zip'
 Move-Item -LiteralPath $packagePath -Destination $publishedPackagePath
 $packagePath = $publishedPackagePath
+# CSL_PREMAIN_REFERENCE_RECEIPT_BEGIN
+if($preMainWorkerReference){$exportArchiveReceipt['preMainWorkerReference']=$preMainWorkerReference}
+# CSL_PREMAIN_REFERENCE_RECEIPT_END
 $exportArchiveReceipt.zip = $packagePath
 $exportReceiptPath = Join-Path $BuildRoot 'Validation\ExportIdentity\FINAL-ZIP-IDENTITY.json'
 $exportArchiveReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $exportReceiptPath -Encoding UTF8
@@ -1384,7 +1409,6 @@ $deckyCurrentSourceReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath 
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
 & (Join-Path $PSScriptRoot 'write-battery-runtime-receipt.ps1') -ReleaseRoot (Split-Path -Parent $ReleaseYeManCC) -BuildId $exportBuildIdentity.buildId
 Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
-Write-Output 'PACKAGE_OK'
 Write-Output "Release YeManCC:      $ReleaseYeManCC"
 Write-Output "Release PowerControl: $ReleasePowerControl"
 Write-Output "Release CustomSteamLibrary: $ReleaseCustomSteamLibrary"
@@ -1392,7 +1416,11 @@ Write-Output "Complete package:     $packagePath"
 Write-Output "Package SHA256:       $packageHash"
 Write-Output "Release envelope:     $releaseEnvelope"
 Write-Output "Assets:               $($assetSources.Values -join ', ')"
+# CSL_PREMAIN_VALIDATE_BEGIN
+if($preMainSelection){Assert-CslWorkerPackageReference $preMainSelection $ProjectRoot $WorkspaceRoot}
+# CSL_PREMAIN_VALIDATE_END
 $publishStarted = $true
+Write-Output 'PACKAGE_OK'
 } catch {
   # Release publication is transactional. If a move/copy/validation fails
   # after old output was backed up, restore every published item so the next

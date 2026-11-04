@@ -27,6 +27,7 @@ export function wallpaperClasses(modules:any):{home?:string;homeImages?:string;h
   const safe=(value:any)=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value)?value:undefined;
   return {home:home.length===1?safe(home[0].RecentGamesBackgroundContainer):undefined,homeImages:home.length===1?safe(home[0].RecentGamesBackgroundImages):undefined,homeRoot:home.length===1?safe(home[0].RecentGamesContainer):undefined,detail:detail.length===1?safe(detail[0].HeaderBackgroundImage):undefined,detailImages:detail.length===1?safe(detail[0].ImgSrc):undefined};
 }
+const imageIdentity=(entry:any)=>entry?.kind==='image'?JSON.stringify([entry.assetId,entry.revision,entry.bindingRevision,entry.url]):null;
 export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,client,entrance='fade'}:{host:any;react:any;reactDom?:any;ui?:any;routerHook:any;client:MirrorClient;entrance?:WallpaperEntrance}):()=>void {
   // Event-only diagnostics: bounded history, no source URLs/tokens and no timer.
   const traceNow=()=>globalThis.performance?.now?.()??Date.now(),traceStarted=traceNow();
@@ -41,7 +42,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
   const capable=typeof routerHook?.addPatch==='function'&&typeof routerHook?.removePatch==='function'&&typeof reactDom?.createPortal==='function';
   trace('install',{router:typeof routerHook?.addPatch==='function',portal:typeof reactDom?.createPortal==='function'});
   if(!capable)return ()=>{};
-  let disposed=false,transportAvailable=true,enabled=false,playbackKnown=false,needReady=true,wallpaperDemand=false,sequence=0,current:WallpaperSelection|null=null,currentSeq=0,currentVisible=false,currentOwner:any=null,frame:any=null,contextPending=false,resumeGeneration=0,stateRevision=0,stateOwner:string|null=null;
+  let disposed=false,transportAvailable=true,enabled=false,nativeAdmission=false,playbackKnown=false,needReady=true,wallpaperDemand=false,sequence=0,current:WallpaperSelection|null=null,currentSeq=0,currentVisible=false,currentOwner:any=null,frame:any=null,contextPending=false,resumeGeneration=0,stateRevision=0,stateOwner:string|null=null;
   const retiredStateOwners=new Set<string>();
   const validEntry=(entry:any)=>entry&&typeof entry.assetId==='string'&&typeof entry.revision==='string'&&['video','image'].includes(entry.kind)&&typeof entry.url==='string'&&/^http:\/\/127\.0\.0\.1:\d+\/asset\/[a-z0-9-]+\.(mp4|webm|jpg|png|webp|bmp|ico)\?token=[a-f0-9]+$/.test(entry.url);
   const classes=wallpaperClasses(ui?.modules);const roots=new Set<any>();
@@ -55,6 +56,19 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
   // Space identical, unacknowledged ready retries on existing events only.
   // First selection, changed intent, forced recovery and failed sends stay immediate.
   let readyContextSentAt:number|null=null;
+  const bootstrapWaitOwner={};let stopBootstrapWait:(()=>void)|null=null;
+  function syncBootstrapWait(){
+    // Unknown local binding is not an OFF receipt. Only a visible, selected
+    // route whose current context was not accepted may observe its arrival.
+    const waiting=!disposed&&host.__YMCC_DECKY_MIRROR__==null&&contextPending&&currentVisible&&!!current&&roots.has(currentOwner);
+    if(waiting){
+      if(!stopBootstrapWait)stopBootstrapWait=client.waitForBootstrap(bootstrapWaitOwner,()=>{
+        stopBootstrapWait=null;if(disposed)return;
+        if(host.__YMCC_DECKY_MIRROR__!=null)client.bootstrapChanged();
+        bootstrap();
+      });
+    }else{const stop=stopBootstrapWait;stopBootstrapWait=null;stop?.();}
+  }
   const report=(selection:WallpaperSelection|null,owner:any,visible:boolean,force=false)=>{
     if(disposed||!selection)return;
     // A forced transport/ready report may only revalidate its own visible route.
@@ -67,18 +81,19 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     if(same&&!force&&!contextPending&&sameReadyInFlight)return;
     // Request sequencing fences incoming replies, not an already verified display.
     // Keep the same selected asset through a recheck, without inventing a new ack.
-    const keep=same&&visible&&enabled&&playbackKnown&&transportAvailable&&!!frame?.entry;
+    const keep=same&&visible&&nativeAdmission&&enabled&&playbackKnown&&transportAvailable&&!!frame?.entry;
     if(!keep){frame=null;if(currentOwner)owners.get(currentOwner)?.clear();}
     current=selection;currentVisible=visible;currentOwner=owner;currentSeq=++sequence;
     contextPending=!client.sendWallpaper('wallpaper.context',{contextSeq:currentSeq,appId:selection.appId,name:selection.name,visible,requestReady:needReady});
     readyContextSentAt=needReady&&!contextPending?now:null;
+    syncBootstrapWait();
     trace('context',{appId:selection.appId,seq:currentSeq,visible,sent:!contextPending});refresh();
   };
   const foregrounds=new Map<Document,WallpaperForeground>();
   const foregroundFor=(doc:Document)=>{let state=foregrounds.get(doc);if(!state){state=new WallpaperForeground(doc);foregrounds.set(doc,state);}return state;};
   if(host.document?.defaultView)foregroundFor(host.document);
   function Surface(props:any){
-    const players=React.useRef(null);const output=React.useRef(null);const root=React.useRef(null);const owner=React.useRef({}).current;const [,update]=React.useState(0);const [visible,setVisible]=React.useState(false);const admitted=React.useRef(false);const [surface,setSurface]=React.useState(null);const inView=React.useRef(false);const [viewport,setViewport]=React.useState(null);
+    const players=React.useRef(null);const output=React.useRef(null);const root=React.useRef(null);const owner=React.useRef({}).current;const [,update]=React.useState(0);const [visible,setVisible]=React.useState(false);const admitted=React.useRef(false);const [surface,setSurface]=React.useState(null);const inView=React.useRef(false);const [viewport,setViewport]=React.useState(null);const imageNode=React.useRef(null);const [imageReady,setImageReady]=React.useState(null);
     React.useEffect(()=>{
       const node=root.current as HTMLElement|null;if(!node||disposed)return;const doc=node.ownerDocument,view=doc.defaultView;if(!view)return;
       const route:Element|null=props.routeRoot??node.closest('[data-ymcc-wallpaper-route]');
@@ -93,7 +108,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
         }catch{}return true;
       };
       const render=()=>update((n:number)=>n+1),reset=()=>players.current?.stop();listeners.add(render);resets.add(reset);
-      owners.set(owner,{visible:()=>admitted.current&&routeVisible(),clear:()=>players.current?.clearCurrent()});
+      owners.set(owner,{visible:()=>foregroundFor(doc).localAllowed()&&routeVisible(),clear:()=>players.current?.clearCurrent()});
       const selected=()=>{
         if(!routeVisible())return null;
         const focused=doc.activeElement,other=focused?.closest('[data-ymcc-wallpaper-route]');
@@ -106,9 +121,9 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
           (props.page==='/library/home'&&classes.homeImages?selectionFromElement(route?.querySelector('.'+classes.homeImages)):null);
       };
       const foreground=foregroundFor(doc);
-      const updateVisibility=(force=false)=>{const show=foreground.allowed()&&routeVisible();const changed=admitted.current!==show;admitted.current=show;if(!show)players.current?.stop();setVisible(show);if(changed)trace(show?'foreground':'background',{page:props.page});if(!show&&currentOwner===owner&&current)report(current,owner,false,force);if(show)roots.add(owner);else roots.delete(owner);bootstrap();if(show&&currentOwner===owner&&current)report(current,owner,true,force);};
+      const updateVisibility=(force=false)=>{const local=foreground.localAllowed()&&routeVisible(),show=local&&foreground.allowed();const changed=admitted.current!==show;admitted.current=show;if(!show)players.current?.stop();setVisible(show);if(changed)trace(show?'foreground':'background',{page:props.page});if(!local&&currentOwner===owner&&current)report(current,owner,false,force);if(local)roots.add(owner);else roots.delete(owner);bootstrap();if(local&&currentOwner===owner&&current)report(current,owner,true,force);};
       const offVisibility=foreground.subscribe(updateVisibility);
-      const focus=(event:any)=>{if(!belongs(event.target)||!routeVisible())return;foreground.revalidateFocus(event);updateVisibility();const selection=props.appId?{appId:String(props.appId),name:''}:selectionFromElement(event.target);if(selection){report(selection,owner,admitted.current&&foreground.allowed());}};
+      const focus=(event:any)=>{if(!belongs(event.target)||!routeVisible())return;foreground.revalidateFocus(event);updateVisibility();const selection=props.appId?{appId:String(props.appId),name:''}:selectionFromElement(event.target);if(selection){report(selection,owner,foreground.localAllowed()&&routeVisible());}};
       doc.addEventListener('focusin',focus,true);
       // HUD/QAM may already own the socket. Acquire wallpaper demand first;
       // no new connection event will replay an initial request on that socket.
@@ -116,7 +131,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
       // A mounted Steam route may still have no foreground admission or card.
       // Record the actual one-time gate values; do not poll or relax playback.
       trace('route-mounted',{page:props.page,documentVisibility:doc.visibilityState,documentFocused:doc.hasFocus(),foregroundAllowed:foreground.allowed(),routeVisible:routeVisible(),selectionFound:!!initial,connected:transportAvailable,playbackKnown,enabled});
-      if(initial)report(initial,owner,admitted.current,true);
+      if(initial)report(initial,owner,foreground.localAllowed()&&routeVisible(),true);
       let nativeObserver:MutationObserver|null=null;
       if(props.page==='/library/home'&&classes.homeImages){
         let watched:Element|null=null,watchedBackground:Element|null=null,nativeBound=false;
@@ -130,7 +145,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
             if(route&&route!==holder&&route!==background)nativeObserver?.observe(route,{childList:true,subtree:!holder&&!background});
           }
         };
-        nativeObserver=new view.MutationObserver(()=>{if(disposed)return;watchNativeSelection();const selection=selected();if(selection)report(selection,owner,admitted.current&&foreground.allowed());});
+        nativeObserver=new view.MutationObserver(()=>{if(disposed)return;watchNativeSelection();const selection=selected();if(selection)report(selection,owner,foreground.localAllowed()&&routeVisible());});
         watchNativeSelection();
       }
       return()=>{nativeObserver?.disconnect();admitted.current=false;players.current?.stop();if(currentOwner===owner&&!disposed&&current)client.sendWallpaper('wallpaper.context',{contextSeq:++sequence,appId:current.appId,name:current.name,visible:false});roots.delete(owner);bootstrap();listeners.delete(render);resets.delete(reset);owners.delete(owner);offVisibility();doc.removeEventListener('focusin',focus,true);if(currentOwner===owner){currentOwner=null;current=null;currentVisible=false;frame=null;refresh();}};
@@ -191,7 +206,15 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     // frame may belong to the preceding request for this exact owner/selection;
     // report revokes it synchronously whenever that display authority changes.
     const active=!disposed&&enabled&&admitted.current&&currentOwner===owner&&frame?.entry&&visible&&onScreen;
-    const displayed=frame;
+    const displayed=frame,imageKey=imageIdentity(active?displayed?.entry:null);
+    const ownsImage=(node:HTMLImageElement)=>!disposed&&enabled&&admitted.current&&inView.current&&currentOwner===owner&&currentVisible&&imageNode.current===node&&node.isConnected&&imageKey!==null&&imageIdentity(frame?.entry)===imageKey&&foregroundFor(node.ownerDocument).allowed();
+    const imageLoaded=(event:any)=>{const node=event.currentTarget as HTMLImageElement;if(ownsImage(node)&&node.complete&&node.naturalWidth>0)setImageReady(node);};
+    const imageFailed=(event:any)=>{
+      if(!ownsImage(event.currentTarget))return;
+      const failed=frame;setImageReady(null);(surface as HTMLElement|null)?.removeAttribute('data-ymcc-wallpaper-ready');frame=null;
+      trace('playback-failed',{appId:failed.appId,seq:failed.contextSeq,kind:'image'});
+      client.sendWallpaper('wallpaper.status',{contextSeq:failed.contextSeq,appId:failed.appId,assetId:failed.entry.assetId,bindingRevision:failed.entry.bindingRevision,status:'playback-failed'});refresh();
+    };
     React.useEffect(()=>{
       const doc=root.current?.ownerDocument;if(!doc)return;
       if(!players.current)players.current=new WallpaperPlayers(doc,(failed:any)=>{if(!disposed&&enabled&&currentOwner===owner&&currentVisible&&failed.contextSeq===currentSeq&&failed.appId===current?.appId){trace('playback-failed',{appId:failed.appId,seq:failed.contextSeq});client.sendWallpaper('wallpaper.status',{contextSeq:failed.contextSeq,appId:failed.appId,assetId:failed.entry.assetId,bindingRevision:failed.entry.bindingRevision,status:'playback-failed'});}},{entrance,allowed:()=>admitted.current,presented:(shown:any)=>trace('video-ready',{appId:shown.appId,seq:shown.contextSeq})});
@@ -200,11 +223,19 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
       if(active&&displayed?.entry.kind==='video'&&output.current){player.show(output.current,displayed);}else player.clearCurrent();
     });
     React.useEffect(()=>()=>{players.current?.stop();players.current=null;},[]);
-    React.useEffect(()=>{if(!surface||!active)return;const target=surface as HTMLElement;target.setAttribute('data-ymcc-wallpaper-target',props.page);if(displayed?.entry.kind==='image')target.setAttribute('data-ymcc-wallpaper-ready','true');return()=>{target.removeAttribute('data-ymcc-wallpaper-target');target.removeAttribute('data-ymcc-wallpaper-ready');};},[surface,active,props.page,frame?.entry?.kind]);
+    React.useLayoutEffect(()=>{
+      if(imageReady&&(!active||imageReady!==imageNode.current))setImageReady(null);
+      if(!surface||!active)return;
+      const target=surface as HTMLElement;target.setAttribute('data-ymcc-wallpaper-target',props.page);
+      // A static fallback can also fail or arrive late. Keep Steam's native
+      // background until this exact image has decoded; old nodes own no output.
+      if(imageKey&&imageReady===imageNode.current&&imageReady?.complete&&imageReady.naturalWidth>0)target.setAttribute('data-ymcc-wallpaper-ready','true');
+      return()=>{target.removeAttribute('data-ymcc-wallpaper-target');target.removeAttribute('data-ymcc-wallpaper-ready');};
+    },[surface,active,props.page,displayed?.entry?.kind,imageKey,imageReady]);
     const nativeImage=props.page==='/library/home'?classes.homeImages:classes.detailImages;
     const content=React.createElement(React.Fragment,null,active?React.createElement('style',null,`[data-ymcc-wallpaper-target="${props.page}"]{opacity:1!important}[data-ymcc-wallpaper-target="${props.page}"] .${nativeImage}{transition:opacity ${displayed?.entry.kind==='video'?wallpaperEntranceMs(entrance):0}ms ease-out!important}[data-ymcc-wallpaper-target="${props.page}"][data-ymcc-wallpaper-ready="true"] .${nativeImage}{opacity:0!important}@media(prefers-reduced-motion:reduce){[data-ymcc-wallpaper-target="${props.page}"] .${nativeImage}{transition:none!important}}`):null,
       React.createElement('div',{ref:output,'data-ymcc-wallpaper-surface':props.page,style:{position:'absolute',inset:0,pointerEvents:'none',zIndex:0,overflow:'hidden'}},
-      active&&frame.entry.kind==='image'?React.createElement('img',{src:frame.entry.url,alt:'',style:{width:'100%',height:'100%',objectFit:frame.entry.playback?.fit||'cover',opacity:frame.opacity??0.64,filter:(frame.blur??0)>0?`blur(${frame.blur}px)`:'none'}}):null));
+      active&&frame.entry.kind==='image'?React.createElement('img',{key:imageKey,ref:imageNode,src:frame.entry.url,alt:'',onLoad:imageLoaded,onError:imageFailed,style:{width:'100%',height:'100%',objectFit:frame.entry.playback?.fit||'cover',opacity:frame.opacity??0.64,filter:(frame.blur??0)>0?`blur(${frame.blur}px)`:'none'}}):null));
     return React.createElement(React.Fragment,null,React.createElement('span',{ref:root,style:{display:'none'}}),surface&&active?reactDom.createPortal(content,surface):null);
   }
   const patches:Array<{path:string;patch:any}>=[];
@@ -255,6 +286,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
       }
       stateRevision=revision;
     }
+    nativeAdmission=message.foreground===true;for(const foreground of foregrounds.values())foreground.confirmNative(nativeAdmission);
     if(message.type==='wallpaper-ready'){playbackKnown=true;needReady=false;readyContextSentAt=null;trace('ready',{enabled:message.enabled===true});const changed=enabled!==(message.enabled===true);enabled=message.enabled===true;
       const resumed=enabled&&Number.isSafeInteger(generation)&&generation>resumeGeneration;
       if(resumed){resumeGeneration=generation;trace('native-resume',{generation});}if(!enabled||resumed){resetPlayers();frame=null;}
@@ -265,23 +297,24 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     // once OFF is known, a cached frame cannot turn it back on.
     if(message.enabled===true&&!enabled&&(playbackKnown||message.stateRevision!==undefined))return;
     playbackKnown=true;needReady=false;readyContextSentAt=null;enabled=message.enabled===true;if(!enabled)resetPlayers();
-    if(!enabled||!message.entry){trace('frame-empty',{appId:current?.appId,seq:currentSeq,enabled,status:typeof message.status==='string'?message.status.slice(0,64):undefined});frame=null;refresh();return;}
+    if(!enabled||!nativeAdmission||!message.entry){trace('frame-empty',{appId:current?.appId,seq:currentSeq,enabled,status:typeof message.status==='string'?message.status.slice(0,64):undefined});frame=null;refresh();return;}
     const entry=message.entry;
     if(!validEntry(entry)){trace('frame-rejected',{appId:current?.appId,seq:currentSeq});return;}
     const same=frame?.contextSeq===message.contextSeq&&frame?.entry?.url===entry.url&&frame?.entry?.assetId===entry.assetId&&frame?.entry?.revision===entry.revision&&frame?.entry?.bindingRevision===entry.bindingRevision&&frame?.opacity===message.opacity&&frame?.blur===message.blur&&JSON.stringify(frame?.entry?.playback)===JSON.stringify(entry.playback);
     frame=message;if(!same){trace('frame',{appId:current?.appId,seq:currentSeq,kind:entry.kind});refresh();}
   });
-  const offConnection=client.subscribe(state=>{transportAvailable=state.connected;if(!state.connected){playbackKnown=false;needReady=true;readyContextSentAt=null;resetPlayers();frame=null;enabled=false;resumeGeneration=0;stateRevision=0;stateOwner=null;retiredStateOwners.clear();refresh();}else if(current&&currentOwner)report(current,currentOwner,currentVisible,true);},{connectionOnly:true});
+  const offConnection=client.subscribe(state=>{transportAvailable=state.connected;if(!state.connected){nativeAdmission=false;for(const foreground of foregrounds.values())foreground.confirmNative(false);playbackKnown=false;needReady=true;readyContextSentAt=null;resetPlayers();frame=null;enabled=false;resumeGeneration=0;stateRevision=0;stateOwner=null;retiredStateOwners.clear();refresh();}else if(current&&currentOwner)report(current,currentOwner,currentVisible,true);},{connectionOnly:true});
   const bootstrap=()=>{
-    const wanted=!disposed&&roots.size>0&&host.__YMCC_DECKY_MIRROR__?.wallpaperProtocol===1;
+    const wanted=!disposed&&roots.size>0&&host.__YMCC_DECKY_MIRROR__?.wallpaperProtocol===1&&host.__YMCC_DECKY_MIRROR__?.revoked!==true;
     if(wanted&&!wallpaperDemand){needReady=true;readyContextSentAt=null;}wallpaperDemand=wanted;
     client.setPassiveDemand('wallpaper',wanted);
     // A late bootstrap can grant demand without opening a new socket. Retry
     // only a context that was not accepted; ordinary focus/DOM updates stay idle.
     if(wanted&&contextPending&&current&&currentOwner)report(current,currentOwner,currentVisible,true);
+    syncBootstrapWait();
   };
   host.addEventListener('ymcc-decky-bootstrap',bootstrap);bootstrap();
   const disposeFallback=installWallpaperRouteFallback({host,react:React,reactDom,ui,routerHook,homeRootClass:classes.homeRoot,Surface,isDisposed:()=>disposed,trace});
-  return()=>{if(disposed)return;disposed=true;disposeFallback();for(const foreground of foregrounds.values())foreground.stop();foregrounds.clear();resetPlayers();frame=null;enabled=false;refresh();for(const listener of routeListeners)listener();routeListeners.clear();offExtra();offConnection();host.removeEventListener('ymcc-decky-bootstrap',bootstrap);for(const {path,patch} of patches)routerHook.removePatch(path,patch);listeners.clear();owners.clear();client.setPassiveDemand('wallpaper',false);};
+  return()=>{if(disposed)return;disposed=true;const stop=stopBootstrapWait;stopBootstrapWait=null;stop?.();disposeFallback();for(const foreground of foregrounds.values())foreground.stop();foregrounds.clear();resetPlayers();frame=null;enabled=false;refresh();for(const listener of routeListeners)listener();routeListeners.clear();offExtra();offConnection();host.removeEventListener('ymcc-decky-bootstrap',bootstrap);for(const {path,patch} of patches)routerHook.removePatch(path,patch);listeners.clear();owners.clear();client.setPassiveDemand('wallpaper',false);};
 }
 

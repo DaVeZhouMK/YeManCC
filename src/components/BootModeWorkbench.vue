@@ -3,15 +3,12 @@ import BootModePreview from './BootModePreview.vue';
 import '@/styles/bootModeGlow.css';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import InlineIcon from './InlineIcon.vue';
-import Dropdown from './Dropdown.vue';
 import BootModeFields from './BootModeFields.vue';
-import ControllerShortcutEditorView from '@/views/ControllerShortcutEditorView.vue';
 import { windowApi } from '@/bridge/api';
 import { isNativeRuntime } from '@/bridge/ipc';
 import { focusGamepadElement } from '@/gamepad/focus';
 import { BOOT_MODE_IDS, BOOT_MODE_LABELS, BOOT_MODE_CATEGORIES, cloneBootValue, resolveBootMode, setBootModeModuleScope, type BootModeDocument, type BootModeSnapshot, type BootModeId, type BootModeCategory, type BootModeModule, type BootConfig } from '@/bridge/bootModeModel';
 import type { BootDeviceCapabilities } from '@/bridge/bootModeModel';
-import type { ControllerShortcutRule } from '@/bridge/controllerShortcutRules';
 
 const props = withDefaults(defineProps<{
   document: BootModeDocument; initialMode: BootModeId; baseline?: BootModeSnapshot;
@@ -27,9 +24,9 @@ const emit = defineEmits<{
 }>();
 const draft = ref(cloneBootValue(props.document));
 const selected = ref(props.initialMode), category = ref<BootModeCategory>('performance');
-const controllerOpen = ref(false), notice = ref(''), supportDialog = ref('');
+const notice = ref(''), supportDialog = ref('');
 const confirmation = ref<'discard' | 'baseline' | 'preset' | 'replace' | ''>('');
-const sceneName = ref(''), scenePreset = ref(''), templateName = ref('');
+const sceneName = ref(''), scenePreset = ref('');
 const root = ref<HTMLElement | null>(null), dialog = ref<HTMLElement | null>(null), scroll = ref<HTMLElement | null>(null);
 const initialGlobal = cloneBootValue(props.baseline || props.document.global);
 const snapshot = computed(() => resolveBootMode(draft.value, selected.value));
@@ -38,9 +35,9 @@ const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(prop
 const blocked = computed(() => props.saving || props.externalModal);
 const localModal = computed(() => !!supportDialog.value || !!confirmation.value);
 const own = (module: BootModeModule) => selected.value === 'global' || !!draft.value.scenes[selected.value].overrides[module];
-const readOnly = (module: BootModeModule) => !own(module) || (selected.value === 'global' && module === 'controller');
+const readOnly = (module: BootModeModule) => !own(module);
 const presetOptions = computed(() => Object.keys(draft.value.presets[selected.value] || {}).map(value => ({ value, label: value })));
-const names: Record<BootModeModule, string> = { performance: '性能调度', fan: '风扇控制', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', controller: '手柄自定义', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观', sleep: '睡眠优化' };
+const names: Record<BootModeModule, string> = { performance: '性能调度', fan: '风扇控制', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观', sleep: '睡眠优化' };
 const supportKeys: Partial<Record<BootModeModule, keyof BootDeviceCapabilities>> = { performance: 'performance', fan: 'fan', charge: 'charge', gyro: 'gyro', sleep: 'hibernate' };
 function warning(module: BootModeModule) {
   const key = supportKeys[module];
@@ -64,7 +61,7 @@ function changeCategory(value: BootModeCategory) {
   void nextTick(() => { if (scroll.value) scroll.value.scrollTop = 0; });
 }
 watch(category, value => emit('category-change', value), { immediate: true });
-watch(selected, () => { scenePreset.value = ''; sceneName.value = ''; templateName.value = ''; notice.value = ''; if (scroll.value) scroll.value.scrollTop = 0; });
+watch(selected, () => { scenePreset.value = ''; sceneName.value = ''; notice.value = ''; if (scroll.value) scroll.value.scrollTop = 0; });
 // A successful save supplies the normalized document and its new revision.
 // Replacing the draft here makes the next save use that revision as well.
 let saveRequested = false, observedSaveReceipt = props.saveReceipt;
@@ -80,10 +77,10 @@ watch(() => props.document, (value, previous) => {
     return;
   }
   // Minimized drafts retain edits when only the panel's current/boot choice changes.
-  const config = (doc: BootModeDocument) => JSON.stringify([doc.global, doc.scenes, doc.presets, doc.controllerTemplates]);
+  const config = (doc: BootModeDocument) => JSON.stringify([doc.global, doc.scenes, doc.presets]);
   if (config(value) === config(previous)) {
     const updated = cloneBootValue(value);
-    draft.value = { ...updated, global: draft.value.global, scenes: draft.value.scenes, presets: draft.value.presets, controllerTemplates: draft.value.controllerTemplates };
+    draft.value = { ...updated, global: draft.value.global, scenes: draft.value.scenes, presets: draft.value.presets };
   } else notice.value = '配置已在外部更新，草稿已保留；保存冲突时请收回并重新载入。';
 });
 watch(() => props.saving, value => { if (!value && props.error) saveRequested = false; });
@@ -99,7 +96,7 @@ function requestClose() {
 }
 function saveScene() {
   const name = sceneName.value.trim();
-  if (blocked.value || readOnly('controller') || !name) return;
+  if (blocked.value || !name) return;
   if (['__proto__', 'prototype', 'constructor'].includes(name)) { notice.value = '请使用其他预设名称。'; return; }
   const entries = draft.value.presets[selected.value] || {};
   if (Object.prototype.hasOwnProperty.call(entries, name) && confirmation.value !== 'replace') { confirmation.value = 'replace'; return; }
@@ -122,17 +119,6 @@ function confirm() {
   if (action === 'replace') saveScene();
   confirmation.value = '';
 }
-function saveTemplate() {
-  const name = templateName.value.trim();
-  if (blocked.value || !name) return;
-  if (['__proto__', 'prototype', 'constructor'].includes(name)) { notice.value = '请使用其他手柄预设名称。'; return; }
-  if (!Object.prototype.hasOwnProperty.call(draft.value.controllerTemplates, name) && Object.keys(draft.value.controllerTemplates).length >= 30) { notice.value = '最多保存 30 个手柄预设，请使用已有名称。'; return; }
-  draft.value.controllerTemplates = { ...draft.value.controllerTemplates, [name]: cloneBootValue(snapshot.value.controller) };
-  templateName.value = ''; notice.value = '手柄预设已加入草稿，请保存更改。';
-}
-function applyRules(rules: ControllerShortcutRule[]) { update('controller', { ...snapshot.value.controller, name: '自定义手柄预设', rules: cloneBootValue(rules) } as unknown as BootConfig); }
-function chooseTemplate(value: string | number) { const preset = draft.value.controllerTemplates[String(value)]; if (preset) update('controller', preset); }
-
 let originalFocus: HTMLElement | null = null, modalFocus: HTMLElement | null = null, disposed = false;
 let widthHeld = false, widthQueue: Promise<void> = Promise.resolve();
 const widthOwner = 'boot-mode-editor-' + Date.now() + '-' + Math.random().toString(36).slice(2);
@@ -155,15 +141,15 @@ watch(() => props.active, async value => {
   if (value) { originalFocus = props.returnFocus || document.activeElement as HTMLElement; await nextTick(); focusGamepadElement(root.value?.querySelector('[data-boot-close]') || null); }
   else restoreFocus(originalFocus);
 }, { immediate: true });
-watch([localModal, controllerOpen, () => props.externalModal], async ([local, controller, external], previous) => {
+watch([localModal, () => props.externalModal], async ([local, external], previous) => {
   const wasBlocked = previous?.some(Boolean);
-  if (local || controller || external) {
+  if (local || external) {
     if (!wasBlocked) modalFocus = document.activeElement as HTMLElement;
     if (local) { await nextTick(); focusGamepadElement(dialog.value?.querySelector(focusable) || null); }
   } else if (props.active) restoreFocus(modalFocus);
 });
 function back(event: Event) {
-  if (!props.active || props.externalModal || controllerOpen.value || event.defaultPrevented) return;
+  if (!props.active || props.externalModal || event.defaultPrevented) return;
   if (root.value?.querySelector('[aria-expanded="true"][aria-haspopup="listbox"]')) return;
   event.preventDefault();
   if (supportDialog.value) supportDialog.value = '';
@@ -173,10 +159,9 @@ function back(event: Event) {
 function keydown(event: KeyboardEvent) {
   if (!props.active || props.externalModal || event.defaultPrevented) return;
   if (root.value?.querySelector('[aria-expanded="true"][aria-haspopup="listbox"]')) return;
-  if (event.key === 'Escape') { if (!controllerOpen.value) back(event); return; }
+  if (event.key === 'Escape') { back(event); return; }
   if (event.key !== 'Tab') return;
-  const nested = controllerOpen.value ? Array.from(root.value?.querySelectorAll<HTMLElement>('[data-gp-modal]') || []).filter(el => el.getClientRects().length).pop() : null;
-  const owner = nested || (localModal.value ? dialog.value : root.value);
+  const owner = localModal.value ? dialog.value : root.value;
   const controls = Array.from(owner?.querySelectorAll<HTMLElement>(focusable) || []).filter(el => !el.closest('[inert], [hidden]') && el.getClientRects().length);
   if (!controls.length) return;
   const index = controls.indexOf(document.activeElement as HTMLElement);
@@ -220,7 +205,7 @@ function enterCategoryFields() {
   if (target) focusGamepadElement(target);
 }
 function categoryNavigation(event: Event) {
-  if (event.defaultPrevented || !props.active || blocked.value || controllerOpen.value || localModal.value) return;
+  if (event.defaultPrevented || !props.active || blocked.value || localModal.value) return;
   const action = (event as CustomEvent<{ action?: string }>).detail?.action;
   if (!action || !['nav-left', 'nav-right', 'nav-up', 'nav-down'].includes(action)) return;
   const host = root.value, active = document.activeElement;
@@ -239,7 +224,7 @@ function categoryNavigation(event: Event) {
       if (id === category.value) enterCategoryFields();
       else {
         changeCategory(id);
-        void nextTick(() => { if (!disposed && props.active && !controllerOpen.value && !localModal.value && !props.externalModal) enterCategoryFields(); });
+        void nextTick(() => { if (!disposed && props.active && !localModal.value && !props.externalModal) enterCategoryFields(); });
       }
     } else if (action === 'nav-up' || action === 'nav-down') {
       const next = buttons[index + (action === 'nav-up' ? -1 : 1)];
@@ -278,7 +263,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div v-if="active" ref="root" class="boot-workbench-overlay" :data-gp-modal="externalModal ? undefined : 'boot-mode-workbench'" data-gp-scope="boot-mode-workbench" data-gp-spatial="nearest" data-performance-editor-scale="1" :inert="externalModal || undefined">
-      <section class="boot-workbench" role="dialog" aria-modal="true" aria-label="开机模式配置工作台" :inert="controllerOpen || localModal || undefined">
+      <section class="boot-workbench" role="dialog" aria-modal="true" aria-label="开机模式配置工作台" :inert="localModal || undefined">
 <header class="boot-workbench-top preview-editor-header">
     <div class="preview-editor-title"><small>开机模式</small><h2>编辑配置</h2></div>
     <div role="group" class="boot-mode-strip preview-editor-modes preview-modes-inline" aria-label="编辑模式选择">
@@ -292,23 +277,19 @@ onBeforeUnmount(() => {
   
         <div class="boot-workbench-columns">
           <aside>
-            <div class="boot-workbench-image"><BootModePreview :mode="selected" :active="active && !externalModal && !localModal && !controllerOpen"/></div>
+            <div class="boot-workbench-image"><BootModePreview :mode="selected" :active="active && !externalModal && !localModal"/></div>
 
             <nav aria-label="开机模式设置分类"><button v-for="item in BOOT_MODE_CATEGORIES" :key="item.id" :data-boot-category="item.id" :aria-pressed="category === item.id" :disabled="blocked" @click="changeCategory(item.id)"><InlineIcon :name="item.icon"/><span>{{ item.label }}</span><small>{{ item.modules.filter(id => own(id)).length }}/{{ item.modules.length }}</small></button></nav>
           </aside>
           <main class="boot-workbench-main">
-            <div class="boot-category-heading"><h3>{{ currentCategory.label }}</h3><p>{{ category === 'controller' && selected === 'global' ? '全局快捷键在手柄页修改，所有跟随项共用。' : '跟随全局；只有单独设置的栏目在此模式优先。' }}</p></div>
+            <div class="boot-category-heading"><h3>{{ currentCategory.label }}</h3><p>跟随全局；只有单独设置的栏目在此模式优先。</p></div>
             <div ref="scroll" class="boot-config-scroll" :class="{ 'optimization-grid': category === 'optimization' }" data-gp-pane="boot-mode-fields" @focusin="rememberField">
               <article v-for="module in currentCategory.modules" :key="selected + module" class="boot-module" :data-boot-module="module">
                 <header><h3>{{ names[module] }}</h3><button v-if="warning(module)" class="boot-support" :disabled="blocked" @click="supportDialog = warning(module)!.reason"><i>!</i>{{ warning(module)!.label }}</button><small>{{ selected === 'global' ? '全局配置' : own(module) ? '当前模式优先' : '共用全局' }}</small></header>
                 <div v-if="selected !== 'global'" class="boot-scope"><button :aria-pressed="!own(module)" :disabled="blocked" @click="scope(module, false)">跟随全局</button><button :aria-pressed="own(module)" :disabled="blocked" @click="scope(module, true)">模式单独设置</button></div>
-                <p v-if="module === 'touch'" class="boot-touch-note">此处为屏幕触摸按钮；实体按键请在「手柄自定义」设置。</p>
+                <p v-if="module === 'touch'" class="boot-touch-note">此处为屏幕触摸按钮；实体按键与校准请在全局「控制器」页面设置。</p>
                 <div v-if="module === 'performance' && support.hybridCores?.state !== 'supported'" class="boot-core-notice"><span>大小核调度</span><button class="boot-support" :disabled="blocked" @click="supportDialog = support.hybridCores?.reason || 'CPU 架构尚未确认'"><i>!</i>{{ support.hybridCores?.state === 'unsupported' ? '不支持' : '支持待确认' }}</button></div>
-                <div v-if="module === 'controller'" class="boot-template-row">
-                  <label><span>手柄预设</span><Dropdown :model-value="''" :options="Object.keys(draft.controllerTemplates).map(value => ({ value, label: value }))" :disabled="readOnly(module) || blocked" placeholder="选择手柄预设" aria-label="手柄自定义预设" @update:model-value="chooseTemplate"/></label>
-                  <input v-model="templateName" maxlength="60" :disabled="readOnly(module) || blocked" aria-label="手柄预设名称" placeholder="手柄预设名称"><button :disabled="readOnly(module) || blocked || !templateName.trim()" @click="saveTemplate">另存手柄预设</button>
-                </div>
-                <BootModeFields :module="module" :value="snapshot[module]" :disabled="readOnly(module) || blocked" :persona="String(snapshot.input.persona)" :support="support" :apps="apps" @change="update(module, $event)" @edit-controller="controllerOpen = true" @shared-apps="emit('shared-apps')"/>
+                <BootModeFields :module="module" :value="snapshot[module]" :disabled="readOnly(module) || blocked" :persona="String(snapshot.input.persona)" :support="support" :apps="apps" @change="update(module, $event)" @shared-apps="emit('shared-apps')"/>
               </article>
             </div>
           </main>
@@ -319,7 +300,6 @@ onBeforeUnmount(() => {
         <div v-if="supportDialog"><h3><i>!</i>设备兼容性</h3><p>{{ supportDialog }}</p><p>仍可编辑此项目。实际应用结果以设备接口回执为准。</p><button @click="supportDialog = ''">继续设置</button></div>
         <div v-else><h3>{{ confirmation === 'discard' ? '放弃未保存的修改？' : confirmation === 'baseline' ? '恢复本次载入的全局配置？' : confirmation === 'replace' ? '覆盖同名场景预设？' : '恢复选中的场景预设？' }}</h3><p>{{ confirmation === 'discard' ? '返回会丢弃草稿；使用「收回」可保留修改。' : confirmation === 'baseline' ? '使用打开此面板时捕获的全局配置，修改先写入草稿。' : '此操作修改所选开机预设，保存后重启生效。' }}</p><div class="boot-dialog-actions"><button @click="confirmation = ''">继续编辑</button><button class="primary" @click="confirm">{{ confirmation === 'discard' ? '放弃并返回' : '确认' }}</button></div></div>
       </div>
-      <ControllerShortcutEditorView v-if="controllerOpen && !externalModal" :teleport-to="root || 'body'" :persona="String(snapshot.input.persona) === 'disabled' ? 'elite' : String(snapshot.input.persona)" :preset-draft="{ name: own('controller') && selected !== 'global' ? BOOT_MODE_LABELS[selected] : '全局快捷动作', rules: snapshot.controller.rules as any, apps }" @preset-apply="applyRules" @close="controllerOpen = false"/>
     </div>
   </Teleport>
 </template>

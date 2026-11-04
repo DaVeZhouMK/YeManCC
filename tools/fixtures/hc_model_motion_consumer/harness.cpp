@@ -350,7 +350,18 @@ int main(int argc,char** argv) {
       const auto frozenFeature=before::observe(row),historicalFeature=historical::observe(row);
       check(frozenFeature["identity"]==historicalFeature["identity"],"feature-preimages",name+": both before identity resolvers execute");
       const bool wantedBefore=model["admitted"].get<bool>();
-      check(frozenFeature["bound"].get<bool>()==wantedBefore&&!historicalFeature["bound"].get<bool>(),"feature-preimages",name+": LegacyMotion before has new9 while historical before lacks it");
+      // Historical resolver bytes stay frozen. They share the candidate catalog,
+      // so the a250 resolver must reject the f2e58468 resource tuple rather than
+      // silently claim readiness with old axes. Preserve the original assertion
+      // count and verify both old identity axes and rejection, not a skip.
+      const bool upgraded=model.contains("previousResourceIdentity");
+      const bool oldFeature=upgraded
+        ? frozenFeature["identity"]["gyro"]==model["previousResourceIdentity"]["gyro"] &&
+          frozenFeature["identity"]["accel"]==model["previousResourceIdentity"]["accel"] &&
+          !frozenFeature["bound"].get<bool>() && !frozenFeature["admitted"].get<bool>()
+        : frozenFeature["bound"].get<bool>()==wantedBefore;
+      check(oldFeature&&!historicalFeature["bound"].get<bool>(),"feature-preimages",
+        name+(upgraded?": old resolver rejects upgraded resource and preserves old identity":": LegacyMotion before has new9 while historical before lacks it"));
       setup(row); inputCaptureResolveHcMotionSelector();
       const bool bound=inputCaptureMotionSelectorBound();
       const bool admitted=probeConsumer(true,true,true,"provider-a","provider-a",73,73);

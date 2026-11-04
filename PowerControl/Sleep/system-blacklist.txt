@@ -27,37 +27,7 @@ Start11_64.exe
 Start11Srv.exe
 
 # ---- 游戏启动器 / 商店 / 平台 ----
-Steam.exe
-steamwebhelper.exe
-steamerrorreporter.exe
-steamservice.exe
-Playnite.exe
-PlayniteUI.exe
-EpicGamesLauncher.exe
-EpicWebHelper.exe
-GalaxyClient.exe
-Battle.net.exe
-Origin.exe
-EADesktop.exe
-EALauncher.exe
-UbisoftConnect.exe
-upc.exe
-XboxApp.exe
-XboxPcAppFT.exe
-WeGame.exe
-tgp_daemon.exe
-HoYoPlay.exe
-HYP.exe
-BsgLauncher.exe
-RiotClientServices.exe
-RockstarGamesLauncher.exe
-SocialClubHelper.exe
-Heroic.exe
-wgc.exe
-wgc_api.exe
-Steamcommunity_302.exe
-steamcommunity_302.caddy
-steamcommunity_302.cli
+# 此分类由程序共享的 game_library_blacklist_entries.h 提供；旧版个人文件中的同名规则仍兼容。
 
 # ---- 游戏加速 / 串流 / 远程游戏工具 ----
 uu.exe

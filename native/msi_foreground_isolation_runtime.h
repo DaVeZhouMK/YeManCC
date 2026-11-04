@@ -50,9 +50,9 @@ static MsiForegroundIsolationTestIo g_msiForegroundTestIo;
 #endif
 static bool msiForegroundIsolationUiEligible() {
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
-    if(g_msiForegroundTestIo.ui) return g_msiForegroundTestIo.ui();
+    if(g_msiForegroundTestIo.ui) return g_controllerFrontendIsolationEnabled.load(std::memory_order_acquire) && g_msiForegroundTestIo.ui();
 #endif
-    return gamepadUiInputEligible();
+    return gamepadUiOutputIsolationEligible();
 }
 static bool msiForegroundIsolationSnapshot(HidHideVisibilitySnapshot& snapshot) {
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST

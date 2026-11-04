@@ -102,8 +102,16 @@ function Assert-DeckyCurrentSourceExport {
     [Parameter(Mandatory=$true)][string]$ProjectRoot
   )
   $project = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
-  $description = & node (Join-Path $project 'tools\build-decky-sidebar-plugin.mjs') --describe
-  if ($LASTEXITCODE -ne 0) { throw "DECKY_EXPORT_CURRENT_SOURCE_BUILD_FAILED: exit=$LASTEXITCODE" }
+  # Native stdout is UTF-8 JSON. No stdin is sent, so only its decoder changes.
+  $callerConsoleOutputEncoding = [Console]::OutputEncoding
+  try {
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $description = & node (Join-Path $project 'tools\build-decky-sidebar-plugin.mjs') --describe
+    $describeExitCode = $LASTEXITCODE
+  } finally {
+    [Console]::OutputEncoding = $callerConsoleOutputEncoding
+  }
+  if ($describeExitCode -ne 0) { throw "DECKY_EXPORT_CURRENT_SOURCE_BUILD_FAILED: exit=$describeExitCode" }
   $expected = ($description -join [Environment]::NewLine) | ConvertFrom-Json
   if (-not $expected.described -or [IO.Path]::GetFullPath($expected.sourceRoot).TrimEnd('\') -ine $project -or $expected.files.Count -ne 5) {
     throw 'DECKY_EXPORT_CURRENT_SOURCE_RECORD_INVALID'

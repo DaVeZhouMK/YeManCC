@@ -280,6 +280,9 @@ void strictSchemaAndOwner() {
     auto bad = base; bad["allDevices"] = true; rejects(fixture.path(), bad.dump());
     bad = base; bad["applications"] = Json::array({Json::array()}); rejects(fixture.path(), bad.dump());
     bad = base; bad["hiddenPaths"] = Json::array({42}); rejects(fixture.path(), bad.dump());
+    // The decoder negatives leave intentionally invalid bytes. Restore this
+    // private fixture baseline explicitly; the product writer must refuse them.
+    writeRaw(fixture.path(), bytes);
     save(fixture.path(), sample());
     auto invalid = sample(); invalid.owner = "other-owner"; invalidSave(fixture.path(), invalid, readRaw(fixture.path()));
 }

@@ -19,10 +19,10 @@ test('descriptor retains actual original source and exposes one reviewed softwar
  assert(adapter.evidenceInputs.includes('tools/tdp_frontend_static_selftest.ts'));
  assert(adapter.evidenceInputs.includes('src/bridge/yeman.ts'));
  assert(adapter.evidenceInputs.includes('tools/mock-shell.ts'));
- assert(adapter.artifactInputs.length>=749&&adapter.artifactInputs.length<=3072);assert.deepEqual(adapter.resultFiles,['tdp-consumer/result.json','tdp-consumer/output-evidence.json']);
+ assert.equal(adapter.artifactInputs.length,736);assert(adapter.artifactInputs.length<=3072);assert.deepEqual(adapter.resultFiles,['tdp-consumer/result.json','tdp-consumer/output-evidence.json']);
 });
 test('the entire original current report contract must pass',t=>{
- const original=execution(t);assert.equal(verifyOriginalExecution(original,spec).checks,20);
+ const original=execution(t);assert.equal(verifyOriginalExecution(original,spec).checks,87);
 });
 test('missing, duplicate and renamed original cases never become full acceptance',t=>{
  for(const mode of ['missing','duplicate','renamed']){

@@ -13,7 +13,7 @@ internal static class FanCapabilityPolicy
         "HandheldCompanion.Devices.OneXPlayerX1Intel" or "HandheldCompanion.Devices.OneXPlayerX1Pro" or ApexFactory;
     private static bool IsG1Factory(string? type) => type is
         "HandheldCompanion.Devices.OneXPlayerG1AMD" or "HandheldCompanion.Devices.OneXPlayerG1Intel";
-    internal static bool NeedsEcContract(string? type) => IsX1Factory(type) || IsG1Factory(type);
+    internal static bool NeedsEcContract(string? type) => IsX1Factory(type) || IsG1Factory(type) || MiniAmdFanContractAdapter.IsFactory(type);
     private static bool HasUsableInheritedEcContract(HcEcFanContract? contract) => contract is not null
         && contract.UseOpenLib && contract.ControlAddress is > 0 and <= ushort.MaxValue
         && contract.DutyAddress is > 0 and <= ushort.MaxValue && contract.ControlAddress != contract.DutyAddress
@@ -31,6 +31,10 @@ internal static class FanCapabilityPolicy
             return declared == true && contract?.FactoryType == factory && G1FanContractAdapter.Matches(contract)
                 ? new(true, true, "hc-g1-upstream-ec-contract", "G1 已匹配上游机型专属 EC 契约并沿用 HC 继承 writer（物理未验证）")
                 : new(false, declared, "hc-inherited-ec-contract-incomplete", "当前 G1 未匹配完整的机型专属上游 EC 写入契约");
+        if (MiniAmdFanContractAdapter.IsFactory(factory))
+            return declared == true && contract?.FactoryType == factory && MiniAmdFanContractAdapter.Matches(contract)
+                ? new(true, true, "hc-miniamd-fixed-duty-contract", "MiniAMD已匹配固定来源0..100占空比合同（物理未验证）")
+                : new(false, declared, "hc-miniamd-duty-contract-incomplete", "MiniAMD未匹配完整的固定来源占空比合同");
         if (declared == true) return new(true, true, "hc-fan-control-declared", "HC 已声明 FanControl 能力");
         // The legacy implementation accepts mapped routes when HC exposes no capability field.
         if (declared is null) return new(true, null, "legacy-route-capability-unavailable", "HC 路线已登记，能力字段不可读");
@@ -65,7 +69,7 @@ internal static class FanCapabilityPolicy
         Check(!Evaluate(true, false, null).Supported, "fan942-missing-contract-rejected");
         Check(Evaluate(true, false, source).Declared == false, "fan942-hc-declaration-not-forged");
         foreach (var name in new[] { "AOKZOEA1", "AOKZOEA1Pro", "AOKZOEA1X", "AOKZOEA2", "OneXPlayer2", "OneXPlayer2Pro",
-            "OneXPlayerMiniAMD", "OneXPlayerMiniIntel", "OneXPlayerMiniPro", "OneXPlayerOneXFly", "OneXPlayerOneXFlyF1Pro" })
+            "OneXPlayerMiniIntel", "OneXPlayerMiniPro", "OneXPlayerOneXFly", "OneXPlayerOneXFlyF1Pro" })
             Check(Evaluate(true, true, null, "HandheldCompanion.Devices." + name).Supported, "fan942-family-declared-unchanged-" + name);
         foreach (var name in new[] { "OneXPlayerG1AMD", "OneXPlayerG1Intel" })
         {
@@ -82,6 +86,12 @@ internal static class FanCapabilityPolicy
             Check(!Evaluate(true, true, expected with { Max = expected.Max == 255 ? 184 : 255 }, factory).Supported,
                 "fan942-g1-cross-model-range-rejected-" + name);
         }
+        var mini = MiniAmdFanContractAdapter.Expected;
+        Check(Evaluate(true, true, mini, mini.FactoryType).Supported, "fan-miniamd-complete100-supported");
+        Check(!Evaluate(true, true, mini with { Max = 255 }, mini.FactoryType).Supported, "fan-miniamd-old255-rejected");
+        Check(!Evaluate(true, true, null, mini.FactoryType).Supported, "fan-miniamd-missing-contract-rejected");
+        Check(!Evaluate(true, false, mini, mini.FactoryType).Supported, "fan-miniamd-undeclared-rejected");
+        Check(!Evaluate(true, true, mini with { DutyDeclaringType = "foreign" }, mini.FactoryType).Supported, "fan-miniamd-foreign-writer-rejected");
         return checks;
     }
 }

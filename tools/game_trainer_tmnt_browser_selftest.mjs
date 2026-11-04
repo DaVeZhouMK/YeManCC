@@ -20,13 +20,13 @@ assert(mockStart>=0&&mockEnd>mockStart);
 const mocks=vm.runInNewContext('(function(){'+shared.slice(mockStart,mockEnd)+'return mocks;})()');
 mocks['@/bridge/yeman'] += 'export const getTdpExecutionCapability=async()=>null;export const formatTdpTarget=(value)=>String(value)+" W";';
 const engine=fs.readFileSync('src/gamepad/engine.ts','utf8');
-const focusStart=engine.indexOf('function focusables(): HTMLElement[] {'),focusEnd=engine.indexOf('function isRangeInput(',focusStart);
+const focusStart=engine.indexOf('function focusables('),focusEnd=engine.indexOf('function isRangeInput(',focusStart);
 assert(focusStart>=0&&focusEnd>focusStart);
 const focusCode=engine.slice(focusStart,focusEnd);
 const pageCommandCode=engine.slice(engine.indexOf('function offerPageCommand('),engine.indexOf('function navigate('));
 const backCode=pageCommandCode+'\n'+engine.slice(engine.indexOf('function handleGamepadBack('),engine.indexOf('function handleGamepadEditGame('));
 Object.assign(mocks,{
- '@/gamepad/engine': `import {focusGamepadElement,setGamepadFocused} from './src/gamepad/focus.ts';import {spatialNavigationTarget} from './src/gamepad/spatial.ts';const FOCUSABLE='button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';const activeFanNodeEditor=()=>null;export const isMouseModeSuppressed=()=>false;${focusCode}\nexport const testMoveFocus=moveFocus;let sliderEditMode=false;const log=()=>{};${backCode} export const testControllerBack=handleGamepadBack;`,
+ '@/gamepad/engine': `import {focusGamepadElement,setGamepadFocused} from './src/gamepad/focus.ts';import {spatialNavigationTarget,createSpatialMeasurements,type SpatialMeasurements} from './src/gamepad/spatial.ts';const FOCUSABLE='button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';const activeFanNodeEditor=()=>null;export const isMouseModeSuppressed=()=>false;${focusCode}\nexport const testMoveFocus=moveFocus;let sliderEditMode=false;const log=()=>{};${backCode} export const testControllerBack=handleGamepadBack;`,
  '@/bridge/uiSettings': `export const getUiSetting=()=>window.__fixture.autoTrainer!==false;export const loadUiSettings=async()=>{};export const setUiSettings=async patch=>{window.__fixture.autoTrainer=patch.trainerAutoPrepare;window.dispatchEvent(new CustomEvent('ui-settings:changed'))};`,
  '@/bridge/gamePolicyTarget': `export const getPolicyGame=()=>window.__fixture.game;export function subscribePolicyGameStatus(callback){callback(window.__fixture.game);return ()=>{}};`,
  '@/bridge/gameQuickSession': `export const getLockedGameTarget=()=>null;export const validateLockedGameTarget=async()=>window.__fixture.game;export const unlockGameTarget=()=>{};export const lockGameTarget=game=>game;export const captureAndLockGameTarget=async game=>game;`,

@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
         <button type="button" class="trainer-menu-action" data-gp-row="3" data-gp-col="0" data-trainer-ce :disabled="opening" @click="openCe"><AppIcon name="bolt" /><span><strong>启动 Cheat Engine</strong><small>与修改器管理器共用 CE 配置</small></span></button>
         <button type="button" class="trainer-menu-action" data-gp-row="4" data-gp-col="0" :disabled="saving" :aria-pressed="autoEnabled" @click="toggleAuto"><AppIcon name="rotate" /><span><strong>{{ autoEnabled ? '关闭自动下载修改器' : '开启自动下载修改器' }}</strong><small>{{ autoEnabled ? '识别游戏后，在额度内后台下载' : '自动下载已关闭' }}</small></span></button>
         </div>
-        <button type="button" class="trainer-menu-cancel" data-gp-row="5" data-gp-col="0" @click="close"><strong class="trainer-key-b">B</strong>关闭页面</button>
+        <button type="button" class="trainer-menu-cancel" data-gp-row="5" data-gp-col="0" @click="close"><span class="controller-key trainer-key-b" data-controller-key="B">B</span>关闭页面</button>
       </section>
     </div>
   </Teleport>

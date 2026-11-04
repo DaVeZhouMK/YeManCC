@@ -18,10 +18,12 @@ for (let i=0; i<args.length; ++i) {
   if (['--out','--vcvars'].includes(args[i]) && args[i+1]) options[args[i].slice(2)] = args[++i];
   else throw Error(`Unknown/incomplete argument ${args[i]}`);
 }
-const validation = path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXProtocol');
+let validation = path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXProtocol');
 const out = path.resolve(options.out || path.join(validation,new Date().toISOString().replace(/[:.]/g,'-')));
 const inside = (base,target) => {const relative=path.relative(base,target);return relative==='' || (!path.isAbsolute(relative) && relative!=='..' && !relative.startsWith(`..${path.sep}`));};
-if (!inside(validation,out)) throw Error('Output must stay under Build/Validation/HC-ModelCapabilities-20261017/OneXProtocol');
+const coreEvidence=path.join(workspace,'Testing/YMCC/Evidence');
+if(inside(coreEvidence,out)&&out!==coreEvidence)validation=coreEvidence;
+if (!inside(validation,out)) throw Error('Output must stay under OneXProtocol or Testing/YMCC/Evidence');
 // Resolve existing parents before creating output, so junctions cannot redirect it.
 fs.mkdirSync(validation,{recursive:true});
 const realRoot=fs.realpathSync(validation);
@@ -64,6 +66,8 @@ try {
   if(JSON.stringify(includes)!==JSON.stringify(['array','cstddef','cstdint','optional','string_view']) || /^\s*#\s*include\s*"/m.test(source))
     throw Error('Header dependency boundary changed');
   const o=deriveOracle(workspace,fixtures);
+  receipt.inputs.push(...o.upgrades.map(({path,sha256})=>({path,sha256})));
+  receipt.upstreamOverrides=o.upgrades;
   receipt.upstream={commit:o.commit,manifestSha256:o.manifestSha256,treeSha256:o.treeSha256,sourcePinsSha256:o.sourcePinsSha256,files:o.provenance};
   receipt.oracleSha256=sha(JSON.stringify(o));
   fs.writeFileSync(path.join(out,'expectations.json'),JSON.stringify(o,null,2)+'\n');

@@ -9,9 +9,13 @@ function Assert-AppearanceIdlePath {
     $path
 }
 function Get-AppearanceSteamSession {
-    $all=@(Get-Process -Name steam -ErrorAction SilentlyContinue|Where-Object {Test-CurrentUserProcess $_})
-    if($all.Count -ne 1){return $null}
-    $process=$all[0]
+    if(!$script:AppearanceProcessReceipt){$null=Update-AppearanceProcessInventory}
+    $expectedPid=if($SessionPid){$SessionPid}else{$script:AppearanceProcessReceipt.steamPid}
+    $expectedBirth=if($SessionBirth){$SessionBirth}else{$script:AppearanceProcessReceipt.steamBirth}
+    if(!$expectedPid){return $null}
+    $process=Get-Process -Id $expectedPid -ErrorAction SilentlyContinue
+    if(!$process -or $process.HasExited){return $null}
+    if($process.StartTime.ToUniversalTime().ToFileTimeUtc().ToString() -ne $expectedBirth -or !(Test-CurrentUserProcess $process)){throw 'Exact Steam identity changed; shared observation required'}
     $image=Get-AppearanceProcessPath $process
     if([IO.Path]::GetFileName($image) -ine 'steam.exe'){return $null}
     [pscustomobject]@{pid=[int]$process.Id;birth=([string]$process.StartTime.ToUniversalTime().ToFileTimeUtc());root=[IO.Path]::GetDirectoryName($image)}
@@ -36,7 +40,7 @@ function Clear-AppearanceIdle {
 function Test-CssDesktopEditing {
     # No timer/cache: validate once at the destructive action boundary. Minimized
     # Desktop still means an edit; an unreadable matching process preserves CSS.
-    try{$processes=@(Get-Process -Name 'CSSLoader Desktop','CSSLoader-Desktop' -ErrorAction SilentlyContinue)}catch{return $true}
+    try{$processes=@(Get-AppearanceProcessCandidates 2 -Refresh)}catch{return $true}
     foreach($process in $processes){
         try {
             if($process.HasExited){continue}

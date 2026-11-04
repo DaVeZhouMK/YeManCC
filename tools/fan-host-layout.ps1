@@ -44,7 +44,20 @@ function Assert-FanHostToolingPaths([string]$ProjectRoot) {
     if ($c.forbidden -and $text.Contains($c.forbidden)) { throw ('FAN_LEGACY_RUNTIME_PATH: '+$c.file) }
   }
   $workflow=[IO.File]::ReadAllText((Join-Path $ProjectRoot '.github/workflows/release.yml'))
-  $pre=$workflow.IndexOf('name: Verify local Fan Host V2 lane before publishing')
+  # Preparation and formal publishing share this local composite. Expand only
+  # its declared prepublication step location so the original ordering assertion
+  # still checks preflight -> publish -> download -> public-byte gate -> main.
+  $sharedCall='uses: ./.github/actions/release-build'
+  if($workflow.Contains($sharedCall)){
+    if(([regex]::Matches($workflow,[regex]::Escape($sharedCall))).Count -ne 1 -or $workflow -notmatch '(?m)^\s+mode:\s+formal\s*$'){throw 'FAN_PUBLISH_GATE_ORDER_DRIFT'}
+    $actionPath=Join-Path $ProjectRoot '.github/actions/release-build/action.yml'
+    if(!(Test-Path -LiteralPath $actionPath -PathType Leaf)){throw 'FAN_PUBLISH_GATE_ORDER_DRIFT'}
+    $shared=[IO.File]::ReadAllText($actionPath)
+    if($shared -notmatch '(?m)^\s+using:\s+composite\s*$' -or !$shared.Contains('tools/fan_host_path_gate.ps1')){throw 'FAN_PUBLISH_GATE_ORDER_DRIFT'}
+    $workflow=$workflow.Replace($sharedCall,$shared)
+  }
+  $preMatches=[regex]::Matches($workflow,'(?m)^[ \t]*-[ \t]+name:[ \t]*Verify local Fan Host V2 lane before publishing[ \t]*\r?$')
+  $pre=if($preMatches.Count -eq 1){$preMatches[0].Index}else{-1}
   $publish=$workflow.IndexOf('name: Publish GitHub Release')
   $download=$workflow.IndexOf("gh release download")
   $post=$workflow.IndexOf('name: Verify published Fan Host V2 lane and source-bound bytes')

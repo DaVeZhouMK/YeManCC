@@ -11,12 +11,26 @@ export function beginTdpObservation(detail: Omit<TdpObservationContext, 'operati
   const started = performance.now();
   const context: TdpObservationContext = { ...detail, operationId: `tdp:${Date.now()}:${++sequence}` };
   const state: Record<string, unknown> = { configSaved: false, processStarted: 'not-observed', hardwareCommandReturned: 'not-observed', readbackMatched: 'not-observed' };
+  // Keep the initial request immediately observable, then deliver bounded
+  // causal rows together at completion. No timer, observer or background work.
+  const pending: Array<{ event: string; detail: Record<string, unknown> }> = [];
+  const deliver = (rows: typeof pending): void => {
+    try {
+      const payload = rows.length === 1 ? rows[0] : { events: rows };
+      void invoke<{ ok?: boolean }>('tdp.observe', payload)
+        .then(result => { if (result?.ok === false) failedLogDeliveries += rows.length; })
+        .catch(() => { failedLogDeliveries += rows.length; });
+    } catch { failedLogDeliveries += rows.length; }
+  };
   const emit = (event: string, fields: Record<string, unknown> = {}): void => {
     try {
       Object.assign(state, fields);
       if (typeof fields.configSaved === 'boolean') context.configSaved = fields.configSaved;
-      void invoke('tdp.observe', { event, detail: { ...context, ...state, durationMs: performance.now() - started } })
-        .catch(() => { ++failedLogDeliveries; });
+      const row = { event, detail: { ...context, ...state, durationMs: performance.now() - started } };
+      if (event === 'tdp.request') { deliver([row]); return; }
+      pending.push(row);
+      if (pending.length >= 16 || ['tdp.completed', 'tdp.failed', 'tdp.skipped', 'tdp.unverified'].includes(event))
+        deliver(pending.splice(0));
     } catch { ++failedLogDeliveries; }
   };
   emit('tdp.request', { configSaved: false, processStarted: false, hardwareCommandReturned: 'not-observed', readbackMatched: 'not-observed' });

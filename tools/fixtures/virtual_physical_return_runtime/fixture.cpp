@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +27,8 @@
 using json=nlohmann::json;using USAGE=USHORT;namespace fspath=std::filesystem;
 #include "types.inc"
 #include "paths.inc"
+static std::wstring hidHideCurrentModulePath();
+#include "rog-partial-hide-bindings.inc"
 using InputHostMutex=ymcc::inputHost::TransactionMutex<>;
 static InputHostMutex g_inputHostMx;
 static std::mutex g_hidHideMx;
@@ -51,10 +54,15 @@ static ymcc::targetReturn::process::Probe fixtureCliProbe(const ymcc::targetRetu
  else {++fixtureForbiddenIo;throw std::logic_error("unexpected-foreign-CLI-process-model-identity");}
  return {state,state==State::Dead?Reason::MatchingExited:state==State::Alive?Reason::MatchingRunning:Reason::OpenFailed,static_cast<DWORD>(state==State::Unknown?ERROR_ACCESS_DENIED:ERROR_SUCCESS)};
 }
-static bool g_inputHostTransportFault=false;
+static bool g_inputHostTransportFault=false,g_inputHostPipeRetired=false;
+// Explicit environment fact for this compact consumer, not the production debt
+// algorithm. Actual ROG source/target/configuration predicates remain extracted.
+static bool fixtureDeferredHideContextAllowed=true;
+static bool inputHostDeferredPhysicalHideWriteCurrent(){return fixtureDeferredHideContextAllowed;}
 static ymcc::targetReturn::process::State fixtureWriterState=ymcc::targetReturn::process::State::Dead;
 static std::vector<ymcc::targetReturn::ProcessIdentity> fixtureWriterProbes;
-static std::atomic<std::uint64_t> g_hidResolveCacheGeneration{1},g_xinputTopologyEpoch{1},g_msiMainSourceRevision{1};
+static std::atomic<std::uint64_t> g_hidResolveCacheGeneration{1},g_msiMainSourceRevision{1};
+static std::atomic<unsigned> g_xinputTopologyEpoch{1};
 static std::uint64_t fixturePower=1,fixtureClock=GetTickCount64();
 static std::uint64_t g_inputHostSwitchRecoveryStartDeadline=0,g_inputHostSwitchRecoveryStartRequestId=0,g_inputHostSwitchRecoveryStartPower=0;
 static ymcc::VirtualStartProtection g_virtualStartProtection;
@@ -121,7 +129,13 @@ static std::vector<HidHidePhysicalIdentity> fixtureSources;
 static std::vector<std::string> fixtureTargets;
 static std::set<std::string> world;
 static bool pipeOk=true,cliOk=true,pipeApplies=true,cliApplies=true;
+static std::string fixtureRejectedHidePath; // Exact driver-result leaf; empty preserves every existing case.
+static std::function<void(unsigned,HidHideVisibilitySnapshot&)> fixtureVisibilitySnapshotHook;
 static unsigned snapshots=0,health=0,applyFallback=0;
+#ifdef YMCC_APPLY_INTEGRATION_ONLY
+static std::string fixtureInverseRaw;
+static std::vector<std::wstring> fixtureSnapshotApplications;
+#endif
 static unsigned checks=0;static json failures=json::array(),cases=json::array();static std::string fixtureCurrentCase;
 static void check(bool value,const char* assertion){++checks;if(!value)failures.push_back({{"case",fixtureCurrentCase},{"assertion",assertion}});}
 static void appendNativeLifecycleLog(const char* event,json facts){
@@ -130,7 +144,7 @@ static void appendNativeLifecycleLog(const char* event,json facts){
   fixtureCommitObserved=true;auto action=std::move(fixtureAfterCommit);fixtureAfterCommit={};if(action)action();
  }
 }
-static bool hidHideIsVirtualIdentity(const std::string&,const std::string&){return virtualIdentity;}
+static bool hidHideIsVirtualIdentity(const std::string& path,const std::string&){return virtualIdentity||path.find("VIRTUAL")!=std::string::npos;}
 static std::wstring fixturePath(){return fixtureRecordPath;}
 static std::optional<ymcc::targetReturn::ProcessIdentity> fixtureCapture(HANDLE process){
  if(process==GetCurrentProcess())return ymcc::targetReturn::process::capture(process);
@@ -175,16 +189,88 @@ static void driverObservation(const char* leaf,const std::string& path){
  check(hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,path),"actual caller keeps local path responsibility before driver dispatch");
  operations.push_back({{"leaf",leaf},{"path",path},{"durableBeforeDriver",group!=nullptr},{"ownedAtDispatch",owned},{"recordRevision",loaded.record?loaded.record->revision:0}});
 }
-enum class YmccInterfacePolicy {Other,MsiClawDinput};struct Machine {int family=0;};static Machine g_machineIdentity;
+namespace YmccFamily {static constexpr int LenovoLegionGo=2;}
+enum class YmccInterfacePolicy {Other,MsiClawDinput};struct Machine {int family=0;bool resolved=false;};static Machine g_machineIdentity;
 static YmccInterfacePolicy ymccFamilyInterfacePolicy(int family){return family==3?YmccInterfacePolicy::MsiClawDinput:YmccInterfacePolicy::Other;}
 static void inputHostExitFenceLogRefusal(const char*,const char*){}
 static void hidHideServiceHealth(const char*){++health;}
-static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out){if(!identityOk||fixtureSources.empty())return false;out=fixtureSources;return true;}
-static bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot& out){++snapshots;if(!snapshotOk||(fixtureSnapshotFailAt&&snapshots>=fixtureSnapshotFailAt))return false;out={};out.valid=true;out.cloaking=true;
-#ifdef YMCC_APPLY_INTEGRATION_ONLY
- out.applications={L"C:\\fixture-private\\YeManCC.exe"}; // Preexisting registration, no application write.
+#ifdef YMCC_C01_SOURCE_HIDE
+// Explicit OS mapping/discovery leaves; no final source-allowed boolean is modeled.
+static bool fixtureSourceHideCase=false,fixtureDiscoveryComplete=true,fixtureOpenXInput=true;
+static unsigned fixtureActualDiscoveryCalls=0,fixtureLegacyDiscoveryCalls=0;
+static std::function<void()> fixtureSourceHideSnapshotHook;
+static std::vector<HidHidePhysicalIdentity> fixtureInventory;
+static HidHidePhysicalIdentity fixtureRawIdentity;
+static std::array<std::wstring,4> fixtureSlotPaths;
+static std::mutex g_gamepadReadMx,g_hidResolveCacheMx,g_hidHidePhysicalIdentityMx;
+static HidHidePhysicalIdentity g_hidHidePhysicalIdentity;
+static bool g_xinputPhysicalSourceLocked=false;
+static DWORD g_xinputPhysicalSourceMask=0,g_xinputPrimarySlot=0,g_xinputSemanticSlot=0,g_xinputPreTargetSlots=0,g_xinputVirtualEndpointMask=0,g_xinputConnectedMask=0,g_xinputSlotUnknownMask=0;
+static std::atomic<bool> g_xinputPreTargetBoundaryScanned{false},g_xinputSlotFullScanOnce{false},g_externalPriorityVirtualSuspended{false};
+static std::atomic<unsigned> g_xinputBoundaryScanEpoch{1},g_xinputSlotFullScanEpochStart{1},g_xinputSlotIdentityEpoch{1};
+static struct {bool enabled=false,virtualTargetEnabled=false;} g_realStickTest;
+static bool ymccOpenXInputAvailable(){return fixtureOpenXInput;}
+static std::wstring ymccOpenXInputGetDevicePath(DWORD slot){return slot<4?fixtureSlotPaths[slot]:std::wstring{};}
+static BYTE ymccOpenXInputGetUserIndex(const std::wstring& path){for(BYTE i=0;i<4;++i)if(fixtureSlotPaths[i]==path)return i;return 0xff;}
+static std::vector<std::wstring> fixtureAssignedPaths;
+static bool ymccOpenXInputAssignSlot(const std::wstring& path,BYTE,bool& accepted,bool(*guard)(void*) noexcept=nullptr,void* context=nullptr){if(guard&&!guard(context))return false;fixtureAssignedPaths.push_back(path);accepted=true;return true;}
+static ULONGLONG g_openXInputSlotGuardLastTick=0;
+static std::atomic<bool> g_inputCaptureStop{false},g_inputReady{true},g_inputHostPowerAdmissionRevoked{false},g_physicalReleaseWindowDutyActive{false};
+static std::atomic<std::uint64_t> g_powerGeneration{1},g_inputHostEpochMirror{1},g_inputHostVirtualIntentRevision{1};
+static std::atomic<unsigned> g_inputHostVirtualIntentWriters{0};
+enum class PowerLifecycle {Ready};static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static bool physicalReleaseWindowActive(){return false;}
+static void ymccOpenXInputVirtualSlotGuard(){}
+static DWORD xinputPhysicalConnectedMask(){return g_xinputConnectedMask&~g_xinputVirtualEndpointMask&~g_xinputSlotUnknownMask;}
+static bool hidHideResolvePhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out,bool* complete){++fixtureActualDiscoveryCalls;out=fixtureInventory;if(complete)*complete=fixtureDiscoveryComplete;return identityOk&&!out.empty();}
+static bool hidHideResolveRawInputIdentity(HANDLE,HidHidePhysicalIdentity& out,std::uint64_t* generation){out=fixtureRawIdentity;if(generation)*generation=g_hidResolveCacheGeneration.load();return identityOk&&out.resolved;}
+struct GpHidResolveCallerScope{explicit GpHidResolveCallerScope(int){}};
+static bool tickCostEnabled(){return false;}
+static std::array<std::atomic<unsigned>,2> g_gpSelectedGenerationRejects{};
+template<class A,class B>static void legionMotionSelectedIdentityChanging(const A&,const B&){}
+template<class A>static bool msiDinputObservePhysicalXinputReturn(const A&,ULONGLONG){return false;}
+template<class A>static void msiForegroundIsolationObserveNative(const A&){}
+template<class A>static void msiNativeForegroundObserveSource(const A&,std::uint64_t){}
+static bool msiControllerRepairScope(){return false;}
+static bool msiDinputMainSourceEligible(){return false;}
+static bool msiDinputManagedMainSourceActive(HidHideMsiMainSourceRecord&){return false;}
+static std::atomic<bool> g_msiDinputRouteConfirmed{false},g_msiDinputAdmissionLogged{false};
+static struct {std::atomic<int> productId{0};} g_msiDinput;
+static const struct {const char* mainInterfaceToken="MI_00&COL01";} kMsiClawCapability;
+static bool deviceInterfaceContainerId(const wchar_t*,GUID*){throw std::logic_error("unexpected-MSI-container-query");}
+static std::string msiGuidToString(const GUID&){return {};}
+static bool deviceInterfaceUsbInstance(const wchar_t*,std::wstring&){throw std::logic_error("unexpected-MSI-USB-query");}
+static bool hidHideMsiSiblingSourceAdmitted(bool,bool,bool,bool){throw std::logic_error("unexpected-MSI-sibling-policy");}
+static std::string hidHideUpper(std::string);
+static json hidHideIdentityJson(const HidHidePhysicalIdentity&);
+static std::uint64_t inputHostEpochToken(){return g_inputHostEpoch;}
+#include "source-hide-support.inc"
+#define hidHideGetPhysicalIdentities fixtureActualGetPhysicalIdentities
+#include "source-hide-consumers.inc"
+#undef hidHideGetPhysicalIdentities
+static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out,std::shared_ptr<const HidHideReadSourceProof>* proof=nullptr){
+ if(fixtureSourceHideCase){
+#ifdef YMCC_C01_BEFORE
+  if(proof)proof->reset();return fixtureActualGetPhysicalIdentities(out);
+#else
+  return fixtureActualGetPhysicalIdentities(out,proof);
 #endif
-for(const auto& path:world)out.hidden.push_back(U2W(path));return true;}
+ }
+ ++fixtureLegacyDiscoveryCalls;if(proof)proof->reset();if(!identityOk||fixtureSources.empty())return false;out=fixtureSources;return true;
+}
+
+#else
+static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out){if(!identityOk||fixtureSources.empty())return false;out=fixtureSources;return true;}
+#endif
+static bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot& out){
+#ifdef YMCC_C01_SOURCE_HIDE
+ auto sourceHook=std::move(fixtureSourceHideSnapshotHook);fixtureSourceHideSnapshotHook={};if(sourceHook)sourceHook();
+#endif
+ ++snapshots;if(!snapshotOk||(fixtureSnapshotFailAt&&snapshots>=fixtureSnapshotFailAt))return false;out={};out.valid=true;out.cloaking=true;
+#ifdef YMCC_APPLY_INTEGRATION_ONLY
+ out.applications=fixtureSnapshotApplications;out.inverseRaw=fixtureInverseRaw; // Preexisting configuration, no application/inverse write.
+#endif
+for(const auto& path:world)out.hidden.push_back(U2W(path));if(fixtureVisibilitySnapshotHook)fixtureVisibilitySnapshotHook(snapshots,out);return true;}
 #ifdef YMCC_APPLY_INTEGRATION_ONLY
 static bool hidHideApplyPhysicalTransaction(const std::string&,bool);
 static bool hidHideRefreshPhysicalHide(const std::string&,const char*);
@@ -192,16 +278,22 @@ static bool hidHideRefreshPhysicalHide(const std::string&,const char*);
 // Legacy Refresh boundary only; never compiled in the actual Apply consumer.
 static bool hidHideApplyPhysicalTransaction(const std::string&,bool){++applyFallback;return false;}
 #endif
-static std::vector<std::string> hidHideVirtualPhysicalTargets(const HidHidePhysicalIdentity&,const HidHideVisibilitySnapshot&,std::size_t,const char*){return fixtureTargets;}
+static std::vector<std::string> hidHidePhysicalTargets(const HidHidePhysicalIdentity&);
+static std::vector<std::string> hidHideVirtualPhysicalTargets(const HidHidePhysicalIdentity& physical,const HidHideVisibilitySnapshot&,std::size_t,const char*){
+ (void)physical;
+#ifdef YMCC_C01_SOURCE_HIDE
+ if(fixtureSourceHideCase)return hidHidePhysicalTargets(physical);
+#endif
+ return fixtureTargets;}
 static bool msiCrashRecoveryBeforeHide(const HidHidePhysicalIdentity&,const std::vector<std::string>&,const HidHideVisibilitySnapshot&,const std::string&){return reservationOk;}
-static bool inputHostHidHideApplyViaPipeLocked(const std::wstring& action,const std::wstring& path){if(action!=L"hide")throw std::logic_error("unadmitted driver action");const auto value=W2U(path);driverObservation("pipe",value);if(pipeApplies)world.insert(value);
+static bool inputHostHidHideApplyViaPipeLocked(const std::wstring& action,const std::wstring& path){if(action!=L"hide")throw std::logic_error("unadmitted driver action");const auto value=W2U(path);driverObservation("pipe",value);if(pipeApplies&&value!=fixtureRejectedHidePath)world.insert(value);
  if(fixtureCrashAfterFirstHide&&operations.size()==1){
   fixtureCrashAfterFirstHide=false;
   events.push_back({{"event","CrashInterrupted-first-actual-hide-leaf"},{"path",value},{"recordBytesBeforeCrash",bytes()},{"worldBeforeCrash",world},{"authorityTargetsBeforeCrash",fixtureNativeProofTargets},{"wholeSnapshotCalls",fixtureHandoffSnapshotCalls}});
   throw CrashInterrupted{}; // Escapes actual Apply directly: no normal rollback.
  }
- return pipeOk;}
-static bool hidHideRun(const std::wstring& args){const std::wstring prefix=L"--dev-hide \"";if(args.rfind(prefix,0)!=0||args.back()!=L'"')throw std::logic_error("unadmitted CLI action");const auto value=W2U(args.substr(prefix.size(),args.size()-prefix.size()-1));driverObservation("CLI",value);if(cliApplies)world.insert(value);return cliOk;}
+ return pipeOk&&value!=fixtureRejectedHidePath;}
+static bool hidHideRun(const std::wstring& args){const std::wstring prefix=L"--dev-hide \"";if(args.rfind(prefix,0)!=0||args.back()!=L'"')throw std::logic_error("unadmitted CLI action");const auto value=W2U(args.substr(prefix.size(),args.size()-prefix.size()-1));driverObservation("CLI",value);if(cliApplies&&value!=fixtureRejectedHidePath)world.insert(value);return cliOk&&value!=fixtureRejectedHidePath;}
 static std::wstring hidHideCurrentModulePath(){
 #ifdef YMCC_APPLY_INTEGRATION_ONLY
  return L"C:\\fixture-private\\YeManCC.exe";
@@ -216,7 +308,7 @@ static void msiControllerTraceLog(const char*,json,bool){}
 // Explicit Apply environment leaves. Unexpected mutation branches throw before IO.
 // No native GPD state machine is claimed by these donor models.
 static ULONGLONG g_hidHideLastIdentityBlockedLog=0;
-namespace YmccFamily {static constexpr int LenovoLegionGo=2;}
+
 static const char* ymccFamilyName(int){return "fixture-other";}
 static bool msiClawKnownBoardAuthority(){return false;}
 static void hidHideInvalidateRawInputIdentityCache(){++g_hidResolveCacheGeneration;}
@@ -232,6 +324,9 @@ static bool msiNativeForegroundAcceptVirtualJournal(const HidHideVisibilitySnaps
  // Model only the final authority leaf. Production Apply must reach this leaf
  // after exact readback and actual reservation; assert the observed inputs.
  check(after.valid&&after.cloaking,"Apply supplies completed modeled readback to donor acceptance leaf");
+#ifdef YMCC_C01_SOURCE_HIDE
+ if(fixtureSourceHideCase)return true; // No OEM donor is owned by the ordinary C01 route.
+#endif
  if(!fixtureNativeDonorProof)return g_hidHideVisibilityJournal.hiddenByUs.empty()&&fixtureNativeProofExpireAt==0;
  for(const auto& target:{fixtureNativeDonorPath,fixtureNativeExtraDonorPath}){
   if(target.empty())continue;
@@ -249,7 +344,10 @@ static bool msiNativeForegroundAcceptVirtualJournal(const HidHideVisibilitySnaps
 static const std::string rootId="USB\\VID_1234&PID_5678\\PHYSICAL",pathA="HID\\VID_1234&PID_5678\\A",pathB="HID\\VID_1234&PID_5678\\B";
 static unsigned caseSerial=0;
 static void reset(const std::string& name){
- runtime::state=runtime::State{};fixtureCurrentCase=name;
+  runtime::state=runtime::State{};fixtureCurrentCase=name;t_rogPartialHideIdentity=nullptr;fixtureDeferredHideContextAllowed=true;g_inputHostPipeRetired=false;fixtureRejectedHidePath.clear();fixtureVisibilitySnapshotHook={};
+#ifdef YMCC_C01_SOURCE_HIDE
+ fixtureSourceHideCase=false;g_realStickTest={};hidHideReadSourceReset();fixtureSourceHideSnapshotHook={};
+#endif
  g_hidHidePendingWriter.reset();g_hidHidePendingJob.reset();g_hidHidePendingAttempt.clear();
  if(g_hidHidePendingChildProcess)CloseHandle(g_hidHidePendingChildProcess);
  if(g_hidHidePendingReadPipe)CloseHandle(g_hidHidePendingReadPipe);
@@ -263,12 +361,13 @@ static void reset(const std::string& name){
  fixtureNativeDonorBaseline={};fixtureNativeDonorBaseline.valid=true;
 #ifdef YMCC_APPLY_INTEGRATION_ONLY
  fixtureNativeDonorHeld=false; // No native Apply donor until seedNativeDonor explicitly supplies one.
+ fixtureInverseRaw.clear();fixtureSnapshotApplications={hidHideCurrentModulePath()};
 #endif
 
  fixtureSources={HidHidePhysicalIdentity{}};fixtureSources[0].resolved=true;fixtureSources[0].deviceInstanceId=pathA;fixtureSources[0].baseContainerDeviceInstanceId=rootId;
  fixtureTargets={pathA};world={};events={};operations={};fixtureAfterProof={};fixtureAfterCommit={};fixtureCommitObserved=false;fixtureProofCalls=0;
  fixtureProofState=duty::physicalPath::State::Proven;virtualIdentity=false;identityOk=snapshotOk=reservationOk=true;pipeOk=cliOk=pipeApplies=cliApplies=true;fence=false;fixtureCaptureFails=false;
- snapshots=health=applyFallback=0;g_inputHostTransportFault=false;g_hidHidePendingChildProcess=nullptr;fixtureWriterState=duty::process::State::Dead;fixtureWriterProbes.clear();g_machineIdentity.family=1;fixtureClock=GetTickCount64();fixturePower=1;g_hidResolveCacheGeneration=1;g_xinputTopologyEpoch=1;g_msiMainSourceRevision=1;
+ snapshots=health=applyFallback=0;g_inputHostTransportFault=false;g_hidHidePendingChildProcess=nullptr;fixtureWriterState=duty::process::State::Dead;fixtureWriterProbes.clear();g_machineIdentity={};g_machineIdentity.family=1;g_machineIdentity.resolved=true;fixtureClock=GetTickCount64();fixturePower=1;g_hidResolveCacheGeneration=1;g_xinputTopologyEpoch=1;g_msiMainSourceRevision=1;
  g_inputHostProcess=reinterpret_cast<HANDLE>(std::uintptr_t{1});fixtureHostPid=fixtureExpectedDebtHostPid=700001;g_inputHostHostInstanceId="owned-host-1";g_inputHostRunId="owned-run-1";g_inputHostEpoch=1;fixturePersona="steamdeck";
  g_virtualStartProtection.~VirtualStartProtection();new(&g_virtualStartProtection)ymcc::VirtualStartProtection();const auto ticket=g_virtualStartProtection.admit("steamdeck",fixtureClock);if(!ticket.accepted)throw std::runtime_error("real protection ticket not admitted");
  g_inputHostSwitchRecoveryStartRequestId=ticket.requestId;g_inputHostSwitchRecoveryStartPower=fixturePower;g_inputHostSwitchRecoveryStartDeadline=fixtureClock+30000;g_psEndpointOwnership.clear();
@@ -303,7 +402,7 @@ static void seedNativeDonor(){
 
 #ifdef YMCC_APPLY_INTEGRATION_ONLY
 static const std::string foreignPath="HID\\VID_7777&PID_7777\\FOREIGN";
-static bool applyNative(){std::lock_guard<InputHostMutex> lock(g_inputHostMx);return hidHideApplyPhysicalTransaction("apply-journal-1",false);}
+static bool applyNative(bool powerCycle=false){std::lock_guard<InputHostMutex> lock(g_inputHostMx);return hidHideApplyPhysicalTransaction("apply-journal-1",powerCycle);}
 static void prepareApply(bool twoPaths=false){
  seedNativeDonor();g_hidHideVisibilityJournal={};
  if(twoPaths){fixtureNativeExtraDonorPath=pathB;world.insert(pathB);fixtureTargets={pathA,pathB};}
@@ -388,6 +487,39 @@ static void applyBatchAuthorityCases(){
   check(fixtureHandoffSnapshotCalls==2&&fixtureNativeProofCalls==0&&operations.empty()&&pathCount(disk())==0&&g_hidHideVisibilityJournal.hiddenByUs.empty(),"precommit Snapshot retirement preserves native donor with zero hide and zero partial persisted batch");
  });
 }
+
+// Existing Apply integration entry only. Initial Apply reaches the real path
+// reservations; the exact root's pipe/CLI OS leaves reject without applying.
+static HidHidePhysicalIdentity prepareRogPartialRefresh(){
+ HidHidePhysicalIdentity source{};source.resolved=true;source.vendorId=0x0b05;source.productId=0x1b4c;
+ source.usagePage=1;source.usage=5;
+ source.deviceInstanceId="HID\\VID_0B05&PID_1B4C&MI_02\\ROG164155_GAMEPAD";
+ source.baseContainerDeviceInstanceId="USB\\VID_0B05&PID_1B4C\\ROG164155_INTERNAL";
+ source.sourcePath=source.deviceInstanceId;source.physicalIdentity=source.deviceInstanceId+"|"+source.baseContainerDeviceInstanceId;
+ fixtureSources={source};fixtureTargets={source.deviceInstanceId,source.baseContainerDeviceInstanceId};
+ fixtureInverseRaw="off";world={foreignPath};g_hidHideVisibilityJournal={};
+ fixtureRejectedHidePath=source.baseContainerDeviceInstanceId;
+ check(!applyNative(),"ROG164155 initial real Apply fails only at the reserved original root driver leaf");
+ check(operations.size()==3&&world.count(source.deviceInstanceId)&&!world.count(source.baseContainerDeviceInstanceId),"ROG164155 actual Apply hides child, then root pipe and CLI both fail without applying");
+ const auto loaded=disk();const auto* child=pathOwner(loaded,source.deviceInstanceId);const auto* root=pathOwner(loaded,source.baseContainerDeviceInstanceId);
+ check(pathCount(loaded)==2&&child&&root&&duty::sameOrigin(child->origin,root->origin)&&
+  hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,source.deviceInstanceId)&&
+  hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,source.baseContainerDeviceInstanceId),"ROG164155 actual BeforeHide retains both paths under the same durable origin after partial failure");
+ check(g_hidHideVisibilityJournal.active&&fixtureAcceptCalls==0&&fixtureForbiddenIo==0,"ROG164155 failed Apply retains its active journal without donor transfer or cycle");
+ fixtureRejectedHidePath.clear();return source;
+}
+struct FixtureRogPartialScope {
+ HidHidePhysicalIdentity identity;const HidHidePhysicalIdentity* prior=t_rogPartialHideIdentity;
+ explicit FixtureRogPartialScope(const HidHidePhysicalIdentity& source):identity(source){t_rogPartialHideIdentity=&identity;}
+ ~FixtureRogPartialScope(){t_rogPartialHideIdentity=prior;}
+ FixtureRogPartialScope(const FixtureRogPartialScope&)=delete;
+ FixtureRogPartialScope& operator=(const FixtureRogPartialScope&)=delete;
+};
+static void observeRogPartialFirstConfiguration(){
+ HidHideVisibilitySnapshot before;
+ check(hidHideCaptureVisibilitySnapshot(before)&&inputHostRogPartialHideConfigurationCurrent(before),"ROG164155 first configuration snapshot passes the extracted production configuration predicate");
+}
+
 static void applyIntegrationCases(){
  run("Apply/native-prehidden-durable-same-hide-then-real-AfterRestore",[]{
   prepareApply(true);check(applyNative(),"actual Apply accepts two native-prehidden donor paths after real durable reservations");
@@ -426,7 +558,263 @@ static void applyIntegrationCases(){
   env.session.reset();auto reopened=duty::Session::open(fixtureRecordPath,fixtureMachineBinding());
   check(reopened.ready()&&reopened.record()->obligations.empty()&&reopened.record()->revision>produced.revision,"second real Session reopen verifies cold execution settlement is durable");observeDebt("actual-coldExecution-reopened-clean-record");
  });
+ // Prehidden targets isolate the real Apply readback decision from native donor
+ // authority. All existing foreign devices/applications and inverse policy stay owned externally.
+ struct ConfigurationCase {const char* name;int family;bool resolved;const char* inverseRaw;bool targetsNonEmpty;bool admitted;};
+ for(const auto& selected:std::vector<ConfigurationCase>{
+  {"Apply/Lenovo-inverse-off-complete-config",YmccFamily::LenovoLegionGo,true,"off",true,true},
+  {"Apply/Lenovo-inverse-on-refused-before-cycle",YmccFamily::LenovoLegionGo,true,"on",true,false},
+  {"Apply/Lenovo-inverse-empty-unknown-refused-before-cycle",YmccFamily::LenovoLegionGo,true,"",true,false},
+  {"Apply/Lenovo-inverse-unrecognized-refused-before-cycle",YmccFamily::LenovoLegionGo,true,"unavailable",true,false},
+  {"Apply/Lenovo-empty-targets-refused-before-cycle",YmccFamily::LenovoLegionGo,true,"off",false,false},
+  {"Apply/other-family-inverse-on-empty-targets-legacy-admitted",1,true,"on",false,true},
+  {"Apply/msi-family-inverse-unknown-legacy-admitted",3,true,"",true,true},
+  {"Apply/unresolved-Lenovo-inverse-on-legacy-admitted",YmccFamily::LenovoLegionGo,false,"on",true,true}
+ })run(selected.name,[&]{
+  g_hidHideVisibilityJournal={};g_machineIdentity.family=selected.family;g_machineIdentity.resolved=selected.resolved;
+  fixtureInverseRaw=selected.inverseRaw;fixtureSnapshotApplications.push_back(hidHideCurrentModulePath()+L".foreign");
+  world={pathA,pathB,foreignPath};const auto originalHidden=world;
+  fixtureTargets=selected.targetsNonEmpty?std::vector<std::string>{pathA,pathB}:std::vector<std::string>{};
+  events.push_back({{"event","configuration-case-input"},{"resolved",selected.resolved},{"family",selected.family},{"inverseRaw",selected.inverseRaw},{"targets",fixtureTargets},{"powerCycleRequested",!selected.admitted},{"expectedAdmitted",selected.admitted}});
+  check(applyNative(!selected.admitted)==selected.admitted,"source-exact Apply enforces complete Lenovo configuration and retains legacy family behavior");
+  const auto refusal=std::find_if(events.begin(),events.end(),[](const auto& event){return event.value("event",std::string{})=="hidhide.p-hid-apply-readback-failed";});
+  check((refusal!=events.end())==!selected.admitted,"configuration refusal comes from original final readback diagnostic");
+  if(refusal!=events.end()){
+   const auto& facts=(*refusal)["facts"];
+   const std::string expectedInverse=std::string(selected.inverseRaw)=="on"?"on":std::string(selected.inverseRaw)=="off"?"off":"unknown";
+   check(facts.at("lenovoConfigurationRequired")==true&&facts.at("inverseApplicationList")==expectedInverse&&facts.at("expectedTargets")==fixtureTargets.size()&&facts.at("safeStop")==true,"original refusal reports required Lenovo gate, exact inverse tri-state and target count");
+  }
+  check(fixtureAcceptCalls==(selected.admitted?1u:0u)&&fixtureForbiddenIo==0,"readback refusal precedes donor acceptance and every wireless/cycle leaf");
+  HidHideVisibilitySnapshot after;check(hidHideCaptureVisibilitySnapshot(after),"controlled final configuration remains readable");
+  check(world==originalHidden&&after.applications==fixtureSnapshotApplications&&after.inverseRaw==selected.inverseRaw&&g_hidHideVisibilityJournal.before.applications==fixtureSnapshotApplications&&g_hidHideVisibilityJournal.before.inverseRaw==selected.inverseRaw,"Apply preserves all preexisting hidden targets, foreign application registration and inverse policy");
+  check(operations.empty()&&g_hidHideVisibilityJournal.hiddenByUs.empty()&&!g_hidHideVisibilityJournal.applicationAdded&&!g_hidHideVisibilityJournal.cloakChanged&&disk().state==duty::LoadState::Missing&&!runtime::state.session,"configuration-only admission or refusal creates no hide, application/cloak write, ownership claim or durable debt");
+  check(g_hidHideVisibilityJournal.physicalSources.size()==fixtureSources.size()&&g_hidHideVisibilityJournal.physical.deviceInstanceId==pathA&&g_hidHideVisibilityJournal.physical.baseContainerDeviceInstanceId==rootId,"configuration verdict preserves original physical source selection");
+ });
+ // Reuse an actual Apply-produced journal and durable debt before introducing
+ // external configuration drift. No test synthesizes or replaces return duties.
+ struct ActiveConfigurationCase {const char* name;int family;bool powerCycle;const char* inverseRaw;bool fallback;bool sourcesResolved;bool missingBase;bool admitted;unsigned captures;};
+ for(const auto& selected:std::vector<ActiveConfigurationCase>{
+  {"Apply/active-Lenovo-off-physical-fallback",YmccFamily::LenovoLegionGo,true,"off",true,true,false,true,1},
+  {"Apply/active-Lenovo-inverse-on-drift-refused",YmccFamily::LenovoLegionGo,true,"on",false,true,false,false,1},
+  {"Apply/active-Lenovo-refresh-inverse-unknown-drift-refused",YmccFamily::LenovoLegionGo,false,"",false,true,false,false,2},
+  {"Apply/active-Lenovo-missing-base-refused",YmccFamily::LenovoLegionGo,true,"off",false,true,true,false,1},
+  {"Apply/active-Lenovo-unresolved-source-refused",YmccFamily::LenovoLegionGo,true,"off",false,false,false,false,1},
+  {"Apply/active-other-inverse-on-legacy-early-return",1,true,"on",false,true,false,true,0},
+  {"Apply/active-other-inverse-unknown-legacy-refresh",1,false,"",false,true,false,true,1},
+  {"Apply/active-msi-inverse-unknown-legacy-refresh",3,false,"",false,true,false,true,2}
+ })run(selected.name,[&]{
+  fixtureSnapshotApplications.push_back(hidHideCurrentModulePath()+L".foreign");
+  prepareApply(true);check(applyNative()&&pathCount(disk())==2,"original Apply first produces the exact active journal and durable two-path debt");
+  g_machineIdentity.family=selected.family;fixtureInverseRaw=selected.inverseRaw;
+  auto second=fixtureSources.front();second.deviceInstanceId=pathB;fixtureSources.push_back(second);
+  for(auto& source:fixtureSources)source.resolved=selected.sourcesResolved;
+  g_hidHideVisibilityJournal.physical=fixtureSources.front();
+  g_hidHideVisibilityJournal.physicalSources=selected.fallback?std::vector<HidHidePhysicalIdentity>{}:fixtureSources;
+  world.insert(rootId);if(selected.missingBase)world.erase(rootId);
+  const auto originalHidden=world;const auto prior=bytes();const auto journal=g_hidHideVisibilityJournal;
+  const unsigned capturesBefore=snapshots,acceptsBefore=fixtureAcceptCalls;const auto operationsBefore=operations.size(),eventsBefore=events.size();
+  check(applyNative(selected.powerCycle)==selected.admitted,"active Apply rechecks resolved Lenovo configuration before either successful early return");
+  check(snapshots==capturesBefore+selected.captures&&operations.size()==operationsBefore&&fixtureAcceptCalls==acceptsBefore&&fixtureForbiddenIo==0,"active gate preserves original refresh capture costs, adds one Lenovo observation and issues no re-hide, donor transfer or cycle");
+  const auto refusal=std::find_if(events.begin()+static_cast<std::ptrdiff_t>(eventsBefore),events.end(),[](const auto& event){return event.value("event",std::string{})=="hidhide.p-hid-apply-readback-failed";});
+  check((refusal!=events.end())==!selected.admitted,"only failed active Lenovo configuration emits the original readback refusal");
+  if(refusal!=events.end()){
+   const auto& facts=(*refusal)["facts"];
+   const std::string expectedInverse=std::string(selected.inverseRaw)=="on"?"on":std::string(selected.inverseRaw)=="off"?"off":"unknown";
+   check(facts.at("lenovoConfigurationRequired")==true&&facts.at("inverseApplicationList")==expectedInverse&&facts.at("journalRetained")==true&&facts.at("expectedTargets")==3&&facts.at("reason")=="retained-lenovo-configuration-unverified"&&facts.at("safeStop")==true,"active refusal diagnoses inverse drift or incomplete resolved base/game targets while retaining the journal");
+  }
+  const auto& retained=g_hidHideVisibilityJournal;
+  check(retained.active==journal.active&&retained.transactionId==journal.transactionId&&retained.hiddenByUs==journal.hiddenByUs&&retained.before.hidden==journal.before.hidden&&retained.before.applications==journal.before.applications&&retained.before.inverseRaw==journal.before.inverseRaw&&retained.before.valid==journal.before.valid&&retained.before.cloaking==journal.before.cloaking&&retained.admittedTick==journal.admittedTick&&retained.applicationAdded==journal.applicationAdded&&retained.ownedApplications==journal.ownedApplications&&retained.ownedApplicationResponsibilityUnknown==journal.ownedApplicationResponsibilityUnknown&&retained.cloakChanged==journal.cloakChanged&&retained.cycledBaseContainers==journal.cycledBaseContainers&&retained.preReleaseCycleAttempted==journal.preReleaseCycleAttempted&&retained.preReleaseCycleOk==journal.preReleaseCycleOk,"active admission or refusal preserves original journal responsibility, baseline and cycle state");
+  check(retained.physicalSources.size()==journal.physicalSources.size()&&retained.physical.deviceInstanceId==journal.physical.deviceInstanceId&&retained.physical.baseContainerDeviceInstanceId==journal.physical.baseContainerDeviceInstanceId&&bytes()==prior&&pathCount(disk())==2,"active recheck leaves source selection and exact real durable debt unchanged");
+  check(world==originalHidden&&world.count(foreignPath)&&!hidHideContainsPath(retained.hiddenByUs,foreignPath)&&fixtureSnapshotApplications==journal.before.applications&&fixtureInverseRaw==selected.inverseRaw,"active recheck preserves every foreign hidden device/application and never rewrites inverse drift");
+ });
+
+ // ROG164155 uses the same original Apply entry and real active-journal Refresh.
+ // Only OS discovery/snapshot/driver facts are controlled; no guard is modeled.
+ run("Apply/ROG164155-partial-bound-real-Refresh",[]{
+  const auto source=prepareRogPartialRefresh();const auto prior=bytes();const auto operationsBefore=operations.size();const auto capturesBefore=snapshots;
+  const auto deadline=g_inputHostSwitchRecoveryStartDeadline,request=g_inputHostSwitchRecoveryStartRequestId;
+  {FixtureRogPartialScope scope(source);observeRogPartialFirstConfiguration();
+   check(applyNative(),"ROG164155 bound active Apply executes real Refresh and completes the missing original root");}
+  check(operations.size()==operationsBefore+1&&operations.back()["path"]==source.baseContainerDeviceInstanceId&&snapshots==capturesBefore+2,"ROG164155 real Refresh queries its second configuration, skips hidden child and writes only missing root");
+  check(bytes()==prior&&pathCount(disk())==2&&world.count(source.deviceInstanceId)&&world.count(source.baseContainerDeviceInstanceId),"ROG164155 completion reuses exact durable debt without another origin or revision");
+  check(!t_rogPartialHideIdentity&&world.count(foreignPath)&&!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,foreignPath)&&fixtureForbiddenIo==0&&fixtureAcceptCalls==0,"ROG164155 TLS scope restores and completion preserves foreign ownership with no transfer or cycle");
+  check(g_inputHostSwitchRecoveryStartDeadline==deadline&&g_inputHostSwitchRecoveryStartRequestId==request,"ROG164155 actual Refresh retains original absolute deadline and request");
+ });
+ for(const bool changedSource:{true,false})run(changedSource?"Apply/ROG164155-re-resolved-source-zero-hide":"Apply/ROG164155-extra-target-zero-hide",[&]{
+  const auto source=prepareRogPartialRefresh();const auto prior=bytes();const auto originalHidden=world;const auto operationsBefore=operations.size();const auto capturesBefore=snapshots;
+  if(changedSource)fixtureSources.front().deviceInstanceId+="_OTHER";else fixtureTargets.push_back("HID\\VID_0B05&PID_1B4C\\EXTRA");
+  {FixtureRogPartialScope scope(source);observeRogPartialFirstConfiguration();
+   check(!applyNative(),"ROG164155 real Refresh executes the extracted source or target binding refusal");}
+  check(operations.size()==operationsBefore&&world==originalHidden&&bytes()==prior&&pathCount(disk())==2&&fixtureForbiddenIo==0,"ROG164155 rejected source/target emits no additional hide and preserves exact original duties");
+  check(snapshots==capturesBefore+(changedSource?1u:2u),"ROG164155 source guard refuses before Refresh snapshot and target guard refuses after it");
+ });
+ for(const std::string shape:{"invalid","cloak-off","app-missing","inverse-on","inverse-unknown"}){
+  const auto name="Apply/ROG164155-second-config-"+shape+"-zero-hide";
+  run(name.c_str(),[&]{
+   const auto source=prepareRogPartialRefresh();const auto prior=bytes();const auto originalHidden=world;const auto operationsBefore=operations.size();
+   const unsigned secondRead=snapshots+2;bool injected=false;
+   {FixtureRogPartialScope scope(source);observeRogPartialFirstConfiguration();
+    fixtureVisibilitySnapshotHook=[&](unsigned read,HidHideVisibilitySnapshot& value){if(read!=secondRead)return;injected=true;
+     if(shape=="invalid")value.valid=false;else if(shape=="cloak-off")value.cloaking=false;
+     else if(shape=="app-missing")value.applications.clear();else value.inverseRaw=shape=="inverse-on"?"on":"unknown";};
+    check(!applyNative(),"ROG164155 actual Refresh refuses changed second configuration before any hide");
+    fixtureVisibilitySnapshotHook={};}
+   check(injected&&snapshots==secondRead&&operations.size()==operationsBefore&&world==originalHidden,"ROG164155 invalid/cloak/application/inverse second snapshot reaches real guard and emits zero additional driver writes");
+   check(bytes()==prior&&pathCount(disk())==2&&g_hidHideVisibilityJournal.active&&fixtureForbiddenIo==0,"ROG164155 second-snapshot rejection retains original active journal and durable cleanup responsibility");
+  });
+ }
+ for(const std::string shape:{"transport-fault","retired-pipe","context-refused"}){
+  const auto name="Apply/ROG164155-second-context-"+shape+"-zero-hide";
+  run(name.c_str(),[&]{
+   const auto source=prepareRogPartialRefresh();const auto prior=bytes();const auto originalHidden=world;const auto operationsBefore=operations.size();
+   const unsigned secondRead=snapshots+2;bool injected=false;
+   {FixtureRogPartialScope scope(source);observeRogPartialFirstConfiguration();
+    fixtureVisibilitySnapshotHook=[&](unsigned read,HidHideVisibilitySnapshot&){if(read!=secondRead)return;injected=true;
+     if(shape=="transport-fault")g_inputHostTransportFault=true;else if(shape=="retired-pipe")g_inputHostPipeRetired=true;else fixtureDeferredHideContextAllowed=false;};
+    check(!applyNative(),"ROG164155 actual Refresh rechecks controlled transport/pipe/context facts after second snapshot");
+    fixtureVisibilitySnapshotHook={};}
+   check(injected&&snapshots==secondRead&&operations.size()==operationsBefore&&world==originalHidden&&bytes()==prior&&fixtureForbiddenIo==0,"ROG164155 retired controlled context cannot dispatch or consume original return debt");
+  });
+ }
+
 }
+#endif
+#ifdef YMCC_C01_SOURCE_HIDE
+static HidHidePhysicalIdentity sourceHideDevice(const std::string& tag){
+ HidHidePhysicalIdentity x{};x.resolved=true;x.vendorId=0x17ef;x.productId=0x6182;x.usagePage=1;x.usage=5;
+ x.sourcePath="\\\\?\\hid#physical-"+tag;x.deviceInstanceId="HID\\VID_17EF&PID_6182\\"+tag;
+ x.baseContainerDeviceInstanceId="USB\\VID_17EF&PID_6182\\"+tag;
+ x.baseContainerDevicePath="\\\\?\\usb#vid_17ef&pid_6182#"+tag;
+ x.physicalIdentity=x.baseContainerDeviceInstanceId;return x;
+}
+static void sourceHidePrepare(){
+ fixtureSourceHideCase=true;fixtureDiscoveryComplete=true;fixtureOpenXInput=true;
+ fixtureActualDiscoveryCalls=fixtureLegacyDiscoveryCalls=0;fixtureSourceHideSnapshotHook={};
+ g_machineIdentity={YmccFamily::LenovoLegionGo,true};g_realStickTest={true,true};
+ hidHideReadSourceReset();g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;g_xinputPreTargetSlots=0;
+ g_xinputConnectedMask=1;g_xinputPrimarySlot=g_xinputSemanticSlot=0;g_xinputVirtualEndpointMask=g_xinputSlotUnknownMask=0;
+ g_xinputSlotIdentityEpoch.fetch_add(1);g_xinputBoundaryScanEpoch=g_xinputTopologyEpoch.load();g_xinputPreTargetBoundaryScanned=true;
+ g_externalPriorityVirtualSuspended=false;fixtureSlotPaths={};const auto a=sourceHideDevice("A");
+ fixtureInventory={a};fixtureRawIdentity=a;g_hidHidePhysicalIdentity=a;fixtureSlotPaths[0]=U2W(a.baseContainerDevicePath);
+ fixtureSources={a};fixtureTargets={a.deviceInstanceId,a.baseContainerDeviceInstanceId};
+ g_hidHideVisibilityJournal={};fixtureInverseRaw="off";fixtureNativeDonorHeld=false;fixtureNativeDonorProof=false;
+ world={foreignPath};
+}
+static void sourceHideFacts(const char* phase){const auto proof=std::atomic_load(&g_hidHideReadSourceProof);
+ events.push_back({{"event",phase},{"actualSourceSlot",g_xinputPrimarySlot},{"actualSourceMask",g_xinputPhysicalSourceMask},
+ {"actualSlotPath",W2U(ymccOpenXInputGetDevicePath(g_xinputPrimarySlot))},{"lastRawPhysical",g_hidHidePhysicalIdentity.physicalIdentity},
+ {"proofToken",proof?proof->token:0},{"proofPower",proof?proof->power:0},{"proofTopology",proof?proof->topology:0},
+ {"proofCapture",proof?proof->capture:0},{"proofSelection",proof?proof->selection:0},{"actualGetDiscoveryCalls",fixtureActualDiscoveryCalls},{"legacyGetCalls",fixtureLegacyDiscoveryCalls}});
+}
+static void sourceHideForeignCase(){
+ sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"actual selected-slot admission accepts mapped A before Raw B");
+ const auto b=sourceHideDevice("B");fixtureRawIdentity=b;fixtureInventory={b};hidHideObserveRawInputDevice(reinterpret_cast<HANDLE>(1));
+ const bool result=applyNative();sourceHideFacts("C01-A-read-B-observed");
+ check(g_xinputPhysicalSourceLocked&&g_xinputPrimarySlot==0&&g_xinputPhysicalSourceMask==1&&ymccOpenXInputGetDevicePath(0)==U2W(sourceHideDevice("A").baseContainerDevicePath),"A remains the actual locked slot/path; Raw B never reassigns the reader");
+ check(!world.count(b.deviceInstanceId)&&!world.count(b.baseContainerDeviceInstanceId)&&operations.empty()&&pathCount(disk())==0,"C01_BINDING_B_MUST_NOT_BE_HIDDEN_OR_OWNED");
+ check(!result&&fixtureActualDiscoveryCalls>0&&fixtureLegacyDiscoveryCalls==0,"current distinct B is rejected through actual Get; no fake source-allowed leaf");
+}
+static void sourceHideGenerationCase(){
+ sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"A admitted before use-time generation change");
+ fixtureSourceHideSnapshotHook=[]{g_hidHideReadCapture.fetch_add(1,std::memory_order_acq_rel);};
+ check(!applyNative()&&operations.empty()&&pathCount(disk())==0,"C01_STALE_USE_MUST_NOT_DISPATCH_OR_CREATE_DEBT");
+ sourceHideFacts("C01-stale-use");
+}
+static void sourceHideSameSourceCase(){sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"actual A admission binds mapped slot/path/container");
+  hidHideObserveRawInputDevice(reinterpret_cast<HANDLE>(1));const auto token=hidHideReadSourceSampleToken(1,0,true);
+  check(token&&hidHideReadSourceFrameCurrent(true,token,false),"actual read-token producer and final source guard accept same-source A");
+  check(!hidHideReadSourceNeedsNeutral(true,token,false)&&hidHideReadSourceNeedsNeutral(true,0,false)&&!hidHideReadSourceNeedsNeutral(true,0,true),"same-source stays live; missing source requests original neutral path; existing neutral is never blocked");
+  check(applyNative()&&world.count(sourceHideDevice("A").deviceInstanceId)&&world.count(sourceHideDevice("A").baseContainerDeviceInstanceId),"real Get and Apply hide only same-source A child/base");
+  check(fixtureActualDiscoveryCalls>=2&&fixtureLegacyDiscoveryCalls==0&&pathCount(disk())==2,"same-source proof uses actual discovery and durable BeforeHide reservations");sourceHideFacts("C01-same-A");}
+static void sourceHideCaptureRebindCase(){
+ sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"actual A admitted before capture restart");
+ const auto old=hidHideReadSourceSampleToken(1,0,true);hidHideReadSourceReset(true);
+ check(!hidHideReadSourceFrameCurrent(true,old,false),"capture restart retires old frame without clearing its reader owner");
+ check(inputHostAdmitSelectedPhysicalSource(),"same locked A can bind again after capture-only restart");
+ const auto fresh=hidHideReadSourceSampleToken(1,0,true);
+ check(fresh&&fresh!=old&&hidHideReadSourceFrameCurrent(true,fresh,false),"new A read token is current after actual re-admission");
+ hidHideReadSourceReset(true);++g_xinputTopologyEpoch;fixtureInventory={sourceHideDevice("B")};fixtureSlotPaths[0]=U2W(fixtureInventory[0].baseContainerDevicePath);
+ check(!inputHostAdmitSelectedPhysicalSource()&&!applyNative(),"capture-only restart must not grant old A slot to distinct B");
+ check(operations.empty()&&pathCount(disk())==0,"capture rebind failure creates no foreign hide or return debt");
+}
+static void sourceHideJournalSwitchCase(){
+ sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource()&&applyNative(),"A creates original actual hide and debt");
+ const auto debt=bytes();const auto journal=g_hidHideVisibilityJournal;hidHideReadSourceReset();
+ g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=g_xinputPreTargetSlots=0;
+ fixtureInventory={sourceHideDevice("B")};fixtureSlotPaths[0]=U2W(fixtureInventory[0].baseContainerDevicePath);
+ check(inputHostAdmitSelectedPhysicalSource(),"explicit B reader admission is separate from old A visibility responsibility");
+ check(!applyNative(true)&&bytes()==debt&&g_hidHideVisibilityJournal.hiddenByUs==journal.hiddenByUs,"B cannot borrow active A journal success; failed new-hide preserves exact A debt");
+ for(const auto& target:journal.hiddenByUs)world.erase(W2U(target));
+ HidHideVisibilitySnapshot returned;check(hidHideCaptureVisibilitySnapshot(returned),"original owned A paths can be observed returned");
+ check(settle(returned,true,journal.hiddenByUs)&&pathCount(disk())==0&&world.count(foreignPath),"actual AfterRestore cleans A debt despite current B hide refusal and preserves foreign state");
+}
+static void sourceHideSlotOwnerCase(){
+ sourceHidePrepare();g_hidHidePhysicalIdentity=sourceHideDevice("B");
+ check(inputHostAdmitSelectedPhysicalSource()&&g_hidHidePhysicalIdentity.physicalIdentity==sourceHideDevice("A").physicalIdentity,"binding publishes admitted A instead of pre-admission last-Raw B");
+ fixtureRawIdentity=sourceHideDevice("B");hidHideObserveRawInputDevice(reinterpret_cast<HANDLE>(1));
+ fixtureSlotPaths[1]=fixtureSlotPaths[0];fixtureSlotPaths[0].clear();fixtureSlotPaths[2]=U2W(fixtureRawIdentity.baseContainerDevicePath);g_xinputConnectedMask=6;
+ g_openXInputSlotGuardLastTick=0;fixtureAssignedPaths.clear();ymccOpenXInputSlotGuard();
+ check(fixtureAssignedPaths.size()==1&&fixtureAssignedPaths[0]==U2W(sourceHideDevice("A").baseContainerDevicePath),"actual SlotGuard restores only owned A path, never Raw B");
+}
+static void sourceHideCases(){
+#ifdef YMCC_C01_CONTROLS
+ run("C01/A-lock-RawB",sourceHideForeignCase);
+ run("C01/same-source-A",sourceHideSameSourceCase);
+ run("C01/stale-before-hide",sourceHideGenerationCase);
+ return;
+#endif
+#ifdef YMCC_C01_FOLLOWUP
+ run("C01/A-lock-RawB",sourceHideForeignCase);
+ run("C01/same-source-A",sourceHideSameSourceCase);
+ run("C01/capture-reset-rebind",sourceHideCaptureRebindCase);
+ run("C01/new-owner-old-journal",sourceHideJournalSwitchCase);
+ run("C01/slot-guard-owned-A",sourceHideSlotOwnerCase);
+ return;
+#endif
+#ifdef YMCC_C01_BEFORE
+ run("C01/A-lock-RawB",sourceHideForeignCase);return;
+#elif defined(YMCC_C01_MUTATION_SOURCE)
+ run("C01/A-lock-RawB",sourceHideForeignCase);return;
+#elif defined(YMCC_C01_MUTATION_GENERATION)
+ run("C01/stale-before-hide",sourceHideGenerationCase);return;
+#endif
+ run("C01/A-lock-RawB",sourceHideForeignCase);
+ run("C01/stale-before-hide",sourceHideGenerationCase);
+ run("C01/same-source-A",sourceHideSameSourceCase);
+ for(int fault=0;fault<8;++fault)run(("C01/unknown-or-ambiguous/"+std::to_string(fault)).c_str(),[&]{sourceHidePrepare();
+  if(fault==0)fixtureOpenXInput=false;else if(fault==1)fixtureSlotPaths[0].clear();else if(fault==2)fixtureInventory[0].baseContainerDeviceInstanceId.clear();
+  else if(fault==3)fixtureDiscoveryComplete=false;else if(fault==4)fixtureInventory.push_back(fixtureInventory[0]);
+  else if(fault==5)fixtureSlotPaths[0]=L"VIRTUAL";else if(fault==6)g_externalPriorityVirtualSuspended=true;else fixtureInventory[0].physicalIdentity.clear();
+  check(!inputHostAdmitSelectedPhysicalSource(),"missing, virtual, ambiguous or external source cannot receive source ownership");
+  check(!applyNative()&&operations.empty()&&pathCount(disk())==0,"source refusal never dispatches hide or acquires foreign debt");});
+ for(int generation=0;generation<5;++generation)run(("C01/old-frame-retired/"+std::to_string(generation)).c_str(),[&]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"same-source initial admission before retirement");const auto token=hidHideReadSourceSampleToken(1,0,true);check(token!=0,"actual sample captures admitted source token");
+  if(generation==0)++fixturePower;else if(generation==1)++g_xinputTopologyEpoch;else if(generation==2)++g_xinputSlotIdentityEpoch;else if(generation==3)g_hidHideReadCapture.fetch_add(1);else g_hidHideReadSelection.fetch_add(1);
+  check(!hidHideReadSourceFrameCurrent(true,token,false),"old source stamp cannot cross power/topology/identity/capture/source retirement");
+  check(hidHideReadSourceFrameCurrent(true,token,true),"neutral/release bypass remains available after source proof retirement");});
+ run("C01/continuous-slot-B-reuse",[]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"A owns initial reader");++g_xinputTopologyEpoch;++g_xinputSlotIdentityEpoch;++g_hidResolveCacheGeneration;
+  auto b=sourceHideDevice("B");fixtureInventory={b};fixtureSlotPaths[0]=U2W(b.baseContainerDevicePath);fixtureRawIdentity=b;
+  check(!inputHostAdmitSelectedPhysicalSource()&&!applyNative()&&operations.empty(),"same connected slot remapped to B cannot inherit A container/source ownership");});
+ run("C01/reenumerated-same-owner",[]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"A owns initial reader before reenumeration");const auto old=hidHideReadSourceSampleToken(1,0,true);++g_xinputTopologyEpoch;++g_xinputSlotIdentityEpoch;++g_hidResolveCacheGeneration;
+  fixtureInventory[0].sourcePath+="-NEW";fixtureInventory[0].deviceInstanceId+="-NEW";
+  check(inputHostAdmitSelectedPhysicalSource(),"fresh unique same-container A child is re-admitted");
+  check(!hidHideReadSourceFrameCurrent(true,old,false)&&applyNative(),"old A frame retires; fresh reenumerated A can enter actual Apply");});
+ run("C01/explicit-source-switch",[]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"A owns initial source");const auto old=hidHideReadSourceSampleToken(1,0,true);hidHideReadSourceReset();g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;g_xinputPreTargetSlots=0;
+  auto b=sourceHideDevice("B");fixtureInventory={b};fixtureSlotPaths[0]=U2W(b.baseContainerDevicePath);fixtureRawIdentity=b;
+  check(inputHostAdmitSelectedPhysicalSource()&&!hidHideReadSourceFrameCurrent(true,old,false),"explicit reset and actual re-admission grant B a new authority without relabeling old A frames");});
+ run("C01/any-connected-owned-set-only",[]{sourceHidePrepare();g_xinputConnectedMask=3;fixtureSlotPaths[1]=U2W(sourceHideDevice("B").baseContainerDevicePath);fixtureInventory.push_back(sourceHideDevice("B"));
+  check(inputHostAdmitSelectedPhysicalSource()&&g_xinputPhysicalSourceMask==1,"existing selected pre-target source policy is preserved despite another connected pad");
+  check(hidHideReadSourceSampleToken(3,1,true)==0,"unowned any-connected merged mask cannot borrow the selected-source token");
+  check(applyNative()&&!world.count(sourceHideDevice("B").deviceInstanceId),"another connected controller is never hidden wholesale");});
+ run("C01/debt-survives-new-source-refusal",[]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource()&&applyNative(),"A hide produces actual owned return debt");const auto debt=bytes();const auto journal=g_hidHideVisibilityJournal.hiddenByUs;
+  ++g_xinputTopologyEpoch;fixtureInventory={sourceHideDevice("B")};fixtureSlotPaths[0]=U2W(fixtureInventory[0].baseContainerDevicePath);
+  check(!applyNative()&&bytes()==debt&&g_hidHideVisibilityJournal.hiddenByUs==journal,"new source-hide refusal preserves old durable/journal responsibility");
+  world.clear();const auto owned=journal;const auto after=absent();check(settle(after,true,owned)&&pathCount(disk())==0,"actual AfterRestore still cleans prior A debt independently of new-hide admission");});
+ run("C01/failed-hide-retains-exact-debt",[]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"A admitted before failed dispatch");pipeOk=cliOk=false;
+  check(!applyNative()&&pathCount(disk())>0&&!g_hidHideVisibilityJournal.hiddenByUs.empty(),"failed hide receipts preserve actual pre-dispatch return debt");});
+ run("C01/foreign-prehidden-B-preserved",[]{sourceHidePrepare();check(inputHostAdmitSelectedPhysicalSource(),"A admitted with foreign prehidden B");const auto b=sourceHideDevice("B");world.insert(b.deviceInstanceId);fixtureInventory.push_back(b);fixtureRawIdentity=b;hidHideObserveRawInputDevice(reinterpret_cast<HANDLE>(1));
+  check(applyNative()&&world.count(b.deviceInstanceId)&&!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,b.deviceInstanceId),"foreign B remains hidden by its owner and is never claimed by A transaction");});
+}
+
 #endif
 int wmain(int argc,wchar_t** argv){
  if(argc!=3)return 2;fixtureCaseRoot=argv[1];fspath::create_directories(fixtureCaseRoot);
@@ -434,8 +822,13 @@ int wmain(int argc,wchar_t** argv){
 #ifdef YMCC_APPLY_INTERRUPT_ONLY
  applyInterruptCase();
 #else
- applyIntegrationCases();
- applyBatchAuthorityCases();
+#if !defined(YMCC_C01_BEFORE) && !defined(YMCC_C01_MUTATION_SOURCE) && !defined(YMCC_C01_MUTATION_GENERATION) && !defined(YMCC_C01_FOLLOWUP) && !defined(YMCC_C01_CONTROLS)
+  applyIntegrationCases();
+  applyBatchAuthorityCases();
+#endif
+#ifdef YMCC_C01_SOURCE_HIDE
+  sourceHideCases();
+#endif
 #endif
 #else
  run("Refresh/reserve-before-driver",[]{check(refresh(),"real Refresh accepts successful hide after durable reservation");const auto loaded=disk();check(operations.size()==1&&pathCount(loaded)==1,"single hide creates one exact physical debt");const auto* owner=pathOwner(loaded,pathA);check(owner&&owner->origin.physicalRoot==rootId&&owner->origin.host.pid==700001,"durable origin pins selected root and modeled old Host");check(runtime::state.physicals.size()==1,"actual physical producer publishes one owned in-process origin");});
@@ -600,8 +993,10 @@ int wmain(int argc,wchar_t** argv){
  result["integrationAssertionContract"]="batch-v2: native existing-owned set is Reserved in one atomic revision before any re-hide; per-path hooks reuse origin; false after commit publishes whole journal; original fault requirements retained";
  result["consumer"]="actual source-exact hidHideApplyPhysicalTransaction -> actual BeforeHide/Session/store -> actual AfterRestore; separate reopened Apply duty -> actual coldExecution::run";
  result["actualApplyConsumerCompiledAndCalled"]=true;result["actualAfterRestoreCalled"]=true;result["actualColdExecutionRunCalled"]=true;
+ result["actualApplyActiveJournalRecheckCalled"]=true;result["actualRefreshCalledFromApply"]=true;
  result["actualRefreshRuntimeSessionStore"]=false;result["nativeDonorAuthorityIsExplicitFakeLeaf"]=true;result["realNativeDonorStateMachineProven"]=false;
 #ifdef YMCC_APPLY_INTERRUPT_ONLY
+ result["actualApplyActiveJournalRecheckCalled"]=false;result["actualRefreshCalledFromApply"]=false;
  result["actualAfterRestoreCalled"]=false;result["interruptionModel"]="CrashInterrupted at first actual hide leaf; no rollback; producer runtime/Session/journal/donor discarded; original disk and world retained";
  result["nativeInitialHideBeforeHandoffReservationCovered"]=false;result["recordTailSynthesizedByFixture"]=false;
 #endif

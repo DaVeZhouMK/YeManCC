@@ -17,7 +17,6 @@ import { useVirtualTargetPolicy, currentVirtualTargetPolicy } from '@/bridge/vir
 import { virtualTargetOptions, virtualTargetSelectionError, requireVirtualTargetAllowed, STEAM_DECK_SELF_OUTPUT_MESSAGE } from '@/bridge/virtualTargetPolicy';
 import { computed, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import InlineIcon from '@/components/InlineIcon.vue';
-import ScreenTouchpadsSettings from '@/components/ScreenTouchpadsSettings.vue';
 import ControllerShortcutsCard from '@/components/ControllerShortcutsCard.vue';
 import {mouseModeState} from '@/bridge/mouseModeState';
 import {mouseModeText} from '@/bridge/mouseModePresentation';
@@ -39,9 +38,9 @@ import { acceptVirtualOutputRuntime, externalControllerPriorityPresentation, vir
 
 // Only the current three virtual outputs are selectable or admitted.
 const basePersonaOptions = CONTROLLER_PERSONA_OPTIONS;
-type ControllerPage = 'controller' | 'touchpad' | 'calibration' | 'feedback';
+type ControllerPage = 'controller' | 'calibration' | 'feedback';
 const controllerPage = ref<ControllerPage>('controller');
-const controllerPages = [{id:'controller',title:'控制器',icon:'gamepad'}, {id:'touchpad',title:'触控板',icon:'mouse'}, {id:'calibration',title:'校对',icon:'gamepad'}, {id:'feedback',title:'灯光震动',icon:'volume'}] as const;
+const controllerPages = [{id:'controller',title:'控制器',icon:'gamepad'}, {id:'calibration',title:'校对',icon:'calibration-steam'}, {id:'feedback',title:'灯光震动',icon:'volume'}] as const;
 function selectControllerPage(page: ControllerPage): void {
   controllerPage.value = page;
   void nextTick(() => controllerRoot.value?.closest('.app-content')?.scrollTo({top:0}));
@@ -93,6 +92,9 @@ const externalPriorityRuntime = ref<ExternalPriorityRuntimeState | null>(null);
 const externalControllerPriority = ref(false);
 const externalPriorityBusy = ref(false);
 const externalPriorityError = ref('');
+const frontendIsolationEnabled = ref(true);
+const frontendIsolationBusy = ref(false);
+const frontendIsolationError = ref('');
 let stopInputSettings: (() => void) | null = null;
 // GP-926R13 §4：恢复耗尽后的可见降级（0 无 / 1 已请求物理兜底 / 2 读回物理可用 / 3 兜底未证实）。
 const recoveryFallbackState = ref(0);
@@ -195,7 +197,7 @@ function restoreControllerFocus(selector = '[data-controller-profile-exit]'): vo
 }
 async function requestProfileRemoval(): Promise<void> {
   const editor = inputEditor.value;
-  if (!controllerActive || !editor?.profile || targetBusy.value || externalPriorityBusy.value || profileRemovalBusy.value) return;
+  if (!controllerActive || !editor?.profile || targetBusy.value || externalPriorityBusy.value || frontendIsolationBusy.value || profileRemovalBusy.value) return;
   const target = {...editor.target}, gameName = editingGame.value, requestEpoch = ++profileRemovalEpoch;
   profileRemovalBusy.value = true; profileRemovalNote.value = '';
   try {
@@ -215,7 +217,7 @@ function cancelProfileRemoval(): void {
 }
 async function confirmProfileRemoval(): Promise<void> {
   const request = profileRemoval.value;
-  if (!request || profileRemovalBusy.value) return;
+  if (!request || profileRemovalBusy.value || frontendIsolationBusy.value) return;
   const release = tryAcquireQuickAction('controller-profile-remove');
   if (!release) { profileRemovalError.value = '已有其它快捷操作正在执行，请稍候'; return; }
   profileRemovalBusy.value = true; profileRemovalError.value = ''; let deleted = false;
@@ -255,6 +257,7 @@ const displayPersona = computed(() => shortcutRuntime.value?.persona ?? persona.
 const controllerTitle = computed(() => {
   if (!snapshot.value && !shortcutRuntime.value) return '控制器';
   if (displayPersona.value === 'disabled') return '本机控制器';
+  if (displayPersona.value === 'steamdeck') return 'SteamDeck';
   const selected = basePersonaOptions.find(option => option.value === displayPersona.value);
   return selected ? `${selected.label} 控制器` : '控制器';
 });
@@ -305,6 +308,7 @@ function applyInputSnapshot(input: InputSettingsSnapshot): void {
   if (snapshot.value && input.revision < snapshot.value.revision) return;
   snapshot.value = input;
   externalControllerPriority.value = input.ownership?.externalControllerPriority === true;
+  frontendIsolationEnabled.value = input.ownership?.frontendIsolationEnabled !== false;
 
   targetEnabled.value = input.outputTarget?.buttonMappingEnabled === true;
   gyroEnabled.value = input.outputTarget?.gyroEnabled === true;
@@ -320,8 +324,35 @@ async function loadTarget(): Promise<void> {
   await readShortcutRuntime();
 
 }
+async function saveFrontendIsolation(requested: boolean): Promise<void> {
+  if (!snapshot.value || frontendIsolationBusy.value || externalPriorityBusy.value || targetBusy.value ||
+      startProtectionLocked.value || profileRemovalBusy.value || profileRemoval.value) return;
+  frontendIsolationError.value = '';
+  frontendIsolationBusy.value = true;
+  try {
+    // Keep the same narrow intent when retrying against a newer shared snapshot.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await compareAndSwapInputSettings(snapshot.value.revision, {
+        ownership: { frontendIsolationEnabled: requested },
+      });
+      inputEditor.value = await readGameInputEditor();
+      applyInputSnapshot(inputEditor.value.input);
+      if (result.ok === true || (result.reason === 'revision-conflict' && frontendIsolationEnabled.value === requested)) {
+        if (frontendIsolationEnabled.value !== requested) frontendIsolationError.value = '呼出隔离设置已被其他操作更新，请重试';
+        return;
+      }
+      if (result.reason === 'revision-conflict' && attempt === 0) continue;
+      frontendIsolationError.value = result.reason === 'revision-conflict'
+        ? '呼出隔离设置已被其他操作更新，请重试' : '呼出隔离保存失败，请重试';
+      return;
+    }
+  } catch {
+    frontendIsolationError.value = '呼出隔离保存失败，请重试';
+    await loadTarget().catch(() => undefined);
+  } finally { frontendIsolationBusy.value = false; }
+}
 async function saveExternalPriority(): Promise<void> {
-  if (!snapshot.value || externalPriorityBusy.value || targetBusy.value || profileRemovalBusy.value) return;
+  if (!snapshot.value || externalPriorityBusy.value || frontendIsolationBusy.value || targetBusy.value || profileRemovalBusy.value) return;
   const requested = !externalControllerPriority.value;
   externalPriorityError.value = '';
   externalPriorityBusy.value = true;
@@ -350,7 +381,7 @@ async function saveExternalPriority(): Promise<void> {
 }
 async function saveTarget(nextEnabled: boolean, nextPersona: ControllerPersona): Promise<void> {   // 批112
   refreshTargetWait();
-  if (gameLocked.value || !snapshot.value || externalPriorityBusy.value || profileRemovalBusy.value) return;
+  if (gameLocked.value || !snapshot.value || externalPriorityBusy.value || frontendIsolationBusy.value || profileRemovalBusy.value) return;
   if (targetBusy.value || startProtectionLocked.value) return;
   if (virtualTargetSelectionError(nextPersona, currentVirtualTargetPolicy(), nextEnabled)) return;
   const editorAtRequest = inputEditor.value!;
@@ -419,7 +450,7 @@ async function saveTarget(nextEnabled: boolean, nextPersona: ControllerPersona):
 // 原 onTargetEnabled 已随之删除。
 function onPersona(value: string | number): void {
   refreshTargetWait();
-  if (gameLocked.value || externalPriorityBusy.value || profileRemovalBusy.value) return;
+  if (gameLocked.value || externalPriorityBusy.value || frontendIsolationBusy.value || profileRemovalBusy.value) return;
   const next = isControllerPersona(value) ? value : 'disabled';   // 批112
   if (targetBusy.value || startProtectionLocked.value) return;
   if (virtualTargetSelectionError(next, currentVirtualTargetPolicy())) return;
@@ -493,8 +524,15 @@ function closeShortcutEditor(): void {
 <template>
   <IntegratedPage :title="controllerTitle" hide-heading>
   <div ref="controllerRoot" class="page controller-page controller-paged" :data-controller-panel="controllerPage" data-gp-scope="controller-page" data-gp-spatial="nearest">
-    <header class="console-heading controller-unified-header"><h1 class="controller-page-title"><InlineIcon name="gamepad"/>{{controllerPage==='controller'?controllerTitle:controllerPage==='touchpad'?'触控板':controllerPage==='calibration'?'校对':'灯光与震动'}}</h1><Toggle v-if="controllerPage==='controller'" :model-value="externalControllerPriority" label="外置优先" compact aria-describedby="external-priority-status" :title="externalPriorityDescription" :disabled="!snapshot || externalPriorityBusy || targetBusy || profileRemovalBusy" @update:model-value="saveExternalPriority"/><span v-if="controllerPage==='controller' && mouseModeState?.on && mouseModeState.stateKnown && mouseModeState.provider === 'ymcc'" class="controller-mouse-active" role="status"><InlineIcon name="mouse"/>{{mouseModeState.verification === 'process-liveness' ? '鼠标映射待确认' : '模拟鼠标开启'}}</span><span v-if="controllerPage==='touchpad'" class="controller-current-persona" aria-label="当前虚拟手柄，只读"><InlineIcon name="gamepad"/>{{displayPersona==='disabled'?'本机手柄':basePersonaOptions.find(option=>option.value===displayPersona)?.label}}<span class="persona-readonly-dot" aria-hidden="true"/></span><span v-else-if="controllerPage==='feedback'" class="controller-current-persona"><InlineIcon name="gamepad"/>当前设备</span><span id="external-priority-status" class="policy-accessible-status" role="status" aria-live="polite">{{externalPriorityDescription}}</span></header>
-    <GameProfileModeBanner v-if="editingGame" class="controller-profile-banner" :game-name="editingGame"><template #actions><button class="controller-profile-exit" data-controller-profile-exit data-gp-pane="controller-editor" :disabled="targetBusy || externalPriorityBusy || profileRemovalBusy" @click="requestProfileRemoval">退出专属</button></template></GameProfileModeBanner>
+    <header class="console-heading controller-unified-header"><h1 class="controller-page-title"><InlineIcon :name="controllerPage==='calibration'?'calibration-steam':'gamepad'"/><span>{{controllerPage==='controller'?controllerTitle:controllerPage==='calibration'?'校对':'灯光与震动'}}</span></h1><div v-if="controllerPage==='controller'" class="controller-heading-actions">
+        <Toggle :model-value="frontendIsolationEnabled" label="呼出隔离" compact
+          title="开启时，YMCC 呼出或最大化会隔离后台手柄输入，界面导航仍可用；关闭时允许手柄输入传递到后台。"
+          aria-describedby="frontend-isolation-status"
+          :disabled="!snapshot || frontendIsolationBusy || targetBusy || startProtectionLocked || externalPriorityBusy || profileRemovalBusy || !!profileRemoval"
+          @update:model-value="saveFrontendIsolation" />
+        <Toggle :model-value="externalControllerPriority" label="外置优先" compact aria-describedby="external-priority-status" :title="externalPriorityDescription" :disabled="!snapshot || externalPriorityBusy || frontendIsolationBusy || targetBusy || profileRemovalBusy" @update:model-value="saveExternalPriority"/>
+      </div><span v-if="controllerPage==='controller' && mouseModeState?.on && mouseModeState.stateKnown && mouseModeState.provider === 'ymcc'" class="controller-mouse-active" role="status"><InlineIcon name="mouse"/>{{mouseModeState.verification === 'process-liveness' ? '鼠标映射待确认' : '模拟鼠标开启'}}</span><span v-if="controllerPage==='feedback'" class="controller-current-persona"><InlineIcon name="gamepad"/>当前设备</span><span id="external-priority-status" class="policy-accessible-status" role="status" aria-live="polite">{{externalPriorityDescription}}</span></header>
+    <GameProfileModeBanner v-if="editingGame" class="controller-profile-banner" :game-name="editingGame"><template #actions><button class="controller-profile-exit" data-controller-profile-exit data-gp-pane="controller-editor" :disabled="targetBusy || externalPriorityBusy || frontendIsolationBusy || profileRemovalBusy" @click="requestProfileRemoval">退出专属</button></template></GameProfileModeBanner>
     <p v-if="profileRemovalNote" class="controller-profile-note" role="status">{{profileRemovalNote}}</p>
     <nav class="controller-page-tabs" :style="{ gridTemplateColumns: 'repeat(' + controllerPages.length + ', minmax(0, 1fr))' }" data-gp-pane="controller-editor" aria-label="控制器分区"><button v-for="page in controllerPages" :key="page.id" type="button" :data-controller-section="page.id" :aria-pressed="controllerPage===page.id" @click="selectControllerPage(page.id)"><InlineIcon :name="page.icon"/><span>{{page.title}}</span></button></nav>
     <div class="controller-page-content" data-gp-pane="controller-editor">
@@ -522,6 +560,7 @@ function closeShortcutEditor(): void {
           <strong>虚拟未恢复</strong>
           <span>{{ recoveryFallbackState === 2 ? '已请求物理兜底（读回：物理可用）。' : '已请求物理兜底（读回结果见日志）。' }}请重新开关虚拟手柄或切换人格重试。</span>
         </div>
+        <p v-if="frontendIsolationError" id="frontend-isolation-status" class="field-hint" role="alert">{{ frontendIsolationError }}</p>
         <div class="persona-actions">
           <button
             v-for="o in visiblePersonaOptions"
@@ -530,7 +569,7 @@ function closeShortcutEditor(): void {
             class="persona-btn"
             :class="{ active: o.value === displayPersona }"
             :data-gp-initial-focus="o.value === 'disabled' ? 'true' : undefined"
-            :disabled="gameLocked || (targetBusy || startProtectionLocked) || externalPriorityBusy || profileRemovalBusy || !snapshot || !!virtualTargetSelectionError(o.value, virtualTargetPolicy)"
+            :disabled="gameLocked || (targetBusy || startProtectionLocked) || externalPriorityBusy || frontendIsolationBusy || profileRemovalBusy || !snapshot || !!virtualTargetSelectionError(o.value, virtualTargetPolicy)"
             :title="virtualTargetSelectionError(o.value, virtualTargetPolicy)"
             @click="onPersona(o.value)"
           >{{ o.label }}</button>
@@ -548,11 +587,8 @@ function closeShortcutEditor(): void {
 
 
     </section>
-    <ControllerShortcutsCard :preview-target="controllerPreviewHost" :persona="displayPersona" :steam-deck-active="displayTargetEnabled && displayPersona === 'steamdeck'" @open-editor="openShortcutEditor" />
+    <ControllerShortcutsCard :preview-active="!editorOpen && controllerPage==='controller'" :preview-target="controllerPreviewHost" :persona="displayPersona" :steam-deck-active="displayTargetEnabled && displayPersona === 'steamdeck'" @open-editor="openShortcutEditor" />
 </div>
-<section v-if="controllerPage==='touchpad'" class="card controller-touchpads-card" aria-label="屏幕触控板设置"><ScreenTouchpadsSettings :key="displayPersona" :persona="displayPersona"
-        :steam-deck-enabled="displayTargetEnabled && displayPersona === 'steamdeck'"
-        :ps5-enabled="displayTargetEnabled && displayPersona === 'dualsense-edge'" :disabled="gameLocked || targetBusy" /></section>
     <ControllerCalibrationCard v-if="controllerPage==='calibration'" :disabled="targetBusy || startProtectionLocked || profileRemovalBusy" />
     <ControllerFeedbackCapabilitiesCard v-if="controllerPage==='feedback'" />
     </div>
@@ -581,12 +617,12 @@ function closeShortcutEditor(): void {
 </style>
 
 <style>
-.controller-page .controller-preview-row{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:10px 0 6px;min-width:0}.controller-page .controller-preview-host{min-width:0}.controller-page .controller-preview-host .viz{margin-top:0}.controller-page .controller-preview-host .test-toggle{margin-top:8px}.controller-page .controller-preview-host .test-toggle .toggle-desc{font-size:12px}.controller-page .controller-touchpads-card .screen-touchpads-bubble{margin-top:0}
+.controller-page .controller-preview-row{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:10px 0 6px;min-width:0}.controller-page .controller-preview-host{min-width:0}.controller-page .controller-preview-host .viz{margin-top:0}.controller-page .controller-preview-host .test-toggle{margin-top:8px}.controller-page .controller-preview-host .test-toggle .toggle-desc{font-size:12px}
 </style>
 
 
 <style>
-.controller-page .controller-unified-header{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;margin:0;padding:3px 1px 0;min-width:0}.controller-page .controller-unified-header>.controller-page-title{margin:0!important;padding:0!important;border:0!important;display:flex;align-items:center;gap:7px;margin:0;font-size:20px;font-weight:650;line-height:1.2;letter-spacing:.2px;white-space:nowrap}.controller-page .controller-unified-header>.controller-page-title::after{display:none!important}.controller-page .controller-page-title>svg{width:20px;height:20px;flex:0 0 auto;color:var(--accent)}.controller-page .controller-unified-header>.toggle-row{padding:0!important;min-height:36px;white-space:nowrap}.controller-page .controller-unified-header .toggle-label{font-size:13px}.controller-page .controller-unified-header .policy-accessible-status{position:absolute;width:1px;height:1px;clip:rect(0 0 0 0);overflow:hidden;white-space:nowrap}
+.controller-page .controller-unified-header{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;margin:0;padding:3px 1px 0;min-width:0}.controller-page .controller-unified-header>.controller-page-title{margin:0!important;padding:0!important;border:0!important;display:flex;align-items:center;gap:7px;margin:0;font-size:20px;font-weight:650;line-height:1.2;letter-spacing:.2px;white-space:nowrap}.controller-page .controller-unified-header>.controller-page-title::after{display:none!important}.controller-page .controller-page-title>svg{width:20px;height:20px;flex:0 0 auto;color:var(--accent)}.controller-page .controller-unified-header>.toggle-row,.controller-page .persona-block>.card-head-actions>.toggle-row{padding:0!important;min-height:36px;white-space:nowrap}.controller-page .controller-unified-header .toggle-label,.controller-page .persona-block>.card-head-actions .toggle-label{font-size:13px}.controller-page .controller-unified-header .policy-accessible-status{position:absolute;width:1px;height:1px;clip:rect(0 0 0 0);overflow:hidden;white-space:nowrap}
 </style>
 
 <style scoped>
@@ -599,10 +635,12 @@ function closeShortcutEditor(): void {
 <style>
 .controller-paged{--cp-line:color-mix(in srgb,var(--accent) 20%,rgba(138,157,180,.18));--cp-soft:color-mix(in srgb,var(--accent) 5%,rgba(12,20,30,.72));gap:10px!important;min-width:0;padding-bottom:10px!important}
 .controller-paged .controller-pages-workspace,.controller-paged .controller-page-content,.controller-paged .controller-general-panel{min-width:0}
+.controller-heading-actions{display:flex;align-items:center;gap:10px;min-width:0}.controller-heading-actions>.toggle-row{padding:0!important;min-height:36px;gap:6px;white-space:nowrap}.controller-heading-actions :deep(.toggle-label){font-size:13px}
+.controller-page .controller-unified-header>.controller-page-title{min-width:0}.controller-page-title>span{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .controller-paged .controller-general-panel{display:grid;gap:10px}
 .controller-paged .controller-page-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 10px;min-width:0}
 .controller-paged .controller-page-tabs button{display:flex;align-items:center;justify-content:center;gap:6px;height:39px;min-width:0;padding:6px 5px;border:1px solid var(--cp-line);border-radius:9px;background:var(--console-surface-alt);color:var(--text-dim);font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
-.controller-paged .controller-page-tabs button svg{width:17px;height:17px;flex:0 0 auto}
+.controller-paged .controller-page-tabs button svg,.controller-paged .controller-page-tabs button .app-icon-page-symbol{width:17px;height:17px;flex:0 0 auto}
 .controller-paged .controller-page-tabs button[aria-pressed=true]{color:var(--accent);background:var(--accent-surface);border-color:var(--accent);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
 .controller-paged .controller-page-tabs button.focused,.controller-paged .controller-page-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .controller-paged .controller-current-persona{display:inline-flex;align-items:center;justify-self:end;gap:6px;min-height:30px;padding:4px 8px;border:1px solid var(--cp-line);border-radius:7px;background:var(--console-surface-alt);font-size:13px;color:var(--text);white-space:nowrap}
@@ -610,23 +648,6 @@ function closeShortcutEditor(): void {
 .controller-paged .persona-readonly-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);margin-left:2px;opacity:.8}
 .controller-paged .controller-profile-banner{font-size:13px;padding:7px 8px;gap:7px;border-radius:8px;margin:0!important}
 .controller-paged .controller-profile-exit{min-height:30px;padding:4px 8px;font-size:12px}
-.controller-paged .controller-touchpads-card{padding:12px!important;margin:0!important;border:1px solid var(--cp-line)!important;border-radius:12px!important;background:var(--console-surface)!important}
-.controller-paged .touchpad-master{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:0 0 11px;margin-bottom:10px;border-bottom:1px solid var(--cp-line)}
-.controller-paged .touchpad-master-copy{display:grid;gap:3px;min-width:0}
-.controller-paged .touchpad-master strong{font-size:15px;color:var(--text);font-weight:650;line-height:1.4}
-.controller-paged .touchpad-master-copy>span{font-size:12px;color:var(--text-dim);line-height:1.4}
-.controller-paged .touchpad-master .toggle-row{padding:0!important;min-height:32px}
-.controller-paged .screen-touchpads-bubble{border:0;background:transparent;padding:0;margin:0;gap:9px 10px}
-.controller-paged .screen-touchpad-field{gap:5px}
-.controller-paged .screen-touchpad-field label{font-size:13px;line-height:17px;letter-spacing:0;color:var(--text-dim)}
-.controller-paged .screen-touchpad-field .dd-trigger{height:34px;min-height:34px;padding:0 8px;font-size:13px;border-radius:7px}
-.controller-paged .screen-control-selects{gap:9px 10px}
-.controller-paged .screen-touchpad-sliders{gap:8px 10px;padding-top:8px;margin-top:2px;border-color:var(--cp-line)}
-.controller-paged .screen-touchpad-sliders .slider{padding:2px 0!important}
-.controller-paged .screen-touchpad-sliders .slider-label,.controller-paged .screen-touchpad-sliders .slider-val{font-size:13px}
-.controller-paged .touchpad-memory-note{display:flex;align-items:center;gap:5px;margin:10px 0 0;font-size:11px;color:var(--text-dim);line-height:1.4}
-.controller-paged .touchpad-memory-note>span{color:var(--accent);font-size:8px}
-.controller-paged .touchpad-disabled{opacity:.45}
 .controller-paged .feedback-card{padding:12px!important;margin:0!important;border:1px solid var(--cp-line)!important;border-radius:12px!important;background:var(--console-surface)!important}
 .controller-paged .feedback-card>.card-head{display:none}
 .controller-paged .feedback-grid{gap:10px;margin:0}

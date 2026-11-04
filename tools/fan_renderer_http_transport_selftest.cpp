@@ -5,6 +5,7 @@
 #include <atomic>
 #include <functional>
 #include <iostream>
+#include <mutex>
 #include <thread>
 #include "http_request_deadline.h"
 #include "fan_response_contract.h"
@@ -43,5 +44,31 @@ void fanLeaseKeepaliveDisarm(const char*){disarmed++;}
 void fanActivityObserve(const std::string& path,const std::string&,DWORD status,const std::string& body,const json* supplied,ULONGLONG){json fallback;const json* value=supplied;if(!value){fallback=json::parse(body,nullptr,false);value=&fallback;}if(ymcc::fan_response::accepted(path,status,*value))activityAccepted++;}
 static std::string fanApiPathFromObject(const std::wstring& p){auto s=W2U(p);const auto q=s.find('?');if(q!=std::string::npos)s.resize(q);return s;}
 static void fanLeaseKeepaliveObserveHttp(const std::string&,const wchar_t*,unsigned short,const std::wstring&,const std::string&,DWORD,const std::string&,bool,const std::string&,const std::string&,const json*,ULONGLONG);
+std::atomic<unsigned long long> g_fanMsiModeRevision{0},g_fanMsiModePowerGeneration{1};
+std::atomic<bool> g_fanLeaseKeepaliveArmed{false};
+std::mutex g_fanLeaseKeepaliveMx;std::string g_fanLeaseId="fixture-lease-0001";
+bool fanLeaseKeepaliveMayRun(){return true;}
+unsigned long long currentFanPowerGeneration(){return 1;}
+int headerAliasReads=0,responseBodyMoves=0,responseHeaderMoves=0;
+void fixtureObserveHeaderStorage(const json& headers,const json& args){const auto it=args.find("headers");if(it!=args.end()&&&headers==&*it)++headerAliasReads;}
+void fixtureObserveResponseStorage(const json& result,const char* body,const char* headers){if(result.at("body").get_ref<const std::string&>().data()==body)++responseBodyMoves;if(result.at("headers").get_ref<const std::string&>().data()==headers)++responseHeaderMoves;}
 #include "HttpExtract.inc"
-int main(int argc,char** argv){if(argc!=4)return 9;const auto actualPort=static_cast<INTERNET_PORT>(std::stoi(argv[1]));const std::string kind=argv[2],mode=argv[3];fixturePort=mode=="nonfan"?1:actualPort;reg_http();std::thread stop;if(kind=="cancel-body")stop=std::thread([]{Sleep(80);g_poolCancel=true;});const auto begin=GetTickCount64();json result;try{result=fixtureHandler({{"url","http://127.0.0.1:"+std::to_string(actualPort)+"/api/"+(mode=="close"?"close":mode=="get"?"state":"enable")+"?kind="+kind},{"method",mode=="head"?"HEAD":mode=="get"?"GET":"POST"},{"headers",{{"X-YeMan-Fan-Session","fixture-session"}}},{"body",R"({"leaseId":"fixture-lease-0001","nodes":[{"tempC":0,"dutyPercent":100},{"tempC":100,"dutyPercent":100}]})"},{"timeoutMs",600}});}catch(const std::exception& e){result={{"threw",true},{"error",e.what()}};}if(stop.joinable())stop.join();result["elapsed"]=GetTickCount64()-begin;result["headerConversions"]=headerConversions;result["displayObserved"]=displayObserved;result["activityAccepted"]=activityAccepted;result["armed"]=armed;result["disarmed"]=disarmed;result["authRejected"]=authRejected;std::cout<<result.dump()<<"\n";}
+int main(int argc,char** argv){
+ if(argc!=4)return 9;
+ const auto actualPort=static_cast<INTERNET_PORT>(std::stoi(argv[1]));const std::string kind=argv[2],mode=argv[3];
+ fixturePort=mode=="nonfan"?1:actualPort;reg_http();std::thread stop;
+ if(kind=="cancel-body")stop=std::thread([]{Sleep(80);g_poolCancel=true;});
+ const std::string endpoint=mode=="close"?"close":mode=="get"?"state":(mode=="heartbeat"||mode=="repeat")?"heartbeat":"enable";
+ json args{{"url","http://127.0.0.1:"+std::to_string(actualPort)+"/api/"+endpoint+"?kind="+kind},{"method",mode=="head"?"HEAD":mode=="get"?"GET":"POST"},{"headers",{{"X-YeMan-Fan-Session","fixture-session"}}},{"body",R"({"leaseId":"fixture-lease-0001","nodes":[{"tempC":0,"dutyPercent":100},{"tempC":100,"dutyPercent":100}]})"},{"timeoutMs",600}};
+ if(kind=="missing-headers")args.erase("headers");
+ if(kind=="null-headers")args["headers"]=nullptr;
+ if(kind=="empty-headers")args["headers"]=json::object();
+ if(kind=="invalid-header")args["headers"]["bad\r\nname"]="value";
+ const auto before=args;const auto begin=GetTickCount64();json result;int calls=0;
+ try{const int count=mode=="repeat"?3:1;for(int i=0;i<count;++i){result=fixtureHandler(args);++calls;}}
+ catch(const std::exception& e){result={{"threw",true},{"error",e.what()}};}
+ if(stop.joinable())stop.join();
+ result["elapsed"]=GetTickCount64()-begin;result["headerConversions"]=headerConversions;result["displayObserved"]=displayObserved;result["activityAccepted"]=activityAccepted;result["armed"]=armed;result["disarmed"]=disarmed;result["authRejected"]=authRejected;
+ result["headerAliasReads"]=headerAliasReads;result["responseBodyMoves"]=responseBodyMoves;result["responseHeaderMoves"]=responseHeaderMoves;result["calls"]=calls;result["inputUnchanged"]=args==before;
+ std::cout<<result.dump()<<'\n';
+}

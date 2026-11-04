@@ -4,12 +4,21 @@ export async function readTests(root,out){
  for(const [kind,script]of Object.entries({source,compact})){
   const run=async(options={})=>{const window={location:{origin:'https://steamloopback.host'},DeckyPluginLoader:{},__YMCC_DECKY_FRONTEND__:{active:true,buildId:'a'.repeat(64)},__YMCC_DECKY_MIRROR__:{runId:'b'.repeat(32),token:'c'.repeat(64),endpoint:'ws://127.0.0.1:1822/mirror'}};window.top=window;
    if(options.noPrior)delete window.__YMCC_DECKY_FRONTEND__;if(options.inactive)window.__YMCC_DECKY_FRONTEND__.active=false;if(options.foreign)window.location.origin='https://example.invalid';if(options.frame)window.top={};if(options.badBridge)window.__YMCC_DECKY_MIRROR__.endpoint='ws://example.invalid/mirror';if(options.noLoader)delete window.DeckyPluginLoader;if(options.loadedFlag)window.deckyHasLoaded=true;if(options.loaderVersion)window.DeckyPluginLoader.deckyState={publicState:()=>({versionInfo:{current:options.loaderVersion}})};
+   if(options.officialHealth){window.DeckyBackend={ws:{readyState:options.wsState??1,url:'ws://127.0.0.1:1337/ws?auth=PRIVATE'}};if(!options.noHooks){window.__TABS_HOOK_INSTANCE={tabs:[{id:999}],qamBrowserViewPatch:{unpatch(){}}};window.DeckyPluginLoader.tabsHook=options.orphanHooks?{}:window.__TABS_HOOK_INSTANCE;}}
    const UI={GetUIMode:async()=>4},context=vm.createContext({window,location:window.location,SteamClient:{UI},Date,Math,Promise,Number,setTimeout,clearTimeout});
    const value=await vm.runInContext(script+'({operation:"ui.mode.get"})',context);return JSON.parse(JSON.stringify(value));};
   const check=async(name,fn)=>{await fn();cases.push(kind+': '+name);};
   await check('actual verified mode expression includes bounded active residue only',async()=>{const v=await run();assert.equal(v.mode,'bigpicture');assert.deepEqual(v.deckyUpdateResidue,{protocol:1,active:true,bridgePresent:true,frontendBuildId:'a'.repeat(64)});const s=JSON.stringify(v);assert(!s.includes('c'.repeat(64)));assert(!s.includes('ws://'));assert(!s.includes('b'.repeat(32)));assert.equal(v.mutated,false);});
   await check('real loaded official version is included only when strictly recognized',async()=>{assert.equal((await run({loaderVersion:'v3.2.10'})).deckyUpdateResidue.loaderVersion,'v3.2.10');assert.equal((await run({loaderVersion:'v3.2.10-private/path'})).deckyUpdateResidue.loaderVersion,undefined);});
   await check('fresh/loaded/unknown context is reported without allowing repeat injection',async()=>{assert.equal((await run()).deckyFrontendLoaded,true);assert.equal((await run({noLoader:true})).deckyFrontendLoaded,false);assert.equal((await run({noLoader:true,loadedFlag:true})).deckyFrontendLoaded,true);assert.equal((await run({foreign:true})).deckyFrontendLoaded,undefined);assert.equal((await run({frame:true})).deckyFrontendLoaded,undefined)});
+  await check('mirror-connected cannot conceal official backend/hook loss; unknown versions stay unknown',async()=>{
+   const good=await run({loaderVersion:'v3.3.1',officialHealth:true});assert.equal(good.deckyBackendConnected,true);assert.equal(good.deckyHooksInstalled,true);assert(!JSON.stringify(good).includes('PRIVATE'));
+   for(const state of [0,2,3])assert.equal((await run({loaderVersion:'v3.3.1',officialHealth:true,wsState:state})).deckyBackendConnected,false);
+   assert.equal((await run({loaderVersion:'v3.3.1',officialHealth:true,noHooks:true})).deckyHooksInstalled,false);
+   assert.equal((await run({loaderVersion:'v3.3.1',officialHealth:true,orphanHooks:true})).deckyHooksInstalled,false);
+   const unknown=await run({loaderVersion:'v99.0.0',officialHealth:true});assert.equal(unknown.deckyBackendConnected,undefined);assert.equal(unknown.deckyHooksInstalled,undefined);
+   assert.equal((await run({loaderVersion:'v3.3.1',officialHealth:true,foreign:true})).deckyBackendConnected,undefined);
+  });
   for(const option of ['noPrior','inactive','foreign','frame','badBridge','noLoader'])await check(option+' cannot manufacture update evidence',async()=>{const v=await run({[option]:true});assert.equal(v.deckyUpdateResidue,undefined);assert.equal(v.mode,'bigpicture');});
  }
  fs.writeFileSync(path.join(out,'read-result.json'),JSON.stringify({passed:true,cases:cases.length,results:cases,actualSteam:false,exactFullAndEmbeddedRead:true},null,2));return cases.length;

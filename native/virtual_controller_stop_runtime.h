@@ -163,6 +163,7 @@ static void inputHostStopLocked(const char* reason) {
         return; // original native owner queues one cleanup after exact retirement
     }
 
+    inputHostDeferredPhysicalHideClear(); // late source cannot hide after OFF/retirement/persona replacement
     const auto closingTicket = inputHostConfiguredPersona() == "disabled"
         ? g_virtualStartProtection.pendingTicket("disabled",inputHostStartProtectionNow()) : 0;
     // OFF borrows only its existing closing ticket's original deadline.

@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';
-import {MAX_INPUTS,hash,writeJson,need,freshEvidence,safeRealPath,verifyRows,casesIn,mutateHost,faultVerdict,sourceRows,checkClosure} from './contract.mjs';
+import {MAX_INPUTS,hash,writeJson,need,freshEvidence,safeRealPath,verifyRows,casesIn,reportCaseNames,bindOriginalSuite,verifyOriginalReport,mutateHost,faultVerdict,sourceRows,checkClosure} from './contract.mjs';
 const root=process.env.YMCC_DECKY_TEST_ROOT;need(root&&path.isAbsolute(root),'EXPLICIT_OWN_TEST_ROOT_REQUIRED');need(!fs.existsSync(root),'FRESH_TEST_ROOT_REQUIRED');fs.mkdirSync(root,{recursive:true});
 const spec=JSON.parse(fs.readFileSync(new URL('./spec.json',import.meta.url),'utf8'));
 const own=name=>path.join(root,name);
@@ -11,3 +11,21 @@ test('precise original assertion, original producer load, successful transform a
  for(const patch of [{exit:{naturalExit:false,exitCode:1}},{stderr:'SyntaxError before any assertion'},{stderr:`AssertionError [ERR_ASSERTION]\n at file:///G:/fixed/tools/decky_sidebar_host_selftest.mjs:${line+1}:1`},{loads:[]},{trace:{...value.trace,compilerErrors:[{message:'compile failed'}]}},{trace:{...value.trace,transforms:[]}},{trace:{...value.trace,vmExecutions:[]}}])assert.throws(()=>faultVerdict({...value,...patch}));
 });
 test('faults change only one exact method span and refuse duplicate anchors',()=>{const fault=spec.faults[0],text=`prefix\nexport function startDeckyMirrorHost() {\nreturn {${fault.from}};\n}\nsuffix`;const result=mutateHost(text,fault);assert.equal(result.candidate,text.replace(fault.from,fault.to));assert.throws(()=>mutateHost(text+fault.from,fault),/FAULT_ANCHOR_NOT_UNIQUE/);assert.equal(casesIn("await check('original assertion',()=>{});\n")[0].name,'original assertion');});
+
+test('source membership and expanded report membership stay exact while original fault lines bind current source',()=>{
+ const suite={name:'client',cases:[{name:'plain',line:1},{name:'parameter ',line:2}],expansions:{'parameter ':['parameter a','parameter b']}};
+ const bound=bindOriginalSuite(suite,"// moved without removing assertions\nawait check('plain',()=>{});\nawait check('parameter '+kind,()=>{});\n");
+ assert.equal(bound.cases[0].line,2);assert.deepEqual(reportCaseNames(bound),['plain','parameter a','parameter b']);
+ const report={cases:3,results:reportCaseNames(bound).map(name=>({name,status:'passed'}))};assert.equal(verifyOriginalReport(bound,report),3);
+ for(const names of [['plain','parameter a'],['plain','parameter a','parameter a'],['plain','parameter a','unknown'],['parameter a','plain','parameter b']])assert.throws(()=>verifyOriginalReport(bound,{cases:names.length,results:names.map(name=>({name,status:'passed'}))}));
+ assert.throws(()=>verifyOriginalReport(bound,{...report,cases:2}));assert.throws(()=>verifyOriginalReport(bound,{...report,results:report.results.map((row,i)=>i===1?{...row,status:'failed'}:row)}));
+ assert.throws(()=>bindOriginalSuite(suite,"await check('plain',()=>{});\n"));assert.throws(()=>reportCaseNames({...suite,expansions:{unknown:['extra']}}));assert.throws(()=>reportCaseNames({...suite,expansions:{'parameter ':['plain']}}));
+ const dynamic={name:'host',cases:[{name:'command+ accepted',line:1}],expansions:{'command+ accepted':['first accepted','second accepted']}};
+ const host=bindOriginalSuite(dynamic,"// shifted\nawait check(command+' accepted',()=>{});\n");
+ assert.equal(host.cases[0].line,2);assert.deepEqual(reportCaseNames(host),['first accepted','second accepted']);
+ assert.equal(verifyOriginalReport(host,{status:'passed',cases:['first accepted','second accepted']}),2);
+ for(const names of [['first accepted'],['first accepted','first accepted'],['first accepted','unknown'],['second accepted','first accepted']])assert.throws(()=>verifyOriginalReport(host,{status:'passed',cases:names}));
+ assert.throws(()=>bindOriginalSuite(dynamic,"await check(other+' accepted',()=>{});\n"));
+ assert.throws(()=>casesIn("await check(makeName(),()=>{});\n"),/SOURCE_CASE_EXPRESSION_UNSUPPORTED/);
+
+});

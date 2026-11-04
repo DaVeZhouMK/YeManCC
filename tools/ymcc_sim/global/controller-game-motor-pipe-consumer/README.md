@@ -77,3 +77,14 @@ managed sources,19 actual Compile inputs,1011 actual declared tools and1024
 local cap remain. No global ID, `resultFiles`, smaller test mode or shared runner
 exception is added. Failed producers, stale outputs, changed copies or an
 incomplete closure cannot pass the bridge.
+
+
+## Current closure checkpoint — 2026-11-03
+
+The reviewed current normal managed membership is26 repository sources (27 with the private stale-revision input), and21 actual Compile items. It adds the existing CompactFrameReplyBinding and HostTerminalCleanup helpers to the previously reviewed graph. Both helpers are independent exact Compile inputs with source hashes and unique class ownership checks. RunPipeClientAsync now returns the real HostTerminalCleanup.LoopResult; the private managed entry uses the same unique RunAsync/Settle path as the current lifecycle consumer. This update is build/contract evidence only; it does not mark the complete pipe case passed.
+
+Owned output roots may be descendants of either workspace Build or Testing/YMCC/Evidence. The exact managed/<variant> layout and matching manifest/case ownership remain mandatory; repository source, external and escaped roots are rejected. This adds no automatic runner or public case.
+
+The unsupported-profile raw observation assertion uses an explicit TUPLE_SUBMIT_STATS after the normal input frame. This preserves the original raw payload/protocol assertion under current product policy: ordinary frames with detailed logging off omit raw diagnostic JSON while required motor fields are unchanged.
+
+Native compilation remains incomplete at this checkpoint. The dependency projection preserves current deferred-hide/retired-pipe/state guards and reports remaining real ROG OFF source obligations. Until those real dependencies are closed, run-native writes lifecycle-closure-required.json and fails before compiler/business execution. It does not replace them with fixed success, remove negative cases or relabel the historical compile failure as a semantic rejection. The central record is Testing/YMCC/Evidence/VirtualGamepadSteadyState-20261103/NativeManagedClosure.

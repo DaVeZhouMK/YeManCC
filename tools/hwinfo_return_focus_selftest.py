@@ -7,6 +7,17 @@ import re
 import subprocess
 import json
 
+# Opt-in case of this original consumer, under the caller's existing owner Job.
+if '--inventory-only' in __import__('sys').argv:
+    import os
+    import sys
+    selected_repo = Path(__file__).resolve().parent.parent
+    script = selected_repo / 'tools/fixtures/focus_process_inventory_native.mjs'
+    code = "import {focusInventoryCli} from " + json.dumps(script.as_uri()) + "; await focusInventoryCli(JSON.parse(process.argv[1]));"
+    arguments = sys.argv[1:]
+    completed = subprocess.run([os.environ.get('YMCC_NODE_EXE', 'node'), '--input-type=module', '-e', code, json.dumps(arguments)], cwd=selected_repo)
+    raise SystemExit(completed.returncode)
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=Path('../../Build/Validation/HWiNFO-ReturnFocus-20261009'))
 parser.add_argument('--source', type=Path, help='Archived main.cpp for a same-consumer negative control')
@@ -34,6 +45,7 @@ preamble = r'''
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <winternl.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -66,20 +78,27 @@ static bool snapshotUnavailable=false;
 static DWORD replaceAfterShowPid=0;
 static int snapshotCalls=0,snapshotCloses=0;
 static HANDLE fakeSnapshot(DWORD,DWORD){
- ++snapshotCalls;return snapshotUnavailable?INVALID_HANDLE_VALUE:reinterpret_cast<HANDLE>(99);
+ ++snapshotCalls;SetLastError(snapshotUnavailable?ERROR_ACCESS_DENIED:ERROR_SUCCESS);
+ return snapshotUnavailable?INVALID_HANDLE_VALUE:reinterpret_cast<HANDLE>(99);
 }
 static BOOL fakeSnapshotRow(PROCESSENTRY32W* row){
- if(snapshotCursor==snapshotNames.end())return FALSE;
+ if(snapshotCursor==snapshotNames.end()){SetLastError(ERROR_NO_MORE_FILES);return FALSE;}
  row->th32ProcessID=snapshotCursor->first;
- wcsncpy_s(row->szExeFile,snapshotCursor->second.c_str(),_TRUNCATE);return TRUE;
+ wcsncpy_s(row->szExeFile,snapshotCursor->second.c_str(),_TRUNCATE);SetLastError(ERROR_SUCCESS);return TRUE;
 }
 static BOOL fakeProcessFirst(HANDLE,PROCESSENTRY32W* row){snapshotCursor=snapshotNames.begin();return fakeSnapshotRow(row);}
 static BOOL fakeProcessNext(HANDLE,PROCESSENTRY32W* row){if(snapshotCursor!=snapshotNames.end())++snapshotCursor;return fakeSnapshotRow(row);}
-static BOOL fakeCloseHandle(HANDLE h){++snapshotCloses;return h==reinterpret_cast<HANDLE>(99);}
+static BOOL fakeCloseHandle(HANDLE h){if(h!=reinterpret_cast<HANDLE>(99))return FALSE;++snapshotCloses;return TRUE;}
 #define CreateToolhelp32Snapshot fakeSnapshot
 #define Process32FirstW fakeProcessFirst
 #define Process32NextW fakeProcessNext
 #define CloseHandle fakeCloseHandle
+// No resolver result may escape to the real native process query.
+static HMODULE fakeInventoryModule(LPCWSTR){return reinterpret_cast<HMODULE>(static_cast<UINT_PTR>(1));}
+static FARPROC fakeInventoryProc(HMODULE,LPCSTR){return nullptr;}
+#define GetModuleHandleW fakeInventoryModule
+#define GetProcAddress fakeInventoryProc
+#include "process_inventory.h" // Real owner; only the original fake Toolhelp ports.
 static HWND g_hwnd=handle(1), foreground=nullptr;
 static FocusSessionState g_focusSession;
 static FocusTargetSnapshot remembered;

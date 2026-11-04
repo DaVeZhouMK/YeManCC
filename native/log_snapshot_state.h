@@ -7,7 +7,7 @@
 
 namespace ymcc::logging {
 using SnapshotJson = nlohmann::json;
-enum class SnapshotKind { full, oemWake, hud, screen, sleepInspection, throttle, queue, revision };
+enum class SnapshotKind { full, oemWake, hud, screen, sleepInspection, throttle, queue, revision, settle, dequeue };
 
 // Exact structured comparison, no hashes or serialized copies on unchanged
 // observations. Ignore only documented counters at their specified object level.
@@ -44,6 +44,8 @@ inline bool snapshotValueEqual(const SnapshotJson& a, const SnapshotJson& b) {
 inline bool observationTelemetryKey(std::string_view path, std::string_view key, SnapshotKind kind) noexcept {
     if (kind == SnapshotKind::sleepInspection)
         return path == "nativePrimary.log" && (key == "copiedBytes" || key == "originalBytes");
+    if (path.empty() && kind == SnapshotKind::settle) return key == "deferMs";
+    if (path.empty() && kind == SnapshotKind::dequeue) return key == "waitedMs" || key == "deferCount";
     if (kind != SnapshotKind::screen) return false;
     if (path.empty()) {
         if (snapshotCounter(key, kind)) return true;
@@ -90,7 +92,7 @@ inline bool observationEqual(const SnapshotJson& a, const SnapshotJson& b, Snaps
     }
 }
 inline bool snapshotEqual(const SnapshotJson& a, const SnapshotJson& b, SnapshotKind kind, bool root = true) {
-    if (kind == SnapshotKind::sleepInspection) return observationEqual(a, b, kind);
+    if (kind == SnapshotKind::sleepInspection || kind == SnapshotKind::settle || kind == SnapshotKind::dequeue) return observationEqual(a, b, kind);
     if (!root && kind == SnapshotKind::screen) return observationEqual(a, b, kind);
     if (!a.is_object() || !b.is_object()) return snapshotValueEqual(a, b);
     auto ai = a.begin(), bi = b.begin();
@@ -113,6 +115,41 @@ struct JsonSnapshotLogState {
     bool observe(const SnapshotJson& next, unsigned long long nextGeneration, SnapshotKind kind = SnapshotKind::full) {
         if (known && generation == nextGeneration && snapshotEqual(value, next, kind)) return false;
         value = next; generation = nextGeneration; known = true;
+        return true;
+    }
+};
+
+// RawInput collections can alternate on every packet. Keep a bounded identity
+// observation per interface, not a single last-interface value. This state has
+// no effect on selected devices, ownership, probing or business callbacks.
+struct IdentityObservationView {
+    std::array<std::string_view, 3> text; // path, instance, base container
+    std::array<unsigned long long, 6> numbers; // VID/PID/usage/page/power/source generation
+};
+struct IdentityObservationLogState {
+    struct Entry {
+        std::array<std::string, 3> text;
+        std::array<unsigned long long, 6> numbers{};
+        bool known = false;
+    };
+    std::array<Entry, 16> entries{};
+    size_t evict = 0;
+    void invalidate(std::string_view path) noexcept {
+        for (auto& entry : entries) if (path.empty() || entry.text[0] == path) entry.known = false;
+    }
+    bool observe(const IdentityObservationView& next) {
+        Entry* chosen = nullptr;
+        Entry* free = nullptr;
+        for (auto& entry : entries) {
+            if (entry.known && entry.text[0] == next.text[0]) { chosen = &entry; break; }
+            if (!entry.known && !free) free = &entry;
+        }
+        if (!chosen) chosen = free ? free : &entries[evict++ % entries.size()];
+        bool changed = !chosen->known || chosen->numbers != next.numbers;
+        for (size_t i = 0; i < next.text.size(); ++i) changed |= chosen->text[i] != next.text[i];
+        if (!changed) return false;
+        for (size_t i = 0; i < next.text.size(); ++i) chosen->text[i].assign(next.text[i]);
+        chosen->numbers = next.numbers; chosen->known = true;
         return true;
     }
 };

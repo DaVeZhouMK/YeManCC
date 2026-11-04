@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const build=path.resolve(repo,'../../Build/CustomSteamLibrary');
 const root=path.resolve(process.argv[2]||path.join(build,'preview-browser-'+Date.now()));
-assert(root.startsWith(build+path.sep)&&!fs.existsSync(root),'Use a fresh isolated Build directory');
+const evidence=path.resolve(repo,'../../../Testing/YMCC/Evidence');
+assert((root.startsWith(build+path.sep)||root.startsWith(evidence+path.sep))&&!fs.existsSync(root),'Use a fresh isolated Build/evidence directory');
 fs.mkdirSync(root,{recursive:true});
 const source=fs.readFileSync(path.join(repo,'CustomSteamLibrary/workspace-ui/app.js'),'utf8');
 const begin=source.indexOf('function artworkProviderLabel('),end=source.indexOf('async function searchArtwork(',begin);
@@ -31,6 +32,7 @@ const setup=`
  document.body.innerHTML='<div id="artwork-search-modal"><h2 id="artwork-search-title"></h2><div id="artwork-search-summary"></div><div id="artwork-search-list"></div><div id="artwork-search-empty"></div></div><div id="notice"></div>';
  const $=s=>document.querySelector(s);const libraryNotice=$('#notice');
  let selectedActionGame={primaryExecutable:'G:/Fixture/GameA.exe'};
+ let silentRefreshEpoch=0,silentRefreshClosed=false;function libraryRenderAllowed(){return !silentRefreshClosed&&!document.hidden;}function activeWorkspaceModal(){return $('#artwork-search-modal').classList.contains('hidden')?null:$('#artwork-search-modal');}
  let artworkSearchSlot='cover',artworkSearchType='cover',artworkTaskToken=1,artworkTaskInFlight=false,downloadingCandidateUrl='';
  let artworkCandidates=[];const artworkUnavailableUrls=new Set();
  let artworkDraft={cover:{state:'inherit',asset:{url:'old-manual-image'}},long:{state:'inherit'},wallpaper:{state:'inherit'},dirty:{cover:false,long:false,wallpaper:false}};

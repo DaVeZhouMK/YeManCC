@@ -21,6 +21,8 @@ static ymcc::reviewed_calibration::Context g_reviewedCalibrationContext;
 static std::vector<json> fixtureEvents,fixtureUiEvents;
 static int fixtureStatus=-1,fixtureResubscribe=0;
 static bool fixtureFailFlush=false,fixtureRetireOnFlush=false;
+static unsigned fixtureFlushCalls=0,fixtureFailFlushAt=0;
+static std::function<void()> fixtureAfterFlush;
 static std::function<void()> fixtureAfterMove;
 static void inputCapturePostCalibStatus(int status){fixtureStatus=status;}
 static void appendNativeLifecycleLog(const char* name,const json& body){fixtureEvents.push_back({{"event",name},{"body",body}});}
@@ -29,8 +31,9 @@ static void ymccMadgwickResetOrientation(){}
 enum class SensorThreadRequest{Resubscribe};
 static void inputCaptureSensorThreadPost(SensorThreadRequest){++fixtureResubscribe;}
 static BOOL FlushFileBuffers(HANDLE handle){
-    if(fixtureFailFlush){SetLastError(ERROR_WRITE_FAULT);return FALSE;}
+    if(fixtureFailFlush||++fixtureFlushCalls==fixtureFailFlushAt){SetLastError(ERROR_WRITE_FAULT);return FALSE;}
     const auto result=::FlushFileBuffers(handle);
+    if(result&&fixtureAfterFlush){auto action=std::move(fixtureAfterFlush);fixtureAfterFlush={};action();}
     if(result&&fixtureRetireOnFlush){fixtureRetireOnFlush=false;mockSink.activeBindingGeneration.fetch_add(1);}
     return result;
 }
@@ -99,7 +102,9 @@ int main(int argc,char**argv){try{
   key=seed(row);toApply();const auto original=bytes();HANDLE held=CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(held==INVALID_HANDLE_VALUE)throw std::runtime_error("Target lock failed");frame();CloseHandle(held);event=lastResult();
   txCheck(event["saved"]==false&&event["applied"]==false&&event["rolledBack"]==true&&event["storageReason"]=="replace-failed","sharing error is not reported saved");txCheck(bytes()==original&&same(offset(),{1,2,3}),"sharing failure keeps previous file and real bias");++scenarios;
   key=seed(row);toApply();const auto beforeFlush=bytes();candidate::fixtureFailFlush=true;frame();candidate::fixtureFailFlush=false;event=lastResult();txCheck(event["saved"]==false&&event["storageReason"]=="temporary-flush-failed"&&bytes()==beforeFlush&&same(offset(),{1,2,3}),"flush failure cannot replace original or apply bias");txCheck(noOwnedTemporary(),"failed flush closes handle before deleting owned temporary and lock");++scenarios;
-  key=seed(row);toApply();writeText("{ incomplete");frame();event=lastResult();txCheck(event["saved"]==false&&event["storageReason"]=="existing-json-invalid"&&bytes()=="{ incomplete"&&same(offset(),{1,2,3}),"invalid existing file not overwritten");++scenarios;
+  key=seed(row);toApply();writeText("{ incomplete");frame();event=lastResult();bool originalArchived=false;
+  for(const auto& entry:std::filesystem::directory_iterator(file.parent_path()))if(entry.path().filename().wstring().starts_with(L"calibration.json.before-calibration-recovery-")){std::ifstream input(entry.path(),std::ios::binary);if(std::string(std::istreambuf_iterator<char>(input),{})=="{ incomplete")originalArchived=true;}
+  txCheck(event["saved"]==true&&originalArchived&&read()[key]["xOffset"]==0.25f,"invalid existing file is exactly archived before current-source recovery");++scenarios;
   key=seed(row);toApply();const auto lockedBefore=bytes();const auto lockPath=file.wstring()+L".reviewed.lock";
   HANDLE sidecar=CreateFileW(lockPath.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,nullptr);if(sidecar==INVALID_HANDLE_VALUE)throw std::runtime_error("Fixture sidecar lock failed");
   frame();CloseHandle(sidecar);event=lastResult();txCheck(event["saved"]==false&&event["storageReason"]=="writer-busy-or-lock-failed"&&bytes()==lockedBefore&&same(offset(),{1,2,3})&&noOwnedTemporary(),"exclusive sidecar rejects second writer without file or bias loss");++scenarios;
@@ -148,6 +153,7 @@ int main(int argc,char**argv){try{
   candidate::g_machineIdentity.family=protectedFamily;
   txCheck(candidate::inputCaptureReviewedCalibrationRecipe()==nullptr&&candidate::inputCaptureCalibrationStorageKey("protected-device")=="PROTECTED-DEVICE","protected families retain legacy calibration key and cannot enter reviewed transaction");
  }
+ // @@LEGACY_STORAGE_STORM@@
  destroy(candidate::g_gm);candidate::g_gm=nullptr;FreeLibrary(module);
  const json report={{"status",failures.empty()?"pass":"fail"},{"checks",checks},{"failures",failures},{"groups",groups},{"models",models},{"scenarios",scenarios},{"actualTick",true},{"actualBusCall",true},{"actualFileApis",true},{"actualGamepadMotion",true},{"confidence","controlled; calibration convergence not tested"},{"physicalAcceptance",false},{"hardwareIo",false},{"normalAppStarted",false},{"realCalibrationFileTouched",false}};
  std::ofstream(argv[3])<<report.dump(2)<<'\n';std::cout<<json({{"status",report["status"]},{"checks",checks},{"failures",failures.size()},{"scenarios",scenarios}}).dump()<<'\n';return failures.empty()?0:1;

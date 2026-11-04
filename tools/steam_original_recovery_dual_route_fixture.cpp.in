@@ -134,6 +134,9 @@ std::atomic<U64> g_resumeReadyGeneration{7},g_lastPowerResumeCommitTick{0};
 std::atomic<bool> g_inputReady{true};
 bool sgShouldKeepInputDuringStandby(){return false;}
 void openHardwareWriteGate(){++gateOpenCalls;}
+// Unrelated static-scan notifications in the real power commit remain platform ports.
+void sgStaticScanSchedule(bool){}
+void sgNotifyWork(){}
 void traceLog(const char*,...){}
 constexpr std::uintptr_t g_hwnd=1;constexpr unsigned WM_POWER_RESUME_COMMIT=0x8000;
 bool PostMessageW(std::uintptr_t,unsigned,std::uintptr_t,std::intptr_t){++postResumeMessages;return true;}
@@ -353,6 +356,43 @@ int main(){
     test("event-wrong-ready-generation-does-not-release-wake",[]{auto c=reset(false);eventOwner(c);g_powerLifecycle=PowerLifecycle::Resuming;steamOriginalRecoveryWake(7);g_powerLifecycle=PowerLifecycle::Ready;steamOriginalRecoveryPowerReady(8);check(c->pending.empty(),"other-generation-released-wake");check(c->deferredWake==7,"other-generation-erased-wake");steamOriginalRecoveryPowerReady(7);drainOne(c);check(engineCalls==2,"correct-generation-did-not-release-wake");});
     test("event-stale-wake-does-not-replace-new-generation",[]{auto c=reset(false);eventOwner(c);c->latestPower=8;c->deferredWake=8;steamOriginalRecoveryWake(7);check(c->pending.empty(),"stale-wake-queued");check(c->latestPower==8&&c->deferredWake==8,"stale-wake-replaced-generation");steamOriginalRecoverySuspend(7);check(c->pending.empty(),"stale-suspend-queued");});
     test("event-stop-clears-pending-and-prevents-reentry",[]{auto c=reset(false);eventOwner(c);steamOriginalRecoveryWake(7);check(c->pending.size()==1,"prestop-event-not-queued");steamOriginalRecoveryRequestStop();check(c->stop&&c->pending.empty(),"stop-did-not-clear-queue");steamOriginalRecoveryWake(7);steamOriginalRecoveryPowerReady(7);check(c->pending.empty(),"stopped-owner-queued-work");check(engineCalls==0,"stopped-owner-entered-engine");});
+    // A budgeted background discovery can complete after the admitted wake.
+    // Exercise the actual target callback without a later Steam window hint.
+    test("event-target-ready-retries-deferred-identity",[]{
+        auto c=reset(false);eventOwner(c);targetAvailable=false;
+        steamOriginalRecoveryWake(7);drainOne(c);
+        check(engineCalls==0,"pending-target-entered-engine");
+        check(c->deferredWake==7,"pending-target-erased-deferred-wake");
+        targetAvailable=true;
+        steamOriginalRecoveryTargetChanged(liveGame.pid,liveGame.processCreated,liveGame.path,9);
+        check(!c->pending.empty()&&c->pending.front().kind==Trigger::Wake,"target-ready-did-not-resume-deferred-wake");
+        drainOne(c);
+        check(engineCalls==2,"target-ready-did-not-reach-dual-engine");
+        check(requests[0]["trigger"]["kind"]=="wake"&&requests[1]["trigger"]["kind"]=="wake","target-ready-only-observed");
+        check(requests[0]["recoveryAllowed"]==true&&requests[1]["recoveryAllowed"]==true,"target-ready-lost-admitted-recovery");
+        check(c->deferredWake==0,"target-ready-kept-admitted-deferred-wake");
+        const auto queued=c->pending.size();
+        steamOriginalRecoveryTargetChanged(liveGame.pid,liveGame.processCreated,liveGame.path,9);
+        check(c->pending.size()==queued,"same-target-reopened-completed-wake");
+    });
+    test("event-target-ready-without-wake-only-observes",[]{
+        auto c=reset(false);eventOwner(c);
+        steamOriginalRecoveryTargetChanged(liveGame.pid,liveGame.processCreated,liveGame.path,9);
+        check(c->deferredWake==0&&c->pending.size()==1,"target-event-fabricated-wake");
+        check(c->pending.front().kind==Trigger::TargetChanged,"ordinary-target-event-became-wake");
+        drainOne(c);
+        check(engineCalls==2,"ordinary-target-observation-lost");
+        check(requests[0]["recoveryAllowed"]==false&&requests[1]["recoveryAllowed"]==false,"ordinary-target-can-mutate");
+    });
+    test("event-target-tombstone-keeps-deferred-wake",[]{
+        auto c=reset(false);eventOwner(c);targetAvailable=false;
+        steamOriginalRecoveryWake(7);drainOne(c);
+        steamOriginalRecoveryTargetChanged(0,0,L"",9);
+        check(c->deferredWake==7,"tombstone-erased-deferred-wake");
+        check(c->pending.size()==1&&c->pending.front().kind==Trigger::TargetChanged,"tombstone-resumed-wake");
+        drainOne(c);
+        check(engineCalls==0,"tombstone-entered-engine");
+    });
     test("event-binding-ready-retries-deferred-identity",[]{auto c=reset(false);eventOwner(c);targetAvailable=false;steamOriginalRecoveryWake(7);drainOne(c);check(engineCalls==0,"missing-target-entered-engine");check(c->deferredWake==7,"missing-target-erased-deferred-wake");targetAvailable=true;steamOriginalRecoveryBindingReady();check(c->pending.size()==2,"binding-event-did-not-requeue-wake-and-observation");check(c->pending.front().kind==Trigger::Wake,"binding-event-replaced-wake-with-observation");drainOne(c);check(engineCalls==2,"binding-ready-did-not-reach-dual-engine");});
     test("event-static-rejection-preserves-legacy-dispatch",[]{auto c=reset(false);eventOwner(c);privateAvailable=false;steamOriginalRecoveryWake(7);drainOne(c);check(engineCalls==1,"event-static-rejection-blocked-legacy");check(requests[0]["recoveryRoute"]=="legacy-dynamic","event-legacy-not-selected");check(privateReads==1,"event-static-qualification-was-skipped");});
     test("event-no-admission-does-not-fabricate-recovery",[]{auto c=reset(false);eventOwner(c);SleepRecoveryAuto::state.wakeAdmission["status"]="rejected";steamOriginalRecoveryWake(7);drainOne(c);check(engineCalls==0,"event-fabricated-resume-proof");});

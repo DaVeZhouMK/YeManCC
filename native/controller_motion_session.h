@@ -167,7 +167,7 @@ public:
         result.axes = axes;
         result.deltaSeconds = nowSeconds - previousSeconds_;
         const float dt = static_cast<float>(result.deltaSeconds);
-        if (!owner_->process(key, axes, dt)) return std::nullopt;
+        owner_->processValidated(handle, axes, dt);
         previousSeconds_ = nowSeconds;
         reads_.getCal(handle, &result.calibrated.x, &result.calibrated.y, &result.calibrated.z);
         reads_.getGravity(handle, &result.gravity.x, &result.gravity.y, &result.gravity.z);

@@ -1,0 +1,423 @@
+{
+  "schemaVersion": 1,
+  "dateHongKong": "2026-11-02",
+  "role": "source-and-execution-audit;not-runtime-registration",
+  "runtimeConsumer": false,
+  "registrationAuthority": "capabilities/hc-motion-policy.json + existing HcMotionCapabilityCatalog",
+  "goalComplete": false,
+  "phase": "SOURCE_OFFLINE_CONSUMPTION_VERIFIED;FIELD_RECOVERY_OPEN_BOTH_SENSOR_TYPES_NOT_FOUND",
+  "target": {
+    "deviceClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+    "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+    "observedProduct": "ONEXPLAYER X2Mini PRO",
+    "observedCpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "notAnAliasOf": [
+      "OneXPlayerMiniPro",
+      "OneXPlayerOneXFly",
+      "OneXPlayerOneXFlyF1Pro"
+    ],
+    "currentFieldResult": "2026-11-02T20:59:45+08:00: typed discovery patch ran; WinRT0/0 and both SensorAPI types0x80070490; no sensor samples; action/output off",
+    "physicalAcceptanceVerified": false
+  },
+  "upstream": {
+    "commit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+    "evidence": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/UPSTREAM-RECHECK.json",
+    "sourceWalk": {
+      "schema": 1,
+      "status": "PASS",
+      "commit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+      "checkedAt": "2026-11-02T09:26:31.836Z",
+      "files": [
+        {
+          "path": "HandheldCompanion/Managers/ControllerManager.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-ControllerManager.cs",
+          "expectedGitBlob": "34564f48406ec9a18eac9408c63b07a87227037e",
+          "gitBlob": "34564f48406ec9a18eac9408c63b07a87227037e",
+          "exact": true,
+          "sha256": "d802bad7c368213d3405a0ae028e17fb5c555301e82cf3a3f329b872baed743c"
+        },
+        {
+          "path": "HandheldCompanion/Controllers/GamepadMotion.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-GamepadMotion.cs",
+          "expectedGitBlob": "25a1ddb9dcb6ea8ef5a9c6383b39f909fdc17c39",
+          "gitBlob": "25a1ddb9dcb6ea8ef5a9c6383b39f909fdc17c39",
+          "exact": true,
+          "sha256": "7a7a4917f5bdeb818874bb159be8b0f4be6a7ce19625a533ce2254264d9d7b60"
+        },
+        {
+          "path": "HandheldCompanion/Actions/GyroActions.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-GyroActions.cs",
+          "expectedGitBlob": "5e1ae72c35145a0332b94820379d4957020dfc8a",
+          "gitBlob": "5e1ae72c35145a0332b94820379d4957020dfc8a",
+          "exact": true,
+          "sha256": "01ab8e89bba8bc0d59acd729fe9768cb41fc07685ceb77485150f23c92552cd6"
+        },
+        {
+          "path": "HandheldCompanion/Controllers/IController.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-IController.cs",
+          "expectedGitBlob": "6a5dfeda63abf727ea760303744a6f8de63b9a85",
+          "gitBlob": "6a5dfeda63abf727ea760303744a6f8de63b9a85",
+          "exact": true,
+          "sha256": "8839bcb96735036370102262a81720ef76e68554bd360e74a30fa0362d65eb9f"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/IMUAccelerometer.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-IMUAccelerometer.cs",
+          "expectedGitBlob": "65104007174179f175feef47919565997fca2455",
+          "gitBlob": "65104007174179f175feef47919565997fca2455",
+          "exact": true,
+          "sha256": "3cd61c3967cf81ecdb7500a4ab0f37b42d913d7b67be9ddea3dfb2cd8855500a"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/IMUGyrometer.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-IMUGyrometer.cs",
+          "expectedGitBlob": "751a15d55fcb6271fdcc891165fe0c03862f7c9c",
+          "gitBlob": "751a15d55fcb6271fdcc891165fe0c03862f7c9c",
+          "exact": true,
+          "sha256": "6982d2b93db1161baab4dd4a7357d5ca01d9b24432dce7c01e8c2acb65e2812d"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/IMUSensor.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-IMUSensor.cs",
+          "expectedGitBlob": "1e198d7178df340dc44ab6ae69527896d7ea96b2",
+          "gitBlob": "1e198d7178df340dc44ab6ae69527896d7ea96b2",
+          "exact": true,
+          "sha256": "a23431a0236f092bc2aefb87cbf3dfa806088e3760d3f87aa14290c56d3f2108"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/IMUWindowsAccelerometer.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-IMUWindowsAccelerometer.cs",
+          "expectedGitBlob": "9a07dc57bf172f09c5e49507f4f8f2d57e40d389",
+          "gitBlob": "9a07dc57bf172f09c5e49507f4f8f2d57e40d389",
+          "exact": true,
+          "sha256": "d3a7a45a03f9aae9051f3c342b6d3e6c9433a3d32e0cfbddd647f06b42a711f5"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/IMUWindowsGyrometer.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-IMUWindowsGyrometer.cs",
+          "expectedGitBlob": "0178ca484c6594bb8012e03a7e1d01a8039af32e",
+          "gitBlob": "0178ca484c6594bb8012e03a7e1d01a8039af32e",
+          "exact": true,
+          "sha256": "85ae222ad61c7bf979fe57832cbe9d1546605f53d727c54f67062912cc9d165e"
+        },
+        {
+          "path": "HandheldCompanion/Managers/MotionManager.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-MotionManager.cs",
+          "expectedGitBlob": "f4f8e9fc84a594ba3857d656283737a7d5cc5b6d",
+          "gitBlob": "f4f8e9fc84a594ba3857d656283737a7d5cc5b6d",
+          "exact": true,
+          "sha256": "96df7cef17776273d9fee0b13cd481869c980aba6b8537b8b85e8e71ad2367d5"
+        },
+        {
+          "path": "HandheldCompanion/Controllers/OneXPlayer/OneXPlayerX2Controller.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-OneXPlayerX2Controller.cs",
+          "expectedGitBlob": "626f71601421b46871ec0f0fcaf2ca7ca05f5a4e",
+          "gitBlob": "626f71601421b46871ec0f0fcaf2ca7ca05f5a4e",
+          "exact": true,
+          "sha256": "699c23fb91d5e2a1e7b48a1f0bcd742f8e9bd7482ba6e7734e111255364a7bad"
+        },
+        {
+          "path": "HandheldCompanion/Managers/SensorsManager.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-SensorsManager.cs",
+          "expectedGitBlob": "bea0920e67a21d3d7bf91643aa6930e4b2d7e00f",
+          "gitBlob": "bea0920e67a21d3d7bf91643aa6930e4b2d7e00f",
+          "exact": true,
+          "sha256": "4460ae2a584bae6bbd5ec97c657e6adb635738decfee723c49b0adb99e8ecfb3"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/SerialUSBIMU.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-SerialUSBIMU.cs",
+          "expectedGitBlob": "baaa3f2825827384f271d398abd7bbdc2efdad86",
+          "gitBlob": "baaa3f2825827384f271d398abd7bbdc2efdad86",
+          "exact": true,
+          "sha256": "fdcc85b575a3bed05af139602332b7a15047b410b4d998433add6b06a7ba3f7c"
+        },
+        {
+          "path": "HandheldCompanion/Managers/VirtualManager.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-VirtualManager.cs",
+          "expectedGitBlob": "1888f43921060d2a3775d570324894661d865c19",
+          "gitBlob": "1888f43921060d2a3775d570324894661d865c19",
+          "exact": true,
+          "sha256": "bdc6d895aec5934a5ec9b4962deb957d9ad95e801d78486a076d6b2f914fc5ba"
+        },
+        {
+          "path": "HandheldCompanion/Sensors/WindowsSensorManager.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-WindowsSensorManager.cs",
+          "expectedGitBlob": "6bede14a2677fb2f1654d3d418fd859fa031c0c3",
+          "gitBlob": "6bede14a2677fb2f1654d3d418fd859fa031c0c3",
+          "exact": true,
+          "sha256": "cc774e5269062c99495dc864b8ddde77f907567ef1de85459f92f9c00f1be9e5"
+        },
+        {
+          "path": "HandheldCompanion/Controllers/XInputController.cs",
+          "file": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/upstream-XInputController.cs",
+          "expectedGitBlob": "39acbb94553a1e64878e527c1aa74f26b8784d17",
+          "gitBlob": "39acbb94553a1e64878e527c1aa74f26b8784d17",
+          "exact": true,
+          "sha256": "24db609e973136811a6149af5fc4ba3b81f0d3dbb26df43536ab53e08889a1f1"
+        }
+      ]
+    }
+  },
+  "evidenceRoot": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102",
+  "softwareEvidence": [
+    {
+      "stage": "actual identity, recipe, binding, pair consumer",
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/Consumers-CurrentVerified/source-bindings.json",
+      "configurations": [
+        "Release",
+        "Checked"
+      ],
+      "checksEach": 114950,
+      "scope": "extracted actual consumers;not full bus or real sensors"
+    },
+    {
+      "stage": "actual native calibration bus call and processing/storage",
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/WindowsBus/2026-11-02T08-57-40-166Z-56808/RESULT.json",
+      "configurations": [
+        "Release",
+        "Checked"
+      ],
+      "models": 51,
+      "checksEach": 4191,
+      "scope": "real GamepadMotion DLL and isolated filesystem;not OS sensor or Host Main"
+    },
+    {
+      "stage": "allocation-free axis parser equivalence",
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/AxisParser-Current/RESULT.json",
+      "matrixIds": 6219,
+      "comparisonPairsEach": 93285,
+      "configurations": [
+        "Release",
+        "Checked"
+      ]
+    },
+    {
+      "stage": "source rejection retained",
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/WindowsBus-Negative/2026-11-02T09-04-11-805Z-34812/RESULT.json",
+      "expected": "fail",
+      "failuresEach": 733
+    },
+    {
+      "stage": "spoofed save receipt rejection retained",
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/WindowsBus-Negative/2026-11-02T09-06-18-080Z-70456/RESULT.json",
+      "expected": "fail",
+      "failuresEach": 606
+    }
+  ],
+  "fieldEvidence": {
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FIELD-REPORT.json",
+    "summary": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FIELD-REPORT.md",
+    "loggingEnabled": true,
+    "completeInputSamples": 3348,
+    "gyroAndAccelSequenceAllZero": true,
+    "winrtReportedCounts": {
+      "gyro": 0,
+      "accel": 0
+    },
+    "sensorApiCategoryResult": "0x80070490",
+    "driverStorePackage": "Bosch bmi160.inf / oem22.inf; not proof of online sensor",
+    "currentInstalledVersion": "0.0.38.0"
+  },
+  "physicalAcceptance": {
+    "status": "not-proven",
+    "required": [
+      "paired current gyro/accel samples on corrected target build",
+      "current model/provider/generation admitted to real processing",
+      "actual output submitted and accepted by active target",
+      "device motion affects intended game consumer"
+    ],
+    "requiredForThisSourceOnlyDevelopment": false
+  },
+  "deployment": {
+    "installedCopyChanged": false,
+    "driversChanged": false,
+    "deviceIoPerformed": false
+  },
+  "familyComparison": {
+    "status": "PASS_WITH_EXPLICIT_APEX_UPSTREAM_BLOCKER",
+    "evidence": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FamilyAudit/FAMILY-AUDIT.json",
+    "summary": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FamilyAudit/FAMILY-AUDIT.zh-CN.md",
+    "typeCount": 20,
+    "concreteModels": 17,
+    "latestMatrixEquivalent": 16,
+    "nonFactoryBases": 3,
+    "sourceChecks": 639,
+    "apexException": {
+      "reason": "Latest HC AxisSwap X:Y,Y:X,Z:Y is non-bijective",
+      "action": "retain current valid original matrix; do not import invalid source or invent corrected axes"
+    },
+    "currentSourceClosure": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/CURRENT-SOURCE-CLOSURE.json"
+  },
+  "latestUserDirection": {
+    "text": "你可以直接尝试无日志反馈直接从HC源码测挖穿来连通",
+    "acceptance": "Continue source and actual offline consumer development without waiting for new field logs; do not claim physical acceptance."
+  },
+  "providerCompatibilityFix": {
+    "source": "native/msi_legacy_sensor.h",
+    "headerSha256": "b3b3c90735cee63b2f54707bd374a26a54f8e8f1062e02560b0248e10010de81",
+    "behavior": "Category ERROR_NOT_FOUND or empty collection can use requested standard sensor types; original unique/pair admission and read/stop fences retained",
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/SensorTypeFallback/REPORT.json",
+    "scope": "production Provider poll through actual sample callbacks with memory COM terminals",
+    "adapterChecksEach": 72,
+    "legacyCoreChecksEach": 35,
+    "oldHeaderFailureControl": "original34 still pass;25 added typed-path assertions fail"
+  },
+  "hostReportSoftware": {
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/HostWire/HOST-WIRE-RECEIPT.json",
+    "currentness": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/HostWire/SOURCE-CURRENTNESS.json",
+    "checksEach": 223264,
+    "rowsEach": 7202,
+    "knownBoundary": "Original independent/stored raw vectors; additional actual Provider-to-action-to-typed-Host consumption is proven separately by continuousConsumption.",
+    "outerDriftErrorPreserved": true
+  },
+  "completionScope": "Historical source/offline consumer work remains completed; this new field observation reopens physical recovery investigation and does not prove a missing or faulty driver.",
+  "continuousConsumption": {
+    "status": "PASS_SELECTED_CONTINUOUS_SCOPE",
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/IngressToHost/CONTINUOUS-RECEIPT.json",
+    "summary": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/IngressToHost/CONTINUOUS-RECEIPT.md",
+    "currentSourceClosure": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/CURRENT-SOURCE-CLOSURE.json",
+    "nativeChecksEach": 18,
+    "hostFramesEach": 4,
+    "hostChecksEach": 72,
+    "configurations": [
+      "Release",
+      "Checked"
+    ],
+    "faultClasses": [
+      "callback",
+      "ProcessMotion",
+      "matrix",
+      "motion-action",
+      "typed-frame-delivery"
+    ],
+    "faultExecutions": 10,
+    "observations": [
+      {
+        "phase": "enabled",
+        "right": [
+          12000,
+          11000
+        ],
+        "gyro": [
+          11,
+          -12,
+          -10
+        ]
+      },
+      {
+        "phase": "disabled",
+        "right": [
+          0,
+          0
+        ],
+        "gyro": [
+          11,
+          -12,
+          -10
+        ]
+      },
+      {
+        "phase": "trigger-released",
+        "right": [
+          0,
+          0
+        ],
+        "gyro": [
+          11,
+          -12,
+          -10
+        ]
+      },
+      {
+        "phase": "retired",
+        "right": [
+          0,
+          0
+        ],
+        "gyro": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "boundaries": {
+      "hardwareIo": false,
+      "physicalAcceptance": false,
+      "hostMainExecuted": false,
+      "virtualTargetCreated": false,
+      "fullInputHostSubmitPadLifecycleExecuted": false,
+      "namedPipeExecuted": false,
+      "submitFault": "Omit actual typed serialized enabled-frame emission to memory Host terminal",
+      "owner": "Original actual BUS processing prefix with memory owner/effect ports. Actual source cache/stamp/pair, original GamepadMotion DLL and motion contribution execute. Full calibration, selected-owner handoff and target lifecycle remain outside this case.",
+      "profile": "Controlled Windows Auto=Yaw/LocalSpace, RT held, threshold=1, sensitivity=1 (native x1000), gyro weight=1, identity axis modifiers, zero physical right stick.",
+      "disabled": "Action disabled -> neutral right stick. Valid pair raw gyro remains present. Source retired -> neutral stick and gyro."
+    }
+  },
+  "originalFailureReceiptsPreserved": true,
+  "sourceChain": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/HC-TO-YMCC-SOURCE-CHAIN.json",
+  "sourceDevelopmentComplete": true,
+  "latestFieldFollowup": {
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FieldLog-234039/FIELD-FOLLOWUP.json",
+    "exportTime": "2026-11-02T23:40:39+08:00",
+    "sourceBranchObservedOnTarget": true,
+    "sensorTypesFound": false,
+    "samplesPositive": false,
+    "completeSampleRows": 2207,
+    "currentActionEnabled": false,
+    "physicalRecoveryVerified": false,
+    "newDeviceDiagnosticsPresent": false,
+    "rootCause": "not established; target exposes no gyro/accel endpoints and new device-node snapshot is absent"
+  },
+  "diagnosticGapRepair": {
+    "status": "SOURCE_DIAGNOSTIC_GAP_REPAIR_VERIFIED; PHYSICAL_RECOVERY_OPEN",
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeviceDiagnostics/DELIVERY.json",
+    "logArtifact": "windows-sensor-devices.json",
+    "selectedValidation": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeviceDiagnostics/2026-11-02T14-09-58-302Z-87784-baseline/RESULT.json",
+    "sourceVerified": true,
+    "fullApplicationBuilt": false,
+    "deployed": false,
+    "targetDeviceObserved": false,
+    "physicalRecoveryVerified": false,
+    "nativeBuild": {
+      "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeviceChangeRecovery/NativeBuild/RESULT.json",
+      "productLinked": true,
+      "fullSourceIdentityVerified": false,
+      "deployed": false
+    }
+  },
+  "crossFamilyFieldComparison": {
+    "deviceClass": "HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+    "gyroReport": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FieldLog-LGO-213840/GYRO-COMPARISON.json",
+    "fanReport": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/FieldLog-LGO-213840/FAN-FAILURE-REVIEW.json",
+    "meaning": "Comparison evidence only; Lenovo controller source must not inherit ONEX Windows discovery/matrix policy"
+  },
+  "deviceChangeRecovery": {
+    "status": "MISSING_SOURCE_EVENT_RECOVERY_SOFTWARE_VERIFIED; PHYSICAL_RECOVERY_OPEN",
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeviceChangeRecovery/DELIVERY.json",
+    "selectedValidation": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeviceChangeRecovery/Inventory/2026-11-02T14-51-18-104Z-39744-baseline/RESULT.json",
+    "sourceVerified": true,
+    "pausedResumeFixVerified": true,
+    "fullApplicationBuilt": false,
+    "deployed": false,
+    "physicalRecoveryVerified": false,
+    "nativeBuild": {
+      "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeviceChangeRecovery/NativeBuild/RESULT.json",
+      "exitCode": 0,
+      "productLinked": true,
+      "sourceIdentityComplete": false,
+      "deployed": false
+    }
+  },
+  "deliveryCandidate": {
+    "status": "FROZEN_NATIVE_CANDIDATE_READY_FOR_ORIGINAL_EXPORT_REVIEW; PHYSICAL_RECOVERY_OPEN",
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeliveryCandidate/HANDOFF.json",
+    "nativeBuildReceipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OneX-Gyro-20261102/DeliveryCandidate/RESULT.json",
+    "artifactSha256": "5e1535a9c92b62e9a13e1e1a2c797aad1234db8550f2f7ed9925ef8031367e6c",
+    "frozenRepositoryInputsVerified": true,
+    "mainlineCurrentBundle": false,
+    "deployed": false,
+    "physicalRecoveryVerified": false
+  }
+}

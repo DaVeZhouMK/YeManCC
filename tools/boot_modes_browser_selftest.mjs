@@ -6,7 +6,8 @@ import {createRequire} from 'node:module';
 import {runtimeBundle,outputDirectory,repo,hash,fingerprints,listenBootFixture} from './boot_modes_fixture/harness.mjs';
 import {buildBrowser} from './boot_modes_fixture/buildBrowser.mjs';
 const out=outputDirectory(process.argv.slice(2),'browser');
-const report={schema:1,suite:'boot-modes-browser',pass:false,isolation:'Startup-only actual PowerView/IntegratedPage with BootModesPanel/Workbench, Dropdown/Toggle/Slider/ScreenTouchpads and original gamepad engine; memory boot bridge and native IO; loopback server only. Browser replay, not installed-app or physical-controller acceptance.',assertions:[],layouts:[],shells:[],initialViewports:[],widthOwnership:[],screenshots:[],sourceHashes:{},pageErrors:[],networkRejected:[]};
+const sleepGuardOnly=process.argv.includes('--sleep-guard');
+const report={scope:sleepGuardOnly?'sleep-guard':'all',wholeSuite:sleepGuardOnly?'NOT_RUN':'executed',schema:1,suite:'boot-modes-browser',pass:false,isolation:'Startup-only actual PowerView/IntegratedPage with BootModesPanel/Workbench, Dropdown/Toggle/Slider/ScreenTouchpads and original gamepad engine; memory boot bridge and native IO; loopback server only. Browser replay, not installed-app or physical-controller acceptance.',assertions:[],layouts:[],shells:[],initialViewports:[],widthOwnership:[],screenshots:[],sourceHashes:{},pageErrors:[],networkRejected:[]};
 let browser,server;
 const test=async(name,height,run)=>{try{const evidence=await run();report.assertions.push({name,height,pass:true,...(evidence?{evidence}:{})});}catch(error){report.assertions.push({name,height,pass:false,error:error.stack||String(error)});}};
 const command=async(page,action)=>{await page.evaluate(action=>window.__bootGamepad.command(action),action);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));};
@@ -50,6 +51,27 @@ try{
   await page.addInitScript(()=>{const active=new Set(),events=[];const add=window.addEventListener.bind(window),remove=window.removeEventListener.bind(window);window.addEventListener=(type,listener,options)=>{if(type==='boot-mode:changed'){active.add(listener);events.push('add');}return add(type,listener,options);};window.removeEventListener=(type,listener,options)=>{if(type==='boot-mode:changed'){active.delete(listener);events.push('remove');}return remove(type,listener,options);};window.__bootReceiptProbe={count:()=>active.size,events};});
   await page.route('**/*',async route=>{if(route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:'))await route.continue();else{report.networkRejected.push(route.request().url());await route.abort();}});
   await page.goto(origin+'/');await page.waitForSelector('.boot-mode-cards');
+  if(sleepGuardOnly){
+   await test('sleep guard fields use actual components and engine, retain saved intent and return with B',height,async()=>{
+    await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled);
+    const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');
+    const category=page.locator('[data-boot-category="sleep"]');await focus(page,category);await command(page,'confirm');
+    const timeout=page.locator('[data-field="sleep.config.retryOnSleepTimeout"]').getByRole('switch',{name:'睡眠超时',exact:true});
+    const entry=page.locator('[data-field="sleep.config.retryOnEntryFailure"]').getByRole('switch',{name:'入睡失败重试',exact:true});
+    assert.equal(await timeout.count(),1);assert.equal(await entry.count(),1);assert.equal(await timeout.getAttribute('aria-checked'),'false');
+    const oldEntry=await entry.getAttribute('aria-checked');await focus(page,timeout);await command(page,'confirm');
+    assert.equal(await timeout.getAttribute('aria-checked'),'true');assert.equal(await entry.getAttribute('aria-checked'),oldEntry);
+    const layout=await auditRows(page,height,'sleep-timeout');
+    const save=page.getByRole('button',{name:'保存预设',exact:true});await focus(page,save);await command(page,'confirm');
+    await page.waitForFunction(()=>window.__bootMemory.document.global.sleep.config.retryOnSleepTimeout===true);
+    await shot(page,height+'-sleep-timeout-fields');await command(page,'back');await page.waitForSelector('.boot-workbench',{state:'detached'});
+    await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');await focus(page,category);await command(page,'confirm');
+    assert.equal(await timeout.getAttribute('aria-checked'),'true');assert.equal(await entry.getAttribute('aria-checked'),oldEntry);
+    await command(page,'back');await page.waitForSelector('.boot-workbench',{state:'detached'});
+    return {...layout,partialFieldRetained:true,saveAndReopen:true,formalEngine:true};
+   });
+   await page.close();continue;
+  }
   const waitVideo=async(selector='.boot-main-image video')=>{
    await page.waitForFunction(selector=>{const v=document.querySelector(selector);return v?.readyState>=2&&!v.paused&&v.currentTime>.03;},selector);
    return page.locator(selector);
@@ -230,17 +252,14 @@ try{
   await test('native factor-2 editor width is owned, capped to 1280, and outside the sidebar zoom',height,async()=>{
    await page.waitForFunction(()=>window.__bootMemory.nativeCalls.some(c=>c.op==='window.editorWidth'||c.op==='ipc.diagnostics.frontendTrace'&&c.value.enabled));const result=await page.evaluate(()=>{const editor=document.querySelector('.boot-workbench'),r=editor.getBoundingClientRect();const event=window.__bootMemory.nativeCalls.find(c=>c.op==='window.editorWidth'||c.op==='ipc.diagnostics.frontendTrace'&&c.value.enabled).value;const top=document.elementFromPoint(r.left+r.width/2,r.top+20);return {request:event,editor:r.toJSON(),outsideStage:!editor.closest('.app-stage'),topOwner:!!top.closest('.boot-workbench')};});assert.equal(result.request.factor,2);assert.equal(result.request.expandedWidth,1280);assert(result.editor.width>result.request.collapsedWidth*1.5);assert(result.outsideStage);assert(result.topOwner);return result;
   });
-  await test('editor has no running animations or horizontal overflow',height,async()=>{const result=await page.locator('.boot-workbench-overlay').evaluate(el=>({animations:el.getAnimations({subtree:true}).filter(a=>a.playState==='running').map(a=>a.effect?.target?.className),horizontalOverflow:document.documentElement.scrollWidth>innerWidth,box:el.getBoundingClientRect().toJSON()}));assert.deepEqual(result.animations,[]);assert.equal(result.horizontalOverflow,false);return result;});
-  const categories=['性能与散热','优化软件','手柄与陀螺仪','手柄自定义','触摸板与屏幕按键','Steam 大屏','睡眠优化','监控与画面'];
+  await test('editor has no running animations or horizontal overflow',height,async()=>{await page.waitForFunction(()=>{const el=document.querySelector('.boot-workbench-overlay');return el&&!el.getAnimations({subtree:true}).some(a=>a.playState==='running');},undefined,{timeout:750});const result=await page.locator('.boot-workbench-overlay').evaluate(el=>({animations:el.getAnimations({subtree:true}).filter(a=>a.playState==='running').map(a=>a.effect?.target?.className),horizontalOverflow:document.documentElement.scrollWidth>innerWidth,box:el.getBoundingClientRect().toJSON()}));assert.deepEqual(result.animations,[]);assert.equal(result.horizontalOverflow,false);return result;});
+  const categories=['性能与散热','优化软件','手柄与陀螺仪','触摸板与屏幕按键','Steam 大屏','睡眠优化','监控与画面'];
   for(const category of categories){
-   if(category==='手柄自定义')await page.locator('[data-preview-mode="xbox"]').click();
    await page.locator('.boot-workbench nav button').filter({hasText:category}).click();
-   if(category==='手柄自定义')await page.locator('[data-boot-module="controller"]').getByRole('button',{name:'模式单独设置',exact:true}).click();
    await test(category+' visual rows: left returns to selected category, right stays in row, up/down visit adjacent row',height,async()=>{
     return auditRows(page,height,category);
    });
    await shot(page,`${height}-${categories.indexOf(category)}-${category==='性能与散热'?'performance':'category'}`);
-   if(category==='手柄自定义')await page.locator('[data-preview-mode="global"]').click();
   }
   await page.locator('.boot-workbench nav button').filter({hasText:'手柄与陀螺仪'}).click();
   await test('A opens actual Dropdown; B cancels and restores its trigger; A confirms',height,async()=>{
@@ -261,23 +280,15 @@ try{
   await test('Slider changes only in A edit mode; B restores the old value; second A commits',height,async()=>{
    const slider=page.locator('[data-field="performance.controls.ac.tdpCeiling"] input');await focus(page,slider);const before=await slider.inputValue();await command(page,'slider-increase');assert.equal(await slider.inputValue(),before);await command(page,'confirm');assert.equal(await page.evaluate(()=>window.__bootGamepad.editing()),true);await command(page,'slider-increase');assert.notEqual(await slider.inputValue(),before);await command(page,'back');assert.equal(await slider.inputValue(),before);assert.equal(await page.evaluate(()=>window.__bootGamepad.editing()),false);await command(page,'confirm');await command(page,'slider-increase');await command(page,'confirm');assert.notEqual(await slider.inputValue(),before);assert.equal(await page.evaluate(()=>window.__bootGamepad.editing()),false);
   });
-  await page.locator('.boot-workbench nav button').filter({hasText:'手柄自定义'}).click();
-  await test('controller configuration is reachable with directions, opens on A, owns focus, and B returns',height,async()=>{
-   await page.locator('[data-preview-mode="xbox"]').click();await page.locator('[data-boot-category="controller"]').click();await page.locator('[data-boot-module="controller"]').getByRole('button',{name:'模式单独设置',exact:true}).click();
-   const category=page.locator('.boot-workbench nav button').filter({hasText:'手柄自定义'});await focus(page,category);await command(page,'nav-right');const entry=page.getByRole('button',{name:'编辑手柄自定义',exact:true});
-   const route=await page.evaluate(()=>{
-    const start=document.activeElement,target=Array.from(document.querySelectorAll('button')).find(el=>el.textContent.trim()==='编辑手柄自定义');
-    const elements=window.__bootGamepad.focusables();elements.forEach((el,i)=>el.dataset.bootReachId=String(i));
-    const queue=[{el:start,path:[]}],seen=new Set([start]);let found;
-    while(queue.length&&seen.size<160){const node=queue.shift();for(const [dx,dy]of [[1,0],[0,-1],[0,1],[-1,0]]){window.__bootGamepad.focus(node.el);window.__bootGamepad.move(dx,dy);const next=document.activeElement;if(seen.has(next))continue;const path=[...node.path,[dx,dy]];if(next===target){found=path;break;}seen.add(next);queue.push({el:next,path});}if(found)break;}
-    window.__bootGamepad.focus(start);if(found)for(const [dx,dy]of found)window.__bootGamepad.move(dx,dy);return {path:found,visited:seen.size};
-   });
-   assert.equal(await entry.evaluate(el=>el===document.activeElement),true,'No directional path to controller editor: '+JSON.stringify(route));await command(page,'confirm');await page.waitForSelector('[data-gp-modal="controller-shortcut-editor"]');
-   assert.equal(await page.evaluate(()=>document.querySelector('[data-gp-modal="controller-shortcut-editor"]').contains(document.activeElement)),true);const focusables=await page.evaluate(()=>window.__bootGamepad.focusables().every(el=>!!el.closest('[data-gp-modal="controller-shortcut-editor"]')));assert.equal(focusables,true);await shot(page,`${height}-controller-modal`);await command(page,'back');await page.waitForSelector('[data-gp-modal="controller-shortcut-editor"]',{state:'detached'});assert.equal(await entry.evaluate(el=>el===document.activeElement),true);
+  await test('all four modes exclude controller editing and calibration from the mounted workbench',height,async()=>{
+   const rows=[];for(const mode of ['global','xbox','steam','xbox-steam']){
+    await page.locator('[data-preview-mode="'+mode+'"]').click();
+    assert.equal(await page.locator('[data-boot-category="controller"],[data-boot-module="controller"],[data-gp-modal="controller-shortcut-editor"]').count(),0);
+    assert.equal(await page.getByRole('button',{name:/编辑手柄自定义|手柄校准|摇杆校准/}).count(),0);
+    const controls=await page.evaluate(()=>window.__bootGamepad.focusables().map(el=>el.textContent?.trim()||''));assert(!controls.some(label=>/编辑手柄自定义|手柄校准|摇杆校准/.test(label)));
+    rows.push({mode,retiredControls:0});
+   }await page.locator('[data-preview-mode="global"]').click();return {rows};
   });
-  // Recover any modal after a failed reachability assertion so later tests remain independent.
-  if(await page.locator('[data-gp-modal="controller-shortcut-editor"]').count())await command(page,'back');
-  await page.locator('[data-preview-mode="global"]').click();
   await page.locator('.boot-workbench nav button').filter({hasText:'触摸板与屏幕按键'}).click();
   await test('actual touchpad preset controls edit only the draft; dropdown B returns focus',height,async()=>{
    const master=page.getByRole('switch',{name:'触控板总开关',exact:true});assert.equal(await master.count(),1);const before=await master.getAttribute('aria-checked');await focus(page,master);await command(page,'confirm');assert.notEqual(await master.getAttribute('aria-checked'),before);if(before==='true')await command(page,'confirm');
@@ -383,12 +394,40 @@ try{
    await focus(page,own);await command(page,'confirm');await choose('手动模式');await selectMode('global');assert.match(await dropdown().innerText(),/自动模式/);await selectMode('steam');assert.match(await dropdown().innerText(),/自动模式/);
    await selectMode('xbox');assert.match(await dropdown().innerText(),/手动模式/);await focus(page,follow);await command(page,'confirm');assert.match(await dropdown().innerText(),/自动模式/);
    await focus(page,own);await command(page,'confirm');assert.match(await dropdown().innerText(),/手动模式/);await focus(page,follow);await command(page,'confirm');
-   const controllerCategory=page.locator('[data-boot-category="controller"]');await focus(page,controllerCategory);await command(page,'confirm');const entry=page.getByRole('button',{name:'编辑手柄自定义',exact:true});assert.equal(await entry.isDisabled(),true);
-   const controllerOwn=page.locator('[data-boot-module="controller"]').getByRole('button',{name:'模式单独设置',exact:true});await focus(page,controllerOwn);await command(page,'confirm');assert.equal(await entry.isEnabled(),true);await focus(page,entry);await command(page,'confirm');const child=page.locator('[data-gp-modal="controller-shortcut-editor"]');await child.waitFor();assert.match(await child.innerText(),/Xbox 全屏模式/);await command(page,'back');await child.waitFor({state:'detached'});
+   assert.equal(await page.locator('[data-boot-category="controller"],[data-boot-module="controller"]').count(),0);
    const revision=await page.evaluate(()=>window.__bootMemory.document.revision),save=page.locator('.boot-workbench-top button').filter({hasText:'保存预设'});await focus(page,save);await command(page,'confirm');await page.waitForFunction(r=>window.__bootMemory.document.revision>r,revision);
    const saved=await page.evaluate(()=>window.__bootMemory.document);assert.deepEqual(saved.global,initial);assert.equal(saved.scenes.xbox.overrides.performance,undefined);assert.equal(saved.scenes.xbox.rememberedOverrides.performance.controls.ac.mode,'manual');assert.equal(saved.scenes.steam.overrides.performance,undefined);
    await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();await selectMode('xbox');await focus(page,performanceCategory);await command(page,'confirm');await focus(page,own);await command(page,'confirm');assert.match(await dropdown().innerText(),/手动模式/);await focus(page,follow);await command(page,'confirm');assert.match(await dropdown().innerText(),/自动模式/);
-   return {globalUntouched:true,inheritedReadOnly:true,ownPriority:true,inactiveOwnRemembered:true,ownShortcutEditorReachable:true,gamepadActions:true};
+   return {globalUntouched:true,inheritedReadOnly:true,ownPriority:true,inactiveOwnRemembered:true,retiredControllerAbsent:true,gamepadActions:true};
+  });
+
+  await test('late older overview receipt cannot replace a newer successful editor save',height,async()=>{
+   await page.goto(origin+'/');await page.waitForSelector('.boot-mode-cards');
+   await page.evaluate(()=>{window.__bootMemory.snapshotNextOverviewRead=true;window.__bootMemory.holdNextOverviewRead=true;window.__bootMemory.completeStartup('global');});
+   await page.waitForFunction(()=>typeof window.__bootMemory.releaseOverviewRead==='function');
+   await page.getByRole('button',{name:'编辑配置',exact:true}).click();await page.locator('.boot-workbench').waitFor();await page.locator('[data-boot-category="input"]').click();
+   const toggle=page.locator('[data-field="gyro.motion.enabled"] [role="switch"]'),previous=await toggle.getAttribute('aria-checked');await toggle.click();const changed=await toggle.getAttribute('aria-checked');assert.notEqual(changed,previous);
+   const revision=await page.evaluate(()=>window.__bootMemory.document.revision),save=page.locator('.boot-workbench-top button').filter({hasText:'保存预设'});await save.click();await page.waitForFunction(r=>window.__bootMemory.document.revision===r+1,revision);await page.waitForFunction(()=>document.querySelector('.boot-workbench-top button.primary')?.disabled??true);
+   await page.evaluate(()=>window.__bootMemory.releaseOverviewRead());await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+   assert.equal(await toggle.getAttribute('aria-checked'),changed,'late overview rolled the saved draft back');assert.equal(await save.isDisabled(),true);assert.equal(await page.evaluate(()=>window.__bootMemory.document.revision),revision+1);
+   return {olderRevision:revision,newerRevision:revision+1,savedDraftPreserved:true};
+  });
+  await test('four-mode category, dropdown and modal lifecycle churn does not break Vue DOM anchors',height,async()=>{
+   await page.goto(origin+'/');await page.getByRole('button',{name:'编辑配置',exact:true}).click();await page.locator('.boot-workbench').waitFor();
+   const categories=await page.locator('.boot-workbench nav button').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('data-boot-category')));let transitions=0,dropdowns=0;
+   for(let mode=0;mode<4;mode++)for(const category of categories){
+    await page.locator('.boot-mode-strip button').nth(mode).click();await page.locator('[data-boot-category="'+category+'"]').click();
+    const dropdown=page.locator('.boot-workbench .dd-trigger:enabled').first();if(await dropdown.count()){await dropdown.click();await page.locator('[role="listbox"]').waitFor();await page.locator('.boot-mode-strip button').nth((mode+1)%4).click();await page.locator('[role="listbox"]').waitFor({state:'detached'});dropdowns++;}transitions++;
+   }
+   assert.equal(await page.locator('[data-boot-module="controller"]').count(),0);assert.equal(await page.locator('.boot-workbench').count(),1);await page.locator('[data-boot-close]').click();await page.locator('.boot-workbench').waitFor({state:'detached'});
+   return {modes:4,categories:categories.length,transitions,dropdowns,retiredEditorAbsent:true};
+  });
+
+  await test('malformed startup notifications cannot crash or refresh the editor',height,async()=>{
+   await page.goto(origin+'/');await page.waitForFunction(()=>window.__bootMemory.overviewReads>=1);await page.getByRole('button',{name:'编辑配置',exact:true}).click();await page.locator('.boot-workbench').waitFor();
+   const before=await page.evaluate(()=>({reads:window.__bootMemory.overviewReads,doc:window.__bootMemory.document}));
+   await page.evaluate(()=>{const valid={mode:'global',applied:[],skipped:[],pending:[]};for(const patch of [{mode:'unknown'},{applied:null},{skipped:[null]},{pending:[{}]},{pending:[123]}])window.dispatchEvent(new CustomEvent('boot-mode:changed',{detail:{...valid,...patch}}));const circular={...valid,pending:[null]};circular.circular=circular;window.dispatchEvent(new CustomEvent('boot-mode:changed',{detail:circular}));});
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));assert.deepEqual(await page.evaluate(()=>({reads:window.__bootMemory.overviewReads,doc:window.__bootMemory.document})),before);assert.equal(await page.locator('.boot-workbench').count(),1);return {invalidNotifications:6,noRefresh:true,noWrite:true};
   });
   await page.close();
  }

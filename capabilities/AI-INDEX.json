@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "dateHongKong": "2026-10-20",
+  "dateHongKong": "2026-11-04T16:01:02.391646+08:00",
   "role": "documentation-navigation-only",
   "runtimeConsumer": false,
   "registrationAuthority": false,
@@ -29,13 +29,13 @@
       "id": "status",
       "name": "接入状态与执行路线",
       "purpose": "Source-qualified status, issues and consumer anchors",
-      "fileCount": 2
+      "fileCount": 3
     },
     {
       "id": "policy",
       "name": "生成输入策略",
       "purpose": "Reviewed allowlists and domain rules",
-      "fileCount": 8
+      "fileCount": 9
     },
     {
       "id": "generated-data",
@@ -47,13 +47,13 @@
       "id": "generated-code",
       "name": "生成代码",
       "purpose": "Compiled tables; update through their generators",
-      "fileCount": 10
+      "fileCount": 11
     },
     {
       "id": "runtime-binding",
       "name": "手写运行绑定",
       "purpose": "Existing dispatch/binding/session code; preserve live consumer guards",
-      "fileCount": 12
+      "fileCount": 13
     },
     {
       "id": "consumption-contract",
@@ -65,20 +65,26 @@
       "id": "guide",
       "name": "维护入口说明",
       "purpose": "Human/AI navigation; not runtime input",
-      "fileCount": 4
+      "fileCount": 9
     },
     {
       "id": "documentation-snapshot",
       "name": "文档数量快照",
       "purpose": "Dated reporting data; not a new registry",
-      "fileCount": 1
+      "fileCount": 6
+    },
+    {
+      "id": "upstream-provenance",
+      "name": "上游来源与载荷快照",
+      "purpose": "Pinned source/license/payload provenance for existing domains; compilation and availability remain owned by the original projects and consumers",
+      "fileCount": 18
     }
   ],
   "files": [
     {
       "path": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
       "group": "scope",
-      "summary": "本轮8类已启用能力与停止规则",
+      "summary": "当前已启用消费范围：原设备能力、TDP及已启用手动CCD/CPU offset；自动/未启用边界分开",
       "editMode": "maintained-source"
     },
     {
@@ -118,6 +124,30 @@
       "editMode": "maintained-source"
     },
     {
+      "path": "capabilities/CONTROLLER-MODEL-COVERAGE.json",
+      "group": "documentation-snapshot",
+      "summary": "现有域的来源/覆盖审查快照；不是实时可用性或新增运行时权威",
+      "editMode": "refresh-from-original-source-and-consumer-evidence"
+    },
+    {
+      "path": "capabilities/CONTROLLER-MODEL-COVERAGE.md",
+      "group": "guide",
+      "summary": "现有控制/灯光域的维护与来源说明；不是新增运行时表",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/CONTROLLER-REPAIR-SUPPORT.json",
+      "group": "documentation-snapshot",
+      "summary": "现有域的来源/覆盖审查快照；不是实时可用性或新增运行时权威",
+      "editMode": "refresh-from-original-source-and-consumer-evidence"
+    },
+    {
+      "path": "capabilities/CONTROLLER-REPAIR-SUPPORT.md",
+      "group": "guide",
+      "summary": "现有控制/灯光域的维护与来源说明；不是新增运行时表",
+      "editMode": "maintained-source"
+    },
+    {
       "path": "capabilities/CONTROLLER-STEAMDECK-RUMBLE-RECEIPT.json",
       "group": "consumption-contract",
       "summary": "既有SteamDeck经典震动回执",
@@ -146,6 +176,81 @@
       "group": "runtime-binding",
       "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
       "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-battery-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for battery",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-configuration-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-configuration",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-feedback-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-feedback",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-input-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-input",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-motion-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-motion",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-device-catalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/hc-device-catalog.json",
+      "group": "generated-data",
+      "summary": "冻结机型事实、别名、声明与各域派生登记",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/hc-lighting-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for lighting",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-model-method-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for model-method",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-motion-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for motion",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-performance-metadata.json",
+      "group": "generated-data",
+      "summary": "HC CPU/GPU来源资料；TDP消费策略通过同总库绑定，HC静态值不覆盖当前设置",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HC-UPSTREAM-UPGRADE.json",
+      "group": "status",
+      "summary": "新版HC机型能力纯代码升级来源、真实消费进度和缺口；唯一运行入口仍为原总库",
+      "editMode": "source-review-and-consumer-evidence"
     },
     {
       "path": "capabilities/HcBatteryCapabilityCatalog.cs",
@@ -277,6 +382,18 @@
       "editMode": "maintained-source"
     },
     {
+      "path": "capabilities/LIGHTING-CONTROLS-AUDIT-20261101.json",
+      "group": "documentation-snapshot",
+      "summary": "现有域的来源/覆盖审查快照；不是实时可用性或新增运行时权威",
+      "editMode": "refresh-from-original-source-and-consumer-evidence"
+    },
+    {
+      "path": "capabilities/LIGHTING-CONTROLS-AUDIT-20261101.md",
+      "group": "guide",
+      "summary": "现有控制/灯光域的维护与来源说明；不是新增运行时表",
+      "editMode": "maintained-source"
+    },
+    {
       "path": "capabilities/MODEL-METHOD-CONSUMPTION.json",
       "group": "generated-data",
       "summary": "397条Devices方法声明分类；不是逐方法执行证明",
@@ -296,6 +413,12 @@
       "editMode": "maintained-source"
     },
     {
+      "path": "capabilities/PinnedFanSourceCatalog.cs",
+      "group": "runtime-binding",
+      "summary": "固定HC九条fan来源与精确DMI/寄存器事实；原FanCapabilityCatalog的partial唯一入口，实际写许可及owner不由查表授予",
+      "editMode": "reviewed-source-and-consumer-maintenance"
+    },
+    {
       "path": "capabilities/README.md",
       "group": "guide",
       "summary": "总库入口和历史记录；先读顶部AI导航",
@@ -308,79 +431,167 @@
       "editMode": "maintained-source"
     },
     {
+      "path": "capabilities/TDP-INTEGRATION.md",
+      "group": "guide",
+      "summary": "同总库TDP/手动CCD/CPU offset合同、来源/消费分工和未完成证据",
+      "editMode": "manual-maintenance"
+    },
+    {
+      "path": "capabilities/TdpCapabilityCatalog.generated.h",
+      "group": "generated-code",
+      "summary": "同总库机型别名与TDP能力策略生成的native消费表",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/AYANEO3.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/AYANEONEXT2.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.source.json",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/OneXPlayer3.json",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/f2e58468/performance-source-facts.json",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/CustomPresets.xaml.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/Family.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/Intel_Management.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/IntelPawnIO.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/LICENSE",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/MainWindow.xaml.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/modules/IntelMSR.bin",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/modules/RyzenSMU.bin",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/RyzenAdj_To_UXTU.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
+      "path": "capabilities/upstream/uxtu-26.3.1/RyzenSmu.cs",
+      "group": "upstream-provenance",
+      "summary": "既有域的固定上游来源、许可或载荷快照；不能据文件存在宣称运行准入",
+      "editMode": "preserve-source-provenance-update-through-original-owner"
+    },
+    {
       "path": "capabilities/USER-SCOPE-DECISIONS.json",
       "group": "scope",
       "summary": "用户排除及性能/接线边界",
       "editMode": "maintained-source"
     },
     {
-      "path": "capabilities/hc-battery-policy.json",
+      "path": "capabilities/uxtu-tdp-handheld-coverage.json",
+      "group": "documentation-snapshot",
+      "summary": "现有域的来源/覆盖审查快照；不是实时可用性或新增运行时权威",
+      "editMode": "refresh-from-original-source-and-consumer-evidence"
+    },
+    {
+      "path": "capabilities/uxtu-tdp-policy.json",
       "group": "policy",
-      "summary": "Reviewed generator input for battery",
-      "editMode": "maintained-source"
+      "summary": "唯一CPU能力数据：TDP配方、手动CCD/CPU offset、全核CO有序候选与固定来源；声明不授权硬件写",
+      "editMode": "review-source-before-policy-change"
     },
     {
-      "path": "capabilities/hc-controller-configuration-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for controller-configuration",
-      "editMode": "maintained-source"
+      "path": "capabilities/ONEX-MOTION-ADAPTATION.json",
+      "group": "documentation-snapshot",
+      "summary": "壹号本陀螺仪来源、实际消费与实机缺样本核查；非运行时登记",
+      "editMode": "refresh-from-original-source-and-consumer-evidence"
     },
     {
-      "path": "capabilities/hc-controller-feedback-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for controller-feedback",
-      "editMode": "maintained-source"
+      "path": "capabilities/ONEX-MOTION-ADAPTATION.md",
+      "group": "guide",
+      "summary": "X2MiniPro与壹号本全系陀螺仪核查说明",
+      "editMode": "refresh-from-original-source-and-consumer-evidence"
     },
     {
-      "path": "capabilities/hc-controller-input-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for controller-input",
-      "editMode": "maintained-source"
+      "path": "FanLab/real-host/PinnedUmaEcFanTransport.cs",
+      "group": "consumer",
+      "summary": "Original Super X UMA fan terminal; strict method schema/data, unique retained endpoint, readback and cleanup debt",
+      "editMode": "reviewed-source-and-consumer-maintenance"
     },
     {
-      "path": "capabilities/hc-controller-motion-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for controller-motion",
-      "editMode": "maintained-source"
-    },
-    {
-      "path": "capabilities/hc-device-catalog.generated.h",
-      "group": "generated-code",
-      "summary": "生成的编译表；经原生成器更新",
-      "editMode": "review-input-then-regenerate",
-      "generator": "tools/hc_capability_catalog_generate.mjs"
-    },
-    {
-      "path": "capabilities/hc-device-catalog.json",
-      "group": "generated-data",
-      "summary": "冻结机型事实、别名、声明与各域派生登记",
-      "editMode": "review-input-then-regenerate",
-      "generator": "tools/hc_capability_catalog_generate.mjs"
-    },
-    {
-      "path": "capabilities/hc-lighting-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for lighting",
-      "editMode": "maintained-source"
-    },
-    {
-      "path": "capabilities/hc-model-method-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for model-method",
-      "editMode": "maintained-source"
-    },
-    {
-      "path": "capabilities/hc-motion-policy.json",
-      "group": "policy",
-      "summary": "Reviewed generator input for motion",
-      "editMode": "maintained-source"
-    },
-    {
-      "path": "capabilities/hc-performance-metadata.json",
-      "group": "generated-data",
-      "summary": "CPU/GPU资料；当前运行消费保持独立",
-      "editMode": "review-input-then-regenerate",
-      "generator": "tools/hc_capability_catalog_generate.mjs"
+      "path": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+      "group": "source-facts",
+      "summary": "Audited protocol and DMI facts; pins primary files, not imported unlicensed implementation or hardware acceptance",
+      "editMode": "reviewed-source-facts"
     }
   ],
   "domains": [
@@ -389,7 +600,8 @@
       "bindings": [
         "capabilities/FanCapabilityCatalog.cs",
         "capabilities/AsusFanCapabilitySession.cs",
-        "capabilities/HcDeviceCapabilityCatalog.cs"
+        "capabilities/HcDeviceCapabilityCatalog.cs",
+        "capabilities/PinnedFanSourceCatalog.cs"
       ],
       "policy": [],
       "contracts": [
@@ -407,6 +619,42 @@
         {
           "file": "capabilities/AsusFanCapabilitySession.cs",
           "anchor": "AsusFanCapabilitySession"
+        },
+        {
+          "file": "capabilities/PinnedFanSourceCatalog.cs",
+          "anchor": "AcquirePinnedFanSource"
+        },
+        {
+          "file": "FanLab/fan-backend/PinnedSourceFanSession.cs",
+          "anchor": "TryStop"
+        },
+        {
+          "file": "FanLab/real-host/PinnedSourceFanSelection.cs",
+          "anchor": "TrySelectPinnedSourceFanFromMotherboard"
+        },
+        {
+          "file": "FanLab/real-host/PinnedSourceFanConsumer.cs",
+          "anchor": "OpenPinnedSourceCore"
+        },
+        {
+          "file": "FanLab/real-host/PinnedSourceFanEngine.cs",
+          "anchor": "CloseSourceSessionForLifecycle"
+        },
+        {
+          "file": "src/bridge/fanApi.ts",
+          "anchor": "validSourceFanHandshake"
+        },
+        {
+          "file": "src/bridge/fanSessionEvidence.ts",
+          "anchor": "hasSafeSourceFanRelease"
+        },
+        {
+          "file": "native/fan_response_contract.h",
+          "anchor": "sourceReleaseSafe"
+        },
+        {
+          "file": "FanLab/real-host/PinnedUmaEcFanTransport.cs",
+          "role": "Super X actual UMA fan transport in existing Host/session; current verification pending"
         }
       ],
       "existingTestReferences": [
@@ -414,7 +662,57 @@
         "fan.unified-capability-roundtrip",
         "fan.explicit-off-host-chain-consumer"
       ],
-      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution.",
+      "superXUmaCurrent": {
+        "executionId": "HC-CODEX-064-ONEX-SUPERX-UMA",
+        "atHongKong": "2026-11-04T16:41:06.938518+08:00",
+        "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_EXPORTED_HUMAN_CLOSEOUT",
+        "soleEntry": "FanCapabilityCatalog partial in capabilities/PinnedFanSourceCatalog.cs",
+        "sourceDescriptorCount": 10,
+        "oldHcDescriptorsPreserved": 9,
+        "newModelClass": "YeManCC.SourceDevices.OneXPlayerSuperX",
+        "sourceRepository": "the-reengineers/XmaX",
+        "sourceCommit": "6d728795511c2f9f683d1757e72481236de9b23a",
+        "sourceFacts": {
+          "path": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+          "sha256": "2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027"
+        },
+        "identity": "Exact baseboard ONEXPLAYER SUPER X plus source ordinal ONE-NETBOOK vendor substring; old nine exact predicates unchanged",
+        "actualConsumer": "Existing RealHcBackend selection/curve -> existing catalog session -> PinnedUmaEcFanTransport -> UMAInterface GetEcValue/SetEcValue, raw EC16 Index Int32, Data byte; checked readback",
+        "stopBoundary": "Existing revoke/in-flight/automatic return/terminal disposal/generation ownership; retained exact cleanup debt",
+        "thermal95C": "Existing YMCC Host policy, not a Super X hardware fact",
+        "temperature": "Existing HWiNFO callback; no guessed EC temperature",
+        "tests": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\DIRECTED-VERIFICATION.json",
+          "bytes": 2017,
+          "sha256": "a605da02176eff9cddcac0d667e10c215559e58054bf5ae99cdf0208c058791b"
+        },
+        "sourceBoundComponent": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\FAN-COMPONENT-ADOPTION.json",
+          "bytes": 17131,
+          "sha256": "e5e646a52324bfd6678d0433fa1586cc99039c315e572f73ad50570f0f1883dd"
+        },
+        "ordinaryExport": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-165414\\YeManCC.zip",
+          "bytes": 110410337,
+          "sha256": "0e4be09038d463714b75515e1ddd367e9a45764fd18a671af40000dd86a4d1bb"
+        },
+        "chargingOrLightingActivated": false,
+        "hardwareIo": false,
+        "physicalAcceptance": false,
+        "wholeFamilyComplete": false,
+        "goalStatus": "active",
+        "actualUniquePassedCases": 18,
+        "passedChecks": 572,
+        "userCloseout": "Finish this batch quickly and keep edits; no next adaptation",
+        "result": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-064-ONEX-SUPERX-UMA\\FINAL-RESULT.json",
+          "bytes": 5267,
+          "sha256": "4f0b3a854eb42ee16c65647d0abc558feb2e644b13a054b60f2c9247ed8c687d"
+        },
+        "stopAfterCurrentBatch": true,
+        "nextBatch": null
+      }
     },
     {
       "id": "motion",
@@ -473,7 +771,10 @@
       "historicalSoftwareEvidenceReference": {
         "file": "capabilities/INTEGRATION-STATUS.json",
         "pointer": "/domains/4/historicalSoftwareEvidence"
-      }
+      },
+      "familyAudits": [
+        "capabilities/ONEX-MOTION-ADAPTATION.json"
+      ]
     },
     {
       "id": "lighting",
@@ -483,7 +784,10 @@
       "policy": [
         "capabilities/hc-lighting-policy.json"
       ],
-      "contracts": [],
+      "contracts": [
+        "capabilities/LIGHTING-CONTROLS-AUDIT-20261101.md",
+        "capabilities/LIGHTING-CONTROLS-AUDIT-20261101.json"
+      ],
       "consumers": [
         {
           "file": "native/main.cpp",
@@ -798,6 +1102,65 @@
       ],
       "existingTestReferences": [],
       "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "tdp",
+      "bindings": [
+        "capabilities/TdpCapabilityCatalog.generated.h",
+        "src/bridge/cpuCapabilityPolicy.generated.ts",
+        "PowerControl/pawnio/YeManTdpCtl.py"
+      ],
+      "policy": [
+        "capabilities/uxtu-tdp-policy.json"
+      ],
+      "contracts": [
+        "capabilities/TDP-INTEGRATION.md",
+        "capabilities/hc-performance-metadata.json"
+      ],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "tdpExecutionCapability",
+          "meaning": "existing descriptor and OEM/CPU transport selection; generated policy binding requires current consumer evidence"
+        },
+        {
+          "file": "src/bridge/yeman.ts",
+          "anchor": "export async function getTdpExecutionCapability",
+          "meaning": "existing cached descriptor and shared target resolution for TDP writers"
+        },
+        {
+          "file": "PowerControl/pawnio/YeManTdpCtl.py",
+          "anchor": "def apply_tdp(",
+          "meaning": "existing CLI/daemon helper; family recipes generated from the sole policy"
+        },
+        {
+          "file": "src/bridge/cpuctl.ts",
+          "anchor": "CCD_MANUAL_CONTROL_ACTIVE",
+          "meaning": "Existing explicit Settings CCD affinity path consumes generated activation and actual native topology/admission; never infer support from domain count alone."
+        },
+        {
+          "file": "src/bridge/cpuctl.ts",
+          "anchor": "CPU_VOLTAGE_OFFSET_ACTIVE",
+          "meaning": "Existing explicit Settings static CPU offset consumes generated policy; no automatic startup or voltage schedule."
+        },
+        {
+          "file": "PowerControl/pawnio/YeManTdpCtl.py",
+          "anchor": "def amd_uv_set_with(",
+          "meaning": "AMD static all-core CO candidate consumer reads generated candidateSelection.retryOnly.mailboxStatuses=[254,255]; only current typed firmware_response with matching raw status may advance once per same-value candidate. I/O, mutex, timeout, unknown, BUSY/PREREQ stop. Runtime/software and exact packaged helper acceptance stay separate."
+        },
+        {
+          "file": "PowerControl/pawnio/YeManTdpCtl.py",
+          "anchor": "def intel_uv_set_pawn(",
+          "meaning": "Existing Intel core/cache static offset; no GPU/SA consumer."
+        }
+      ],
+      "existingTestReferences": [
+        "performance.tdp-protocol-consumer",
+        "performance.tdp-frontend-consumer",
+        "performance.tdp-schedule-consumer"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution.",
+      "scopeDecision": "Existing manual CCD affinity and static CPU offset are enabled by explicit Settings actions; legacy core startup and automatic voltage scheduling remain false. Frozen HC CPU/GPU stays reference metadata."
     }
   ],
   "workflows": [
@@ -871,6 +1234,15 @@
         "capabilities/OVERVIEW-COUNTS.json"
       ],
       "action": "Read dated provenance and recompute changed source facts. Keep source classes, methods, routes, recipes and software test IDs as different units."
+    },
+    {
+      "id": "source-only-hc-model-upgrade",
+      "question": "冻结HC不变，如何接入新版机型能力？",
+      "read": [
+        "capabilities/HC-UPSTREAM-UPGRADE.json",
+        "tools/ymcc_sim/HC-UPGRADE-REGRESSION.md"
+      ],
+      "action": "Pin official source commit and exact bytes, parse using existing PcCapabilityAudit without HC load, plan changes via existing maintenance, update the same total-library domain rows and original consumers, then rerun only affected original positive/negative/lifecycle scenarios. Source registration is not completion."
     }
   ],
   "tools": [
@@ -901,6 +1273,20 @@
       "runsProduct": false,
       "buildsExtractor": true,
       "changesGeneratedFiles": false
+    },
+    {
+      "path": "tools/hc_upstream_capability_upgrade.mjs",
+      "purpose": "校验固定上游源码及Roslyn清单，生成原总库的离线候选供既有维护器审查；不写运行库",
+      "runsProduct": false,
+      "buildsExtractor": false,
+      "changesGeneratedFiles": false
+    },
+    {
+      "path": "tools/tdp_capability_catalog_generate.mjs",
+      "purpose": "仅TDP派生物的定向生成或--check；仍来自同一总库policy，完整总库生成器亦须保持一致",
+      "runsProduct": false,
+      "buildsExtractor": false,
+      "changesGeneratedFiles": "only-without---check"
     }
   ],
   "maintenanceRules": [
@@ -908,5 +1294,116 @@
     "Do not hand-edit generated code or the generated catalog/method metadata.",
     "Keep existing product responsibilities, shared-file ownership and physical/deployment authorization.",
     "Source comments change source byte identity; retain prior receipts as their original evidence, not a new current-primary acceptance."
-  ]
+  ],
+  "currentOnexFamilyBidirectionalAudit": {
+    "objective": "对onexplayer全家族的能力继续正反推导排查补完能力总库",
+    "goalStatus": "active",
+    "coverageFile": "ONEX-FAMILY-COVERAGE.json",
+    "readFirst": "ONEX-FAMILY-COVERAGE.md",
+    "sourceClasses": 20,
+    "factoryConcreteClasses": 17,
+    "exactFactoryProductLabels": 21,
+    "currentBoundedRepairs": 7,
+    "remainingFindings": [
+      "ONEX-SRC-005",
+      "ONEX-SRC-006",
+      "ONEX-SRC-007"
+    ],
+    "ordinaryExport": "HC063_ACCEPTED_SOFTWARE_SCOPE; full family active",
+    "hardwareAccepted": false,
+    "ordinaryPackage": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+      "bytes": 110387690,
+      "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+    },
+    "ordinaryReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+      "bytes": 3346,
+      "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+    },
+    "nextExistingConsumerMigration": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\NEXT-BOUNDED-CONSUMER-PLAN.json",
+      "bytes": 2832,
+      "sha256": "ac05721b2c4e633dcd0f52a736a6b94f0367661c52555bd8de27d33c22df6910"
+    },
+    "postFreezeNavigationOnly": true,
+    "currentHc063": {
+      "batch": "HC-CODEX-063-ONEX-INPUT-LIGHTING",
+      "atHongKong": "2026-11-04T15:40:39.602019+08:00",
+      "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_PACKAGE_DELIVERED",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+        "bytes": 110387690,
+        "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+      },
+      "sourceImplementation": {
+        "input": "Single HcOneXVendorInputContract via existing HcOemInputCapabilityBinding; six exact classes; independent input ReportId,15..512 bounded input,64/65 output; fixed init plans/delay and status reinit; original native lifecycle",
+        "x2Transport": "Unique source-matching collection; reopen exact observed PID; original pending IO and probe-close ownership",
+        "lighting": "Exact X2MiniPro five-zone main/secondary solid/breathing/brightness/off actual independent core and generated single policy; owner ABI v2 exact model/generation/path; no preset/status"
+      },
+      "inputEvidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+        "bytes": 1572,
+        "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+      },
+      "x2WindowsEvidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\X2-WINDOWS-VERIFICATION.json",
+        "bytes": 1436,
+        "sha256": "a3833c5891e4e987ba63785e0a2b295e82a435271ea3c021af25f38300c98432"
+      },
+      "nativeLightingEvidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-tests\\run-native-001\\result.json",
+        "bytes": 44596,
+        "sha256": "54996305baac3ef51fc355727beaa2deabdf254713bfed649a79da40a64437c3"
+      },
+      "managedLightingEvidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-tests\\COMBINED-ACTUAL-CONSUMER-VERIFICATION.json",
+        "bytes": 984495,
+        "sha256": "047cf706a715a5d28711fba153cb8ae3ca447dfeaa02ee5b187bef801f7997ef"
+      },
+      "productionCoreSha256": "924576fffd04ead813fc7cb0f1ddbda4b15d8e43416b564c1107b88a76211675",
+      "notHardwareOrWholeApplicationAcceptance": true,
+      "oldFailedEpochAndProducerCostsRetained": true,
+      "sourceReady": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\SOURCE_READY.json",
+        "bytes": 2249,
+        "sha256": "a0e053429df9910b34ef12eebd14972f390015958681d5c077c31de89631e541"
+      },
+      "ordinaryReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+        "bytes": 3346,
+        "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+      },
+      "mainlineLightingPayloadAdoption": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-mainline-adoption\\RESULT.json",
+        "bytes": 9914,
+        "sha256": "7a4d5574994718c23e52ffffcffc0bf3d8e39af1b3f35985fe5d5572b379082f"
+      },
+      "ordinaryExportReceipt": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\EXPORT-RECEIPT.json",
+        "bytes": 70760,
+        "sha256": "1d221e72596e3d0da52e84152cc71a119133b17c46ae9a4792475b8046cd8adf"
+      },
+      "wholeFamilyComplete": false
+    },
+    "currentWindowsSuperXPrimaryIntake": {
+      "atHongKong": "2026-11-04T16:01:02.391646+08:00",
+      "status": "CONCRETE_WINDOWS_UMA_EC16_IMPLEMENTATION_CANDIDATE_FOUND_PENDING_ACTUAL_YMCC_CONSUMER",
+      "decision": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\WINDOWS-SUPERX-PRIMARY-DECISION.json",
+        "bytes": 20367,
+        "sha256": "b4930b1d4a9393d3eeb3a8f6527614013c1166ea5604efc6e3ab23c0576b2282"
+      },
+      "nextBoundedPlan": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\NEXT-BOUNDED-CONSUMER-PLAN.json",
+        "bytes": 2832,
+        "sha256": "ac05721b2c4e633dcd0f52a736a6b94f0367661c52555bd8de27d33c22df6910"
+      },
+      "sourceCommit": "6d728795511c2f9f683d1757e72481236de9b23a",
+      "actualRuntimeRegistration": false,
+      "newLibraryRuntimeRows": 0,
+      "hc063PackageChanged": false,
+      "allFamilyComplete": false
+    }
+  }
 }

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
+import MouseModeSettings from '@/components/MouseModeSettings.vue';
+import {acceptMouseModeState} from '@/bridge/mouseModeState';
 import SteamDeckMouseSensitivity from '@/components/SteamDeckMouseSensitivity.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
 import { useShortcutPreviewFocus } from '@/composables/useShortcutPreviewFocus';
@@ -20,6 +22,7 @@ import {
   type ControllerShortcutInput,
   highlightedGamepadButtons,
   readControllerShortcutRules,
+  validateControllerShortcutRules,
   reconcileControllerShortcutRules,
   type ControllerShortcutRule,
 } from '@/bridge/controllerShortcutRules';
@@ -34,7 +37,7 @@ import {
  */
 // 2026-10-05：快捷开关与规则编辑共用同一张卡，页面负责原有编辑器生命周期。
 const emit = defineEmits<{ (e: 'open-editor'): void }>();
-const props = withDefaults(defineProps<{ steamDeckActive?: boolean; persona?: string; previewTarget?: HTMLElement | null }>(), { steamDeckActive: false, persona: 'xbox' });
+const props = withDefaults(defineProps<{ steamDeckActive?: boolean; persona?: string; previewTarget?: HTMLElement | null; previewActive?: boolean; mouseSettingsOnly?: boolean; disabled?: boolean }>(), { steamDeckActive: false, persona: 'xbox', previewActive: true });
 const PAGE_SIZE = 8;
 const SYNC_EVENT = 'ipc:controller-shortcuts.updated';
 // 与虚拟手柄卡共用同一份输入配置快照（input 段）。
@@ -42,6 +45,7 @@ const rules = ref<ControllerShortcutRule[]>([]);
 const snapshot = ref<InputSettingsSnapshot | null>(null);
 const page = ref(0);
 const busy = ref(false);
+const nativeSyncPending = ref(false);
 const status = ref('读取快捷规则…');
 const independentMode = ref(false);
 const previewFocus = useShortcutPreviewFocus();
@@ -89,6 +93,7 @@ function clampPage(): void {
 async function load(): Promise<void> {
   const actual = await summonGet().catch(() => gamepad.value);
   gamepad.value = { ...actual, mouseBackend: actual.mouseBackend === 'gamebar' ? 'gamebar' : 'joyxoff' };
+  if (props.mouseSettingsOnly) return;
   const settings = await loadSettings();
   independentMode.value = hasModeShortcutOverride(settings);
   const sharedRules = globalShortcutContainer(settings);
@@ -100,36 +105,66 @@ async function load(): Promise<void> {
     : reconcileControllerShortcutRules(persisted, { ...nativeEnabled, ...globalFlags });
   rules.value = reconciled.rules;
   clampPage();
-  status.value = independentMode.value ? '全局快捷 · 当前模式使用单独设置' : '';
+  status.value = hasStoredGlobalShortcuts(settings) && !Array.isArray(sharedRules.shortcutRules)
+    ? '快捷规则表异常，请打开编辑器恢复默认或新建动作。'
+    : independentMode.value ? '全局快捷 · 当前模式使用单独设置' : '';
 }
 /**
  * 卡片开关走与编辑器“应用规则”完全相同的写入路径（CAS 配置 + 原生开关桥），
  * 这样卡片与编辑器永远基于同一份数据，不再出现两份并存的快捷。
  */
-async function persistRules(next: ControllerShortcutRule[]): Promise<void> {
+async function persistRules(next: ControllerShortcutRule[]): Promise<boolean> {
   if (!snapshot.value) throw new Error('规则配置尚未读取完成');
   const currentRules = snapshot.value.buttonMapping?.rules && typeof snapshot.value.buttonMapping.rules === 'object' ? snapshot.value.buttonMapping.rules : {};
   const result = await compareAndSwapInputSettings(snapshot.value.revision, {
     buttonMapping: { rules: { ...currentRules, schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: preserveControllerShortcutRecords(currentRules, readControllerShortcutRules(currentRules), next) } },
   }, undefined, { globalShortcuts: true });
   snapshot.value = { ...result.value, buttonMapping: { ...result.value.buttonMapping, rules: result.globalShortcutRules ?? result.value.buttonMapping?.rules } };
-  if (!result.ok) throw new Error('配置已被其它页面更新，已刷新为最新值');
-  const effective = readControllerShortcutRules(effectiveShortcutContainer({ input: result.value }));
+  if (result.ok === false) throw new Error(result.reason === 'revision-conflict' ? '配置已被其它页面更新，已刷新为最新值'
+    : result.reason === 'write-failed' ? '配置写入失败，请重试'
+    : result.reason === 'cancelled' ? '本次保存已取消' : '专属配置正在接管，请稍后重试');
+  window.dispatchEvent(new CustomEvent(SYNC_EVENT));
+  try {
+    await syncNativeSettings(result.value);
+    return true;
+  } catch (error) {
+    nativeSyncPending.value = true;
+    status.value = `配置已保存，但快捷开关同步失败：${(error as Error).message}。可点击“重试同步”。`;
+    return false;
+  }
+}
+async function syncNativeSettings(input: InputSettingsSnapshot): Promise<void> {
+  const effective = readControllerShortcutRules(effectiveShortcutContainer({ input }));
   const nativeSettings = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(definition => [definition.defaultKey,
     effective.some(rule => rule.origin === 'native-default' && rule.defaultKey === definition.defaultKey && rule.enabled)]));
-  gamepad.value = await summonSet(nativeSettings).catch(() => gamepad.value);
+  gamepad.value = await summonSet(nativeSettings);
+  nativeSyncPending.value = false;
   window.dispatchEvent(new CustomEvent('ipc:gamepad.settings', { detail: gamepad.value }));
-  window.dispatchEvent(new CustomEvent(SYNC_EVENT));
+}
+async function retryNativeSync(): Promise<void> {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const settings = await loadSettings();
+    await syncNativeSettings(settings.input);
+    independentMode.value = hasModeShortcutOverride(settings);
+    status.value = independentMode.value ? '全局快捷已保存；当前模式使用单独设置。' : '快捷开关已同步。';
+  } catch (error) {
+    status.value = `配置已保存，但快捷开关同步失败：${(error as Error).message}。可点击“重试同步”。`;
+  } finally { busy.value = false; }
 }
 async function toggleRule(rule: ControllerShortcutRule): Promise<void> {
   if (busy.value || !isControllerShortcutActionVisible(rule.actionId)) return;
   const before = rules.value;
   const next = rules.value.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item);
+  const changed = next.find(item => item.id === rule.id)!;
+  const problem = validateControllerShortcutRules([changed], oemKeys.value)[0];
+  if (problem) { status.value = `无法启用：${problem}`; return; }
   busy.value = true;
   rules.value = next;
   try {
-    await persistRules(next);
-    status.value = independentMode.value ? '全局快捷已保存；当前模式使用单独设置。' : '已保存，开关立即生效。';
+    const synced = await persistRules(next);
+    if (synced) status.value = independentMode.value ? '全局快捷已保存；当前模式使用单独设置。' : '已保存，开关立即生效。';
   } catch (error) {
     // 失败后一律回读磁盘真值（含 CAS 冲突场景），状态行再回显失败原因。
     await load().catch(() => { rules.value = before; });
@@ -149,6 +184,7 @@ function onRulesUpdated(): void {
   if (!busy.value) void load().catch(() => undefined);
 }
 function applyMouseBackend(result: MouseModeState): void {
+  if (!acceptMouseModeState(result)) return;
   gamepad.value = { ...gamepad.value, mouseBackend: result.backend };
   window.dispatchEvent(new CustomEvent('mouse-mode:backend-changed', { detail: { backend: result.backend } }));
   window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { ...result } }));
@@ -202,7 +238,7 @@ function onGamepadBack(event: Event): void {
   closeGameInputRepair();
 }
 async function onMouseBackend(backend: MouseBackend): Promise<void> {
-  if (props.steamDeckActive || mouseBackendBusy.value || gamepad.value.mouseBackend === backend) return;
+  if (props.disabled || props.steamDeckActive || mouseBackendBusy.value || gamepad.value.mouseBackend === backend) return;
   mouseBackendBusy.value = true;
   mouseBackendNotice.value = '';
   const before = gamepad.value.mouseBackend;
@@ -226,7 +262,7 @@ async function onMouseBackend(backend: MouseBackend): Promise<void> {
 
 onMounted(() => {
   // Device catalog is immutable within this native session: one read, no polling.
-  void oemKeysGet().then(value => { oemKeys.value = value; }).catch(() => undefined);
+  if (!props.mouseSettingsOnly) void oemKeysGet().then(value => { oemKeys.value = value; }).catch(() => undefined);
   void load().catch((error) => { status.value = `读取失败：${(error as Error).message}`; });
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
   window.addEventListener(SYNC_EVENT, onRulesUpdated);
@@ -242,7 +278,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="card shortcuts-card">
+  <section class="card shortcuts-card" :class="{'mouse-settings-card':mouseSettingsOnly}">
+    <template v-if="!mouseSettingsOnly">
     <div class="card-head">
       <h3 class="card-title"><InlineIcon name="keyboard" /> 手柄快捷操作</h3>
       <div class="shortcut-header-actions">
@@ -250,7 +287,7 @@ onBeforeUnmount(() => {
         <button type="button" class="shortcut-editor-open" aria-haspopup="dialog" @click="emit('open-editor')">打开编辑器</button>
       </div>
     </div>
-    <Teleport :to="props.previewTarget || 'body'" :disabled="!props.previewTarget"><GamepadVisualizer :show-test-mode="false" :persona="props.persona" :settings="gamepad" :highlight-buttons="highlightedButtons" :oem-keys="oemKeys" :highlight-oem-keys="highlightedOemKeys" minimum-press-feedback match-steam-deck-height /></Teleport>
+    <Teleport :to="props.previewTarget || 'body'" :disabled="!props.previewTarget"><GamepadVisualizer :presentation-active="previewActive" :show-test-mode="false" :persona="props.persona" :settings="gamepad" :highlight-buttons="highlightedButtons" :oem-keys="oemKeys" :highlight-oem-keys="highlightedOemKeys" minimum-press-feedback match-steam-deck-height /></Teleport>
     <div v-if="!visibleRules.length" class="shortcut-empty">尚无快捷规则。请打开编辑器新建，或恢复默认快捷键。</div>
     <div v-else ref="gridEl" class="shortcut-grid">
       <button v-for="rule in pagedRules" :key="rule.id" class="shortcut-toggle"
@@ -264,19 +301,24 @@ onBeforeUnmount(() => {
       <span>第 {{ page + 1 }}/{{ totalPages }} 页 · 共 {{ rules.length }} 条</span>
       <button type="button" :disabled="busy || page >= totalPages - 1" @click="changePage(1)">下一页 ›</button>
     </div>
-    <div v-if="mouseToggleEnabled || steamDeckActive" class="backend-bubble">
+    </template>
+    <MouseModeSettings v-if="mouseSettingsOnly" :steam-deck-active="steamDeckActive" :disabled="disabled || mouseBackendBusy"><template #backend="{busy:settingsBusy}">
+    <div class="backend-bubble">
       <div class="mouse-mode-backends"><span>鼠标模式后端</span>
       <div class="mouse-backend-control">
         <div class="mouse-backend-buttons">
-          <button ref="gameInputRepairTriggerEl" type="button" :class="{ active: !steamDeckActive && gamepad.mouseBackend === 'gamebar' }" :disabled="steamDeckActive || mouseBackendBusy" @click="onMouseBackend('gamebar')">微软鼠标</button>
-          <button type="button" :class="{ active: !steamDeckActive && gamepad.mouseBackend === 'joyxoff' }" :disabled="steamDeckActive || mouseBackendBusy" @click="onMouseBackend('joyxoff')">JoyXoff</button>
-          <button v-if="steamDeckActive" type="button" class="steamdeck-backend active" disabled aria-pressed="true" title="SteamDeck 模式由 Steam 管理">SteamDeck鼠标</button>
+          <button ref="gameInputRepairTriggerEl" type="button" :class="{ active: !steamDeckActive && gamepad.mouseBackend === 'gamebar' }" :disabled="disabled || steamDeckActive || mouseBackendBusy || settingsBusy" @click="onMouseBackend('gamebar')">微软鼠标</button>
+          <button type="button" :class="{ active: !steamDeckActive && gamepad.mouseBackend === 'joyxoff' }" :disabled="disabled || steamDeckActive || mouseBackendBusy || settingsBusy" @click="onMouseBackend('joyxoff')">JoyXoff</button>
+          <button type="button" class="steamdeck-backend" :class="{active:steamDeckActive}" disabled :aria-pressed="steamDeckActive" :title="steamDeckActive ? '由 Steam 管理' : '仅 SD 虚拟手柄可用'">SteamDeck</button>
         </div>
         <Transition name="mouse-pop"><div v-if="mouseBackendNotice" class="mouse-backend-popover" role="alert"><InlineIcon name="warning" size="15px" /><span>{{ mouseBackendNotice }}</span><button type="button" aria-label="关闭提示" @click="mouseBackendNotice = ''">×</button></div></Transition>
       </div></div>
-      <SteamDeckMouseSensitivity v-if="steamDeckActive" class="mouse-mode-sensitivity" :disabled="busy || mouseBackendBusy" />
+      <small v-if="!steamDeckActive" class="sd-backend-hint">SteamDeck：仅 SD 虚拟手柄可用</small>
+      <SteamDeckMouseSensitivity v-if="steamDeckActive" class="mouse-mode-sensitivity" :disabled="busy || mouseBackendBusy || settingsBusy" />
     </div>
-    <p v-if="status" class="status-line" role="status"><InlineIcon name="check" /> {{ status }}</p>
+    </template></MouseModeSettings>
+    <p v-if="!mouseSettingsOnly && status" class="status-line" role="status"><InlineIcon name="check" /> {{ status }}</p>
+    <button v-if="nativeSyncPending" type="button" class="shortcut-editor-open" :disabled="busy" @click="retryNativeSync">重试同步</button>
   </section>
 
   <Teleport to="body"><Transition name="gameinput-repair-pop"><div v-if="gameInputRepairOpen" ref="gameInputRepairPanelEl" class="gameinput-repair-confirm" :class="{ above: gameInputRepairAbove }" :style="gameInputRepairStyle" role="alertdialog" aria-modal="true" aria-label="修复微软鼠标组件" data-gp-modal @pointerdown.stop @keydown.esc.prevent="closeGameInputRepair">
@@ -288,6 +330,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.mouse-settings-card .backend-bubble{display:block;margin:0;padding:10px}
+.mouse-settings-card .mouse-mode-backends{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.mouse-settings-card .mouse-backend-control{width:100%}
+.mouse-settings-card .mouse-backend-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
+.sd-backend-hint{display:block;margin-top:7px;color:var(--text-dim);font-size:11px}
+
 .card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }.card-title{margin:0}.shortcut-empty{margin-top:10px;padding:14px 12px;border:1px dashed rgba(255,255,255,.16);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent);color:var(--text-dim);font-size:11px;line-height:1.5;text-align:center}.backend-bubble,.shortcut-toggle{border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.shortcut-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.shortcut-toggle{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;color:var(--text);text-align:left;cursor:pointer;transition:border-color .12s,background .12s,transform .08s}.shortcut-toggle:active{transform:scale(.98)}.shortcut-toggle span{display:grid;gap:3px;min-width:0}.shortcut-toggle b{font-size:12px}.shortcut-toggle small{color:var(--text-dim);font-size:10px;line-height:1.3}.shortcut-toggle i{font-style:normal;flex:0 0 auto;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.1);color:var(--text-dim);font-size:10px;font-weight:700}.shortcut-toggle.on{border-color:color-mix(in srgb,var(--accent) 55%,transparent);background:color-mix(in srgb,var(--accent) 13%,transparent)}.shortcut-toggle.on i{background:var(--accent);color:#06121d}.shortcut-toggle.sel,.shortcut-toggle:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}.shortcut-toggle:disabled{opacity:.55;cursor:default}.shortcut-pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding:6px 9px;border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.shortcut-pager button{min-height:28px;padding:0 10px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:7px;background:transparent;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer}.shortcut-pager button:focus-visible{outline:none;box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}.shortcut-pager button:disabled{opacity:.4;cursor:default;border-color:rgba(255,255,255,.12);color:var(--text-dim)}.shortcut-pager span{color:var(--text-dim);font-size:10px;font-weight:700}.backend-bubble{display:block;margin-top:8px;padding:8px 10px}.mouse-mode-backends>span{color:var(--text-dim);font-size:11px;font-weight:700}.mouse-backend-control{position:relative;min-width:0}.mouse-backend-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:3px;border-radius:9px;background:var(--bg-panel)}.mouse-backend-buttons button{min-height:28px;padding:4px 7px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-dim);font-size:10px;font-weight:700;cursor:pointer}.mouse-backend-buttons button.active{border-color:color-mix(in srgb,var(--accent) 48%,transparent);background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}.mouse-backend-buttons button:disabled{opacity:.55;cursor:default}.mouse-backend-popover{position:absolute;z-index:25;top:calc(100% + 7px);right:0;width:min(360px,calc(100vw - 24px));display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:12px 14px;border:1px solid color-mix(in srgb,#f5b93d 58%,transparent);border-radius:10px;background:color-mix(in srgb,var(--bg-card) 94%,#17120a);color:#ffd47a;box-shadow:0 8px 22px rgba(0,0,0,.42);font-size:12px;line-height:1.45}.mouse-backend-popover>button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:rgba(255,255,255,.08);color:inherit;cursor:pointer}.shortcut-hint{min-height:36px;margin:8px 2px 4px;color:var(--text-dim);font-size:11px;line-height:1.5}.shortcut-hint b{color:var(--accent)}.shortcut-hint .key{color:#f5b93d;font-size:1.2em;font-weight:700}.status-line{display:flex;align-items:flex-start;gap:5px;margin:9px 2px 0;color:var(--text-dim);font-size:11px;line-height:1.45}.status-line .inline-icon{color:var(--accent);margin-top:1px}.gameinput-repair-confirm{z-index:1200;background:#161d29;border:1px solid #2a3342;border-radius:12px;padding:18px 20px 17px;box-shadow:0 16px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:12px;max-width:calc(100vw - 16px);min-height:0;overflow-y:auto}.gameinput-repair-confirm::before{content:'';position:absolute;width:13px;height:13px;background:#161d29;border-left:1px solid #2a3342;border-top:1px solid #2a3342;transform:rotate(45deg);top:-7px;right:32px}.gameinput-repair-confirm.above::before{top:auto;bottom:-7px;border-left:none;border-top:none;border-right:1px solid #2a3342;border-bottom:1px solid #2a3342}.gameinput-repair-title{display:flex;align-items:center;gap:9px;color:var(--text);font-size:16px;font-weight:700}.gameinput-repair-title .inline-icon{color:var(--danger)}.gameinput-repair-desc,.gameinput-repair-status{margin:0;color:var(--text-dim);font-size:14px;line-height:1.6}.gameinput-repair-status{color:#ffd47a}.gameinput-repair-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:3px}.gameinput-repair-actions button{min-height:44px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:var(--bg-input);color:var(--text);font-size:14px;font-weight:600;cursor:pointer}.gameinput-repair-actions button small{margin-left:4px;color:var(--text-dim);font-size:11px}.gameinput-repair-actions button.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 46%,transparent);background:color-mix(in srgb,var(--danger) 8%,var(--bg-input))}.gameinput-repair-actions button:disabled{cursor:default;opacity:.6}.gameinput-repair-pop-enter-active,.gameinput-repair-pop-leave-active,.mouse-pop-enter-active,.mouse-pop-leave-active{transition:opacity .14s ease,transform .14s ease}.gameinput-repair-pop-enter-from,.gameinput-repair-pop-leave-to,.mouse-pop-enter-from,.mouse-pop-leave-to{opacity:0;transform:translateY(-5px)}@media(max-width:580px){.shortcut-grid{grid-template-columns:1fr}.backend-bubble{align-items:flex-start;flex-direction:column}.mouse-backend-control{width:100%}.mouse-backend-buttons{width:100%}}
 /* Controller page contract: keep the top shortcut controls two-up at the
    supported 1280x720, 1280x800, and high-DPI equivalent layouts.

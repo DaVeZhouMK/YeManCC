@@ -3,6 +3,7 @@
 // Never grants CSS/Steam mode/start authority. Ordinary launches without update
 // evidence remain observation-only; a user/safety off veto wins until a new process.
 #include "steam_session_observer.h"
+#include "steam_ui_epoch.h"
 #include "json.hpp"
 #include <mutex>
 #include <string>
@@ -26,6 +27,93 @@ inline Json residue(const Json& raw){
         return raw;
     }catch(...){return Json::object();}
 }
+// V2 is an evidence chain, not a refill counter. A reservation remains spent
+// until THIS native host has observed the resulting different Steam document,
+// its own live official backend and an authenticated native ready snapshot.
+// Legacy v1/unknown history never becomes ready merely because a host restarted.
+namespace managed {
+inline std::string document(const std::string& epoch){const auto value=steamui::parseModeEpoch(epoch);return value.valid?std::string(value.document):std::string{};}
+inline bool valid(const Json& value){
+    try{return value.is_object()&&value.size()==7&&value.at("schemaVersion").is_number_integer()&&value.at("schemaVersion")==2&&
+        value.at("steamSession").is_string()&&validTicket(value.at("steamSession").get<std::string>())&&
+        value.at("host").is_string()&&validTicket(value.at("host").get<std::string>())&&
+        value.at("document").is_string()&&!value.at("document").get<std::string>().empty()&&
+        value.at("document").get<std::string>().size()<=75&&value.at("document").get<std::string>().find(':')==std::string::npos&&
+        value.at("frontendBuildId").is_string()&&fingerprint(value.at("frontendBuildId").get<std::string>())&&
+        value.at("loaderVersion").is_string()&&loaderVersion(value.at("loaderVersion").get<std::string>())&&
+        (value.at("status")=="reserved"||value.at("status")=="ready");}catch(...){return false;}
+}
+inline Json record(const steamsession::Session& session,const std::string& doc,const std::string& host,
+        const std::string& build,const std::string& loader,const char* status){
+    Json result={{"schemaVersion",2},{"steamSession",ticket(session)},{"host",host},{"document",doc},
+        {"frontendBuildId",build},{"loaderVersion",loader},{"status",status}};return valid(result)?result:Json();
+}
+inline bool available(const Json& ledger,const steamsession::Session& session,const std::string& doc){
+    return valid(ledger)&&(ledger.at("steamSession")!=ticket(session)||
+        (!doc.empty()&&ledger.at("status")=="ready"&&ledger.at("document")==doc));
+}
+inline Json completed(const Json& ledger,const steamsession::Session& session,const std::string& doc,
+        const std::string& host,const std::string& build,const std::string& loader,const std::string& manualOrigin={}){
+    if(!ledger.is_null()){
+        if(!valid(ledger)){
+            // A positively different Steam PID/birth ends the old v1 scope.
+            // Same-process v1 and all malformed/unknown history stay spent.
+            if(!ledger.is_object()||ledger.size()!=2||!ledger.contains("schemaVersion")||!ledger["schemaVersion"].is_number_integer()||ledger["schemaVersion"]!=1||
+               !ledger.contains("steamSession")||!ledger["steamSession"].is_string()||
+               !validTicket(ledger["steamSession"].get<std::string>()))return {};
+            // A current explicit manual repair can establish a NEW native-owned
+            // healthy lifecycle after legacy history. It needs its real starting
+            // document and a different verified ready document; this is never an
+            // inference about the unknown old v1 operation or an automatic refund.
+            if(ledger["steamSession"]==ticket(session)&&
+               (manualOrigin.empty()||manualOrigin==doc||manualOrigin.size()>75||manualOrigin.find(':')!=std::string::npos))return {};
+            return record(session,doc,host,build,loader,"ready");
+        }
+        if(ledger.at("steamSession")==ticket(session)&&ledger.at("status")=="reserved"&&
+           (ledger.at("host")!=host||ledger.at("document")==doc))return {};
+    }
+    return record(session,doc,host,build,loader,"ready");
+}
+}
+// RAM-only provenance of THIS host's positively acknowledged explicit repair.
+// OFF clears it; power/account/session mismatches and a new host have no witness.
+// It certifies no success itself. The private ready-confirmation path still
+// requires the actual new document, owned backend and two durable copies.
+class ManualBaseline {
+    std::mutex mutex_;steamsession::Session session_;std::string original_;unsigned long long power_=0,generation_=0;
+public:
+    unsigned long long epoch(){std::lock_guard lock(mutex_);return generation_;}
+    void capture(const steamsession::Session& session,const std::string& original,unsigned long long power,unsigned long long expectedEpoch){
+        if(ticket(session).empty()||!session.account||original.empty()||original.size()>75||original.find(':')!=std::string::npos)return;
+        std::lock_guard lock(mutex_);if(expectedEpoch!=generation_)return;
+        session_=session;original_=original;power_=power;
+    }
+    void clear(){std::lock_guard lock(mutex_);++generation_;session_={};original_.clear();power_=0;}
+    std::string origin(const steamsession::Session& session,const std::string& current,unsigned long long power,unsigned long long* observedEpoch=nullptr){
+        std::lock_guard lock(mutex_);
+        if(!(session==session_)||power!=power_||current.empty()||current==original_)return {};
+        if(observedEpoch)*observedEpoch=generation_;
+        return original_;
+    }
+};
+// One bounded, observational backend-confirmation episode. The Runtime owner
+// borrows its normal wait; no standalone timer or healthy-state polling. A lost
+// or uncertain DISPATCH is never retried by this pre-dispatch proof schedule.
+class ManagedProofWindow {
+    std::string key_;steamsession::RetryWindow retry_;unsigned long long until_=0;bool finished_=true;
+public:
+    bool take(const std::string& key,unsigned long long now){
+        if(key_!=key){key_=key;retry_.begin(now);until_=now+30000;finished_=false;return true;}
+        if(finished_)return false;
+        if(now>=until_){finished_=true;return true;} // One final observation at the original 30s boundary.
+        return retry_.take(now);
+    }
+    DWORD timeout(unsigned long long now)const{
+        if(finished_)return INFINITE;
+        return (std::min)(retry_.timeout(now),now>=until_?0ul:static_cast<DWORD>(until_-now));
+    }
+    void dispatched(){finished_=true;}
+};
 class Recovery {
     mutable std::mutex mutex_;
     steamsession::Session resumed_;
@@ -75,9 +163,21 @@ public:
                    prior.value("loaderVersion",std::string{})==installedLoader;
         }catch(...){return false;}
     }
+    // Only the private native worker may supply this pair after reading BOTH
+    // durable copies. JS mode/account callbacks do not carry this authority.
+    bool continueManaged(const steamsession::Session& s,const Json& state,const Json& primary,const Json& backup,
+            const std::string& host,const std::string& installedBuild,const std::string& installedLoader){
+        if(primary!=backup||!managed::valid(primary)||primary.at("status")!="ready"||
+           primary.at("steamSession")!=ticket(s)||primary.at("host")==host||!validTicket(host)||
+           primary.at("document")!=managed::document(state.value("modeEpoch",std::string{}))||
+           primary.at("frontendBuildId")!=installedBuild||primary.at("loaderVersion")!=installedLoader||
+           !allowsRetainedFrontend(s,state,installedBuild,installedLoader))return false;
+        std::lock_guard lock(mutex_);if(veto_)return false;resumed_=s;return true;
+    }
     // Explicit repair never clears a concurrent user/fault OFF. Only the existing
     // ON switch may reset that veto. A failed/uncertain refresh grants no retries.
     bool allowManualRepair(const steamsession::Session& s){std::lock_guard lock(mutex_);if(veto_)return false;resumed_=s;explicitTicket_.clear();return true;}
+    bool vetoed()const{std::lock_guard lock(mutex_);return veto_;}
     bool allows(const steamsession::Session& s)const{std::lock_guard lock(mutex_);return !veto_&&same(s,resumed_);}
 };
 }

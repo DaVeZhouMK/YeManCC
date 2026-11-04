@@ -1,4 +1,4 @@
-import { spatialNavigationTarget, nearestSpatialTarget, spatialNavigationRect } from '../src/gamepad/spatial';
+import { spatialNavigationTarget, nearestSpatialTarget, spatialNavigationRect, createSpatialMeasurements } from '../src/gamepad/spatial';
 
 type Fake = { dataset: { gpRow: string; gpCol: string }; id: string };
 const node = (id: string, row: number, col: number) =>
@@ -65,5 +65,19 @@ try {
   globalThis.getComputedStyle = (()=>({display:'block',visibility:'visible',overflowY:'auto',overflowX:'hidden'})) as unknown as typeof getComputedStyle;
   expect(spatialNavigationRect(scrolled).top,150,'pane scrolling keeps logical layout position');
   expect(nearestSpatialTarget([current,scrolled,farAligned], current, {dx:0,dy:1}), scrolled, 'scrolled-out adjacent row remains reachable above distant aligned controls');
+  // A synchronous navigation shares its visibility scan and geometry reads.
+  // The following key press gets a fresh snapshot after scrolling/reflow.
+  let rectReads=0, styleReads=0, shifted=0;
+  const measuredA=rectangle('measured-a',0,0),measuredB=rectangle('measured-b',120,0);
+  const aRect=measuredA.getBoundingClientRect.bind(measuredA),bRect=measuredB.getBoundingClientRect.bind(measuredB);
+  measuredA.getBoundingClientRect=()=>{rectReads++;return aRect()};
+  measuredB.getBoundingClientRect=()=>{rectReads++;const r=bRect();return {...r,left:r.left+shifted,right:r.right+shifted} as DOMRect};
+  globalThis.getComputedStyle=(()=>{styleReads++;return {display:'block',visibility:'visible'}}) as unknown as typeof getComputedStyle;
+  const measurements=createSpatialMeasurements();
+  for(const el of [measuredA,measuredB]){measurements.rect(el);measurements.style(el)}
+  expect(nearestSpatialTarget([measuredA,measuredB],measuredA,{dx:1,dy:0},measurements),measuredB,'shared scan retains same next target');
+  expect(rectReads,2,'one navigation measures each rectangle once');expect(styleReads,2,'one navigation measures each style once');
+  shifted=-240;
+  expect(nearestSpatialTarget([measuredA,measuredB],measuredA,{dx:1,dy:0},createSpatialMeasurements()),null,'next navigation sees moved layout instead of stale geometry');
 } finally { globalThis.getComputedStyle = previousStyle; }
-console.log('gamepad spatial selftest: 25/25 passed');
+console.log('gamepad spatial selftest: 29/29 passed');

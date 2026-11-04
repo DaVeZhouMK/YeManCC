@@ -7,7 +7,8 @@
 #include "steam_cssloader_guard.h"
 #include "decky_sidebar_runtime.h"
 #include "decky_update_recovery.h"
-#include "decky_gaming_fullscreen.h"
+#include "decky_sidebar_session.h"
+#include "decky_sidebar_diagnostics.h"
 #include "json.hpp"
 #include <iostream>
 #include <fstream>
@@ -21,20 +22,24 @@ static std::wstring POWER_CONTROL_DIR=L"C:\\inert-fixture";
 namespace ymcc::deckymirror {inline std::string frontendBuildId(const std::wstring&){return std::string(64,'b');}}
 namespace ymcc::deckyidentity {inline const char* version="v3.3.0";}
 static struct {Session session;Session sessionSnapshot(){return session;}} g_steamSettingsObserver;
-static ymcc::deckygaming::Observation gamingFullscreenObservation;
-static ymcc::deckygaming::Observation deckySidebarGamingFullscreenObservation(const Session&){return gamingFullscreenObservation;}
 enum class PowerLifecycle{Suspending,Suspended,Resuming,Ready};
 static std::atomic<PowerLifecycle>g_powerLifecycle{PowerLifecycle::Ready};
+static unsigned long long fixturePowerGeneration=1;static unsigned long long currentPowerGeneration(){return fixturePowerGeneration;}
 static std::atomic<unsigned> probes{0},helpers{0},modeReads{0};
 static unsigned failures=0,checks=0,consumerWakes=0;
 static HANDLE helperLease=nullptr;
 static struct { HANDLE confirmAndIdle(const Session&,bool,bool){++helpers;HANDLE duplicate=nullptr;DuplicateHandle(GetCurrentProcess(),helperLease,GetCurrentProcess(),&duplicate,0,FALSE,DUPLICATE_SAME_ACCESS);return duplicate;} } g_steamCssUse;
-static struct {std::mutex mutex;json state;void requestRefresh(const Session&){} void set(json value){std::lock_guard lock(mutex);state=std::move(value);}json current(){std::lock_guard lock(mutex);return state;}json snapshot(const Session&){++modeReads;return current();}} g_steamModeObserver;
+static struct {std::mutex mutex;json state;void requestRefresh(const Session&,bool=true){} void set(json value){std::lock_guard lock(mutex);state=std::move(value);}json current(){std::lock_guard lock(mutex);return state;}json snapshot(const Session&){++modeReads;return current();}} g_steamModeObserver;
 static struct {ymcc::deckysidebar::State state;ymcc::deckysidebar::State snapshot(){return state;}bool requestLaunchAdmissionRefresh(){++consumerWakes;return true;}} g_deckySidebarRuntime;
 static struct {ymcc::steamcss::Runtime* actual=nullptr;void observeMode(const Session& s,const ymcc::steamcss::ModeSample& m){if(actual)actual->observeMode(s,m);}} g_steamCssGuard;
 static void deckySidebarDiagnostic(const char*,const json&,bool=false){}
+static struct {bool connected=false;json status(){return {{"active",true},{"connected",connected}};}} g_deckyMirrorBroker;
 static void deckySidebarPost(const char*,const json&){}
 static void deckySidebarSessionDiagnostic(const Session&,const char*){}
+// Adjacent consumers are inert ports here; this fixture proves startup/CSS admission only.
+static unsigned wallpaperWakeSignals=0,managedModeSignals=0;
+static void steamWallpaperForegroundSignal(){++wallpaperWakeSignals;}
+static void deckySidebarResumeManagedMode(const Session&){++managedModeSignals;}
 namespace ymcc::steamcss {inline Result fixtureProbeBackend(){++probes;return {nullptr,0,"missing",{},false};}}
 // Only external process IO is replaced. The four lambdas below are extracted
 // exactly from production main.cpp, not rewritten as a parallel policy.
@@ -58,20 +63,30 @@ int main(int argc,char** argv){try{
  signal(old,"bigpicture");
  auto first=cssGuard.ensure({},old,valid);check(first.phase=="missing"&&probes==1,"already running Big Picture permits a CSS-only probe even without a manual Steam startup grant");
  auto ticket=cssGuard.confirmIdle(old,true,true);check(ticket&&helpers==1,"already running Big Picture can apply enabled appearance once");if(ticket)CloseHandle(ticket);
- auto sidebar=productionSidebarAdmission();check(!sidebar.allowed&&!sidebar.retryable,"ordinary startup still refuses unrequested Decky reinjection");
- // Field: Xbox Full Screen starts Steam before YMCC; system FSE is the
- // explicit independent admission, never process age or a generic saved ON.
- gamingFullscreenObservation={true,true,true,true};g_deckySidebarRuntime.state.enabled=true;
- signal(old,"bigpicture","xbox-document:1",false);
- check(productionSidebarAdmission().allowed,"Xbox full-screen admits missing Decky when Steam predates YMCC");
- for(unsigned i=0;i<4;++i){auto prior=gamingFullscreenObservation;if(i==0)gamingFullscreenObservation.apiAvailable=false;if(i==1)gamingFullscreenObservation.supported=false;if(i==2)gamingFullscreenObservation.active=false;if(i==3)gamingFullscreenObservation.sameWindowsSession=false;check(!productionSidebarAdmission().allowed,"missing/unsupported/inactive/foreign-session FSE never admits");gamingFullscreenObservation=prior;}
- g_deckySidebarRuntime.state.enabled=false;check(!productionSidebarAdmission().allowed,"Xbox FSE cannot override user or fault OFF");g_deckySidebarRuntime.state.enabled=true;
- g_powerLifecycle=PowerLifecycle::Suspended;check(!productionSidebarAdmission().allowed,"Xbox FSE waits for committed native Ready");g_powerLifecycle=PowerLifecycle::Ready;
- g_exitRequested=true;check(!productionSidebarAdmission().allowed,"Xbox FSE cannot revive exiting YMCC");g_exitRequested=false;
- for(const auto bad:{"pid","birth","known","running","mode"}){auto mode=g_steamModeObserver.current();const auto original=mode;if(std::string(bad)=="pid")mode[bad]=999u;if(std::string(bad)=="birth")mode[bad]="stale";if(std::string(bad)=="known"||std::string(bad)=="running")mode[bad]=false;if(std::string(bad)=="mode")mode[bad]="desktop";g_steamModeObserver.set(mode);check(!productionSidebarAdmission().allowed,"Xbox FSE rejects stale session and unconfirmed/non-BPM state");g_steamModeObserver.set(original);}
- {auto mode=g_steamModeObserver.current();mode["deckyFrontendLoaded"]=true;g_steamModeObserver.set(mode);check(!productionSidebarAdmission().allowed&&productionSidebarAdmission().reason=="decky-context-already-loaded","Xbox FSE does not reinject an already loaded page");mode.erase("deckyFrontendLoaded");g_steamModeObserver.set(mode);check(!productionSidebarAdmission().allowed,"Xbox FSE preserves unknown frontend state veto");}
- check(!g_steamLinkAdmission.allows(old),"FSE never grants shared CSS or Steam mode/start authority");
- gamingFullscreenObservation={};g_deckySidebarRuntime.state.enabled=true;
+ auto sidebar=productionSidebarAdmission();check(!sidebar.allowed&&!sidebar.retryable,"ordinary startup preserves the already-loaded-document no-reinjection boundary");
+ // General policy: Steam may predate YMCC, offline/FSE/manual-origin are
+ // not prerequisites. Loaded/foreign/unknown pages still cannot be injected.
+ signal(old,"bigpicture","global-document:1",false);
+ check(productionSidebarAdmission().allowed,"ON + verified Big Picture admits missing Decky without a manual/FSE/update grant");
+ check(!g_steamLinkAdmission.allows(old),"Decky admission grants no shared CSS or Steam mode/start authority");
+ const auto beforeStableProbes=probes.load();bool stable=true;for(unsigned i=0;i<1000;++i)stable=productionSidebarAdmission().allowed&&stable;check(stable,"stable verified Big Picture remains admitted");
+ check(probes==beforeStableProbes,"global admission storm adds no backend probe or helper work");
+ auto health=productionConnectionHealth();check(health.required&&!health.connected,"global health detects missing authenticated peer");
+ g_deckyMirrorBroker.connected=true;health=productionConnectionHealth();check(health.required&&!health.connected,"mirror alone does not certify official backend");
+ {auto mode=g_steamModeObserver.current();mode["deckyBackendConnected"]=true;mode["deckyHooksInstalled"]=true;g_steamModeObserver.set(mode);health=productionConnectionHealth();check(health.required&&health.connected,"all three channels certify structural health");
+ mode["deckyBackendConnected"]=false;g_steamModeObserver.set(mode);check(!productionConnectionHealth().connected,"official backend loss survives connected mirror");
+ mode["deckyBackendConnected"]=true;mode["deckyHooksInstalled"]=false;g_steamModeObserver.set(mode);check(!productionConnectionHealth().connected,"missing official hooks survive connected backend");}
+ g_deckyMirrorBroker.connected=false;
+ g_deckySidebarRuntime.state.enabled=false;check(!productionSidebarAdmission().allowed&&!productionConnectionHealth().required,"global rule respects user or fault OFF");g_deckySidebarRuntime.state.enabled=true;
+ for(const auto lifecycle:{PowerLifecycle::Suspending,PowerLifecycle::Suspended,PowerLifecycle::Resuming}){g_powerLifecycle=lifecycle;check(!productionSidebarAdmission().allowed&&!productionConnectionHealth().required,"global rule waits for committed native Ready");}g_powerLifecycle=PowerLifecycle::Ready;
+ g_exitRequested=true;check(!productionSidebarAdmission().allowed&&!productionConnectionHealth().required,"global rule cannot revive exiting YMCC");g_exitRequested=false;
+ g_aiFanMockSession.isolated=true;check(!productionSidebarAdmission().allowed&&!productionConnectionHealth().required,"global rule preserves isolation");g_aiFanMockSession.isolated=false;
+ for(const auto bad:{"pid","birth","known","running","mode","observedAccount"}){auto mode=g_steamModeObserver.current();const auto original=mode;if(std::string(bad)=="pid")mode[bad]=999u;if(std::string(bad)=="birth")mode[bad]="stale";if(std::string(bad)=="known"||std::string(bad)=="running")mode[bad]=false;if(std::string(bad)=="mode")mode[bad]="desktop";if(std::string(bad)=="observedAccount")mode[bad]=999u;g_steamModeObserver.set(mode);check(!productionSidebarAdmission().allowed&&!productionConnectionHealth().required,"global rule rejects stale/foreign/unconfirmed/non-BPM state");g_steamModeObserver.set(original);}
+ {auto mode=g_steamModeObserver.current();mode["deckyFrontendLoaded"]=true;g_steamModeObserver.set(mode);check(!productionSidebarAdmission().allowed&&productionSidebarAdmission().reason=="decky-context-already-loaded","global recovery does not reinject an already loaded page");mode.erase("deckyFrontendLoaded");g_steamModeObserver.set(mode);check(!productionSidebarAdmission().allowed,"global recovery preserves unknown frontend state veto");}
+ const auto line=ymcc::deckydiag::record("connection-recovery",{{"stageBudgetMs",20000u},{"stageRemainingMs",15000u},{"recoveryTrigger","confirmed-step-failure"},{"scope","global-connection"},{"steamPid",5u},{"steamBirth","123456"},{"runtimeReason","unknown-future-error"},{"recoveryEpisode",3ull},{"nextRetryMs",30000u},{"preparationRequested",true},{"admissionRequested",true},{"connectionRequested",true},{"token","secret"},{"endpoint","private"},{"args",json::object()}});
+ check(line.contains("steamPid")&&line.contains("steamBirth")&&line.value("runtimeReason",std::string{})=="unknown-future-error"&&line.contains("recoveryEpisode")&&line.contains("nextRetryMs")&&line.contains("preparationRequested")&&line.contains("admissionRequested")&&line.contains("connectionRequested"),"unified recovery and wake fields survive the actual native log allowlist");
+ check(line.contains("stageBudgetMs")&&line.contains("stageRemainingMs")&&line.value("recoveryTrigger",std::string{})=="confirmed-step-failure","calibrated stage reason and actual wait survive native serializer");
+ check(!line.contains("token")&&!line.contains("endpoint")&&!line.contains("args"),"unified logs do not leak credentials or business arguments");
  signal(old,"bigpicture","document-a:1",true,true);
  check(g_deckyUpdateRecovery.allows(old),"field update mismatch reaches the actual Decky recovery grant");
  sidebar=productionSidebarAdmission();check(!sidebar.allowed&&!sidebar.retryable&&sidebar.reason=="decky-context-already-loaded","update recovery cannot start a second Loader on a loaded Steam document");
@@ -119,14 +134,25 @@ int main(int argc,char** argv){try{
  check(!productionSidebarAdmission().allowed,"a genuinely newer Steam process still cannot override an already loaded document");
  // Exact launch admission must wait for the same account identity that the
  // authenticated binding already requires, before resource/worker preparation.
+ // Preserve the original early no-read veto for truly unverified processes.
+ auto noProcess=newer;noProcess.pid=0;g_steamSettingsObserver.session=noProcess;const auto beforeUnverified=modeReads.load();
+ const auto processWait=productionSidebarAdmission();check(!processWait.allowed&&modeReads==beforeUnverified,"unverified process never copies or queries shared UI state");
  auto noAccount=newer;noAccount.account=0;g_steamSettingsObserver.session=noAccount;
  signal(noAccount,"bigpicture","new-steam:2",false);const auto readsBeforeAccountWait=modeReads.load();
  const auto accountWait=productionSidebarAdmission();
  check(!accountWait.allowed&&accountWait.retryable&&accountWait.reason=="steam-session-unconfirmed","account-pending startup waits before preparing resources or a binding worker");
- check(modeReads==readsBeforeAccountWait,"account-pending admission does not copy or query shared UI state");
+ // Account0 is a logged-in offline candidate, not an anonymous grant. Reading
+ // one already-shared cache is necessary to inspect its independent UI proof.
+ check(modeReads==readsBeforeAccountWait+1,"account-pending admission consumes one shared cached mode proof without granting startup");
+ auto offlineMode=g_steamModeObserver.current();offlineMode["observedAccount"]=newer.account;offlineMode["deckyAccountWatchAvailable"]=true;g_steamModeObserver.set(offlineMode);
+ check(productionSidebarAdmission().allowed,"verified current UI fixture proof restores permitted offline startup");
+ check(g_steamSettingsObserver.sessionSnapshot().account==0,"offline proof never writes or adopts the shared registry account");
+ offlineMode["pid"]=noAccount.pid+1;g_steamModeObserver.set(offlineMode);check(!productionSidebarAdmission().allowed,"foreign-process offline proof cannot authorize startup");
+ offlineMode["pid"]=noAccount.pid;offlineMode["deckyAccountWatchAvailable"]=false;g_steamModeObserver.set(offlineMode);check(!productionSidebarAdmission().allowed,"missing native user-watch proof cannot authorize offline startup");
+ offlineMode["deckyAccountWatchAvailable"]=true;offlineMode["observedAccount"]=0;g_steamModeObserver.set(offlineMode);check(!productionSidebarAdmission().allowed,"account0 UI proof never becomes anonymous startup authority");
  g_steamSettingsObserver.session=newer;signal(newer,"bigpicture","new-steam:2",false);
  check(productionSidebarAdmission().allowed,"real account readiness immediately restores existing permitted startup");
  CloseHandle(helperLease);helperLease=nullptr;
- const json receipt={{"ok",failures==0},{"checks",checks},{"failures",failures},{"actualSteamActions",0},{"actualCssLaunches",0},{"source","Four exact production callbacks plus actual CSS worker; only external IO replaced"}};
+ const json receipt={{"ok",failures==0},{"checks",checks},{"failures",failures},{"actualSteamActions",0},{"actualCssLaunches",0},{"source","Five exact production callbacks plus actual CSS worker; only external IO replaced"}};
  std::ofstream(out/L"result.json")<<receipt.dump(2)<<'\n';std::cout<<receipt.dump()<<'\n';return failures?1:0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 2;}}

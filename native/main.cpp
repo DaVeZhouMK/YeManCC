@@ -27,10 +27,13 @@
 #define _WIN32_WINNT 0x0A00
 #include "rog_fse_experiment_policy.h"
 #include "radial_release.h"
+#include "ipc_result_mailbox.h"
 
 #include "fan_resume_evidence.h"
 #include "sleep_residency_evidence.h"
 #include "sleep_notification_evidence.h"
+#include "sleep_activity_evidence.h"
+#include "sleep_timeout_policy.h"
 #include "sleep_export_diagnostics.h"
 #include "sleep_abnormal_resleep.h"
 #include "sleep_request_fallback.h"
@@ -39,6 +42,7 @@
 #include "fan_response_contract.h"
 #include "fan_http_body_contract.h"
 #include "fan_keepalive_process_selection.h"
+#include "fan_keepalive_transport.h"
 #include "fan_physical_wake.h"
 #include "http_request_deadline.h"
 #include <windows.h>
@@ -55,11 +59,13 @@
 #include "mouse_backend_process.h"
 #include "mouse_mode_com_apartment.h"
 #include "mouse_mode_foreground.h"
+#include "mouse_mode_application_rules.h"
 #include "process_efficiency_inventory.h"
 #include "input_host_pipe_transport.h"
 #include "input_host_process_retirement.h"
 #include "input_host_exit_retirement.h"
 #include "input_host_transport_state.h"
+#include "input_host_compact_frame_reply.h"
 #include "xinput_identity_refresh_policy.h"
 #include "input_host_recovery_health.h"
 #include "controller_device_stack_evidence.h"
@@ -67,6 +73,9 @@
 #include "input_host_lifecycle_claim.h"
 #include "virtual_start_protection.h"
 #include "input_host_transaction_mutex.h"
+#include "game_rule_file_guard.h"
+#include "game_process_inventory.h"
+#include "rtss_process_runtime.h"
 #include "msi_legacy_sensor.h"
 #include "msi_motion_capabilities.h"
 #include "sensor_choice.h"
@@ -76,10 +85,13 @@
 #include "windows_source_eligibility.h"
 #include "windows_source_stream.h"
 #include "sensorapi_private_reader.h"
+#include "sensor_device_evidence.h"
 #include "sensorapi_inventory_json.h"
 #include "windows_source_view.h"
 #include "windows_motion_processing.h"
 #include "onex_x2_windows.h"
+#include "oxp3_lighting_owner.h"
+#include "superjoy_lighting_owner.h"
 #include "hc_model_motion_catalog.h"
 #include "hc_default_motion_catalog.h"
 #include "hc_generic_motion_catalog.h"
@@ -88,12 +100,14 @@
 #include "../capabilities/HcControllerFeedbackCapabilityCatalog.h"
 #include "../capabilities/HcControllerMotionCapabilityCatalog.h"
 #include "../capabilities/HcOemInputCapabilityBinding.h"
+#include "../capabilities/TdpCapabilityCatalog.generated.h"
 #include "hc_legacy_motion_catalog.h"
 #include "hc_oem_windows_motion_catalog.h"
 #include "legion_motion_source.h"
 #include "legion_motion_bank_evidence.h"
 #include "legion_motion_message_clock.h"
 #include "legion_input_protocol.h"
+#include "legion_motion_activation_win32.h"
 #include "controller_motion_session.h"
 #include "controller_motion_bank_sessions.h"
 #include "controller_motion_processing_evidence.h"
@@ -104,6 +118,8 @@
 #include "reviewed_gyro_calibration.h"
 #include "sensor_sta_wait.h"
 #include "sensor_thread_mailbox.h"
+#include "sensor_device_change.h"
+#include "sensor_virtual_link_wake.h"
 #include "input_idle_windows_json.h"
 #include "native_process_cost.h"
 #include "decky_wallpaper_process_cost.h"
@@ -207,9 +223,9 @@ static ymcc::msi::rearObservation::Counters g_msiRearSourceObservation;
 #include "steam_cssloader_use.h"
 #include "steam_link_admission.h"
 #include "decky_sidebar_runtime.h"
+#include "decky_sidebar_session.h"
 #include "decky_sidebar_manual_repair.h"
 #include "decky_sidebar_automatic_repair.h"
-#include "decky_gaming_fullscreen.h"
 #include "boot_mode_platform.h"
 #include "early_start_service.h"
 #include "decky_sidebar_setup.h"
@@ -221,6 +237,7 @@ static ymcc::msi::rearObservation::Counters g_msiRearSourceObservation;
 #include "decky_sidebar_bootstrap.h"
 #include "ai_fan_session.h"
 #include "update_download_resume.h"
+#include "update_config_state.h"
 #include "update_download_control.h"
 #include "update_cache_maintenance.h"
 #include "ai_fan_close_evidence.h"
@@ -267,6 +284,7 @@ static const GUID kYeManGuidDeviceInterfaceHid =
 #include "monitor_cpu_deltas.h"
 #include "monitor_hwinfo_recovery.h"
 #include "monitor_rtss_global.h"
+#include "monitor_rtss_config_evidence.h"
 #include "monitor_voltage.h"
 #include "monitor_fan_receipt.h"
 #include "monitor_memory_network.h"
@@ -364,7 +382,9 @@ static bool fanHostOwnsLoopbackPort(DWORD pid, unsigned short port);
 #include "shared_game_media_download_supervisor.h"
 #include "shared_game_media_shortcut.h"
 #include "shared_game_media_diagnostics.h"
+#include "steam_wallpaper_foreground.h"
 #include "gpu_dedicated_memory_runtime.h"
+#include "gpu_schedule_state.h"
 #include "amd_fsr_upgrade_runtime.h"
 #include "battery_charge_client.h"
 #include "secondary_display_client.h"
@@ -389,6 +409,7 @@ static bool fanHostOwnsLoopbackPort(DWORD pid, unsigned short port);
 #include "window_taskbar_layout.h"
 #include "shortcut_frontend_button.h"
 #include "shortcut_action_protocol.h"
+#include "keyboard_shortcut_sequence.h"
 static ymcc::FrontendButtonPulse g_frontendButtonPulse;
 #include "input_startup_policy.h"
 #include "boot_mode_identity.h"
@@ -752,6 +773,7 @@ static bool g_summonEnabled = true;   // 「按键呼出」开关：后台按住
 // Input consumer. While armed, it consumes the captured chord before any
 // global shortcut or page semantic can execute.
 static std::atomic<bool> g_shortcutRecordingActive{false};
+static std::atomic<uint64_t> g_shortcutRecordingOemMask{0}; // Machine catalog only; listener-owned.
 static uint64_t g_shortcutRecordingMask = 0;
 static bool g_shortcutRecordingAwaitNeutral = false;
 static bool g_bDoubleMinimize = true; // 双击 B 最小化到托盘（设置可关）
@@ -803,6 +825,14 @@ static bool g_returnDesktop = true;   // 选择(Back) + A 组合按下瞬间 →
 static bool g_mouseToggle = true;     // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关
 static std::atomic<int> g_mousePolicyMode{0}; // off=0, auto=1, on=2; missing preference remains off.
 static std::string g_mouseBackend = "joyxoff"; // 模拟鼠标方案：joyxoff / gamebar
+// Immutable dedicated mouse lists; loaded/saved at settings boundaries only.
+struct MouseAutoRulesState {
+ json data={{"blacklist",json::array()},{"whitelist",json::array()}};
+ ymcc::mousePolicy::AutoOverrides overrides;
+ std::string error;
+};
+static std::atomic<std::shared_ptr<const MouseAutoRulesState>> g_mouseAutoRules{std::make_shared<const MouseAutoRulesState>()};
+
 static std::atomic<bool> g_summonQuit{false};  // 退出信号（跨线程原子；手柄已改 Raw Input，掌机自动关闭线程仍复用）
 
 // ── 掌机前端自动关闭（后台轮询 5 秒，温和关闭 = 发 WM_CLOSE）──
@@ -835,6 +865,7 @@ static bool windowPlacementIsLeft();
 static ymcc::gesturesummon::EdgeSurface g_gestureSummon;
 static void gestureSummonRefresh(bool force = false);
 static void ipc_emit(const std::string& ev, const json& data);
+static void ipc_emit_owned_gamepad_state(json data);
 
 // 判断窗口是否铺满整块显示器（含任务栏条带）。实现位于下方焦点模块，这里前向声明。
 static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect);
@@ -1153,7 +1184,9 @@ static bool gamepadSerialSubmit(std::function<void()> job,
 
 static bool joinThreadBoundedForExit(std::thread& thread, DWORD timeoutMs, const char* name);
 
+static void nativeKeyboardSequenceStop();
 static void gamepadSerialStop(DWORD timeoutMs = INFINITE) {
+    nativeKeyboardSequenceStop();
     {
         std::lock_guard<std::mutex> lock(g_gamepadSerialMx);
         if (!g_gamepadSerialStarted) return;
@@ -1233,9 +1266,17 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define EXIT_CLEANUP_WATCHDOG_TIMER_ID 0xA20D // 退出进度检查；不能销毁仍有清理所有权的线程
 #define EXIT_CLEANUP_WATCHDOG_MS 8000
 #define SG_MONITOR_ENTRY_FAILURE_TIMER_ID 0xA20E // S0 睡眠后屏幕异常保持亮起
+#define SG_SLEEP_TIMEOUT_TIMER_ID 0xA214 // one shot, original button intent + 240 seconds
 #define SG_ABNORMAL_TIMER_ID 0xA212
 static constexpr UINT WM_SG_ABNORMAL_EVIDENCE=WM_APP+825;
 static constexpr UINT WM_SG_STATIC_SCAN=WM_APP+826;
+static constexpr UINT WM_STEAM_WALLPAPER_FOREGROUND=WM_APP+827;
+static void steamWallpaperForegroundSignal();
+static void steamWallpaperForegroundWake();
+static void steamWallpaperForegroundObserver(bool active);
+static void steamWallpaperForegroundPreference(const json& document);
+static json steamWallpaperForegroundRead();
+static void steamWallpaperForegroundPublish();
 static constexpr UINT_PTR SG_STATIC_SCAN_TIMER_ID=0xA213;
 #define RESUME_GAME_FOCUS_TIMER_ID 0xA211 // bounded, optional post-thaw focus scheduling
 // GP-926R17c（operator 指定）：唤醒对焦 nudge 的延迟计时器（5 s 一次性；无目标则跳过）。
@@ -1250,6 +1291,8 @@ static ymcc::steamcssuse::Runtime g_steamCssUse;
 static ymcc::steamlink::Admission g_steamLinkAdmission{ymcc::steamlink::currentProcessCreated()};
 static ymcc::deckyupdate::Recovery g_deckyUpdateRecovery;
 static ymcc::deckyrepair::ManualRepair g_deckyConnectionRepair;
+static ymcc::deckyupdate::ManualBaseline g_deckyManualBaseline;
+static void deckySidebarEndManagedModeWait();
 static ymcc::deckyrepair::AutomaticRepair g_deckyAutomaticRepair;
 #define WM_DECKY_MIRROR_EVENT (WM_USER + 30)
 static std::mutex g_deckyEventMutex;
@@ -1434,7 +1477,8 @@ static std::wstring steamOriginalRecoveryExportSnapshot();
 
 static bool g_sgPauseResume   = true;  // 睡眠时暂停游戏 + 唤醒时自动恢复（两者绑定，只一个开关）
 static bool g_sgResleepEnabled = false; // 供电变动等非人工唤醒后重睡，默认关闭
-static bool g_sgRetryEntryFailure = true; // 明确 S0/S3 入睡失败时同模式重试一次
+static bool g_sgRetryEntryFailure = true; // 明确失败后请求 Windows sleep；保留累计重试上限
+static bool g_sgRetrySleepTimeout = true; // 独立240秒超时保护，默认开启
 // GP-STEAMWAKE-5：旧关闭 Steam Overlay 策略已过时、弃用且不可达。
 // 不再读取旧 true 偏好激活，也不自动关闭或恢复 Steam 叠加设置。
 static std::atomic<bool> g_sofEnabled{kSteamOverlayFixDefaultEnabled};
@@ -1449,7 +1493,7 @@ static bool g_sgRepairEligible = false; // 本轮是否有明确的程序/用户
 static int g_sgLastS0WakeReason = -1;
 static ULONGLONG g_sgLastS0WakeTick = 0;
 enum class SgSleepMode : uint8_t { Unknown, S3, S4 };
-enum class SgRetryKind : uint8_t { None, EntryFailure, UnexpectedWake };
+enum class SgRetryKind : uint8_t { None, EntryFailure, UnexpectedWake, SleepTimeout };
 
 // This is the lifecycle valve for one system sleep transaction.  It never
 // elects a game PID; that remains exclusively owned by GameTargetArbiter.
@@ -1511,7 +1555,7 @@ static unsigned long long g_sgSleepQueryGeneration = 0;
 static bool g_sgSleepQueryOwnsGeneration = false;
 static ULONGLONG g_sgLastModernStandbyIntentTick = 0;
 static void sgStartSleepRetry(SgRetryKind kind, const char* reason);
-static void sgCancelEntryFailureRetry(const char* reason);
+// EntryFailure and SleepTimeout share cancellation; declaration below carries the default kind.
 static void sgAbnormalStop(const char* reason);
 static void sgAbnormalStopAsync();
 static bool sgAbnormalPermitted();
@@ -1521,6 +1565,14 @@ static bool sgAbnormalObserveOwnedRetry(ULONGLONG originalHumanIntent, ULONGLONG
 static void sgAbnormalOwnedRetryResult(ULONGLONG originalHumanIntent, ULONGLONG requestFileTime, bool accepted);
 static void sgAdvanceSleepRetry(const char* reason);
 static bool sgSleepRetryActive();
+static void sgCancelEntryFailureRetry(const char* reason,SgRetryKind only=SgRetryKind::EntryFailure);
+static void sgSleepTimeoutStop(const char* reason) noexcept;
+static bool sgSleepTimeoutDispatchPermitted();
+static ULONGLONG sgSleepTimeoutOriginalIntent();
+static void sgSleepTimeoutArm(int reason,ULONGLONG original);
+static void sgSleepTimeoutObserveCompleted(const json& evidence,ULONGLONG at) noexcept;
+static void sgSleepTimeoutPowerBroadcast(ULONG code);
+static void sgSleepTimeoutTick();
 static void sgStopMonitorEntryFailureTimer(const char* reason);
 static void stopPowerResumeWatchdog();
 static void armPowerResumeWatchdog(unsigned long long generation, UINT delayMs);
@@ -1530,7 +1582,11 @@ static void closeJoyXoffAsync(const char* reason);
 // 所有真正的恢复完成通知都在统一事务提交后由 UI 线程发出。
 enum class PowerLifecycle : uint8_t { Ready, Suspending, Suspended, Resuming };
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
-static std::atomic<unsigned long long> g_powerGeneration{1};
+// A trusted helper can outlive a renderer/YMCC restart. Seed the existing
+// generation from this boot's monotonic clock instead of going backwards to 1.
+// The helper cannot survive a Windows reboot; no persistent counter is needed.
+static unsigned long long initialPowerGeneration() { return GetTickCount64() + 1ULL; }
+static std::atomic<unsigned long long> g_powerGeneration{initialPowerGeneration()};
 static std::atomic<bool> g_hardwareWriteGate{true};
 static std::atomic<unsigned int> g_hardwareWriteInFlight{0};
 static std::atomic<bool> g_inputReady{true};
@@ -1655,6 +1711,8 @@ static void fanDiagnosticsApplyEnabled(bool enabled);
 static void rogBindInputHid();
 static bool rogEnsureXboxFaceEnabled(const char* reason);
 static void sgRecordFact(const char* event, const json& details = json::object());
+static void sgSleepActivityOnFact(const char* event,const json& details);
+static void sgSleepActivityEnd(const char* source,ULONGLONG eventTime,int reason) noexcept;
 static void sgStaticScanCancel(const char* reason);
 static void sgStaticScanSchedule(bool startup);
 static std::string nativeLifecycleTimestamp();
@@ -1973,6 +2031,7 @@ static const char* sgRetryKindName(SgRetryKind kind) {
     switch (kind) {
     case SgRetryKind::EntryFailure: return "entry-failure";
     case SgRetryKind::UnexpectedWake: return "unexpected-wake";
+    case SgRetryKind::SleepTimeout: return "sleep-timeout";
     default: return "none";
     }
 }
@@ -2118,6 +2177,22 @@ static bool sgShouldKeepInputDuringStandby();
 static bool powerLifecycleMatches(PowerLifecycle phase, unsigned long long generation) {
     return currentPowerGeneration() == generation &&
         g_powerLifecycle.load(std::memory_order_acquire) == phase;
+}
+
+// Worker completion and the existing wake nudge share one idempotent signal.
+// The UI-thread commit owns deduplication; a lost/late message must not consume
+// the only chance to recover CPU/TDP writes for this generation.
+static void publishPowerResumeReady(unsigned long long generation) {
+    if (!g_hwnd || !powerLifecycleMatches(PowerLifecycle::Resuming, generation)) return;
+    g_resumeReadyGeneration.store(generation, std::memory_order_release);
+    PostMessageW(g_hwnd, WM_POWER_RESUME_READY, static_cast<WPARAM>(generation), 0);
+}
+
+// Called only by the existing bounded wake nudge, outside every write path.
+static void reconcilePowerResumeReady(unsigned long long generation) {
+    if (g_resumeWatchdogGeneration != generation || sgSleepRetryActive() ||
+        g_resumeReadyGeneration.load(std::memory_order_acquire) != generation) return;
+    publishPowerResumeReady(generation);
 }
 
 static void closeHardwareWriteGate(const char* reason) {
@@ -2286,7 +2361,7 @@ static bool sgPrepareSleepPrivilege(SgSystemSleepRequestResult& result) {
 }
 static SgSystemSleepRequestResult sgRequestSystemSleep(
     ymcc::sleeprequest::Mode first=ymcc::sleeprequest::Mode::ModernStandby,
-    ymcc::sleeprequest::Mode last=ymcc::sleeprequest::Mode::Hibernate,bool staged=false) {
+    ymcc::sleeprequest::Mode last=ymcc::sleeprequest::Mode::Sleep,bool staged=false) {
     using namespace ymcc::sleeprequest;
     SgSystemSleepRequestResult result;
     const auto generation=currentPowerGeneration();
@@ -2296,7 +2371,8 @@ static SgSystemSleepRequestResult sgRequestSystemSleep(
     // UnexpectedWake. A delayed callback carries the original wake time, which
     // can precede this helper even though it arrived during request preparation.
     const auto retryIntent=!staged && requestKind!=SgRetryKind::None
-        ? g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire) : 0;
+        ? (requestKind==SgRetryKind::SleepTimeout ? sgSleepTimeoutOriginalIntent() :
+            g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire)) : 0;
     const auto canceled=[&] {
         const auto buttonWake=g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire);
         return generation!=currentPowerGeneration() || !g_guardEnabled ||
@@ -2304,7 +2380,8 @@ static SgSystemSleepRequestResult sgRequestSystemSleep(
             (!staged && (retryIntent==0 || !g_sgRetryInProgress || g_sgTask.retryKind==SgRetryKind::None ||
                 g_sgTask.retryKind!=requestKind ||
                 (requestKind==SgRetryKind::EntryFailure && !g_sgRetryEntryFailure) ||
-                (requestKind==SgRetryKind::UnexpectedWake && !g_sgResleepEnabled))) ||
+                (requestKind==SgRetryKind::UnexpectedWake && !g_sgResleepEnabled) ||
+                (requestKind==SgRetryKind::SleepTimeout && !sgSleepTimeoutDispatchPermitted()))) ||
             buttonWake>=startedFileTime || sgUserWakeCancelsSleepIntent(retryIntent, buttonWake);
     };
     g_sgAutomaticSleepTarget.store(Mode::None,std::memory_order_release);
@@ -2314,43 +2391,31 @@ static SgSystemSleepRequestResult sgRequestSystemSleep(
     const DWORD capabilityError=known ? ERROR_SUCCESS : GetLastError();
     const Capabilities caps{known,power.AoAc!=FALSE,
         power.SystemS1!=FALSE || power.SystemS2!=FALSE || power.SystemS3!=FALSE,
-        power.SystemS4!=FALSE && power.HiberFilePresent!=FALSE,capabilityError};
+        false,capabilityError}; // automatic detection never dispatches explicit Hibernate
     sgRecordFact("sleep-request-route",{{"generation",generation},{"capabilitiesKnown",known},
         {"aoAc",known ? json(caps.modern) : json(nullptr)},
         {"ordinarySleepSupported",known ? json(caps.sleep) : json(nullptr)},
-        {"hibernateAvailable",known ? json(caps.hibernate) : json(nullptr)},
-        {"order",json::array({"modern-standby","sleep","hibernate"})}});
+        {"hibernateAvailable",known ? json(power.SystemS4!=FALSE && power.HiberFilePresent!=FALSE) : json(nullptr)},
+        {"hibernateAllowed",false},{"order",json::array({"modern-standby","sleep"})},
+        {"api","SetSuspendState"},{"arguments",json::array({false,false,false})}});
     const auto selected=request(caps,[&](Mode mode) -> Reply {
         // A callback-side confirmed button wake cancels between fallback calls
         // even if its window message has not yet been processed.
         if (canceled()) return {Outcome::Failed,ERROR_CANCELLED};
-        if (mode!=Mode::ModernStandby && !result.shutdownPrivilegeEnabled && !sgPrepareSleepPrivilege(result))
+        if (mode==Mode::Hibernate) return {Outcome::Unsupported,ERROR_NOT_SUPPORTED};
+        if (!result.shutdownPrivilegeEnabled && !sgPrepareSleepPrivilege(result))
             return {Outcome::Failed,result.shutdownPrivilegeError ? result.shutdownPrivilegeError : ERROR_PRIVILEGE_NOT_HELD};
         if (canceled()) return {Outcome::Failed,ERROR_CANCELLED};
         sgRecordFact("sleep-request-dispatch",{{"generation",generation},{"target",name(mode)},
-            {"api",api(mode)},{"hibernate",mode==Mode::Hibernate},
-            {"shutdownPrivilegeRequired",mode!=Mode::ModernStandby}});
-        const bool windowValid=mode!=Mode::ModernStandby || (g_hwnd && IsWindow(g_hwnd));
-        // Logging and window validation can yield to event callbacks. Recheck
-        // after them, immediately before the OS boundary for every fallback.
-        // The live-source query can also block: manual veto is checked after it.
+            {"api","SetSuspendState"},{"hibernate",false},{"arguments",json::array({false,false,false})},
+            {"shutdownPrivilegeRequired",true}});
+        // All automatic repairs use the same real Windows suspend call.
+        // The target label describes capability routing, not physical residency.
+        // Recheck the callback-side human/success veto after logging/source reads.
         if ((staged && !sgAbnormalDispatchReady()) || canceled()) return {Outcome::Failed,ERROR_CANCELLED};
         g_sgAutomaticSleepTarget.store(mode,std::memory_order_release);
         SetLastError(ERROR_SUCCESS);
-        BOOL accepted=FALSE;
-        if (mode==Mode::ModernStandby) {
-            // Public monitor-off system command. The normal WndProc delegates
-            // this command to DefWindowProc; Windows starts its S0 transition.
-            // Delivery is pending evidence, never proof of DRIPS or permission
-            // to fall back just because entry is taking time.
-            DWORD_PTR reply=0;
-            if (windowValid)
-                accepted=SendMessageTimeoutW(g_hwnd,WM_SYSCOMMAND,SC_MONITORPOWER,2,
-                    SMTO_ABORTIFHUNG,1000,&reply)!=0;
-            else SetLastError(ERROR_INVALID_WINDOW_HANDLE);
-        } else {
-            accepted=SetSuspendState(mode==Mode::Hibernate ? TRUE : FALSE,FALSE,FALSE);
-        }
+        const BOOL accepted=SetSuspendState(FALSE,FALSE,FALSE);
         const DWORD error=accepted ? ERROR_SUCCESS : GetLastError();
         if (accepted) return {Outcome::Accepted,ERROR_SUCCESS};
         auto expected=mode;
@@ -2366,7 +2431,8 @@ static SgSystemSleepRequestResult sgRequestSystemSleep(
             {"outcome",name(step.reply.outcome)},{"error",step.reply.error}});
     }
     sgRecordFact("sleep-request-route-result",{{"generation",generation},{"target",name(selected.target)},
-        {"api",result.api},{"outcome",name(selected.reply.outcome)},{"error",result.requestError},
+        {"api",result.api},{"arguments",json::array({false,false,false})},{"hibernate",false},
+        {"outcome",name(selected.reply.outcome)},{"error",result.requestError},
         {"attempts",std::move(attempts)}});
     return result;
 }
@@ -2434,6 +2500,7 @@ static void sgRecordFact(const char* event, const json& details) {
         {"details", details.is_object() ? details : json::object()}
     };
     ymcc::sleepfactlog::decorateRecord(record,currentPowerGeneration());
+    {
     std::lock_guard<std::mutex> lock(g_sgFactMx);
     // Append order only. A reservation is not a durable file-write acknowledgement.
     static unsigned long long writerSequence=0;
@@ -2452,6 +2519,10 @@ static void sgRecordFact(const char* event, const json& details) {
     }
     std::ofstream log(SG_FACT_LOG, std::ios::binary | std::ios::app);
     if (log) log << line << '\n';
+    }
+    // Observer runs after the parent journal lock is released. Its own facts
+    // cannot recurse into sampling or alter the original power decision.
+    try { sgSleepActivityOnFact(event,details); } catch (...) {}
 }
 
 static void sgMarkInternalSleepRequest(SgRetryKind kind) {
@@ -2484,12 +2555,11 @@ static bool sgInternalSleepRequestMatches506(int reason, ULONGLONG eventFileTime
         return false;
 
     const ULONGLONG now = GetTickCount64();
-    if (now < g_sgInternalSleepRequest.dispatchTick ||
-        now - g_sgInternalSleepRequest.dispatchTick > SG_INTERNAL_SLEEP_506_WINDOW_MS)
-        return false;
-
+    if (now < g_sgInternalSleepRequest.dispatchTick) return false;
+    // Delivery can be delayed across a real sleep. Prefer original event time
+    // to callback age so our own late506 never becomes a fresh human intent.
     if (eventFileTime == 0 || g_sgInternalSleepRequest.dispatchFileTime == 0)
-        return true;
+        return now - g_sgInternalSleepRequest.dispatchTick <= SG_INTERNAL_SLEEP_506_WINDOW_MS;
     const ULONGLONG earlyAllowance =
         SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS * 10000ULL;
     const ULONGLONG lateAllowance =
@@ -2720,13 +2790,23 @@ static void sgWriteFile(const std::wstring& path, const std::string& content) {
 }
 // 原子写：同目录唯一临时文件 + 分片路径锁 + 全量 WriteFile/FlushFileBuffers 校验。
 // 每个成功返回只提交本次调用自己的内容；任何短写/刷盘/替换失败均保留原文件。
-bool sgWriteFileAtomicFlags(const std::wstring& path, const std::string& content, bool durable) {
+bool sgWriteFileAtomicFlags(const std::wstring& path, const std::string& content, bool durable,
+    const std::function<void()>& prepare = nullptr) {
     static std::mutex pathLocks[32];
     static std::atomic<unsigned long long> tempSeq{1};
 
-    std::wstring lockKey = path;
+    const DWORD keyLength = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (!keyLength || keyLength > 32768) return false;
+    std::wstring lockKey(keyLength, L'\0');
+    const DWORD resolvedLength = GetFullPathNameW(path.c_str(), keyLength, lockKey.data(), nullptr);
+    if (!resolvedLength || resolvedLength >= keyLength) return false;
+    lockKey.resize(resolvedLength);
+    std::replace(lockKey.begin(), lockKey.end(), L'/', L'\\');
     std::transform(lockKey.begin(), lockKey.end(), lockKey.begin(), ::towlower);
     std::lock_guard<std::mutex> pathLock(pathLocks[std::hash<std::wstring>{}(lockKey) % 32]);
+    // Conditional text writes inspect and encode their source inside this same
+    // transaction, before any temporary exists. Ordinary callers have no prepare.
+    if (prepare) prepare();
 
     const auto seq = tempSeq.fetch_add(1);
     std::wstring tmp = path + L".ymcc." + std::to_wstring(GetCurrentProcessId()) +
@@ -2871,7 +2951,7 @@ static bool waitForHardwareWritesQuiesced(unsigned long long generation, DWORD t
 // 独立文件；只有低频用户设置进入 yeman-settings.json。
 static const std::wstring YM_SETTINGS_FILE = POWER_CONTROL_DIR + L"\\yeman-settings.json";
 static const std::wstring YM_SETTINGS_BACKUP_FILE = YM_SETTINGS_FILE + L".bak";
-static std::mutex g_settingsFileMtx;
+static std::timed_mutex g_settingsFileMtx;
 
 static std::wstring normalizeWindowsPathForCompare(std::wstring path) {
     for (auto& ch : path) {
@@ -2943,30 +3023,38 @@ static void ymSettingsFillMissing(json& current, const json& defaults) {
 }
 
 static json ymSettingsReadUnlocked() {
-    const auto raw = ymSettingsReadRaw(YM_SETTINGS_FILE);
-    if (!raw.empty()) {
+    // Runtime reads may use a healthy backup/defaults after access, oversized,
+    // truncation or schema errors. Writers still use strict raw reads so an
+    // unobserved file can never be overwritten as if it were absent.
+    for(const auto* path:{&YM_SETTINGS_FILE,&YM_SETTINGS_BACKUP_FILE}) {
         try {
-            auto j = json::parse(raw);
-            if (j.is_object()) { ymcc::controllerPersona::migrateSavedDocument(j); return j; }
-        } catch (...) {}
-    }
-    const auto backup = ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
-    if (!backup.empty()) {
-        try {
-            auto j = json::parse(backup);
-            if (j.is_object()) { ymcc::controllerPersona::migrateSavedDocument(j); return j; }
-        } catch (...) {}
+            const auto raw=ymSettingsReadRaw(*path);
+            if(raw.empty())continue;
+            auto document=ymcc::settingsBaseline::parseDocument(raw);
+            if(!ymcc::settingsBaseline::supported(document))continue;
+            ymcc::controllerPersona::migrateSavedDocument(document);
+            return document;
+        }catch(...){}
     }
     return json::object();
 }
 class SettingsFileGuard {
 public:
-    SettingsFileGuard() : local_(g_settingsFileMtx) {
-        mutex_ = CreateMutexW(nullptr, FALSE, L"Local\\YeManCC-UnifiedSettings");
+    SettingsFileGuard() : local_(g_settingsFileMtx,std::defer_lock) {
+        constexpr ULONGLONG budgetMs=2000;
+        const auto started=GetTickCount64();
+        if(!local_.try_lock_for(std::chrono::milliseconds(budgetMs)))
+            throw std::runtime_error("Unified settings local lock timeout");
+        auto& shared = processMutexHandle();
+        if (!shared) shared = CreateMutexW(nullptr, FALSE, L"Local\\YeManCC-UnifiedSettings");
+        mutex_ = shared;
         if (!mutex_) throw std::runtime_error("Unified settings mutex creation failed");
-        const DWORD wait = WaitForSingleObject(mutex_, INFINITE);
+        const auto elapsed=GetTickCount64()-started;
+        const DWORD remaining=elapsed<budgetMs?static_cast<DWORD>(budgetMs-elapsed):0;
+        const DWORD wait = WaitForSingleObject(mutex_, remaining);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
             CloseHandle(mutex_);
+            shared = nullptr;
             mutex_ = nullptr;
             throw std::runtime_error("Unified settings mutex wait failed");
         }
@@ -2974,13 +3062,20 @@ public:
     ~SettingsFileGuard() {
         if (mutex_) {
             ReleaseMutex(mutex_);
-            CloseHandle(mutex_);
         }
     }
     SettingsFileGuard(const SettingsFileGuard&) = delete;
     SettingsFileGuard& operator=(const SettingsFileGuard&) = delete;
 private:
-    std::unique_lock<std::mutex> local_;
+    // Access only while local_ owns g_settingsFileMtx. Keep one named handle
+    // for this process; failed waits clear it so a later transaction can retry.
+    // A plain process-lifetime handle avoids static-destruction races with
+    // shutdown settings writers; Windows reclaims it when the process exits.
+    static HANDLE& processMutexHandle() noexcept {
+        static HANDLE handle = nullptr;
+        return handle;
+    }
+    std::unique_lock<std::timed_mutex> local_;
     HANDLE mutex_ = nullptr;
 };
 // Defined beside the effective input consumer. Admission precedes any backup or commit.
@@ -3000,14 +3095,157 @@ struct InputHostTargetWriteGuard {
     void commit() noexcept;
     ~InputHostTargetWriteGuard() noexcept;
 };
+// Configuration recovery streams only a preserved preimage. It never allocates
+// an over-limit JSON document, and a bounded IO failure leaves the source intact.
+static bool ymSettingsFileExceedsLimit(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    if(!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&attributes)){
+        const auto error=GetLastError();if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)return false;
+        throw std::runtime_error("Cannot inspect settings recovery source: "+std::to_string(error));
+    }
+    if(attributes.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)throw std::runtime_error("Settings source is a directory");
+    ULARGE_INTEGER size{};size.HighPart=attributes.nFileSizeHigh;size.LowPart=attributes.nFileSizeLow;
+    return size.QuadPart>4u*1024u*1024u;
+}
+// Revision checks in JS happen before IPC. Compare the complete boot-owned
+// intent under the native lock as well, including startup claims/results. An
+// unrelated section writer may still merge; a stale mode writer cannot roll
+// revisions or another mode's saved values back during that gap.
+static bool ymSettingsBootWriteMatches(const json& current,const json* baseline,const json& next,bool initialize) {
+    if(!baseline||initialize)return true;
+    const auto intent=[](const json& document){
+        json result=json::object();
+        const auto extensions=document.find("extensions");
+        if(extensions==document.end()||!extensions->is_object())return result;
+        for(const auto* key:{"bootModes","bootModesAppliedBoot","bootModesActiveBoot","bootModesStartupResult"}){
+            const auto found=extensions->find(key);if(found!=extensions->end())result[key]=*found;
+        }
+        return result;
+    };
+    const auto expected=intent(*baseline),requested=intent(next);
+    return requested==expected||intent(current)==expected;
+}
+static bool ymSettingsArchiveFile(const std::wstring& source,const std::wstring& destination) {
+    struct Handle{HANDLE value=INVALID_HANDLE_VALUE;~Handle(){if(value!=INVALID_HANDLE_VALUE)CloseHandle(value);}bool close(){auto h=value;value=INVALID_HANDLE_VALUE;return h==INVALID_HANDLE_VALUE||CloseHandle(h)!=FALSE;}};
+    const auto temporary=destination+L".tmp";
+    struct Temporary{std::wstring path;bool owned=false;~Temporary(){if(owned)DeleteFileW(path.c_str());}}cleanup{temporary};
+    Handle input,output;input.value=CreateFileW(source.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+    if(input.value==INVALID_HANDLE_VALUE)return false;
+    LARGE_INTEGER size{};if(!GetFileSizeEx(input.value,&size)||size.QuadPart<0)return false;
+    output.value=CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
+    if(output.value==INVALID_HANDLE_VALUE)return false;cleanup.owned=true;
+    const auto begin=GetTickCount64();char buffer[65536];unsigned long long total=0;
+    for(;;){
+        if(GetTickCount64()-begin>2000)return false;
+        DWORD read=0;if(!ReadFile(input.value,buffer,sizeof(buffer),&read,nullptr))return false;if(!read)break;
+        DWORD offset=0;while(offset<read){DWORD written=0;if(!WriteFile(output.value,buffer+offset,read-offset,&written,nullptr)||!written)return false;offset+=written;}
+        total+=read;
+    }
+    if(total!=static_cast<unsigned long long>(size.QuadPart)||!FlushFileBuffers(output.value)||!output.close())return false;
+    if(!MoveFileExW(temporary.c_str(),destination.c_str(),MOVEFILE_WRITE_THROUGH))return false;
+    cleanup.owned=false;return true;
+}
+static bool ymSettingsWriteBoundedRecovery(json parsed,const json* baseline,json* committed,bool initialize,
+    long long expectedInputRevision,bool* handled,bool* startProtectionBlocked) {
+    *handled=false;
+    const bool mainLarge=ymSettingsFileExceedsLimit(YM_SETTINGS_FILE),backupLarge=ymSettingsFileExceedsLimit(YM_SETTINGS_BACKUP_FILE);
+    if(!mainLarge&&!backupLarge)return false;
+    const auto mainRaw=mainLarge?std::string{}:ymSettingsReadRaw(YM_SETTINGS_FILE);
+    const auto main=ymcc::settingsBaseline::parseDocument(mainRaw);
+    if(ymcc::settingsBaseline::supported(main))return false; // normal writer owns a valid main, including its backup rotation
+    *handled=true;
+    if(main.is_object()||!baseline||!baseline->is_object()||expectedInputRevision>=0)return false;
+    const auto backupRaw=backupLarge?std::string{}:ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
+    const auto backup=ymcc::settingsBaseline::parseDocument(backupRaw);
+    if(backup.is_object()&&!ymcc::settingsBaseline::supported(backup))return false;
+    const bool trusted=ymcc::settingsBaseline::supported(backup);
+    if(!trusted&&!initialize)return false;
+    if(trusted){
+        if(!ymSettingsBootWriteMatches(backup,baseline,parsed,initialize))return false;
+        auto next=backup;if(initialize)ymSettingsFillMissing(next,parsed);else ymSettingsApplyDelta(next,*baseline,parsed);
+        parsed=std::move(next);ymcc::settingsBaseline::preserveReceipt(parsed,backup);
+        // A backup recovery has the same native-owned receipt and input revision
+        // protection as the normal document writer, even after an over-limit main.
+        for(const auto* key:{"domainLogs","steamDeckMouse","deckyContextCleanup","deckyBigPictureRecovery"})if(backup.contains(key))parsed[key]=backup[key];
+        if(backup.contains("input")&&backup["input"].is_object()){
+            const auto previous=ymcc::settingsBaseline::integerOr(backup["input"],"revision",-1LL);
+            const auto incoming=parsed.contains("input")?ymcc::settingsBaseline::integerOr(parsed["input"],"revision",-1LL):-1LL;
+            if(previous>incoming)parsed["input"]=backup["input"];
+        }
+    }else ymcc::settingsBaseline::deactivateRecoveredState(parsed);
+    if(trusted)ymcc::settingsBaseline::preserveNativeCleanupHistory(parsed,json(),backup,!backup.contains("deckyContextCleanup"));
+    ymcc::bootModeShortcuts::retireGlobalSnapshot(parsed);
+    const auto content=parsed.dump(2);if(content.size()>4u*1024u*1024u||!ymcc::settingsBaseline::supported(parsed))return false;
+    InputHostTargetWriteGuard request;
+    if(!request.admit(trusted?backup:json::object(),parsed)){if(startProtectionBlocked)*startProtectionBlocked=true;if(committed)*committed=trusted?backup:json::object();return false;}
+    static unsigned long long sequence=0;const auto suffix=L".before-bounded-recovery-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++sequence);
+    if(fspath::exists(YM_SETTINGS_FILE)&&!ymSettingsArchiveFile(YM_SETTINGS_FILE,YM_SETTINGS_FILE+suffix))return false;
+    if(!trusted&&fspath::exists(YM_SETTINGS_BACKUP_FILE)&&!ymSettingsArchiveFile(YM_SETTINGS_BACKUP_FILE,YM_SETTINGS_BACKUP_FILE+suffix))return false;
+    if(!sgWriteFileAtomic(YM_SETTINGS_FILE,content))return false;
+    request.commit();if(committed)*committed=parsed;return true;
+}
 // Ordinary native writers may recover a readable backup, but cannot silently
-// replace existing corrupt/empty files. Only settings.reset owns that recovery.
+// replace existing corrupt/empty files. Initialization may archive and rebuild
+// both damaged sources; ordinary section writes still require a compatible base.
 static bool ymSettingsHasCompatibleWriteBase(const std::string& mainRaw, const json& recovered) {
     if (!ymcc::settingsBaseline::supported(recovered)) return false;
-    try { if (json::parse(mainRaw).is_object()) return true; } catch (...) {}
+    try { const auto main=ymcc::settingsBaseline::parseDocument(mainRaw);if(main.is_object())return ymcc::settingsBaseline::supported(main); } catch (...) {}
     const auto backupRaw = ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
-    try { return ymcc::settingsBaseline::supported(json::parse(backupRaw)); } catch (...) {}
+    const auto backup=ymcc::settingsBaseline::parseDocument(backupRaw);
+    if(!backup.is_discarded())return ymcc::settingsBaseline::supported(backup);
     return mainRaw.empty() && backupRaw.empty() && !fspath::exists(YM_SETTINGS_FILE) && !fspath::exists(YM_SETTINGS_BACKUP_FILE);
+}
+// Inspect the prior backup before any rotation can erase native recovery
+// history. A missing key in a valid main never outranks a spent backup.
+static void ymSettingsPreserveCleanupHistory(json& next, const json& primary, bool primaryPresent) {
+    json backup;
+    bool unconfirmed = ymSettingsFileExceedsLimit(YM_SETTINGS_BACKUP_FILE);
+    if (!unconfirmed) {
+        const auto raw = ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
+        backup = ymcc::settingsBaseline::parseDocument(raw);
+        const bool present = !raw.empty() || fspath::exists(YM_SETTINGS_BACKUP_FILE);
+        unconfirmed = present && !ymcc::settingsBaseline::supported(backup);
+    }
+    const bool trustedBackup = ymcc::settingsBaseline::supported(backup);
+    if (primaryPresent && !ymcc::settingsBaseline::supported(primary) &&
+        (!trustedBackup || !backup.contains("deckyContextCleanup"))) unconfirmed = true;
+    ymcc::settingsBaseline::preserveNativeCleanupHistory(next,
+        ymcc::settingsBaseline::supported(primary) ? primary : json(),
+        trustedBackup ? backup : json(), unconfirmed);
+}
+// Preserve an unreadable-version or damaged backup before normal rotation.
+// Reads stay strict: access failure cannot become permission to overwrite it.
+static bool ymSettingsPreserveMainBeforeWrite(const std::string& mainRaw) {
+    static unsigned long long sequence=0;
+    const auto suffix=std::to_wstring(GetCurrentProcessId())+L"-"+
+        std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++sequence);
+    const auto current=ymcc::settingsBaseline::parseDocument(mainRaw);
+    if(ymcc::settingsBaseline::supported(current)) {
+        auto preserved = current;
+        ymSettingsPreserveCleanupHistory(preserved,current,true);
+        const auto backupContent = preserved == current ? mainRaw : preserved.dump(2);
+        if(ymSettingsFileExceedsLimit(YM_SETTINGS_BACKUP_FILE)){
+            if(!ymSettingsArchiveFile(YM_SETTINGS_BACKUP_FILE,YM_SETTINGS_BACKUP_FILE+L".before-bounded-recovery-"+suffix))return false;
+            return sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE,backupContent);
+        }
+        const auto backupRaw=ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
+        if(!backupRaw.empty()||fspath::exists(YM_SETTINGS_BACKUP_FILE)) {
+            const auto backup=ymcc::settingsBaseline::parseDocument(backupRaw);
+            if(!ymcc::settingsBaseline::supported(backup)&&
+                !sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE+L".before-backup-replacement-"+suffix,backupRaw))return false;
+        }
+        return sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE,backupContent);
+    }
+    return (mainRaw.empty()&&!fspath::exists(YM_SETTINGS_FILE))||
+        sgWriteFileAtomic(YM_SETTINGS_FILE+L".corrupt-native-"+suffix,mainRaw);
+}
+static bool ymSettingsArchiveDamagedSources(const std::string& mainRaw,const std::string& backupRaw) {
+    static unsigned long long sequence=0;
+    const auto suffix=L".before-auto-recovery-"+std::to_wstring(GetCurrentProcessId())+
+        L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++sequence);
+    if((!mainRaw.empty()||fspath::exists(YM_SETTINGS_FILE))&&!sgWriteFileAtomic(YM_SETTINGS_FILE+suffix,mainRaw))return false;
+    if((!backupRaw.empty()||fspath::exists(YM_SETTINGS_BACKUP_FILE))&&!sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE+suffix,backupRaw))return false;
+    return true;
 }
 static bool ymSettingsWriteDocumentUnlocked(const std::string& content,
                                             long long* staleInputDroppedRev = nullptr,
@@ -3020,22 +3258,35 @@ static bool ymSettingsWriteDocumentUnlocked(const std::string& content,
     if (inputRevisionConflict) *inputRevisionConflict = false;
     json parsed;
     try {
-        parsed = json::parse(content);
+        parsed = ymcc::settingsBaseline::parseDocument(content);
     } catch (...) {
         return false;
     }
     if (!ymcc::settingsBaseline::supported(parsed)) return false;
+    bool boundedHandled=false;
+    const bool boundedResult=ymSettingsWriteBoundedRecovery(parsed,baseline,committed,initialize,expectedInputRevision,&boundedHandled,startProtectionBlocked);
+    if(boundedHandled)return boundedResult;
     const auto raw = ymSettingsReadRaw(YM_SETTINGS_FILE);
     json old;
     bool oldValid = false;
     if (!raw.empty()) {
         try {
-            old = json::parse(raw);
+            old = ymcc::settingsBaseline::parseDocument(raw);
             oldValid = old.is_object();
         } catch (...) {}
     }
     if (oldValid && !ymcc::settingsBaseline::supported(old)) return false;
-    if (!oldValid && !ymSettingsHasCompatibleWriteBase(raw, ymSettingsReadUnlocked())) return false;
+    bool initializeDamaged=false;
+    std::string damagedBackupRaw;
+    if (!oldValid && !ymSettingsHasCompatibleWriteBase(raw, ymSettingsReadUnlocked())) {
+        // Only a full initialization can rebuild damaged storage. Strict reads
+        // must succeed, and no parseable object (including a future schema) may
+        // be mistaken for corrupt bytes. CAS still needs an actual disk revision.
+        if(!initialize||!baseline||!baseline->is_object()||expectedInputRevision>=0)return false;
+        damagedBackupRaw=ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
+        try {if(ymcc::settingsBaseline::parseDocument(damagedBackupRaw).is_object())return false;}catch(...){}
+        initializeDamaged=true;
+    }
     // OEM save CAS: validate the caller revision under the same native lock
     // as delta merge and atomic commit. Same-next-revision races must reject.
     if (expectedInputRevision >= 0) {
@@ -3055,14 +3306,14 @@ static bool ymSettingsWriteDocumentUnlocked(const std::string& content,
             return false; // no backup/write/refresh on rejected transaction
         }
     }
-    if (!raw.empty() && !oldValid) {
-        const auto corrupt = YM_SETTINGS_FILE + L".corrupt-native-" + std::to_wstring(GetTickCount64());
-        if (!sgWriteFileAtomic(corrupt, raw)) return false;
-    }
     if (baseline) {
         if (!baseline->is_object()) return false;
         json merged = oldValid ? old : ymSettingsReadUnlocked();
         if (!merged.is_object()) merged = json::object();
+        if(!ymSettingsBootWriteMatches(merged,baseline,parsed,initialize)){
+            if(committed)*committed=merged;
+            return false; // no archive, backup rotation or partial startup cache write
+        }
         if (initialize) {
             ymSettingsFillMissing(merged, parsed);
             if (parsed.contains("schemaVersion") && parsed["schemaVersion"].is_number_integer()) {
@@ -3084,17 +3335,28 @@ static bool ymSettingsWriteDocumentUnlocked(const std::string& content,
         if (old.contains("domainLogs")) parsed["domainLogs"] = old["domainLogs"];
         // Native-owned deferred Steam write receipts must survive stale UI snapshots.
         if (old.contains("steamDeckMouse")) parsed["steamDeckMouse"] = old["steamDeckMouse"];
+        // A stale renderer snapshot cannot refill the native final-cleanup fuse.
+        for(const char* key:{"deckyContextCleanup","deckyBigPictureRecovery"})if(old.contains(key))parsed[key]=old[key];
         const bool diskInput = old.contains("input") && old["input"].is_object();
         if (diskInput) {
-            const long long diskRev = old["input"].value("revision", -1LL);
+            const long long diskRev = ymcc::settingsBaseline::integerOr(old["input"],"revision",-1LL);
             const bool incomingInput = parsed.contains("input") && parsed["input"].is_object();
-            const long long inRev = incomingInput ? parsed["input"].value("revision", -1LL) : -1LL;
+            const long long inRev = incomingInput ? ymcc::settingsBaseline::integerOr(parsed["input"],"revision",-1LL) : -1LL;
             if (diskRev > inRev) {
                 parsed["input"] = old["input"];
                 if (staleInputDroppedRev) *staleInputDroppedRev = inRev;
             }
         }
     }
+    // A compatible backup is also authority for this native-only reservation.
+    // Missing/old UI baselines cannot turn damaged main storage into a refill.
+    if(!oldValid){
+        const auto recovered=ymSettingsReadUnlocked();
+        if(recovered.is_object())for(const char* key:{"deckyContextCleanup","deckyBigPictureRecovery"})
+            if(recovered.contains(key))parsed[key]=recovered[key];
+    }
+    ymSettingsPreserveCleanupHistory(parsed,old,!raw.empty()||fspath::exists(YM_SETTINGS_FILE));
+    if(initializeDamaged)ymcc::settingsBaseline::deactivateRecoveredState(parsed);
     ymcc::settingsBaseline::preserveReceipt(parsed, old);
     if (!ymcc::settingsBaseline::supported(parsed)) return false;
     ymcc::controllerPersona::migrateSavedDocument(parsed);
@@ -3107,7 +3369,8 @@ static bool ymSettingsWriteDocumentUnlocked(const std::string& content,
         if (committed) *committed = old;
         return false;
     }
-    if (oldValid && !sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE, raw)) return false;
+    if(initializeDamaged) {if(!ymSettingsArchiveDamagedSources(raw,damagedBackupRaw))return false;}
+    else if(!ymSettingsPreserveMainBeforeWrite(raw))return false;
     if (!sgWriteFileAtomic(YM_SETTINGS_FILE, serialized)) return false;
     targetRequest.commit();
     if (committed) *committed = parsed;
@@ -3126,11 +3389,11 @@ static bool ymSettingsWriteDocument(const std::string& content,
 }
 // Explicit-read metadata validation; no polling, parsing or disk reads when
 // size/creation/last-write stamp is unchanged. Guard covers stamp + content.
-static json ymSettingsReadSnapshot(const std::string& knownStamp) {
+static json ymSettingsReadSnapshot(const std::string& knownStamp,const std::wstring& path=YM_SETTINGS_FILE) {
     SettingsFileGuard guard;
     WIN32_FILE_ATTRIBUTE_DATA attributes{};
     std::string stamp = "missing";
-    if (GetFileAttributesExW(YM_SETTINGS_FILE.c_str(), GetFileExInfoStandard, &attributes)) {
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes)) {
         ULARGE_INTEGER modified{}, created{}, size{};
         modified.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
         modified.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
@@ -3138,18 +3401,29 @@ static json ymSettingsReadSnapshot(const std::string& knownStamp) {
         created.LowPart = attributes.ftCreationTime.dwLowDateTime;
         size.HighPart = attributes.nFileSizeHigh; size.LowPart = attributes.nFileSizeLow;
         stamp = std::to_string(modified.QuadPart) + ":" + std::to_string(created.QuadPart) + ":" + std::to_string(size.QuadPart);
+        if(size.QuadPart>4u*1024u*1024u)
+            return {{"stamp",stamp+":too-large"},{"unchanged",false},{"content",""},{"readFault","content-too-large"}};
     } else {
         const DWORD error = GetLastError();
         if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
-            throw std::runtime_error("Unified settings metadata read failed: " + std::to_string(error));
+            return {{"stamp","unreadable-"+std::to_string(error)},{"unchanged",false},{"content",""},
+                {"readFault","metadata-read-failed"},{"win32Error",error}};
     }
     if (!knownStamp.empty() && knownStamp == stamp && stamp != "missing")
         return {{"stamp", stamp}, {"unchanged", true}};
-    auto content = ymSettingsReadRaw(YM_SETTINGS_FILE);
+    std::string content;
+    try {content=ymSettingsReadRaw(path);}
+    catch(...) {return {{"stamp",stamp+":unreadable"},{"unchanged",false},{"content",""},{"readFault","content-read-failed"}};}
+    // File bytes are not a JSON string unless their UTF-8 encoding is valid.
+    // Preserve the original file; only the transport receives a typed fault.
+    if(!content.empty()&&!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,content.data(),static_cast<int>(content.size()),nullptr,0))
+        return {{"stamp",stamp+":invalid-text"},{"unchanged",false},{"content",""},{"readFault","invalid-text-encoding"}};
     try {
-        auto document = json::parse(content);
+        auto document = ymcc::settingsBaseline::parseDocument(content);
+        if(!document.is_object()&&stamp!="missing")
+            return {{"stamp",stamp+":invalid-document"},{"unchanged",false},{"content",""},{"readFault","invalid-document"}};
         if (ymcc::controllerPersona::migrateSavedDocument(document)) content = document.dump();
-    } catch (...) {} // Preserve existing corrupt/missing-file recovery behavior.
+    } catch (...) {} // The repository chooses compatible backup/defaults.
     return {{"stamp", stamp}, {"unchanged", false}, {"content", content}};
 }
 // This storage-only recovery endpoint is never called automatically.
@@ -3167,7 +3441,7 @@ static json ymSettingsResetApplication(const json& defaults) {
     const auto mainRaw = ymSettingsReadRaw(YM_SETTINGS_FILE);
     const auto backupRaw = ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
     auto objectFrom = [](const std::string& raw) -> json {
-        try { auto value = json::parse(raw); if (value.is_object()) return value; } catch (...) {}
+        try { auto value = ymcc::settingsBaseline::parseDocument(raw); if (value.is_object()) return value; } catch (...) {}
         return json();
     };
     json current = objectFrom(mainRaw);
@@ -3184,6 +3458,7 @@ static json ymSettingsResetApplication(const json& defaults) {
     next["cpu"]["autoEnable"] = {{"mode", "off"}};
     next["cpu"]["autostart"] = {{"ccd", {{"enabled", false}}}, {"uv", {{"enabled", false}}}};
     next["performanceSchedule"]["enabled"] = false;
+    ymSettingsPreserveCleanupHistory(next,objectFrom(mainRaw),!mainRaw.empty()||fspath::exists(YM_SETTINGS_FILE));
     const auto content = next.dump(2);
     if (content.size() > 4 * 1024 * 1024) throw std::runtime_error("Recovered configuration is too large");
     static unsigned long long sequence = 0;
@@ -3204,8 +3479,10 @@ static json ymSettingsResetApplication(const json& defaults) {
 }
 
 static json ymSettingsRead() {
-    SettingsFileGuard guard;
-    return ymSettingsReadUnlocked();
+    // Runtime defaults must remain available even if another settings writer
+    // holds the bounded lock. Durable writers still propagate/reject the fault.
+    try {SettingsFileGuard guard;return ymSettingsReadUnlocked();}
+    catch(...) {return json::object();}
 }
 static json ymSettingsSection(const char* section);
 static bool ymSettingsWriteSection(const char* section, const json& value) {
@@ -3216,16 +3493,9 @@ static bool ymSettingsWriteSection(const char* section, const json& value) {
     all["schemaVersion"] = (std::max)(1, all.value("schemaVersion", 1));
     if (!all.contains("baselineId")) all["baselineId"] = "2026-08-09-user-default";
     all[section] = value;
+    ymSettingsPreserveCleanupHistory(all,ymcc::settingsBaseline::parseDocument(raw),!raw.empty()||fspath::exists(YM_SETTINGS_FILE));
     // Keep the last valid main file available for recovery before replacing it.
-    if (!raw.empty()) {
-        try {
-            auto old = json::parse(raw);
-            if (old.is_object()) { if (!sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE, raw)) return false; }
-            else if (!sgWriteFileAtomic(YM_SETTINGS_FILE + L".corrupt-native-" + std::to_wstring(GetTickCount64()), raw)) return false;
-        } catch (...) {
-            if (!sgWriteFileAtomic(YM_SETTINGS_FILE + L".corrupt-native-" + std::to_wstring(GetTickCount64()), raw)) return false;
-        }
-    }
+    if(!ymSettingsPreserveMainBeforeWrite(raw))return false;
     ymcc::controllerPersona::migrateSavedDocument(all);
     return sgWriteFileAtomic(YM_SETTINGS_FILE, all.dump(2));
 }
@@ -3256,10 +3526,74 @@ static bool ymSettingsSetInputBooleanCas(const char* key, bool value, bool* revi
 static bool ymSettingsExists() {
     return fspath::exists(YM_SETTINGS_FILE);
 }
+// Section-only memoization. Every call still reads current bytes under the
+// original SettingsFileGuard. Do not feed this cache from a pending writer.
+struct YmSettingsSectionReadCache {
+    std::wstring source;
+    std::string raw;
+    json document;
+    void swap(YmSettingsSectionReadCache& other) noexcept {
+        source.swap(other.source);
+        raw.swap(other.raw);
+        document.swap(other.document);
+    }
+};
+// Private to ymSettingsSection: the caller must hold SettingsFileGuard for the
+// entire call, including cache initialization, replacement and section copy.
+static json ymSettingsSectionReadCachedUnlocked(const char* section, const char* field = nullptr,
+                                               const std::initializer_list<const char*>* fields = nullptr) {
+    static YmSettingsSectionReadCache cache;
+    for (const auto* path : {&YM_SETTINGS_FILE, &YM_SETTINGS_BACKUP_FILE}) {
+        try {
+            auto raw = ymSettingsReadRaw(*path);
+            if (raw.empty()) continue;
+            if (cache.source != *path || cache.raw != raw) {
+                auto document = ymcc::settingsBaseline::parseDocument(raw);
+                if (!ymcc::settingsBaseline::supported(document)) continue;
+                ymcc::controllerPersona::migrateSavedDocument(document);
+                // Construct the complete source/bytes/DOM tuple before publishing.
+                YmSettingsSectionReadCache next{*path, std::move(raw), std::move(document)};
+                cache.swap(next);
+            }
+            const auto it = cache.document.find(section);
+            if (it == cache.document.end() || !it->is_object())
+                return field ? json() : json::object();
+            if (fields) {
+                json selected = json::object();
+                for (const auto* key : *fields) {
+                    const auto value = it->find(key);
+                    if (value != it->end()) selected[key] = *value;
+                }
+                return selected;
+            }
+            if (!field) return *it;
+            const auto selected = it->find(field);
+            return selected != it->end() ? *selected : json();
+        } catch (...) {} // Try the current backup, never a last-known document.
+    }
+    return field ? json() : json::object();
+}
 static json ymSettingsSection(const char* section) {
-    const auto all = ymSettingsRead();
-    auto it = all.find(section);
-    return it != all.end() && it->is_object() ? *it : json::object();
+    try {
+        SettingsFileGuard guard;
+        return ymSettingsSectionReadCachedUnlocked(section);
+    } catch (...) { return json::object(); }
+}
+// Copy only the requested value while retaining the same current-byte read,
+// file guard and main/backup selection as the full-section reader.
+static json ymSettingsField(const char* section, const char* field) {
+    try {
+        SettingsFileGuard guard;
+        return ymSettingsSectionReadCachedUnlocked(section, field);
+    } catch (...) { return json(); }
+}
+
+// Copy only existing requested keys from one current section snapshot.
+static json ymSettingsFields(const char* section, std::initializer_list<const char*> fields) {
+    try {
+        SettingsFileGuard guard;
+        return ymSettingsSectionReadCachedUnlocked(section, nullptr, &fields);
+    } catch (...) { return json::object(); }
 }
 
 static ymcc::fxsound::Service g_fxSoundRecovery;
@@ -3315,15 +3649,8 @@ static bool ymSettingsPatchSection(const char* section, const json& patch) {
     next["schemaVersion"] = (std::max)(1, next.value("schemaVersion", 1));
     if (!next.contains("baselineId")) next["baselineId"] = "2026-08-09-user-default";
     next[section] = current;
-    if (!raw.empty()) {
-        try {
-            auto old = json::parse(raw);
-            if (old.is_object()) { if (!sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE, raw)) return false; }
-            else if (!sgWriteFileAtomic(YM_SETTINGS_FILE + L".corrupt-native-" + std::to_wstring(GetTickCount64()), raw)) return false;
-        } catch (...) {
-            if (!sgWriteFileAtomic(YM_SETTINGS_FILE + L".corrupt-native-" + std::to_wstring(GetTickCount64()), raw)) return false;
-        }
-    }
+    ymSettingsPreserveCleanupHistory(next,ymcc::settingsBaseline::parseDocument(raw),!raw.empty()||fspath::exists(YM_SETTINGS_FILE));
+    if(!ymSettingsPreserveMainBeforeWrite(raw))return false;
     return sgWriteFileAtomic(YM_SETTINGS_FILE, next.dump(2));
 }
 
@@ -3351,6 +3678,8 @@ static const std::wstring FLOAT_ACTIVE_MARKER = MONITOR_DIR + L"\\float-active";
 static const std::wstring LEGACY_TOPMON_PID = MONITOR_DIR + L"\\topmon.pid";
 static const std::wstring LEGACY_FPS_PID = MONITOR_DIR + L"\\fps-monitor.pid";
 
+static void mousePolicyGameContextChanged();
+static ymcc::mousePolicy::Context mouseModeObserveForeground();
 static std::vector<std::wstring> sgExcludes();
 static std::vector<std::wstring> sgGameWhitelist();
 static std::wstring sgMatchingGameWhitelistRule(
@@ -3465,7 +3794,7 @@ static ymcc::hwinfo::Result nativeHWiNFOManage(ymcc::hwinfo::Request request,uns
     request.powerControl = POWER_CONTROL_DIR;
     auto result = ymcc::hwinfo::run(std::move(request), [recoveryGeneration,demandGeneration]{return monitorHWiNFOCancelled()||(recoveryGeneration&&(currentPowerGeneration()!=recoveryGeneration||g_monitorHWiNFODemandGeneration.load(std::memory_order_acquire)!=demandGeneration||!monitorHWiNFODemandActive()));},allowElevation);
     const auto* event=result.code==0?"hwinfo-management-complete":
-        (result.code==11||result.code==12)?"hwinfo-recovery-launch-deferred":"hwinfo-management-failed";
+        (result.code==11||result.code==12||result.code==16)?"hwinfo-recovery-launch-deferred":"hwinfo-management-failed";
     appendNativeLifecycleLog(event,ymcc::hwinfo::asJson(result));
     return result;
 }
@@ -4121,6 +4450,15 @@ static bool nativeMonitorExcluded(const std::wstring& name) {
     return false;
 }
 
+enum class NativeGameDiscoveryState { Complete, Pending, Unavailable };
+static const char* nativeGameDiscoveryStateName(NativeGameDiscoveryState state) {
+    switch (state) {
+    case NativeGameDiscoveryState::Complete: return "complete";
+    case NativeGameDiscoveryState::Pending: return "pending";
+    default: return "unavailable";
+    }
+}
+
 struct NativeDetectedGame {
     DWORD pid = 0;
     std::wstring name;
@@ -4179,8 +4517,19 @@ static std::wstring nativeCustomExeStem(const std::string& raw) {
 
 static std::vector<std::wstring> nativeConfiguredGameExes() {
     std::vector<std::wstring> configured;
-    const std::string raw = sgReadFile(GAME_CUSTOM_CONFIG_JSON);
+    std::string raw = sgReadFile(GAME_CUSTOM_CONFIG_JSON);
     if (raw.empty() || raw.size() > 4ULL * 1024ULL * 1024ULL) return configured;
+    // Keep the fresh file read and compare every byte. Only parsing is reused;
+    // metadata, path, PID identity and rule-epoch validation stay independent.
+    static std::mutex cacheMx;
+    static std::string cachedRaw;
+    static std::vector<std::wstring> cachedConfigured;
+    static bool cacheReady = false;
+    std::lock_guard<std::mutex> cacheLock(cacheMx);
+    if (cacheReady && raw == cachedRaw) {
+        try { return cachedConfigured; }
+        catch (...) { /* Fall through to the original parser if copying fails. */ }
+    }
     try {
         const json config = json::parse(raw);
         const auto entries = config.value("entries", json::object());
@@ -4193,7 +4542,18 @@ static std::vector<std::wstring> nativeConfiguredGameExes() {
     } catch (...) {
         // A malformed standalone file means no custom target is configured.
         // The frontend keeps the file for diagnosis and does not resurrect a
-        // legacy settings section.
+        // legacy settings section. Never cache a failed/partial parse.
+        return configured;
+    }
+    try {
+        // Build the only allocating replacement before publishing either field.
+        // These swaps cannot leave a new raw key paired with an older result.
+        auto nextConfigured = configured;
+        cachedConfigured.swap(nextConfigured);
+        cachedRaw.swap(raw);
+        cacheReady = true;
+    } catch (...) {
+        // Cache maintenance is optional; preserve the freshly parsed result.
     }
     return configured;
 }
@@ -4343,7 +4703,9 @@ static NativeOnePidResult nativeScanGameOnePid(
     const std::vector<std::wstring>& userExcludes,
     const std::vector<std::wstring>& whitelist,
     const std::vector<std::wstring>& configuredGameExes,
-    NativeDetectedGame* out) {
+    NativeDetectedGame* out,
+    bool* topologyChanged = nullptr) {
+    if (topologyChanged) *topologyChanged = false;
     if (!out) return NativeOnePidResult::Rejected;
     *out = {};
     if (tickCostEnabled()) g_gameValveOnePidChecks.fetch_add(1, std::memory_order_relaxed);
@@ -4358,8 +4720,12 @@ static NativeOnePidResult nativeScanGameOnePid(
             return NativeOnePidResult::Rejected;
     }
 
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-    if (!process) return NativeOnePidResult::Rejected;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
+    if (!process) {
+        const DWORD error = GetLastError();
+        if (topologyChanged && (error == ERROR_INVALID_PARAMETER || error == ERROR_NOT_FOUND)) *topologyChanged = true;
+        return NativeOnePidResult::Rejected;
+    }
     if (tickCostEnabled()) g_gameValveDetailQueries.fetch_add(1, std::memory_order_relaxed);
 
     std::wstring path;
@@ -4379,7 +4745,14 @@ static NativeOnePidResult nativeScanGameOnePid(
     if (GetProcessMemoryInfo(process, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
         workingSet = memory.WorkingSetSize;
     processCreated = nativeProcessCreatedFromHandle(process);
+    // Creation time remains readable on an exited process object. Test the
+    // same handle without waiting before admitting even a configured 0-WS target.
+    const DWORD processWait = WaitForSingleObject(process, 0);
     CloseHandle(process);
+    if (processWait != WAIT_TIMEOUT) {
+        if (topologyChanged) *topologyChanged = true;
+        return NativeOnePidResult::Rejected;
+    }
 
     if (name.empty()) {
         if (path.empty()) return NativeOnePidResult::NameUnavailable;
@@ -4398,6 +4771,7 @@ static NativeOnePidResult nativeScanGameOnePid(
     {
         const NativeNameIdentity identity = nativeNameIdentityVerdict(name, path);
         if (identity == NativeNameIdentity::Mismatch) {
+            if (topologyChanged) *topologyChanged = true;
             if (tickCostEnabled()) g_gameValveIdentityRejects.fetch_add(1, std::memory_order_relaxed);
             return NativeOnePidResult::Rejected;
         }
@@ -4436,36 +4810,33 @@ static bool nativeScanGameConfiguredBest(
     const std::vector<std::wstring>& whitelist,
     const std::vector<std::wstring>& configuredGameExes,
     NativeDetectedGame* out) {
+    auto toolhelpFallback = [&]() -> bool {
     if (!out) return false;
     *out = {};
     if (configuredGameExes.empty()) return true;   // 没有优先类 ⇒ 结果必为空
     if (tickCostEnabled()) g_gameValveConfiguredNamePasses.fetch_add(1, std::memory_order_relaxed);
 
     DWORD currentSession = 0;
-    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession)) return true;
+    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession)) return false;
 
     struct NativeConfiguredCandidate {
         DWORD pid = 0;
         std::wstring name;
     };
     std::vector<NativeConfiguredCandidate> candidates;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W pe{sizeof(pe)};
-        if (Process32FirstW(snap, &pe)) {
-            do {
-                const DWORD pid = pe.th32ProcessID;
+    const auto topology = ymcc::processInventory::read();
+    if (topology->status == ymcc::processInventory::Status::Complete) {
+            for (const auto& pe : topology->rows) {
+                const DWORD pid = pe.pid;
                 if (!pid || pid == 4 || pid == GetCurrentProcessId()) continue;
-                const std::wstring name = sgBaseName(pe.szExeFile);
+                const std::wstring name = sgBaseName(pe.name);
                 if (!nativeIsConfiguredGameExe(name, configuredGameExes)) continue;
                 DWORD processSession = 0;
                 if (!ProcessIdToSessionId(pid, &processSession) || processSession != currentSession)
                     continue;
                 candidates.push_back({pid, name});
-            } while (Process32NextW(snap, &pe));
-        }
-        CloseHandle(snap);
-    }
+            }
+    } else return false;
 
     NativeDetectedGame best;
     for (const auto& candidate : candidates) {
@@ -4479,6 +4850,47 @@ static bool nativeScanGameConfiguredBest(
     if (best.pid) best.title = nativeProcessWindowTitle(best.pid);
     *out = std::move(best);
     return true;
+
+    };
+    if (!out) return false;
+    *out = {};
+    if (configuredGameExes.empty()) return true;
+    const auto started = GetTickCount64();
+    const bool actualForeground = ymcc::gameInventory::foreground(g_hwnd);
+    const bool fast = actualForeground || ymcc::gameInventory::manualDepth != 0;
+    const ymcc::gameInventory::RuleKey rules{userExcludes, whitelist, configuredGameExes};
+    const auto& memo = ymcc::gameInventory::inventory(rules, actualForeground);
+    static ymcc::gameInventory::Candidates candidates;
+    if (candidates.version != memo.version) {
+        candidates.reset(memo.version, memo.resetProgress);
+        if (!memo.available) {
+            const bool available = toolhelpFallback();
+            if (out->pid) candidates.ranked.push_back({out->pid, out->name, out->workingSet,
+                0, out->processCreated, out->path});
+            candidates.windowEnd = candidates.ranked.size();
+            candidates.sourceAvailable = available;
+            candidates.complete = available && !out->pid;
+            return available;
+        }
+        if (tickCostEnabled()) g_gameValveConfiguredNamePasses.fetch_add(1, std::memory_order_relaxed);
+        for (const auto& entry : memo.rows) {
+            if (!entry.pid || entry.pid == 4 || entry.pid == GetCurrentProcessId()) continue;
+            const std::wstring name = sgBaseName(entry.name);
+            if (nativeIsConfiguredGameExe(name, configuredGameExes))
+                candidates.ranked.push_back({entry.pid, name, entry.workingSet, 0, 0, {}, entry.processCreated, entry.sequence});
+        }
+        candidates.rank();
+    }
+    *out = ymcc::gameInventory::next<NativeDetectedGame>(candidates, fast, started,
+        [&](const ymcc::gameInventory::Hint& hint, NativeDetectedGame& one) {
+            bool changed = false;
+            const auto result = nativeScanGameOnePid(hint.pid, hint.name, userExcludes, whitelist, configuredGameExes, &one, &changed);
+            candidates.topologyChanged = changed;
+            return result == NativeOnePidResult::Ok && one.customConfigured;
+        });
+    if (out->pid) out->title = nativeProcessWindowTitle(out->pid);
+    // False means unfinished/unavailable, never a proof of no configured game.
+    return out->pid || (candidates.sourceAvailable && candidates.complete);
 }
 
 // This is deliberately the only process enumeration used by the game valve.
@@ -4490,7 +4902,15 @@ static NativeDetectedGame nativeScanGame(
     DWORD preferredPid,
     const std::vector<std::wstring>& userExcludes,
     const std::vector<std::wstring>& whitelist,
-    const std::vector<std::wstring>& configuredGameExes) {
+    const std::vector<std::wstring>& configuredGameExes,
+    NativeGameDiscoveryState* discoveryState = nullptr,
+    ULONGLONG* qualificationObservedAt = nullptr) {
+    if (discoveryState) *discoveryState = NativeGameDiscoveryState::Unavailable;
+    if (qualificationObservedAt) *qualificationObservedAt = 0;
+    bool fallbackComplete = false;
+    ULONGLONG fallbackObservedAt = 0;
+    auto toolhelpFallback = [&]() -> NativeDetectedGame {
+    bool livenessKnown = true;
     NativeDetectedGame best;
     NativeDetectedGame bestWhitelisted;
     NativeDetectedGame bestCustom;
@@ -4498,20 +4918,19 @@ static NativeDetectedGame nativeScanGame(
     DWORD currentSession = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession)) return best;
 
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return best;
+    const auto topology = ymcc::processInventory::read();
+    if (topology->status != ymcc::processInventory::Status::Complete) return best;
     if (tickCostEnabled()) g_gameValveFullScans.fetch_add(1, std::memory_order_relaxed);
 
-    PROCESSENTRY32W pe{sizeof(pe)};
     // C-D1（155 §3.1-4）：路径缓冲一次分配、循环内复用（旧实现每个进程都分配
     // 并清零 64 KB 宽字符）；镜像路径只在"本次真的会被存为候选"时才查询（旧实现
     // 无条件查询每个进程）。查询期间持有句柄只保证"打开之后的对象不变"，不保证
     // 先前的 Toolhelp 快照名属于同一对象；名字一致性由下面的 A9 复核判定。
     std::vector<wchar_t> image(32768);
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            const DWORD pid = pe.th32ProcessID;
-            const std::wstring name = sgBaseName(pe.szExeFile);
+    {
+        for (const auto& pe : topology->rows) {
+            const DWORD pid = pe.pid;
+            const std::wstring name = sgBaseName(pe.name);
             const bool isWhitelisted = sgNameExcludedBy(name, whitelist);
             if (!pid || pid == 4 || pid == GetCurrentProcessId() ||
                 (!isWhitelisted && (nativeMonitorExcluded(name) || sgNameExcludedBy(name, userExcludes)))) {
@@ -4522,7 +4941,7 @@ static NativeDetectedGame nativeScanGame(
             if (!ProcessIdToSessionId(pid, &processSession) || processSession != currentSession)
                 continue;
 
-            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
             if (!process) continue;
             if (tickCostEnabled()) g_gameValveDetailQueries.fetch_add(1, std::memory_order_relaxed);
 
@@ -4560,7 +4979,12 @@ static NativeDetectedGame nativeScanGame(
                 if (QueryFullProcessImageNameW(process, 0, image.data(), &imageLength))
                     path.assign(image.data(), imageLength);
             }
+            const DWORD processWait = WaitForSingleObject(process, 0);
             CloseHandle(process);
+            if (processWait != WAIT_TIMEOUT) {
+                if (processWait != WAIT_OBJECT_0) livenessKnown = false;
+                continue;
+            }
 
             // A9（191 §3.1）：将要准入/发布的候选必须通过镜像身份复核——快照名与
             // 句柄镜像名已确认不一致（PID 复用）⇒ 丢弃该候选，不按旧名字获得白名单/
@@ -4616,9 +5040,19 @@ static NativeDetectedGame nativeScanGame(
             best.path = std::move(path);
             best.workingSet = workingSet;
             best.processCreated = processCreated;
-        } while (Process32NextW(snap, &pe));
+        }
     }
-    CloseHandle(snap);
+    const bool enumerationComplete = true;
+    // Unknown rows cannot establish an empty/idle result, but they do not
+    // revoke another candidate already validated on its own live handle.
+    const bool hasVerifiedCandidate = preferredPid ? preferred.pid != 0 :
+        (bestCustom.pid || bestWhitelisted.pid || best.pid);
+    fallbackComplete = enumerationComplete && (livenessKnown || hasVerifiedCandidate);
+    if (!fallbackComplete) return {};
+    // The process set is part of this absence proof; retain its actual age.
+    fallbackObservedAt = topology->observedAt;
+    if (qualificationObservedAt) *qualificationObservedAt = fallbackObservedAt;
+    if (discoveryState) *discoveryState = NativeGameDiscoveryState::Complete;
 
     // A summon request carries the PID captured from the original foreground
     // window.  It is intentionally strict: if that PID no longer satisfies
@@ -4640,10 +5074,74 @@ static NativeDetectedGame nativeScanGame(
     }
     if (best.pid) best.title = nativeProcessWindowTitle(best.pid);
     return best;
+
+    };
+    if (preferredPid) {
+        NativeDetectedGame strict;
+        const auto result = nativeScanGameOnePid(preferredPid, L"", userExcludes, whitelist, configuredGameExes, &strict);
+        if (result == NativeOnePidResult::NameUnavailable) return toolhelpFallback();
+        if (result != NativeOnePidResult::Ok) return {};
+        strict.title = nativeProcessWindowTitle(strict.pid);
+        return strict;
+    }
+    const auto started = GetTickCount64();
+    const bool actualForeground = ymcc::gameInventory::foreground(g_hwnd);
+    const bool fast = actualForeground || ymcc::gameInventory::manualDepth != 0;
+    const ymcc::gameInventory::RuleKey rules{userExcludes, whitelist, configuredGameExes};
+    const auto& memo = ymcc::gameInventory::inventory(rules, actualForeground);
+    static ymcc::gameInventory::Candidates candidates;
+    if (candidates.version != memo.version) {
+        candidates.reset(memo.version, memo.resetProgress);
+        candidates.qualificationObservedAt = memo.fullAt;
+        if (!memo.available) {
+            // One exact legacy discovery per epoch, including empty/failure.
+            auto fallback = toolhelpFallback();
+            if (fallback.pid) candidates.ranked.push_back({fallback.pid, fallback.name, fallback.workingSet,
+                0, fallback.processCreated, fallback.path});
+            candidates.windowEnd = candidates.ranked.size();
+            candidates.sourceAvailable = fallbackComplete;
+            candidates.qualificationObservedAt = fallbackComplete ? fallbackObservedAt : 0;
+            candidates.complete = fallbackComplete && !fallback.pid;
+            return fallback;
+        }
+        if (tickCostEnabled()) g_gameValveFullScans.fetch_add(1, std::memory_order_relaxed);
+        for (const auto& entry : memo.rows) {
+            if (!entry.pid || entry.pid == 4 || entry.pid == GetCurrentProcessId()) continue;
+            if (whitelist.empty() && configuredGameExes.empty() &&
+                entry.workingSet < static_cast<SIZE_T>(SG_MIN_WS)) continue;
+            const std::wstring name = sgBaseName(entry.name);
+            const bool white = sgNameExcludedBy(name, whitelist);
+            const bool custom = nativeIsConfiguredGameExe(name, configuredGameExes);
+            const SIZE_T threshold = static_cast<SIZE_T>(custom ? 0 : (white ? SG_CAPTURE_MIN_WS : SG_MIN_WS));
+            if (entry.workingSet < threshold) continue;
+            if (!white && (nativeMonitorExcluded(name) || sgNameExcludedBy(name, userExcludes))) continue;
+            candidates.ranked.push_back({entry.pid, name, entry.workingSet, custom ? 0u : (white ? 1u : 2u), 0, {}, entry.processCreated, entry.sequence});
+        }
+        candidates.rank();
+    }
+    auto result = ymcc::gameInventory::next<NativeDetectedGame>(candidates, fast, started,
+        [&](const ymcc::gameInventory::Hint& hint, NativeDetectedGame& one) {
+            bool changed = false;
+            const auto result = nativeScanGameOnePid(hint.pid, hint.name, userExcludes, whitelist, configuredGameExes, &one, &changed);
+            candidates.topologyChanged = changed;
+            return result == NativeOnePidResult::Ok;
+        });
+    if (result.pid) result.title = nativeProcessWindowTitle(result.pid);
+    if (qualificationObservedAt) *qualificationObservedAt = candidates.sourceAvailable
+        ? candidates.qualificationObservedAt : 0;
+    if (discoveryState) *discoveryState = result.pid ? NativeGameDiscoveryState::Complete :
+        (!candidates.sourceAvailable ? NativeGameDiscoveryState::Unavailable :
+         (candidates.complete ? NativeGameDiscoveryState::Complete : NativeGameDiscoveryState::Pending));
+    return result;
 }
 
 struct NativeGameValveSnapshot {
     NativeDetectedGame game;
+    NativeGameDiscoveryState discoveryState = NativeGameDiscoveryState::Unavailable;
+    // Qualification time is independent of publication/last-seen heartbeats.
+    ULONGLONG qualificationObservedAt = 0;
+    // Request-local outcome only; never persisted as a global no-game proof.
+    DWORD rejectedPreferredPid = 0;
     double selectedAtEpoch = 0.0;
     double lastSeenEpoch = 0.0;
     unsigned long long rulesEpoch = 0;
@@ -4658,6 +5156,8 @@ struct NativeGameValveSnapshot {
     unsigned long long identityGeneration = 0;
 };
 static NativeGameValveSnapshot g_gameValveTarget;
+// Same elected authority, immutable publication for latency-sensitive focus consumers.
+static std::atomic<std::shared_ptr<const NativeGameValveSnapshot>> g_gameValveObservation;
 static unsigned long long g_gameValveGeneration = 0;
 static std::mutex g_gameValvePublishMx;
 static unsigned long long g_gameValvePublishedGeneration = 0;
@@ -4667,7 +5167,7 @@ static bool nativeValveTargetStillValid(
     const std::vector<std::wstring>& userExcludes,
     const std::vector<std::wstring>& whitelist,
     const std::vector<std::wstring>& configuredGameExes) {
-    if (!target.game.pid || !target.game.processCreated) return false;
+    if (!target.game.pid || !target.game.processCreated || target.game.path.empty()) return false;
     DWORD currentSession = 0, targetSession = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
         !ProcessIdToSessionId(target.game.pid, &targetSession) ||
@@ -4728,6 +5228,8 @@ static NativeGameValveSnapshot nativeValveCommitLocked(
         focusLosslessReturnInvalidate();
     }
     g_gameValveTarget.game = game;
+    g_gameValveTarget.discoveryState = NativeGameDiscoveryState::Complete;
+    g_gameValveTarget.qualificationObservedAt = GetTickCount64();
     if (!g_gameValveTarget.selectedAtEpoch) g_gameValveTarget.selectedAtEpoch = sgNowEpoch();
     g_gameValveTarget.lastSeenEpoch = sgNowEpoch();
     g_gameValveTarget.rulesEpoch = rulesEpoch;
@@ -4742,10 +5244,14 @@ static void nativeValveTouchLocked() {
     g_gameValveTarget.generation = ++g_gameValveGeneration;
 }
 
-static void nativeValveClearLocked() {
+static void nativeValveClearLocked(NativeGameDiscoveryState state = NativeGameDiscoveryState::Complete,
+                                   ULONGLONG qualificationObservedAt = 0) {
     const bool wasEmpty = !g_gameValveTarget.game.pid;
     const auto previousIdentity = g_gameValveTarget.identityGeneration;
     g_gameValveTarget = {};
+    g_gameValveTarget.discoveryState = state;
+    g_gameValveTarget.qualificationObservedAt = state == NativeGameDiscoveryState::Complete
+        ? qualificationObservedAt : 0;
     g_gameValveTarget.generation = ++g_gameValveGeneration;
     g_gameValveTarget.identityGeneration = g_gameValveTarget.generation;
     if (wasEmpty && previousIdentity) g_gameValveTarget.identityGeneration = previousIdentity;
@@ -4759,27 +5265,44 @@ static void nativeValveClearLocked() {
 // lock-captured observation. No second PID election or post-read identity query.
 static json nativeGameTargetJson(const NativeGameValveSnapshot& target) {
     const auto& game = target.game;
-    return {
-        {"valid", game.pid != 0}, {"pid", static_cast<int>(game.pid)},
-        {"processCreated", std::to_string(static_cast<unsigned long long>(game.processCreated))},
-        {"name", W2U(game.name)}, {"title", W2U(game.title)}, {"path", W2U(game.path)},
-        {"workingSet", static_cast<unsigned long long>(game.workingSet)},
-        {"source", !game.pid ? "none" : (game.customConfigured ? "custom" : (game.whitelisted ? "whitelist" : "memory"))},
-        {"whitelistRule", game.whitelisted ? W2U(game.whitelistRule) : ""},
-        {"selectedAt", static_cast<long long>(target.selectedAtEpoch * 1000.0)},
-        {"lastSeen", static_cast<long long>(target.lastSeenEpoch * 1000.0)},
-        {"rulesEpoch", target.rulesEpoch}, {"generation", target.generation},
-        {"identityGeneration", target.identityGeneration},
-        {"identityPolicy", "ymcc-original-game-identity-v2"},
-        {"ts", static_cast<long long>(sgNowEpoch() * 1000.0)},
-    };
+    json result = json::object();
+    result["valid"] = game.pid != 0;
+    result["pid"] = static_cast<int>(game.pid);
+    result["observationState"] = nativeGameDiscoveryStateName(target.discoveryState);
+    result["processCreated"] = std::to_string(static_cast<unsigned long long>(game.processCreated));
+    result["name"] = W2U(game.name);
+    result["title"] = W2U(game.title);
+    result["path"] = W2U(game.path);
+    result["workingSet"] = static_cast<unsigned long long>(game.workingSet);
+    result["source"] = !game.pid ? "none" : (game.customConfigured ? "custom" : (game.whitelisted ? "whitelist" : "memory"));
+    result["whitelistRule"] = game.whitelisted ? W2U(game.whitelistRule) : "";
+    result["selectedAt"] = static_cast<long long>(target.selectedAtEpoch * 1000.0);
+    result["lastSeen"] = static_cast<long long>(target.lastSeenEpoch * 1000.0);
+    result["rulesEpoch"] = target.rulesEpoch;
+    result["generation"] = target.generation;
+    result["identityGeneration"] = target.identityGeneration;
+    result["identityPolicy"] = "ymcc-original-game-identity-v2";
+    result["ts"] = static_cast<long long>(sgNowEpoch() * 1000.0);
+    return result;
 }
 
-static void nativeValvePublish(const NativeGameValveSnapshot& target) {
+static void nativeValvePublish(const NativeGameValveSnapshot& target, bool rulesAvailable = true) {
     std::lock_guard<std::mutex> publishLock(g_gameValvePublishMx);
-    if (!target.generation || target.generation <= g_gameValvePublishedGeneration) return;
-    g_updateGameDetected.store(target.game.pid != 0,std::memory_order_release);
-    g_updateGameObservationTick.store(GetTickCount64(),std::memory_order_release);
+    if (!target.generation || target.generation < g_gameValvePublishedGeneration) return;
+    const bool observationComplete = rulesAvailable && target.discoveryState == NativeGameDiscoveryState::Complete;
+    if (!observationComplete) {
+        // Pending discovery and unavailable inputs cannot authorize idle work.
+        // Revoke previous idle proof even for a repeated tombstone generation.
+        g_updateGameDetected.store(true,std::memory_order_release);
+        g_updateGameObservationTick.store(0,std::memory_order_release);
+    }
+    if (target.generation == g_gameValvePublishedGeneration) return;
+    g_gameValveObservation.store(std::make_shared<const NativeGameValveSnapshot>(target),std::memory_order_release);
+    if (observationComplete) {
+        g_updateGameDetected.store(target.game.pid != 0,std::memory_order_release);
+        // Re-publishing a cached empty result cannot renew its idle proof.
+        g_updateGameObservationTick.store(target.qualificationObservedAt,std::memory_order_release);
+    }
     if (target.game.pid) { const auto live=g_updateDownloadControl.status(); g_updateDownloadControl.cancel(live.operation); }
 
     // Write the versioned valid snapshot or invalid tombstone before waking consumers.
@@ -4793,13 +5316,16 @@ static void nativeValvePublish(const NativeGameValveSnapshot& target) {
         {"path", W2U(target.game.path)}, {"title", W2U(target.game.title)},
         {"source", target.game.customConfigured ? "custom" : (target.game.whitelisted ? "whitelist" : "memory")},
         {"whitelistRule", W2U(target.game.whitelistRule)}, {"rulesEpoch", target.rulesEpoch},
-        {"identityGeneration", target.identityGeneration}
+        {"identityGeneration", target.identityGeneration},
+        {"observationState", nativeGameDiscoveryStateName(target.discoveryState)}
     };
     if (notifiedSelection != selection) {
         notifiedSelection = selection;
         const json signal = {{"generation", target.generation}, {"identityGeneration", target.identityGeneration},
-            {"valid", target.game.pid != 0}, {"pid", target.game.pid}, {"snapshotWritten", snapshotWritten}};
+            {"valid", target.game.pid != 0}, {"pid", target.game.pid}, {"snapshotWritten", snapshotWritten},
+            {"observationState", nativeGameDiscoveryStateName(target.discoveryState)}};
         gamepadSerialPostEvent("game.target.changed", signal);
+        mousePolicyGameContextChanged();
         appendNativeLifecycleLog("game-target-changed", signal);
     }
 }
@@ -4821,13 +5347,30 @@ static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned re
     // release the mutex before process enumeration/identity queries. The UI
     // must be able to answer game.rules.get/set and keep focus timers moving
     // while the valve scans a busy/full-screen title.
-    {
+    try {
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
         nativeRefreshGameRulesEpochFromDiskLocked();
         userExcludes = sgExcludes();
         whitelist = sgGameWhitelist();
         configuredGameExes = nativeConfiguredGameExes();
         rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
+    }
+    catch (...) {
+        // Unconfirmed persisted rules cannot elect or authorize a game. Keep
+        // the existing no-game generation stable during a persistent fault;
+        // the original publisher de-duplicates successful tombstone writes.
+        {
+            std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+            if (g_gameValveTarget.game.pid || !g_gameValveTarget.generation ||
+                g_gameValveTarget.discoveryState != NativeGameDiscoveryState::Unavailable)
+                nativeValveClearLocked(NativeGameDiscoveryState::Unavailable);
+            published = g_gameValveTarget;
+        }
+        // IPC consumers must retain unknown readiness, rather than treating
+        // a configuration fault as a confirmed "no game running" response.
+        if (observation) *observation = published;
+        nativeValvePublish(published, false);
+        return {};
     }
     {
         std::lock_guard<std::mutex> valveLock(g_gameValveMx);
@@ -4848,8 +5391,10 @@ static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned re
                 // A strict summon request that no longer matches its captured
                 // process is an explicit recognition failure. Do not leave a
                 // previous PID published while the foreground target changed.
-                nativeValveClearLocked();
+                // Rejecting one strict PID does not prove that the machine is idle.
+                nativeValveClearLocked(NativeGameDiscoveryState::Unavailable);
                 published = g_gameValveTarget;
+                published.rejectedPreferredPid = preferredPid;
                 shouldPublish = true;
             } else {
                 result = nativeValveCommitLocked(preferred, rulesEpoch).game;
@@ -4875,14 +5420,18 @@ static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned re
                 }
             }
             if (!currentValid) {
-                // 155 §3.1-3：无目标 / 旧目标失效 / 规则需重新仲裁时保留完整发现
-                // 与原顺序，不放大发现间隔。工作集变化没有事件也必须能被发现。
+                // Background discovery may yield before exhausting its candidates.
+                // Only an exhausted pass can establish a confirmed no-game state.
+                NativeGameDiscoveryState discoveryState = NativeGameDiscoveryState::Unavailable;
+                ULONGLONG qualificationObservedAt = 0;
                 const auto candidate = nativeScanGame(
-                    0, userExcludes, whitelist, configuredGameExes);
+                    0, userExcludes, whitelist, configuredGameExes, &discoveryState, &qualificationObservedAt);
                 if (candidate.pid) {
                     nativeValveCommitLocked(candidate, rulesEpoch);
-                } else {
-                    nativeValveClearLocked();
+                } else if (discoveryState == NativeGameDiscoveryState::Complete ||
+                    g_gameValveTarget.game.pid || !g_gameValveTarget.generation ||
+                    g_gameValveTarget.discoveryState != discoveryState) {
+                    nativeValveClearLocked(discoveryState, qualificationObservedAt);
                 }
                 shouldPublish = true;
             } else {
@@ -4916,7 +5465,16 @@ static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned re
     // of recursively consuming the caller's stack.
     if (g_gameRulesEpoch.load(std::memory_order_acquire) != rulesEpoch) {
         constexpr unsigned maxRuleRetries = 2;
-        if (retryCount >= maxRuleRetries) return {};
+        if (retryCount >= maxRuleRetries) {
+            {
+                std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+                nativeValveClearLocked(NativeGameDiscoveryState::Unavailable);
+                published = g_gameValveTarget;
+            }
+            if (observation) *observation = published;
+            nativeValvePublish(published, false);
+            return {};
+        }
         return nativeValveAcquire(preferredPid, retryCount + 1, observation);
     }
     if (observation) *observation = published;
@@ -4946,7 +5504,7 @@ static bool nativeValveValidateCurrentTarget(
         std::vector<std::wstring> whitelist;
         std::vector<std::wstring> configuredGameExes;
         unsigned long long rulesEpoch = 0;
-        {
+        try {
             std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
             nativeRefreshGameRulesEpochFromDiskLocked();
             userExcludes = sgExcludes();
@@ -4954,6 +5512,7 @@ static bool nativeValveValidateCurrentTarget(
             configuredGameExes = nativeConfiguredGameExes();
             rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
         }
+        catch (...) { return false; }
         std::lock_guard<std::mutex> valveLock(g_gameValveMx);
         if (g_gameValveTarget.game.pid != pid ||
             g_gameValveTarget.game.processCreated != processCreated ||
@@ -4990,7 +5549,7 @@ static bool nativeValveReadCurrentTarget(
     std::vector<std::wstring> whitelist;
     std::vector<std::wstring> configuredGameExes;
     unsigned long long rulesEpoch = 0;
-    {
+    try {
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
         nativeRefreshGameRulesEpochFromDiskLocked();
         // Always refresh disk stamps and the whitelist. The process/path
@@ -5005,6 +5564,7 @@ static bool nativeValveReadCurrentTarget(
         if (snapshot.game.customConfigured) configuredGameExes = nativeConfiguredGameExes();
         rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
     }
+    catch (...) { return false; }
     if (!snapshot.game.pid || !snapshot.game.processCreated || !snapshot.generation ||
         !snapshot.identityGeneration || snapshot.rulesEpoch != rulesEpoch ||
         !nativeValveTargetStillValid(snapshot, userExcludes, whitelist, configuredGameExes))
@@ -6175,48 +6735,103 @@ static bool tdpVerifyPipeServer(HANDLE pipe, DWORD* serverPidOut = nullptr) {
     return ok;
 }
 
+// A connection pins both authenticated endpoints. No per-write path or PID probes.
+// Any uncertain transfer drops the connection; the caller must never replay a set.
+struct TdpPipeSession {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    HANDLE event = nullptr;
+    HANDLE server = nullptr;
+};
+static TdpPipeSession g_tdpPipeSession;
+static std::mutex g_tdpPipeSessionMx;
+
+static void closeTdpPipeSessionLocked() {
+    if (g_tdpPipeSession.pipe != INVALID_HANDLE_VALUE) CloseHandle(g_tdpPipeSession.pipe);
+    if (g_tdpPipeSession.event) CloseHandle(g_tdpPipeSession.event);
+    if (g_tdpPipeSession.server) CloseHandle(g_tdpPipeSession.server);
+    g_tdpPipeSession = {};
+}
+
+static HANDLE tdpDaemonSessionWaitHandle() {
+    std::lock_guard<std::mutex> lock(g_tdpPipeSessionMx);
+    HANDLE copy = nullptr;
+    if (g_tdpPipeSession.server)
+        DuplicateHandle(GetCurrentProcess(), g_tdpPipeSession.server, GetCurrentProcess(),
+                        &copy, SYNCHRONIZE, FALSE, 0);
+    return copy;
+}
+
+static bool tdpDaemonSessionAlive() {
+    std::lock_guard<std::mutex> lock(g_tdpPipeSessionMx);
+    return g_tdpPipeSession.pipe != INVALID_HANDLE_VALUE && g_tdpPipeSession.server &&
+        WaitForSingleObject(g_tdpPipeSession.server, 0) == WAIT_TIMEOUT;
+}
+
 static json tdpDaemonPipeRequest(const json& request, DWORD timeoutMs = 3000) {
     const std::string op = request.value("op", std::string{});
     if (op == "set" && !hardwareWriteAllowed())
         throw std::runtime_error("hardware writes are blocked during power transition");
-    if (!WaitNamedPipeW(kTdpDaemonPipeName, timeoutMs))
-        throw std::runtime_error("TDP daemon pipe unavailable");
-    HANDLE pipe = CreateFileW(kTdpDaemonPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
-    if (pipe == INVALID_HANDLE_VALUE)
-        throw std::runtime_error("TDP daemon pipe connect failed");
+    json wire = request;
+    wire["sessionVersion"] = 2; // Old helpers ignore this and keep their one-shot protocol.
+    const std::string payload = wire.dump();
+    if (payload.empty() || payload.size() > 4096)
+        throw std::runtime_error("TDP daemon request too large");
+    std::lock_guard<std::mutex> lock(g_tdpPipeSessionMx);
     try {
-        if (!tdpVerifyPipeServer(pipe))
-            throw std::runtime_error("TDP daemon identity verification failed");
-        DWORD mode = PIPE_READMODE_MESSAGE;
-        if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr))
-            throw std::runtime_error("TDP daemon pipe mode failed");
-        std::string payload = request.dump();
-        if (payload.empty() || payload.size() > 4096)
-            throw std::runtime_error("TDP daemon request too large");
+        if (g_tdpPipeSession.pipe == INVALID_HANDLE_VALUE) {
+            // A server can briefly have no pipe instance while retiring a timed-
+            // out client. Wait only on this disconnected boundary, before dispatch.
+            const auto connectDeadline = GetTickCount64() + timeoutMs;
+            for (;;) {
+                const auto now = GetTickCount64();
+                if (now >= connectDeadline)
+                    throw std::runtime_error("TDP daemon pipe unavailable");
+                const DWORD remaining = (DWORD)(connectDeadline - now);
+                if (WaitNamedPipeW(kTdpDaemonPipeName, remaining)) {
+                    g_tdpPipeSession.pipe = CreateFileW(kTdpDaemonPipeName,
+                        GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+                    if (g_tdpPipeSession.pipe != INVALID_HANDLE_VALUE) break;
+                }
+                const auto error = GetLastError();
+                if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PIPE_BUSY && error != ERROR_SEM_TIMEOUT)
+                    throw std::runtime_error("TDP daemon pipe connect failed");
+                Sleep(std::min<DWORD>(10, remaining));
+            }
+            DWORD serverPid = 0;
+            if (!tdpVerifyPipeServer(g_tdpPipeSession.pipe, &serverPid))
+                throw std::runtime_error("TDP daemon identity verification failed");
+            g_tdpPipeSession.server = OpenProcess(SYNCHRONIZE, FALSE, serverPid);
+            if (!g_tdpPipeSession.server)
+                throw std::runtime_error("TDP daemon process lifetime unavailable");
+            DWORD mode = PIPE_READMODE_MESSAGE;
+            if (!SetNamedPipeHandleState(g_tdpPipeSession.pipe, &mode, nullptr, nullptr))
+                throw std::runtime_error("TDP daemon pipe mode failed");
+            g_tdpPipeSession.event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!g_tdpPipeSession.event)
+                throw std::runtime_error("TDP daemon transfer event unavailable");
+        }
         auto ioWithTimeout = [&](bool write, void* data, DWORD size, DWORD& transferred) -> bool {
             OVERLAPPED ov{};
-            ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            if (!ov.hEvent) return false;
+            ov.hEvent = g_tdpPipeSession.event;
+            ResetEvent(ov.hEvent);
             BOOL started = write
-                ? WriteFile(pipe, data, size, nullptr, &ov)
-                : ReadFile(pipe, data, size, nullptr, &ov);
-            DWORD le = started ? ERROR_SUCCESS : GetLastError();
-            bool ok = false;
-            if (started || le == ERROR_IO_PENDING) {
-                DWORD wr = WaitForSingleObject(ov.hEvent, timeoutMs);
-                if (wr == WAIT_OBJECT_0)
-                    ok = GetOverlappedResult(pipe, &ov, &transferred, FALSE) != FALSE;
-                else
-                    CancelIoEx(pipe, &ov);
-            }
-            CloseHandle(ov.hEvent);
-            return ok;
+                ? WriteFile(g_tdpPipeSession.pipe, data, size, nullptr, &ov)
+                : ReadFile(g_tdpPipeSession.pipe, data, size, nullptr, &ov);
+            const DWORD error = started ? ERROR_SUCCESS : GetLastError();
+            if (!started && error != ERROR_IO_PENDING) return false;
+            if (WaitForSingleObject(ov.hEvent, timeoutMs) == WAIT_OBJECT_0)
+                return GetOverlappedResult(g_tdpPipeSession.pipe, &ov, &transferred, FALSE) != FALSE;
+            CancelIoEx(g_tdpPipeSession.pipe, &ov);
+            // Cancellation is asynchronous: keep OVERLAPPED/event storage until settled.
+            DWORD ignored = 0;
+            GetOverlappedResult(g_tdpPipeSession.pipe, &ov, &ignored, TRUE);
+            return false;
         };
         DWORD wrote = 0;
         if (op == "set" && !hardwareWriteAllowed())
             throw std::runtime_error("hardware writes were blocked before daemon dispatch");
-        if (!ioWithTimeout(true, payload.data(), (DWORD)payload.size(), wrote) || wrote != payload.size())
+        if (!ioWithTimeout(true, const_cast<char*>(payload.data()), (DWORD)payload.size(), wrote) || wrote != payload.size())
             throw std::runtime_error("TDP daemon request write failed or timed out");
         char buf[4096] = {};
         DWORD got = 0;
@@ -6226,10 +6841,11 @@ static json tdpDaemonPipeRequest(const json& request, DWORD timeoutMs = 3000) {
         if (resp.value("version", 0) != 1 ||
             resp.value("requestId", std::string{}) != request.value("requestId", std::string{}))
             throw std::runtime_error("TDP daemon response correlation failed");
-        CloseHandle(pipe);
+        if (op == "quit" || resp.value("sessionVersion", 0) != 2)
+            closeTdpPipeSessionLocked();
         return resp;
     } catch (...) {
-        CloseHandle(pipe);
+        closeTdpPipeSessionLocked();
         throw;
     }
 }
@@ -6641,8 +7257,8 @@ static void stopTdpDaemonForExit() {
     // is only an acknowledgement; the daemon may still be unwinding its
     // hardware handles after it has replied.
     DWORD daemonPid = 0;
-    HANDLE daemonWait = nullptr;
-    if (WaitNamedPipeW(kTdpDaemonPipeName, 200)) {
+    HANDLE daemonWait = tdpDaemonSessionWaitHandle();
+    if (!daemonWait && WaitNamedPipeW(kTdpDaemonPipeName, 200)) {
         HANDLE probe = CreateFileW(kTdpDaemonPipeName, GENERIC_READ | GENERIC_WRITE,
                                    0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (probe != INVALID_HANDLE_VALUE) {
@@ -6835,6 +7451,8 @@ static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     hidHideSweepAllHiddenDevices("app-exit");
     // 批136：原在此处的 `fanLeaseKeepaliveShutdown()` + `fanHostCleanupForAppExit()` +
     // `fan-exit-handoff-result` 已按裁决令第④项前移到退出链最前（见本函数开头）。
+    g_exitCleanupStage.store("battery-stop",std::memory_order_release);
+    appendNativeLifecycleLog("battery-in-process-exit",ymcc::batterycharge::shutdown(yemancc_data_dir()));
     g_exitCleanupStage.store("sleep-worker-stop",std::memory_order_release);
     sgStopWorkThread(1000);
     g_exitCleanupStage.store("decky-stop",std::memory_order_release);
@@ -6917,6 +7535,7 @@ static void beginAsyncExit(HWND hwnd, WPARAM code, const char* trigger) {
     // 见 g_exitSessionId 处的 happens-before 说明），再抬闸。
     g_exitSessionId = std::to_string(static_cast<unsigned long>(GetCurrentProcessId())) + "-" +
         std::to_string(static_cast<unsigned long long>(GetTickCount64()));
+    ymcc::batterycharge::seal(); // No late request may revive the in-process charge owner.
     inputHostRaiseExitFence(trigger);
     // GP-926R17 R17-3：退出 = 先**纯内存取消借用**（不触发设备写、不 re-hide/回搬）；
     // 随后原 T0 stop/release 链释放虚拟目标并恢复真实手柄。保持 Fan 先、手柄 stop 后的次序。
@@ -7124,6 +7743,7 @@ static void sgLoadConfig() {
                     ? j.value("resleepEnabled", false)
                     : false;
             g_sgRetryEntryFailure = j.value("retryOnEntryFailure", true);
+            g_sgRetrySleepTimeout = j.value("retryOnSleepTimeout", true);
             g_sleepRecoveryAutoEnabled.store(ymcc::sleepprefs::autoWakePreference(j), std::memory_order_release);
             g_wakePasswordPreference.store(j.value("wakePasswordEnabled", false), std::memory_order_release);
             g_sgFactMonitorEnabled.store(j.value("factMonitorEnabled", false), std::memory_order_release);
@@ -7137,7 +7757,7 @@ static void sgLoadConfig() {
 static bool sgConfigWantsGuard() {
     if (g_aiFanMockSession.isolated) return false;
     return g_sgMode != "off" &&
-        (g_sgPauseResume || g_sgRetryEntryFailure || g_sgResleepEnabled);
+        (g_sgPauseResume || g_sgRetryEntryFailure || g_sgRetrySleepTimeout || g_sgResleepEnabled);
 }
 
 static void sgSyncEnableMirror() {
@@ -7145,6 +7765,8 @@ static void sgSyncEnableMirror() {
 }
 
 static void sgSaveConfig() {
+    if(!g_guardEnabled||!g_sgRetrySleepTimeout||g_sgMode=="off")sgSleepTimeoutStop("timeout-setting-disabled");
+    if(!g_sgRetrySleepTimeout)sgCancelEntryFailureRetry("timeout-setting-disabled",SgRetryKind::SleepTimeout);
     if(!g_guardEnabled||!g_sgRetryEntryFailure)sgAbnormalStopAsync();
     if(!g_sgRetryEntryFailure)sgCancelEntryFailureRetry("entry-failure-setting-disabled");
     const auto currentSleep = ymSettingsSection("sleep");
@@ -7154,6 +7776,7 @@ static void sgSaveConfig() {
         {"mode", g_sgMode},
         {"pauseGameOnSleep", g_sgPauseResume},
         {"retryOnEntryFailure", g_sgRetryEntryFailure},
+        {"retryOnSleepTimeout", g_sgRetrySleepTimeout},
         {"retryOnNonUserWake", g_sgResleepEnabled},
         {"factMonitorEnabled", g_sgFactMonitorEnabled.load(std::memory_order_acquire)},
         {"sleepPowerPlanOptimizationEnabled", sleepPowerPlanOptimizationEnabled},
@@ -7172,6 +7795,30 @@ static std::wstring summonPath() {
     return L"C:\\SOFT\\YeMan\\PowerControl\\summon.json";
 }
 static void summonSave();
+static std::shared_ptr<MouseAutoRulesState> mouseAutoRulesParse(const json& raw,std::uint64_t epoch){
+ auto out=std::make_shared<MouseAutoRulesState>();out->overrides.epoch=epoch;
+ try {
+  if(!raw.is_object())throw std::runtime_error("鼠标名单格式无效");
+  for(const auto* kind:{"blacklist","whitelist"}){
+   const auto list=raw.value(kind,json::array());
+   if(!list.is_array()||list.size()>64)throw std::runtime_error("每份鼠标名单最多 64 项");
+   auto& wide=std::string(kind)=="blacklist"?out->overrides.blacklist:out->overrides.whitelist;
+   for(const auto& item:list){
+    if(!item.is_string())throw std::runtime_error("鼠标名单必须是进程名");
+    auto name=item.get<std::string>();
+    if(name.size()<=4||name.size()>200||name.find_first_of("\\/:*?\"<>|")!=std::string::npos||
+       std::any_of(name.begin(),name.end(),[](unsigned char ch){return ch<32;})||name.front()==' '||name.back()==' ')
+      throw std::runtime_error("请输入完整 EXE 进程名，不能包含路径或通配符");
+    auto normalized=ymcc::mousePolicy::lower(U2W(name));
+    if(normalized.size()<=4||normalized.substr(normalized.size()-4)!=L".exe")throw std::runtime_error("鼠标名单仅接受 EXE 进程名");
+    if(std::find(wide.begin(),wide.end(),normalized)==wide.end()){wide.push_back(normalized);out->data[kind].push_back(W2U(normalized));}
+   }
+  }
+  for(const auto& name:out->overrides.blacklist)if(std::find(out->overrides.whitelist.begin(),out->overrides.whitelist.end(),name)!=out->overrides.whitelist.end())throw std::runtime_error("同一程序不能同时出现在鼠标黑白名单");
+ }catch(const std::exception& e){out->overrides.valid=false;out->error=e.what();}
+ return out;
+}
+
 static void summonLoad() {
     json settings = ymSettingsSection("gamepad");
     std::string c = settings.empty() ? sgReadFile(summonPath()) : settings.dump();
@@ -7179,6 +7826,7 @@ static void summonLoad() {
     if (!c.empty()) {
         try {
             json j = json::parse(c);
+            g_mouseAutoRules.store(mouseAutoRulesParse(j.value("mouseAutoRules",json::object()),1),std::memory_order_release);
             auto loadBool = [&](const char* key, bool& dst, bool fallback) {
                 if (!j.contains(key) || !j[key].is_boolean()) {
                     dst = fallback;
@@ -7314,19 +7962,15 @@ static DWORD WINAPI autoCloseThread(LPVOID) {
         if (names.empty()) continue;
         // 枚举进程，收集匹配 PID
         std::unordered_set<DWORD> pids;
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe{ sizeof(pe) };
-            if (Process32FirstW(snap, &pe)) {
-                do {
-                    std::wstring exe = pe.szExeFile;
-                    if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
-                        exe.resize(exe.size() - 4);
-                    if (pe.th32ProcessID != selfPid && acNameMatch(exe, names))
-                        pids.insert(pe.th32ProcessID);
-                } while (Process32NextW(snap, &pe));
+        const auto topology = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+        if (topology->status == ymcc::processInventory::Status::Complete) {
+            for (const auto& pe : topology->rows) {
+                std::wstring exe = pe.name;
+                if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
+                    exe.resize(exe.size() - 4);
+                if (pe.pid != selfPid && acNameMatch(exe, names)) pids.insert(pe.pid);
             }
-            CloseHandle(snap);
         }
         if (!pids.empty()) {
             AcCloseCtx ctx{ &pids, selfPid };
@@ -7343,6 +7987,7 @@ static DWORD WINAPI autoCloseThread(LPVOID) {
 #define FOCUS_DISPLAY_TIMER_ID 0x5A34
 #define TASKBAR_LAYOUT_RECHECK_TIMER_ID 0x5A36
 static ymcc::windowlayout::TaskbarRecheck g_taskbarLayoutRecheck;
+static ymcc::windowlayout::TaskbarEvents g_taskbarLayoutEvents;
 #define GP_STATE_FALLBACK_TIMER_ID 0x5A35 // ROG/复合 HID 驱动可能漏投 WM_INPUT 时的低频状态兜底
 
 static void showWindowAnimated(HWND hwnd, int showCmd, bool activate);
@@ -7490,21 +8135,27 @@ static bool focusIsBackgroundMonitorWindow(HWND hwnd) {
     if (focusQueryProcessIdentity(pid, &path, nullptr) && !path.empty())
         return focusBackgroundMonitorName(sgBaseName(path));
 
-    // Snapshot names only reject background monitors here; they never admit
-    // games/overlays. Successful image queries do not take a process snapshot.
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return false;
-    bool monitor = false;
-    PROCESSENTRY32W entry{sizeof(entry)};
-    if (Process32FirstW(snapshot, &entry)) {
-        do {
-            if (entry.th32ProcessID != pid) continue;
-            monitor = focusBackgroundMonitorName(sgBaseName(entry.szExeFile));
-            break;
-        } while (Process32NextW(snapshot, &entry));
+    // Inventory names only reject background monitors here; they never admit
+    // games/overlays. Successful image queries do not read the inventory.
+    try {
+        const auto topology = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+        if (!topology) return false;
+        if (topology->status != ymcc::processInventory::Status::Complete) {
+            // A partial prefix may reject this known PID/name only; it cannot
+            // admit a game, prove absence or supply an overlay identity.
+            for (const auto& hint : topology->rejectionHints)
+                if (hint.pid == pid) return focusBackgroundMonitorName(sgBaseName(hint.name));
+            return false;
+        }
+        for (const auto& entry : topology->rows) {
+            if (entry.pid != pid) continue;
+            return focusBackgroundMonitorName(sgBaseName(entry.name));
+        }
+    } catch (...) {
+        return false;
     }
-    CloseHandle(snapshot);
-    return monitor;
+    return false;
 }
 
 static FocusTargetSnapshot focusCaptureTarget(HWND hwnd) {
@@ -7630,26 +8281,33 @@ static DWORD focusFindProcessByPath(const std::wstring& wantedPath) {
     if (wantedPath.empty()) return 0;
     DWORD currentSession = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession)) return 0;
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return 0;
-    DWORD result = 0;
-    PROCESSENTRY32W entry{sizeof(entry)};
-    if (Process32FirstW(snapshot, &entry)) {
-        do {
-            if (!entry.th32ProcessID || entry.th32ProcessID == GetCurrentProcessId()) continue;
-            DWORD session = 0;
-            if (!ProcessIdToSessionId(entry.th32ProcessID, &session) || session != currentSession) continue;
-            std::wstring path;
-            if (focusQueryProcessIdentity(entry.th32ProcessID, &path, nullptr) &&
-                !path.empty() && _wcsicmp(path.c_str(), wantedPath.c_str()) == 0 &&
-                focusFindWindowForPid(entry.th32ProcessID)) {
-                result = entry.th32ProcessID;
-                break;
+    try {
+        // Keep Windows drive/UNC/separator and C-string path semantics. An
+        // absent basename stays eligible for the original live checks.
+        const auto wantedName = fspath::path(wantedPath.c_str()).filename().wstring();
+        const auto topology = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+        if (!topology || topology->status != ymcc::processInventory::Status::Complete) return 0;
+        for (const auto& entry : topology->rows) {
+            if (!entry.pid || entry.pid == GetCurrentProcessId()) continue;
+            if (!wantedName.empty()) {
+                const auto candidateName = fspath::path(entry.name.c_str()).filename().wstring();
+                if (!candidateName.empty() && CompareStringOrdinal(candidateName.c_str(), -1,
+                    wantedName.c_str(), -1, TRUE) != CSTR_EQUAL) continue;
             }
-        } while (Process32NextW(snapshot, &entry));
+            DWORD session = 0;
+            if (!ProcessIdToSessionId(entry.pid, &session) || session != currentSession) continue;
+            std::wstring path;
+            if (focusQueryProcessIdentity(entry.pid, &path, nullptr) &&
+                !path.empty() && _wcsicmp(path.c_str(), wantedPath.c_str()) == 0 &&
+                focusFindWindowForPid(entry.pid)) {
+                return entry.pid;
+            }
+        }
+    } catch (...) {
+        return 0;
     }
-    CloseHandle(snapshot);
-    return result;
+    return 0;
 }
 
 static bool focusResolveTarget(FocusTargetSnapshot& target) {
@@ -7847,9 +8505,18 @@ static void cancelTaskbarLayoutRecheck() {
     if (g_hwnd) KillTimer(g_hwnd, TASKBAR_LAYOUT_RECHECK_TIMER_ID);
 }
 
+static void focusScheduleDisplayReflow();
+static void taskbarLayoutObserved() {
+    if (g_hwnd && IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd)) focusScheduleDisplayReflow();
+}
+static void stopTaskbarLayoutObserver() {
+    g_taskbarLayoutEvents.stop();
+    cancelTaskbarLayoutRecheck();
+    if (g_hwnd) KillTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID);
+}
 static void scheduleTaskbarLayoutRecheck() {
-    if (!g_hwnd || (!g_fullHeight && !g_frameless)) return;
-    g_taskbarLayoutRecheck.arm();
+    if (!g_hwnd || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd) || (!g_fullHeight && !g_frameless)) return;
+    g_taskbarLayoutRecheck.arm(g_taskbarLayoutEvents.start(taskbarLayoutObserved));
     if (!SetTimer(g_hwnd, TASKBAR_LAYOUT_RECHECK_TIMER_ID,
                   ymcc::windowlayout::TaskbarRecheck::intervalMs, nullptr))
         cancelTaskbarLayoutRecheck();
@@ -7862,18 +8529,24 @@ static void taskbarLayoutRecheckTick() {
     }
     if (!g_hwnd || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd) ||
         (!g_fullHeight && (!g_frameless || !IsZoomed(g_hwnd)))) {
-        cancelTaskbarLayoutRecheck();
+        stopTaskbarLayoutObserver();
         return;
     }
     focusReflowMainWindow();
     if (!g_taskbarLayoutRecheck.finishPass()) cancelTaskbarLayoutRecheck();
 }
 
+static void taskbarDisplayReflowTick() {
+    if (g_hwnd) KillTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID);
+    if (g_hwnd && IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd)) focusReflowMainWindow();
+}
 static void focusScheduleDisplayReflow() {
-    if (!g_hwnd) return;
+    if (!g_hwnd || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd)) return;
     KillTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID);
-    SetTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID, 250, nullptr);
-    scheduleTaskbarLayoutRecheck();
+    // Coalesce taskbar/slate animations before reading the final work area.
+    // A successful observer has no periodic sampling once this one-shot ends.
+    cancelTaskbarLayoutRecheck();
+    if (!SetTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID, 250, nullptr)) focusReflowMainWindow();
 }
 
 static HWND resolvePreviousFocusWindow(bool allowGameFallback = false) {
@@ -8345,20 +9018,11 @@ static void nativeAdjustRtss(int delta);
 static void nativeApplyBrightness(int dir, bool enabled, int step = 5);
 static void toggleMouseMode(const std::string& backend);
 static void nativeAdjustBrightness(int dir); // Start+左右转发亮度调节
-// 浮动运行标志文件：autofloat 启用时写、关闭时删，且每 5 秒刷新时间戳；
-// native 按 30 秒新鲜度判定，避免程序强杀/残留文件导致误判浮动仍在运行而吞掉按键。
-static bool floatActive() {
-    try {
-        auto p = fspath::path(L"C:\\SOFT\\YeMan\\PowerControl\\float-active");
-        if (!fspath::exists(p)) return false;
-        auto last = fspath::last_write_time(p);
-        auto now = fspath::file_time_type::clock::now();
-        return (now - last) < std::chrono::seconds(30);
-    } catch (...) { return false; }
-}
+// Controller TDP keys use the continuous bank owner. Exit cleanup still removes
+// legacy float-active files, but there is no runtime marker reader.
 static void runKillBat();          // 选择 + B → 执行 KiLL-EXE.bat 结束当前游戏
 static void openTouchKeyboard();   // 选择 + X → 呼出 Windows 触摸键盘
-static void returnToDesktop();     // 选择 + A → 内部 Win+D 立即返回桌面
+static bool returnToDesktop();     // 选择 + A → 内部 Win+D 立即返回桌面
 static void toggleMouseMode();     // 选择 + Y → 启停当前选中的模拟鼠标后端
 static void ipc_emit(const std::string& ev, const json& data);
 static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target);
@@ -9418,6 +10082,8 @@ static std::atomic<bool> g_inputCaptureSensorsSuspended{false};
 using SensorThreadRequest = ymcc::sensors::ThreadRequest;
 static std::mutex g_sensorThreadMx; // thread/wake handle lifetime, not request acknowledgements
 static ymcc::sensors::ThreadMailbox g_sensorThreadMailbox;
+static ymcc::sensors::device_change::Hint g_windowsSensorDeviceChange;
+static ymcc::sensors::virtual_link::Wake g_virtualGyroWake;
 #ifdef YMCC_FAULT_INJECT
 // Tests drive the actual STA pump/Post/Shutdown owners without sensor or HID I/O.
 // This seam is absent from the shipping translation unit.
@@ -9469,7 +10135,7 @@ constexpr UINT32 kInputCaptureSensorPumpCheckMs = 1000;        // 泵常驻检�
 // 晃动"，没有晃动就**无限等待**（不做静止自愈）。
 // 修正 = 取消"在线即早退"：917-8 实测 virtualTargetEnabled=true 时泵整段早退 ⇒
 // 后果是"开着虚拟手柄 + 晃动"也永远触发不了（该会话 0 条百式日志）；现不早退，
-// 且修复动作只有 WinRT 重初始化（PnP 升级已按 2026-09-17 用户裁决下线）。
+// 2026-11-03：先观察已有供数；低数据且有新动作才修复，PnP 只用于已知 BOSC0200。
 constexpr double kInputCaptureHighMagDps = 100.0;              // 高频判据 ±100 dps
 constexpr UINT32 kInputCaptureHighMagFreshWindowMs = 2000;     // 高频样本的新鲜窗口
 constexpr UINT32 kInputCaptureHighMagTriggerLatchMs = 5000;    // 低频轮询仍能吃到首个 100
@@ -9490,7 +10156,8 @@ constexpr UINT32 kGyroJudgeSegMs = 10000;                      // 段长（10s�
 constexpr UINT64 kGyroJudgeSegMinSamples = 250;                // 稳定高数据下限（≈25Hz）
 constexpr int kGyroJudgeSegRunNeeded = 3;                      // 连续达标段数 ⇒ 成功
 constexpr int kGyroJudgeSegTotal = 6;                          // 观察期段数（= 60s）
-constexpr UINT64 kGyroJudgeArtifactCapPerSec = 120;            // 单秒样本上限（超出=重置/追补伪影，剔除）
+// Count current-binding samples with advancing sensor timestamps; legitimate
+// 200/500/1000Hz sources must not be discarded as >120Hz artifacts.
 constexpr UINT32 kGyroJudgeWarmupMs = 3000;                   // 武装后先稳定 3s，再开始取证
 constexpr UINT32 kGyroJudgeFirstFrameTimeoutMs = 3000;         // 开始取证后 3s 没首帧=动作未生效
 constexpr UINT32 kGyroJudgeGyroLiveWindowMs = 1500;            // 判定高数据时 gyro receipt 必须新鲜
@@ -9507,7 +10174,12 @@ static ULONGLONG g_gyroJudgeArmTick = 0;       // T0（本轮武装完成时刻�
 static ULONGLONG g_gyroJudgeSegStartTick = 0;  // 当前段起点
 static UINT64 g_gyroJudgeSegAccum = 0;         // 当前段累计样本
 static UINT64 g_gyroJudgeObservedTotal = 0;    // 观察期累计样本（证据用）
-static UINT64 g_gyroJudgeLastPumpSeq = 0;      // 上次泵时的 totalSeq（算逐秒增量）
+static UINT64 g_gyroJudgeLastPumpSeq = 0;      // 上次泵时的 unique timestamp sequence
+static UINT64 g_gyroJudgeLastRejectedSeq = 0;
+static UINT64 g_gyroJudgeBindingGeneration = 0;
+static UINT64 g_gyroJudgeSegmentMinSamples = kGyroJudgeSegMinSamples;
+static bool g_gyroJudgeObserveStarted = false;
+static bool g_gyroJudgeObservationOnly = false;
 static int g_gyroJudgeSegIndex = 0;            // 已完成段数
 static int g_gyroJudgeSegRun = 0;              // 连续达标段数
 static int g_gyroJudgeSegAlive = 0;            // 达标段总数
@@ -9583,6 +10255,11 @@ public:
     // 轴值（是否静止）不再参与——取证见「百式判定数据流程书-20260916」。
     UINT64 gyroSequence = 0;
     UINT64 accelSequence = 0;
+    // Cadence evidence excludes duplicate/backward/zero timestamps without
+    // changing the HC raw-sample stream or adding per-event logging.
+    UINT64 gyroCadenceSequence = 0;
+    UINT64 gyroCadenceTimestamp100ns = 0;
+    UINT64 gyroCadenceRejectedSamples = 0;
     // Per-binding rejected numeric reports, never accepted sensor observations.
     UINT64 gyroRejectedSamples=0, accelRejectedSamples=0;
     static bool AxesUsable(double x,double y,double z) noexcept {
@@ -9601,12 +10278,14 @@ public:
         gyroReceiptTick = accelReceiptTick = 0;
         gyroHighMagLastTick = 0;
         gyroSequence = accelSequence = 0;
+        gyroCadenceSequence = gyroCadenceTimestamp100ns = gyroCadenceRejectedSamples = 0;
         gyroRejectedSamples = accelRejectedSamples = 0;
     }
     void SetBindingGeneration(UINT64 generation) noexcept {
         std::lock_guard<std::mutex> lock(mx);
         if (generation != activeBindingGeneration.load(std::memory_order_relaxed)) {
             gyroOk = accelOk = false; // A new binding is not a sensor observation.
+            gyroCadenceSequence = gyroCadenceTimestamp100ns = gyroCadenceRejectedSamples = 0;
             gyroRejectedSamples = accelRejectedSamples = 0;
         }
         gyroBindingGeneration = accelBindingGeneration = generation;
@@ -9629,6 +10308,12 @@ public:
             gyroReceiptTick = tick;
             gyroTimeOfDayMs = hcSinkTimeOfDayMs(ts);
             ++gyroSequence;
+            if (ts != 0 && ts > gyroCadenceTimestamp100ns) {
+                ++gyroCadenceSequence;
+                gyroCadenceTimestamp100ns = ts;
+            } else {
+                ++gyroCadenceRejectedSamples;
+            }
             // 高幅触发采用 episode（边沿）而不是持续电平：重绑后同一段持续晃动
             // 不会反复触发；安静 ≥1.5s 后的下一次高幅样本才开新 episode。
             const bool high = fabs(x) >= kInputCaptureHighMagDps ||
@@ -9763,6 +10448,16 @@ struct RealStickTestConfig {
     std::string laneId;
 };
 static RealStickTestConfig g_realStickTest;
+// Machine-wide preference, published only by existing settings/startup events.
+// Missing/legacy values preserve the current default: YMCC summon isolation ON.
+static std::atomic<bool> g_controllerFrontendIsolationEnabled{true};
+static bool controllerFrontendIsolationSetting(const json& input) {
+    if(!input.is_object())return true;
+    const auto ownership=input.find("ownership");
+    if(ownership==input.end() || !ownership->is_object())return true;
+    const auto enabled=ownership->find("frontendIsolationEnabled");
+    return enabled==ownership->end() || !enabled->is_boolean() || enabled->get<bool>();
+}
 // Existing settings refresh publishes this Controller-only preference to BUS.
 // It does not add a configuration writer or change the Windows calibration path.
 static std::atomic<bool> g_controllerAutoCalibrationRequested{true};
@@ -10035,6 +10730,7 @@ static constexpr uint64_t kOemBitWinKey = 1ull << 50, kOemBitEscKey = 1ull << 51
 static constexpr uint64_t kOemBitOrange = 1ull << 52, kOemBitFunction = 1ull << 53;
 static constexpr uint64_t kOemBitOrangeKb = 1ull << 54, kOemBitOrangeTb = 1ull << 55;
 static constexpr uint64_t kOemBitOrangeLp = 1ull << 56;
+static constexpr uint64_t kOemBitGKey = 1ull << 63; // f2e58468 OXP3 dedicated held OEM4
 // Legion Go 其余 4 个背键（W7 步骤 4 确证：HC LegionController.cs:44-54 BackEnum 六位
 // M3=0x04/M2=0x08/M1=0x10/Y3=0x20/Y2=0x40/Y1=0x80，:227-233 映射 R4/R5/L4/L5/B5/B11；
 // YMCC 此前只解 M1/Y1 两位 ⇒ 其余 4 键被静默丢弃）
@@ -10296,7 +10992,7 @@ enum class OemChordProfileId : int {
     SuiPlay, Aokzoe, Ayn, OneXX1, OneXFly, OneXMini, OneXApex, OneX2,
     AyaneoFlip1SKb,
     AyaneoNext2,
-    Ayaneo3, OneXX2MiniPro,
+    Ayaneo3, OneXX2MiniPro, OneXX3,
     None,
 };
 static const OemChordProfile kOemProfiles[] = {
@@ -10307,7 +11003,7 @@ static const OemChordProfile kOemProfiles[] = {
     { kP_OneXX1, 2 }, { kP_OneXFly, 3 }, { kP_OneXMini, 3 }, { kP_OneXApex, 6 }, { kP_OneX2, 1 },
     { kP_AyaneoFlip1SKb, 8 },
     { kP_AyaneoNext2, 9 },
-    { kP_Ayaneo3, 9 }, { kP_OneXX2MiniPro, 4 },
+    { kP_Ayaneo3, 9 }, { kP_OneXX2MiniPro, 4 }, { kP_OneXX1, 2 },
     { nullptr, 0 },
 };
 static const OemChordProfile& oemChordProfileFor(int id) {
@@ -10501,7 +11197,7 @@ static constexpr std::array<uint64_t, kOemProducerCount> kOemProducerMasks = {
     kOemBitLegionL | kOemBitLegionR | kOemBitLegionFrontL | kOemBitLegionFrontR, kOemBitL4 | kOemBitR4 | kOemBitGamepad,
     kOemBitL4 | kOemBitR4 | kOemBitSpecial | kOemBitOrange | kOemBitKeyboard,
     kOemBitM1 | kOemBitM2, kOemBitCc | kOemBitAc | kOemBitLib,
-    kOemBitL4 | kOemBitR4, kOemBitHome
+    kOemBitL4 | kOemBitR4 | kOemBitHome | kOemBitGKey, kOemBitHome
 };
 struct OemProducerTokens {
     std::array<uint64_t, kOemProducerCount> generations{}, authorities{};
@@ -11017,12 +11713,17 @@ static uint64_t oemKeyboardConsumeEligibleMask() {
     if (!g_oemHooksWanted.load(std::memory_order_acquire) ||
         !g_oemKeyHooksActive.load(std::memory_order_acquire) ||
         g_exitRequested.load(std::memory_order_acquire) ||
-        g_shortcutRecordingActive.load(std::memory_order_acquire) ||
-        profile == static_cast<int>(OemChordProfileId::Rog) ||
+        (!g_shortcutRecordingActive.load(std::memory_order_acquire) && profile == static_cast<int>(OemChordProfileId::Rog)) ||
         profile != g_oemConsumePolicyProfile.load(std::memory_order_acquire) ||
         epoch != g_oemConsumePolicyEpoch.load(std::memory_order_acquire) ||
         g_oemKeyboardConsume.replayFault) return 0;
     uint64_t mask = g_oemConsumePolicyMask.load(std::memory_order_acquire);
+    // Recording owns known OEM keyboard/mouse chords without dispatching them.
+    // Do not require a saved shortcut or strip a WMI/HID authority: both sources
+    // still record, while only the OS mirror is swallowed by this hook.
+    if (g_shortcutRecordingActive.load(std::memory_order_acquire))
+        return mask & g_shortcutRecordingOemMask.load(std::memory_order_acquire);
+
     mask &= ~static_cast<uint64_t>(msiDinputBackAuthoritativeMask());
     const uint64_t mirrorGeneration=g_msiQsKeyboardMirrorSourceGeneration.load(std::memory_order_acquire);
     const bool currentMirrorSource=msiQsKeyboardMirrorSourceCurrent(mirrorGeneration);
@@ -11151,7 +11852,8 @@ static bool oemKeyboardConsumeEvent(const KBDLLHOOKSTRUCT& key, ULONGLONG now, b
     // known, configured MSI QS mirror that WMI owns for action delivery.
     const uint64_t qsMirror=msiQsKeyboardMirrorSourceCurrent(g_msiQsKeyboardMirrorSourceGeneration.load(std::memory_order_acquire))?
         g_msiQsKeyboardMirrorPolicy.load(std::memory_order_acquire)&mask:0;
-    const uint64_t canonical=ymcc::msi::qsMirror::suppressionCanonical(nativeOemKeyMask(true),
+    const uint64_t canonical=g_shortcutRecordingActive.load(std::memory_order_acquire) ?
+        g_oemKeyMask.load(std::memory_order_acquire) : ymcc::msi::qsMirror::suppressionCanonical(nativeOemKeyMask(true),
         g_oemKeyMask.load(std::memory_order_acquire),qsMirror,msiWmiShortcutAuthoritative(),
         g_oemBackProfileId.load(std::memory_order_acquire)==static_cast<int>(OemChordProfileId::Msi),
         oemKeyboardPhysicalMask(),kVkWin|kVkG,kVkWin|kVkTab);
@@ -11546,7 +12248,7 @@ static void inputHostPresentationDeferred(const ymcc::VirtualOutputAdmissionStat
         const ymcc::VirtualOutputAdmissionStatus::Context& context, bool waiting) {
     std::lock_guard<std::mutex> lock(g_inputHostPersonaMx);
     if (waiting) g_inputHostAdmissionStatus.defer(request, context);
-    else g_inputHostAdmissionStatus.clear(request);
+    else g_inputHostAdmissionStatus.clear(request, context);
 }
 static std::string inputHostConfiguredPersona() {
     std::lock_guard<std::mutex> lock(g_inputHostPersonaMx);
@@ -11636,8 +12338,7 @@ static std::string inputHostTargetKey(const json& input) {
         (ymcc::inputShortcutBool(target, "buttonMappingEnabled") || ymcc::inputShortcutBool(target, "gyroEnabled"))
         ? persona : "disabled";
 }
-static json inputHostStartProtectionSnapshot() {
-    const auto view = g_virtualStartProtection.view(inputHostStartProtectionNow());
+static json inputHostStartProtectionJson(const ymcc::VirtualStartProtection::View& view) {
     // Only an active UI wait needs a transport-age deadline. Idle snapshots
     // stay stable and do not read a second clock on the steady frame path.
     unsigned long long expiresAtUnixMs = 0;
@@ -11660,6 +12361,10 @@ static json inputHostStartProtectionSnapshot() {
         {"executionInspectionDeadlineElapsedMs",view.inspectionDeadlineElapsedMs},
         {"fallbackAttempts",view.fallbackAttempts},{"fallbackMaxAttempts",ymcc::VirtualStartProtection::fallbackMaxAttempts},
         {"maxMs",ymcc::VirtualStartProtection::maxMs},{"settleMs",ymcc::VirtualStartProtection::settleMs}};
+}
+
+static json inputHostStartProtectionSnapshot() {
+    return inputHostStartProtectionJson(g_virtualStartProtection.view(inputHostStartProtectionNow()));
 }
 static void inputHostStartProtectionLog(const char* action, const char* origin) noexcept {
     try {
@@ -11741,7 +12446,19 @@ static bool clearInputShortcutRuntime() {
 static bool inputHostSteamDeckSelfOutputBlocked() noexcept;
 static const char* inputHostMachineTargetRejectionReason(const std::string& persona) noexcept;
 static void axisCalibrationRefreshSettings(const json& input);
+static void controllerFrontendIsolationRefreshSettings(const json& input);
+static void inputCaptureConfigureVirtualGyroWake(const json& input, bool enabled) {
+    // Bind the effective game/shortcut controls, not the global page's cached switch.
+    const auto overlay=input.value("gameOverride",json::object());
+    const auto context=json{{"owner",ymcc::gameInputOverrideActive(input,gameInputOwnerSession())
+            ? overlay.value("identity",std::string{}) : std::string("global")},
+        {"outputTarget",input.value("outputTarget",json::object())},
+        {"gyroMotion",input.value("gyroMotion",json::object())}};
+    g_virtualGyroWake.configure(context,enabled && machineIsRogAllyFamily());
+}
 static void inputCaptureRefreshRealStickSettings(bool force = false) {
+    // This preference also applies to native-OFF isolation with capture disabled.
+    if(force)controllerFrontendIsolationRefreshSettings(ymSettingsSection("input"));
     if (!g_realStickTest.enabled) return;
     const ULONGLONG now = GetTickCount64();
     if (!force && g_realStickSettingsLastRefresh != 0 && now - g_realStickSettingsLastRefresh < kInputCaptureSettingsRefreshMs) return;
@@ -11904,6 +12621,8 @@ static void inputCaptureRefreshRealStickSettings(bool force = false) {
     g_realStickTest.motionActionEnabled = nextMotionActionEnabled;
     g_realStickTest.motionTriggerResolved = triggerResolved;
     g_realStickTest.motionEnabled = nextMotionEnabled;
+    inputCaptureConfigureVirtualGyroWake(input, nextMotionEnabled && targetEnabled &&
+        readBool(outputTarget,"buttonMappingEnabled",false) && readBool(motion,"virtualPadLink",true));
     // 百式任务链严格绑定“有效陀螺仪已启用”这个边界：关 gyro 就取消整条链；
     // 再次手动开启时生成新 epoch，旧的 100 高幅电平不得穿透成自动触发。
     if (motionEnabledChanged) {
@@ -12136,6 +12855,7 @@ static bool inputCaptureMotionTriggered(const XINPUT_GAMEPAD& pad) {
 
 static void inputCaptureLoadRealStickTestConfig() {
     g_sleepRecoveryOutputWanted.store(false, std::memory_order_release);
+    g_virtualGyroWake.configure(json(),false);
     const InputHostVirtualIntentMutation intentMutation;
     g_realStickTest = {};
     g_realStickSettingsLastRefresh = 0;
@@ -12355,7 +13075,23 @@ static constexpr BYTE kLegionBackBitLeft = 0x10;   // M1 → bit0（左）
 static constexpr BYTE kLegionBackBitRight = 0x80;  // Y1 → bit1（右）
 
 struct LegionBackSession : OemHidReadSession {
+    unsigned motionOutputBytes = 0;
+    std::string motionPhysicalIdentity;
+    bool goS = false;
+    std::mutex activationMx;
+    std::atomic<bool> activationOutstanding{false};
+    ymcc::legion_activation::Session<ymcc::legion_activation::Win32Port> activation;
+    uint64_t settledPower = 0, settledRaw = 0, settledEpoch = 0, settledOwner = 0;
 };
+static void legionMotionActivationTick(LegionBackSession& owner);
+static std::string legionMotionResolveActivationIdentity(const std::wstring&, SP_DEVINFO_DATA*, HDEVINFO);
+static void legionMotionActivationStop(LegionBackSession& owner) {
+    std::lock_guard<std::mutex> lock(owner.activationMx);
+    owner.activation.stop();
+    (void)owner.activation.drain(GetTickCount64());
+    owner.activationOutstanding.store(!owner.activation.inspect().resourceTerminal, std::memory_order_release);
+    owner.settledOwner = 0;
+}
 // Fixed process-lifetime slot: pending I/O cannot lose its buffer to static destruction.
 static LegionBackSession& g_legionBack = *new LegionBackSession;
 
@@ -12366,6 +13102,7 @@ static bool legionBackIsPid(USHORT pid) {
 }
 
 static void legionBackClose() {
+    legionMotionActivationStop(g_legionBack);
     (void)oemProducerCancel(OemProducerId::Legion, g_legionBack.actionGeneration);
     g_legionBack.actionGeneration = 0;
     g_legionBack.bound = false;
@@ -12380,7 +13117,8 @@ static bool legionBackBind() {
         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (set == INVALID_HANDLE_VALUE) return false;
     std::wstring found;
-    ULONG reportLen = 0;
+    ULONG reportLen = 0, outputLen = 0;
+    std::string motionIdentity;
     for (DWORD index = 0; found.empty(); ++index) {
         SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
         if (!SetupDiEnumDeviceInterfaces(set, nullptr, &kYeManGuidDeviceInterfaceHid, index, &iface)) break;
@@ -12408,6 +13146,8 @@ static bool legionBackBind() {
         if (match) {
             found = detail->DevicePath;
             reportLen = caps.InputReportByteLength;
+            outputLen = caps.OutputReportByteLength;
+            motionIdentity = legionMotionResolveActivationIdentity(found, &data, set);
         }
         if (prep) HidD_FreePreparsedData(prep);
         CloseHandle(probe);
@@ -12425,6 +13165,8 @@ static bool legionBackBind() {
         return false;
     }
     g_legionBack.buf.assign(reportLen > 0 ? reportLen : 64, 0);
+    g_legionBack.motionOutputBytes = outputLen;
+    g_legionBack.motionPhysicalIdentity = std::move(motionIdentity);
     g_legionBack.bound = true;
     g_legionBack.actionGeneration = oemProducerBegin(OemProducerId::Legion);
     g_legionBack.readPending = false;
@@ -12528,6 +13270,7 @@ static void legionBackSetEnabled(bool enable) {
 
 // BUS tick 泵：绑定（2s 节流重试）→ 读完成检查 → 解析 → 续读。
 static void legionBackPump() {
+    legionMotionActivationTick(g_legionBack);
     oemHidReadServiceClosing(g_legionBack, "legion-hid");
     if (g_legionBack.closing || !g_legionBack.enabled) return;
     if (!g_legionBack.bound) {
@@ -12559,7 +13302,8 @@ static const USHORT kLegionSPids[] = {0xE310, 0xE311};
 static constexpr BYTE kLegionSBackBitLeft = 0x01;   // Y1 → bit0（左）
 static constexpr BYTE kLegionSBackBitRight = 0x02;  // Y2 → bit1（右）
 
-struct LegionSBackSession : OemHidReadSession {
+struct LegionSBackSession : LegionBackSession {
+    LegionSBackSession() { goS = true; }
 };
 // Fixed process-lifetime slot: pending I/O cannot lose its buffer to static destruction.
 static LegionSBackSession& g_legionSBack = *new LegionSBackSession;
@@ -12571,6 +13315,7 @@ static bool legionSBackIsPid(USHORT pid) {
 }
 
 static void legionSBackClose() {
+    legionMotionActivationStop(g_legionSBack);
     (void)oemProducerCancel(OemProducerId::LegionS, g_legionSBack.actionGeneration);
     g_legionSBack.actionGeneration = 0;
     g_legionSBack.bound = false;
@@ -12584,7 +13329,8 @@ static bool legionSBackBind() {
         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (set == INVALID_HANDLE_VALUE) return false;
     std::wstring found;
-    ULONG reportLen = 0;
+    ULONG reportLen = 0, outputLen = 0;
+    std::string motionIdentity;
     for (DWORD index = 0; found.empty(); ++index) {
         SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
         if (!SetupDiEnumDeviceInterfaces(set, nullptr, &kYeManGuidDeviceInterfaceHid, index, &iface)) break;
@@ -12612,6 +13358,8 @@ static bool legionSBackBind() {
         if (match) {
             found = detail->DevicePath;
             reportLen = caps.InputReportByteLength;
+            outputLen = caps.OutputReportByteLength;
+            motionIdentity = legionMotionResolveActivationIdentity(found, &data, set);
         }
         if (prep) HidD_FreePreparsedData(prep);
         CloseHandle(probe);
@@ -12629,6 +13377,8 @@ static bool legionSBackBind() {
         return false;
     }
     g_legionSBack.buf.assign(reportLen > 0 ? reportLen : 64, 0);
+    g_legionSBack.motionOutputBytes = outputLen;
+    g_legionSBack.motionPhysicalIdentity = std::move(motionIdentity);
     g_legionSBack.bound = true;
     g_legionSBack.actionGeneration = oemProducerBegin(OemProducerId::LegionS);
     g_legionSBack.readPending = false;
@@ -12700,6 +13450,7 @@ static void legionSBackSetEnabled(bool enable) {
 }
 
 static void legionSBackPump() {
+    legionMotionActivationTick(g_legionSBack);
     oemHidReadServiceClosing(g_legionSBack, "legion-s-hid");
     if (g_legionSBack.closing || !g_legionSBack.enabled) return;
     if (!g_legionSBack.bound) {
@@ -12955,22 +13706,9 @@ struct OnexCapDescriptor {
 // 精确字符串匹配（非 X1 子串模糊放行）：身份串形如
 // HandheldCompanion.Devices.<SimpleClassName>（不含 HC 子命名空间）。
 static OnexCapDescriptor onexCapDescriptorFor(const std::string& cls) {
-    OnexCapDescriptor d;
-    if (cls == "HandheldCompanion.Devices.OneXPlayerX1") {
-        d.valid = d.independentRearProtocol = true; d.initProfile = OnexInitProfile::X1;
-    } else if (cls == "HandheldCompanion.Devices.OneXPlayerX1AMD") {
-        d.valid = d.independentRearProtocol = true; d.initProfile = OnexInitProfile::X1;
-    } else if (cls == "HandheldCompanion.Devices.OneXPlayerX1Intel") {
-        d.valid = d.independentRearProtocol = true; d.initProfile = OnexInitProfile::X1;
-    } else if (cls == "HandheldCompanion.Devices.OneXPlayerX1Mini") {
-        d.valid = d.independentRearProtocol = true; d.initProfile = OnexInitProfile::X1Mini;
-    } else if (cls == "HandheldCompanion.Devices.OneXPlayerX1Pro") {
-        d.valid = d.independentRearProtocol = true; d.initProfile = OnexInitProfile::X1;
-    } else if (cls == "HandheldCompanion.Devices.OneXPlayerApex") {
-        d.valid = d.independentRearProtocol = true;
-        d.initProfile = OnexInitProfile::Apex; d.role21Orange = true;
-    }
-    return d;
+    const auto source = ymcc::capabilities::oem::onex::descriptorFor(cls);
+    return {source.valid, source.independentRearProtocol,
+        static_cast<OnexInitProfile>(source.initProfile), source.role21Orange};
 }
 
 struct OnexBackSession {
@@ -12979,6 +13717,7 @@ struct OnexBackSession {
     HANDLE ovEvent = nullptr;
     OVERLAPPED ov{};
     std::vector<BYTE> buf;
+    USHORT inputReportBytes = 0, outputReportBytes = 0; // independently observed on probe and reopened handle
     bool readPending = false;
     // ── R3：读生命周期（与写对称；close 不得直接清 readPending，须确证终态）──
     // CancelIoEx 的取消申请不是完成证明：终态确认前保留 ov/ovEvent/buf 所有权，禁复用。
@@ -12998,7 +13737,7 @@ struct OnexBackSession {
     // FILE_FLAG_OVERLAPPED 句柄的写必须带独立 OVERLAPPED + 专用事件 + 稳定（非栈）缓冲。
     HANDLE writeEvent = nullptr;
     OVERLAPPED writeOv{};
-    std::vector<BYTE> writeBuf;     // 稳定 64B 写缓冲（不落栈）
+    std::vector<BYTE> writeBuf;     // stable observed64/65-byte write buffer (never stack)
     uint64_t bindGeneration = 0;    // 每次绑定/关闭递增；晚到完成按代丢弃
     uint64_t writeOpToken = 0;      // 每次写递增
     uint64_t completedOpToken = 0;  // 最近完成（成功）的写 token
@@ -13035,7 +13774,10 @@ struct OnexBackSession {
     BYTE initAwaitingCmd = 0;
     ULONGLONG initAwaitingDelayAfter = 0;
     // ── X1Mini B8(0xB8) report[3]==0xFE 有限去重重初始化 ──
-    bool feLatched = false;         // FE latch：非 FE 帧解除（去重）
+    bool feLatched = false;         // exact per-model status edge latch
+    bool reinitRequested = false;   // one pending request, including during initialization/in-flight writes
+    ULONGLONG reinitDue = 0;
+    uint64_t reinitRequestGen = 0;
     int reinitCount = 0;            // 每代计数（硬上界）
     ULONGLONG lastReinitAt = 0;     // 最小间隔约束
 };
@@ -13072,6 +13814,9 @@ static void onexBackFinalizeClose() {
     }
     g_onexBack.buf.clear();
     g_onexBack.writeBuf.clear();
+    g_onexBack.inputReportBytes = g_onexBack.outputReportBytes = 0;
+    g_onexBack.reinitRequested = false;
+    g_onexBack.reinitDue = g_onexBack.reinitRequestGen = 0;
     g_onexBack.readPending = false;
     g_onexBack.readInFlightGen = 0;
     g_onexBack.readCancelRequested = false;
@@ -13117,6 +13862,7 @@ static void onexBackRetireStuck() {
     g_onexBack.writeStuck = true;
     g_onexBack.draining = true;
     g_onexBack.bound = false;
+    g_onexBack.reinitRequested = false;
     (void)oemProducerCancel(OemProducerId::OneX, g_onexBack.actionGeneration);
     g_onexBack.actionGeneration = 0;
     g_onexBack.state = 0;
@@ -13136,6 +13882,7 @@ static void onexBackRetireReadStuck(const char* reason) {
     g_onexBack.readStuck = true;
     g_onexBack.draining = true;
     g_onexBack.bound = false;
+    g_onexBack.reinitRequested = false;
     (void)oemProducerCancel(OemProducerId::OneX, g_onexBack.actionGeneration);
     g_onexBack.actionGeneration = 0;
     g_onexBack.state = 0;
@@ -13163,7 +13910,7 @@ static void onexBackServiceWrite() {
         const BOOL ok = GetOverlappedResult(g_onexBack.device, &g_onexBack.writeOv, &bytes, FALSE);
         if (ok || GetLastError() != ERROR_IO_INCOMPLETE) {
             // 终态（成功 / 失败 / ERROR_OPERATION_ABORTED）——可安全回收该写槽。
-            onexBackSettleWrite(ok != FALSE && bytes == 64, bytes);
+            onexBackSettleWrite(ok != FALSE && bytes == g_onexBack.writeBuf.size(), bytes);
             return;
         }
         // ERROR_IO_INCOMPLETE：事件置位但 I/O 仍在途 —— 保留在途所有权，继续等待。
@@ -13200,13 +13947,15 @@ static void onexBackServiceRead() {
             // 终态（成功 / 失败 / ERROR_OPERATION_ABORTED）——可安全回收该读槽。
             const uint64_t gen = g_onexBack.readInFlightGen;
             const bool currentGen = (gen == g_onexBack.bindGeneration);
-            const bool publish = ok != FALSE && bytes >= 64 && currentGen && !g_onexBack.draining;
+            const bool completeReport = ok != FALSE && bytes == g_onexBack.buf.size() &&
+                ymcc::capabilities::oem::onex::inputReportBytesAllowed(bytes);
+            const bool publish = completeReport && currentGen && !g_onexBack.draining;
             g_onexBack.readPending = false;
             g_onexBack.readCancelRequested = false;
             g_onexBack.readCancelMs = 0;
             if (publish) {
                 onexBackParse(g_onexBack.buf.data(), bytes, g_onexBack.readActionGeneration);
-            } else if (ok != FALSE && bytes >= 64) {
+            } else if (completeReport) {
                 // 旧代/回收中读成功晚到：仅回收，不 parse 发布键、不影响新计划。
                 appendNativeLifecycleLog("onex-back-read-late", {
                     {"gen", gen}, {"bytes", static_cast<int>(bytes)}
@@ -13268,6 +14017,8 @@ static void onexBackClose() {
     g_onexBack.initAwaitingCmd = 0;
     g_onexBack.initAwaitingDelayAfter = 0;
     g_onexBack.feLatched = false;
+    g_onexBack.reinitRequested = false;
+    g_onexBack.reinitDue = g_onexBack.reinitRequestGen = 0;
     g_onexBack.reinitCount = 0;
     g_onexBack.lastReinitAt = 0;
     // R3：逻辑撤销与 I/O 归属分离 —— 立即撤销旧输入，但不得直接清掉读/写的真实 I/O
@@ -13332,7 +14083,7 @@ static void onexBackApplyDescriptor(const std::string& cls) {
 
 // ── GP-FAMILY-CAPABILITY-4 §3.2 / R1-1 / R2-1：合规 overlapped 写模型 ──────
 // FILE_FLAG_OVERLAPPED 句柄禁止用空 OVERLAPPED 同步写：必须独立 OVERLAPPED +
-// 专用事件 + 稳定（非栈）64B 缓冲；每次写带 opToken，关闭/换代递增
+// 专用事件 + 稳定（非栈）64/65B 缓冲；每次写带 opToken，关闭/换代递增
 // bindGeneration，晚到完成按代丢弃。R2-1：提交后立即返回（绝不在采集泵内做同步
 // 等待），终态由 pump 的 onexBackServiceWrite 零等待推进；取消申请不是完成通知，
 // 回收完成前保留在途所有权、不复用缓冲/事件。槽被占用（在途/回收中/已退役）时
@@ -13341,17 +14092,15 @@ static OnexWriteSubmit onexBackSubmitWrite(BYTE cmd, const BYTE* payload, size_t
                                            uint64_t& tokenOut) {
     tokenOut = 0;
     if (g_onexBack.device == INVALID_HANDLE_VALUE ||
-        g_onexBack.writeBuf.size() != 64 || !g_onexBack.writeEvent)
+        !ymcc::capabilities::oem::onex::reportBytesAllowed(g_onexBack.writeBuf.size()) || !g_onexBack.writeEvent)
         return OnexWriteSubmit::Failed;
     // 槽占用（在途 / draining 回收中 / 已退役）时禁止复用缓冲/事件。
     if (g_onexBack.writeInFlight || g_onexBack.draining || g_onexBack.writeStuck)
         return OnexWriteSubmit::Failed;
     BYTE* buf = g_onexBack.writeBuf.data();
-    std::memset(buf, 0, 64);
-    buf[0] = cmd; buf[1] = kOnexBackFrame; buf[2] = 0x01;  // HC BuildCommand :211-224
-    const size_t copy = (std::min)(n, static_cast<size_t>(64 - 5));
-    if (payload && copy) std::memcpy(buf + 3, payload, copy);
-    buf[62] = kOnexBackFrame; buf[63] = cmd;
+    const DWORD reportBytes = static_cast<DWORD>(g_onexBack.writeBuf.size());
+    if (!ymcc::capabilities::oem::onex::encodeOutput(cmd, payload, n, reportBytes, buf, reportBytes))
+        return OnexWriteSubmit::Failed;
 
     ZeroMemory(&g_onexBack.writeOv, sizeof(g_onexBack.writeOv));
     g_onexBack.writeOv.hEvent = g_onexBack.writeEvent;
@@ -13360,13 +14109,13 @@ static OnexWriteSubmit onexBackSubmitWrite(BYTE cmd, const BYTE* payload, size_t
     const uint64_t gen = g_onexBack.bindGeneration;
     const ULONGLONG now = GetTickCount64();
     DWORD wrote = 0;
-    if (WriteFile(g_onexBack.device, buf, 64, &wrote, &g_onexBack.writeOv)) {
+    if (WriteFile(g_onexBack.device, buf, reportBytes, &wrote, &g_onexBack.writeOv)) {
         // 同步到达终态（本代内）。
         if (g_onexBack.bindGeneration != gen) return OnexWriteSubmit::Failed;
         g_onexBack.completedOpToken = token;
         g_onexBack.lastOpTerminal = true;
         g_onexBack.lastOpToken = token;
-        g_onexBack.lastOpSuccess = (wrote == 64);
+        g_onexBack.lastOpSuccess = (wrote == reportBytes);
         return OnexWriteSubmit::Completed;
     }
     if (GetLastError() != ERROR_IO_PENDING) {
@@ -13392,50 +14141,18 @@ static OnexWriteSubmit onexBackSubmitWrite(BYTE cmd, const BYTE* payload, size_t
     return OnexWriteSubmit::Pending;
 }
 
-// HC InitializeProfile()（OneXPlayerOxpHidMonitor.cs:162-188）逐字节 oracle：
-//   X1     : B4 page1（间隔 50ms）→ B4 page2
-//   X1Mini : B4 page1（50ms）→ B4 page2（50ms）→ B3 motor[01,05,05]
-//   Apex   : B4 page1（100ms）→ B4 page2（100ms）→ B2 cfg →（200ms）→ B2 [00,01,02]
-// None/未知型号 → 无步骤（零写）。返回 false 表示该 (profile, step) 无更多步骤。
+// Fixed newer per-model ConfigureController is consumed from the single capability library.
+// X1: B4/B4(50ms); Mini: B3 only; Apex: 02-prefix B4/B4/B2/B2(50/50/50ms).
+// None/unknown has no steps. Frozen legacy monitor source/runtime remains unchanged.
 static bool onexInitStepAt(OnexInitProfile p, int step,
                            BYTE& cmd, const BYTE*& payload, size_t& n,
                            ULONGLONG& delayAfterMs) {
-    // HC BuildRemapPage1/2 :226-257；X1 固定 m1=0x67(R4/0x22)、m2=0x66(L4/0x23)。
-    static const BYTE page1[] = {0x02,0x38,0x20,0x01,0x01,
-        0x01,0x01,0x01,0x00,0x00,0x00, 0x02,0x01,0x02,0x00,0x00,0x00,
-        0x03,0x01,0x03,0x00,0x00,0x00, 0x04,0x01,0x04,0x00,0x00,0x00,
-        0x05,0x01,0x05,0x00,0x00,0x00, 0x06,0x01,0x06,0x00,0x00,0x00,
-        0x07,0x01,0x07,0x00,0x00,0x00, 0x08,0x01,0x08,0x00,0x00,0x00,
-        0x09,0x01,0x09,0x00,0x00,0x00};
-    static const BYTE page2[] = {0x02,0x38,0x20,0x02,0x01,
-        0x0A,0x01,0x0A,0x00,0x00,0x00, 0x0B,0x01,0x0B,0x00,0x00,0x00,
-        0x0C,0x01,0x0C,0x00,0x00,0x00, 0x0D,0x01,0x0D,0x00,0x00,0x00,
-        0x0E,0x01,0x0E,0x00,0x00,0x00, 0x0F,0x01,0x0F,0x00,0x00,0x00,
-        0x10,0x01,0x10,0x00,0x00,0x00,
-        0x22,0x02,0x01,0x67,0x00,0x00,   // R4(0x22)=0x67
-        0x23,0x02,0x01,0x66,0x00,0x00};   // L4(0x23)=0x66
-    static const BYTE motor[] = {0x01,0x05,0x05};                      // BuildMotorLevelPayload(0x05)
-    static const BYTE apexCfg[] = {0x01,0x1F,0x40,0x03,0x02,0x03,0x00,0x00,0x00,0x01};
-    static const BYTE apexEnd[] = {0x00,0x01,0x02};
-    switch (p) {
-        case OnexInitProfile::X1:
-            if (step == 0) { cmd = 0xB4; payload = page1; n = sizeof(page1); delayAfterMs = 50; return true; }
-            if (step == 1) { cmd = 0xB4; payload = page2; n = sizeof(page2); delayAfterMs = 0;  return true; }
-            return false;
-        case OnexInitProfile::X1Mini:
-            if (step == 0) { cmd = 0xB4; payload = page1; n = sizeof(page1); delayAfterMs = 50; return true; }
-            if (step == 1) { cmd = 0xB4; payload = page2; n = sizeof(page2); delayAfterMs = 50; return true; }
-            if (step == 2) { cmd = kOnexBackVibCmd; payload = motor; n = sizeof(motor); delayAfterMs = 0; return true; }
-            return false;
-        case OnexInitProfile::Apex:
-            if (step == 0) { cmd = 0xB4; payload = page1; n = sizeof(page1); delayAfterMs = 100; return true; }
-            if (step == 1) { cmd = 0xB4; payload = page2; n = sizeof(page2); delayAfterMs = 100; return true; }
-            if (step == 2) { cmd = 0xB2; payload = apexCfg; n = sizeof(apexCfg); delayAfterMs = 200; return true; }
-            if (step == 3) { cmd = 0xB2; payload = apexEnd; n = sizeof(apexEnd); delayAfterMs = 0; return true; }
-            return false;
-        default:
-            return false;  // None / 未知型号：零写
-    }
+    ymcc::capabilities::oem::onex::Step source;
+    const bool exists = ymcc::capabilities::oem::onex::stepAt(
+        static_cast<ymcc::capabilities::oem::onex::InitProfile>(p), step, source);
+    cmd = source.command; payload = source.payload; n = source.bytes;
+    delayAfterMs = source.delayAfterMs;
+    return exists;
 }
 
 // 非阻塞初始化泵：每次 pump 至多推进一步（遵守 HC 页间隔）；未知型号立即完成
@@ -13445,8 +14162,23 @@ static bool onexInitStepAt(OnexInitProfile p, int step,
 static void onexBackInitPump() {
     if (!g_onexBack.bound || g_onexBack.device == INVALID_HANDLE_VALUE) return;
     if (g_onexBack.draining) return;   // 回收中：不推进初始化（由 service 收尾）
-    if (g_onexBack.initDone) return;
     const ULONGLONG now = GetTickCount64();
+    if (g_onexBack.reinitRequested && g_onexBack.reinitRequestGen != g_onexBack.bindGeneration)
+        g_onexBack.reinitRequested = false;
+    if (g_onexBack.initDone) {
+        if (!g_onexBack.reinitRequested || g_onexBack.writeInFlight ||
+            g_onexBack.initAwaiting || now < g_onexBack.reinitDue) return;
+        g_onexBack.reinitRequested = false;
+        ++g_onexBack.reinitCount;
+        g_onexBack.lastReinitAt = now;
+        g_onexBack.initDone = false; g_onexBack.initStep = 0;
+        g_onexBack.initStepDue = now;
+        g_onexBack.initWrites = g_onexBack.initFailures = 0;
+        g_onexBack.initAllWritesOk = true;
+        appendNativeLifecycleLog("onex-back-reinit", {
+            {"count", g_onexBack.reinitCount}, {"sourceDelayMs", 200}
+        });
+    }
 
     // 1) 先结算先前提交的在途写（仅当其确证终态）。
     if (g_onexBack.initAwaiting) {
@@ -13458,7 +14190,7 @@ static void onexBackInitPump() {
         appendNativeLifecycleLog("onex-back-init-step", {
             {"step", g_onexBack.initAwaitingStep},
             {"cmd", static_cast<int>(g_onexBack.initAwaitingCmd)},
-            {"ok", ok}, {"bytes", 64}
+            {"ok", ok}, {"bytes", static_cast<int>(g_onexBack.writeBuf.size())}
         });
         g_onexBack.initAwaiting = false;
         ++g_onexBack.initStep;
@@ -13467,7 +14199,7 @@ static void onexBackInitPump() {
         return;
     }
 
-    if (now < g_onexBack.initStepDue) return;
+    if (g_onexBack.writeInFlight || now < g_onexBack.initStepDue) return;
     BYTE cmd = 0; const BYTE* payload = nullptr; size_t n = 0; ULONGLONG delayAfterMs = 0;
     if (!onexInitStepAt(g_onexBack.desc.initProfile, g_onexBack.initStep,
                         cmd, payload, n, delayAfterMs)) {
@@ -13497,33 +14229,39 @@ static void onexBackInitPump() {
     if (!ok) { g_onexBack.initAllWritesOk = false; ++g_onexBack.initFailures; }
     ++g_onexBack.initStep;
     ++g_onexBack.initWrites;
-    g_onexBack.initStepDue = now + delayAfterMs;
+    g_onexBack.initStepDue = GetTickCount64() + delayAfterMs;
     appendNativeLifecycleLog("onex-back-init-step", {
         {"step", stepIndex}, {"cmd", static_cast<int>(cmd)}, {"ok", ok}
     });
 }
 
-// X1Mini B8(0xB8) report[3]==0xFE：HC HandleStatusReport 置位后由读循环重跑
-// InitializeProfile()。YMCC 做有限、去重处理（C4 §3.2）：FE 帧经 latch 去重
-// （非 FE 帧解除），并受最小间隔 + 每代次数硬上界约束 —— 不无限重试。
+// Source status events schedule one delayed reconfiguration in the current generation.
+// Mini uses frame[3]==FE; X1/Apex frame[5]==20. Bursts coalesce without losing an event
+// during initial/config writes; source200ms delay and existing rate/count bounds both apply.
 static void onexBackRequestReinit() {
-    // R2-1：计划在途（未结算）时拒绝重启，避免污染在途步的结算。
-    if (g_onexBack.initAwaiting || g_onexBack.writeInFlight) return;
+    if (!g_onexBack.bound || !g_onexBack.enabled || g_onexBack.draining ||
+        g_onexBack.reinitRequested || g_onexBack.reinitCount >= kOnexB8ReinitMaxPerGen) return;
     const ULONGLONG now = GetTickCount64();
-    if (g_onexBack.reinitCount >= kOnexB8ReinitMaxPerGen) return;
-    if (now - g_onexBack.lastReinitAt < kOnexB8ReinitMinIntervalMs) return;
-    g_onexBack.lastReinitAt = now;
-    ++g_onexBack.reinitCount;
-    g_onexBack.initStep = 0;
-    g_onexBack.initDone = false;
-    g_onexBack.initStepDue = 0;
-    // R2-1：B8 新计划自拥计数（不跨次污染），写步骤只在完成/最终失败后结算。
-    g_onexBack.initWrites = 0;
-    g_onexBack.initFailures = 0;
-    g_onexBack.initAllWritesOk = true;
-    appendNativeLifecycleLog("onex-back-reinit", {
-        {"reason", "b8-fe"}, {"count", g_onexBack.reinitCount}
-    });
+    const ULONGLONG sourceDue = now + ymcc::capabilities::oem::onex::kReinitDelayMs;
+    const ULONGLONG rateDue = g_onexBack.reinitCount > 0 ?
+        g_onexBack.lastReinitAt + kOnexB8ReinitMinIntervalMs : sourceDue;
+    g_onexBack.reinitRequested = true;
+    g_onexBack.reinitDue = (std::max)(sourceDue, rateDue);
+    g_onexBack.reinitRequestGen = g_onexBack.bindGeneration;
+}
+
+static bool onexBackReadHidCaps(HANDLE device, USHORT& inputBytes, USHORT& outputBytes) {
+    HIDD_ATTRIBUTES attrs{}; attrs.Size = sizeof(attrs);
+    PHIDP_PREPARSED_DATA prep = nullptr; HIDP_CAPS caps{};
+    const bool attrsOk = HidD_GetAttributes(device, &attrs) != FALSE;
+    const bool prepOk = HidD_GetPreparsedData(device, &prep) != FALSE;
+    const bool capsOk = prepOk && HidP_GetCaps(prep, &caps) == HIDP_STATUS_SUCCESS;
+    if (prep) HidD_FreePreparsedData(prep);
+    if (!attrsOk || !capsOk || !ymcc::capabilities::oem::onex::capsAllowed(
+            attrs.VendorID, attrs.ProductID, caps.UsagePage, caps.Usage,
+            caps.InputReportByteLength, caps.OutputReportByteLength)) return false;
+    inputBytes = caps.InputReportByteLength; outputBytes = caps.OutputReportByteLength;
+    return true;
 }
 
 static bool onexBackBind() {
@@ -13532,11 +14270,14 @@ static bool onexBackBind() {
     if (g_onexBack.writeInFlight || g_onexBack.writeStuck || g_onexBack.draining ||
         g_onexBack.readPending || g_onexBack.readStuck)
         return false;
+    if (!g_onexBack.desc.valid || !g_onexBack.desc.independentRearProtocol) return false;
     HDEVINFO set = SetupDiGetClassDevsW(&kYeManGuidDeviceInterfaceHid, nullptr, nullptr,
         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (set == INVALID_HANDLE_VALUE) return false;
     std::wstring found;
-    for (DWORD index = 0; found.empty(); ++index) {
+    USHORT inputBytes = 0, outputBytes = 0;
+    bool ambiguous = false;
+    for (DWORD index = 0; ; ++index) {
         SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
         if (!SetupDiEnumDeviceInterfaces(set, nullptr, &kYeManGuidDeviceInterfaceHid, index, &iface)) break;
         DWORD bytes = 0;
@@ -13554,32 +14295,33 @@ static bool onexBackBind() {
             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL, nullptr);
         if (probe == INVALID_HANDLE_VALUE) continue;
-        HIDD_ATTRIBUTES attrs{}; attrs.Size = sizeof(attrs);
-        PHIDP_PREPARSED_DATA prep = nullptr;
-        HIDP_CAPS caps{};
-        const bool attrOk = HidD_GetAttributes(probe, &attrs) != FALSE;
-        const bool prepOk = HidD_GetPreparsedData(probe, &prep) != FALSE;
-        const bool capsOk = prepOk && HidP_GetCaps(prep, &caps) == HIDP_STATUS_SUCCESS;
-        const bool match = attrOk && capsOk &&
-            attrs.VendorID == 0x1A86 && attrs.ProductID == kOnexBackPid;
-        if (match) found = path;
-        if (prep) HidD_FreePreparsedData(prep);
+        USHORT candidateInput = 0, candidateOutput = 0;
+        const bool match = onexBackReadHidCaps(probe, candidateInput, candidateOutput);
         CloseHandle(probe);
+        if (!match) continue;
+        if (!found.empty()) { ambiguous = true; break; }
+        found = path; inputBytes = candidateInput; outputBytes = candidateOutput;
     }
     SetupDiDestroyDeviceInfoList(set);
-    if (found.empty()) return false;
+    if (found.empty() || ambiguous) return false;
     HANDLE h = CreateFileW(found.c_str(), GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
+    USHORT reopenedInput = 0, reopenedOutput = 0;
+    if (!onexBackReadHidCaps(h, reopenedInput, reopenedOutput) ||
+        reopenedInput != inputBytes || reopenedOutput != outputBytes) {
+        CloseHandle(h); return false;
+    }
     g_onexBack.device = h;
+    g_onexBack.inputReportBytes = inputBytes; g_onexBack.outputReportBytes = outputBytes;
     g_onexBack.ovEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_onexBack.ovEvent) {
         onexBackClose();
         return false;
     }
-    g_onexBack.buf.assign(64, 0);
-    g_onexBack.writeBuf.assign(64, 0);   // 稳定写缓冲（合规 overlapped 写模型）
+    g_onexBack.buf.assign(inputBytes, 0);
+    g_onexBack.writeBuf.assign(outputBytes, 0); // stable observed-size overlapped output
     g_onexBack.writeEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_onexBack.writeEvent) {
         onexBackClose();
@@ -13596,7 +14338,7 @@ static bool onexBackBind() {
     // 分型号初始化：非阻塞步进（由 pump 驱动；未知型号零写）。
     g_onexBack.initDone = false;
     g_onexBack.initStep = 0;
-    g_onexBack.initStepDue = 0;
+    g_onexBack.initStepDue = GetTickCount64() + ymcc::capabilities::oem::onex::kInitialDelayMs;
     g_onexBack.initWrites = 0;
     g_onexBack.initAllWritesOk = true;
     g_onexBack.initFailures = 0;
@@ -13616,11 +14358,14 @@ static bool onexBackBind() {
     g_onexBack.lastOpToken = 0;
     g_onexBack.lastOpSuccess = false;
     g_onexBack.feLatched = false;
+    g_onexBack.reinitRequested = false;
+    g_onexBack.reinitDue = g_onexBack.reinitRequestGen = 0;
     g_onexBack.reinitCount = 0;
     g_onexBack.lastReinitAt = 0;
     appendNativeLifecycleLog("onex-back-bind", {
         {"ok", true}, {"path", W2U(found)},
-        {"initProfile", static_cast<int>(g_onexBack.desc.initProfile)}
+        {"initProfile", static_cast<int>(g_onexBack.desc.initProfile)},
+        {"inputReportBytes", inputBytes}, {"outputReportBytes", outputBytes}, {"initialDelayMs", 4000}
     });
     return true;
 }
@@ -13628,16 +14373,13 @@ static bool onexBackBind() {
 // 事件式解析（按下/释放两条帧）→ 累积位图 → g_oemBackState。
 static void onexBackParse(const BYTE* data, size_t len, uint64_t actionGeneration) {
     if (actionGeneration && !oemProducerCurrent(OemProducerId::OneX, actionGeneration)) return;
-    if (!data || len < 64) return;
-    if (data[1] != kOnexBackFrame || data[62] != kOnexBackFrame) return;  // 帧校验
-    if (data[0] == kOnexBackStatusCmd) {   // 0xB8：X1Mini 重初始化触发（有限去重）
-        if (g_onexBack.desc.initProfile == OnexInitProfile::X1Mini) {
-            if (data[3] == 0xFE) {
-                if (!g_onexBack.feLatched) { g_onexBack.feLatched = true; onexBackRequestReinit(); }
-            } else {
-                g_onexBack.feLatched = false;   // 非 FE：解除 latch（去重）
-            }
-        }
+    data = ymcc::capabilities::oem::onex::inputFrame(data, len);
+    if (!data) return;
+    if (data[0] == kOnexBackStatusCmd) {
+        const bool requested = ymcc::capabilities::oem::onex::reinitStatus(
+            static_cast<ymcc::capabilities::oem::onex::InitProfile>(g_onexBack.desc.initProfile), data);
+        if (requested && !g_onexBack.feLatched) onexBackRequestReinit();
+        g_onexBack.feLatched = requested;
         return;
     }
     if (data[0] != kOnexBackBtnCmd) return;                               // 仅按键帧
@@ -13698,6 +14440,9 @@ static bool onexBackStartRead() {
                  static_cast<DWORD>(g_onexBack.buf.size()), &got, &g_onexBack.ov)) {
         // 同步到达终态：换代后不得发布旧代结果。
         if (gen != g_onexBack.bindGeneration) return false;
+        if (got != g_onexBack.buf.size() || !ymcc::capabilities::oem::onex::inputReportBytesAllowed(got)) {
+            onexBackReadFaultRevoke("short-report"); return false;
+        }
         onexBackParse(g_onexBack.buf.data(), got, g_onexBack.readActionGeneration);
         return true;
     }
@@ -13710,6 +14455,7 @@ static bool onexBackStartRead() {
         g_onexBack.readStuck = false;
         return true;
     }
+    onexBackReadFaultRevoke("device-error");
     return false;
 }
 
@@ -13742,7 +14488,8 @@ static void onexBackPump() {
         return;
     }
     onexBackInitPump();          // 前置：分型号初始化（非阻塞步进；未知型号零写）
-    if (!g_onexBack.initDone) return;   // 初始化完成前不收包（对齐 HC Open 顺序）
+    // Fixed source reads before and during configuration; retain one independent read slot.
+    if (!g_onexBack.bound || g_onexBack.draining) return;
     // 无在途读时发起新读；在途读的终态（含旧代晚到）由 onexBackServiceIo 零等待推进，
     // 仅当代且非回收中才 parse 发布。
     if (!g_onexBack.readPending) (void)onexBackStartRead();
@@ -13792,6 +14539,551 @@ static bool onexX2BindingPathAllowed(const std::wstring& path) {
         std::atomic_store_explicit(&g_onexX2BoundDevicePath, std::make_shared<const std::wstring>(path), std::memory_order_release);
     return true;
 }
+static ymcc::oxp3_owner::Lease g_oxp3OwnerLease;
+static ymcc::oxp3_owner::OwnerState g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+static std::mutex g_oxp3OwnerStateMx;
+static HANDLE g_oxp3OwnerRevokedEvent = 0;
+static std::wstring g_oxp3OwnerEventName;
+static std::wstring g_oxp3OwnerInterfacePath;
+static HANDLE g_oxp3OwnerHandoffMapping = nullptr;
+static ymcc::oxp3_owner::HandoffRecord* g_oxp3OwnerHandoff = nullptr;
+static std::atomic<bool> g_oxp3OwnerPendingDebt{false};
+static std::atomic<bool> g_oxp3OwnerStopTimedOut{false};
+static std::atomic<bool> g_oxp3OwnerApplyOutstanding{false};
+static std::atomic<bool> g_oxp3OwnerHelperAlive{false};
+static HANDLE g_oxp3OwnerRetiredProcess = 0;
+static std::string g_oxp3OwnerRetiredProcessToken;
+static std::atomic<bool> g_oxp3OwnerChildReturnObserved{false};
+static std::atomic<std::uint64_t> g_oxp3OwnerAdmissionSequence{0};
+static bool oxp3OwnerDenyWrite() { return false; }
+static bool oxp3OwnerDenyBind(const std::wstring&) { return false; }
+static bool onexX2OwnerWriteAllowed() {
+    return ymcc::oxp3_owner::writeAllowed(hardwareWriteAllowed(), g_oxp3OwnerLease);
+}
+static bool onexX2OwnerBindAllowed(const std::wstring& path) {
+    return ymcc::oxp3_owner::bindAllowed(onexX2BindingPathAllowed(path), g_oxp3OwnerLease);
+}
+static std::wstring oxp3OwnerEventNameFor(const std::string& token) {
+    std::wstring name = ymcc::oxp3_owner::kRevokedEventPrefix;
+    for (const char c : token) name.push_back(c == ':' ? L'-' : static_cast<wchar_t>(c));
+    return name;
+}
+static bool oxp3OwnerEnsureHandoff() {
+    if (g_oxp3OwnerHandoff) return true;
+    if (!g_oxp3OwnerHandoffMapping) {
+        g_oxp3OwnerHandoffMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+            static_cast<DWORD>(sizeof(ymcc::oxp3_owner::HandoffRecord)), ymcc::oxp3_owner::kHandoffRecordName);
+        if (!g_oxp3OwnerHandoffMapping) return false;
+    }
+    const void* view = MapViewOfFile(g_oxp3OwnerHandoffMapping, FILE_MAP_ALL_ACCESS, 0, 0,
+        sizeof(ymcc::oxp3_owner::HandoffRecord));
+    if (!view) return false;
+    g_oxp3OwnerHandoff = const_cast<ymcc::oxp3_owner::HandoffRecord*>(
+        static_cast<const ymcc::oxp3_owner::HandoffRecord*>(view));
+    return true;
+}
+static void oxp3OwnerPublishHandoff(ymcc::oxp3_owner::OwnerState state, std::uint64_t generation,
+                                    std::uint64_t topology, std::uint64_t admission,
+                                    const std::string& token, const std::wstring& path) {
+    if (!oxp3OwnerEnsureHandoff()) return;
+    auto& record = *g_oxp3OwnerHandoff;
+    const std::uint64_t sequence = std::atomic_ref<std::uint64_t>(record.sequence).load(std::memory_order_acquire);
+    std::atomic_ref<std::uint64_t>(record.sequence).store(sequence + 1, std::memory_order_release);
+    record.magic = ymcc::oxp3_owner::kHandoffMagic;
+    record.version = ymcc::oxp3_owner::kHandoffVersion;
+    record.generation = generation;
+    record.topology = topology;
+    record.admission = admission;
+    record.heartbeat = GetTickCount64();
+    record.state = static_cast<std::uint32_t>(state);
+    record.modelTag = (state == ymcc::oxp3_owner::OwnerState::Active ||
+        state == ymcc::oxp3_owner::OwnerState::Retiring) ?
+        g_oxp3OwnerLease.modelTag.load(std::memory_order_acquire) : 0;
+    for (size_t i = 0; i < sizeof(record.token); ++i) record.token[i] = 0;
+    const size_t tokenLength = (std::min)(token.size(), sizeof(record.token) - 1);
+    for (size_t i = 0; i < tokenLength; ++i) record.token[i] = token[i];
+    const size_t pathLength = (std::min)(path.size(), sizeof(record.interfacePath) / sizeof(wchar_t) - 1);
+    for (size_t i = 0; i < pathLength; ++i) record.interfacePath[i] = path[i];
+    record.interfacePath[pathLength] = L'\0';
+    std::atomic_ref<std::uint64_t>(record.sequence).store(sequence + 2, std::memory_order_release);
+}
+static void oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState state) {
+    oxp3OwnerPublishHandoff(state, g_oxp3OwnerLease.generation.load(std::memory_order_acquire),
+        g_oxp3OwnerLease.topology.load(std::memory_order_acquire),
+        g_oxp3OwnerLease.admission.load(std::memory_order_acquire),
+        g_oxp3OwnerLease.generationToken, g_oxp3OwnerInterfacePath);
+}
+static void oxp3OwnerHeartbeat(std::uint64_t now) {
+    if (!g_oxp3OwnerHandoff || !g_oxp3OwnerLease.active.load(std::memory_order_acquire)) return;
+    std::atomic_ref<std::uint64_t>(g_oxp3OwnerHandoff->heartbeat).store(now, std::memory_order_release);
+}
+static void oxp3OwnerRetainRetiredProcess(HANDLE process, const std::string& token) {
+    if (!process) return;
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    if (g_oxp3OwnerRetiredProcess) {
+        if (WaitForSingleObject(g_oxp3OwnerRetiredProcess, 0) == WAIT_OBJECT_0) {
+            CloseHandle(g_oxp3OwnerRetiredProcess);
+            g_oxp3OwnerRetiredProcess = 0;
+            g_oxp3OwnerRetiredProcessToken.clear();
+        } else {
+            // One lease can have only one unresolved child; never replace an
+            // actually unsignaled old process with a newer identity.
+            return;
+        }
+    }
+    g_oxp3OwnerRetiredProcess = process;
+    g_oxp3OwnerRetiredProcessToken = token;
+    g_oxp3OwnerChildReturnObserved.store(false, std::memory_order_release);
+}
+static bool oxp3OwnerRetiredProcessReturned() {
+    HANDLE returned = 0;
+    {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        if (!g_oxp3OwnerRetiredProcess) return true;
+        if (g_oxp3OwnerRetiredProcessToken != g_oxp3OwnerLease.generationToken) return false;
+        if (WaitForSingleObject(g_oxp3OwnerRetiredProcess, 0) != WAIT_OBJECT_0) return false;
+        returned = g_oxp3OwnerRetiredProcess;
+        g_oxp3OwnerRetiredProcess = 0;
+        g_oxp3OwnerRetiredProcessToken.clear();
+        g_oxp3OwnerChildReturnObserved.store(true, std::memory_order_release);
+    }
+    CloseHandle(returned);
+    return true;
+}
+static bool oxp3OwnerCompleteReturnedChild() {
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    if (g_oxp3OwnerState != ymcc::oxp3_owner::OwnerState::Retiring) return false;
+    if (g_oxp3OwnerRetiredProcess) return false;
+    if (!g_oxp3OwnerPendingDebt.load(std::memory_order_acquire)) return false;
+    if (!g_oxp3OwnerChildReturnObserved.load(std::memory_order_acquire)) return false;
+    // The retained process slot was observed signaled; only then may the debt
+    // markers created for that exact child be retired once.
+    g_oxp3OwnerChildReturnObserved.store(false, std::memory_order_release);
+    g_oxp3OwnerHelperAlive.store(false, std::memory_order_release);
+    g_oxp3OwnerApplyOutstanding.store(false, std::memory_order_release);
+    g_oxp3OwnerLease.active.store(false, std::memory_order_release);
+    g_oxp3OwnerPendingDebt.store(false, std::memory_order_release);
+    g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+    g_oxp3OwnerLease.generation.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.topology.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.modelTag.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.admission.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.generationToken.clear();
+    g_oxp3OwnerLease.interfacePath.clear();
+    g_oxp3OwnerInterfacePath.clear();
+    oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Idle);
+    return true;
+}
+static void oxp3OwnerRetainDebtRecord(std::uint64_t generation, std::uint64_t topology,
+                                      const std::wstring& path, const std::string& token) {
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    g_oxp3OwnerLease.generation.store(generation, std::memory_order_release);
+    g_oxp3OwnerLease.topology.store(topology, std::memory_order_release);
+    g_oxp3OwnerLease.interfacePath = W2U(path);
+    g_oxp3OwnerInterfacePath = path;
+    g_oxp3OwnerLease.generationToken = token;
+    g_oxp3OwnerPendingDebt.store(true, std::memory_order_release);
+    if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Admitting)
+        g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Retiring;
+    oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Retiring);
+}
+static void oxp3OwnerAbandonReservation() {
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Admitting)
+        g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+    g_oxp3OwnerLease.active.store(false, std::memory_order_release);
+    g_oxp3OwnerLease.revoked.store(true, std::memory_order_release);
+    g_oxp3OwnerLease.generation.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.topology.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.modelTag.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.admission.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.generationToken.clear();
+    g_oxp3OwnerLease.interfacePath.clear();
+    g_oxp3OwnerInterfacePath.clear();
+    oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Idle);
+}
+static bool oxp3OwnerSettleDebt() {
+    if (!oxp3OwnerRetiredProcessReturned()) return false;
+    {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        if (g_oxp3OwnerState != ymcc::oxp3_owner::OwnerState::Retiring)
+            return g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Idle;
+        if (g_oxp3OwnerHelperAlive.load(std::memory_order_acquire) ||
+            g_oxp3OwnerApplyOutstanding.load(std::memory_order_acquire)) {
+            // A live helper/application still owns the request until its exact
+            // child is observed signaled; flags alone never clear the debt.
+            if (!g_oxp3OwnerChildReturnObserved.load(std::memory_order_acquire)) return false;
+            g_oxp3OwnerChildReturnObserved.store(false, std::memory_order_release);
+        }
+        g_oxp3OwnerHelperAlive.store(false, std::memory_order_release);
+        g_oxp3OwnerApplyOutstanding.store(false, std::memory_order_release);
+        // Cleared only while the state still owns the gate; a later reservation
+        // can only start after this Retiring state is retired.
+        g_oxp3OwnerLease.active.store(false, std::memory_order_release);
+    }
+    bool pending = true;
+    {
+        std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
+        g_onexX2Transport.tick(GetTickCount64(), onexX2OwnerWriteAllowed, onexX2OwnerBindAllowed);
+        pending = g_onexX2Transport.snapshot().writePending;
+    }
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Retiring) {
+        if (!pending && !g_oxp3OwnerRetiredProcess &&
+            !g_oxp3OwnerApplyOutstanding.load(std::memory_order_acquire) &&
+            !g_oxp3OwnerHelperAlive.load(std::memory_order_acquire)) {
+            g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+            g_oxp3OwnerPendingDebt.store(false, std::memory_order_release);
+            g_oxp3OwnerLease.generation.store(0, std::memory_order_release);
+            g_oxp3OwnerLease.topology.store(0, std::memory_order_release);
+            g_oxp3OwnerLease.modelTag.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.admission.store(0, std::memory_order_release);
+            g_oxp3OwnerLease.generationToken.clear();
+            g_oxp3OwnerLease.interfacePath.clear();
+            g_oxp3OwnerInterfacePath.clear();
+            oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Idle);
+            return true;
+        }
+        g_oxp3OwnerLease.active.store(true, std::memory_order_release);
+        return false;
+    }
+    // Another transaction retired this debt or reserved a new lease; never
+    // clobber the gate of a newer owner.
+    return g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Idle;
+}
+static bool oxp3OwnerAdmit(std::uint64_t deadline, std::string& reason) {
+    if (g_machineIdentity.family != YmccFamily::OneXPlayer ||
+        !ymcc::lighting::usesOneXVendorOwner(g_machineIdentity.deviceClass)) {
+        reason = "owner-model-unsupported"; return false;
+    }
+    const auto expectedModel = ymcc::onex_x2::modelForClass(g_machineIdentity.deviceClass);
+    (void)oxp3OwnerSettleDebt();
+    std::uint64_t reservedAdmission = 0;
+    {
+        // Reservation and the busy decision are one short transaction. A loser
+        // never touches the event, token, path or lease owned by the winner.
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        if (g_oxp3OwnerState != ymcc::oxp3_owner::OwnerState::Idle) {
+            reason = g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Retiring
+                ? "owner-retiring-debt" : "owner-lease-busy";
+            return false;
+        }
+        g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Admitting;
+        reservedAdmission = g_oxp3OwnerAdmissionSequence.fetch_add(1, std::memory_order_acq_rel) + 1;
+        g_oxp3OwnerStopTimedOut.store(false, std::memory_order_release);
+        g_oxp3OwnerPendingDebt.store(false, std::memory_order_release);
+        g_oxp3OwnerLease.revoked.store(false, std::memory_order_release);
+        g_oxp3OwnerLease.active.store(true, std::memory_order_release);
+        g_oxp3OwnerLease.generation.store(0, std::memory_order_release);
+        g_oxp3OwnerLease.topology.store(0, std::memory_order_release);
+        g_oxp3OwnerLease.modelTag.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.admission.store(0, std::memory_order_release);
+        g_oxp3OwnerLease.admission.store(reservedAdmission, std::memory_order_release);
+        g_oxp3OwnerLease.generationToken.clear();
+        g_oxp3OwnerLease.interfacePath.clear();
+        g_oxp3OwnerInterfacePath.clear();
+    }
+    // Drain the previous initialization write through short state transactions;
+    // never hold the input/stop owner mutex across the wait or Sleep.
+    auto state = g_onexX2Transport.snapshot();
+    bool live = g_onexX2Transport.hasDevice();
+    for (;;) {
+        bool stopRequested = false;
+        {
+            std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+            stopRequested = g_oxp3OwnerState != ymcc::oxp3_owner::OwnerState::Admitting;
+        }
+        if (stopRequested) {
+            oxp3OwnerAbandonReservation();
+            reason = "owner-stop-requested";
+            return false;
+        }
+        const ULONGLONG now = GetTickCount64();
+        {
+            std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
+            g_onexX2Transport.tick(now, oxp3OwnerDenyWrite, oxp3OwnerDenyBind);
+            state = g_onexX2Transport.snapshot();
+            live = g_onexX2Transport.hasDevice();
+        }
+        oxp3OwnerHeartbeat(now);
+        if (state.phase != ymcc::onex_x2::Phase::Live || !state.writePending) break;
+        if (GetTickCount64() >= deadline) break;
+        Sleep(5);
+    }
+    if (state.phase != ymcc::onex_x2::Phase::Live || !live ||
+        state.requested != expectedModel || state.bound != expectedModel) {
+        oxp3OwnerAbandonReservation();
+        reason = "owner-quiesce-not-live";
+        return false;
+    }
+    if (state.writePending) {
+        // Retain the outstanding initialization debt instead of claiming ready.
+        const std::uint64_t topology = g_onexX2DeviceEpoch.load(std::memory_order_acquire);
+        oxp3OwnerRetainDebtRecord(state.generation, topology, g_onexX2Transport.devicePath(),
+            ymcc::oxp3_owner::makeAdmissionToken(state.generation, topology, reservedAdmission));
+        reason = "owner-pending-write-debt";
+        return false;
+    }
+    if (!state.initialized) {
+        oxp3OwnerAbandonReservation();
+        reason = "owner-initialization-not-complete"; return false;
+    }
+    const std::uint64_t generation = state.generation;
+    const std::uint64_t topology = g_onexX2DeviceEpoch.load(std::memory_order_acquire);
+    const std::wstring interfacePath = g_onexX2Transport.devicePath();
+    const std::string token = ymcc::oxp3_owner::makeAdmissionToken(generation, topology, reservedAdmission);
+    const std::wstring eventName = oxp3OwnerEventNameFor(token);
+    if (g_oxp3OwnerRevokedEvent && g_oxp3OwnerEventName != eventName) {
+        CloseHandle(g_oxp3OwnerRevokedEvent);
+        g_oxp3OwnerRevokedEvent = 0;
+        g_oxp3OwnerEventName.clear();
+    }
+    if (!g_oxp3OwnerRevokedEvent) {
+        g_oxp3OwnerRevokedEvent = CreateEventW(nullptr, TRUE, FALSE, eventName.c_str());
+        if (!g_oxp3OwnerRevokedEvent) {
+            oxp3OwnerAbandonReservation();
+            reason = "owner-event-create-failed";
+            return false;
+        }
+        g_oxp3OwnerEventName = eventName;
+    }
+    if (!ResetEvent(g_oxp3OwnerRevokedEvent)) {
+        oxp3OwnerAbandonReservation();
+        reason = "owner-event-reset-failed";
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
+        g_onexX2Transport.tick(GetTickCount64(), oxp3OwnerDenyWrite, oxp3OwnerDenyBind);
+        state = g_onexX2Transport.snapshot();
+        live = g_onexX2Transport.hasDevice();
+    }
+    if (state.phase != ymcc::onex_x2::Phase::Live || !live || state.writePending || !state.initialized ||
+        state.requested != expectedModel || state.bound != expectedModel ||
+        g_machineIdentity.family != YmccFamily::OneXPlayer ||
+        ymcc::onex_x2::modelForClass(g_machineIdentity.deviceClass) != expectedModel ||
+        state.generation != generation || g_onexX2DeviceEpoch.load(std::memory_order_acquire) != topology ||
+        g_onexX2Transport.devicePath() != interfacePath) {
+        if (state.writePending)
+            oxp3OwnerRetainDebtRecord(generation, topology, interfacePath, token);
+        else
+            oxp3OwnerAbandonReservation();
+        reason = state.writePending ? "owner-pending-write-debt" : "owner-quiesce-not-live";
+        return false;
+    }
+    bool published = false;
+    {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Admitting) {
+            g_oxp3OwnerLease.generation.store(generation, std::memory_order_release);
+            g_oxp3OwnerLease.topology.store(topology, std::memory_order_release);
+            g_oxp3OwnerLease.modelTag.store(static_cast<std::uint32_t>(expectedModel), std::memory_order_release);
+            g_oxp3OwnerLease.interfacePath = W2U(interfacePath);
+            g_oxp3OwnerInterfacePath = interfacePath;
+            g_oxp3OwnerLease.generationToken = token;
+            g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Active;
+            // Publish the authoritative handoff inside the same transaction so a
+            // concurrent stop cannot leave an Active record behind Retiring state.
+            oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Active);
+            published = true;
+        }
+    }
+    if (!published) {
+        oxp3OwnerAbandonReservation();
+        reason = "owner-stop-requested";
+        return false;
+    }
+    reason = "ok";
+    return true;
+}
+static bool oxp3OwnerSequenceCurrent() {
+    std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
+    const auto state = g_onexX2Transport.snapshot();
+    const auto expectedModel = ymcc::onex_x2::modelForClass(g_machineIdentity.deviceClass);
+    if (g_machineIdentity.family != YmccFamily::OneXPlayer ||
+        !ymcc::lighting::usesOneXVendorOwner(g_machineIdentity.deviceClass) ||
+        state.phase != ymcc::onex_x2::Phase::Live || !state.initialized ||
+        state.requested != expectedModel || state.bound != expectedModel ||
+        g_oxp3OwnerLease.modelTag.load(std::memory_order_acquire) != static_cast<std::uint32_t>(expectedModel)) return false;
+    return ymcc::oxp3_owner::sequenceCurrent(g_oxp3OwnerLease,
+        state.generation, g_onexX2DeviceEpoch.load(std::memory_order_acquire),
+        W2U(g_onexX2Transport.devicePath()));
+}
+static bool oxp3OwnerRelease(const std::string& token, std::uint64_t deadline, bool revoke) {
+    if (!oxp3OwnerRetiredProcessReturned()) return false;
+    if (!ymcc::oxp3_owner::releaseAllowed(g_oxp3OwnerLease, token)) return false;
+    if (revoke && g_oxp3OwnerRevokedEvent) SetEvent(g_oxp3OwnerRevokedEvent);
+    g_oxp3OwnerLease.revoked.store(revoke, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Active)
+            g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Retiring;
+        oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Retiring);
+    }
+    // The helper process is already signaled before this call. Open initialization
+    // writes again only to observe whether their pending debt actually returned.
+    g_oxp3OwnerLease.active.store(false, std::memory_order_release);
+    bool cleared = false;
+    for (;;) {
+        const ULONGLONG now = GetTickCount64();
+        {
+            std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
+            g_onexX2Transport.tick(now, onexX2OwnerWriteAllowed, onexX2OwnerBindAllowed);
+            cleared = !g_onexX2Transport.snapshot().writePending;
+        }
+        if (cleared || GetTickCount64() >= deadline) break;
+        Sleep(5);
+    }
+    if (!cleared) {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        g_oxp3OwnerLease.active.store(true, std::memory_order_release);
+        g_oxp3OwnerPendingDebt.store(true, std::memory_order_release);
+        g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Retiring;
+        oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Retiring);
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Retiring)
+            g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+        g_oxp3OwnerPendingDebt.store(false, std::memory_order_release);
+        g_oxp3OwnerLease.generation.store(0, std::memory_order_release);
+        g_oxp3OwnerLease.topology.store(0, std::memory_order_release);
+        g_oxp3OwnerLease.modelTag.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.admission.store(0, std::memory_order_release);
+        g_oxp3OwnerLease.generationToken.clear();
+        g_oxp3OwnerLease.interfacePath.clear();
+        g_oxp3OwnerInterfacePath.clear();
+        oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Idle);
+    }
+    return true;
+}
+static void oxp3OwnerMarkDebt() {
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    if (!g_oxp3OwnerLease.active.load(std::memory_order_acquire)) return;
+    g_oxp3OwnerPendingDebt.store(true, std::memory_order_release);
+    g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Retiring;
+    oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Retiring);
+}
+static bool oxp3OwnerFinishApply(const std::string& token, bool revoke, bool childReturned) {
+    // The request path may only release after the specific helper process is
+    // signaled; a termination request alone keeps the debt/retiring gate closed.
+    if (!childReturned) {
+        if (revoke && g_oxp3OwnerRevokedEvent) SetEvent(g_oxp3OwnerRevokedEvent);
+        g_oxp3OwnerLease.revoked.store(true, std::memory_order_release);
+        oxp3OwnerMarkDebt();
+        return false;
+    }
+    return oxp3OwnerRelease(token, GetTickCount64() + 500, revoke);
+}
+static bool oxp3OwnerWaitChild(HANDLE process, DWORD timeoutMs, DWORD graceMs,
+                               bool& timedOut, DWORD& exitCode) {
+    const DWORD wait = WaitForSingleObject(process, timeoutMs);
+    timedOut = wait != WAIT_OBJECT_0;
+    if (!timedOut) {
+        GetExitCodeProcess(process, &exitCode);
+        return true;
+    }
+    TerminateProcess(process, 1);
+    // A termination request is not return proof; wait for the actual signal.
+    return WaitForSingleObject(process, graceMs) == WAIT_OBJECT_0;
+}
+static bool oxp3OwnerParentTransition(HANDLE process, bool ownerAdmitted, bool ownerChildReturned,
+                                      const std::string& token, bool revoke) {
+    // Exact production post-wait transition shared with ymccLightSetterApply.
+    if (!ownerAdmitted) return true;
+    if (ownerChildReturned) {
+        g_oxp3OwnerHelperAlive.store(false, std::memory_order_release);
+        const bool released = oxp3OwnerFinishApply(token, revoke, true);
+        g_oxp3OwnerApplyOutstanding.store(false, std::memory_order_release);
+        return released;
+    }
+    oxp3OwnerRetainRetiredProcess(process, token);
+    return oxp3OwnerFinishApply(token, revoke, false);
+}
+static bool oxp3OwnerReceiptAccepted(bool timedOut, bool outputReadTimedOut,
+                                     bool outputTruncated, bool outputReadError,
+                                     DWORD exitCode, bool childReportedOk,
+                                     bool childIdentityAccepted, bool childCatalogAccepted,
+                                     bool childOperationAccepted, bool ownerGenerationStable,
+                                     bool ownerChildReturned, bool ownerLeaseReleased) {
+    // Exact production acceptance gate shared with ymccLightSetterApply.
+    return !timedOut && !outputReadTimedOut && !outputTruncated && !outputReadError &&
+           exitCode == 0 && childReportedOk && childIdentityAccepted &&
+           childCatalogAccepted && childOperationAccepted && ownerGenerationStable &&
+           ownerChildReturned && ownerLeaseReleased;
+}
+static bool oxp3OwnerStopRetire(std::uint64_t deadline) {
+    bool held = false;
+    {
+        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+        held = g_oxp3OwnerState != ymcc::oxp3_owner::OwnerState::Idle;
+        if (held) {
+            g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Retiring;
+            g_oxp3OwnerLease.revoked.store(true, std::memory_order_release);
+            if (g_oxp3OwnerRevokedEvent) SetEvent(g_oxp3OwnerRevokedEvent);
+            oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Retiring);
+        }
+    }
+    if (!held) return true;
+    for (;;) {
+        (void)oxp3OwnerRetiredProcessReturned();
+        if (!g_oxp3OwnerRetiredProcess && g_oxp3OwnerPendingDebt.load(std::memory_order_acquire) &&
+            g_oxp3OwnerHelperAlive.load(std::memory_order_acquire) &&
+            oxp3OwnerCompleteReturnedChild()) return true;
+        if (!g_oxp3OwnerLease.active.load(std::memory_order_acquire) &&
+            !g_oxp3OwnerPendingDebt.load(std::memory_order_acquire) &&
+            !g_oxp3OwnerApplyOutstanding.load(std::memory_order_acquire) &&
+            !g_oxp3OwnerHelperAlive.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+            if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Retiring) {
+                g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+                g_oxp3OwnerLease.generationToken.clear();
+                g_oxp3OwnerLease.interfacePath.clear();
+                g_oxp3OwnerInterfacePath.clear();
+                oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Idle);
+            }
+            return true;
+        }
+        if (GetTickCount64() >= deadline) {
+            std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+            g_oxp3OwnerPendingDebt.store(true, std::memory_order_release);
+            if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Retiring)
+                oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Retiring);
+            return false;
+        }
+        Sleep(10);
+    }
+}
+static void oxp3OwnerSettleFromTick(const ymcc::onex_x2::Snapshot& state) {
+    if (!g_oxp3OwnerPendingDebt.load(std::memory_order_acquire)) return;
+    // The exact retained child (if any) must be observed signaled before any
+    // debt marker may be cleared; a flag or a timeout is not return proof.
+    if (!oxp3OwnerRetiredProcessReturned()) return;
+    if (state.writePending) return;
+    std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+    if (g_oxp3OwnerState != ymcc::oxp3_owner::OwnerState::Retiring ||
+        g_oxp3OwnerRetiredProcess) return;
+    if (g_oxp3OwnerHelperAlive.load(std::memory_order_acquire) ||
+        g_oxp3OwnerApplyOutstanding.load(std::memory_order_acquire)) {
+        if (!g_oxp3OwnerChildReturnObserved.load(std::memory_order_acquire)) return;
+        g_oxp3OwnerChildReturnObserved.store(false, std::memory_order_release);
+    }
+    g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Idle;
+    g_oxp3OwnerPendingDebt.store(false, std::memory_order_release);
+    g_oxp3OwnerHelperAlive.store(false, std::memory_order_release);
+    g_oxp3OwnerApplyOutstanding.store(false, std::memory_order_release);
+    g_oxp3OwnerLease.active.store(false, std::memory_order_release);
+    g_oxp3OwnerLease.generation.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.topology.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.modelTag.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.admission.store(0, std::memory_order_release);
+    g_oxp3OwnerLease.generationToken.clear();
+    g_oxp3OwnerLease.interfacePath.clear();
+    g_oxp3OwnerInterfacePath.clear();
+    oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Idle);
+}
+
 static void onexX2RevokeSources(bool clearBinding = true) noexcept {
     g_onexX2PublishedReady.store(false, std::memory_order_release);
     if (clearBinding) std::atomic_store_explicit(&g_onexX2BoundDevicePath, std::shared_ptr<const std::wstring>{}, std::memory_order_release);
@@ -13800,7 +15092,7 @@ static void onexX2RevokeSources(bool clearBinding = true) noexcept {
     if (rear) {
         std::lock_guard<std::mutex> lock(g_oemProducerMx);
         const auto& state = g_oemProducerStates[static_cast<size_t>(OemProducerId::OneXX2Rear)];
-        if (state.generation == rear && state.sampled) g_onexX2RearReleaseFence |= state.physicalMask & (kOemBitL4 | kOemBitR4);
+        if (state.generation == rear && state.sampled) g_onexX2RearReleaseFence |= state.physicalMask & (kOemBitL4 | kOemBitR4 | kOemBitHome | kOemBitGKey);
     }
     try { (void)oemProducerCancel(OemProducerId::OneXX2Rear, rear); } catch (...) {}
     try { (void)oemProducerCancel(OemProducerId::OneXX2Home, home); } catch (...) {}
@@ -13890,17 +15182,182 @@ static void onexX2LogOwner(const char* reason, bool force = false) {
         {"deviceNotificationError", g_onexX2NotifyError}, {"xinputTopologyObserved", g_xinputTopologyEpoch.load(std::memory_order_acquire)},
         {"bindAttempts", g_onexX2Transport.bindAttempts()}, {"error", g_onexX2Transport.lastError()},
         {"homeRoute", "vendor-click"}, {"rearRoute", state.requested == ymcc::onex_x2::Model::X2MiniPro ? "keyboard-F15-F16" : "vendor-held"},
-        {"turboKeyboardRoute", "keyboard-vk"}, {"hardwareModeReadbackVerified", false}, {"owner", "existing-capture-lifecycle-thread"}
+        {"turboKeyboardRoute", "keyboard-vk"}, {"hardwareModeReadbackVerified", false}, {"owner", "existing-capture-lifecycle-thread"},
+        {"oxp3LeaseActive", g_oxp3OwnerLease.active.load(std::memory_order_acquire)},
+        {"oxp3LeaseRevoked", g_oxp3OwnerLease.revoked.load(std::memory_order_acquire)},
+        {"oxp3StopLeaseTimedOut", g_oxp3OwnerStopTimedOut.load(std::memory_order_acquire)}
     });
 }
+// BEGIN SuperJoy lighting native lifecycle
+// Distinct endpoint ownership; reuses the existing input lifecycle tick and WndProc.
+static std::atomic<std::uint64_t> g_superJoyLightingTopology{1};
+static std::atomic<bool> g_superJoyLightingStopped{false}, g_superJoyLightingOwnerUsed{false};
+static std::atomic<bool> g_superJoyLightingNotifyReady{false}, g_superJoyLightingStopTimedOut{false};
+static std::mutex g_superJoyLightingNotifyMx;
+static HDEVNOTIFY g_superJoyLightingNotify = nullptr;
+static ymcc::superjoy_owner::Owner& superJoyLightingOwner() {
+    static ymcc::superjoy_owner::Owner owner;
+    return owner;
+}
+static ymcc::superjoy_owner::Context superJoyLightingContext() {
+    return {currentPowerGeneration(), g_superJoyLightingTopology.load(std::memory_order_acquire),
+        hardwareWriteAllowed() && !g_exitRequested.load(std::memory_order_acquire) &&
+        !g_superJoyLightingStopped.load(std::memory_order_acquire) &&
+        g_superJoyLightingNotifyReady.load(std::memory_order_acquire), g_machineIdentity.deviceClass};
+}
+static bool superJoyLightingRouteAdmitted() {
+    return ymcc::superjoy_owner::sourceModel(g_machineIdentity.deviceClass) &&
+        ymcc::lighting::sourceAdapter(g_machineIdentity.deviceClass) == ymcc::lighting::SourceAdapter::SuperJoyCec;
+}
+static bool superJoyLightingEnsureNotification() {
+    std::lock_guard<std::mutex> lock(g_superJoyLightingNotifyMx);
+    if (g_superJoyLightingStopped.load(std::memory_order_acquire) || !g_hwnd ||
+        !ymcc::superjoy_owner::sourceModel(g_machineIdentity.deviceClass)) return false;
+    if (g_superJoyLightingNotify) return g_superJoyLightingNotifyReady.load(std::memory_order_acquire);
+    DEV_BROADCAST_DEVICEINTERFACE_W filter{};
+    filter.dbcc_size = sizeof(filter); filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    filter.dbcc_classguid = kYeManGuidDeviceInterfaceHid;
+    g_superJoyLightingNotify = RegisterDeviceNotificationW(g_hwnd, &filter, DEVICE_NOTIFY_WINDOW_HANDLE);
+    g_superJoyLightingNotifyReady.store(g_superJoyLightingNotify != nullptr, std::memory_order_release);
+    return g_superJoyLightingNotify != nullptr;
+}
+static void superJoyLightingObserveDeviceChange(WPARAM event, LPARAM payload) {
+    if ((event != DBT_DEVICEARRIVAL && event != DBT_DEVICEREMOVECOMPLETE) || !payload) return;
+    const auto* header = reinterpret_cast<const DEV_BROADCAST_HDR*>(payload);
+    const size_t offset = offsetof(DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name);
+    if (header->dbch_devicetype != DBT_DEVTYP_DEVICEINTERFACE || header->dbch_size < offset + sizeof(wchar_t) ||
+        header->dbch_size > 65536) return;
+    const auto* detail = reinterpret_cast<const DEV_BROADCAST_DEVICEINTERFACE_W*>(header);
+    if (!IsEqualGUID(detail->dbcc_classguid, kYeManGuidDeviceInterfaceHid)) return;
+    const size_t capacity = (header->dbch_size - offset) / sizeof(wchar_t);
+    const wchar_t* end = std::find(detail->dbcc_name, detail->dbcc_name + capacity, L'\0');
+    if (end == detail->dbcc_name + capacity) return;
+    const std::wstring path(detail->dbcc_name, static_cast<size_t>(end - detail->dbcc_name));
+    if (!ymcc::superjoy_owner::sourcePath(path)) return;
+    // Includes the unknown-candidate discovery window and never advances for an
+    // unrelated HID. No endpoint/probe/report I/O is performed in WndProc.
+    g_superJoyLightingTopology.fetch_add(1, std::memory_order_acq_rel);
+    if (g_superJoyLightingOwnerUsed.load(std::memory_order_acquire)) superJoyLightingOwner().retire();
+}
+static bool superJoyLightingSelectInterface(std::wstring& selected, std::string& reason) {
+    selected.clear();
+    const auto before = superJoyLightingContext();
+    if (!before.writesAllowed || !ymcc::superjoy_owner::sourceModel(before.model)) {
+        reason = "superjoy-owner-context-unavailable"; return false;
+    }
+    HDEVINFO set = SetupDiGetClassDevsW(&kYeManGuidDeviceInterfaceHid, nullptr, nullptr,
+        DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (set == INVALID_HANDLE_VALUE) { reason = "superjoy-hid-enumeration-failed"; return false; }
+    bool valid = true, finished = false;
+    for (DWORD index = 0; index < 4096; ++index) {
+        SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
+        if (!SetupDiEnumDeviceInterfaces(set, nullptr, &kYeManGuidDeviceInterfaceHid, index, &iface)) {
+            finished = GetLastError() == ERROR_NO_MORE_ITEMS;
+            if (!finished) { valid = false; reason = "superjoy-hid-enumeration-incomplete"; }
+            break;
+        }
+        DWORD bytes = 0;
+        (void)SetupDiGetDeviceInterfaceDetailW(set, &iface, nullptr, 0, &bytes, nullptr);
+        if (bytes < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) || bytes > 65536) {
+            valid = false; reason = "superjoy-hid-detail-invalid"; break;
+        }
+        std::vector<BYTE> storage(bytes);
+        auto* detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(storage.data());
+        detail->cbSize = sizeof(*detail);
+        if (!SetupDiGetDeviceInterfaceDetailW(set, &iface, detail, bytes, nullptr, nullptr)) {
+            valid = false; reason = "superjoy-hid-detail-unavailable"; break;
+        }
+        const size_t capacity = (bytes - offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath)) / sizeof(wchar_t);
+        const wchar_t* end = std::find(detail->DevicePath, detail->DevicePath + capacity, L'\0');
+        if (end == detail->DevicePath + capacity) { valid = false; reason = "superjoy-hid-path-invalid"; break; }
+        const std::wstring path(detail->DevicePath, static_cast<size_t>(end - detail->DevicePath));
+        if (!ymcc::superjoy_owner::sourcePath(path)) continue;
+        HANDLE probe = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (probe == INVALID_HANDLE_VALUE) { valid = false; reason = "superjoy-endpoint-observation-failed"; break; }
+        HIDD_ATTRIBUTES attributes{}; attributes.Size = sizeof(attributes);
+        PHIDP_PREPARSED_DATA preparsed = nullptr; HIDP_CAPS caps{};
+        const bool attrsOk = HidD_GetAttributes(probe, &attributes) != FALSE;
+        const bool prepOk = HidD_GetPreparsedData(probe, &preparsed) != FALSE;
+        const bool capsOk = prepOk && HidP_GetCaps(preparsed, &caps) == HIDP_STATUS_SUCCESS;
+        if (preparsed) HidD_FreePreparsedData(preparsed);
+        CloseHandle(probe);
+        if (!attrsOk || !capsOk) { valid = false; reason = "superjoy-endpoint-descriptor-unavailable"; break; }
+        const bool matches = attributes.VendorID == 0x1C4F && attributes.ProductID == 2 &&
+            caps.UsagePage == 0xFF00 && caps.Usage == 1 && caps.InputReportByteLength == 65 && caps.OutputReportByteLength == 65;
+        if (!matches) continue;
+        if (!selected.empty()) { valid = false; reason = "superjoy-endpoint-ambiguous"; break; }
+        selected = path;
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    const auto after = superJoyLightingContext();
+    if (!finished && valid) { valid = false; reason = "superjoy-hid-enumeration-limit"; }
+    if (!after.writesAllowed || before.generation != after.generation || before.topology != after.topology || before.model != after.model) {
+        valid = false; reason = "superjoy-owner-context-changed";
+    }
+    if (!valid) { selected.clear(); return false; }
+    if (selected.empty()) { reason = "superjoy-endpoint-unavailable"; return false; }
+    return true;
+}
+static std::optional<ymcc::superjoy_owner::Admission> superJoyLightingAdmit(std::string& reason) {
+    if (!superJoyLightingRouteAdmitted()) { reason = "superjoy-lighting-route-not-connected"; return std::nullopt; }
+    if (!superJoyLightingEnsureNotification()) { reason = "superjoy-device-notification-unavailable"; return std::nullopt; }
+    std::wstring path;
+    if (!superJoyLightingSelectInterface(path, reason)) return std::nullopt;
+    auto& owner = superJoyLightingOwner();
+    g_superJoyLightingOwnerUsed.store(true, std::memory_order_release);
+    auto admission = owner.begin(superJoyLightingContext(), path);
+    if (!admission) reason = "superjoy-owner-busy-or-retiring";
+    return admission;
+}
+static void superJoyLightingOwnerTick() noexcept {
+    try {
+        // No new discovery or periodic registration. The admitted helper's wait
+        // and the existing input lifecycle tick maintain only its owner record.
+        if (g_superJoyLightingOwnerUsed.load(std::memory_order_acquire)) {
+            if (superJoyLightingOwner().observation().phase == ymcc::superjoy_owner::Phase::Idle) return;
+            superJoyLightingOwner().refresh(superJoyLightingContext());
+            (void)superJoyLightingOwner().observeReturn();
+        }
+    } catch (...) {}
+}
+static bool superJoyLightingOwnerStop(std::uint64_t deadline) noexcept {
+    g_superJoyLightingStopped.store(true, std::memory_order_release);
+    g_superJoyLightingTopology.fetch_add(1, std::memory_order_acq_rel);
+    g_superJoyLightingNotifyReady.store(false, std::memory_order_release);
+    try {
+        { std::lock_guard<std::mutex> lock(g_superJoyLightingNotifyMx);
+          if (g_superJoyLightingNotify && UnregisterDeviceNotification(g_superJoyLightingNotify)) g_superJoyLightingNotify = nullptr; }
+        if (!g_superJoyLightingOwnerUsed.load(std::memory_order_acquire)) return true;
+        auto& owner = superJoyLightingOwner(); owner.retire();
+        do {
+            (void)owner.observeReturn();
+            if (owner.observation().phase == ymcc::superjoy_owner::Phase::Idle) {
+                g_superJoyLightingStopTimedOut.store(false, std::memory_order_release); return true;
+            }
+            if (GetTickCount64() >= deadline) break;
+            Sleep(10);
+        } while (true);
+    } catch (...) {}
+    g_superJoyLightingStopTimedOut.store(true, std::memory_order_release); return false;
+}
+static void superJoyLightingOwnerResume() noexcept {
+    if (g_superJoyLightingStopped.exchange(false, std::memory_order_acq_rel))
+        g_superJoyLightingTopology.fetch_add(1, std::memory_order_acq_rel);
+}
+// END SuperJoy lighting native lifecycle
+
 static void onexX2OwnerTick() noexcept {
+    superJoyLightingOwnerTick();
     using namespace ymcc::onex_x2;
     std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
+    const ULONGLONG tickNow = GetTickCount64();
+    oxp3OwnerHeartbeat(tickNow);
     const Model machine = g_machineIdentity.family == YmccFamily::OneXPlayer ? modelForClass(g_machineIdentity.deviceClass) : Model::Unsupported;
-    if (!supported(machine)) (void)onexX2EnsureDeviceNotification(machine, GetTickCount64());
+    if (!supported(machine)) (void)onexX2EnsureDeviceNotification(machine, tickNow);
     if (!supported(machine) && !g_onexX2Transport.hasDevice() && !g_onexX2RearGeneration && !g_onexX2HomeGeneration) return;
     try {
-        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG now = tickNow;
         const Context context{currentPowerGeneration(), g_onexX2DeviceEpoch.load(std::memory_order_acquire)};
         const bool notifications = onexX2EnsureDeviceNotification(machine, now);
         const bool allowed = notifications && g_inputCaptureReady && !g_exitRequested.load(std::memory_order_acquire) &&
@@ -13910,9 +15367,10 @@ static void onexX2OwnerTick() noexcept {
         if (state.phase != Phase::Live || state.generation != g_onexX2SessionGeneration) onexX2RevokeSources();
         g_onexX2SessionGeneration = state.generation;
         onexX2BeginBindingObservation(context);
-        g_onexX2Transport.tick(now, hardwareWriteAllowed, onexX2BindingPathAllowed);
+        g_onexX2Transport.tick(now, onexX2OwnerWriteAllowed, onexX2OwnerBindAllowed);
         onexX2EndBindingObservation();
         state = g_onexX2Transport.snapshot();
+        oxp3OwnerSettleFromTick(state);
         // A fresh binding already registered its exact path before I/O. Retiring
         // old action producers must not erase that new notification ownership.
         if (state.phase != Phase::Live || state.generation != g_onexX2SessionGeneration)
@@ -13924,7 +15382,10 @@ static void onexX2OwnerTick() noexcept {
                 context.power != currentPowerGeneration() || context.topology != g_onexX2DeviceEpoch.load(std::memory_order_acquire) ||
                 g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) { onexX2RevokeSources(); break; }
             const bool home = event->kind == EventKind::Click && event->button == Button::Home;
-            const bool rear = (event->kind == EventKind::RearChanged || event->kind == EventKind::RearObserved) && machine != Model::X2MiniPro;
+            const bool heldEvent = event->kind == EventKind::RearChanged || event->kind == EventKind::RearObserved;
+            const bool rear = heldEvent && machine != Model::X2MiniPro &&
+                (event->button == Button::L4 || event->button == Button::R4 ||
+                 (machine == Model::OneXPlayer3 && (event->button == Button::Home || event->button == Button::GKey)));
             if (!home && !rear) continue; // keyboard-owned signals never get a second producer
             g_onexX2PublishedPower.store(context.power, std::memory_order_release);
             g_onexX2PublishedTopology.store(context.topology, std::memory_order_release);
@@ -13935,15 +15396,18 @@ static void onexX2OwnerTick() noexcept {
                     g_onexX2HomeDisplayUntil.store(now + clickPulseMs, std::memory_order_release);
                 else { g_onexX2Transport.stop(now); onexX2RevokeSources(); break; }
             } else {
-                const uint64_t observed = event->button == Button::L4 ? kOemBitL4 : kOemBitR4;
-                const bool pressed = (event->rearBits & (event->button == Button::L4 ? 1 : 2)) != 0;
+                const uint64_t observed = event->button == Button::L4 ? kOemBitL4 : event->button == Button::R4 ? kOemBitR4 :
+                    event->button == Button::Home ? kOemBitHome : kOemBitGKey;
+                const unsigned heldBit = event->button == Button::L4 ? 1 : event->button == Button::R4 ? 2 : event->button == Button::Home ? 4 : 8;
+                const bool pressed = (event->rearBits & heldBit) != 0;
                 if (!pressed) g_onexX2RearReleaseFence &= ~observed;
                 if (!g_onexX2RearGeneration) {
                     g_onexX2RearGeneration = oemProducerBegin(OemProducerId::OneXX2Rear);
                     std::lock_guard<std::mutex> sourceLock(g_oemProducerMx);
                     g_oemProducerStates[static_cast<size_t>(OemProducerId::OneXX2Rear)].armedMask &= ~g_onexX2RearReleaseFence;
                 }
-                const uint64_t mask = (event->rearBits & 1 ? kOemBitL4 : 0) | (event->rearBits & 2 ? kOemBitR4 : 0);
+                const uint64_t mask = (event->rearBits & 1 ? kOemBitL4 : 0) | (event->rearBits & 2 ? kOemBitR4 : 0) |
+                    (event->rearBits & 4 ? kOemBitHome : 0) | (event->rearBits & 8 ? kOemBitGKey : 0);
                 if (!oemProducerPublish(OemProducerId::OneXX2Rear, g_onexX2RearGeneration, mask, observed)) {
                     g_onexX2Transport.stop(now); onexX2RevokeSources(); break;
                 }
@@ -13957,6 +15421,12 @@ static void onexX2OwnerTick() noexcept {
     }
 }
 static void onexX2OwnerStop() noexcept {
+    // Keep the retiring/debt state until the admitted helper actually returns;
+    // a timeout must not reopen admission or rebinding.
+    const auto stopDeadline = GetTickCount64() + 5000;
+    (void)superJoyLightingOwnerStop(stopDeadline);
+    if (!oxp3OwnerStopRetire(stopDeadline))
+        g_oxp3OwnerStopTimedOut.store(true, std::memory_order_release);
     std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
     const bool observed = g_onexX2Transport.hasDevice() || g_onexX2RearGeneration || g_onexX2HomeGeneration;
     g_onexX2Transport.stop(GetTickCount64()); onexX2RevokeSources();
@@ -16677,8 +18147,8 @@ static int oemChordProfileIdFor(YmccFamily family, const std::string& cls) {
         case YmccFamily::Ayn: return id(OemChordProfileId::Ayn);
         case YmccFamily::OneXPlayer:
             if (cls == "HandheldCompanion.Devices.OneXPlayerX2MiniPro") return id(OemChordProfileId::OneXX2MiniPro);
-            if (cls == "HandheldCompanion.Devices.OneXPlayerX2" ||
-                cls == "HandheldCompanion.Devices.OneXPlayer3") return id(OemChordProfileId::OneXX1); // keyboard rules only; HID descriptor remains unadmitted
+            if (cls == "HandheldCompanion.Devices.OneXPlayer3") return id(OemChordProfileId::OneXX3);
+            if (cls == "HandheldCompanion.Devices.OneXPlayerX2") return id(OemChordProfileId::OneXX1);
             if (has("OneXPlayerApex")) return id(OemChordProfileId::OneXApex);
             if (has("OneXPlayerMini")) return id(OemChordProfileId::OneXMini);
             if (has("OneXPlayerOneXFly")) return id(OemChordProfileId::OneXFly);
@@ -16887,6 +18357,7 @@ static void ymccResolveFamily(MachineIdentity& id) {
     const auto& m = id.manufacturer;
     const auto& p = id.product;
     const auto& sys = id.systemProduct;
+    const auto oneXClass = ymcc::capabilities::oem::resolveOneXDeviceClass(m, p, id.systemVersion);
     // HC anchor: Devices/IDevice.cs:821-835 switch(ManufacturerName.ToUpper())
     //   case "ASUSTEK COMPUTER INC." — 精确串匹配（非 find 子串），manufacturer
     //   已经 ymccDmiNormalize 大写化（6162/6294）。C3 修复 2026-09-11：移除
@@ -17091,22 +18562,19 @@ static void ymccResolveFamily(MachineIdentity& id) {
         id.gyroMatrixId = "hc-a250b19a:ayaneo-flip11:gyro:x-z-neg-y";
         id.accelMatrixId = "hc-a250b19a:ayaneo-flip11:accel:x-z-neg-y";
         id.inputHidKey = "ayaneo-flip11:keyboard-oem";
-    } else if ((m == "ONE-NETBOOK TECHNOLOGY CO., LTD." || m == "ONE-NETBOOK") &&
-               (p == "ONEXPLAYER X2")) {
+    } else if (oneXClass == "HandheldCompanion.Devices.OneXPlayerX2") {
         id.family = YmccFamily::OneXPlayer;
         id.deviceClass = "HandheldCompanion.Devices.OneXPlayerX2";
         id.gyroMatrixId = "hc-a250b19a:onexplayer-x2:gyro:z-x-neg-y";
         id.accelMatrixId = "hc-a250b19a:onexplayer-x2:accel:z-x-neg-y";
         id.inputHidKey = "onexplayer-x2:keyboard-oem";
-    } else if ((m == "ONE-NETBOOK TECHNOLOGY CO., LTD." || m == "ONE-NETBOOK") &&
-               (p == "ONEXPLAYER X2MINI PRO")) {
+    } else if (oneXClass == "HandheldCompanion.Devices.OneXPlayerX2MiniPro") {
         id.family = YmccFamily::OneXPlayer;
         id.deviceClass = "HandheldCompanion.Devices.OneXPlayerX2MiniPro";
         id.gyroMatrixId = "hc-a250b19a:onexplayer-x2minipro:gyro:y-neg-z-neg-x";
         id.accelMatrixId = "hc-a250b19a:onexplayer-x2minipro:accel:neg-x-neg-z-y";
         id.inputHidKey = "onexplayer-x2minipro:keyboard-oem";
-    } else if ((m == "ONE-NETBOOK TECHNOLOGY CO., LTD." || m == "ONE-NETBOOK") &&
-               (p == "ONEXPLAYER 3" || p == "ONEXPLAYER-3")) {
+    } else if (oneXClass == "HandheldCompanion.Devices.OneXPlayer3") {
         id.family = YmccFamily::OneXPlayer;
         id.deviceClass = "HandheldCompanion.Devices.OneXPlayer3";
         id.gyroMatrixId = "hc-a250b19a:onexplayer-3:gyro:y-x-z";
@@ -17194,45 +18662,11 @@ static void ymccResolveFamily(MachineIdentity& id) {
             id.accelMatrixId = "hc-06c0b954:ayanero-next:accel:neg-x-neg-z-y";
         }
         id.inputHidKey = "ayanero:hid";
-    } else if (m.find("ONE-NETBOOK") != std::string::npos) {
+    } else if (ymcc::capabilities::oem::oneXManufacturerMatches(m)) {
+        // The unique capability-library identity map retains only fixed factory cases.
+        if (oneXClass.empty()) return;
         id.family = YmccFamily::OneXPlayer;
-        const std::string& ver = id.systemVersion;
-        if (p.find("X1 MINI") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerX1Mini";
-        else if (p.find("X1PRO") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerX1Pro";
-        else if (p.find("X1 I") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerX1Intel";
-        else if (p.find("X1") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerX1AMD";
-        else if (p.find("APEX") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerApex";
-        else if (p.find("G1 I") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerG1Intel";
-        else if (p.find("G1") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerG1AMD";
-        else if (p.find("F1PRO") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro";
-        else if (p.find("F1") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerOneXFly";
-        else if (p.find("MINI A07") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayerMiniAMD";
-        else if (p.find("MINI PRO") != std::string::npos || p.find("ONE XPLAYER") != std::string::npos) {
-            // HC groups these with SystemVersion: 1002-C Intel, V03 MiniPro, else AMD.
-            if (ver.find("1002-C") != std::string::npos)
-                id.deviceClass = "HandheldCompanion.Devices.OneXPlayerMiniIntel";
-            else if (ver.find("V03") != std::string::npos)
-                id.deviceClass = "HandheldCompanion.Devices.OneXPlayerMiniPro";
-            else
-                id.deviceClass = "HandheldCompanion.Devices.OneXPlayerMiniAMD";
-        } else if (p.find("2 PRO") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayer2Pro";
-        else if (p.find("2 ARP23") != std::string::npos)
-            id.deviceClass = "HandheldCompanion.Devices.OneXPlayer2";
-        else {
-            id.family = YmccFamily::Unknown;
-            return;
-        }
+        id.deviceClass = std::string(oneXClass);
         if (id.deviceClass == "HandheldCompanion.Devices.OneXPlayerX1Mini" ||
             id.deviceClass == "HandheldCompanion.Devices.OneXPlayerG1AMD" ||
             id.deviceClass == "HandheldCompanion.Devices.OneXPlayerG1Intel") {
@@ -17331,8 +18765,8 @@ static void ymccResolveFamily(MachineIdentity& id) {
 //   AYANEO CEc -> AYANEODeviceCEc.cs:31-39（Light/Brightness/SecondColor/Solid）
 //                 NEXT/2021 为裸 :IDevice（AYANEONEXT.cs:8 / AYANEO2021.cs:8）
 //   OneXPlayer -> OneXPlayerX1.cs:82-88（X1 系 Light/Brightness/SecondColor/
-//                 Solid/LEDPreset；X1Mini 继承 SecondColor 未清除于
-//                 OneXPlayerX1Mini.cs:28-34 且 |= Rainbow；G1.cs:25-30 /
+//                 Solid/LEDPreset；X1Mini 源声明继承 SecondColor，但当前 writer 忽略副颜色：
+//                 有效 SecondColor=false，Solid/Rainbow/Brightness 保留；G1.cs:25-30 /
 //                 OneXFly.cs:55-60 仅 Light/Brightness + Solid/Rainbow；
 //                 Mini.cs / OneXPlayer2.cs 无任何 Capabilities 行）
 //   Zotac      -> GamingZone.cs:170-179（Light/Brightness/SecondColor/
@@ -17391,6 +18825,10 @@ static const std::vector<std::string>& ymccDeviceClassLightingSet() {
         "HandheldCompanion.Devices.SuiPlay0X1",
         "HandheldCompanion.Devices.XboxROGAlly",
         "HandheldCompanion.Devices.XboxROGAllyX",
+        "HandheldCompanion.Devices.OneXPlayer3",
+        "HandheldCompanion.Devices.AYANEO3",
+        "HandheldCompanion.Devices.AYANEONEXT2",
+        "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
     };
     return s_set;
 }
@@ -17415,9 +18853,12 @@ static const std::vector<std::string>& ymccDeviceClassSecondColorSet() {
         "HandheldCompanion.Devices.OneXPlayerX1",
         "HandheldCompanion.Devices.OneXPlayerX1AMD",
         "HandheldCompanion.Devices.OneXPlayerX1Intel",
-        "HandheldCompanion.Devices.OneXPlayerX1Mini",
         "HandheldCompanion.Devices.OneXPlayerX1Pro",
         "HandheldCompanion.Devices.SuiPlay0X1",
+        "HandheldCompanion.Devices.OneXPlayer3",
+        "HandheldCompanion.Devices.AYANEO3",
+        "HandheldCompanion.Devices.AYANEONEXT2",
+        "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
     };
     return s_set;
 }
@@ -17463,7 +18904,9 @@ static std::vector<std::string> ymccDeviceClassLedEffects(const std::string& dev
         deviceClass == "HandheldCompanion.Devices.LokiMax6800U" ||
         deviceClass == "HandheldCompanion.Devices.LokiMiniPro" ||
         deviceClass == "HandheldCompanion.Devices.LokiZero" ||
-        deviceClass == "HandheldCompanion.Devices.SuiPlay0X1")
+        deviceClass == "HandheldCompanion.Devices.SuiPlay0X1" ||
+        deviceClass == "HandheldCompanion.Devices.AYANEO3" ||
+        deviceClass == "HandheldCompanion.Devices.AYANEONEXT2")
         return {"solid"};
     if (deviceClass == "HandheldCompanion.Devices.ClawA1M" ||
         deviceClass == "HandheldCompanion.Devices.ClawA2VM" ||
@@ -17490,6 +18933,10 @@ static std::vector<std::string> ymccDeviceClassLedEffects(const std::string& dev
         deviceClass == "HandheldCompanion.Devices.XboxROGAlly" ||
         deviceClass == "HandheldCompanion.Devices.XboxROGAllyX")
         return {"solid", "breathing", "rainbow", "wheel", "ambilight"};
+    if (deviceClass == "HandheldCompanion.Devices.OneXPlayer3")
+        return {"solid", "breathing", "preset"};
+    if (deviceClass == "HandheldCompanion.Devices.OneXPlayerX2MiniPro")
+        return {"solid", "breathing"};
     return {};
 }
 
@@ -17862,6 +19309,17 @@ static const OemKeyDef kOneXX2Keys[] = {
     {"l4", "M1", 1, OemKeyForm::HidButton, false},
     {"r4", "M2", 2, OemKeyForm::HidButton, false},
 };
+// The single total-library OXP3 row uses the same source owner; f2e58468 adds
+// G-Key and real held Home. Its dedicated profile retains X2 keyboard rules
+// without inheriting the replaced mouse OEM4 chord.
+static const OemKeyDef kOneXX3Keys[] = {
+    {"turbo", "Turbo", 0, OemKeyForm::KeyboardVk, false},
+    {"keyboard", "Keyboard", 0, OemKeyForm::KeyboardVk, false},
+    {"home", "Home", 0, OemKeyForm::HidButton, false},
+    {"l4", "M1", 1, OemKeyForm::HidButton, false},
+    {"r4", "M2", 2, OemKeyForm::HidButton, false},
+    {"gkey", "G-Key", 0, OemKeyForm::HidButton, false},
+};
 static const OemKeyDef kOneXX2MiniProKeys[] = {
     {"turbo", "Turbo", 0, OemKeyForm::KeyboardVk, false},
     {"keyboard", "Keyboard", 0, OemKeyForm::KeyboardVk, false},
@@ -17909,8 +19367,8 @@ static OemCatalogRef oemCatalogForFamily(YmccFamily family, const std::string& d
             return oemCatalogOf(kSteamDeckKeys);
         case YmccFamily::OneXPlayer:
             if (deviceClass == "HandheldCompanion.Devices.OneXPlayerX2MiniPro") return oemCatalogOf(kOneXX2MiniProKeys);
-            if (deviceClass == "HandheldCompanion.Devices.OneXPlayerX2" ||
-                deviceClass == "HandheldCompanion.Devices.OneXPlayer3") return oemCatalogOf(kOneXX2Keys);
+            if (deviceClass == "HandheldCompanion.Devices.OneXPlayer3") return oemCatalogOf(kOneXX3Keys);
+            if (deviceClass == "HandheldCompanion.Devices.OneXPlayerX2") return oemCatalogOf(kOneXX2Keys);
             if (has("OneXPlayerApex")) return oemCatalogOf(kOneXApexKeys);
             if (has("OneXPlayerMini")) return oemCatalogOf(kOneXMiniKeys);
             if (has("OneXPlayerOneXFly")) return oemCatalogOf(kOneXFlyKeys);
@@ -17972,6 +19430,7 @@ static OemCatalogRef oemBoundCatalogForFamily(YmccFamily family, const std::stri
 static bool oemKeyCaptureImplemented(YmccFamily family, const std::string& cls, const std::string& key) {
     if (family == YmccFamily::ValveSteamDeck && cls == "HandheldCompanion.Devices.SteamDeck")
         return false; // Embedded catalog only; a physical Neptune reader is not integrated.
+    if (family == YmccFamily::OneXPlayer && cls == "HandheldCompanion.Devices.OneXPlayer3" && key == "gkey") return true;
     if (family == YmccFamily::OneXPlayer &&
         (cls == "HandheldCompanion.Devices.OneXPlayerX2" || cls == "HandheldCompanion.Devices.OneXPlayer3" ||
          cls == "HandheldCompanion.Devices.OneXPlayerX2MiniPro"))
@@ -18421,7 +19880,7 @@ static bool machineIdentitySelfTest() {
 
     // ── 7.52 P1-T4：deviceClass 级能力位断言（C1/C2 修复验证，HC per-class
     // Capabilities |= 基准）。NEXT/2021 裸 :IDevice 无光；G1/OneXFly/2/Mini
-    // 直连 OneXAOKZOE 无对应位；X1Mini 继承 X1:84 SecondColor（未清除）。--
+    // 直连 OneXAOKZOE 无对应位；X1Mini 源声明继承但有效 SecondColor=false。--
     {
         auto checkLight = [&](const char* name, const char* cls, bool expected) {
             const bool actual = ymccDeviceClassSupportsLighting(cls);
@@ -18445,13 +19904,13 @@ static bool machineIdentitySelfTest() {
             // CEc 系有光
             !checkLight("slide", "HandheldCompanion.Devices.AYANEOSlide", true) ||
             !checkLight("air", "HandheldCompanion.Devices.AYANEOAIR", true) ||
-            // C2：G1/OneXFly/Mini/2 无 SecondColor；X1 系有（继承含 X1Mini）
+            // C2：G1/OneXFly/Mini/2 无 SecondColor；X1 其他有效 writer 保留，Mini 排除
             !checkSecond("g1", "HandheldCompanion.Devices.OneXPlayerG1AMD", false) ||
             !checkSecond("onexfly", "HandheldCompanion.Devices.OneXPlayerOneXFly", false) ||
             !checkSecond("mini", "HandheldCompanion.Devices.OneXPlayerMiniAMD", false) ||
             !checkSecond("ox2", "HandheldCompanion.Devices.OneXPlayer2", false) ||
             !checkSecond("x1", "HandheldCompanion.Devices.OneXPlayerX1AMD", true) ||
-            !checkSecond("x1mini", "HandheldCompanion.Devices.OneXPlayerX1Mini", true) ||
+            !checkSecond("x1mini", "HandheldCompanion.Devices.OneXPlayerX1Mini", false) ||
             // C2 伴生：Mini/2 连 Lighting 都没有
             !checkLight("mini", "HandheldCompanion.Devices.OneXPlayerMiniAMD", false) ||
             !checkLight("ox2", "HandheldCompanion.Devices.OneXPlayer2", false) ||
@@ -19046,16 +20505,33 @@ static bool ymccApplyNamedImuMatrix(const std::string& matrixId, double ix, doub
     if (gyroAt != std::string::npos) recipeAt = gyroAt + 6;
     else if (accelAt != std::string::npos) recipeAt = accelAt + 7;
     if (recipeAt == std::string::npos) return false;
-    const std::string recipe = matrixId.substr(recipeAt);
-    std::vector<std::string> tokens;
-    std::string swap;
-    if (!ymccSplitAxisRecipe(recipe, tokens, swap)) return false;
+    auto swapAt = matrixId.rfind("-swap-");
+    if (swapAt != std::string::npos && swapAt < recipeAt) swapAt = std::string::npos;
+    const size_t coreEnd = swapAt == std::string::npos ? matrixId.size() : swapAt;
+    const size_t swapBegin = swapAt == std::string::npos ? matrixId.size() : swapAt + 6;
     int axis[3]{}, sign[3]{};
-    for (int k = 0; k < 3; ++k)
-        if (!ymccParseAxisToken(tokens[k], axis[k], sign[k])) return false;
+    size_t i = recipeAt;
+    for (int k = 0; k < 3; ++k) {
+        if (i >= coreEnd) return false;
+        sign[k] = 1;
+        if (coreEnd - i > 4 && matrixId.compare(i, 4, "neg-") == 0) {
+            sign[k] = -1;
+            i += 4;
+        }
+        const char axisName = matrixId[i++];
+        if (axisName == 'x') axis[k] = 0;
+        else if (axisName == 'y') axis[k] = 1;
+        else if (axisName == 'z') axis[k] = 2;
+        else return false;
+        if (i < coreEnd) {
+            if (matrixId[i] != '-') return false;
+            ++i;
+        }
+    }
+    if (i != coreEnd) return false;
     const double in[3] = { ix, iy, iz };
     double scaled[3];
-    if (swap.empty()) {
+    if (swapBegin == matrixId.size()) {
         // Result form: token k names which input (and sign) becomes output k.
         ox = sign[0] * in[axis[0]];
         oy = sign[1] * in[axis[1]];
@@ -19067,10 +20543,10 @@ static bool ymccApplyNamedImuMatrix(const std::string& matrixId, double ix, doub
     scaled[1] = sign[1] * in[1];
     scaled[2] = sign[2] * in[2];
     double out[3] = { scaled[0], scaled[1], scaled[2] };
-    if (swap == "yz") { out[1] = scaled[2]; out[2] = scaled[1]; }
-    else if (swap == "xy") { out[0] = scaled[1]; out[1] = scaled[0]; }
-    else if (swap == "yzx") { out[0] = scaled[1]; out[1] = scaled[2]; out[2] = scaled[0]; }
-    else if (swap == "zyx") { out[0] = scaled[2]; out[1] = scaled[0]; out[2] = scaled[1]; }
+    if (matrixId.compare(swapBegin, std::string::npos, "yz") == 0) { out[1] = scaled[2]; out[2] = scaled[1]; }
+    else if (matrixId.compare(swapBegin, std::string::npos, "xy") == 0) { out[0] = scaled[1]; out[1] = scaled[0]; }
+    else if (matrixId.compare(swapBegin, std::string::npos, "yzx") == 0) { out[0] = scaled[1]; out[1] = scaled[2]; out[2] = scaled[0]; }
+    else if (matrixId.compare(swapBegin, std::string::npos, "zyx") == 0) { out[0] = scaled[2]; out[1] = scaled[0]; out[2] = scaled[1]; }
     else return false;
     ox = out[0]; oy = out[1]; oz = out[2];
     return true;
@@ -19447,6 +20923,8 @@ static bool inputCaptureStartMsiSensorApi(UINT64 generation) {
 }
 
 static void inputCaptureUnsubscribeWinRtSensorsImpl() {
+    g_virtualGyroWake.cancelPending();
+    g_windowsSensorDeviceChange.reset();
     g_sensorWakePollActive.store(false, std::memory_order_release);
     // 仅在专职 STA 传感器线程内调用。退订 ReadingChanged 但保留传感器对象
     // 与 meta（HC IMUGyrometer.StopListening 语义：Suspend 不释放实例，
@@ -19585,8 +21063,7 @@ static void inputCaptureResubscribeWinRtSensorsImpl() {
     // stop（stop 会清空 g_sensorMeta，破坏 gyroDeviceId 追踪）。
     if (g_gyroReadingChangedSubscribed || g_accelReadingChangedSubscribed || g_msiSensorApiProvider.running() || g_hcWindowsSensorApiProvider.running())
         inputCaptureUnsubscribeWinRtSensorsImpl();
-    // A failed revoke retains the old token; never overwrite it with a new subscription.
-    if(g_gyroReadingChangedSubscribed||g_accelReadingChangedSubscribed)return;
+    // A failed revoke retains its token AND paused admission so a later valid resume can retry.
     if (g_gyroReadingChangedSubscribed || g_accelReadingChangedSubscribed ||
         g_msiSensorApiProvider.running() || g_hcWindowsSensorApiProvider.running() || inputCaptureSensorStopRequested()) {
         g_inputCaptureSensorsSuspended.store(true, std::memory_order_release);
@@ -19622,6 +21099,78 @@ static void inputCaptureResubscribeWinRtSensorsImpl() {
     // E8（六十八批，用户已批准）：唤醒转场完成但传感器仍缺失
     // （Resubscribe 失败/GetDefault null）→ 启动受限轮询（arm 辅助见下）。
     inputCaptureArmWakeSensorPollIfAbsent();
+}
+
+static bool inputCaptureVirtualGyroWakeBusy();
+static bool inputCaptureVirtualGyroHostMayWake();
+
+// This is called only after the existing Host accepts a current physical-source frame.
+// No waiting, device access or settings write is allowed under the Host lock.
+static void inputCaptureNoteVirtualGyroReady(unsigned long long hostEpoch, std::uint64_t config) {
+    const auto power=currentPowerGeneration();
+    if(!config || !g_virtualGyroWake.needsReady(hostEpoch,power) || !inputCaptureVirtualGyroHostMayWake() || inputCaptureSensorStopRequested() ||
+        g_exitRequested.load(std::memory_order_acquire) || !g_inputReady.load(std::memory_order_acquire) ||
+        g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) ||
+        !g_sleepRecoveryOutputWanted.load(std::memory_order_acquire))return;
+    const auto sink=g_inputCaptureSink;
+    const auto generation=sink?sink->activeBindingGeneration.load(std::memory_order_acquire):0;
+    if(g_virtualGyroWake.accepted(hostEpoch,power,ymcc::windows_motion::retain(sink,generation),GetTickCount64(),config)) {
+        if(g_sensorThreadWake)SetEvent(g_sensorThreadWake);
+        appendNativeLifecycleLog("gyro-virtual-link-wake",{{"phase","queued"},{"hostEpoch",hostEpoch},
+            {"bindingGeneration",generation},{"settleMs",ymcc::sensors::virtual_link::Wake::settleMs},
+            {"gameConsumptionProven",false}});
+    }
+}
+
+static void inputCaptureVirtualGyroWakeStep() {
+    if(!inputCaptureVirtualGyroHostMayWake() || inputCaptureSensorStopRequested() || g_exitRequested.load(std::memory_order_acquire) ||
+        !g_inputReady.load(std::memory_order_acquire) || g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) ||
+        !g_sleepRecoveryOutputWanted.load(std::memory_order_acquire)) {
+        g_virtualGyroWake.cancelPending();return;
+    }
+    const auto now=GetTickCount64();
+    const auto ticket=g_virtualGyroWake.take(now,inputHostEpochToken(),currentPowerGeneration());
+    if(!ticket)return;
+    const auto sink=g_inputCaptureSink;
+    const auto meta=inputCaptureSensorMetaSnapshot();
+    const bool winrt=machineIsRogAllyFamily() && sink && g_gyroSensor && g_accelSensor &&
+        meta.gyroFamily=="winrt" && meta.accelFamily=="winrt";
+    const auto log=[&](const char* phase,bool fresh) {
+        appendNativeLifecycleLog("gyro-virtual-link-wake",{{"phase",phase},{"hostEpoch",ticket->host},
+            {"bindingGeneration",ticket->bindingGeneration},{"verification",ticket->verification},
+            {"samplePairFresh",fresh},{"gameConsumptionProven",false}});
+    };
+    if(!winrt){log("source-not-supported",false);return;}
+    if(inputCaptureVirtualGyroWakeBusy()){log("existing-source-operation-active",false);return;}
+    const auto binding=ymcc::windows_motion::retain(sink,ticket->bindingGeneration);
+    if(!ymcc::windows_motion::sameOwner(ticket->binding.lock(),binding.activeBinding) ||
+        !g_virtualGyroWake.current(*ticket,inputHostEpochToken(),currentPowerGeneration()))return;
+    bool fresh=false;
+    {
+        std::lock_guard<std::mutex> lock(sink->mx);
+        const auto recent=[&](ULONGLONG tick){return tick && tick<=now && now-tick<=ymcc::sensors::virtual_link::Wake::freshMs;};
+        fresh=sink->gyroOk && sink->accelOk && sink->gyroSequence>=2 && sink->accelSequence>=2 &&
+            sink->gyroTimestamp100ns && sink->accelTimestamp100ns &&
+            sink->gyroBindingGeneration==ticket->bindingGeneration && sink->accelBindingGeneration==ticket->bindingGeneration &&
+            recent(sink->gyroReceiptTick) && recent(sink->accelReceiptTick);
+    }
+    if(fresh){log(ticket->verification?"samples-resumed":"already-streaming",true);return;}
+    if(ticket->verification){log("samples-still-stale",false);return;}
+    if(!g_virtualGyroWake.commit(*ticket,inputHostEpochToken(),currentPowerGeneration(),GetTickCount64(),[&] {
+        return !inputCaptureSensorStopRequested() && inputCaptureVirtualGyroHostMayWake() &&
+            inputHostEpochToken()==ticket->host && currentPowerGeneration()==ticket->power;
+    }))return;
+    // Reuse the established same-object StopListening/StartListening path once.
+    // The independent motion/output gates stay untouched, including mode/trigger.
+    try {inputCaptureResubscribeWinRtSensorsImpl();}
+    catch(...) {log("resubscribe-failed",false);return;}
+    const auto generation=sink->activeBindingGeneration.load(std::memory_order_acquire);
+    if(inputCaptureSensorStopRequested() || !inputCaptureVirtualGyroHostMayWake() || !g_gyroReadingChangedSubscribed || !g_accelReadingChangedSubscribed ||
+        inputHostEpochToken()!=ticket->host || currentPowerGeneration()!=ticket->power ||
+        !g_virtualGyroWake.verifyAfter(*ticket,ymcc::windows_motion::retain(sink,generation),GetTickCount64())) {
+        log("resubscribe-not-confirmed",false);return;
+    }
+    log("resubscribed-awaiting-samples",false);
 }
 
 // 批90（2026-09-12 用户授权）提取：传感器缺失（GetDefault null）时启动
@@ -19732,6 +21281,15 @@ static bool inputCapturePnPReArmSensorDevice() {
         });
         return false;
     }
+    const std::wstring boschPrefix = L"ACPI\\BOSC0200\\";
+    if (!machineIsRogAllyFamily() || meta.gyroFamily != "winrt" || instanceId.size() < boschPrefix.size() ||
+        _wcsnicmp(instanceId.c_str(), boschPrefix.c_str(), boschPrefix.size()) != 0) {
+        appendNativeLifecycleLog("gyro-pnp-rearm-skip", {
+            {"tag", "百式"}, {"reason", "provider-not-bosch-pnp-repair"},
+            {"sourceFamily", meta.gyroFamily}, {"hcParity", "no-hc-analog"}
+        });
+        return false;
+    }
     DEVINST dn = 0;
     const CONFIGRET rcLocate = CM_Locate_DevNodeW(&dn,
         const_cast<wchar_t*>(instanceId.c_str()), CM_LOCATE_DEVNODE_NORMAL);
@@ -19806,7 +21364,9 @@ static void gyroJudgeFinishSuccess(UINT64 segSamples) {
     appendNativeLifecycleLog("gyro-judge-verdict", {
         {"tag", "百式"}, {"result", "success"},
         {"segSamples", segSamples}, {"run", g_gyroJudgeSegRun},
-        {"segMinSamples", kGyroJudgeSegMinSamples},
+        {"segMinSamples", g_gyroJudgeSegmentMinSamples},
+        {"observationOnly", g_gyroJudgeObservationOnly},
+        {"scope", "gyro-source-cadence;not-trigger-or-game-output"},
         {"segments", g_gyroJudgeSegIndex + 1}, {"artifacts", g_gyroJudgeArtifacts},
         {"firstFrameMs", firstFrameMs},
         {"peakSegmentSamples", g_gyroJudgePeakSegmentSamples},
@@ -19841,6 +21401,47 @@ static void gyroJudgeFinishFailed(UINT64 totalSamples, ULONGLONG now) {
     });
 }
 
+// BOSC0200's proven healthy Windows delivery is 25~43Hz even with a 10ms
+// request. Keep that measured compatibility floor only for that provider.
+// Other sources use their own requested interval (80% cadence allowance), so
+// a nominal high-rate device degraded to 30Hz is not called healthy by a ROG rule.
+static UINT64 gyroJudgeRequiredSamples(const InputCaptureSensorMeta& meta) {
+    const auto id = ascii_lower(meta.gyroDeviceId);
+    const bool bosch = meta.gyroFamily == "winrt" &&
+        (id.find("acpi#bosc0200#") != std::string::npos || id.find("acpi\\bosc0200\\") != std::string::npos);
+    if (meta.gyroIntervalMs == 0) return kGyroJudgeSegMinSamples;
+    const UINT64 interval = meta.gyroIntervalMs;
+    const UINT64 expected = (std::max)(UINT64(1), (UINT64(kGyroJudgeSegMs) * 4 + interval * 5 - 1) / (interval * 5));
+    return bosch ? (std::min)(kGyroJudgeSegMinSamples, expected) : expected;
+}
+static void gyroJudgeBeginObservation(bool observationOnly, const char* trigger, bool pnpReset) {
+    const auto meta = inputCaptureSensorMetaSnapshot();
+    g_gyroJudgeObservationOnly = observationOnly;
+    g_gyroJudgeObserveStarted = true;
+    g_gyroJudgeArmTick = GetTickCount64();
+    g_gyroJudgeDetectionStartTick = g_gyroJudgeArmTick + (observationOnly ? 0 : kGyroJudgeWarmupMs);
+    g_gyroJudgeSegStartTick = 0;
+    g_gyroJudgeSegAccum = g_gyroJudgeObservedTotal = g_gyroJudgeLastPumpSeq = g_gyroJudgeLastRejectedSeq = 0;
+    g_gyroJudgeSegIndex = g_gyroJudgeSegRun = g_gyroJudgeSegAlive = 0;
+    g_gyroJudgeArtifacts = 0;
+    g_gyroJudgeFirstFrameTick = g_gyroJudgeLastProgressTick = 0;
+    g_gyroJudgePeakSegmentSamples = 0;
+    g_gyroJudgeBindingGeneration = g_inputCaptureSink->activeBindingGeneration.load(std::memory_order_acquire);
+    g_gyroJudgeSegmentMinSamples = gyroJudgeRequiredSamples(meta);
+    g_gyroJudgeState = GyroJudgeState::Sampling;
+    appendNativeLifecycleLog(observationOnly ? "gyro-judge-observe" : "gyro-judge-rearm", {
+        {"tag", "百式"}, {"armTick", g_gyroJudgeArmTick}, {"trigger", trigger},
+        {"repair", observationOnly ? "none-observe-existing-source" :
+            (pnpReset ? "pnp-disable-enable+winrt-reinit" : "winrt-reinit-fallback")},
+        {"pnpReset", pnpReset}, {"observationOnly", observationOnly}, {"repairScope", "rog-only"},
+        {"sourceFamily", meta.gyroFamily}, {"reportIntervalMs", meta.gyroIntervalMs},
+        {"bindingGeneration", g_gyroJudgeBindingGeneration},
+        {"warmupMs", observationOnly ? 0u : kGyroJudgeWarmupMs},
+        {"firstFrameTimeoutMs", kGyroJudgeFirstFrameTimeoutMs},
+        {"observationMs", static_cast<unsigned long>(kGyroJudgeSegMs * kGyroJudgeSegTotal)},
+        {"segMinSamples", g_gyroJudgeSegmentMinSamples}
+    });
+}
 // ── 百式执行线：低频等待首个 100 → 单次武装 → 3s warmup → 数据判定 ──
 static void inputCaptureSensorHighMagKeepaliveStep() {
     // ── 0. 任务边界 ──
@@ -19884,6 +21485,8 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
         g_gyroJudgeState = GyroJudgeState::Idle;
         g_gyroJudgeFailCount = 0;
         g_gyroJudgeInconclusiveCount = 0;
+        g_gyroJudgeObserveStarted = false;
+        g_gyroJudgeObservationOnly = false;
         g_gyroJudgeThrottleUntilTick = 0;
         g_gyroJudgeLastTriggerPollTick = 0;
         g_gyroJudgeArmTick = 0;
@@ -19909,16 +21512,32 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
         }
         appendNativeLifecycleLog("gyro-judge-chain-start", {
             {"tag", "百式"}, {"task", "enabled"},
-            {"stage", "wait-first-100"},
+            {"stage", "check-rog-source"},
+            {"repairScope", "rog-only"},
             {"triggerPollMs", kGyroJudgeTriggerPollMs}
         });
     }
     if (!g_inputCaptureSink || g_inputCaptureSensorsSuspended)
         return;
-    if (!g_gyroSensor && !g_accelSensor)
-        return;  // 设备对象不存在时交给唤醒轮询，不在这里武装
+    const auto sourceMeta = inputCaptureSensorMetaSnapshot();
+    if (!sourceMeta.gyroPresent || (sourceMeta.gyroFamily != "winrt" && sourceMeta.gyroFamily != "sensorapi"))
+        return; // Controller IMU protocols keep their own source owner; no device-wide PnP reset here.
     if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready ||
         !g_inputReady.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // 2026-11-03 user decision: 百式 is ROG-only. GPD/other devices keep
+    // their existing source owners; broader recovery requires player evidence.
+    // See docs/rog-gyro-recovery.md. Never apply the Bosch workaround by Hz alone.
+    if (!machineIsRogAllyFamily()) {
+        g_gyroJudgeTaskEnabled.store(false, std::memory_order_release);
+        g_gyroJudgeState = GyroJudgeState::Idle;
+        appendNativeLifecycleLog("gyro-judge-skipped", {
+            {"tag", "百式"}, {"reason", "rog-only-policy"},
+            {"repairScope", "rog-only"}, {"sourceFamily", sourceMeta.gyroFamily},
+            {"sourceUnchanged", true}
+        });
         return;
     }
 
@@ -19928,7 +21547,7 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
     UINT64 highMotionEpisode = 0;
     UINT64 accelMotionEpisode = 0;
     double mag = 0;
-    UINT64 totalSeq = 0;
+    UINT64 totalSeq = 0, rejectedSeq = 0, bindingGeneration = 0;
     {
         std::lock_guard<std::mutex> lock(g_inputCaptureSink->mx);
         // 触发使用跨重绑保留的 episode 时间戳；不能只用 ResetSamples 会清零的
@@ -19940,24 +21559,40 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
         accelMotionEpisode = g_inputCaptureSink->accelMotionEpisode;
         mag = (std::max)({(std::max)(fabs(g_inputCaptureSink->gx),
             fabs(g_inputCaptureSink->gy)), fabs(g_inputCaptureSink->gz)});
-        totalSeq = g_inputCaptureSink->gyroSequence;
+        totalSeq = g_inputCaptureSink->gyroCadenceSequence;
+        rejectedSeq = g_inputCaptureSink->gyroCadenceRejectedSamples;
+        bindingGeneration = g_inputCaptureSink->activeBindingGeneration.load(std::memory_order_acquire);
     }
     const ULONGLONG now = GetTickCount64();
     const ULONGLONG highMotionAgeMs = highMotionTick == 0 ? ~0ull : (now - highMotionTick);
     const ULONGLONG gyroReceiptAgeMs = gyroLastReceipt == 0 ? ~0ull : (now - gyroLastReceipt);
     const ULONGLONG accelMotionAgeMs = accelMotionTick == 0 ? ~0ull : (now - accelMotionTick);
 
-    // ── 2. 武装后等待 3 秒，不取证、不重触发 ──
+    if (g_gyroJudgeState == GyroJudgeState::Sampling && bindingGeneration != g_gyroJudgeBindingGeneration) {
+        g_gyroJudgeObserveStarted = false;
+        gyroJudgeFinishInconclusive("sensor-binding-changed", now);
+        return;
+    }
+    // First observe every supported real Windows source. A healthy default
+    // high-rate source needs no shake, WinRT rebuild or driver disable/enable.
+    if (!g_gyroJudgeObserveStarted && bindingGeneration != 0 &&
+        g_inputCaptureSawRealGyro.load(std::memory_order_acquire)) {
+        gyroJudgeBeginObservation(true, "effective-gyro-enabled", false);
+        return;
+    }
+    // ── 2. 修复后先等待 3 秒；被动观察无需重置/暖机 ──
     if (g_gyroJudgeState == GyroJudgeState::Sampling) {
         if (now < g_gyroJudgeDetectionStartTick) {
             // warmup 期间只把 seq 推进到当前值，避免把武装瞬间的残留爆发计入结果。
             g_gyroJudgeLastPumpSeq = totalSeq;
+            g_gyroJudgeLastRejectedSeq = rejectedSeq;
             return;
         }
         // 第一次进入检测阶段建立基线；从下一次泵拍开始计算数据量。
         if (g_gyroJudgeSegStartTick == 0) {
             g_gyroJudgeSegStartTick = now;
             g_gyroJudgeLastPumpSeq = totalSeq;
+            g_gyroJudgeLastRejectedSeq = rejectedSeq;
             return;
         }
         const UINT64 dSample = totalSeq >= g_gyroJudgeLastPumpSeq
@@ -19978,12 +21613,13 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
             gyroJudgeFinishInconclusive("total-timeout", now);
             return;
         }
-        if (dSample > kGyroJudgeArtifactCapPerSec) {
-            ++g_gyroJudgeArtifacts;
-        } else {
-            g_gyroJudgeSegAccum += dSample;
-            g_gyroJudgeObservedTotal += dSample;
-        }
+        // Count unique source timestamps, not a fixed callbacks-per-pump cap.
+        // This remains valid for high-rate sources and delayed sensor-pump ticks.
+        g_gyroJudgeArtifacts += rejectedSeq >= g_gyroJudgeLastRejectedSeq
+            ? rejectedSeq - g_gyroJudgeLastRejectedSeq : 0;
+        g_gyroJudgeLastRejectedSeq = rejectedSeq;
+        g_gyroJudgeSegAccum += dSample;
+        g_gyroJudgeObservedTotal += dSample;
         if (now - g_gyroJudgeSegStartTick < kGyroJudgeSegMs)
             return;
 
@@ -19993,7 +21629,8 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
         const UINT64 segSamples = g_gyroJudgeSegAccum;
         const double rateHz = segMs == 0 ? 0.0 :
             static_cast<double>(segSamples) * 1000.0 / static_cast<double>(segMs);
-        const bool segAlive = segSamples >= kGyroJudgeSegMinSamples && gyroLive;
+        const UINT64 requiredSamples = (g_gyroJudgeSegmentMinSamples * segMs + kGyroJudgeSegMs - 1) / kGyroJudgeSegMs;
+        const bool segAlive = segSamples >= requiredSamples && gyroLive;
         const char* dataState = segAlive ? "high" :
             (segSamples == 0 ? "no-data" : (gyroLive ? "low" : "stale"));
         g_gyroJudgePeakSegmentSamples = (std::max)(g_gyroJudgePeakSegmentSamples, segSamples);
@@ -20001,6 +21638,7 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
             {"tag", "百式"}, {"index", g_gyroJudgeSegIndex + 1},
             {"samples", segSamples}, {"alive", segAlive},
             {"dataState", dataState}, {"rateHz", rateHz},
+            {"requiredSamples", requiredSamples}, {"observationOnly", g_gyroJudgeObservationOnly},
             {"gyroReceiptAgeMs", gyroReceiptAgeMs},
             {"run", segAlive ? g_gyroJudgeSegRun + 1 : 0},
             {"segMs", segMs}, {"artifacts", g_gyroJudgeArtifacts}
@@ -20017,6 +21655,10 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
         if (g_gyroJudgeSegRun >= kGyroJudgeSegRunNeeded) {
             // A：高频成功。gyroJudgeFinishSuccess 会关闭整个百式任务链。
             gyroJudgeFinishSuccess(segSamples);
+        } else if (g_gyroJudgeObservationOnly && !segAlive) {
+            // A weak initial stream returns to the original new-motion trigger;
+            // observation alone never authorizes a PnP or source restart.
+            gyroJudgeFinishInconclusive("initial-cadence-low", now);
         } else if (g_gyroJudgeSegIndex >= kGyroJudgeSegTotal) {
             // B：低频/失败。回到等待下一次新的首个 100 数据。
             if (g_gyroJudgeSegAlive == 0)
@@ -20059,6 +21701,15 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
         return;
     }
 
+    if (sourceMeta.gyroFamily != "winrt") {
+        g_gyroJudgeConsumedHighMotionEpisode = highMotionEpisode;
+        g_gyroJudgeConsumedAccelMotionEpisode = accelMotionEpisode;
+        appendNativeLifecycleLog("gyro-judge-skipped", {
+            {"tag", "百式"}, {"reason", "source-recovery-not-supported"},
+            {"sourceFamily", sourceMeta.gyroFamily}, {"observationOnly", true}
+        });
+        return;
+    }
     ++g_sensorRebindCount;
     g_sensorLastRebindTick = now;
     g_sensorStallLastRebindAt = now;
@@ -20082,30 +21733,7 @@ static void inputCaptureSensorHighMagKeepaliveStep() {
     // 重建作为降级路径，但日志必须明确区分两者，不能把纯重订阅冒充成功重武装。
     const bool pnpReset = inputCapturePnPReArmSensorDevice();
     inputCaptureStartWinRtSensorsImpl();
-    g_gyroJudgeArmTick = GetTickCount64();
-    g_gyroJudgeDetectionStartTick = g_gyroJudgeArmTick + kGyroJudgeWarmupMs;
-    g_gyroJudgeSegStartTick = 0;
-    g_gyroJudgeSegAccum = 0;
-    g_gyroJudgeObservedTotal = 0;
-    g_gyroJudgeLastPumpSeq = 0;
-    g_gyroJudgeSegIndex = 0;
-    g_gyroJudgeSegRun = 0;
-    g_gyroJudgeSegAlive = 0;
-    g_gyroJudgeArtifacts = 0;
-    g_gyroJudgeFirstFrameTick = 0;
-    g_gyroJudgeLastProgressTick = 0;
-    g_gyroJudgePeakSegmentSamples = 0;
-    g_gyroJudgeState = GyroJudgeState::Sampling;
-    appendNativeLifecycleLog("gyro-judge-rearm", {
-        {"tag", "百式"}, {"armTick", g_gyroJudgeArmTick},
-        {"trigger", triggerKind},
-        {"repair", pnpReset ? "pnp-disable-enable+winrt-reinit" : "winrt-reinit-fallback"},
-        {"pnpReset", pnpReset},
-        {"warmupMs", kGyroJudgeWarmupMs},
-        {"firstFrameTimeoutMs", kGyroJudgeFirstFrameTimeoutMs},
-        {"observationMs", static_cast<unsigned long>(kGyroJudgeSegMs * kGyroJudgeSegTotal)},
-        {"segMinSamples", kGyroJudgeSegMinSamples}
-    });
+    gyroJudgeBeginObservation(false, triggerKind, pnpReset);
 }
 
 // 传感器初始化（专职 STA 线程内执行，对齐 HC Dispatcher 消息泵模型）。
@@ -20949,7 +22577,7 @@ static json inputCaptureWindowsSourceSelectionCancel(const json&);
 static json inputCaptureWindowsSourceSelectionStatus();
 static WindowsSensorView inputCaptureWindowsDefaultViewSnapshot(bool routed=true);
 static WindowsSensorView inputCaptureWindowsDefaultRouteSnapshot(WindowsSensorView);
-static WindowsSensorView inputCaptureWindowsSensorViewSnapshot(const WindowsSensorView* suppliedDefault=nullptr) {
+static WindowsSensorView inputCaptureWindowsSensorViewSnapshot(WindowsSensorView* suppliedDefault=nullptr) {
     using namespace ymcc::sensors;
     WindowsSensorView result;
     const auto privateView=std::atomic_load_explicit(&g_windowsPrivateConsumerProjection,std::memory_order_acquire);
@@ -20982,7 +22610,7 @@ static WindowsSensorView inputCaptureWindowsSensorViewSnapshot(const WindowsSens
         selected.frame=*frame;result.coherent=selection::frameCurrent(selected,GetTickCount64());
         return result;
     }
-    return suppliedDefault?inputCaptureWindowsDefaultRouteSnapshot(*suppliedDefault):inputCaptureWindowsDefaultViewSnapshot();
+    return suppliedDefault?inputCaptureWindowsDefaultRouteSnapshot(std::move(*suppliedDefault)):inputCaptureWindowsDefaultViewSnapshot();
 }
 static WindowsSensorView inputCaptureWindowsDefaultViewSnapshot(bool routed) {
     using namespace ymcc::sensors;
@@ -21008,7 +22636,7 @@ static WindowsSensorView inputCaptureWindowsDefaultViewSnapshot(bool routed) {
         result.coherent=true;
     }
     if(owner!=g_inputCaptureSink)result.coherent=false;
-    return routed?inputCaptureWindowsDefaultRouteSnapshot(std::move(result)):result;
+    return routed?inputCaptureWindowsDefaultRouteSnapshot(std::move(result)):std::move(result);
 }
 static WindowsSensorView inputCaptureWindowsDefaultRouteSnapshot(WindowsSensorView result) {
     using namespace ymcc::sensors;
@@ -21025,12 +22653,79 @@ static WindowsSensorView inputCaptureWindowsDefaultRouteSnapshot(WindowsSensorVi
 // Called directly from the OS power callback. Never wait for the window pump
 // or perform sensor COM operations on the notification thread.
 static void inputCaptureSignalSensorPowerPause() {
+    g_windowsSensorDeviceChange.reset();
     g_sensorSuspendCallbackActive.store(true, std::memory_order_release);
     g_inputCaptureSensorsSuspended.store(true, std::memory_order_release);
     g_sensorWakePollActive.store(false, std::memory_order_release);
     g_sensorPowerPausePending.store(true, std::memory_order_release);
     std::lock_guard<std::mutex> lock(g_sensorThreadMx);
     if (g_sensorThreadWake) SetEvent(g_sensorThreadWake);
+}
+
+// Only a missing default OneX source may be rediscovered after an OS device-tree hint.
+// Existing live/explicit sources and wake recovery keep their original owners.
+static void inputCaptureRediscoverMissingWindowsSensors() noexcept {
+    try {
+        if(inputCaptureSensorStopRequested()||!g_sensorThreadMailbox.acceptsWork()){
+            g_windowsSensorDeviceChange.reset();return;
+        }
+        const auto scope=inputCaptureWindowsInventoryTicket();
+        const auto serial=g_windowsSensorDeviceChange.claim(scope,GetTickCount64());
+        if(!serial)return;
+        const auto ignored=[&](const char* reason){appendDomainLog("gyro","windows-sensor-device-change",{
+            {"phase","ignored"},{"reason",reason},{"hint",*serial},{"bindingGeneration",scope.binding.bindingGeneration},
+            {"powerGeneration",scope.power},{"hardwareReady",false}});};
+        if(!g_machineIdentity.resolved||g_machineIdentity.family!=YmccFamily::OneXPlayer||
+            !inputCaptureHcWindowsLegacyNeeded(g_machineIdentity,false,false)){ignored("model-not-onex-windows-source");return;}
+        const auto sink=g_inputCaptureSink;
+        if(!sink||!ymcc::windows_motion::current(scope.binding)||
+            scope.binding.activeBinding.get()!=&sink->activeBindingGeneration){ignored("capture-binding-not-current");return;}
+        if(g_sensorWakePollActive.load(std::memory_order_acquire)){ignored("existing-wake-recovery-active");return;}
+        if(inputCaptureWindowsSelectionHasWork()||g_windowsSourceProbeBusy.load(std::memory_order_acquire)){
+            ignored("explicit-source-owner-active");return;
+        }
+        const auto meta=inputCaptureSensorMetaSnapshot();
+        if(g_gyroSensor||g_accelSensor||g_gyroReadingChangedSubscribed||g_accelReadingChangedSubscribed||
+            meta.gyroPresent||meta.accelPresent){ignored("existing-source-preserved");return;}
+        if(g_msiSensorApiProvider.running()||g_hcWindowsSensorApiProvider.running()||
+            g_sensorUnsubscribeRetained.load(std::memory_order_acquire)){
+            ignored("previous-source-owner-active");return;
+        }
+        // A signalled failed Provider still owns its COM/handle cleanup. Settle it
+        // through the original owner, never infer retirement from running()==false.
+        if(!inputCaptureStopHcWindowsSensorApi()||!g_msiSensorApiProvider.stop(0)||
+            !g_hcWindowsSensorApiProvider.stopped()||!g_msiSensorApiProvider.stopped()){
+            ignored("previous-source-not-retired");return;
+        }
+        if(inputCaptureSensorStopRequested()||g_sensorThreadMailbox.hasQueuedWork()||
+            scope.power!=currentPowerGeneration()||!ymcc::windows_motion::current(scope.binding)||
+            sink!=g_inputCaptureSink||inputCaptureWindowsSelectionHasWork()||
+            g_windowsSourceProbeBusy.load(std::memory_order_acquire)){
+            ignored("scope-or-owner-changed-before-discovery");return;
+        }
+        appendDomainLog("gyro","windows-sensor-device-change",{{"phase","discover-missing"},{"hint",*serial},
+            {"bindingGeneration",scope.binding.bindingGeneration},{"powerGeneration",scope.power},{"hardwareReady",false}});
+        inputCaptureStartWinRtSensorsImpl();
+        // A requested/finished discovery is not a fresh sample or recovery receipt.
+        appendDomainLog("gyro","windows-sensor-device-change",{{"phase","discovery-returned"},{"hint",*serial},
+            {"hardwareReady",false},{"winrtGyroObject",static_cast<bool>(g_gyroSensor)},
+            {"winrtAccelObject",static_cast<bool>(g_accelSensor)},{"providerRunning",g_hcWindowsSensorApiProvider.running()}});
+    }catch(...){try{appendDomainLog("gyro","windows-sensor-device-change",{{"phase","discovery-exception"},{"hardwareReady",false}});}catch(...){}}
+}
+
+// Window notifications only queue a weak, scope-bound hint and signal the current STA.
+// They never start a worker, wait for discovery or call a sensor API.
+static void inputCaptureNoteWindowsSensorDeviceChange() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(g_sensorThreadMx);
+        if(!g_sensorThread||!g_sensorThreadWake||WaitForSingleObject(g_sensorThread,0)!=WAIT_TIMEOUT||
+            !g_sensorThreadMailbox.acceptsWork()||inputCaptureSensorStopRequested())return;
+        const auto scope=inputCaptureWindowsInventoryTicket();
+        if(!g_windowsSensorDeviceChange.note(scope,GetTickCount64()))return;
+        const bool signalled=SetEvent(g_sensorThreadWake)!=FALSE;
+        appendDomainLog("gyro","windows-sensor-device-change",{{"phase","hint-queued"},{"wakeSignalled",signalled},
+            {"bindingGeneration",scope.binding.bindingGeneration},{"powerGeneration",scope.power},{"completed",false}});
+    }catch(...){/* A failed hint cannot authorize a new source or a replacement worker. */}
 }
 
 static DWORD WINAPI inputCaptureSensorThreadProc(LPVOID) noexcept {
@@ -21056,8 +22751,11 @@ static DWORD WINAPI inputCaptureSensorThreadProc(LPVOID) noexcept {
             const UINT32 baseWaitMs = powerBlocked ? INFINITE : g_sensorWakePollActive.load(std::memory_order_acquire)
                 ? kInputCaptureWakeSensorPollIntervalMs
                 : (inputCaptureWindowsSelectionHasWork()?16:(g_gyroJudgeTaskEnabled.load(std::memory_order_acquire) ? kInputCaptureSensorPumpCheckMs : INFINITE));
-            const UINT32 waitMs=!powerBlocked && ymcc::sensors::sensorapi_inventory::Census::pending()
-                ? (std::min)(baseWaitMs,UINT32{100}) : baseWaitMs;
+            const UINT32 linkWaitMs=powerBlocked?baseWaitMs:g_virtualGyroWake.waitMs(GetTickCount64(),baseWaitMs);
+            const UINT32 metadataWaitMs=!powerBlocked && ymcc::sensors::sensorapi_inventory::Census::pending()
+                ? (std::min)(linkWaitMs,UINT32{100}) : linkWaitMs;
+            const UINT32 waitMs=powerBlocked?metadataWaitMs:g_windowsSensorDeviceChange.waitMs(
+                inputCaptureWindowsInventoryTicket(),GetTickCount64(),metadataWaitMs);
             const DWORD wait = MsgWaitForMultipleObjectsEx(1, &wake, waitMs, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             if (wait == WAIT_FAILED) throw std::runtime_error("sensor message pump wait failed");
             for (MSG msg{}; PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE);) {
@@ -21121,6 +22819,11 @@ static DWORD WINAPI inputCaptureSensorThreadProc(LPVOID) noexcept {
                 if(shutdown) break;
             }
             if (!shutdown && !hadRequest && !inputCaptureSensorStopRequested()) {
+#ifdef YMCC_FAULT_INJECT
+                if(!g_sensorThreadCommandForTest)
+#endif
+                    inputCaptureRediscoverMissingWindowsSensors();
+                inputCaptureVirtualGyroWakeStep();
                 if(g_sensorWakePollActive.load(std::memory_order_acquire)) inputCaptureSensorWakePollStep();
                 if(g_gyroJudgeTaskEnabled.load(std::memory_order_acquire)) inputCaptureSensorHighMagKeepaliveStep();
             }
@@ -22605,6 +24308,7 @@ struct ControllerCalibrationRequest {
     ymcc::controller_motion::Key key;
     uint64_t id = 0;
     ULONGLONG requestedAt = 0;
+    bool awaitingSource = false; // Explicit request only; never train without a later current sample.
 };
 static std::mutex g_controllerCalibrationMx;
 static std::optional<ControllerCalibrationRequest> g_controllerCalibrationRequest;
@@ -22726,6 +24430,14 @@ static bool g_gmPairUnprovenLogged = false;
 enum class GyroCalibStage : int { None = 0, Reset = 1, EnterFusion = 2, PollWait = 3, ApplyOffset = 4, ExitManual = 5 };
 static std::atomic<GyroCalibStage> g_gyroCalibStageAtomic{GyroCalibStage::None};
 static std::atomic<bool> g_gyroCalibRequested{false};
+static bool inputCaptureVirtualGyroWakeBusy() {
+    return g_gyroJudgeState==GyroJudgeState::Sampling || g_sensorWakePollActive.load(std::memory_order_acquire) ||
+        g_gyroCalibRequested.load(std::memory_order_acquire) ||
+        g_gyroCalibStageAtomic.load(std::memory_order_acquire)!=GyroCalibStage::None ||
+        inputCaptureWindowsSelectionHasWork() || g_windowsSourceProbeBusy.load(std::memory_order_acquire) ||
+        bool(std::atomic_load_explicit(&g_windowsDefaultSelectedRoute,std::memory_order_acquire)) ||
+        bool(std::atomic_load_explicit(&g_windowsPrivateConsumerProjection,std::memory_order_acquire));
+}
 static std::atomic<bool> g_calibSourceAuto{false};
 static std::atomic<bool> g_autoCalibTrusted{false};
 static std::atomic<bool> g_autoCalibFinished{false};
@@ -22957,41 +24669,55 @@ static std::string inputCaptureCalibrationStorageKey(const std::string& deviceId
     }
     return inputCaptureCalibrationKeyUpper(deviceId);
 }
+// Read one bounded document; malformed/unreadable data is never an offset.
+// Strict raw bytes are retained by the writer before rebuilding a damaged root.
+static bool inputCaptureReadCalibrationDocument(const std::filesystem::path& file,json& root,std::string* raw=nullptr) {
+    if(!file.is_absolute())return false;
+    std::ifstream input(file,std::ios::binary|std::ios::ate);
+    if(!input) return false;
+    const auto length=input.tellg();if(length<0||length>static_cast<std::streamoff>(1u<<20))return false;
+    std::string bytes(static_cast<std::size_t>(length),'\0');input.seekg(0);
+    if(!bytes.empty()&&!input.read(bytes.data(),static_cast<std::streamsize>(bytes.size())))return false;
+    if(raw)*raw=bytes;
+    root=ymcc::settingsBaseline::parseDocument(bytes);return root.is_object();
+}
 static bool inputCaptureLoadCalibration(const std::string& deviceId,
     float& ox, float& oy, float& oz, int& weight, float& confidence,
     const std::string* retainedKey=nullptr,const json* retainedIdentity=nullptr,
     const ymcc::hc_model_motion::Recipe* retainedRecipe=nullptr) {
-    const std::string storageKey = retainedKey?*retainedKey:inputCaptureCalibrationStorageKey(deviceId);
-    if (storageKey.empty()) return false;
-    std::ifstream f(inputCaptureCalibrationJsonPath());
-    if (!f) return false;
-    json root;
-    try { f >> root; } catch (...) { return false; }
-    if (!root.is_object()) return false;
-    const auto it = root.find(storageKey);
-    if (it == root.end() || !it->is_object()) return false;
-    if (const auto* recipe = retainedRecipe?retainedRecipe:inputCaptureSourceQualifiedCalibrationRecipe()) {
-        for (const auto field : {"matrixId", "matrixSourceSha256", "deviceClass"})
-            if (!it->contains(field) || !(*it)[field].is_string()) return false;
-        if ((*it)["matrixId"].get_ref<const std::string&>() != recipe->gyroMatrixId || (*it)["matrixSourceSha256"].get_ref<const std::string&>() != recipe->sourceSha256 ||
-            (*it)["deviceClass"].get_ref<const std::string&>() != recipe->deviceClass) return false;
-        for (const auto field : {"xOffset", "yOffset", "zOffset", "confidence"})
-            if (!it->contains(field) || !(*it)[field].is_number() || !std::isfinite((*it)[field].get<float>())) return false;
-        if (!it->contains("weight") || !(*it)["weight"].is_number_integer() ||
-            (*it)["weight"].get<double>() < 0 || (*it)["weight"].get<double>() > static_cast<double>(std::numeric_limits<int>::max())) return false;
-    }
-    if(retainedIdentity||inputCaptureExtendedCalibrationRecipe()||(t_windowsProcessingView&&t_windowsProcessingView->privateSource)){
-        const auto identity=retainedIdentity?*retainedIdentity:inputCaptureExtendedCalibrationSourceIdentity(deviceId);
-        if(identity.is_null()||!it->contains("sourceIdentity")||!(*it)["sourceIdentity"].is_object()||(*it)["sourceIdentity"]!=identity||
-            (*it)["confidence"].get<float>()<0||(*it)["confidence"].get<float>()>1) return false;
-    }
-    ox = it->value("xOffset", 0.0f); oy = it->value("yOffset", 0.0f); oz = it->value("zOffset", 0.0f);
-    weight = it->value("weight", 0);
-    confidence = it->value("confidence", 0.0f);
-    return true;
+    try {
+        const std::string storageKey=retainedKey?*retainedKey:inputCaptureCalibrationStorageKey(deviceId);
+        if(storageKey.empty())return false;
+        json root;if(!inputCaptureReadCalibrationDocument(std::filesystem::path(inputCaptureCalibrationJsonPath()),root))return false;
+        // Historical files are key dictionaries without a container schema.
+        // An explicit unknown schema is a future container, never a device map.
+        if(root.contains("schemaVersion"))return false;
+        const auto it=root.find(storageKey);if(it==root.end()||!it->is_object())return false;
+        for(const auto* field:{"xOffset","yOffset","zOffset","weight"})if(!it->contains(field))return false;
+        for(const auto* field:{"xOffset","yOffset","zOffset","confidence"}) {
+            const auto value=it->find(field);
+            if(value!=it->end()&&(!value->is_number()||!std::isfinite(value->get<float>())))return false;
+        }
+        if(it->contains("weight")&&(!(*it)["weight"].is_number_integer()||(*it)["weight"].get<double>()<0||
+            (*it)["weight"].get<double>()>static_cast<double>((std::numeric_limits<int>::max)())))return false;
+        if(const auto* recipe=retainedRecipe?retainedRecipe:inputCaptureSourceQualifiedCalibrationRecipe()) {
+            for(const auto* field:{"matrixId","matrixSourceSha256","deviceClass"})if(!it->contains(field)||!(*it)[field].is_string())return false;
+            if((*it)["matrixId"].get_ref<const std::string&>()!=recipe->gyroMatrixId||(*it)["matrixSourceSha256"].get_ref<const std::string&>()!=recipe->sourceSha256||(*it)["deviceClass"].get_ref<const std::string&>()!=recipe->deviceClass)return false;
+            for(const auto* field:{"xOffset","yOffset","zOffset","weight","confidence"})if(!it->contains(field))return false;
+        }
+        const float x=it->value("xOffset",0.0f),y=it->value("yOffset",0.0f),z=it->value("zOffset",0.0f),c=it->value("confidence",0.0f);
+        const int w=it->value("weight",0);
+        if(c<0||c>1)return false;
+        if(retainedIdentity||inputCaptureExtendedCalibrationRecipe()||(t_windowsProcessingView&&t_windowsProcessingView->privateSource)) {
+            const auto identity=retainedIdentity?*retainedIdentity:inputCaptureExtendedCalibrationSourceIdentity(deviceId);
+            if(identity.is_null()||!it->contains("sourceIdentity")||!(*it)["sourceIdentity"].is_object()||(*it)["sourceIdentity"]!=identity)return false;
+        }
+        // Assign together only after all scalar/source validation succeeds.
+        ox=x;oy=y;oz=z;weight=w;confidence=c;return true;
+    }catch(...){return false;}
 }
-static ymcc::reviewed_calibration::StorageReceipt inputCaptureWriteReviewedCalibration(
-    const std::string& storageKey, const ymcc::hc_model_motion::Recipe& recipe,
+static ymcc::reviewed_calibration::StorageReceipt inputCaptureWriteCalibrationRecord(
+    const std::string& storageKey, const ymcc::hc_model_motion::Recipe* recipe,
     float ox, float oy, float oz, int weight, float confidence,
     const std::function<bool()>& sourceCurrent) {
     using Receipt=ymcc::reviewed_calibration::StorageReceipt;
@@ -23023,22 +24749,33 @@ static ymcc::reviewed_calibration::StorageReceipt inputCaptureWriteReviewedCalib
             FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,nullptr);
         if (lock.value==INVALID_HANDLE_VALUE) {result.reason="writer-busy-or-lock-failed";result.error=GetLastError();return result;}
         json root=json::object();
+        std::string originalRaw;std::wstring oversizedArchive;bool damaged=false,oversizedOriginal=false;
         const DWORD attributes=GetFileAttributesW(target.c_str());
         const DWORD attributeError=attributes==INVALID_FILE_ATTRIBUTES?GetLastError():ERROR_SUCCESS;
         const bool existed=attributes!=INVALID_FILE_ATTRIBUTES;
         if (existed) {
             if(attributes&FILE_ATTRIBUTE_DIRECTORY){result.reason="target-is-directory";return result;}
-            std::ifstream input(target,std::ios::binary);
+            std::ifstream input(target,std::ios::binary|std::ios::ate);
             if(!input){result.reason="existing-unreadable";return result;}
-            try {input>>root;}catch(...){result.reason="existing-json-invalid";return result;}
-            if(!root.is_object()){result.reason="existing-json-not-object";return result;}
+            const auto length=input.tellg();if(length<0){result.reason="existing-read-failed";return result;}
+            oversizedOriginal=length>static_cast<std::streamoff>(1u<<20);
+            if(!oversizedOriginal){
+                originalRaw.assign(static_cast<std::size_t>(length),'\0');input.seekg(0);
+                if(!originalRaw.empty()&&!input.read(originalRaw.data(),static_cast<std::streamsize>(originalRaw.size()))){result.reason="existing-read-failed";return result;}
+                root=ymcc::settingsBaseline::parseDocument(originalRaw);
+            }
+            damaged=oversizedOriginal||!root.is_object();
+            if(damaged)root=json::object();
+            else if(root.contains("schemaVersion")){result.reason="unsupported-container-schema";return result;}
         } else if(attributeError!=ERROR_FILE_NOT_FOUND) {
             result.reason="target-query-failed";result.error=attributeError;return result;
         }
-        const json original=root;
-        root[storageKey]={{"xOffset",ox},{"yOffset",oy},{"zOffset",oz},{"weight",weight},
-            {"confidence",confidence},{"thresholdG",2000.0f},{"thresholdA",4.0f},
-            {"matrixId",recipe.gyroMatrixId},{"matrixSourceSha256",recipe.sourceSha256},{"deviceClass",recipe.deviceClass}};
+        // Updating one record retains unknown properties and every other device.
+        auto record=root.value(storageKey,json::object());if(!record.is_object())record=json::object();
+        record["xOffset"]=ox;record["yOffset"]=oy;record["zOffset"]=oz;record["weight"]=weight;
+        record["confidence"]=confidence;record["thresholdG"]=2000.0f;record["thresholdA"]=4.0f;
+        if(recipe){record["matrixId"]=recipe->gyroMatrixId;record["matrixSourceSha256"]=recipe->sourceSha256;record["deviceClass"]=recipe->deviceClass;}
+        root[storageKey]=std::move(record);
         if(inputCaptureExtendedCalibrationRecipe()||(t_windowsProcessingView&&t_windowsProcessingView->privateSource)){
             const auto deviceId=inputCaptureSensorMetaSnapshot().gyroDeviceId;
             const auto identity=inputCaptureExtendedCalibrationSourceIdentity(deviceId);
@@ -23065,13 +24802,53 @@ static ymcc::reviewed_calibration::StorageReceipt inputCaptureWriteReviewedCalib
         };
         if(!readEquals(std::filesystem::path(cleanup.path),root)){result.reason="temporary-readback-failed";return result;}
         if(!sourceCurrent()){result.reason="source-retired-before-replace";return result;}
+        // Preserve exact corrupt bytes before publishing the learned record.
+        // Archive creation, write, flush and readback must all succeed first.
+        if(damaged) {
+            const auto archivePath=target.wstring()+L".before-calibration-recovery-"+std::to_wstring(GetCurrentProcessId())+L"."+
+                std::to_wstring(sequence.fetch_add(1,std::memory_order_relaxed));
+            if(oversizedOriginal){
+                if(!ymSettingsArchiveFile(target.wstring(),archivePath)){result.reason="archive-stream-failed";result.error=GetLastError();return result;}
+                oversizedArchive=archivePath;
+            }else{
+            FileOwner archive;archive.value=CreateFileW(archivePath.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
+            if(archive.value==INVALID_HANDLE_VALUE){result.reason="archive-create-failed";result.error=GetLastError();return result;}
+            DWORD archived=0;
+            const bool written=originalRaw.empty()||(WriteFile(archive.value,originalRaw.data(),static_cast<DWORD>(originalRaw.size()),&archived,nullptr)&&archived==originalRaw.size());
+            const bool flushed=written&&FlushFileBuffers(archive.value);const bool closed=archive.close();
+            if(!flushed||!closed){result.reason="archive-write-failed";return result;}
+            std::ifstream preserved(std::filesystem::path(archivePath),std::ios::binary);const std::string bytes(std::istreambuf_iterator<char>(preserved),{});
+            if(!preserved||bytes!=originalRaw){result.reason="archive-readback-failed";return result;}
+            }
+            if(!sourceCurrent()){result.reason="source-retired-after-archive";return result;}
+        }
+        // The sidecar serializes YMCC writers. A foreign writer may ignore it;
+        // re-read the exact source before publication and require a fresh retry.
+        const auto sourceUnchanged=[&] {
+            if(!existed){const auto attributes=GetFileAttributesW(target.c_str());return attributes==INVALID_FILE_ATTRIBUTES&&GetLastError()==ERROR_FILE_NOT_FOUND;}
+            if(oversizedOriginal){
+                std::ifstream input(target,std::ios::binary|std::ios::ate),archive(std::filesystem::path(oversizedArchive),std::ios::binary|std::ios::ate);
+                if(!input||!archive||input.tellg()!=archive.tellg())return false;
+                input.seekg(0);archive.seekg(0);char left[65536],right[65536];const auto begin=GetTickCount64();
+                for(;;){
+                    if(GetTickCount64()-begin>2000)return false;
+                    input.read(left,sizeof(left));archive.read(right,sizeof(right));const auto size=input.gcount();
+                    if(size!=archive.gcount()||!std::equal(left,left+size,right))return false;
+                    if(!size)return input.eof()&&archive.eof();
+                }
+            }
+            std::ifstream input(target,std::ios::binary|std::ios::ate);if(!input||input.tellg()!=static_cast<std::streamoff>(originalRaw.size()))return false;
+            std::string bytes(originalRaw.size(),'\0');input.seekg(0);
+            return (bytes.empty()||static_cast<bool>(input.read(bytes.data(),static_cast<std::streamsize>(bytes.size()))))&&bytes==originalRaw;
+        };
+        if(!sourceUnchanged()){result.reason="concurrent-file-change";return result;}
         const DWORD flags=MOVEFILE_WRITE_THROUGH|(existed?MOVEFILE_REPLACE_EXISTING:0);
         if(!MoveFileExW(cleanup.path.c_str(),target.c_str(),flags)){
             result.reason="replace-failed";result.error=GetLastError();
             // An unusual OS failure is not proof that the old target survived.
             // Keep this owned complete snapshot if the old content cannot be verified.
             // Report only its ASCII basename, relative to the calibration directory.
-            if(existed&&!readEquals(target,original)){result.recoveryPath=std::filesystem::path(cleanup.path).filename().string();cleanup.owned=false;}
+            if(existed&&!sourceUnchanged()){result.recoveryPath=std::filesystem::path(cleanup.path).filename().string();cleanup.owned=false;}
             return result;
         }
         cleanup.owned=false;result.replaced=true;
@@ -23082,33 +24859,19 @@ static ymcc::reviewed_calibration::StorageReceipt inputCaptureWriteReviewedCalib
 }
 
 
-static void inputCaptureStoreCalibration(const std::string& deviceId,
+static ymcc::reviewed_calibration::StorageReceipt inputCaptureWriteReviewedCalibration(
+    const std::string& storageKey,const ymcc::hc_model_motion::Recipe& recipe,
+    float ox,float oy,float oz,int weight,float confidence,const std::function<bool()>& sourceCurrent) {
+    return inputCaptureWriteCalibrationRecord(storageKey,&recipe,ox,oy,oz,weight,confidence,sourceCurrent);
+}
+
+static bool inputCaptureStoreCalibration(const std::string& deviceId,
     float ox, float oy, float oz, int weight, float confidence) {
-    if(const auto* recipe=inputCaptureSourceQualifiedCalibrationRecipe()) {
-        const auto key=inputCaptureCalibrationStorageKey(deviceId);
-        (void)inputCaptureWriteReviewedCalibration(key,*recipe,ox,oy,oz,weight,confidence,
-            [&]{return !key.empty()&&inputCaptureCalibrationStorageKey(deviceId)==key;});
-        return;
-    }
-    const std::string storageKey = inputCaptureCalibrationStorageKey(deviceId);
-    if (storageKey.empty()) return;
-    json root = json::object();
-    {
-        std::ifstream f(inputCaptureCalibrationJsonPath());
-        if (f) { try { json j; f >> j; if (j.is_object()) root = j; } catch (...) {} }
-    }
-    root[storageKey] = {
-        {"xOffset", ox}, {"yOffset", oy}, {"zOffset", oz}, {"weight", weight},
-        {"confidence", confidence},
-        {"thresholdG", 2000.0f}, {"thresholdA", 4.0f}
-    };
-    if (const auto* recipe = inputCaptureReviewedCalibrationRecipe()) {
-        root[storageKey]["matrixId"] = recipe->gyroMatrixId;
-        root[storageKey]["matrixSourceSha256"] = recipe->sourceSha256;
-        root[storageKey]["deviceClass"] = recipe->deviceClass;
-    }
-    std::ofstream out(inputCaptureCalibrationJsonPath());
-    if (out) out << root.dump(2);
+    const auto key=inputCaptureCalibrationStorageKey(deviceId);if(key.empty())return false;
+    const auto current=[&]{return inputCaptureCalibrationStorageKey(deviceId)==key;};
+    if(const auto* recipe=inputCaptureSourceQualifiedCalibrationRecipe())
+        return inputCaptureWriteReviewedCalibration(key,*recipe,ox,oy,oz,weight,confidence,current).saved;
+    return inputCaptureWriteCalibrationRecord(key,nullptr,ox,oy,oz,weight,confidence,current).saved;
 }
 static std::string g_calibRestoredDeviceId;   // capture tick 单写
 
@@ -23550,15 +25313,17 @@ static void inputCaptureGyroCalibrationTick(
                 (g_gmProcessedThisTick && g_gyroCalibFreshPairThisTick && g_gyroCalibSessionBinding!=0 &&
                  g_gyroCalibBindingThisTick==g_gyroCalibSessionBinding &&
                  autoMeta.gyroDeviceId==g_gyroCalibSessionDeviceId && g_gyroCalibProcessedTicks>0);
-            const bool trusted = g_gyroCalibConfidence > kCalibTrustedConfidence && sameMsiPair;
-            const int weight = static_cast<int>(g_gyroCalibConfidence * 10.0f);
+            const bool trusted = std::isfinite(g_gyroCalibConfidence)&&g_gyroCalibConfidence<=1&&g_gyroCalibConfidence > kCalibTrustedConfidence && sameMsiPair&&
+                std::isfinite(g_gyroCalibOx)&&std::isfinite(g_gyroCalibOy)&&std::isfinite(g_gyroCalibOz);
+            bool saved=false;
+            const int weight = trusted?static_cast<int>(g_gyroCalibConfidence * 10.0f):0;
             const bool fromAuto = g_calibSourceAuto.load(std::memory_order_acquire);
             // 用户裁决（2026-09-16）：大于 99% 才存、才套用偏移；不到不覆盖旧零点。
             if (trusted) {
                 g_gmSetOffset(g_gm, g_gyroCalibOx, g_gyroCalibOy, g_gyroCalibOz, weight);
                 const InputCaptureSensorMeta meta = inputCaptureSensorMetaSnapshot();
                 if (meta.gyroPresent && !meta.gyroDeviceId.empty())
-                    inputCaptureStoreCalibration(meta.gyroDeviceId, g_gyroCalibOx, g_gyroCalibOy, g_gyroCalibOz, weight, g_gyroCalibConfidence);
+                    saved=inputCaptureStoreCalibration(meta.gyroDeviceId, g_gyroCalibOx, g_gyroCalibOy, g_gyroCalibOz, weight, g_gyroCalibConfidence);
                 g_autoCalibTrusted.store(true, std::memory_order_release);
                 g_autoCalibFinished.store(true, std::memory_order_release);
                 inputCapturePostCalibStatus(3);
@@ -23570,7 +25335,7 @@ static void inputCaptureGyroCalibrationTick(
                 inputCapturePostCalibStatus(g_autoCalibTrusted.load(std::memory_order_acquire) ? 3 : 0);
             }
             appendNativeLifecycleLog("gyro-calibration-result", {
-                {"ok", true}, {"saved", trusted}, {"confidence", g_gyroCalibConfidence}, {"weight", weight},
+                {"ok", true}, {"saved", saved}, {"confidence", g_gyroCalibConfidence}, {"weight", weight},
                 {"source", fromAuto ? "auto" : "manual"},
                 {"offset", {{"x", g_gyroCalibOx}, {"y", g_gyroCalibOy}, {"z", g_gyroCalibOz}}},
                 {"hcFlow", "Reset->Fusion->Poll->Offset->Manual"},
@@ -23578,7 +25343,7 @@ static void inputCaptureGyroCalibrationTick(
                 {"sensorPairCurrent", sameMsiPair}, {"msiPolicy", g_gyroCalibMsiSession}
             });
             gamepadSerialPostEvent("gyro.calibrate.result", {{"ok", true},
-                {"saved", trusted},
+                {"saved", saved},
                 {"source", fromAuto ? "auto" : "manual"},
                 {"confidence", g_gyroCalibConfidence}, {"weight", weight},
                 {"offset", {{"x", g_gyroCalibOx}, {"y", g_gyroCalibOy}, {"z", g_gyroCalibOz}}}});
@@ -23704,19 +25469,27 @@ static void inputCaptureWindowsSelectionPublishContext(const WindowsSensorView* 
         std::atomic_store_explicit(&g_windowsSelectionWorkerContext,std::shared_ptr<const WindowsSelectionWorkerContext>(next),std::memory_order_release);
     }catch(...){const auto prior=std::atomic_load_explicit(&g_windowsSelectionWorkerContext,std::memory_order_acquire);if(prior)prior->active->store(false,std::memory_order_release);inputCaptureWindowsSelectionRevokePublication();}
 }
-static bool inputCaptureWindowsProcessingInputMatches(const WindowsSensorView& view) {
+template<bool metadataAlreadyMatched>
+static bool inputCaptureWindowsProcessingInputMatchesImpl(const WindowsSensorView& view) {
     const auto& owner=g_windowsProcessingOwner;const auto& id=owner.identity;
     return owner.valid&&owner.lease&&owner.lease->load(std::memory_order_acquire)&&owner.handle==g_gm&&owner.session==g_gmSessionStart&&
         id.power!=0&&id.power==currentPowerGeneration()&&id.privateSource==view.privateSource&&
         id.captureRequest==view.captureRequestId&&id.choiceRequest==view.choiceRequestId&&
         ymcc::windows_motion::sameInput(owner.raw,view.submission)&&inputCaptureWindowsProcessingRecipeMatches(id.recipe)&&
-        inputCaptureWindowsProcessingMetadataMatches(id.metadata,view.metadata)&&
+        (metadataAlreadyMatched || inputCaptureWindowsProcessingMetadataMatches(id.metadata,view.metadata))&&
         (!view.privateSource||(id.profile==view.profile&&id.key==view.calibrationKey));
 }
-static bool inputCaptureWindowsProcessingFrameCurrent(const WindowsSensorView& view) noexcept {
-    try{return view.coherent&&ymcc::windows_motion::current(view.submission)&&inputCaptureWindowsProcessingInputMatches(view)&&
+static bool inputCaptureWindowsProcessingInputMatches(const WindowsSensorView& view) {
+    return inputCaptureWindowsProcessingInputMatchesImpl<false>(view);
+}
+template<bool metadataAlreadyMatched>
+static bool inputCaptureWindowsProcessingFrameCurrentImpl(const WindowsSensorView& view) noexcept {
+    try{return view.coherent&&ymcc::windows_motion::current(view.submission)&&inputCaptureWindowsProcessingInputMatchesImpl<metadataAlreadyMatched>(view)&&
         ymcc::windows_motion::sameOwner(view.submission.processingLease,g_windowsProcessingOwner.identity.source.processingLease)&&
         (!view.privateSource||view.processingOwnerAccepted);}catch(...){return false;}
+}
+static bool inputCaptureWindowsProcessingFrameCurrent(const WindowsSensorView& view) noexcept {
+    return inputCaptureWindowsProcessingFrameCurrentImpl<false>(view);
 }
 static void inputCaptureWindowsProcessingAbortCalibration(const char* reason) {
     const bool requested=g_gyroCalibRequested.exchange(false,std::memory_order_acq_rel);
@@ -23755,7 +25528,7 @@ static bool inputCaptureWindowsProcessingAdopt(WindowsSensorView& view) noexcept
         }
         if(inputCaptureWindowsProcessingInputMatches(view)){
             view.submission=ymcc::windows_motion::forProcessing(view.submission,g_windowsProcessingOwner.identity.source.processingLease);
-            view.processingOwnerAccepted=view.privateSource;return inputCaptureWindowsProcessingFrameCurrent(view);
+            view.processingOwnerAccepted=view.privateSource;return inputCaptureWindowsProcessingFrameCurrentImpl<true>(view);
         }
         // Only raw snapshots can acquire another CPU owner; an old decoration is never replaced.
         if(view.submission.processingLease)return unavailable();
@@ -23883,11 +25656,16 @@ static bool inputHostProcessAliveSnapshot();
 enum class InputHostRecoveryAdmission : uint8_t { Allowed, DeferredPower, Cancelled, BudgetExhausted };
 // One classified recovery may run inside an admitted player switch. It
 // retains that request and deadline; none of these fields represent a new ON.
+// VC-COMMON-SELF-HEAL-20261103-R1: local visibility faults are facts about
+// this owned contract, not transport errors or proof of external double input.
+enum class InputHostSwitchLocalFault : std::uint8_t { None, DeferredPhysicalHide, OwnedHiddenTargetMissing };
 struct InputHostSwitchRecoveryRequest {
     std::uint64_t requestId=0,power=0,hostEpoch=0,deadline=0;
     std::string stoppedRunId; // Exact old tuple; return proof cannot authorize another Host.
     std::string persona;
     bool tupleFault=false; // A sequence receipt fault is distinct from a transport error.
+    InputHostSwitchLocalFault localFault=InputHostSwitchLocalFault::None;
+    bool resolved=false; // Keep an offered ticket after ordinary execution repairs its fault.
     DWORD error=ERROR_SUCCESS;
     bool pending=false,queued=false,spent=false,awaitingCleanup=false,stopInvoked=false;
     bool executionCleanup=false; // Mandatory fault Stop is execution, not a fallback attempt.
@@ -23915,7 +25693,10 @@ static bool inputHostTupleRecoveryCurrentLocked(const InputHostTupleRecoveryToke
 static bool inputHostTupleRecoveryMaintenanceLocked(std::string&);
 static void inputHostPerformTupleRecovery(const std::string&);
 static void inputHostTupleRecoveryAcceptedLocked(std::uint64_t,std::uint64_t,bool);
-static void inputHostSwitchRecoveryOfferLocked(std::uint64_t,std::uint64_t,DWORD,bool tupleFault=false);
+static InputHostSwitchLocalFault inputHostSwitchLocalFaultCurrentLocked(std::uint64_t);
+static bool inputHostSwitchLocalFaultResolvedLocked(std::uint64_t,InputHostSwitchLocalFault);
+static void inputHostSwitchRecoveryOfferLocked(std::uint64_t,std::uint64_t,DWORD,bool tupleFault=false,
+    InputHostSwitchLocalFault localFault=InputHostSwitchLocalFault::None);
 static void inputHostSwitchRecoveryMaintenanceLocked();
 static void inputHostPerformSwitchRecovery(std::uint64_t);
 static bool inputHostConsumeSwitchFaultCleanup(std::uint64_t);
@@ -24674,6 +26455,50 @@ static unsigned long long g_inputHostEpoch = 0;
 // 线程写、BUS/pump 线程读；模式写意图需"跨线程读代际"来判过期，直接裸读构成数据竞争。镜像在
 // epoch 的**每个写点**同步 store，读侧只读镜像（acquire），不改变 plain 值的既有用法。
 static std::atomic<unsigned long long> g_inputHostEpochMirror{0};
+// A ROG HID-only Start may deliberately defer hide while its physical source
+// re-enumerates. That is a debt of this exact Start, not permission to reuse an
+// empty journal in another session. No timer or target restart is added.
+struct InputHostDeferredPhysicalHide {
+    std::string runId, persona;
+    unsigned long long hostGen=0, powerGen=0, deadline=0, requestId=0;
+    bool refreshRequired=true, refreshAttempted=false; // one initial owned-root refresh, never a reconnect loop
+    bool executionContinuationAttempted=false; // ROG164155: one original partial-hide completion
+};
+static thread_local const InputHostDeferredPhysicalHide* t_inputHostDeferredPhysicalHideWrite=nullptr;
+static std::mutex g_inputHostDeferredPhysicalHideMx;
+static InputHostDeferredPhysicalHide g_inputHostDeferredPhysicalHide;
+static void inputHostDeferredPhysicalHideClear() {
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    g_inputHostDeferredPhysicalHide={};
+}
+static void inputHostDeferredPhysicalHideArm(bool required, const std::string& runId,
+        unsigned long long hostGen, unsigned long long powerGen,
+        const std::string& persona, unsigned long long deadline, unsigned long long requestId=0,
+        bool refreshRequired=true) {
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    g_inputHostDeferredPhysicalHide=required
+        ? InputHostDeferredPhysicalHide{runId,persona,hostGen,powerGen,deadline,requestId,refreshRequired,false}
+        : InputHostDeferredPhysicalHide{};
+}
+static const char* inputHostDeferredPhysicalHideCurrentReason(unsigned long long hostGen,
+        const std::string& runId, unsigned long long powerGen,
+        const std::string& persona, unsigned long long now) {
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    const auto& debt=g_inputHostDeferredPhysicalHide;
+    if(!hostGen || !powerGen || runId.empty())return "current-owner-unbound";
+    if(!debt.hostGen || debt.runId.empty())return "start-debt-absent";
+    if(now>=debt.deadline)return "original-deadline-expired";
+    if(debt.hostGen!=hostGen)return "host-generation-changed";
+    if(debt.runId!=runId)return "host-run-changed";
+    if(debt.powerGen!=powerGen)return "power-generation-changed";
+    if(debt.persona!=persona)return "persona-changed";
+    return nullptr;
+}
+static bool inputHostDeferredPhysicalHideCurrent(unsigned long long hostGen,
+        const std::string& runId, unsigned long long powerGen,
+        const std::string& persona, unsigned long long now) {
+    return inputHostDeferredPhysicalHideCurrentReason(hostGen,runId,powerGen,persona,now)==nullptr;
+}
 // GP-MSI-ONLY-CLOSURE-1-R10-R2（M0）：诊断身份 token 定义（见前向声明）。owner token = Host runId；
 // epoch token = 原子镜像代际。native emitter 的通用 `pid` 仍保留原义（YMCC 本进程 PID），二者不可互比。
 static std::string inputHostOwnerToken() {
@@ -24708,6 +26533,9 @@ static std::atomic<ULONGLONG> g_inputHostLastKeepAliveRequestTick{0};
 static ymcc::psEndpointOwnership::State g_psEndpointOwnership;
 static bool psRetiredReturnProvenLocked();
 static bool g_inputHostHello = false;
+// Only a fully admitted PREPARE/RECREATE receipt can publish this per-target token.
+// All accesses remain under the existing serialized Host transaction owner.
+static std::string g_inputHostFrameReplyBinding;
 // 批次A（评审10 §3，2026-09-18）：精简 HidHide 状态查询能力位。由 HELLO 回执
 // detail 协商（Host 侧能力位）；旧 Host 不广告 → false → 周期核对保持完整
 // HIDHIDE_QUERY（原语义）。随 Host 生命周期重置（inputHostClearLocked）。
@@ -25214,6 +27042,53 @@ static std::atomic<unsigned long long> g_inputHostExitFenceRefusalRows{0};
 static constexpr unsigned long long kInputHostExitFenceRefusalRowMax = 8;
 static bool inputHostExitFenceRaised() {
     return g_inputHostExitFence.load(std::memory_order_acquire);
+}
+static bool inputCaptureVirtualGyroHostMayWake() {
+    return !g_inputHostFaultHoldsStart.load(std::memory_order_acquire) &&
+        !g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire) &&
+        !g_inputHostRecoveryIntentReset.load(std::memory_order_acquire) && !inputHostExitFenceRaised() &&
+        !g_exitRequested.load(std::memory_order_acquire) && g_inputReady.load(std::memory_order_acquire) &&
+        !g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) &&
+        g_sleepRecoveryOutputWanted.load(std::memory_order_acquire);
+}
+// Reused at durable reservation and the pipe/CLI write throats. A slow query
+// cannot renew this Start or turn its old intent into permission to hide.
+static thread_local const char* t_inputHostDeferredPhysicalHideFirstRefusal=nullptr;
+static bool inputHostDeferredPhysicalHideRefuse(const char* reason) {
+    if(!t_inputHostDeferredPhysicalHideFirstRefusal)t_inputHostDeferredPhysicalHideFirstRefusal=reason;
+    return false;
+}
+static bool inputHostDeferredPhysicalHideIntentCurrent() {
+    const auto* debt=t_inputHostDeferredPhysicalHideWrite;
+    if(!debt)return true;
+    if(inputHostExitFenceRaised())return inputHostDeferredPhysicalHideRefuse("exit-fence");
+    if(g_inputHostPowerAdmissionRevoked)return inputHostDeferredPhysicalHideRefuse("power-admission-revoked");
+    if(physicalReleaseWindowActive())return inputHostDeferredPhysicalHideRefuse("physical-release-window");
+    if(!g_realStickTest.enabled)return inputHostDeferredPhysicalHideRefuse("capture-disabled");
+    if(!g_realStickTest.virtualTargetEnabled)return inputHostDeferredPhysicalHideRefuse("virtual-target-disabled");
+    if(debt->hostGen!=g_inputHostEpoch)return inputHostDeferredPhysicalHideRefuse("host-generation-changed");
+    if(debt->runId!=g_inputHostRunId)return inputHostDeferredPhysicalHideRefuse("host-run-changed");
+    const auto now=inputHostStartProtectionNow();
+    if(debt->requestId && g_virtualStartProtection.view(now).requestId!=debt->requestId)
+        return inputHostDeferredPhysicalHideRefuse("player-request-changed");
+    const auto* reason=inputHostDeferredPhysicalHideCurrentReason(debt->hostGen,debt->runId,
+        currentPowerGeneration(),inputHostConfiguredPersona(),now);
+    return !reason || inputHostDeferredPhysicalHideRefuse(reason);
+}
+// Availability is mandatory BEFORE writes; a successful physical refresh may
+// itself take the source offline. Completion still requires current intent.
+static bool inputHostDeferredPhysicalHideWriteCurrent() {
+    if(!t_inputHostDeferredPhysicalHideWrite)return true;
+    if(!inputHostDeferredPhysicalHideIntentCurrent())return false;
+    if(!g_xinputPhysicalSourceLocked)return inputHostDeferredPhysicalHideRefuse("physical-source-unlocked");
+    if((g_xinputConnectedMask & g_xinputPhysicalSourceMask)==0)
+        return inputHostDeferredPhysicalHideRefuse("physical-source-mask-not-live");
+    return true;
+}
+static bool inputHostDeferredPhysicalHideCliCurrent(const std::wstring& arguments) {
+    const bool visibilityWrite=arguments.rfind(L"--dev-hide",0)==0 ||
+        arguments.rfind(L"--cloak-on",0)==0 || arguments.rfind(L"--app-reg",0)==0;
+    return !visibilityWrite || inputHostDeferredPhysicalHideWriteCurrent();
 }
 // 终态期间**允许**入队/执行的工作 = 拆塔与恢复类（release / unhide / 清理）；白名单宁可小：
 // 不在表内的（keepalive / wake-* / tuple-* / persona-* / initial-target-admission /
@@ -27172,6 +29047,32 @@ static bool hidHideCliReapPendingLocked(ULONGLONG absoluteDeadlineTick=0) {
 
 static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr,
                        DWORD* exitCodeOut=nullptr,ULONGLONG absoluteDeadlineTick=0) {
+    DWORD localExit=ERROR_GEN_FAILURE;
+    if(!exitCodeOut)exitCodeOut=&localExit;
+    struct FailureReceipt {
+        DWORD* code;
+        std::string operation,stage="admission",text;
+        std::optional<DWORD> childExit;
+        bool success=false;
+        ~FailureReceipt() {
+            if(success)return;
+            try {
+                static std::mutex receiptMx;
+                static uint64_t receiptPower=0;
+                static unsigned receiptRows=0;
+                std::lock_guard<std::mutex> lock(receiptMx);
+                const auto power=currentPowerGeneration();
+                if(receiptPower!=power){receiptPower=power;receiptRows=0;}
+                if(receiptRows>=32)return;
+                ++receiptRows;
+                const json detail={{"operation",operation},{"stage",stage},
+                {"error",*code},{"output",text.substr(0,2048)},{"outputTruncated",text.size()>2048},
+                {"childExitCode",childExit?json(*childExit):json(nullptr)},
+                {"outputEncoding","pipe-bytes;invalid-UTF8-replaced"},
+                {"failureReceipt",receiptRows},{"failureReceiptLimit",32},{"physicalReturnObserved","UNKNOWN"}};
+                appendNativeLifecycleLog("hidhide.command-failed",json::parse(detail.dump(-1,' ',false,json::error_handler_t::replace)));}catch(...){}
+        }
+    } failureReceipt{exitCodeOut,W2U(arguments.substr(0,arguments.find(L' ')))};
     const auto executionDeadline=g_inputHostSwitchRecoveryStartDeadline;
     if(executionDeadline&&(!absoluteDeadlineTick||executionDeadline<absoluteDeadlineTick))absoluteDeadlineTick=executionDeadline;
     if(output)output->clear();
@@ -27184,7 +29085,8 @@ static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr
     const auto expired=[&]{return GetTickCount64()>=deadline;};
     const auto operationPower=currentPowerGeneration();
     const auto currentRequest=[&] {
-        return currentPowerGeneration()==operationPower &&
+        return inputHostDeferredPhysicalHideCliCurrent(arguments) &&
+            currentPowerGeneration()==operationPower &&
             (!g_inputHostSwitchRecoveryStartRequestId ||
              (g_inputHostSwitchRecoveryStartPower==operationPower &&
               g_virtualStartProtection.view(GetTickCount64()).requestId==g_inputHostSwitchRecoveryStartRequestId));
@@ -27203,11 +29105,12 @@ static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr
         const auto parent=hidHideCliWriterCapture(GetCurrentProcess());
         if(!parent)return false;
         const std::wstring cli=hidHideCliPath();
-        if(GetFileAttributesW(cli.c_str())==INVALID_FILE_ATTRIBUTES)return false;
+        if(GetFileAttributesW(cli.c_str())==INVALID_FILE_ATTRIBUTES){*exitCodeOut=GetLastError();failureReceipt.stage="cli-path";return false;}
         HidHideCliCallHandles scope;scope.deadline=deadline;scope.writer=std::move(lease);
+        failureReceipt.stage="pipe-create";
         SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};
-        if(!CreatePipe(&scope.readPipe,&scope.writePipe,&sa,0))return false;
-        if(!SetHandleInformation(scope.readPipe,HANDLE_FLAG_INHERIT,0))return false;
+        if(!CreatePipe(&scope.readPipe,&scope.writePipe,&sa,0)){*exitCodeOut=GetLastError();return false;}
+        if(!SetHandleInformation(scope.readPipe,HANDLE_FLAG_INHERIT,0)){*exitCodeOut=GetLastError();failureReceipt.stage="pipe-inheritance";return false;}
         STARTUPINFOW si{};si.cb=sizeof(si);si.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW;
         si.hStdOutput=scope.writePipe;si.hStdError=scope.writePipe;si.wShowWindow=SW_HIDE;
         std::wstring cmd=L"\""+cli+L"\" "+arguments;
@@ -27227,9 +29130,10 @@ static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr
         if(!currentRequest()){if(exitCodeOut)*exitCodeOut=ERROR_CANCELLED;return false;}
         const BOOL created=ymcc::processEfficiency::createProcess(nullptr,buf.data(),nullptr,nullptr,TRUE,
             CREATE_NO_WINDOW|CREATE_SUSPENDED|scope.job.flags(),nullptr,nullptr,scope.job.startup(),&scope.pi);
+        const DWORD createError=created?ERROR_SUCCESS:GetLastError();
         if(!CloseHandle(scope.writePipe))return false;
         scope.writePipe=nullptr;
-        if(!created)return false;
+        if(!created){*exitCodeOut=createError;failureReceipt.stage="process-create";return false;}
         const auto child=hidHideCliWriterCapture(scope.pi.hProcess);
         if(!child||!scope.writer->markMayRun(scope.writer->record()->revision,scope.attemptId,*child)) {
             ymcc::hidHideCliWriterRuntime::note("launch-rejected","CLI-child-identity-not-durably-published");return false;
@@ -27248,12 +29152,13 @@ static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr
             const bool exitObservedBeforePeek=scope.exitProven;
             DWORD available=0;
             const BOOL peeked=PeekNamedPipe(scope.readPipe,nullptr,0,nullptr,&available,nullptr);
-            if(!peeked&&GetLastError()!=ERROR_BROKEN_PIPE)break;
+            if(!peeked){const auto error=GetLastError();if(error!=ERROR_BROKEN_PIPE){failure=error;break;}}
             if(available) {
                 if(text.size()>=maxCaptureBytes){failure=ERROR_BUFFER_OVERFLOW;break;}
                 const DWORD want=static_cast<DWORD>((std::min)({std::size_t(available),sizeof(chunk),maxCaptureBytes-text.size()}));
                 DWORD read=0;
-                if(!ReadFile(scope.readPipe,chunk,want,&read,nullptr)||!read||read>want)break;
+                if(!ReadFile(scope.readPipe,chunk,want,&read,nullptr)){failure=GetLastError();break;}
+                if(!read||read>want)break;
                 text.append(chunk,read);
             }
             const DWORD state=WaitForSingleObject(scope.pi.hProcess,0);
@@ -27267,18 +29172,22 @@ static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr
         }
         if(!complete) {
             scope.requestStop();
+            failureReceipt.stage="capture-or-wait";failureReceipt.text=text;
             if(output)*output=std::move(text);
             if(exitCodeOut)*exitCodeOut=failure;
             return false;
         }
         DWORD exitCode=ERROR_GEN_FAILURE;
-        if(!GetExitCodeProcess(scope.pi.hProcess,&exitCode))return false;
-        if(!scope.settle())return false;
+        if(!GetExitCodeProcess(scope.pi.hProcess,&exitCode)){*exitCodeOut=GetLastError();failureReceipt.stage="exit-query";return false;}
+        failureReceipt.childExit=exitCode;
+        failureReceipt.stage="child-exit";failureReceipt.text=text;*exitCodeOut=exitCode;
+        if(!scope.settle()){*exitCodeOut=ERROR_BUSY;failureReceipt.stage="writer-settlement";return false;}
         if(expired()){if(exitCodeOut)*exitCodeOut=WAIT_TIMEOUT;return false;}
         if(!currentRequest()){if(exitCodeOut)*exitCodeOut=ERROR_CANCELLED;return false;}
         if(output)*output=std::move(text);
         if(exitCodeOut)*exitCodeOut=exitCode;
-        return exitCode==ERROR_SUCCESS;
+        failureReceipt.success=exitCode==ERROR_SUCCESS;
+        return failureReceipt.success;
     }catch(...) {
         if(output)output->clear();if(exitCodeOut)*exitCodeOut=ERROR_GEN_FAILURE;
         return false;
@@ -27748,6 +29657,7 @@ static bool msiNativeForegroundVirtualHandoffRequired(uint64_t);
 static void msiForegroundIsolationObserveNative(const HidHidePhysicalIdentity& source);
 static void msiNativeForegroundObserveSource(const HidHidePhysicalIdentity& source,uint64_t sourceGeneration);
 static bool gamepadUiInputEligible();
+static bool gamepadUiOutputIsolationEligible();
 static bool physicalReleaseWindowActive();
 static bool msiForegroundIsolationBorrowBusy();
 static auto msiUiBoundTargetAdmitted(const std::string& boundPersona) -> bool;
@@ -27766,6 +29676,7 @@ static bool inputHostTargetReturnAfterPhysicalRestoreLocked(
 struct MsiClawHidDiag;
 static bool msiCrashRecoveryBeforeModeWrite(BYTE mode,const MsiClawHidDiag& diag,bool ownedReturnRetry);
 static bool msiCrashRecoveryBeforeHide(const HidHidePhysicalIdentity&,const std::vector<std::string>&,const HidHideVisibilitySnapshot&,const std::string&);
+static bool msiCrashRecoveryBeforeNativeHide(const HidHidePhysicalIdentity&,const std::vector<std::string>&,const HidHideVisibilitySnapshot&,const std::string&);
 static void msiCrashRecoveryAfterOwnedRestore(const HidHideVisibilitySnapshot&,bool);
 static bool msiCrashRecoveryAfterModeDischarge(const std::function<bool()>& proofCurrent = {});
 static void msiCrashRecoveryInitialize();
@@ -29088,6 +30999,14 @@ static void hidResolveFaultPollFlag() {
 }
 #endif
 
+static std::string legionMotionResolveActivationIdentity(const std::wstring& path, SP_DEVINFO_DATA* data, HDEVINFO set) {
+    HidHidePhysicalIdentity identity;
+    if (!legionMotionModelBinding().activationSupported() ||
+        !hidHideResolveInterfaceIdentity(path, data, set, identity, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, true)) return {};
+    return legionMotionIdentityAdmitted(identity) && identity.usagePage == 0xFFA0 && identity.usage == 1
+        ? legionMotionStableIdentity(identity) : std::string{};
+}
+
 static bool hidHideResolveRawInputIdentity(HANDLE rawDevice, HidHidePhysicalIdentity& out,
                                            std::uint64_t* resolvedGeneration = nullptr,
                                            bool allowLegionMotionCollection = false) {
@@ -29395,6 +31314,34 @@ static bool msiDinputObservePhysicalXinputReturn(const HidHidePhysicalIdentity& 
     return false;
 }
 
+static void hidHideLogPhysicalIdentityObservation(const HidHidePhysicalIdentity& resolved, std::uint64_t sourceGeneration, bool selectedChanged = true) {
+    static std::mutex observationMx;
+    static ymcc::logging::IdentityObservationLogState observation;
+    const ymcc::logging::IdentityObservationView view{{resolved.sourcePath,
+        resolved.deviceInstanceId, resolved.baseContainerDeviceInstanceId},
+        {resolved.vendorId, resolved.productId, resolved.usagePage, resolved.usage,
+            g_powerGeneration.load(std::memory_order_acquire), sourceGeneration}};
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lock(observationMx);
+        if (!resolved.resolved || resolved.sourcePath.empty() || sourceGeneration == 0) {
+            observation.invalidate(resolved.sourcePath); changed = true;
+        } else changed = observation.observe(view);
+    }
+    // No JSON construction, string copies or writes for an unchanged identity
+    // with detail off. The actual selected-source update remains in the caller.
+    if (!changed && (!selectedChanged || !domainLogEnabled("virtual"))) return;
+    appendNativeLifecycleLog("physical-controller-identity", {
+        {"source", "raw-input-pnp-resolution"}, {"resolved", resolved.resolved},
+        {"deviceInstanceId", resolved.deviceInstanceId},
+        {"baseContainerDeviceInstanceId", resolved.baseContainerDeviceInstanceId},
+        {"sourcePath", resolved.sourcePath}, {"vendorId", resolved.vendorId},
+        {"productId", resolved.productId}, {"usagePage", resolved.usagePage}, {"usage", resolved.usage},
+        {"sourceGeneration", sourceGeneration}, {"snapshotReason", changed ? "state-change" : "repeat"},
+        {"observationScope", "per-interface-identity;selected-interface-trajectory-in-detail"}
+    });
+}
+
 static void hidHideObserveRawInputDevice(HANDLE rawDevice) {
     // R3b″：身份解析调用方 = observe（caller 0）。
     GpHidResolveCallerScope gpCaller(0);
@@ -29425,13 +31372,7 @@ static void hidHideObserveRawInputDevice(HANDLE rawDevice) {
     (void)msiDinputObservePhysicalXinputReturn(resolved, GetTickCount64());
     msiForegroundIsolationObserveNative(resolved);
     msiNativeForegroundObserveSource(resolved,resolvedGeneration); // MSI native-off failed discovery only; enqueue, never driver I/O
-    if (changed) appendNativeLifecycleLog("physical-controller-identity", {
-        {"source", "raw-input-pnp-resolution"}, {"resolved", true},
-        {"deviceInstanceId", resolved.deviceInstanceId},
-        {"baseContainerDeviceInstanceId", resolved.baseContainerDeviceInstanceId},
-        {"sourcePath", resolved.sourcePath}, {"vendorId", resolved.vendorId},
-        {"productId", resolved.productId}, {"usagePage", resolved.usagePage}, {"usage", resolved.usage}
-    });
+    hidHideLogPhysicalIdentityObservation(resolved, resolvedGeneration, changed);
 }
 
 static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out) {
@@ -30190,6 +32131,65 @@ static void virtualOutputNoteSuppression(unsigned long long epoch, ULONGLONG obs
         (epoch == g_virtualOutputSuppression.hostEpoch && observedAt < g_virtualOutputSuppression.observedAt)) return;
     g_virtualOutputSuppression = {epoch, observedAt, verdict};
 }
+// A status-only suppression verdict is NOT recovery authority. Bind this
+// existing slim query to the exact contract it read, including in-place journal
+// mutations. No new device query, timer or second lifecycle is introduced.
+struct InputHostOwnedVisibilityReadback {
+    std::uint64_t requestId=0,hostEpoch=0,power=0,configRevision=0,intentRevision=0;
+    ULONGLONG startedAt=0,completedAt=0;
+    std::string runId,hostInstanceId,persona,transactionId,deviceInstanceId,physicalRoot;
+    std::vector<std::wstring> targets;
+    bool readback=false,targetsMissing=false,cloakOn=false;
+};
+static InputHostOwnedVisibilityReadback g_inputHostOwnedVisibilityReadback; // Host mutex
+static bool inputHostOwnedVisibilityContractCurrentLocked(const InputHostOwnedVisibilityReadback& stamp) {
+    if(!stamp.requestId || !stamp.hostEpoch || !stamp.power)return false;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    const auto& journal=g_hidHideVisibilityJournal;
+    return stamp.requestId && view.requestId==stamp.requestId && view.locked &&
+        (view.phase=="pending" || view.phase=="verifying") && view.persona==stamp.persona &&
+        inputHostConfiguredPersona()==stamp.persona && g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+        !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
+        g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)==stamp.intentRevision &&
+        !inputHostExitFenceRaised() && !g_exitRequested.load(std::memory_order_acquire) &&
+        !g_inputCaptureStop.load(std::memory_order_acquire) && !g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire) &&
+        currentPowerGeneration()==stamp.power && g_inputHostBoundPowerGeneration==stamp.power &&
+        g_inputHostEpoch==stamp.hostEpoch && g_inputHostRunId==stamp.runId && !stamp.runId.empty() &&
+        !stamp.hostInstanceId.empty() && g_inputHostHostInstanceId==stamp.hostInstanceId &&
+        g_inputHostConfigRevision==stamp.configRevision && g_inputHostHello && g_inputHostPrepared && g_inputHostNeutralized &&
+        g_inputHostBoundPersona==stamp.persona && journal.active && !stamp.transactionId.empty() &&
+        journal.transactionId==stamp.transactionId && !stamp.deviceInstanceId.empty() && !stamp.physicalRoot.empty() &&
+        journal.physical.deviceInstanceId==stamp.deviceInstanceId &&
+        journal.physical.baseContainerDeviceInstanceId==stamp.physicalRoot &&
+        !stamp.targets.empty() && journal.hiddenByUs==stamp.targets;
+}
+static InputHostOwnedVisibilityReadback inputHostCaptureOwnedVisibilityReadbackLocked() {
+    InputHostOwnedVisibilityReadback stamp;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    const auto& journal=g_hidHideVisibilityJournal;
+    stamp.requestId=view.requestId;stamp.hostEpoch=g_inputHostEpoch;stamp.power=currentPowerGeneration();
+    stamp.configRevision=g_inputHostConfigRevision;stamp.intentRevision=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+    stamp.runId=g_inputHostRunId;stamp.hostInstanceId=g_inputHostHostInstanceId;stamp.persona=view.persona;stamp.transactionId=journal.transactionId;
+    stamp.deviceInstanceId=journal.physical.deviceInstanceId;stamp.physicalRoot=journal.physical.baseContainerDeviceInstanceId;
+    stamp.targets=journal.hiddenByUs;stamp.startedAt=GetTickCount64();
+    return inputHostOwnedVisibilityContractCurrentLocked(stamp)?stamp:InputHostOwnedVisibilityReadback{};
+}
+static bool inputHostPublishOwnedVisibilityReadback(InputHostOwnedVisibilityReadback stamp,
+        bool readback,const std::vector<std::wstring>& hidden,bool cloakOn,ULONGLONG completedAt) {
+    if(!stamp.requestId || completedAt<stamp.startedAt)return false;
+    std::unique_lock<InputHostMutex> lock(g_inputHostMx,std::try_to_lock);
+    if(!lock.owns_lock() || !inputHostOwnedVisibilityContractCurrentLocked(stamp) || physicalReleaseWindowActive() ||
+        g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) ||
+        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)return false;
+    // A late older query cannot overwrite a newer matching observation.
+    if(g_inputHostOwnedVisibilityReadback.hostEpoch==stamp.hostEpoch &&
+        g_inputHostOwnedVisibilityReadback.startedAt>stamp.startedAt)return false;
+    stamp.completedAt=completedAt;stamp.readback=readback;stamp.cloakOn=cloakOn;
+    if(readback)for(const auto& target:stamp.targets)
+        if(!hidHideContainsPath(hidden,W2U(target))){stamp.targetsMissing=true;break;}
+    g_inputHostOwnedVisibilityReadback=std::move(stamp);
+    return true;
+}
 static HidHideVisibilitySnapshotFacts hidHideVisibilitySnapshotFactsLocked() {
     HidHideVisibilitySnapshotFacts facts;
     const auto& journal = g_hidHideVisibilityJournal;
@@ -30554,8 +32554,37 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
     if (g_hidHideVisibilityJournal.active) {
         // Sleep-wake: the physical instance id changes on re-enumeration.
         // A live journal must still hide the NEW identity (no CyclePort).
-        if (!powerCycle)
-            return hidHideRefreshPhysicalHide(transactionId, "journal-active-refresh");
+        const bool refreshed = powerCycle ||
+            hidHideRefreshPhysicalHide(transactionId, "journal-active-refresh");
+        if (!refreshed) return false;
+        if (g_machineIdentity.resolved && g_machineIdentity.family == YmccFamily::LenovoLegionGo) {
+            // A retained journal owns cleanup; it is not fresh proof that an
+            // external actor left cloak/application/inverse configuration intact.
+            std::vector<std::string> expected;
+            auto sources = g_hidHideVisibilityJournal.physicalSources;
+            if (sources.empty()) sources.push_back(g_hidHideVisibilityJournal.physical);
+            bool sourcesKnown = !sources.empty();
+            for (const auto& source : sources) {
+                sourcesKnown = sourcesKnown && source.resolved;
+                for (const auto& target : hidHidePhysicalTargets(source)) hidHideAppendTarget(expected, target);
+            }
+            HidHideVisibilitySnapshot current;
+            const bool observed = hidHideCaptureVisibilitySnapshot(current);
+            const bool missing = std::any_of(expected.begin(), expected.end(), [&](const auto& target) {
+                return !hidHideContainsPath(current.hidden, target);
+            });
+            const auto module = hidHideCurrentModulePath();
+            const bool admitted = hidHideConfigurationVerified(observed, sourcesKnown && !expected.empty(), missing,
+                current.cloaking, !module.empty() && hidHideContainsPath(current.applications, W2U(module)),
+                hidHideInverseApplicationListState(current.inverseRaw));
+            if (!admitted) appendNativeLifecycleLog("hidhide.p-hid-apply-readback-failed", {
+                {"transactionId", transactionId}, {"reason", "retained-lenovo-configuration-unverified"},
+                {"readback", observed}, {"lenovoConfigurationRequired", true},
+                {"inverseApplicationList", hidHideInverseApplicationListState(current.inverseRaw)},
+                {"expectedTargets", expected.size()}, {"journalRetained", true}, {"safeStop", true}
+            });
+            return admitted;
+        }
         return true;
     }
     std::vector<HidHidePhysicalIdentity> physicalSources;
@@ -30738,11 +32767,26 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
             }
         }
     }
+    // Lenovo family integration consumes the existing complete configuration
+    // verdict before PREPARE_TARGET. Diagnostic membership alone does not prove
+    // normal allowlist semantics. Observe inverse; never rewrite foreign policy.
+    const bool lenovoConfigurationRequired = g_machineIdentity.resolved &&
+        g_machineIdentity.family == YmccFamily::LenovoLegionGo;
+    if (lenovoConfigurationRequired) {
+        const bool targetsMissing = std::any_of(targets.begin(), targets.end(), [&](const auto& target) {
+            return !hidHideContainsPath(after.hidden, target);
+        });
+        readbackAdmitted = hidHideConfigurationVerified(readback, !targets.empty(), targetsMissing,
+            after.cloaking, hidHideContainsPath(after.applications, W2U(module)),
+            hidHideInverseApplicationListState(after.inverseRaw));
+    }
     if(msiControllerTraceEnabled())msiControllerTraceLog("hide-targets-readback",{{"transactionId",transactionId},{"targets",targets},{"readback",readback},{"configurationAdmitted",readbackAdmitted},{"cloak",readback&&after.cloaking},{"inverse",after.inverseRaw},{"applicationSnapshot",msiControllerVisibilityApplications(after,readback)},{"externalSuppression","unverified"}},false);
     if (!readbackAdmitted) {
         appendNativeLifecycleLog("hidhide.p-hid-apply-readback-failed", {
             {"transactionId", transactionId},
             {"readback", readback},
+            {"lenovoConfigurationRequired", lenovoConfigurationRequired},
+            {"inverseApplicationList", hidHideInverseApplicationListState(after.inverseRaw)},
             {"cloaking", readback && after.cloaking},
             {"applicationRegistered", readback && hidHideContainsPath(after.applications, W2U(module))},
             {"expectedTargets", targets.size()},
@@ -30824,6 +32868,172 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
     return true;
 }
 
+static bool nativeForegroundRootCandidate(const std::string& root);
+static bool nativeForegroundGameInputAdmitted(bool sameRoot,bool virtualIdentity,unsigned vendor,unsigned product,unsigned page,unsigned usage);
+static int externalPriorityUsbPortKind(const std::string& root);
+// 131128 field counterexample: the first hide was deferred until AFTER target
+// publication, unlike an ordinary reconnect. A verified list alone did not retire
+// Steam's existing physical endpoint. Complete that original ROG Start with the
+// same exact owned-root refresh used by initial Hide(true), not another target.
+// Host mutex held; original request/deadline and final pipe issue guard apply.
+static bool inputHostDeferredPhysicalHideRefreshLocked(const char** outcome) {
+    const auto done=[&](const char* why,bool ok){if(outcome)*outcome=why;return ok;};
+    const auto* debt=t_inputHostDeferredPhysicalHideWrite;
+    if(!debt)return done("not-required",true);
+    if(!debt->refreshRequired)return done("not-required",inputHostDeferredPhysicalHideIntentCurrent());
+    if(!inputHostDeferredPhysicalHideWriteCurrent() || !g_machineIdentity.resolved ||
+       !ymccIsRogFamily())
+        return done("context-retired",false);
+    const auto& journal=g_hidHideVisibilityJournal;
+    const auto& physical=journal.physical;
+    const auto root=hidHideUpper(physical.baseContainerDeviceInstanceId);
+    if(!journal.active || !physical.resolved || root.empty())return done("physical-journal-unproven",false);
+    // Preserve the established 045E no-cycle safety policy and all external
+    // controller paths. Only the selected on-board 0B05 USB root is new behavior.
+    if(!nativeForegroundRootCandidate(root) ||
+       !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(physical.deviceInstanceId,root),
+           physical.vendorId,physical.productId,physical.usagePage,physical.usage))
+        return done("not-rog-game-root",true);
+    if(journal.transactionId!=debt->runId ||
+       !hidHideContainsPath(journal.hiddenByUs,physical.baseContainerDeviceInstanceId) ||
+       std::any_of(journal.physicalSources.begin(),journal.physicalSources.end(),[&](const auto& source){
+           return !source.resolved || source.vendorId!=0x0b05 ||
+               hidHideUpper(source.baseContainerDeviceInstanceId)!=root;
+       }))return done("exact-owned-root-unproven",false);
+    // Reuse the existing connector-topology authority: VID/model/slot alone
+    // cannot distinguish an internal controller from an external USB device.
+    const int portKind=externalPriorityUsbPortKind(physical.baseContainerDeviceInstanceId);
+    if(portKind!=0)return done(portKind>0?"external-port-no-refresh":"internal-port-unproven",false);
+    if(!inputHostDeferredPhysicalHideWriteCurrent())return done("context-retired-after-port-query",false);
+    const auto now=inputHostStartProtectionNow();
+    if(now>=debt->deadline)return done("original-deadline-expired",false);
+
+    const DWORD budget=static_cast<DWORD>((std::min)(5000ULL,debt->deadline-now));
+    hidHideCycleClearBusyIfStale("deferred-start-hide-setup");
+    if(g_hidHideCycleInFlight.load(std::memory_order_acquire))return done("refresh-busy-deferred",false);
+    {
+        std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+        auto& current=g_inputHostDeferredPhysicalHide;
+        if(current.hostGen!=debt->hostGen || current.runId!=debt->runId ||
+           current.powerGen!=debt->powerGen || current.requestId!=debt->requestId ||
+           current.persona!=debt->persona || current.deadline!=debt->deadline)
+            return done("refresh-owner-retired",false);
+        // A failed/unknown external cycle is not permission to hammer the port.
+        // Keep the debt, never report completion and do not issue it twice.
+        if(current.refreshAttempted)return done("refresh-unproven-no-reissue",false);
+        current.refreshAttempted=true;
+    }
+    const bool refreshed=hidHideCycleInstance(U2W(physical.baseContainerDeviceInstanceId),
+        "deferred-start-hide",budget);
+    if(refreshed && !inputHostDeferredPhysicalHideIntentCurrent())
+        return done("refresh-completed-context-retired",false);
+    return done(refreshed?"owned-root-refreshed":"refresh-failed",refreshed);
+}
+
+// ROG164155: finish a known half-written original hide on its existing owner.
+// No second target, timer, cycle quota or source selection. Reserved paths are
+// return duties, not evidence that the driver accepted the corresponding hide.
+static thread_local const HidHidePhysicalIdentity* t_rogPartialHideIdentity=nullptr;
+static bool inputHostRogPartialHideSourcesCurrent(const std::vector<HidHidePhysicalIdentity>& sources) {
+    if(!t_rogPartialHideIdentity)return true;
+    if(sources.size()!=1)return false;
+    const auto& expected=*t_rogPartialHideIdentity;const auto& source=sources.front();
+    return source.resolved && source.vendorId==expected.vendorId && source.productId==expected.productId &&
+        source.usagePage==expected.usagePage && source.usage==expected.usage &&
+        !source.physicalIdentity.empty() && hidHideUpper(source.physicalIdentity)==hidHideUpper(expected.physicalIdentity) &&
+        hidHideUpper(source.deviceInstanceId)==hidHideUpper(expected.deviceInstanceId) &&
+        hidHideUpper(source.baseContainerDeviceInstanceId)==hidHideUpper(expected.baseContainerDeviceInstanceId);
+}
+static bool inputHostRogPartialHideTargetsCurrent(const std::vector<std::string>& targets) {
+    if(!t_rogPartialHideIdentity)return true;
+    const auto& expected=*t_rogPartialHideIdentity;
+    std::vector<std::wstring> wideTargets;wideTargets.reserve(targets.size());
+    for(const auto& target:targets)wideTargets.push_back(U2W(target));
+    return targets.size()==2 && hidHideContainsPath(wideTargets,expected.deviceInstanceId) &&
+        hidHideContainsPath(wideTargets,expected.baseContainerDeviceInstanceId);
+}
+static bool inputHostRogPartialHideConfigurationCurrent(const HidHideVisibilitySnapshot& value) {
+    const auto module=hidHideCurrentModulePath();
+    return value.valid && value.cloaking && !module.empty() &&
+        hidHideContainsPath(value.applications,W2U(module)) &&
+        hidHideInverseApplicationListState(value.inverseRaw)=="off";
+}
+static bool inputHostCompleteRogPartialHideLocked(const char** outcome) {
+    const auto* debt=t_inputHostDeferredPhysicalHideWrite;
+    if(!debt || !debt->refreshRequired || !ymccIsRogFamily())return false;
+    const auto refused=[&](const char* phase){
+        appendNativeLifecycleLog("input-host-rog-hide-continuation",{{"stage",phase},{"requestId",debt->requestId},
+            {"attempted",false},{"configurationCompleted",false},{"hostPresent",g_inputHostProcess!=nullptr},
+            {"hostOwnedLock",g_inputHostMx.ownedByCurrentThread()},{"hello",g_inputHostHello},{"prepared",g_inputHostPrepared},
+            {"transportFault",g_inputHostTransportFault},{"pipeRetired",g_inputHostPipeRetired},
+            {"sourceLocked",g_xinputPhysicalSourceLocked},{"sourceMask",g_xinputConnectedMask & g_xinputPhysicalSourceMask},
+            {"newTarget",false},{"cycleAttemptedHere",false}});
+        return false;
+    };
+    const auto& journal=g_hidHideVisibilityJournal;
+    if(!g_inputHostMx.ownedByCurrentThread() || !g_inputHostProcess || !g_inputHostHello ||
+        !g_inputHostPrepared || g_inputHostTransportFault || g_inputHostPipeRetired ||
+        g_inputHostReleaseQuarantined || g_inputCaptureStop || g_exitRequested ||
+        !inputHostDeferredPhysicalHideWriteCurrent() || !journal.active || journal.transactionId!=debt->runId ||
+        journal.physicalSources.size()!=1)return refused("original-host-or-journal");
+    const auto physical=journal.physical;
+    const auto& root=physical.baseContainerDeviceInstanceId;
+    if(!physical.resolved || physical.physicalIdentity.empty() || root.empty() ||
+        !nativeForegroundRootCandidate(root) ||
+        !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(physical.deviceInstanceId,root),
+            physical.vendorId,physical.productId,physical.usagePage,physical.usage) ||
+        !hidHideContainsPath(journal.hiddenByUs,root) ||
+        !hidHideContainsPath(journal.hiddenByUs,physical.deviceInstanceId))return refused("owned-root");
+    struct SourceScope {
+        const HidHidePhysicalIdentity* prior=t_rogPartialHideIdentity;
+        explicit SourceScope(const HidHidePhysicalIdentity& value){t_rogPartialHideIdentity=&value;}
+        ~SourceScope(){t_rogPartialHideIdentity=prior;}
+    } sourceScope{physical};
+    const auto scopeCurrent=[&](){return !g_inputHostTransportFault && !g_inputHostPipeRetired &&
+        !g_inputHostReleaseQuarantined && !g_inputCaptureStop && !g_exitRequested &&
+        g_inputHostProcess && g_inputHostHello && g_inputHostPrepared &&
+        g_inputHostBoundPowerGeneration==debt->powerGen && g_inputHostBoundPersona==debt->persona &&
+        inputHostDeferredPhysicalHideWriteCurrent() &&
+        journal.active && journal.transactionId==debt->runId &&
+        inputHostRogPartialHideSourcesCurrent(journal.physicalSources) &&
+        inputHostRogPartialHideSourcesCurrent({journal.physical});};
+    if(!scopeCurrent())return refused("current-bound-source");
+    const auto writersQuiet=[&](){
+        if(g_inputHostTransportFault)return false;
+        std::unique_lock<std::mutex> lock(g_hidHideMx,std::try_to_lock);
+        return lock.owns_lock() && hidHideCliReapPendingLocked(debt->deadline) &&
+            ymcc::hidHideCliWriterRuntime::quiescent();
+    };
+    if(!writersQuiet())return refused("writer-unsettled");
+    HidHideVisibilitySnapshot before;
+    if(!hidHideCaptureVisibilitySnapshot(before) || !inputHostRogPartialHideConfigurationCurrent(before))return refused("configuration-query");
+    const bool hid=hidHideContainsPath(before.hidden,physical.deviceInstanceId);
+    const bool usb=hidHideContainsPath(before.hidden,root);
+    if(hid==usb || externalPriorityUsbPortKind(root)!=0 || !writersQuiet() || !scopeCurrent())return refused("partial-root-or-query-retired");
+    {
+        std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+        auto& current=g_inputHostDeferredPhysicalHide;
+        if(current.requestId!=debt->requestId || current.runId!=debt->runId || current.hostGen!=debt->hostGen ||
+            current.powerGen!=debt->powerGen || current.persona!=debt->persona || current.deadline!=debt->deadline ||
+            !current.refreshRequired || current.executionContinuationAttempted || current.refreshAttempted)return refused("execution-budget-unavailable");
+        current.executionContinuationAttempted=true;
+    }
+    const bool accepted=hidHideApplyPhysicalTransaction(debt->runId,/*powerCycle=*/false);
+    HidHideVisibilitySnapshot after;
+    const bool readback=accepted && scopeCurrent() && hidHideCaptureVisibilitySnapshot(after);
+    const bool complete=readback && inputHostRogPartialHideConfigurationCurrent(after) &&
+        hidHideContainsPath(after.hidden,physical.deviceInstanceId) && hidHideContainsPath(after.hidden,root) &&
+        writersQuiet() && scopeCurrent();
+    if(outcome)*outcome=complete?"partial-hide-completed":"partial-hide-unproven";
+    const auto now=inputHostStartProtectionNow();
+    appendNativeLifecycleLog("input-host-rog-hide-continuation",{{"requestId",debt->requestId},
+        {"runId",debt->runId},{"hostGen",debt->hostGen},{"powerGen",debt->powerGen},
+        {"stage","same-request-execution"},{"accepted",accepted},{"readback",readback},
+        {"configurationCompleted",complete},{"newTarget",false},{"cycleAttemptedHere",false},
+        {"remainingMs",now<debt->deadline?debt->deadline-now:0}});
+    return complete;
+}
+
 static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const char* reason) {
     // 2026-09-23 W3 批 103（D-27 终态闸门）：终态后不再"补隐/重隐"——现场形状正是
     // `app-exit → journal-active-refresh → 再次 hide`，使退出后的物理手柄仍处于隐藏状态。
@@ -30845,6 +33055,10 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
         });
         return false;
     }
+    if(!inputHostRogPartialHideSourcesCurrent(physicalSources))return false;
+    if(t_rogPartialHideIdentity && (g_inputHostTransportFault || g_inputHostPipeRetired ||
+        !g_hidHideVisibilityJournal.active || g_hidHideVisibilityJournal.transactionId!=transactionId ||
+        !inputHostDeferredPhysicalHideWriteCurrent()))return false;
     if (!g_hidHideVisibilityJournal.active)
         return hidHideApplyPhysicalTransaction(transactionId, /*powerCycle=*/false);
 
@@ -30857,6 +33071,8 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
         });
         return false;
     }
+    if(t_rogPartialHideIdentity && (g_inputHostTransportFault || g_inputHostPipeRetired ||
+        !inputHostDeferredPhysicalHideWriteCurrent() || !inputHostRogPartialHideConfigurationCurrent(before)))return false;
     std::vector<std::string> targets;
     for (const auto& physical : physicalSources) {
         const auto physicalTargets = hidHideVirtualPhysicalTargets(physical, before,
@@ -30865,6 +33081,7 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
     }
     std::sort(targets.begin(), targets.end());
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    if(!inputHostRogPartialHideTargetsCurrent(targets))return false;
     if(!msiCrashRecoveryBeforeHide(physicalSources.front(),targets,before,transactionId))return false;
     bool ok = true;
     for (const auto& target : targets) {
@@ -30972,6 +33189,17 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
 // 在无 YMCC 运行的情况下仍被 HidHide 隐藏）。
 #include "msi_foreground_isolation_runtime.h"
 #include "msi_native_foreground_isolation_runtime.h"
+
+static void controllerFrontendIsolationRefreshSettings(const json& input) {
+    const bool enabled=controllerFrontendIsolationSetting(input);
+    if(g_controllerFrontendIsolationEnabled.exchange(enabled,std::memory_order_acq_rel)==enabled)return;
+    // Reuse the serial owner to return an active native lease. This callback
+    // only invalidates/queues; it never performs driver I/O or changes persona.
+    if(!enabled)msiForegroundIsolationSetUiOwned(false);
+    msiNativeForegroundUiEvent(true);
+    appendNativeLifecycleLog("controller-frontend-isolation",{{"enabled",enabled},
+        {"reason","settings-refresh"},{"scope","ymcc-main-window"}});
+}
 
 static void hidHideSweepAllHiddenDevices(const char* reason) {
     // The final app-exit caller runs after Stop, but Stop can retain a live
@@ -31210,7 +33438,7 @@ static bool hidHideRestorePhysicalTransaction(const char* reason) {
         // 区分"已恢复"与"什么都没做"。语义不变（仍返回 true），只补一行常开终态。
         json noJournalRow = {
             {"reason", reason ? reason : "unknown"}, {"transactionId", journal.transactionId},
-            {"status", "already-restored"}, {"cycleVia", "no-journal"},
+            {"status", "no-owned-responsibility"}, {"cycleVia", "no-journal"},
             {"unhideSent", false}, {"virtualEndpointAbsent", virtualEndpointAbsent},
             {"xinputPlaneAbsent", xinputPlaneAbsent},
             {"msiSdOwnedEndpointAbsent", msiSdOwnedEndpointAbsent},
@@ -31219,12 +33447,10 @@ static bool hidHideRestorePhysicalTransaction(const char* reason) {
             {"msiSdReturnDebtRequired", g_msiSteamDeckReleaseDebt.required()},
             {"pXinput", "UNENCLOSED"}
         };
-        if(msiClawKnownBoardAuthority()) {
-            noJournalRow["ownedResponsibilityPresent"]=false;
-            noJournalRow["restoreDecisionScope"]="empty-owned-responsibility;no-physical-visibility-proof";
-            noJournalRow["inheritedHiddenOwnership"]="unproven;not-claimed";
-            noJournalRow["physicalReturnObserved"]="UNKNOWN";
-        }
+        noJournalRow["ownedResponsibilityPresent"]=false;
+        noJournalRow["restoreDecisionScope"]="empty-owned-responsibility;no-physical-visibility-proof";
+        noJournalRow["inheritedHiddenOwnership"]="unproven;not-claimed";
+        noJournalRow["physicalReturnObserved"]="UNKNOWN";
         appendNativeLifecycleLog("hidhide.p-hid-restore",std::move(noJournalRow));
         return true;
     }
@@ -32149,6 +34375,24 @@ static bool mouseModeSteamDeckBlocked();
 // Neptune desktop autosave is writable. Never patch controller_base templates.
 static std::mutex g_sdmMx;
 static std::string g_sdmReceiptError; // protected by g_sdmMx
+// Deferred settings are a receipt, not authority. Malformed fields must not
+// replay writes or invent a live confirmation; keep the raw section untouched.
+static json sdmSavedSettings() {
+    auto saved=ymSettingsSection("steamDeckMouse");
+    if(!saved.is_object())return json::object();
+    bool invalid=saved.contains("schemaVersion");
+    for(const auto* key:{"pending","liveAvailable","reconciled"})if(saved.contains(key)&&!saved[key].is_boolean()){saved[key]=false;invalid=true;}
+    for(const auto* key:{"path","group","phase","error","via","liveReason"})if(saved.contains(key)&&!saved[key].is_string()){saved[key]="";invalid=true;}
+    for(const auto* key:{"account","livePid"})if(saved.contains(key)&&(!saved[key].is_number_integer()||saved[key]<0||saved[key]>4294967295ULL)){saved[key]=0u;invalid=true;}
+    for(const auto* key:{"baseline","desired"})if(saved.contains(key)&&(!saved[key].is_number_integer()||saved[key]<1||saved[key]>300)){saved[key]=100;invalid=true;}
+    if(saved.value("pending",false)) {
+        for(const auto* key:{"account","path","group","baseline","desired"})if(!saved.contains(key))invalid=true;
+        if(saved.value("account",0u)==0||saved.value("path",std::string{}).empty()||saved.value("group",std::string{}).empty())invalid=true;
+        if(saved.contains("phase")&&saved["phase"]!="queued"&&saved["phase"]!="live-inflight"&&saved["phase"]!="finished")invalid=true;
+    }
+    if(invalid){saved["pending"]=false;saved["liveAvailable"]=false;saved["livePid"]=0u;saved["phase"]="invalid-config";saved["error"]="invalid-configuration";saved["via"]="unknown";}
+    return saved;
+}
 static void sdmWaitLocked(json saved, const char* reason, bool retry = true);
 static bool sdmTarget(std::wstring* path, DWORD* account, std::string* text, std::string* error) {
     if (g_aiFanMockSession.isolated) { *error = "isolated-session"; return false; }
@@ -32204,7 +34448,7 @@ static json sdmStateLocked(bool probeLive = false) {
     state["steamRunning"] = sofSteamRunning();
     if (available) state["percent"] = ymcc::steamdeck::desktopLayout(text).sensitivity;
     else state["reason"] = error;
-    const auto saved = ymSettingsSection("steamDeckMouse");
+    const auto saved = sdmSavedSettings();
     const bool sameTarget = available && saved.value("account", 0u) == account && saved.value("path", std::string()) == W2U(path);
     DWORD activePid = 0; sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"pid", &activePid);
     state["liveAvailable"] = sameTarget && saved.value("liveAvailable", false) && state["steamRunning"].get<bool>() && saved.value("livePid", 0u) == activePid;
@@ -32248,7 +34492,7 @@ static void sdmWaitLocked(json saved, const char* reason, bool retry) {
     // to queued. Callers never use this after a possibly submitted mutation.
     saved["phase"] = "queued"; saved["error"] = "";
     g_sdmEventPending.store(retry);
-    if (saved != ymSettingsSection("steamDeckMouse") && !ymSettingsWriteSection("steamDeckMouse", saved)) {
+    if (saved != sdmSavedSettings() && !ymSettingsWriteSection("steamDeckMouse", saved)) {
         sdmFinishLocked(saved, "settings-write-failed"); return;
     }
     g_sdmReceiptError.clear();
@@ -32279,7 +34523,7 @@ static bool sdmReconcileLocked(json saved) {
 }
 static void sdmApplyLocked() {
     if (g_aiFanMockSession.isolated) return;
-    auto saved = ymSettingsSection("steamDeckMouse");
+    auto saved = sdmSavedSettings();
     if (!saved.value("pending", false)) { sdmReconcileLocked(saved); return; }
     if (saved.value("phase", std::string()) == "live-inflight") {
         // A matching readback can heal the receipt; otherwise never replay it.
@@ -32449,14 +34693,15 @@ static std::string deckySidebarStartMirrorBroker() {
                 }
             }
             g_deckyCostContext.request(request,GetTickCount64()); // Passive allowlisted state, never a process target from JS.
-            if (!deckySidebarPost("deckySidebar.mirrorRequest", {{"connection", connection}, {"runId", status["runId"]}, {"revision", status["revision"]}, {"request", request}}) && request.contains("id"))
+            if (!deckySidebarPost("deckySidebar.mirrorRequest", {{"connection", connection}, {"runId", status["runId"]}, {"revision", status["revision"]}, {"connectionRevision",status["connectionRevision"]}, {"request", request}}) && request.contains("id"))
                 g_deckyMirrorBroker.reply(connection, {{"type", "reply"}, {"runId", status["runId"]}, {"id", request["id"]}, {"ok", false}, {"error", "镜像请求队列已满"}});
         },
         [](const std::string& connection, const std::string& runId, bool connected) {
             const auto status = g_deckyMirrorBroker.status();
             g_deckyCostContext.peer(connected,GetTickCount64());
             deckySidebarDiagnostic("mirror-peer",{{"connected",connected},{"revision",status["revision"]}});
-            deckySidebarPost("deckySidebar.mirrorPeer", {{"connection", connection}, {"runId", runId}, {"connected", connected}, {"revision", status["revision"]}});
+            g_deckySidebarRuntime.requestConnectionCheck();
+            deckySidebarPost("deckySidebar.mirrorPeer", {{"connection", connection}, {"runId", runId}, {"connected", connected}, {"revision", status["revision"]}, {"connectionRevision",status["connectionRevision"]}});
         }})) return "mirror-broker-start-failed";
     return {};
 }
@@ -32563,7 +34808,7 @@ static std::string deckySidebarPreflight(const std::wstring&) {
 static json deckySidebarSetEnabled(bool desired,const std::string& fault={}) {
     const auto reason=ymcc::deckyhealth::terminal(fault)?fault:std::string{};
     const bool safety=!desired&&!reason.empty();
-    if(!desired)g_deckyUpdateRecovery.veto(); // User/fault off outranks update recovery.
+    if(!desired){g_deckyUpdateRecovery.veto();g_deckyAutomaticRepair.endEpisode();g_deckyManualBaseline.clear();deckySidebarEndManagedModeWait();} // User/fault off outranks update recovery.
     if(desired){const auto prepared=deckySidebarEnvironment(true);
         if(!prepared.value("ready",false)&&prepared.value("reason",std::string{})!="steam-restart-required")
             throw std::runtime_error(prepared.value("reason",std::string("environment-check-failed")));
@@ -32601,6 +34846,154 @@ static void deckySidebarAcceptSafetyStop(const json& event){
 // One shared production consumer for automatic demand and the manual IPC.
 // Runtime owns automatic IO; native IPC owns the manual call. The shared budget
 // prevents overlap and never retries a possibly dispatched refresh.
+// Final cleanup reserves a durable document boundary. Only an actual native-owned
+// ready backend in a different document can finish it for a later YMCC host.
+// Store it outside deckySidebar: toggling ON/OFF must not refill this fuse. All
+// ordinary settings are reread under the existing lock before this one-key write.
+static bool deckySidebarReserveContextCleanup(const ymcc::steamsession::Session& session,const std::string& document,const std::string& host,const std::function<bool()>& current,bool reopen=false){
+    if(!current())return false;
+    const char* key=reopen?"deckyBigPictureRecovery":"deckyContextCleanup";
+    SettingsFileGuard guard;
+    const auto raw=ymSettingsReadRaw(YM_SETTINGS_FILE);auto all=ymSettingsReadUnlocked();
+    if(!ymSettingsHasCompatibleWriteBase(raw,all)||
+       !ymcc::deckyrepair::cleanupDocumentAvailable(all,session,reopen?std::string{}:document,key)||
+       all.value("extensions",json::object()).value("deckySidebar",json::object()).value("enabled",true)!=true||!current())return false;
+    const auto backupRaw=ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);
+    const auto priorBackup=ymcc::settingsBaseline::parseDocument(backupRaw);
+    const bool backupPresent=!backupRaw.empty()||fspath::exists(YM_SETTINGS_BACKUP_FILE);
+    // Consult BOTH prior copies before normal backup rotation. A partial/old
+    // main cannot overwrite the only remaining proof of a spent cleanup slot.
+    if((backupPresent&&(!ymcc::settingsBaseline::supported(priorBackup)||
+        !ymcc::deckyrepair::cleanupDocumentAvailable(priorBackup,session,reopen?std::string{}:document,key)))||!current())return false;
+    const auto reserved=reopen?json{{"schemaVersion",1},{"steamSession",ymcc::deckyupdate::ticket(session)}}:ymcc::deckyupdate::managed::record(session,document,host,
+        ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js"),ymcc::deckyidentity::version,"reserved");
+    if(reserved.is_null())return false;
+    all[key]=reserved;
+    if(!ymSettingsPreserveMainBeforeWrite(raw)||!sgWriteFileAtomic(YM_SETTINGS_FILE,all.dump(2)))return false;
+    // The normal backup is the PRE-reservation image. Synchronize only this
+    // native receipt before dispatch, otherwise a later corrupt main can roll
+    // back a spent cleanup budget. Keep every backed-up business setting intact.
+    auto backup=ymcc::settingsBaseline::parseDocument(ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE));
+    if(!ymcc::settingsBaseline::supported(backup)||!current())return false;
+    backup[key]=all.at(key);
+    if(!sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE,backup.dump(2))||!current())return false;
+    // Failed or partial persistence never grants the potentially visible reset.
+    for(const auto* path:{&YM_SETTINGS_FILE,&YM_SETTINGS_BACKUP_FILE}){
+        const auto saved=ymcc::settingsBaseline::parseDocument(ymSettingsReadRaw(*path));
+        if(!ymcc::settingsBaseline::supported(saved)||saved.value(key,json())!=all.at(key))return false;
+    }
+    return current();
+}
+// Called only inside the owned private child after fresh UI + backend proof.
+// Legacy same-Steam history needs this host's fresh explicit-manual origin and
+// a different owned-ready document. Unknown history stays closed; both old
+// copies must agree before establishing the new native lifecycle boundary.
+static json deckySidebarManagedLifecycleRecord(const ymcc::deckyrepair::cleanupworker::Request& request,const std::function<bool()>& current){
+    using namespace ymcc::deckyupdate;
+    const auto no=[](const char* reason){return json{{"ok",false},{"mutated",false},{"reason",reason}};};
+    if(!current())return no("decky-managed-cancelled");
+    SettingsFileGuard guard;
+    const auto raw=ymSettingsReadRaw(YM_SETTINGS_FILE);auto all=ymSettingsReadUnlocked();
+    const auto backupRaw=ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE);const auto backupBefore=ymcc::settingsBaseline::parseDocument(backupRaw);
+    const bool backupMissing=backupRaw.empty()&&!fspath::exists(YM_SETTINGS_BACKUP_FILE);
+    if(!ymSettingsHasCompatibleWriteBase(raw,all)||(!backupMissing&&!ymcc::settingsBaseline::supported(backupBefore))||
+       (backupMissing&&(request.args.at("task")=="inspect"||all.contains("deckyContextCleanup")))||
+       all.value("extensions",json::object()).value("deckySidebar",json::object()).value("enabled",true)!=true||!current())return no("decky-managed-history-unconfirmed");
+    const auto prior=all.value("deckyContextCleanup",json());const auto priorBackup=backupMissing?json():backupBefore.value("deckyContextCleanup",json());
+    // Explicit null is unknown history. It must not be confused with a missing
+    // record when establishing an initially healthy managed backend baseline.
+    if(prior!=priorBackup||(all.contains("deckyContextCleanup")&&prior.is_null())||
+       (backupBefore.contains("deckyContextCleanup")&&priorBackup.is_null()))return no("decky-managed-history-unconfirmed");
+    const auto& args=request.args;const auto& session=request.identity.steam;
+    const auto document=managed::document(args.at("modeEpoch").get<std::string>());
+    if(args.at("task")=="inspect"){
+        if(!managed::available(prior,session,document)||prior.at("steamSession")!=ticket(session)||
+           prior.at("frontendBuildId")!=args.at("frontendBuildId")||prior.at("loaderVersion")!=args.at("loaderVersion"))return no("decky-managed-continuation-unconfirmed");
+        return {{"ok",true},{"mutated",false},{"ledger",prior},{"reason","decky-managed-continuation-confirmed"}};
+    }
+    const auto next=managed::completed(prior,session,document,request.state.at("cleanupNativeHost").get<std::string>(),
+        args.at("frontendBuildId").get<std::string>(),args.at("loaderVersion").get<std::string>(),
+        request.state.value("manualRecoveryDocument",std::string{}));
+    if(next.is_null())return no("decky-managed-completion-unconfirmed");
+    if(next==prior)return {{"ok",true},{"mutated",false},{"ledger",next},{"reason","decky-managed-already-recorded"}};
+    if(!current())return no("decky-managed-cancelled");
+    all["deckyContextCleanup"]=next;
+    // Once persistence starts, failure is uncertain. Never report a certified
+    // no-op after a primary-only commit or refill either side by rotating it.
+    const auto uncertain=[](){return json{{"ok",false},{"mutated",true},{"uncertain",true},{"reason","decky-managed-commit-unconfirmed"}};};
+    if(!ymSettingsPreserveMainBeforeWrite(raw)||!sgWriteFileAtomic(YM_SETTINGS_FILE,all.dump(2))||!current())return uncertain();
+    auto backup=ymcc::settingsBaseline::parseDocument(ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE));
+    if(!ymcc::settingsBaseline::supported(backup)||!current())return uncertain();
+    backup["deckyContextCleanup"]=next;
+    if(!sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE,backup.dump(2))||!current())return uncertain();
+    for(const auto* path:{&YM_SETTINGS_FILE,&YM_SETTINGS_BACKUP_FILE}){
+        const auto saved=ymcc::settingsBaseline::parseDocument(ymSettingsReadRaw(*path));
+        if(!ymcc::settingsBaseline::supported(saved)||saved.value("deckyContextCleanup",json())!=next)return uncertain();
+    }
+    return {{"ok",true},{"mutated",true},{"ledger",next},{"reason","decky-managed-ready-recorded"}};
+}
+static bool deckySidebarRunContextCleanupWorker(const json& request,HANDLE cancel,const std::function<bool(const json&)>& emit,int& exit){
+    return ymcc::deckyrepair::cleanupworker::tryRun(request,cancel,emit,exit,[](const auto& request,HANDLE cancel)->json{
+        ymcc::deckybinding::worker::SteamLease steam(request.identity);
+        const auto current=[&]{return cancel&&WaitForSingleObject(cancel,0)==WAIT_TIMEOUT&&steam.current();};
+        const auto& session=request.identity.steam;
+        ymcc::deckyrepair::Dependencies deps;
+        deps.session=[&]{return session;};deps.runtime=[&]{return request.state;};deps.exiting=[&]{return !current();};
+        deps.installed=[]{return ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js");};deps.loader=ymcc::deckyidentity::version;
+        deps.now=[]{return GetTickCount64();};deps.cleanupAllowed=[&](const auto&){return current();};
+        deps.reserveCleanup=[&](const auto& session){return deckySidebarReserveContextCleanup(session,ymcc::deckyupdate::managed::document(request.args.value("modeEpoch",std::string{})),request.state.value("cleanupNativeHost",std::string{}),current,request.args.value("reopenBigPicture",false));};
+        deps.freshMode=[&](const auto&)->json{
+            auto result=ymcc::steamlive::run(session.root,{{"operation","ui.mode.get"}},current,4000);
+            if(!result.value("ok",false)||!current())return json{};
+            // Offline/account-switch proof is rechecked inside this exact child.
+            const auto observed=ymcc::deckysession::positiveAccount(result.value("observedAccount",json()));
+            if((observed&&observed!=session.account)||(request.identity.liveUiAccount&&
+                (!result.value("deckyAccountWatchAvailable",false)||observed!=session.account)))return json{};
+            result["known"]=true;result["running"]=true;result["pid"]=session.pid;result["birth"]=std::to_string(session.created);return result;
+        };
+        if(request.lifecycle){
+            const auto mode=deps.freshMode(session);
+            const auto build=deps.installed();
+            ymcc::deckyupdate::Recovery exact;
+            if(!current()||!ymcc::deckyrepair::cleanupAccountConfirmed(session,mode)||
+               mode.value("modeEpoch",std::string{})!=request.args.value("modeEpoch",std::string{})||
+               build!=request.args.value("frontendBuildId",std::string{})||deps.loader!=request.args.value("loaderVersion",std::string{})||
+               !exact.allowsRetainedFrontend(session,mode,build,deps.loader))
+                return {{"ok",false},{"mutated",false},{"reason","decky-managed-context-changed"}};
+            struct Lease{HANDLE value=nullptr;~Lease(){if(value)CloseHandle(value);}} backend;
+            // An owned-backend inspect is a read-only completion readback, not
+            // the retained no-backend inspect. Require the SAME backend proof.
+            if(request.args.at("backendPid").get<DWORD>()!=0){
+                const auto pid=request.args.at("backendPid").get<DWORD>();
+                backend.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);
+                wchar_t image[32768]{};DWORD length=32768,windowsSession=MAXDWORD;
+                if(!backend.value||WaitForSingleObject(backend.value,0)!=WAIT_TIMEOUT||
+                   std::to_string(ymcc::deckyrepair::cleanupworker::processBirth(backend.value))!=request.args.value("backendBirth",std::string{})||
+                   !QueryFullProcessImageNameW(backend.value,0,image,&length)||
+                   ymcc::steamlive::normalizedPath(std::wstring(image,length))!=ymcc::steamlive::normalizedPath(POWER_CONTROL_DIR+L"\\decky\\PluginLoader_noconsole.exe")||
+                   !ProcessIdToSessionId(pid,&windowsSession)||windowsSession!=request.identity.windowsSession)
+                    return {{"ok",false},{"mutated",false},{"reason","decky-managed-backend-changed"}};
+            }
+            const auto proofCurrent=[&]{return current()&&(!backend.value||WaitForSingleObject(backend.value,0)==WAIT_TIMEOUT);};
+            return deckySidebarManagedLifecycleRecord(request,proofCurrent);
+        }
+        deps.mode=deps.freshMode;deps.consent=[&](const auto&){return current();};
+        deps.preflight=[&]{
+            const auto hash=[&](const auto& path){return ymcc::deckyresources::worker::digest(path,current);};
+            const auto checked=ymcc::deckysetup::inspect(session.root,POWER_CONTROL_DIR+L"\\decky",hash,fspath::path(exe_dir())/L"decky-package.json");
+            if(!checked.value("ready",false))return checked.value("reason",std::string("decky-cleanup-resources-invalid"));
+            return deckySidebarPortPreflight();
+        };
+        deps.dispatch=[&](const auto&,const auto& action,const auto& admit){return ymcc::steamlive::run(session.root,action,admit);};
+        deps.reopenBigPicture=[&](const auto& admit){
+            return ymcc::deckyrepair::bigpicture::run(session,admit,[&]{return deps.freshMode(session);},
+                [&](const std::string& mode){return ymcc::steamui::dispatchRecoveryMode(session,mode,admit);},
+                []{return GetTickCount64();},[&]{WaitForSingleObject(cancel,500);});
+        };
+        ymcc::deckyrepair::ManualRepair repair;
+        return repair.request(request.args,deps,request.args.value("reopenBigPicture",false)?ymcc::deckyrepair::Origin::ReopenBigPicture:ymcc::deckyrepair::Origin::FinalCleanup);
+    });
+}
 static ymcc::deckyrepair::Dependencies deckySidebarRepairDependencies(){
     return {g_aiFanMockSession.isolated,
         []{return g_steamSettingsObserver.sessionSnapshot();},
@@ -32617,6 +35010,33 @@ static ymcc::deckyrepair::Dependencies deckySidebarRepairDependencies(){
             if(!(session==g_steamSettingsObserver.sessionSnapshot()))return json{};
             const auto state=ymcc::steamui::read(g_steamSettingsObserver,true);
             return session==g_steamSettingsObserver.sessionSnapshot()?state:json{};
+        },
+        [](const auto& session){
+            // Same global ON + current verified Big Picture policy as startup.
+            // Durable cleanup/no-replay and fresh child identity still apply.
+            return g_deckySidebarRuntime.snapshot().enabled&&!g_exitRequested.load()&&
+                g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready&&
+                session==g_steamSettingsObserver.sessionSnapshot()&&
+                ymcc::deckysession::bigPicture(session,g_steamModeObserver.snapshot(session));
+        },
+        {}, // Durable settings IO belongs to the isolated final-cleanup child.
+        [](const auto& session){
+            if(!(session==g_steamSettingsObserver.sessionSnapshot()))return;
+            g_steamModeObserver.requestRefresh(session);
+            g_deckySidebarRuntime.requestLaunchAdmissionRefresh();
+        },
+        [](const auto& session,const auto& args,const auto& current)->json{
+            const auto account=ymcc::deckysession::resolve(session,g_steamModeObserver.snapshot(session));
+            if(!account.value)return {{"ok",false},{"mutated",false},{"reason","decky-cleanup-account-unconfirmed"}};
+            auto verified=session;verified.account=account.value;
+            return ymcc::deckyrepair::cleanupworker::dispatch(verified,account.fromUi,args,deckySidebarStateJson(g_deckySidebarRuntime.snapshot()),current);
+        },
+        []{return currentPowerGeneration();},
+        []{return g_deckyManualBaseline.epoch();},
+        [](const auto& session,const json& mode,unsigned long long power,unsigned long long manualEpoch){
+            if(!ymcc::deckyrepair::cleanupAccountConfirmed(session,mode))return;
+            const auto account=ymcc::deckysession::resolve(session,mode);auto verified=session;verified.account=account.value;
+            g_deckyManualBaseline.capture(verified,ymcc::deckyupdate::managed::document(mode.value("modeEpoch",std::string{})),power,manualEpoch);
         }};
 }
 static json deckySidebarConnectionState(){
@@ -32624,21 +35044,602 @@ static json deckySidebarConnectionState(){
     if(state.value("pid",0u)==0&&ymcc::deckyrepair::repairable(state))state["recovery"]=g_deckyAutomaticRepair.snapshot(GetTickCount64());
     return state;
 }
+// A queued mirror reply alone proves no official backend. Capture its exact
+// native context in RAM; the existing Runtime worker later checks Job ownership,
+// the actual 1337 listener and fresh private-child UI/account/document evidence.
+struct DeckyManagedReadyWitness {
+    ymcc::steamsession::Session session;DWORD loaderPid=0;unsigned long long power=0;std::string document;
+    DWORD account=0;std::string run,connection;bool awaitingMode=false,finished=false,initialProof=false;
+    // Native snapshot revisions are evidence, never a repeating recovery grant.
+    unsigned long long nativeRevision=0,expiredRevision=0;
+    bool backendMissing=false,backendExpired=false,lateProofUsed=false,confirmStarted=false;
+};
+static std::mutex g_deckyManagedReadyMutex;
+static DeckyManagedReadyWitness g_deckyManagedReady;
+// Written/read by the existing Runtime worker only. Other threads merely queue
+// a real ready witness and wake that owner; they never reset its proof budget.
+static ymcc::deckyupdate::ManagedProofWindow g_deckyManagedProofWindow;
+static DWORD g_deckyManagedProofTimeout=INFINITE;
+static std::atomic<bool> g_deckyManagedModePending{false};
+static bool deckySidebarSameManagedReady(const DeckyManagedReadyWitness& a,const DeckyManagedReadyWitness& b){
+    return a.session==b.session&&a.loaderPid==b.loaderPid&&a.power==b.power&&a.document==b.document&&
+        a.account==b.account&&a.run==b.run&&a.connection==b.connection&&a.initialProof==b.initialProof;
+}
+// Decky-ready evidence only: registry zero is unavailable provenance, not a
+// different user. Keep the exact Steam process and reject every positive account
+// disagreement. This merely preserves a pending witness; current UI/account,
+// document, owned backend and authenticated peer still gate its confirmation.
+// Global Session equality and cancellation of already-dispatched IO stay strict.
+static bool deckySidebarReadySessionCompatible(const DeckyManagedReadyWitness& witness,const ymcc::steamsession::Session& current){
+    const auto& prior=witness.session;
+    return prior.pid&&prior.created&&!prior.root.empty()&&prior.pid==current.pid&&prior.created==current.created&&prior.root==current.root&&
+        (!prior.account||!current.account||prior.account==current.account)&&
+        (!witness.account||((!prior.account||prior.account==witness.account)&&(!current.account||current.account==witness.account)));
+}
+// A lost write reply has no write authority left. This separate RAM-only
+// observer may INSPECT the same native records after proof settles. Only the
+// existing Runtime worker owns its fixed deadline/retry slots; shared callbacks
+// can wake it once, never extend the window or redispatch the original write.
+struct DeckyManagedReadback {
+    DeckyManagedReadyWitness origin;std::string key,build,manualOrigin;
+    unsigned long long serial=0,observation=0,opened=0,completionEpoch=0,manualEpoch=0,backendBirth=0;
+    DWORD backendPid=0;bool awaitingMode=false,expired=false,lateUsed=false,restartPending=false;
+};
+static std::mutex g_deckyManagedReadbackMutex;
+static DeckyManagedReadback g_deckyManagedReadback;
+static std::atomic<bool> g_deckyManagedReadbackActive{false};
+static ymcc::deckyupdate::ManagedProofWindow g_deckyManagedReadbackWindow;
+static DWORD g_deckyManagedReadbackTimeout=INFINITE;
+static void deckySidebarEndManagedReadback(unsigned long long expected=0,bool expired=false){
+    std::lock_guard lock(g_deckyManagedReadbackMutex);
+    if(expected&&g_deckyManagedReadback.serial!=expected)return;
+    ++g_deckyManagedReadback.serial;g_deckyManagedReadback.awaitingMode=false;
+    g_deckyManagedReadback.expired=expired;g_deckyManagedReadback.restartPending=false;
+    g_deckyManagedReadbackActive.store(false,std::memory_order_release);
+}
+enum class DeckyManagedReadbackProof { Invalid,Pending,Current };
+// Snapshot-only, also used by the shared callback. A missing proof can settle;
+// positive foreign authority cancels. Each actual private read still pins its
+// own strict Session and rechecks provenance after obtaining the mode snapshot.
+static DeckyManagedReadbackProof deckySidebarManagedReadbackProof(const DeckyManagedReadback& item,
+        ymcc::steamsession::Session& session,json& mode){
+    const auto& origin=item.origin;
+    if(!g_deckyManagedReadbackActive.load(std::memory_order_acquire))return DeckyManagedReadbackProof::Invalid;
+    {std::lock_guard lock(g_deckyManagedReadbackMutex);if(g_deckyManagedReadback.serial!=item.serial)return DeckyManagedReadbackProof::Invalid;}
+    const auto live=g_deckySidebarRuntime.snapshot();session=g_steamSettingsObserver.sessionSnapshot();
+    const auto peer=g_deckyMirrorBroker.status();
+    if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+       currentPowerGeneration()!=origin.power||g_deckyAutomaticRepair.completionEpoch()!=item.completionEpoch||
+       (!item.manualOrigin.empty()&&g_deckyManualBaseline.epoch()!=item.manualEpoch)||
+       !deckySidebarReadySessionCompatible(origin,session)||!live.enabled||!live.steamKnown||!live.steamRunning||
+       live.pid!=origin.loaderPid||live.phase!="loader-started"||!peer.value("active",false)||!peer.value("connected",false)||
+       peer.value("runId",std::string{})!=origin.run||peer.value("connection",std::string{})!=origin.connection)return DeckyManagedReadbackProof::Invalid;
+    {std::lock_guard lock(g_deckyManagedReadyMutex);
+        if(!g_deckyManagedReady.finished||!deckySidebarSameManagedReady(origin,g_deckyManagedReady))return DeckyManagedReadbackProof::Invalid;}
+    mode=g_steamModeObserver.snapshot(session);
+    const auto doc=ymcc::deckyupdate::managed::document(mode.value("modeEpoch",std::string{}));
+    const auto observed=ymcc::deckysession::positiveAccount(mode.value("observedAccount",json()));
+    const auto residue=ymcc::deckyupdate::residue(mode.value("deckyUpdateResidue",json()));
+    if((!doc.empty()&&doc!=origin.document)||(observed&&observed!=origin.account)||
+       mode.value("mode",std::string{})=="desktop"||
+       (!residue.empty()&&(residue.value("frontendBuildId",std::string{})!=item.build||residue.value("loaderVersion",std::string{})!=ymcc::deckyidentity::version))||
+       (mode.contains("deckyFrontendLoaded")&&!mode.value("deckyFrontendLoaded",false)))return DeckyManagedReadbackProof::Invalid;
+    // A shared snapshot can yield while OFF/power/peer/ready ownership changes.
+    // Revalidate the native authority AFTER that read before certifying current.
+    // No CDP/file/port IO here; this also runs in the existing shared callback.
+    const auto afterLive=g_deckySidebarRuntime.snapshot();const auto afterPeer=g_deckyMirrorBroker.status();
+    if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+       currentPowerGeneration()!=origin.power||g_deckyAutomaticRepair.completionEpoch()!=item.completionEpoch||
+       (!item.manualOrigin.empty()&&g_deckyManualBaseline.epoch()!=item.manualEpoch)||
+       !afterLive.enabled||!afterLive.steamKnown||!afterLive.steamRunning||afterLive.pid!=origin.loaderPid||afterLive.phase!="loader-started"||
+       !afterPeer.value("active",false)||!afterPeer.value("connected",false)||afterPeer.value("runId",std::string{})!=origin.run||
+       afterPeer.value("connection",std::string{})!=origin.connection)return DeckyManagedReadbackProof::Invalid;
+    {std::lock_guard lock(g_deckyManagedReadyMutex);
+        if(!g_deckyManagedReady.finished||!deckySidebarSameManagedReady(origin,g_deckyManagedReady))return DeckyManagedReadbackProof::Invalid;}
+    {std::lock_guard lock(g_deckyManagedReadbackMutex);
+        if(!g_deckyManagedReadbackActive.load(std::memory_order_acquire)||g_deckyManagedReadback.serial!=item.serial)return DeckyManagedReadbackProof::Invalid;}
+    const auto latest=g_steamSettingsObserver.sessionSnapshot();
+    if(!deckySidebarReadySessionCompatible(origin,latest))return DeckyManagedReadbackProof::Invalid;
+    if(!(latest==session))return DeckyManagedReadbackProof::Pending;
+    ymcc::deckyupdate::Recovery exact;
+    if(doc.empty()||!ymcc::deckyrepair::cleanupAccountConfirmed(session,mode)||
+       ymcc::deckysession::resolve(session,mode).value!=origin.account||
+       !exact.allowsRetainedFrontend(session,mode,item.build,ymcc::deckyidentity::version))return DeckyManagedReadbackProof::Pending;
+    return DeckyManagedReadbackProof::Current;
+}
+static void deckySidebarResumeManagedReadback(){
+    if(!g_deckyManagedReadbackActive.load(std::memory_order_acquire))return;
+    DeckyManagedReadback item;{std::lock_guard lock(g_deckyManagedReadbackMutex);item=g_deckyManagedReadback;if(!item.awaitingMode)return;}
+    ymcc::steamsession::Session session;json mode;
+    const auto proof=deckySidebarManagedReadbackProof(item,session,mode);
+    if(proof==DeckyManagedReadbackProof::Invalid){deckySidebarEndManagedReadback(item.serial);return;}
+    if(proof!=DeckyManagedReadbackProof::Current)return;
+    bool wake=false;{std::lock_guard lock(g_deckyManagedReadbackMutex);
+        if(g_deckyManagedReadbackActive.load(std::memory_order_acquire)&&g_deckyManagedReadback.serial==item.serial&&g_deckyManagedReadback.awaitingMode){
+            g_deckyManagedReadback.awaitingMode=false;wake=true;}}
+    if(wake)g_deckySidebarRuntime.requestConnectionCheck();
+}
+static void deckySidebarEndManagedModeWait(){
+    deckySidebarEndManagedReadback();
+    std::lock_guard lock(g_deckyManagedReadyMutex);g_deckyManagedReady.awaitingMode=false;g_deckyManagedReady.finished=true;g_deckyManagedReady.backendExpired=false;g_deckyManagedReady.backendMissing=false;
+    g_deckyManagedModePending.store(false,std::memory_order_release);
+}
+static void deckySidebarQueueManagedReady(const ymcc::steamsession::Session& hint,DWORD loaderPid,const std::string& run,const std::string& connection,unsigned long long nativeRevision=0);
+static void deckySidebarFinishManagedReady(const DeckyManagedReadyWitness& expected,bool naturalBackendExpiry=false){
+    DeckyManagedReadyWitness recheck;bool pending=false;
+    {std::lock_guard lock(g_deckyManagedReadyMutex);auto& current=g_deckyManagedReady;
+        if(!deckySidebarSameManagedReady(expected,current)||expected.lateProofUsed!=current.lateProofUsed)return;
+        // Only an initial missing-listener window, with no confirm dispatched,
+        // may observe one later native-ready revision. Closed/cancelled work,
+        // protocol outcomes and all uncertain writes remain terminal.
+        current.backendExpired=naturalBackendExpiry&&!current.finished&&current.backendMissing&&!current.confirmStarted&&!current.lateProofUsed;
+        if(current.backendExpired)current.expiredRevision=expected.nativeRevision;
+        current.awaitingMode=false;current.finished=true;g_deckyManagedModePending.store(false,std::memory_order_release);
+        if(current.backendExpired&&current.nativeRevision>current.expiredRevision){recheck=current;pending=true;}
+    }
+    // A real native snapshot may have arrived between the owner's last read
+    // and this expiry publication. Recheck that already-recorded receipt after
+    // releasing the lock; neither mode callbacks nor this recheck invent one.
+    if(pending)deckySidebarQueueManagedReady(recheck.session,recheck.loaderPid,recheck.run,recheck.connection,recheck.nativeRevision);
+}
+static void deckySidebarResumeManagedMode(const ymcc::steamsession::Session& session);
+static void deckySidebarParkManagedMode(const ymcc::steamsession::Session& session,DWORD loaderPid,unsigned long long power){
+    if(g_deckyUpdateRecovery.vetoed())return;
+    {std::lock_guard lock(g_deckyManagedReadyMutex);auto& witness=g_deckyManagedReady;
+        if(witness.finished||!deckySidebarReadySessionCompatible(witness,session)||witness.loaderPid!=loaderPid||witness.power!=power||
+           (!witness.initialProof&&(witness.document.empty()||!witness.account)))return;
+        witness.awaitingMode=true;g_deckyManagedModePending.store(true,std::memory_order_release);}
+    // The shared callback may have settled after our pending snapshot but before
+    // registration. Recheck after publishing, outside the mutex, so neither
+    // callback ordering can lose the only ready wake or create a second one.
+    deckySidebarResumeManagedMode(session);
+}
+// Existing shared-mode callbacks may settle without a mode/entry change. Wake
+// ONLY a previously authenticated native-ready observer which parked on proof.
+// No CDP/file/port read, settings write, launch or recovery-budget reset here.
+static void deckySidebarResumeManagedMode(const ymcc::steamsession::Session& /*hint*/){
+    deckySidebarResumeManagedReadback();
+    if(!g_deckyManagedModePending.load(std::memory_order_acquire))return;
+    if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||g_powerLifecycle.load()!=PowerLifecycle::Ready){deckySidebarEndManagedModeWait();return;}
+    DeckyManagedReadyWitness witness;{std::lock_guard lock(g_deckyManagedReadyMutex);witness=g_deckyManagedReady;}
+    // Park/queue can still hold the previous raw registry provenance. The
+    // callback argument is a hint, not current identity: read native authority
+    // again and obtain its own mode proof before retiring/adopting a witness.
+    const auto session=g_steamSettingsObserver.sessionSnapshot();
+    const auto state=g_deckySidebarRuntime.snapshot();
+    if(!deckySidebarReadySessionCompatible(witness,session)||witness.power!=currentPowerGeneration()||
+       !state.enabled||!state.steamKnown||!state.steamRunning||state.pid!=witness.loaderPid||state.phase!="loader-started"){
+        deckySidebarFinishManagedReady(witness);return;
+    }
+    const auto mode=g_steamModeObserver.snapshot(session);const auto document=ymcc::deckyupdate::managed::document(mode.value("modeEpoch",std::string{}));
+    const auto observed=ymcc::deckysession::positiveAccount(mode.value("observedAccount",json()));
+    if((!witness.document.empty()&&!document.empty()&&document!=witness.document)||(witness.account&&observed&&observed!=witness.account)){
+        deckySidebarFinishManagedReady(witness);return;
+    }
+    if(witness.initialProof&&mode.value("known",false)&&mode.value("mode",std::string{})=="desktop"){deckySidebarFinishManagedReady(witness);return;}
+    if(mode.value("mode",std::string{})!="bigpicture"||!mode.value("known",false)||!mode.value("running",false)||
+       mode.value("pid",0u)!=session.pid||mode.value("birth",std::string{})!=std::to_string(session.created)||
+       document.empty()||!ymcc::deckyrepair::cleanupAccountConfirmed(session,mode))return;
+    const auto account=ymcc::deckysession::resolve(session,mode);if(witness.account&&account.value!=witness.account){deckySidebarFinishManagedReady(witness);return;}
+    const auto peer=g_deckyMirrorBroker.status();
+    if(!peer.value("active",false)||peer.value("runId",std::string{})!=witness.run){deckySidebarFinishManagedReady(witness);return;}
+    if(!peer.value("connected",false))return;
+    if(peer.value("connection",std::string{})!=witness.connection){deckySidebarFinishManagedReady(witness);return;}
+    // Native provenance may change again while the shared snapshot is read.
+    // A compatible change parks for its OWN proof; positive foreign identity
+    // retires the old receipt. Neither path may consume the stale mode read.
+    const auto latest=g_steamSettingsObserver.sessionSnapshot();
+    if(!(latest==session)){
+        if(!deckySidebarReadySessionCompatible(witness,latest))deckySidebarFinishManagedReady(witness);
+        return;
+    }
+    bool wake=false;{std::lock_guard lock(g_deckyManagedReadyMutex);auto& current=g_deckyManagedReady;
+        if(!current.finished&&current.awaitingMode&&deckySidebarSameManagedReady(witness,current)&&
+           !g_exitRequested.load()&&!g_deckyUpdateRecovery.vetoed()&&g_powerLifecycle.load()==PowerLifecycle::Ready&&
+           currentPowerGeneration()==witness.power){
+            current.session=session; // Adopt new registry provenance only after the current positive UI proof.
+            if(current.initialProof){current.document=document;current.account=account.value;current.initialProof=false;}
+            current.awaitingMode=false;g_deckyManagedModePending.store(false,std::memory_order_release);wake=true;
+        }}
+    if(wake)g_deckySidebarRuntime.requestConnectionCheck();
+}
+// A native ready may precede the shared mode/account proof. Keep only its
+// authenticated transport/owned context in RAM; this grants no lifecycle write.
+// Existing shared callbacks complete the first proof, then the original worker
+// still verifies the actual owned backend and fresh private-child UI evidence.
+// A new authenticated ready can replace transport while an uncertain write is
+// already retired. Carry ONLY its existing readonly observation across the same
+// native lifecycle. Cancellation serial changes; the original budget identity,
+// opened time, backend ticket and manual/completion fences never change.
+static bool deckySidebarAdoptManagedReadbackReady(const DeckyManagedReadyWitness& next,const json& mode){
+    DeckyManagedReadback item;bool active=false;
+    {std::lock_guard lock(g_deckyManagedReadbackMutex);item=g_deckyManagedReadback;active=g_deckyManagedReadbackActive.load(std::memory_order_acquire);}
+    // A naturally exhausted readonly observer may reconcile once after a NEW
+    // authenticated native ready. This never restores its retired write.
+    // OFF/exit/foreign proof and parsed protocol failures do not grant this path.
+    if(!active&&(!item.expired||item.lateUsed||!item.observation))return false;
+    const auto& prior=item.origin;ymcc::deckyupdate::Recovery exact;
+    // Native ready can precede its shared document/account proof. Carry the
+    // old readonly identity only; it must be proved again before any inspect.
+    // An inconsistent initial marker with already complete proof is not pending.
+    const bool pending=next.initialProof&&(next.document.empty()||!ymcc::deckyrepair::cleanupAccountConfirmed(next.session,mode));
+    if((next.initialProof&&!pending)||(!pending&&(next.document.empty()||!next.account)))return false;
+    if(!deckySidebarReadySessionCompatible(prior,next.session)||prior.loaderPid!=next.loaderPid||prior.power!=next.power||
+       (!next.document.empty()&&prior.document!=next.document)||(next.account&&prior.account!=next.account)||
+       (prior.run==next.run&&prior.connection==next.connection))return false;
+    const auto document=ymcc::deckyupdate::managed::document(mode.value("modeEpoch",std::string{}));
+    const auto observed=ymcc::deckysession::positiveAccount(mode.value("observedAccount",json()));
+    const auto residue=ymcc::deckyupdate::residue(mode.value("deckyUpdateResidue",json()));
+    if((!document.empty()&&document!=prior.document)||(observed&&observed!=prior.account)||
+       mode.value("mode",std::string{})=="desktop"||
+       (!residue.empty()&&(residue.value("frontendBuildId",std::string{})!=item.build||residue.value("loaderVersion",std::string{})!=ymcc::deckyidentity::version))||
+       (mode.contains("deckyFrontendLoaded")&&!mode.value("deckyFrontendLoaded",false)))return false;
+    if(!pending&&(!ymcc::deckyrepair::cleanupAccountConfirmed(next.session,mode)||
+       ymcc::deckysession::resolve(next.session,mode).value!=next.account||
+       !exact.allowsRetainedFrontend(next.session,mode,item.build,ymcc::deckyidentity::version)))return false;
+    const auto live=g_deckySidebarRuntime.snapshot();const auto peer=g_deckyMirrorBroker.status();
+    if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||g_powerLifecycle.load()!=PowerLifecycle::Ready||currentPowerGeneration()!=next.power||
+       g_deckyAutomaticRepair.completionEpoch()!=item.completionEpoch||(!item.manualOrigin.empty()&&g_deckyManualBaseline.epoch()!=item.manualEpoch)||
+       !(g_steamSettingsObserver.sessionSnapshot()==next.session)||!live.enabled||!live.steamKnown||!live.steamRunning||
+       live.pid!=next.loaderPid||live.phase!="loader-started"||!peer.value("active",false)||!peer.value("connected",false)||
+       peer.value("runId",std::string{})!=next.run||peer.value("connection",std::string{})!=next.connection)return false;
+    std::scoped_lock lock(g_deckyManagedReadyMutex,g_deckyManagedReadbackMutex);
+    if(g_deckyManagedReadbackActive.load(std::memory_order_acquire)!=active||g_deckyManagedReadback.serial!=item.serial||
+       !deckySidebarSameManagedReady(next,g_deckyManagedReady)||g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||
+       g_powerLifecycle.load()!=PowerLifecycle::Ready||currentPowerGeneration()!=next.power)return false;
+    auto& current=g_deckyManagedReadback;++current.serial;current.origin=next;
+    current.expired=false;
+    if(!active){current.lateUsed=true;current.restartPending=true;g_deckyManagedReadbackActive.store(true,std::memory_order_release);}
+    current.origin.document=prior.document;current.origin.account=prior.account;current.awaitingMode=pending;
+    g_deckyManagedReady=current.origin;g_deckyManagedReady.finished=true;g_deckyManagedReady.awaitingMode=false;
+    g_deckyManagedModePending.store(false,std::memory_order_release);
+    return true; // Active observation keeps its original slots. The Runtime alone
+    // starts one separate late readonly window; this callback performs no IO.
+}
+static void deckySidebarQueueManagedReady(const ymcc::steamsession::Session& hint,DWORD loaderPid,const std::string& run,const std::string& connection,unsigned long long nativeRevision){
+    const auto session=g_steamSettingsObserver.sessionSnapshot();
+    DeckyManagedReadyWitness origin;origin.session=hint;origin.account=hint.account;
+    // The native reply may have captured the previous raw source just before
+    // entry. Retain only compatible provenance; the current UI/account and
+    // authenticated peer below still own all first-proof admission.
+    if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+       !deckySidebarReadySessionCompatible(origin,session)||!loaderPid||
+       run.size()!=32||run.find_first_not_of("0123456789abcdef")!=std::string::npos||connection.empty()||connection.size()>32)return;
+    const auto state=g_deckySidebarRuntime.snapshot();const auto peer=g_deckyMirrorBroker.status();
+    if(!state.enabled||!state.steamKnown||!state.steamRunning||state.pid!=loaderPid||state.phase!="loader-started"||
+       !peer.value("active",false)||!peer.value("connected",false)||peer.value("runId",std::string{})!=run||
+       peer.value("connection",std::string{})!=connection)return;
+    const auto mode=g_steamModeObserver.snapshot(session);
+    const auto document=ymcc::deckyupdate::managed::document(mode.value("modeEpoch",std::string{}));
+    const auto account=ymcc::deckysession::resolve(session,mode);
+    const auto observed=ymcc::deckysession::positiveAccount(mode.value("observedAccount",json()));
+    if((account.value&&observed&&account.value!=observed)||(hint.account&&account.value&&hint.account!=account.value))return;
+    const bool initial=document.empty()||!ymcc::deckyrepair::cleanupAccountConfirmed(session,mode);
+    const auto power=currentPowerGeneration();bool changed=false;
+    {std::lock_guard lock(g_deckyManagedReadyMutex);auto& prior=g_deckyManagedReady;
+        if(g_deckyUpdateRecovery.vetoed())return; // OFF may have won after the snapshots.
+        const bool sameOrigin=deckySidebarReadySessionCompatible(prior,session)&&prior.loaderPid==loaderPid&&prior.power==power&&prior.run==run&&prior.connection==connection;
+        // A later unknown snapshot cannot erase positive partial identity from
+        // this same authenticated origin and adopt another account/document.
+        const auto knownDocument=document.empty()&&sameOrigin?prior.document:document;
+        const auto knownAccount=account.value?account.value:(hint.account?hint.account:(sameOrigin?prior.account:0u));
+        changed=!sameOrigin||prior.document!=knownDocument||prior.account!=knownAccount;
+        if(changed){prior={session,loaderPid,power,knownDocument,knownAccount,run,connection,initial,false,initial};
+            prior.nativeRevision=nativeRevision;g_deckyManagedModePending.store(initial,std::memory_order_release);
+        }else{
+            if(nativeRevision>prior.nativeRevision)prior.nativeRevision=nativeRevision;
+            if(prior.finished&&prior.backendExpired&&!prior.lateProofUsed&&nativeRevision>prior.expiredRevision&&nativeRevision==prior.nativeRevision){
+                // One independent late proof; its key never contains revision,
+                // so further snapshots cannot refill or postpone that window.
+                prior.finished=false;prior.initialProof=initial;prior.awaitingMode=initial;
+                prior.backendMissing=false;prior.backendExpired=false;prior.lateProofUsed=true;
+                changed=true;g_deckyManagedModePending.store(initial,std::memory_order_release);
+            }
+        }}
+    if(changed){
+        DeckyManagedReadyWitness ready;{std::lock_guard lock(g_deckyManagedReadyMutex);ready=g_deckyManagedReady;}
+        if(deckySidebarAdoptManagedReadbackReady(ready,mode)){
+            // The shared callback may already have settled after queue's read.
+            // Publish the readonly pending owner, then recheck outside locks.
+            deckySidebarResumeManagedReadback();g_deckySidebarRuntime.requestConnectionCheck();
+        }else if(!initial)g_deckySidebarRuntime.requestConnectionCheck();
+        else if(g_deckyManagedModePending.load(std::memory_order_acquire))deckySidebarResumeManagedMode(session);
+    }
+    // Close the publish-vs-settled-callback race without another IO/timer/readiness receipt.
+    else if(g_deckyManagedModePending.load(std::memory_order_acquire))deckySidebarResumeManagedMode(session);
+}
+struct DeckyManagedBackendLease {
+    HANDLE value=nullptr;DWORD pid=0;unsigned long long birth=0;
+    ~DeckyManagedBackendLease(){if(value)CloseHandle(value);}
+};
+static bool deckySidebarAcquireManagedBackend(DeckyManagedBackendLease& result,bool* absent=nullptr){
+    // Only complete successful OS tables with no listener certify absence.
+    // Read failures, inaccessible/foreign listeners and ownership rejection
+    // must never create the late initial-backend recovery allowance.
+    if(absent)*absent=false;
+    DWORD owner=0;const auto port=[](DWORD value){return static_cast<unsigned short>(((value&0xff)<<8)|((value>>8)&0xff));};
+    // Both complete OS listener tables must succeed. A foreign/shared listener,
+    // inaccessible process or truncated read cannot certify our official backend.
+    for(ULONG family:{static_cast<ULONG>(AF_INET),static_cast<ULONG>(AF_INET6)}){
+        DWORD bytes=0;const auto first=GetExtendedTcpTable(nullptr,&bytes,FALSE,family,TCP_TABLE_OWNER_PID_LISTENER,0);
+        if((first!=ERROR_INSUFFICIENT_BUFFER&&first!=NO_ERROR)||!bytes||bytes>16*1024*1024)return false;
+        std::vector<unsigned char> data(bytes);
+        if(GetExtendedTcpTable(data.data(),&bytes,FALSE,family,TCP_TABLE_OWNER_PID_LISTENER,0)!=NO_ERROR||bytes>data.size())return false;
+        const auto inspect=[&](const auto* table,size_t header){
+            // Success must still report a complete header and every declared
+            // row inside returned bytes and the actual allocated storage.
+            // Divide after the header check; never multiply untrusted counts.
+            if(bytes<header||table->dwNumEntries>(bytes-header)/sizeof(table->table[0]))return false;
+            for(DWORD n=0;n<table->dwNumEntries;++n){const auto& row=table->table[n];
+            if(port(row.dwLocalPort)==1337){if(!row.dwOwningPid||(owner&&owner!=row.dwOwningPid))return false;owner=row.dwOwningPid;}}return true;};
+        if(family==AF_INET?!inspect(reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(data.data()),offsetof(MIB_TCPTABLE_OWNER_PID,table)):
+            !inspect(reinterpret_cast<const MIB_TCP6TABLE_OWNER_PID*>(data.data()),offsetof(MIB_TCP6TABLE_OWNER_PID,table)))return false;
+    }
+    if(!owner){if(absent)*absent=true;return false;}
+    result.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,owner);
+    if(!result.value||!g_deckySidebarRuntime.ownsLiveProcess(result.value))return false;
+    result.pid=owner;result.birth=ymcc::deckyrepair::cleanupworker::processBirth(result.value);return result.birth!=0;
+}
+static void deckySidebarServiceManagedReadback(){
+    g_deckyManagedReadbackTimeout=INFINITE;
+    if(!g_deckyManagedReadbackActive.load(std::memory_order_acquire))return;
+    // An old in-flight read may return after a new ready adopted this SAME
+    // observation. Its serial-qualified cancellation must not lose the new
+    // owner's remaining worker wait, nor mint slots after the final one.
+    struct PreserveReadbackWait{~PreserveReadbackWait(){
+        // Queue may publish the singleton late observer just as this old worker
+        // finishes. Keep that pending owner and its immediate wait atomically.
+        std::lock_guard lock(g_deckyManagedReadbackMutex);
+        if(!g_deckyManagedReadbackActive.load(std::memory_order_acquire)){g_deckyManagedReadbackTimeout=INFINITE;return;}
+        if(g_deckyManagedReadback.restartPending){g_deckyManagedReadbackTimeout=0;return;}
+        const auto remaining=g_deckyManagedReadbackWindow.timeout(GetTickCount64());
+        if(remaining==INFINITE){
+            ++g_deckyManagedReadback.serial;g_deckyManagedReadback.awaitingMode=false;
+            g_deckyManagedReadback.expired=true;g_deckyManagedReadback.restartPending=false;
+            g_deckyManagedReadbackActive.store(false,std::memory_order_release);
+        }
+        g_deckyManagedReadbackTimeout=remaining;
+    }} preserveReadbackWait;
+    const auto now=GetTickCount64();DeckyManagedReadback item;
+    {std::lock_guard lock(g_deckyManagedReadbackMutex);
+        if(g_deckyManagedReadback.restartPending){
+            // Only the existing Runtime owner opens the singleton late read.
+            // Its new observation is distinct; active callbacks never refill it.
+            g_deckyManagedReadback.opened=now;g_deckyManagedReadback.observation=g_deckyManagedReadback.serial;
+            g_deckyManagedReadback.restartPending=false;
+        }
+        item=g_deckyManagedReadback;
+    }
+    if(now>item.opened+30000){deckySidebarEndManagedReadback(item.serial,true);return;}
+    const auto retryKey=std::to_string(item.observation)+":"+item.key;
+    if(!g_deckyManagedReadbackWindow.take(retryKey,now)){
+        g_deckyManagedReadbackTimeout=g_deckyManagedReadbackWindow.timeout(now);return;
+    }
+    g_deckyManagedReadbackTimeout=g_deckyManagedReadbackWindow.timeout(now);
+    ymcc::steamsession::Session session;json mode;
+    const auto proof=deckySidebarManagedReadbackProof(item,session,mode);
+    if(proof==DeckyManagedReadbackProof::Invalid){deckySidebarEndManagedReadback(item.serial);g_deckyManagedReadbackTimeout=INFINITE;return;}
+    if(proof==DeckyManagedReadbackProof::Pending){
+        {std::lock_guard lock(g_deckyManagedReadbackMutex);if(g_deckyManagedReadback.serial==item.serial)g_deckyManagedReadback.awaitingMode=true;}
+        deckySidebarResumeManagedReadback(); // Publish then recheck: no lost shared-mode wake.
+        if(now>=item.opened+30000)deckySidebarEndManagedReadback(item.serial,true);
+        return;
+    }
+    const auto build=ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js");
+    if(build!=item.build){deckySidebarEndManagedReadback(item.serial);g_deckyManagedReadbackTimeout=INFINITE;return;}
+    DeckyManagedBackendLease backend;
+    if(!deckySidebarAcquireManagedBackend(backend)){
+        if(now>=item.opened+30000)deckySidebarEndManagedReadback(item.serial,true);
+        return;
+    }
+    if(backend.pid!=item.backendPid||backend.birth!=item.backendBirth){deckySidebarEndManagedReadback(item.serial);g_deckyManagedReadbackTimeout=INFINITE;return;}
+    const auto current=[&]{ymcc::steamsession::Session latest;json fresh;
+        return deckySidebarManagedReadbackProof(item,latest,fresh)==DeckyManagedReadbackProof::Current&&latest==session&&
+            backend.value&&g_deckySidebarRuntime.ownsLiveProcess(backend.value);};
+    if(!current()){if(now>=item.opened+30000){deckySidebarEndManagedReadback(item.serial);g_deckyManagedReadbackTimeout=INFINITE;}return;}
+    auto verified=session;verified.account=item.origin.account;
+    const auto account=ymcc::deckysession::resolve(session,mode);
+    const json args={{"task","inspect"},{"modeEpoch",mode.value("modeEpoch",std::string{})},{"frontendBuildId",item.build},
+        {"loaderVersion",ymcc::deckyidentity::version},{"backendPid",backend.pid},{"backendBirth",std::to_string(backend.birth)}};
+    auto privateState=deckySidebarStateJson(g_deckySidebarRuntime.snapshot());
+    if(!item.manualOrigin.empty())privateState["manualRecoveryDocument"]=item.manualOrigin;
+    auto result=ymcc::deckyrepair::cleanupworker::dispatch(verified,account.fromUi,args,privateState,current,
+        ymcc::deckyrepair::cleanupworker::recoveryWindowMs,ymcc::deckyrepair::cleanupworker::lifecycleSchema);
+    const bool returned=result.value("cleanupWorkerDestroyed",false)&&result.value("cleanupWorkerHandles",1u)==0&&result.value("cleanupWorkerProcesses",1u)==0;
+    const bool readonly=result.contains("mutated")&&result["mutated"].is_boolean()&&!result["mutated"].get<bool>();
+    if(returned&&result.value("ok",false)&&readonly&&!result.value("uncertain",false)&&current())
+        g_deckyAutomaticRepair.completedManaged(verified,result.value("ledger",json()),item.origin.document,
+            ymcc::deckyrepair::cleanupworker::nativeHost(),item.build,ymcc::deckyidentity::version,item.completionEpoch);
+    const auto reason=result.value("reason",std::string{});
+    // Retry only a known undelivered transport or certified pre-settings refusal
+    // of this READ. Parsed mutating/uncertain replies and malformed frames stop.
+    const auto readError=result.find("cleanupWorkerReadError");
+    const bool cleanEnd=result.contains("cleanupWorkerReadKind")&&result["cleanupWorkerReadKind"]=="ended"&&
+        readError!=result.end()&&readError->is_number_unsigned()&&
+        (*readError==ERROR_BROKEN_PIPE||*readError==ERROR_PIPE_NOT_CONNECTED||*readError==ERROR_NO_DATA);
+    const bool transport=returned&&result.contains("cleanupWorkerReplyReceived")&&result["cleanupWorkerReplyReceived"]==false&&
+        !result.contains("protocolError")&&!result.value("ok",false)&&result.value("uncertain",false)&&
+        ((reason=="decky-cleanup-worker-read-failed"&&cleanEnd)||reason=="decky-cleanup-worker-deadline"||reason=="decky-cleanup-cancelled-unconfirmed");
+    const bool noWrite=returned&&!result.value("ok",false)&&readonly&&!result.value("uncertain",false)&&reason=="decky-managed-context-changed";
+    ymcc::steamsession::Session after;json afterMode;
+    const bool retryable=(transport||noWrite)&&deckySidebarManagedReadbackProof(item,after,afterMode)!=DeckyManagedReadbackProof::Invalid;
+    const bool retry=retryable&&GetTickCount64()<item.opened+30000;
+    if(!retry){deckySidebarEndManagedReadback(item.serial,retryable);g_deckyManagedReadbackTimeout=INFINITE;}
+    else g_deckyManagedReadbackTimeout=g_deckyManagedReadbackWindow.timeout(GetTickCount64());
+    result.erase("ledger");result["task"]="inspect";result["afterUnconfirmedWrite"]=true;result["readbackPending"]=g_deckyManagedReadbackActive.load(std::memory_order_acquire);
+    deckySidebarDiagnostic("managed-lifecycle",result,true);
+}
+static void deckySidebarServiceManagedLifecycle(){
+    deckySidebarServiceManagedReadback();
+    g_deckyManagedProofTimeout=INFINITE;
+    const auto session=g_steamSettingsObserver.sessionSnapshot();const auto state=g_deckySidebarRuntime.snapshot();
+    if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||!state.enabled||!state.steamKnown||!state.steamRunning||
+       g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)return;
+    const auto power=currentPowerGeneration();const bool confirming=state.pid&&state.phase=="loader-started";
+    const auto mode=g_steamModeObserver.snapshot(session);const auto epoch=mode.value("modeEpoch",std::string{});
+    const auto document=ymcc::deckyupdate::managed::document(epoch);
+    if(document.empty()||!ymcc::deckyrepair::cleanupAccountConfirmed(session,mode)){
+        if(confirming)deckySidebarParkManagedMode(session,state.pid,power);return;
+    }
+    const auto account=ymcc::deckysession::resolve(session,mode);auto verified=session;verified.account=account.value;
+    if(!confirming&&(!ymcc::deckyrepair::repairable(deckySidebarStateJson(state))||g_deckyUpdateRecovery.allows(session)))return;
+    const auto residue=mode.value("deckyUpdateResidue",json::object());
+    const auto key=ymcc::deckyupdate::ticket(session)+":"+document+":"+std::to_string(state.pid)+":"+std::to_string(power)+":"+
+        residue.value("frontendBuildId",std::string{})+":"+residue.value("loaderVersion",std::string{})+":"+std::to_string(account.value);
+    // One attempt per actual context/native owner. Callback storms do not spawn
+    // an IO loop; invalid or ambiguous history waits for explicit/new evidence.
+    static std::string inspected,confirmed;
+    auto& attempted=confirming?confirmed:inspected;
+    DeckyManagedReadyWitness witness;if(confirming){std::lock_guard lock(g_deckyManagedReadyMutex);witness=g_deckyManagedReady;}
+    if(attempted==key){if(confirming)deckySidebarFinishManagedReady(witness);return;}
+    DeckyManagedBackendLease backend;
+    if(confirming){
+        if(witness.finished||witness.initialProof||!deckySidebarReadySessionCompatible(witness,session)||witness.loaderPid!=state.pid||witness.power!=power||witness.document!=document||witness.account!=account.value)return;
+        const auto peer=g_deckyMirrorBroker.status();if(!peer.value("active",false)||!peer.value("connected",false)||
+            peer.value("runId",std::string{})!=witness.run||peer.value("connection",std::string{})!=witness.connection)return;
+        const auto now=GetTickCount64();
+        // One authenticated ready origin owns one proof budget. Upgrade module
+        // fingerprints can arrive in pieces or alternate during handoff; those
+        // strings are current evidence, never a fresh native-ready authority.
+        // A genuinely new authenticated transport/document keeps its own window.
+        const auto proofOrigin=ymcc::deckyupdate::ticket(session)+":"+document+":"+std::to_string(state.pid)+":"+
+            std::to_string(power)+":"+std::to_string(account.value)+":"+witness.run+":"+witness.connection+(witness.lateProofUsed?":late-native":"");
+        if(!g_deckyManagedProofWindow.take(proofOrigin,now)){
+            g_deckyManagedProofTimeout=g_deckyManagedProofWindow.timeout(now);
+            if(g_deckyManagedProofTimeout==INFINITE)deckySidebarFinishManagedReady(witness,true);return;
+        }
+        bool backendAbsent=false;
+        if(!deckySidebarAcquireManagedBackend(backend,&backendAbsent)){
+            {std::lock_guard lock(g_deckyManagedReadyMutex);auto& current=g_deckyManagedReady;
+                if(!deckySidebarSameManagedReady(witness,current)||current.finished||current.lateProofUsed!=witness.lateProofUsed)return;
+                current.backendMissing=backendAbsent;
+            }
+            g_deckyManagedProofTimeout=g_deckyManagedProofWindow.timeout(now);
+            if(g_deckyManagedProofTimeout==INFINITE)deckySidebarFinishManagedReady(witness,true);return;
+        }
+        {std::lock_guard lock(g_deckyManagedReadyMutex);auto& current=g_deckyManagedReady;
+            if(!deckySidebarSameManagedReady(witness,current)||current.finished||current.lateProofUsed!=witness.lateProofUsed)return;
+            current.backendMissing=false;
+        }
+    }
+    const auto build=ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js");
+    ymcc::deckyupdate::Recovery exact;
+    if(!exact.allowsRetainedFrontend(session,mode,build,ymcc::deckyidentity::version)){
+        if(confirming)deckySidebarParkManagedMode(session,state.pid,power);return;
+    }
+    unsigned long long manualProofEpoch=0;
+    const auto manualOrigin=confirming?g_deckyManualBaseline.origin(verified,document,power,&manualProofEpoch):std::string{};
+    const auto completionEpoch=confirming?g_deckyAutomaticRepair.completionEpoch():0;
+    const auto current=[&]{const auto live=g_deckySidebarRuntime.snapshot();
+        const auto observed=g_steamModeObserver.snapshot(session);const auto identity=ymcc::deckysession::resolve(session,observed);
+        const auto livePeer=confirming?g_deckyMirrorBroker.status():json::object();
+        return !g_exitRequested.load()&&!g_deckyUpdateRecovery.vetoed()&&g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready&&currentPowerGeneration()==power&&
+            g_steamSettingsObserver.sessionSnapshot()==session&&live.enabled&&live.pid==state.pid&&live.phase==state.phase&&
+            observed.value("mode",std::string{})=="bigpicture"&&ymcc::deckyupdate::managed::document(observed.value("modeEpoch",std::string{}))==document&&
+            ymcc::deckyrepair::cleanupAccountConfirmed(session,observed)&&identity.value==account.value&&
+            // The reply may outlive an upgrade or withdrawn frontend proof.
+            // Reuse cached exact-build evidence; current() performs no new file/CDP IO.
+            exact.allowsRetainedFrontend(session,observed,build,ymcc::deckyidentity::version)&&
+            (manualOrigin.empty()||g_deckyManualBaseline.epoch()==manualProofEpoch)&&
+            (!confirming||(livePeer.value("active",false)&&livePeer.value("connected",false)&&
+                livePeer.value("runId",std::string{})==witness.run&&livePeer.value("connection",std::string{})==witness.connection))&&
+            (!backend.value||g_deckySidebarRuntime.ownsLiveProcess(backend.value));};
+    if(!current())return;
+    if(confirming){std::lock_guard lock(g_deckyManagedReadyMutex);auto& currentReady=g_deckyManagedReady;
+        if(!deckySidebarSameManagedReady(witness,currentReady)||currentReady.finished||currentReady.lateProofUsed!=witness.lateProofUsed)return;
+        currentReady.confirmStarted=true;
+    }
+    attempted=key;
+    const json args={{"task",confirming?"confirm":"inspect"},{"modeEpoch",epoch},{"frontendBuildId",build},
+        {"loaderVersion",ymcc::deckyidentity::version},{"backendPid",backend.pid},{"backendBirth",std::to_string(backend.birth)}};
+    auto privateState=deckySidebarStateJson(state);
+    if(!manualOrigin.empty())privateState["manualRecoveryDocument"]=manualOrigin;
+    auto result=ymcc::deckyrepair::cleanupworker::dispatch(verified,account.fromUi,args,privateState,current,
+        ymcc::deckyrepair::cleanupworker::recoveryWindowMs,ymcc::deckyrepair::cleanupworker::lifecycleSchema);
+    if(confirming){
+        // The private worker emits this exact refusal BEFORE native settings IO.
+        // Retain only this bounded observation, never a durable cleanup slot.
+        // All dispatched/uncertain writes remain single-attempt after transport.
+        const bool noWrite=!result.value("ok",false)&&result.contains("mutated")&&
+            result["mutated"].is_boolean()&&!result["mutated"].get<bool>()&&!result.value("uncertain",false)&&
+            result.value("reason",std::string{})=="decky-managed-context-changed";
+        // A certified pre-settings refusal can finish transport just as the
+        // parent cache becomes pending. Preserve only its original observation
+        // window, never a cleanup slot or an uncertain/mutating dispatch. The
+        // actual private current() predicate above remains strict and unchanged.
+        const auto sameNoWriteContext=[&]{
+            const auto native=g_steamSettingsObserver.sessionSnapshot();const auto live=g_deckySidebarRuntime.snapshot();
+            const auto peer=g_deckyMirrorBroker.status();const auto after=g_steamModeObserver.snapshot(native);
+            const auto afterDoc=ymcc::deckyupdate::managed::document(after.value("modeEpoch",std::string{}));
+            const auto afterAccount=ymcc::deckysession::positiveAccount(after.value("observedAccount",json()));
+            const auto afterResidue=ymcc::deckyupdate::residue(after.value("deckyUpdateResidue",json()));
+            if(g_exitRequested.load()||g_deckyUpdateRecovery.vetoed()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+               currentPowerGeneration()!=power||g_deckyAutomaticRepair.completionEpoch()!=completionEpoch||
+               !deckySidebarReadySessionCompatible(witness,native)||!deckySidebarReadySessionCompatible(witness,g_steamSettingsObserver.sessionSnapshot())||
+               !live.enabled||!live.steamKnown||!live.steamRunning||live.pid!=state.pid||live.phase!=state.phase||
+               !peer.value("active",false)||!peer.value("connected",false)||peer.value("runId",std::string{})!=witness.run||peer.value("connection",std::string{})!=witness.connection||
+               (!manualOrigin.empty()&&g_deckyManualBaseline.epoch()!=manualProofEpoch)||
+               (!afterDoc.empty()&&afterDoc!=document)||(afterAccount&&afterAccount!=account.value)||
+               after.value("mode",std::string{})=="desktop"||(!afterResidue.empty()&&afterResidue!=residue)||
+               (after.contains("deckyFrontendLoaded")&&!after.value("deckyFrontendLoaded",false))||
+               (backend.value&&!g_deckySidebarRuntime.ownsLiveProcess(backend.value)))return false;
+            std::lock_guard lock(g_deckyManagedReadyMutex);
+            return !g_deckyManagedReady.finished&&deckySidebarSameManagedReady(witness,g_deckyManagedReady);
+        };
+        // Retire the write first, then queue an independent bounded READ even
+        // when shared proof is temporarily pending. Never repeat confirmation.
+        const bool readback=result.value("uncertain",false)&&result.value("cleanupWorkerDestroyed",false)&&
+            result.value("cleanupWorkerHandles",1u)==0&&result.value("cleanupWorkerProcesses",1u)==0&&sameNoWriteContext();
+        if(noWrite&&sameNoWriteContext()){
+            g_deckyManagedProofTimeout=g_deckyManagedProofWindow.timeout(GetTickCount64());
+            if(g_deckyManagedProofTimeout!=INFINITE){
+                attempted.clear();
+                if(!current())deckySidebarParkManagedMode(session,state.pid,power);
+            }else{g_deckyManagedProofWindow.dispatched();deckySidebarFinishManagedReady(witness);}
+        }else{g_deckyManagedProofWindow.dispatched();deckySidebarFinishManagedReady(witness);}
+        if(readback){
+            const auto opened=GetTickCount64();
+            DeckyManagedReadback item;
+            {std::lock_guard lock(g_deckyManagedReadbackMutex);item.serial=g_deckyManagedReadback.serial+1;
+                item.observation=item.serial;item.origin=witness;item.key=key;item.build=build;item.manualOrigin=manualOrigin;item.manualEpoch=manualProofEpoch;
+                item.completionEpoch=completionEpoch;item.backendPid=backend.pid;item.backendBirth=backend.birth;item.opened=opened;item.awaitingMode=true;
+                g_deckyManagedReadback=item;g_deckyManagedReadbackActive.store(true,std::memory_order_release);}
+            g_deckyManagedReadbackWindow.take(std::to_string(item.observation)+":"+item.key,opened);
+            g_deckyManagedReadbackTimeout=g_deckyManagedReadbackWindow.timeout(opened);
+            deckySidebarResumeManagedReadback();
+        }
+    }
+    if(confirming&&result.value("ok",false)&&!result.value("uncertain",false)&&current()){
+        // This exact ready record came from the private native double-copy
+        // writer, not the UI snapshot. It closes a completed different-document
+        // lifecycle; the next failure still needs two graces and a new reserve.
+        g_deckyAutomaticRepair.completedManaged(verified,result.value("ledger",json()),document,
+            ymcc::deckyrepair::cleanupworker::nativeHost(),build,ymcc::deckyidentity::version,completionEpoch);
+    }
+    if(!confirming&&result.value("ok",false)&&current()){
+        const auto ledger=result.value("ledger",json());
+        if(g_deckyUpdateRecovery.continueManaged(session,mode,ledger,ledger,ymcc::deckyrepair::cleanupworker::nativeHost(),build,ymcc::deckyidentity::version))
+            result["continuationAdmitted"]=true;
+    }
+    result.erase("ledger");result["task"]=confirming?"confirm":"inspect";
+    deckySidebarDiagnostic("managed-lifecycle",result,true);
+}
+static DWORD deckySidebarConnectionRecoveryTimeout(){
+    if(g_exitRequested.load()||g_powerLifecycle.load()!=PowerLifecycle::Ready)return INFINITE;
+    return (std::min)(g_deckyManagedReadbackTimeout,(std::min)(g_deckyManagedProofTimeout,static_cast<DWORD>(g_deckyAutomaticRepair.nextTimeout(GetTickCount64()))));
+}
 static void deckySidebarObserveAutomaticRepair(){
     // Raw automatic-resume alone can be followed by guarded resleep. Never
     // refresh a document during suspend or manufacture hardware Ready.
     if(g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)return;
-    g_deckyAutomaticRepair.observe(g_deckyConnectionRepair,deckySidebarRepairDependencies(),[]{
-        const auto state=deckySidebarConnectionState();
-        const auto recovery=state.value("recovery",json::object());
-        deckySidebarDiagnostic("connection-recovery",{{"recoveryPhase",recovery.value("phase",std::string{})},{"attempted",recovery.value("attempted",false)},{"uncertain",recovery.value("uncertain",false)},{"reason",recovery.value("reason",std::string{})}},true);
-        deckySidebarPost("deckySidebar.updated",state);
-    });
+    try{deckySidebarServiceManagedLifecycle();}catch(...){deckySidebarDiagnostic("managed-lifecycle",{{"ok",false},{"mutated",false},{"reason","decky-managed-proof-unavailable"}},false);}
+    // UI recovery is ordered by the global Runtime ladder, never a racing cleanup timer.
+
 }
-// The S0 user-wake path can finish by canceling the guarded sleep intent,
-// without WM_POWER_RESUME_COMMIT. Reuse Decky's existing owners after its real
-// Ready gate, once per power generation; never manufacture Ready or UI consent.
-static bool deckySidebarResumeAfterIntent(unsigned long long generation) {
+// S0 intent cancellation and the committed OS resume share the same recovery.
+// A missing Loader cannot rebind; refresh shared mode and admission as well.
+// Consume actual Ready once per generation, without granting Steam/UI consent.
+static bool deckySidebarResumeAfterIntent(unsigned long long generation,const char* scope="sleep-intent-ready") {
     if(!generation||generation!=currentPowerGeneration()||g_exitRequested.load()||g_aiFanMockSession.isolated||
        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready||!g_deckySidebarRuntime.snapshot().enabled)return false;
     static std::atomic<unsigned long long> delivered{0};
@@ -32652,7 +35653,7 @@ static bool deckySidebarResumeAfterIntent(unsigned long long generation) {
     if(session.pid&&session.created&&!session.root.empty())g_steamModeObserver.requestRefresh(session);
     deckySidebarDiagnostic("wake-connection-check",{{"generation",generation},{"bindingRequested",rebound},
         {"preparationRequested",prepared},{"admissionRequested",admission},{"connectionRequested",check},
-        {"scope","sleep-intent-ready"}},true);
+        {"scope",scope}},true);
     return true;
 }
 
@@ -32671,21 +35672,6 @@ static std::string deckySidebarPrepareEnvironment(const std::function<bool()>& c
         {"elapsedMs",GetTickCount64()-started},{"stage","environment-prepared"}},true);
     return reason;
 }
-static ymcc::deckygaming::Observation deckySidebarGamingFullscreenObservation(const ymcc::steamsession::Session& session){
-    static ymcc::deckygaming::WindowsProbe probe;return probe.read(session);
-}
-static bool deckySidebarGamingFullscreenConsent(const ymcc::steamsession::Session& session,const json& mode){
-    const auto runtime=g_deckySidebarRuntime.snapshot();
-    if(!runtime.enabled||g_exitRequested.load()||g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)return false;
-    const auto observation=deckySidebarGamingFullscreenObservation(session);
-    if(!(session==g_steamSettingsObserver.sessionSnapshot())||!ymcc::deckygaming::admit(session,mode,observation,runtime.enabled,true))return false;
-    // Only the existing runtime worker calls this consumer. Log a grant once
-    // per exact session; never grant from the Xbox process name or a saved flag.
-    static ymcc::steamsession::Session last;
-    if(!(last==session)){last=session;deckySidebarDiagnostic("gaming-fullscreen-admission",{{"reason","windows-gaming-fullscreen"},{"steamPid",session.pid},{"steamBirth",std::to_string(session.created)},{"systemActive",true},{"sameWindowsSession",true}},true);}
-    return true;
-}
-
 // Diagnose the existing admission failure without another identity read.
 static void deckySidebarSessionDiagnostic(const ymcc::steamsession::Session& session,const char* stage,DWORD error=0) noexcept {
     try { deckySidebarDiagnostic("steam-session-check",{{"stage",stage},{"steamPid",session.pid},
@@ -32696,7 +35682,11 @@ static void deckySidebarSessionDiagnostic(const ymcc::steamsession::Session& ses
 static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode mode,std::uint64_t generation) {
     using Mode=ymcc::deckysidebar::BindingMode;
     const auto session=g_steamSettingsObserver.sessionSnapshot();
-    if(!session.pid||!session.created||!session.account||session.root.empty()){deckySidebarSessionDiagnostic(session,"binding-identity-incomplete");return {{},"steam-session-unconfirmed"};}
+    const auto account=ymcc::deckysession::resolve(session,g_steamModeObserver.snapshot(session));
+    if(!account.value){deckySidebarSessionDiagnostic(session,"binding-identity-incomplete");return {{},"steam-session-unconfirmed"};}
+    if(account.fromUi)deckySidebarDiagnostic("steam-session-check",{{"stage","binding-identity-verified"},
+        {"steamPid",session.pid},{"steamBirth",std::to_string(session.created)},{"accountPresent",false},
+        {"uiAccountConfirmed",true},{"accountSource","verified-steam-ui"}});
     DWORD windowsSession=0;
     if(!ProcessIdToSessionId(session.pid,&windowsSession)){deckySidebarSessionDiagnostic(session,"windows-session-query",GetLastError());return {{},"steam-session-unconfirmed"};}
     const bool retained=mode==Mode::retained;
@@ -32715,10 +35705,12 @@ static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan(ymcc::deckys
     if(!frontend.empty())bootstrap["frontendBuildId"]=frontend;
     if(!retained){bootstrap["recoverFrontend"]=true;bootstrap["loaderVersion"]=ymcc::deckyidentity::version;}
     if(!(session==g_steamSettingsObserver.sessionSnapshot())){g_deckyMirrorBroker.stop();deckySidebarSessionDiagnostic(session,"session-changed");return {{},"steam-session-unconfirmed"};}
+    json steamIdentity={{"root",W2U(session.root)},{"pid",session.pid},{"created",std::to_string(session.created)},
+        {"account",account.value},{"windowsSession",windowsSession}};
+    if(account.fromUi)steamIdentity["accountSource"]="verified-steam-ui";
     return {{{"schema","ymcc.decky.binding-worker.v1"},{"id",bootstrap.value("runId",std::string{})},
         {"generation",std::to_string(generation)},
-        {"steam",{{"root",W2U(session.root)},{"pid",session.pid},{"created",std::to_string(session.created)},
-                  {"account",session.account},{"windowsSession",windowsSession}}},
+        {"steam",std::move(steamIdentity)},
         {"requireFreshContext",!retained&&g_deckySidebarRuntime.snapshot().pid==0},
         {"retainedFrontendOnly",retained},{"bootstrap",std::move(bootstrap)}}, {}};
 }
@@ -32726,6 +35718,19 @@ static void deckySidebarOwnedBindingDiagnostic(const json& detail) {
     const auto diagnosticSession=g_steamSettingsObserver.sessionSnapshot();
     g_deckyCostContext.binding(detail,diagnosticSession.pid,diagnosticSession.created,GetTickCount64());
     const auto kind=detail.value("bindingPacketKind",std::string{});
+    if(!diagnosticSession.account&&kind=="result"&&detail.value("reason",std::string{})=="mirror-bootstrap-session-changed"&&
+       detail.contains("mutated")&&detail["mutated"].is_boolean()&&!detail["mutated"].get<bool>())
+        g_steamModeObserver.requestRefresh(diagnosticSession); // New document needs its own UI proof; read only, no replay authority.
+    if(detail.value("bootstrapStage",std::string{})=="failed"&&detail.value("reason",std::string{})=="mirror-bootstrap-account-changed"){
+        // Revoke the old mirror before transport-only recovery can revalidate.
+        g_deckyMirrorBroker.stop();
+        g_steamModeObserver.requestRefresh(diagnosticSession);
+    }
+    if(detail.value("scope",std::string{})=="global-connection"){
+        auto row=detail;row["generation"]=currentPowerGeneration();row["steamPid"]=diagnosticSession.pid;
+        row["steamBirth"]=std::to_string(diagnosticSession.created);
+        deckySidebarDiagnostic("connection-recovery",row,true);return;
+    }
     deckySidebarDiagnostic(kind=="result"?"bootstrap":"bootstrap-watch",detail);
     if(detail.value("bootstrapStage",std::string{})=="terminal")deckySidebarPost("deckySidebar.safetyStop",detail);
     if(detail.value("bootstrapStage",std::string{})=="failed"&&
@@ -32806,14 +35811,16 @@ static void deckySidebarInitialize() {
     config.bindingDiagnostic=deckySidebarOwnedBindingDiagnostic;
     config.launchAdmission=
 []() -> ymcc::deckysidebar::LaunchAdmission {
-            // Ordinary startup remains observation-only. A verified active Windows
-            // Gaming Full Screen Experience grants Decky-only missing startup.
+            // Decky ON + verified existing Big Picture needs no manual/FSE/
+            // update-origin grant. Steam/CSS authority remains separate.
+            if(!g_deckySidebarRuntime.snapshot().enabled||g_exitRequested.load()||g_aiFanMockSession.isolated||
+               g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)
+                return {false,"decky-not-ready",true};
             const auto session=g_steamSettingsObserver.sessionSnapshot();
-            if(!session.pid||!session.created||session.root.empty()||!session.account){
+            if(!session.pid||!session.created||session.root.empty()){
                 deckySidebarSessionDiagnostic(session,"launch-identity-incomplete");
                 return {false,"steam-session-unconfirmed",true};
             }
-            const bool loaderConsent = !(!g_steamLinkAdmission.allows(session)&&!g_deckyUpdateRecovery.allows(session));
             // Both consumers use one verified snapshot. The existing slow
             // Decky recovery renews the shared worker, never a second CDP reader.
             static ymcc::deckysidebar::AdmissionReadRefresh freshRead;
@@ -32826,13 +35833,25 @@ static void deckySidebarInitialize() {
             const auto current=g_steamSettingsObserver.sessionSnapshot();
             if(current.pid!=session.pid||current.created!=session.created||current.root!=session.root)
                 return {false,"steam-session-changed",true};
+            // Account0 may represent a logged-in offline session. The shared
+            // read must corroborate its current UI account; the child independently
+            // rechecks that same identity before any credential definition.
+            if(!ymcc::deckysession::resolve(session,state).value){
+                // CurrentUser callback delivery is asynchronous. Reuse the
+                // coalesced shared reader's original minimum gap while waiting
+                // for first proof; never invalidate its already in-flight read.
+                if(!session.account&&state.value("known",false)&&state.value("running",false)&&
+                   state.value("mode",std::string{})=="bigpicture")g_steamModeObserver.requestRefresh(session);
+                deckySidebarSessionDiagnostic(session,"launch-identity-incomplete");
+                return {false,"steam-session-unconfirmed",true};
+            }
             const auto mode = state.value("mode", std::string{});
             if (state.value("known", false) && state.value("running", false)) {
                 if (mode == "bigpicture") {
+                    if(!ymcc::deckysession::bigPicture(session,state))return {false,"steam-ui-state-pending",true};
                     if(g_deckyUpdateRecovery.allowsRetainedFrontend(session,state,
                         ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js"),ymcc::deckyidentity::version))
                         return {true,"retained-frontend-rebind",false,{},true};
-                    if(!loaderConsent&&!deckySidebarGamingFullscreenConsent(session,state))return {false,"ymcc-startup-observation-only",false};
                     // Official Loader reinjection calls RestartJSContext when
                     // deckyHasLoaded is set. Update/manual/retry grants cannot
                     // authorize a second Loader in an already loaded document.
@@ -32844,10 +35863,60 @@ static void deckySidebarInitialize() {
                 }
                 if (mode == "desktop") return {false, "steam-bigpicture-required", true, "desktop"};
             }
-            if(!loaderConsent)return {false,"ymcc-startup-observation-only",false};
             return {false, "steam-ui-state-pending", true, state.value("reason", std::string{})};
         };
+    // Missed-event backstop: cached facts on the existing worker. No internet,
+    // Steam launch/restart, process scan, or business settings replay.
+    config.connectionHealth=[lastRead=ULONGLONG(0)]() mutable -> ymcc::deckysidebar::ConnectionHealth {
+        using Health=ymcc::deckysidebar::ConnectionHealth;
+        if(!g_deckySidebarRuntime.snapshot().enabled||g_exitRequested.load()||g_aiFanMockSession.isolated||g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)
+            return {false,false,"decky-not-ready"};
+        const auto session=g_steamSettingsObserver.sessionSnapshot();
+        const auto mode=g_steamModeObserver.snapshot(session);
+        if(!(session==g_steamSettingsObserver.sessionSnapshot()))return {false,false,"steam-session-changed"};
+        const auto peer=g_deckyMirrorBroker.status();
+        const bool mirror=peer.value("active",false)&&peer.value("connected",false);
+        const bool backend=mode.value("deckyBackendConnected",false),hooks=mode.value("deckyHooksInstalled",false);
+        // Mirror alone missed the 2026-11-03 official WS outage. Borrow the
+        // existing shared reader: idle30s, unavailable5s; coalesced under event storms.
+        const auto now=GetTickCount64();
+        const auto interval=mirror&&backend&&hooks?ymcc::deckysidebar::ConnectionRecoveryWindow::intervalMs:
+            ymcc::deckysidebar::ConnectionRecoveryWindow::evidenceIntervalMs;
+        if(mode.value("mode",std::string{})!="desktop"&&(!lastRead||now-lastRead>=interval)){lastRead=now;g_steamModeObserver.requestRefresh(session,false);}
+        Health health;
+        const auto account=ymcc::deckysession::resolve(session,mode);
+        if(account.value)health.identity=ymcc::deckyupdate::ticket(session)+":"+std::to_string(account.value)+":"+std::to_string(currentPowerGeneration());
+        if(!ymcc::deckysession::bigPicture(session,mode)){
+            health.reason="steam-bigpicture-unconfirmed";
+            health.paused=session.pid&&session.created&&!session.root.empty()&&mode.value("mode",std::string{})!="desktop";
+            return health;
+        }
+        health.required=true;health.connected=mirror&&backend&&hooks;health.transportConnected=mirror;
+        health.reason=!mirror?"authenticated-peer-missing":!mode.contains("deckyBackendConnected")?"official-backend-unconfirmed":
+            !backend?"official-backend-unavailable":!mode.contains("deckyHooksInstalled")?"official-hooks-unconfirmed":
+            !hooks?"official-hooks-unavailable":"decky-channels-connected";
+        return health;
+    };
+    config.connectionStep=[](ymcc::deckysidebar::ConnectionRecoveryWindow::Action step){
+        const bool reopen=step==ymcc::deckysidebar::ConnectionRecoveryWindow::Action::reopen;
+        auto deps=deckySidebarRepairDependencies();const auto session=deps.session();
+        const auto mode=deps.mode(session);const auto state=deps.runtime();
+        const json args={{reopen?"reopenBigPicture":"finalCleanup",true},{"pid",session.pid},
+            {"birth",std::to_string(session.created)},{"revision",state.at("revision")},{"modeEpoch",mode.value("modeEpoch",std::string{})}};
+        const auto started=std::chrono::steady_clock::now();
+        const auto result=g_deckyConnectionRepair.request(args,deps,reopen?ymcc::deckyrepair::Origin::ReopenBigPicture:ymcc::deckyrepair::Origin::FinalCleanup);
+        json detail={{"stage",reopen?"reopen-bigpicture":"rebuild-ui-document"},
+            {"ok",result.value("ok",false)},{"mutated",result.value("mutated",false)},{"uncertain",result.value("uncertain",false)},
+            {"reason",result.value("reason",std::string("decky-recovery-unconfirmed"))},
+            {"elapsedMs",static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count())}};
+        for(const auto* key:{"launchStage","launchMode"})if(result.contains(key)&&result[key].is_string())detail[key]=result[key];
+        deckySidebarDiagnostic("connection-recovery",detail,true);
+        g_steamModeObserver.requestRefresh(session);
+        return result;
+    };
     config.connectionRecovery=[] {deckySidebarObserveAutomaticRepair();};
+    config.cancelConnectionRecovery=[]{ymcc::deckyrepair::cleanupworker::Active::cancel();};
+    config.connectionRecoveryTimeout=deckySidebarConnectionRecoveryTimeout;
     config.prepareEnvironment=deckySidebarPrepareEnvironment;
     g_deckySidebarRuntime.initialize(std::move(config));
     try {
@@ -32883,6 +35952,7 @@ static void steamSettingsObserverStart() {
                 {"launchMode",state.value("mode",std::string{})},{"reason","shared-verified-mode"},
                 {"observedLoaderVersion",ymcc::deckyupdate::residue(state.value("deckyUpdateResidue",json())).value("loaderVersion",std::string{})},
                 {"installedLoaderVersion",ymcc::deckyidentity::version}},true);
+            steamWallpaperForegroundSignal();
             const auto mode = state.value("mode",std::string{});
             // Seed the existing session without replaying its current UI state.
             // Only an observed later desktop -> Big Picture edge grants linkage.
@@ -32892,19 +35962,22 @@ static void steamSettingsObserverStart() {
                 ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js"),g_deckySidebarRuntime.snapshot().enabled,ymcc::deckyidentity::version);
             if(!resumed.empty())deckySidebarDiagnostic("update-recovery",{{"reason",resumed},{"steamPid",session.pid}},true);
             g_deckySidebarRuntime.requestLaunchAdmissionRefresh();
+            deckySidebarResumeManagedMode(session);
             g_steamCssGuard.observeMode(session, {mode == "bigpicture" ? ymcc::steamcss::UiMode::BigPicture : ymcc::steamcss::UiMode::Desktop,
                 state.value("modeEpoch",std::string{})});
             deckySidebarPost("steam.uiStateChanged",json::object());
         };
     modeObserver.settled = [](const ymcc::steamsession::Session& session) {
         if(g_exitRequested.load() || !(session==g_steamSettingsObserver.sessionSnapshot()))return;
+        steamWallpaperForegroundWake(); // A stable completed read does not revoke an unchanged lease.
         // Repair a page's pending display; unchanged mode never wakes CSS/Decky.
         deckySidebarPost("steam.uiStateChanged",json::object());
     };
     modeObserver.stableBigPicture = [](const ymcc::steamsession::Session& session) {
         if(g_exitRequested.load() || !(session==g_steamSettingsObserver.sessionSnapshot()))return;
-        // No read/launch here: the existing worker rechecks the same session and
-        // cache, resources and launch identity. Healthy loaders reject the wake.
+        // A parked native-ready proof may resume once even with an owned Loader.
+        // The existing worker still owns every fresh read and permission check.
+        deckySidebarResumeManagedMode(session);
         if(g_deckySidebarRuntime.requestLaunchAdmissionRefresh())
             deckySidebarDiagnostic("steam-mode-settled",{{"reason","verified-bigpicture-admission-wake"}},true);
     };
@@ -32933,10 +36006,12 @@ static void steamSettingsObserverStart() {
             if(stage=="primary-cleanup"||stage=="secondary-cleanup-complete"||stage=="idle-helper-failed"||stage=="automatic-helper-failed"||stage=="mode-ensure-failed"||stage=="confirmation-failed-hold"||stage=="desktop-editor-preserved")
                 deckySidebarPost("steamAppearance.backendChanged",{{"phase",result.editorProtected?"desktop-editing":result.ok()?"cleanup-checked":"cleanup-unconfirmed"},
                     {"reason",stage},{"remaining",result.remaining},{"error",result.error}});
-        });
+        }, 0, [] { return !g_exitRequested.load(std::memory_order_acquire) && !g_aiFanMockSession.isolated &&
+            g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready; }, [] { return currentPowerGeneration(); });
     // Link-file notifications follow the existing checkbox; no BAT/theme changes.
     ymcc::steamcss::Config cssGuard;
     cssGuard.linkFile = POWER_CONTROL_DIR + L"\\steam-appearance\\backend.path";
+    cssGuard.powerGeneration = [] { return currentPowerGeneration(); };
     // Old backend-exit receipts cannot confirm the resident policy.
     cssGuard.isResidentConfirmed = [](const ymcc::steamsession::Session& session) { return g_steamCssUse.residentConfirmed(session); };
     cssGuard.confirmIdle = [](const ymcc::steamsession::Session& session, bool startBackend, bool renewForMode) -> HANDLE {
@@ -32988,13 +36063,13 @@ static void steamSettingsObserverStart() {
             !ymcc::steamcss::sameSession(session, g_steamSettingsObserver.sessionSnapshot())) return false;
         // A process exit revokes the prior confirmation even during suspension;
         // the separate Ready/mode gate controls any later CSS-only recovery.
-        return g_steamCssUse.invalidateForResume(session);
+        return g_steamCssUse.invalidateForResume(session, false);
     };
     cssGuard.mayLaunch = [] { return !g_exitRequested.load(std::memory_order_acquire) && !g_aiFanMockSession.isolated && g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready; };
     cssGuard.changed = [](const ymcc::steamcss::State& state) {
         g_steamModeObserver.setDemand(ymcc::steamui::ModeConsumer::Css,state.linked);
         deckySidebarDiagnostic("steam-css-guard",{{"policyVersion",3},{"phase",state.phase},{"reason",state.reason},
-            {"linked",state.linked},{"steamRunning",state.steamRunning},{"loaderPid",state.pid},{"attempts",state.attempts},{"automaticRecoveries",state.automaticRecoveries}},true);
+            {"steamPid",state.steamPid},{"steamBirth",std::to_string(state.steamBirth)},{"linked",state.linked},{"steamRunning",state.steamRunning},{"loaderPid",state.pid},{"attempts",state.attempts},{"automaticRecoveries",state.automaticRecoveries}},true);
         deckySidebarPost("steamAppearance.backendChanged", {{"phase", state.phase}, {"reason", state.reason},
             {"pid", state.pid}, {"linked", state.linked}, {"steamRunning", state.steamRunning}});
     };
@@ -33019,7 +36094,7 @@ static void steamSettingsObserverStart() {
             g_steamCssGuard.observeSteam(g_steamSettingsObserver.sessionSnapshot());
             g_steamCssUse.observeSteam(g_steamSettingsObserver.sessionSnapshot());
         }
-        if (sessionChanged) deckySidebarPost("steam.uiStateChanged", json::object());
+        if (sessionChanged){steamWallpaperForegroundSignal();deckySidebarPost("steam.uiStateChanged", json::object());}
     }, [] { return g_sdmEventPending.load() || g_steamClientPending.load(); },
     [] {
         deckySidebarPost("steam.uiStateChanged", json::object());
@@ -34740,6 +37815,7 @@ static void inputHostClearLocked() {
     g_inputHostPipeName.clear();
     g_psEndpointOwnership.clear();
     g_inputHostHostInstanceId.clear();
+    g_inputHostFrameReplyBinding.clear();
     g_inputHostMsiStageRequested = false;
     g_inputHostRunId.clear();
     g_inputHostStartupNonce.clear();
@@ -35039,10 +38115,11 @@ static bool inputHostWaitClientLocked(HANDLE pipe, DWORD timeoutMs, DWORD* error
 // Observe duplicate motor metadata without changing the original JSON parse or
 // frame acceptance. A duplicate or malformed extension never authorizes a motor.
 struct InputHostGameMotorDomKeys {
+    ymcc::inputHost::compactReply::DomKeys compact;
     unsigned seen=0;bool duplicate=false;
     bool operator()(int depth,json::parse_event_t event,json& value){
         if(depth==1&&event==json::parse_event_t::key&&value.is_string()){
-            const auto& name=value.get_ref<const std::string&>();int id=ymcc::game_feedback::fieldId(name);
+            const auto& name=value.get_ref<const std::string&>();compact.key(name);int id=ymcc::game_feedback::fieldId(name);
             if(id<0&&name=="gameFeedbackBindingGeneration")id=6;
             if(id<0&&name=="gameFeedbackProtocol")id=7;
             if(id>=0){const unsigned bit=1u<<id;duplicate|=(seen&bit)!=0;seen|=bit;}}
@@ -35076,6 +38153,29 @@ static void inputHostObserveGameMotorBindingLocked(const json& response,const In
     g_inputHostGameMotorBindingGeneration.store(supported?generation:0,std::memory_order_release);
 }
 
+// Compact replies carry no legacy identity fields. They can inherit the current
+// identity only from the exact token requested on this serialized transaction.
+// The ordinary tuple/request/sequence checks still run on the expanded DOM.
+static bool inputHostExpandCompactFrameReplyLocked(json& response, const std::string* expected,
+        const ymcc::inputHost::compactReply::DomKeys& keys) {
+    if (!ymcc::inputHost::compactReply::mayExpand(response, expected, keys)) return false;
+    response["runId"] = g_inputHostRunId;
+    response["epoch"] = g_inputHostEpoch;
+    response["powerGeneration"] = inputHostProtocolPowerGenerationLocked();
+    response["targetId"] = kInputHostTargetId;
+    response["ownerIdentity"] = kInputHostOwnerIdentity;
+    response["persona"] = inputHostBoundOrCurrentPersona();
+    response["profileIdentity"] = inputHostBoundOrCurrentProfileIdentity();
+    response["startupNonce"] = g_inputHostStartupNonce;
+    response["configRevision"] = g_inputHostConfigRevision;
+    response["configHash"] = kInputHostProtocolConfigHash;
+    response["assetVerified"] = true;
+    response["lockedCoreSha256"] = kInputHostLockedCoreSha256;
+    response["lockedCoreMvid"] = kInputHostLockedCoreMvid;
+    response["hostInstanceId"] = g_inputHostHostInstanceId;
+    return true;
+}
+
 struct InputHostFastReceipt {
     bool used = false;
     bool firstFrame = false;
@@ -35104,7 +38204,8 @@ enum FieldId {
     kFStartupNonce, kFConfigRevision, kFConfigHash, kFAssetVerified,
     kFLockedCoreSha256, kFLockedCoreMvid, kFHostInstanceId, kFOk, kFStatus,
     kFSubmitElapsedUs, kFFirstFrame,
-    kFGameGeneration,kFGameRevision,kFGameLeft,kFGameRight,kFGameCompatibility,kFGameSdkSequence,kFieldCount
+    kFGameGeneration,kFGameRevision,kFGameLeft,kFGameRight,kFGameCompatibility,kFGameSdkSequence,
+    kFCompactReplyVersion,kFFrameReplyBinding,kFieldCount
 };
 
 static_assert(kFieldCount<=32,"receipt field mask exhausted");
@@ -35124,6 +38225,7 @@ const FieldName kFieldNames[] = {
     {"gameFeedbackGeneration",22,kFGameGeneration},{"gameFeedbackRevision",20,kFGameRevision},
     {"gameFeedbackLeft",16,kFGameLeft},{"gameFeedbackRight",17,kFGameRight},
     {"gameFeedbackCompatibility",25,kFGameCompatibility},{"gameFeedbackSdkSequence",23,kFGameSdkSequence},
+    {"compactFrameReplyVersion",24,kFCompactReplyVersion},{"frameReplyBinding",17,kFFrameReplyBinding},
 };
 
 inline const char* skipWs(const char* p, const char* end) {
@@ -35361,9 +38463,10 @@ inline bool viewBoolEq(const FieldView& f, bool v) {
 }
 
 // 扫描 SUBMIT_FRAME 成功回执。返回 true 仅表示“可证明与原路径同判且同值”。
-bool scanSubmitFrameReceipt(const char* begin, const char* end, const char* expectedStatus,
+bool scanSubmitFrameReceiptBound(const char* begin, const char* end, const char* expectedStatus,
                             const std::string& requestIdValue, unsigned long long sequenceValue,
-                            InputHostFastReceipt& out) {
+                            InputHostFastReceipt& out, const std::string* expectedCompactBinding) {
+    if (end < begin || static_cast<std::size_t>(end - begin) > ymcc::inputHost::compactReply::kMaxReplyBytes) return false;
     const char* p = skipWs(begin, end);
     if (p >= end || *p != '{') return false;
     ++p;
@@ -35403,6 +38506,15 @@ bool scanSubmitFrameReceipt(const char* begin, const char* end, const char* expe
     if (!has(kFCommand) || !viewEq(fields[kFCommand], "SUBMIT_FRAME")) return false;
     if (!has(kFRequestId) || !viewEq(fields[kFRequestId], requestIdValue)) return false;
     if (!has(kFSequence) || !viewUIntEq(fields[kFSequence], sequenceValue)) return false;
+    const bool compact = has(kFCompactReplyVersion) || has(kFFrameReplyBinding);
+    if (compact) {
+        constexpr unsigned legacyIdentityMask = ((1u << (kFHostInstanceId + 1)) - 1u) ^ ((1u << kFRunId) - 1u);
+        if (!expectedCompactBinding || !ymcc::inputHost::compactReply::validToken(*expectedCompactBinding) ||
+            !has(kFCompactReplyVersion) || !viewUIntEq(fields[kFCompactReplyVersion], 1ULL) ||
+            !has(kFFrameReplyBinding) || !viewEq(fields[kFFrameReplyBinding], *expectedCompactBinding) ||
+            (seen & legacyIdentityMask) != 0 || g_inputHostHostInstanceId.empty() ||
+            !has(kFFirstFrame) || !has(kFSubmitElapsedUs)) return false;
+    } else {
     if (!has(kFRunId) || !viewEq(fields[kFRunId], g_inputHostRunId)) return false;
     if (!has(kFEpoch) || !viewUIntEq(fields[kFEpoch], g_inputHostEpoch)) return false;
     if (!has(kFPowerGeneration) || !viewUIntEq(fields[kFPowerGeneration], inputHostProtocolPowerGenerationLocked())) return false;
@@ -35424,6 +38536,7 @@ bool scanSubmitFrameReceipt(const char* begin, const char* end, const char* expe
     if (!g_inputHostHostInstanceId.empty()) {
         if (!viewEq(fields[kFHostInstanceId], g_inputHostHostInstanceId)) return false;
     }
+    }
     // ok / status（SUBMIT_FRAME 的 targetPnp 前置不适用：requiresTargetPnp 为 false）
     if (!has(kFOk) || !viewBoolEq(fields[kFOk], true)) return false;
     if (!has(kFStatus) || !viewEq(fields[kFStatus], expectedStatus)) return false;
@@ -35437,24 +38550,36 @@ bool scanSubmitFrameReceipt(const char* begin, const char* end, const char* expe
     out.gameMotor=ymcc::game_feedback::fromWords(motorWords,motorSeen,motorInvalid);
     out.firstFrame = has(kFFirstFrame) && fields[kFFirstFrame].boolVal;
     out.submitElapsedUs = has(kFSubmitElapsedUs) ? fields[kFSubmitElapsedUs].num : 0ULL;
-    out.hostInstanceId.assign(fields[kFHostInstanceId].s, fields[kFHostInstanceId].e);
+    if (compact) out.hostInstanceId = g_inputHostHostInstanceId;
+    else out.hostInstanceId.assign(fields[kFHostInstanceId].s, fields[kFHostInstanceId].e);
     return true;
+}
+
+// Preserve the original six-argument scanner interface for legacy callers.
+bool scanSubmitFrameReceipt(const char* begin, const char* end, const char* expectedStatus,
+                            const std::string& requestId, unsigned long long sequence, InputHostFastReceipt& out) {
+    return scanSubmitFrameReceiptBound(begin, end, expectedStatus, requestId, sequence, out, nullptr);
 }
 
 // 诊断 parity（仅 tick-cost 门内调用）：用旧 JSON 路径复核快路径的接受判定与取值。
 // 自身异常绝不外泄；不改变任何生产状态（对齐 C6a-H 的 parity 纪律）。
 void verifyAgainstDom(const char* begin, const char* end, const char* expectedStatus,
                       const std::string& requestIdValue, unsigned long long sequenceValue,
-                      const InputHostFastReceipt& fast) {
+                      const InputHostFastReceipt& fast, const std::string* expectedCompactBinding = nullptr) {
     static std::atomic<bool> loggedOnce{false};
-    json response = json::parse(std::string(begin, end), nullptr, false);
+    InputHostGameMotorDomKeys domKeys;
+    domKeys.compact.observeWire(std::string_view(begin, static_cast<std::size_t>(end - begin)));
+    json response = json::parse(std::string(begin, end),
+        [&domKeys](int depth,json::parse_event_t event,json& value){return domKeys(depth,event,value);}, false);
+    const bool compactClaim = response.is_object() && (response.contains("compactFrameReplyVersion") || response.contains("frameReplyBinding"));
+    const bool compactExpanded = response.is_object() && inputHostExpandCompactFrameReplyLocked(response, expectedCompactBinding, domKeys.compact);
     bool domAccept = false;
     bool domFirstFrame = false;
     unsigned long long domSubmitUs = 0;
     std::string domHostInstanceId;
     std::string firstDiff;
-    if (response.is_discarded() || !response.is_object()) {
-        firstDiff = "dom-discarded-or-not-object";
+    if (response.is_discarded() || !response.is_object() || (compactClaim && !compactExpanded)) {
+        firstDiff = "dom-discarded-or-not-object-or-invalid-compact-binding";
     } else {
         try {
             const bool tupleMatches =
@@ -35640,8 +38765,13 @@ static bool inputHostWindowsMotionSubmissionCurrent(InputFrameSubmission& frame)
     return false;
 }
 static bool inputHostFrameSubmissionMayIssue(void* context) noexcept {
+    // Runtime invokes this after mutex/buffer/event preparation, immediately
+    // before WriteFile. Deferred visibility borrows that existing issue guard.
+    if(t_inputHostDeferredPhysicalHideWrite){
+        try{if(!inputHostDeferredPhysicalHideWriteCurrent())return false;}catch(...){return false;}
+    }
     auto* frame=static_cast<InputFrameSubmission*>(context);
-    if(!frame)return false;
+    if(!frame)return t_inputHostDeferredPhysicalHideWrite!=nullptr;
     const auto verdict=ymcc::input::frameSubmission::decide(frame->ticket,frame->sample,
         inputHostFrameSubmissionCurrent(frame->physicalSourceAdmitted,frame->sample.msi),GetTickCount64());
     if (verdict==ymcc::input::frameSubmission::Verdict::Allowed &&
@@ -35662,6 +38792,14 @@ static void inputHostFrameSubmissionTransportRejected() noexcept {
     if(t_inputFrameSubmission)inputHostFrameSubmissionNote(t_inputFrameSubmission->reason,"before-overlapped-issue",false);
 }
 static bool inputHostFrameSubmissionRequestCurrent(const char* command,json* responseOut,const char* phase) {
+    if(t_inputHostDeferredPhysicalHideWrite && command &&
+        (std::strcmp(command,"HIDHIDE_HIDE")==0 || std::strcmp(command,"HIDHIDE_CLOAK")==0 ||
+         std::strcmp(command,"HIDHIDE_APP_REG")==0 || std::strcmp(command,"HIDHIDE_CYCLE")==0) && !inputHostDeferredPhysicalHideWriteCurrent()) {
+        if(responseOut)*responseOut={{"status","visibility-context-retired"},
+            {"detail","deferred-Start-intent-or-original-deadline-retired"},
+            {"deviceWriteAttempted",false},{"phase",phase}};
+        return false;
+    }
     if(!t_inputFrameSubmission || !command || std::strcmp(command,"SUBMIT_FRAME")!=0)return true;
     auto& frame=*t_inputFrameSubmission;
     const auto verdict=ymcc::input::frameSubmission::decide(frame.ticket,frame.sample,
@@ -35706,7 +38844,8 @@ static bool inputHostRequestIsLifecycleCommand(const char* command) noexcept {
         std::strcmp(command,"SHUTDOWN")==0);
 }
 static bool inputHostRequestHasExecutionDeadline(const char* command) noexcept {
-    return g_inputHostSwitchRecoveryStartDeadline && inputHostRequestIsLifecycleCommand(command);
+    return g_inputHostSwitchRecoveryStartDeadline && (inputHostRequestIsLifecycleCommand(command) ||
+        (t_inputHostDeferredPhysicalHideWrite && command && std::strncmp(command,"HIDHIDE_",8)==0));
 }
 #include "virtual_target_return_runtime.h"
 
@@ -35797,8 +38936,11 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         }
         return false;
     }
-    const InputFrameTransportScope frameTransportScope(t_inputFrameSubmission && command &&
-        std::strcmp(command,"SUBMIT_FRAME")==0);
+    const bool deferredVisibilityCommand=t_inputHostDeferredPhysicalHideWrite && command &&
+        (std::strcmp(command,"HIDHIDE_HIDE")==0 || std::strcmp(command,"HIDHIDE_CLOAK")==0 ||
+         std::strcmp(command,"HIDHIDE_APP_REG")==0 || std::strcmp(command,"HIDHIDE_CYCLE")==0);
+    const InputFrameTransportScope frameTransportScope((t_inputFrameSubmission && command &&
+        std::strcmp(command,"SUBMIT_FRAME")==0) || deferredVisibilityCommand);
     if(!inputHostFrameSubmissionRequestCurrent(command,responseOut,"before-envelope"))return false;
     // R2：envelope 合并+dump 段计时（仅 SUBMIT_FRAME 且门内；并入 frameBuild 阶段）。
     const bool reqBuildCostOn = tickCostEnabled() && std::strcmp(command, "SUBMIT_FRAME") == 0;
@@ -35809,6 +38951,7 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         inputHostSwitchVerificationForgetAcceptedLocked(); // Target teardown/replacement cannot borrow an old accepted source.
         g_inputHostGameMotorInbox.revoke();g_inputHostGameMotorBindingGeneration.store(0,std::memory_order_release);gamepadSerialRevokeGameFeedback();
     }
+    if (ymcc::inputHost::compactReply::revokesBinding(command)) g_inputHostFrameReplyBinding.clear();
     std::string requestText;
     std::string requestIdValue;
     unsigned long long sequenceValue = 0;
@@ -35844,6 +38987,20 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
 #ifdef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC
     inputHostMsiReportDiagnosticExtendRequest(command, requestText);
 #endif
+    // Old Hosts never publish a token; old callers never request this shape.
+    // There is one send only: a timeout/rejection never replays as a full frame.
+    const std::string* requestedReplyBinding = nullptr;
+    if (std::strcmp(command, "SUBMIT_FRAME") == 0 &&
+        ymcc::inputHost::compactReply::validToken(g_inputHostFrameReplyBinding) &&
+        !requestText.empty() && requestText.back() == '}' &&
+        requestText.size() <= ymcc::inputHost::compactReply::kMaxReplyBytes -
+            (g_inputHostFrameReplyBinding.size() + sizeof(",\"frameReplyBinding\":\"\"") - 1)) {
+        requestText.pop_back();
+        requestText += ",\"frameReplyBinding\":\"";
+        requestText += g_inputHostFrameReplyBinding;
+        requestText += "\"}";
+        requestedReplyBinding = &g_inputHostFrameReplyBinding;
+    }
     if (std::strcmp(command, "SUBMIT_FRAME") != 0) recoverySnapNoteCommand(command);
     if (reqBuildCostOn)
         tickCostAccumulate(kTickCostFrameBuild, tickCostElapsedUs(reqBuildStarted));
@@ -35863,7 +39020,7 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         ? g_inputHostSwitchRecoveryStartDeadline : std::uint64_t{0};
     // Connect/write/read share one command ceiling and the original player
     // deadline. A successful preceding stage never renews either clock.
-    const auto commandDeadline=timeoutMs && inputHostRequestIsLifecycleCommand(command)
+    const auto commandDeadline=timeoutMs && (inputHostRequestIsLifecycleCommand(command) || t_inputHostDeferredPhysicalHideWrite)
         ? inputHostStartProtectionNow()+std::uint64_t(timeoutMs) : std::uint64_t{0};
     const auto ioDeadline=executionDeadline && commandDeadline
         ? (std::min)(executionDeadline,commandDeadline) : executionDeadline ? executionDeadline : commandDeadline;
@@ -36015,8 +39172,8 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         const char* const fastBegin = responseBuffer.data();
         const char* const fastEnd = fastBegin + responseBytes;
         InputHostFastReceipt fastReceipt;
-        if (c7aReceiptFast::scanSubmitFrameReceipt(fastBegin, fastEnd, expectedStatus,
-                                                  requestIdValue, sequenceValue, fastReceipt) &&
+        if (c7aReceiptFast::scanSubmitFrameReceiptBound(fastBegin, fastEnd, expectedStatus,
+                                                  requestIdValue, sequenceValue, fastReceipt, requestedReplyBinding) &&
             !g_inputHostHostInstanceId.empty() &&
             fastReceipt.hostInstanceId == g_inputHostHostInstanceId) {
             fastReceipt.used = true;
@@ -36030,7 +39187,7 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
             if (receiptCostOn) {
                 try {
                     c7aReceiptFast::verifyAgainstDom(fastBegin, fastEnd, expectedStatus,
-                                                     requestIdValue, sequenceValue, fastReceipt);
+                                                     requestIdValue, sequenceValue, fastReceipt, requestedReplyBinding);
                 } catch (...) {
                 }
             }
@@ -36055,6 +39212,7 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         }
     }
     InputHostGameMotorDomKeys gameMotorDomKeys;
+    gameMotorDomKeys.compact.observeWire(std::string_view(responseBuffer.data(), responseBytes));
     json response = json::parse(std::string(responseBuffer.data(), responseBuffer.data() + responseBytes),
         [&gameMotorDomKeys](int depth,json::parse_event_t event,json& value){return gameMotorDomKeys(depth,event,value);}, false);
     if (response.is_discarded() || !response.is_object()) {
@@ -36071,8 +39229,11 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         return false;
     }
     try {
+        const bool frameCommand = std::strcmp(command, "SUBMIT_FRAME") == 0;
+        const bool compactClaim = frameCommand && (response.contains("compactFrameReplyVersion") || response.contains("frameReplyBinding"));
+        const bool compactExpanded = frameCommand && inputHostExpandCompactFrameReplyLocked(response, requestedReplyBinding, gameMotorDomKeys.compact);
         const bool helloCommand = std::strcmp(command, "HELLO") == 0;
-        const bool tupleMatches =
+        const bool tupleMatches = (!compactClaim || compactExpanded) &&
             response.value("protocolVersion", 0) == 1 &&
             response.value("command", "") == command &&
             response.value("requestId", "") == requestIdValue &&
@@ -36364,8 +39525,14 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
     observeReceiptFields(response, /*tupleVerified=*/true);
     if(std::strcmp(command,"SUBMIT_FRAME")==0)
         inputHostConsumeGameMotorReplyLocked(inputHostGameMotorFromDom(response,gameMotorDomKeys),sequenceValue);
-    if(std::strcmp(command,"PREPARE_TARGET")==0||std::strcmp(command,"RECREATE_TARGET")==0)
+    if(std::strcmp(command,"PREPARE_TARGET")==0||std::strcmp(command,"RECREATE_TARGET")==0) {
         inputHostObserveGameMotorBindingLocked(response,gameMotorDomKeys);
+        const auto binding = response.find("frameReplyBinding");
+        if (!gameMotorDomKeys.compact.duplicate && !response.contains("compactFrameReplyVersion") &&
+            binding != response.end() && binding->is_string() &&
+            ymcc::inputHost::compactReply::validToken(binding->get_ref<const std::string&>()))
+            g_inputHostFrameReplyBinding = binding->get<std::string>();
+    }
     if (responseOut) *responseOut = std::move(response);
     // GP-926R9：序列提交点（命令面统一口径，与快路径同规则）——Host 已接受
     // （tuple + status + target-pnp 全过）才推进本地计数器；拒绝/传输故障一律不推进。
@@ -36522,6 +39689,8 @@ static bool inputHostHidHideResolveApplyCommand(const std::wstring& operation, c
 
 static bool inputHostHidHideApplyViaPipeImpl(const std::wstring& operation, const std::wstring& target,
                                              bool adoptedEntry) {
+    if(t_inputHostDeferredPhysicalHideWrite && operation!=L"unhide" &&
+        !inputHostDeferredPhysicalHideWriteCurrent())return false;
     const bool hostAlive = g_inputHostProcess && !g_inputHostTransportFault;
     if (!hostAlive) return false; // caller falls back to CLI
     const char* command = nullptr;
@@ -39666,7 +42835,8 @@ static const char* inputHostLateHideSkipGate(bool virtualTargetEnabled, bool jou
                                              bool wakeHold, const std::string& hostRunId,
                                              const std::string& tuple, const std::string& queuedKey,
                                              InputHostLateHideBypassSource bypassSource,
-                                             bool msiSourceActive, bool msiGenerationValid) {
+                                             bool msiSourceActive, bool msiGenerationValid,
+                                             bool deferredStartHide = false) {
     if (kVirtualTestKeepPhysicalVisible) return "test-keep-physical-visible";
     if (!virtualTargetEnabled) return "virtual-target-not-enabled";
     // run-id-empty 是硬拒绝：C 只绕过 journal/wakeHold，绝不解释成允许空 runId。
@@ -39674,6 +42844,7 @@ static const char* inputHostLateHideSkipGate(bool virtualTargetEnabled, bool jou
     if (tuple == queuedKey) return "already-queued-this-tuple";
     // GP-MSIG3E-4B：MSI 受证实来源只绕过这一道门（journalActive/wakeHold），其余判据不动。
     if (!journalActive && !wakeHold &&
+        !(deferredStartHide && bypassSource!=InputHostLateHideBypassSource::None) &&
         !inputHostLateHideMsiBypassAdmitted(bypassSource, msiSourceActive, msiGenerationValid)) {
         return "no-hide-journal-and-no-wake-hold";
     }
@@ -39727,19 +42898,21 @@ struct InputHostLateHideEpisodeKey {
     bool managedMsiRoute = false;
     // 受管 MSI 主源 record generation 快照（非受管类型 = 0；受管类型但记录未现役 = 0）。
     unsigned long long recordGen = 0;
+    bool deferredStartHide = false; // exact ROG Start debt; rechecked at the I/O throat
 };
 
 static bool inputHostLateHideEpisodeEqual(const InputHostLateHideEpisodeKey& a,
                                           const InputHostLateHideEpisodeKey& b) {
     return a.hostGen == b.hostGen && a.sourceGen == b.sourceGen &&
            a.managedMsiRoute == b.managedMsiRoute &&
-           a.recordGen == b.recordGen && a.runId == b.runId;
+           a.recordGen == b.recordGen && a.runId == b.runId &&
+           a.deferredStartHide == b.deferredStartHide;
 }
 
 static std::string inputHostLateHideEpisodeKeyText(const InputHostLateHideEpisodeKey& e) {
     return e.runId + "|" + std::to_string(e.hostGen) + "|" +
            std::to_string(e.sourceGen) + "|" + std::to_string(e.managedMsiRoute ? 1 : 0) +
-           "|" + std::to_string(e.recordGen);
+           "|" + std::to_string(e.recordGen) + (e.deferredStartHide ? "|deferred-start" : "");
 }
 
 // GP-MSIG3E-6 LC-R3 C3：受管 MSI 路线**类型**判据。只依据既有家族能力 + 真实板号 +
@@ -39986,13 +43159,14 @@ static InputHostLateHideEnqueueOutcome inputHostLateHideEnqueueEpisode(
     bool coalesced = false;
     const bool msiOrderedPublication = ymcc::msi::latehide::buildEnabled &&
         inputHostLateHideManagedMsiRouteType();
+    const bool orderedPublication=msiOrderedPublication || episode.deferredStartHide;
     InputHostLateHidePublication publication{&episode, &tuple, withTupleKey};
     const bool accepted = inputHostQueueLifecycleWorkInternal("late-hide-after-source-return", &coalesced,
-        msiOrderedPublication ? &publication : nullptr);
+        orderedPublication ? &publication : nullptr);
     if (!accepted) return InputHostLateHideEnqueueOutcome::Refused;
-    if (msiOrderedPublication && publication.alreadyCompleted)
+    if (orderedPublication && publication.alreadyCompleted)
         return InputHostLateHideEnqueueOutcome::AlreadyCompleted;
-    const unsigned long long token = msiOrderedPublication ? publication.token :
+    const unsigned long long token = orderedPublication ? publication.token :
         inputHostLateHidePendingCommit(episode, tuple, withTupleKey);
     if (tokenOut != nullptr) *tokenOut = token;
     if (coalescedOut != nullptr) *coalescedOut = coalesced;
@@ -40041,6 +43215,8 @@ static InputHostLateHideEnqueueOutcome inputHostCoordinatorLateHideEnqueue(unsig
     coordEpisode.runId = coordRunId;
     coordEpisode.hostGen = coordHostGen;
     coordEpisode.sourceGen = g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    coordEpisode.deferredStartHide=inputHostDeferredPhysicalHideCurrent(coordHostGen,coordRunId,
+        currentPowerGeneration(),inputHostConfiguredPersona(),inputHostStartProtectionNow());
     inputHostLateHideApplyEpisodeMetadata(&coordEpisode, coordManagedType, coordMsiActive,
                                           coordRecord.generation);
     unsigned long long coordToken = 0;
@@ -40175,12 +43351,16 @@ static void inputHostQueueWakePhysicalHide(const char* reason) {
     InputHostLateHidePendingView lateHidePendingView;
     const bool lateHidePendingExists = inputHostLateHidePendingRead(&lateHidePendingView);
     const std::string queuedTuple = lateHidePendingExists ? lateHidePendingView.tuple : std::string();
+    const bool deferredStartHide=g_xinputPhysicalSourceLocked &&
+        (g_xinputConnectedMask & g_xinputPhysicalSourceMask)!=0 &&
+        inputHostDeferredPhysicalHideCurrent(hostGen,hostRunId,powerGen,
+            inputHostConfiguredPersona(),inputHostStartProtectionNow());
     const char* skipGate = inputHostLateHideSkipGate(
         g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled,
         g_hidHideVisibilityJournal.active,
         g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire),
         hostRunId, tuple, queuedTuple,
-        bypassSource, msiSourceActive, msiGenerationValid);
+        bypassSource, msiSourceActive, msiGenerationValid, deferredStartHide);
     if (skipGate) {
         appendNativeLifecycleLog("input-host-late-hide-decision", {
             {"outcome", "skipped"}, {"gate", skipGate},
@@ -40189,7 +43369,7 @@ static void inputHostQueueWakePhysicalHide(const char* reason) {
             {"wakeHold", g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire)},
             {"virtualTargetEnabled", g_realStickTest.virtualTargetEnabled},
             {"runIdEmpty", hostRunId.empty()},
-            {"bypass", msiBypassName},
+            {"bypass", msiBypassName}, {"deferredStartHide",deferredStartHide},
             {"bypassSource", inputHostLateHideBypassSourceName(bypassSource)},
             {"msiSourceActive", msiSourceActive},
             {"msiGenerationValid", msiGenerationValid},
@@ -40231,6 +43411,7 @@ static void inputHostQueueWakePhysicalHide(const char* reason) {
     episode.runId = hostRunId;
     episode.hostGen = hostGen;
     episode.sourceGen = sourceGen;
+    episode.deferredStartHide=deferredStartHide;
     // C3：类型与代次分离，与 coordinator/suppress 共用同一 metadata 构造。
     inputHostLateHideApplyEpisodeMetadata(&episode, inputHostLateHideManagedMsiRouteType(),
                                           msiSourceActive, lateHideMsiRecord.generation);
@@ -40246,7 +43427,7 @@ static void inputHostQueueWakePhysicalHide(const char* reason) {
             {"outcome", inputHostLateHideEnqueueOutcomeName(enqueueOutcome)},
             {"coalesced", coalesced}, {"alreadyCompleted", episodeCompleted},
             {"reason", reason ? reason : "wake-physical-return"},
-            {"owner", "controller-wake"},
+            {"owner", "controller-wake"}, {"deferredStartHide",deferredStartHide},
             {"runId", hostRunId}, {"hostGen", hostGen}, {"sourceGen", sourceGen},
             {"recordGen", episode.recordGen},
             {"managedMsiRoute", episode.managedMsiRoute},
@@ -41459,8 +44640,8 @@ static void inputHostRunQueuedLifecycleWork() {
                 struct LateHideFlightClaim {
                     bool armed;
                     ~LateHideFlightClaim() { if (armed) inputHostLateHideInFlightSet(false, 0); }
-                } lateHideFlightClaim{ymcc::msi::latehide::buildEnabled &&
-                    inputHostLateHideManagedMsiRouteType()};
+                } lateHideFlightClaim{(ymcc::msi::latehide::buildEnabled &&
+                    inputHostLateHideManagedMsiRouteType()) || lateHideEpisode.deferredStartHide};
                 const bool lateHideTokenStale = lateHideHasPending && lateHideToken != 0 &&
                     inputHostLateHidePendingTokenNow() != lateHideToken;
                 const bool lateHideMsiPendingRequired=ymcc::msi::latehide::buildEnabled && inputHostLateHideManagedMsiRouteType();
@@ -41497,31 +44678,96 @@ static void inputHostRunQueuedLifecycleWork() {
                 if (!lateHideRefused && !kVirtualTestKeepPhysicalVisible &&
                     g_realStickTest.virtualTargetEnabled) {
                     bool lateHideApplied = false;
+                    bool deferredStartCurrent = true;
+                    const char* deferredRefreshOutcome="not-requested";
+                    const char* deferredStartContextReason=nullptr;
+                    const char* deferredContextPhase="worker-entry";
                     {
                         std::lock_guard<InputHostMutex> lock(g_inputHostMx);
                         // §5.4：journal 活跃时该事务内部即 hidHideRefreshPhysicalHide
                         // （journal-active-refresh），只处理**当前物理身份**；不停止 Host、
-                        // 不 Unhide、不 CyclePort、不重建虚拟目标。
-                        lateHideApplied =
-                            hidHideApplyPhysicalTransaction(g_inputHostRunId, /*powerCycle=*/false);
+                        // 不 Unhide、不重建虚拟目标。普通 reconnect 仍不 CyclePort；
+                        // exact ROG deferred-first-hide 另结同一 Start 的一次刷新责任。
+                        if(lateHideEpisode.deferredStartHide){
+                            const auto contextReason=[&]() -> const char* {
+                                if(!lateHideHasPending)return "pending-absent";
+                                if(lateHideEpisode.hostGen!=g_inputHostEpoch)return "episode-host-changed";
+                                if(lateHideEpisode.runId!=g_inputHostRunId)return "episode-run-changed";
+                                if(inputHostExitFenceRaised())return "exit-fence";
+                                if(g_inputHostPowerAdmissionRevoked)return "power-admission-revoked";
+                                if(physicalReleaseWindowActive())return "physical-release-window";
+                                if(!g_realStickTest.enabled)return "capture-disabled";
+                                if(!g_realStickTest.virtualTargetEnabled)return "virtual-target-disabled";
+                                if(!g_xinputPhysicalSourceLocked)return "physical-source-unlocked";
+                                if((g_xinputConnectedMask & g_xinputPhysicalSourceMask)==0)return "physical-source-mask-not-live";
+                                return inputHostDeferredPhysicalHideCurrentReason(g_inputHostEpoch,g_inputHostRunId,
+                                    currentPowerGeneration(),inputHostConfiguredPersona(),inputHostStartProtectionNow());
+                            };
+                            deferredStartContextReason=contextReason();
+                            deferredStartCurrent=deferredStartContextReason==nullptr;
+                        }
+                        if(deferredStartCurrent) {
+                            InputHostDeferredPhysicalHide writeDebt;
+                            if(lateHideEpisode.deferredStartHide){
+                                std::lock_guard<std::mutex> debtLock(g_inputHostDeferredPhysicalHideMx);
+                                writeDebt=g_inputHostDeferredPhysicalHide;
+                            }
+                            struct DeferredHideWriteScope {
+                                const InputHostDeferredPhysicalHide* prior=t_inputHostDeferredPhysicalHideWrite;
+                                const char* priorRefusal=t_inputHostDeferredPhysicalHideFirstRefusal;
+                                uint64_t deadline=g_inputHostSwitchRecoveryStartDeadline;
+                                uint64_t request=g_inputHostSwitchRecoveryStartRequestId,power=g_inputHostSwitchRecoveryStartPower;
+                                DeferredHideWriteScope(bool enabled,const InputHostDeferredPhysicalHide& debt){
+                                    if(!enabled)return;
+                                    t_inputHostDeferredPhysicalHideWrite=&debt;
+                                    t_inputHostDeferredPhysicalHideFirstRefusal=nullptr;
+                                    g_inputHostSwitchRecoveryStartDeadline=deadline?(std::min)(deadline,debt.deadline):debt.deadline;
+                                    g_inputHostSwitchRecoveryStartRequestId=debt.requestId;
+                                    g_inputHostSwitchRecoveryStartPower=debt.powerGen;
+                                }
+                                ~DeferredHideWriteScope(){t_inputHostDeferredPhysicalHideWrite=prior;
+                                    t_inputHostDeferredPhysicalHideFirstRefusal=priorRefusal;
+                                    g_inputHostSwitchRecoveryStartDeadline=deadline;
+                                    g_inputHostSwitchRecoveryStartRequestId=request;g_inputHostSwitchRecoveryStartPower=power;}
+                            } writeScope{lateHideEpisode.deferredStartHide,writeDebt};
+                            lateHideApplied = hidHideApplyPhysicalTransaction(g_inputHostRunId, /*powerCycle=*/false);
+                            if(!lateHideApplied && lateHideEpisode.deferredStartHide)
+                                lateHideApplied=inputHostCompleteRogPartialHideLocked(&deferredRefreshOutcome);
+                            if(lateHideApplied && lateHideEpisode.deferredStartHide)
+                                lateHideApplied=inputHostDeferredPhysicalHideRefreshLocked(&deferredRefreshOutcome);
+                            if(lateHideEpisode.deferredStartHide && !lateHideApplied){
+                                deferredContextPhase="transaction-or-refresh";
+                                deferredStartCurrent=inputHostDeferredPhysicalHideWriteCurrent();
+                                deferredStartContextReason=t_inputHostDeferredPhysicalHideFirstRefusal;
+                            }
+                        }
+                        if(lateHideApplied && lateHideEpisode.deferredStartHide)
+                            inputHostDeferredPhysicalHideClear();
                     }
                     // M1：只有真正执行过才算"该 episode 完成"；失败不置完成态 ⇒ 20 s 内可恢复重试。
                     if (lateHideApplied) inputHostLateHideMarkEpisodeCompleted(lateHideEpisode);
                     appendNativeLifecycleLog("late-hide-complete", {
-                        {"outcome", lateHideApplied ? "applied" : "failed"},
+                        {"outcome", !deferredStartCurrent ? "refused-deferred-start-context" : (lateHideApplied ? "applied" : "failed")},
+                        {"deferredStartHide",lateHideEpisode.deferredStartHide},
+                        {"deferredStartContextCurrent",deferredStartCurrent},
+                        {"deferredStartContextReason",deferredStartContextReason?deferredStartContextReason:""},
+                        {"deferredContextPhase",deferredContextPhase},
+                        {"deferredRefreshOutcome",deferredRefreshOutcome},
                         {"queueToken", lateHideToken},
                         {"runId", lateHideEpisode.runId},
                         {"hostGen", lateHideEpisode.hostGen},
                         {"sourceGen", lateHideEpisode.sourceGen},
                         {"recordGen", lateHideEpisode.recordGen},
                         {"reason", "physical-source-returned-after-skip"},
-                        {"windowState", "closed"}, {"sourceActive", lateHideRecordActive},
+                        {"windowState", physicalReleaseWindowActive()?"open":"closed"}, {"sourceActive", lateHideRecordActive},
                         {"applied", lateHideApplied}
                     });
                     appendNativeLifecycleLog("hidhide.p-hid-late-attempt", {
                         {"reason", "physical-source-returned-after-skip"},
                         {"applied", lateHideApplied},
-                        {"powerCycle", false},
+                        {"powerCycle", std::strcmp(deferredRefreshOutcome,"owned-root-refreshed")==0},
+                        {"hideTransactionPowerCycle", false},
+                        {"deferredRefreshOutcome",deferredRefreshOutcome},
                         {"hcConnectPathHide", true},
                         {"hcXUsbDeviceArrivedParity", true},
                         {"powerGen", currentPowerGeneration()},
@@ -42545,6 +45791,7 @@ static void inputHostReconcilePhysicalSourceOnLifecycleThread() {
     if (physicalReleaseWindowActive()) return;
     HidHideVisibilityJournal journal;
     unsigned long long visibilityObservationEpoch = 0;
+    InputHostOwnedVisibilityReadback ownedVisibilityStamp;
     {
         std::lock_guard<InputHostMutex> lock(g_inputHostMx);
         if (!g_hidHideVisibilityJournal.active) return;
@@ -42561,6 +45808,7 @@ static void inputHostReconcilePhysicalSourceOnLifecycleThread() {
         g_inputHostLastPhysicalIdentityCheckTick = now;
         journal = g_hidHideVisibilityJournal;
         visibilityObservationEpoch = g_inputHostEpoch;
+        ownedVisibilityStamp=inputHostCaptureOwnedVisibilityReadbackLocked();
     }
 
     // HC keeps the selected IController alive after HideHID/CyclePort. The
@@ -42583,6 +45831,8 @@ static void inputHostReconcilePhysicalSourceOnLifecycleThread() {
         }
     }
     const ULONGLONG observationNow = GetTickCount64();
+    inputHostPublishOwnedVisibilityReadback(std::move(ownedVisibilityStamp),readback,
+        currentVisibility.hidden,currentVisibility.cloaking,observationNow);
     // Present the existing slim readback without pretending it verifies applications/inverse.
     if (readback && !hiddenTargetsIntact) {
         virtualOutputNoteSuppression(visibilityObservationEpoch, observationNow, 3);
@@ -44324,6 +47574,27 @@ static void inputEvidenceFlushForExit() noexcept {
 
 #include "controller_axis_calibration_runtime.h"
 
+// ACK may arrive after a settings/source transition. Reuse the normal-frame
+// admission and original source-lineage checks; no new device read is made.
+static void inputHostNoteVirtualGyroAcceptedLocked(std::uint64_t config,
+        const InputFrameSubmission& submitted, const ymcc::input::recoveryHealth::Context& sentContext,
+        const ymcc::input::recoveryHealth::Source& sentSource) {
+    if(!config || config!=g_virtualGyroWake.configuration() || !g_inputHostActive ||
+        !g_inputHostRequestedPersonaMatchesBound.load(std::memory_order_acquire))return;
+    const auto now=GetTickCount64();
+    const auto current=inputHostFrameSubmissionCurrent(submitted.physicalSourceAdmitted,submitted.sample.msi);
+    using namespace ymcc::input::frameSubmission;
+    if(decide(submitted.ticket,submitted.sample,current,now)!=Verdict::Allowed ||
+        source(submitted.sample,current,now)!=Verdict::Allowed)return;
+    const auto context=inputHostRecoveryHealthContextLocked(false);
+    const auto latest=inputHostRecoveryHealthLatestSourceLocked();
+    using namespace ymcc::inputHost::switchVerificationRuntime;
+    if(!(sentContext==context) || !readCurrent(sentSource,context,now) || !readCurrent(latest,context,now) ||
+        !ymcc::input::recoveryHealth::sameSource(sentSource,latest) || sentSource.continuity!=latest.continuity ||
+        sentSource.sequence>latest.sequence || sentSource.completed>latest.completed)return;
+    inputCaptureNoteVirtualGyroReady(g_inputHostEpoch,config);
+}
+
 static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD& pad,
     double cgx, double cgy, double cgz, bool steady, bool calLocked,
     const MotionContribution& motionContribution, const std::string& targetStick,
@@ -44836,6 +48107,11 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
             const auto tupleReportSequence=g_inputHostSequence+1;
             const auto switchAcceptedSource=ymcc::inputHost::switchVerificationRuntime::captureAcceptedSourceLocked(physicalSourceAdmitted);
             const auto recoveryHealthRequestContext = inputHostRecoveryHealthContextLocked(false);
+            const auto virtualGyroReadyConfig=g_virtualGyroWake.needsReady(g_inputHostEpoch,currentPowerGeneration())
+                ? g_virtualGyroWake.configuration() : 0;
+            const auto virtualGyroReadySource=virtualGyroReadyConfig
+                ? inputHostRecoveryHealthSource(t_commonFrameSource,physicalSourceAdmitted)
+                : ymcc::input::recoveryHealth::Source{};
             const auto recoveryHealthRequestSource = inputHostRecoveryHealthSource(
                 t_commonFrameSource, physicalSourceAdmitted && !semanticNeutral);
             accepted = frameTextReady
@@ -44943,6 +48219,9 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
                     auto expected=observedBoundTicket;
                     if(expected)g_inputHostStartProtectionBoundTicket.compare_exchange_strong(expected,0,std::memory_order_acq_rel);
                 }
+                if(virtualGyroReadyConfig && physicalSourceAdmitted && (!semanticNeutral || expectedUiNeutral))
+                    inputHostNoteVirtualGyroAcceptedLocked(virtualGyroReadyConfig,frameSubmission,
+                        recoveryHealthRequestContext,virtualGyroReadySource);
                 // GP-926R13 B2: only accepted current-source reads extend health.
                 // Waiting for an ACK or maintenance cannot fabricate coverage.
                 inputHostRecoveryHealthAcceptedLocked(recoveryHealthRequestContext,
@@ -45160,6 +48439,97 @@ static bool legionMotionPublish(const ymcc::legion_motion::Sample& sample, uint6
         g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready;
     return g_legionMotion.publish(sample, {currentPowerGeneration(), g_hidResolveCacheGeneration.load(std::memory_order_acquire)}, source, ready);
 }
+// Read-only selection prerequisites for an explicit calibration request. A
+// selected source key is not evidence that its sensors are currently sampling.
+static std::optional<ymcc::controller_motion::Key> inputCaptureControllerCalibrationSelectedKey() {
+    if (!inputCaptureLegionControllerMotionRoute()) return std::nullopt;
+    std::lock_guard<std::mutex> selectedLock(g_hidHidePhysicalIdentityMx);
+    std::lock_guard<std::mutex> lock(g_legionImuMx);
+    const auto source=legionMotionSourceForSelectedLocked();
+    const ymcc::controller_motion::Key key{source.physicalIdentity,currentPowerGeneration(),
+        g_hidResolveCacheGeneration.load(std::memory_order_acquire),source.captureEpoch,source.sensorIndex};
+    if (!key.valid() || !source.capabilityToken || !g_inputCaptureReady ||
+        g_inputCaptureStop.load(std::memory_order_acquire) || !g_legionRawInputSubscribed.load(std::memory_order_acquire) ||
+        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready) return std::nullopt;
+    return key;
+}
+static bool inputCaptureControllerCalibrationIntentCurrent(const ymcc::controller_motion::Key& key, ULONGLONG now) {
+    std::lock_guard<std::mutex> lock(g_controllerCalibrationMx);
+    if (!g_controllerCalibrationRequest) return false;
+    const auto& request=*g_controllerCalibrationRequest;
+    return request.key==key && now>=request.requestedAt &&
+        now-request.requestedAt < (request.awaitingSource ? 3500u : 6500u);
+}
+static bool inputCaptureControllerCalibrationWaitingForSource(ULONGLONG now) {
+    if (!g_controllerCalibrationHasRequest.load(std::memory_order_acquire)) return false;
+    const auto key=inputCaptureControllerCalibrationSelectedKey();
+    if (!key) return false;
+    std::lock_guard<std::mutex> lock(g_controllerCalibrationMx);
+    return g_controllerCalibrationRequest && g_controllerCalibrationRequest->awaitingSource &&
+        g_controllerCalibrationRequest->key==*key && now>=g_controllerCalibrationRequest->requestedAt &&
+        now-g_controllerCalibrationRequest->requestedAt<3500;
+}
+
+static void legionMotionActivationTick(LegionBackSession& owner) {
+    if (!owner.enabled && !owner.activationOutstanding.load(std::memory_order_acquire)) return;
+    const auto binding = legionMotionModelBinding();
+    const bool modelMatches = binding.known() && owner.goS ==
+        (binding.descriptor()->protocol == ymcc::capabilities::controller_motion::ProtocolKind::GoS);
+    if (!owner.enabled || !modelMatches) {
+        if (owner.activationOutstanding.load(std::memory_order_acquire)) legionMotionActivationStop(owner);
+        owner.settledOwner = 0;
+        return;
+    }
+    const auto power = currentPowerGeneration();
+    const auto raw = g_hidResolveCacheGeneration.load(std::memory_order_acquire);
+    const auto epoch = g_legionMotionCaptureEpoch.load(std::memory_order_acquire);
+    const bool intent = g_realStickTest.motionActionEnabled || g_controllerCalibrationHasRequest.load(std::memory_order_acquire);
+    if (!intent && !owner.activationOutstanding.load(std::memory_order_acquire)) {
+        // An explicit OFF rearms a later user attempt even when the previous
+        // source finished/failed without any pending I/O. Idle OFF stays cheap.
+        if (owner.settledOwner != 0) legionMotionActivationStop(owner);
+        return;
+    }
+    if (intent && owner.settledPower == power && owner.settledRaw == raw && owner.settledEpoch == epoch &&
+        owner.settledOwner == owner.actionGeneration && owner.settledOwner != 0) return;
+    const auto& recipe = binding.activationCommands();
+    ymcc::legion_activation::Key key;
+    bool wanted = false;
+    std::unique_lock<std::mutex> selectedLock(g_hidHidePhysicalIdentityMx);
+    key = {currentPowerGeneration(), g_hidResolveCacheGeneration.load(std::memory_order_acquire),
+        owner.actionGeneration, binding.token(), legionMotionStableIdentity(g_hidHidePhysicalIdentity), epoch};
+    const ymcc::controller_motion::Key calibrationKey{key.physicalIdentity,key.power,key.raw,key.captureEpoch,legionMotionSelectedSensorIndex()};
+    const bool currentIntent = g_realStickTest.motionActionEnabled || inputCaptureControllerCalibrationIntentCurrent(calibrationKey,GetTickCount64());
+    wanted = currentIntent && binding.activationSupported() && owner.bound && !owner.closing &&
+        key.physicalIdentity == owner.motionPhysicalIdentity &&
+        (!recipe.inputReportBytes || owner.buf.size() == recipe.inputReportBytes) &&
+        g_inputCaptureReady && !g_inputCaptureStop.load(std::memory_order_acquire) &&
+        g_legionRawInputSubscribed.load(std::memory_order_acquire) &&
+        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready;
+    std::lock_guard<std::mutex> lock(owner.activationMx);
+    const auto before = owner.activation.inspect().revision;
+    wanted = wanted && power == currentPowerGeneration() && raw == g_hidResolveCacheGeneration.load(std::memory_order_acquire) &&
+        epoch == g_legionMotionCaptureEpoch.load(std::memory_order_acquire) && !g_inputCaptureStop.load(std::memory_order_acquire) &&
+        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+        (g_realStickTest.motionActionEnabled || inputCaptureControllerCalibrationIntentCurrent(calibrationKey,GetTickCount64()));
+    owner.activation.tick(wanted, key, owner.device, owner.motionOutputBytes, recipe, GetTickCount64());
+    selectedLock.unlock();
+    const auto evidence = owner.activation.inspect();
+    owner.activationOutstanding.store(!evidence.resourceTerminal, std::memory_order_release);
+    if (wanted && evidence.resourceTerminal && (evidence.phase == ymcc::legion_activation::Phase::Complete ||
+        evidence.phase == ymcc::legion_activation::Phase::Failed)) {
+        owner.settledPower = power; owner.settledRaw = raw; owner.settledEpoch = epoch; owner.settledOwner = key.owner;
+    } else owner.settledOwner = 0;
+    if (evidence.revision != before) appendNativeLifecycleLog("controller-motion-activation", {
+        {"phase",static_cast<unsigned>(evidence.phase)},{"completedCommands",evidence.completedCommands},
+        {"commandCount",evidence.commandCount},{"outputReportBytes",evidence.outputReportBytes},
+        {"pending",evidence.pending},{"resourceTerminal",evidence.resourceTerminal},
+        {"error",owner.activation.port.error},{"physicalIdentity",evidence.key.physicalIdentity},
+        {"capabilityToken",evidence.key.token},{"powerGeneration",evidence.key.power},{"rawGeneration",evidence.key.raw},
+        {"sourceOwnerGeneration",evidence.key.owner},{"captureEpoch",evidence.key.captureEpoch},
+        {"firmwareAcceptanceProven",false},{"gameConsumptionProven",false}});
+}
+
 static std::optional<ymcc::legion_motion::Sample> legionMotionSnapshot(ULONGLONG now) {
     if (!inputCaptureLegionControllerMotionRoute()) return std::nullopt;
     std::lock_guard<std::mutex> selectedLock(g_hidHidePhysicalIdentityMx);
@@ -45449,34 +48819,42 @@ static json inputCaptureControllerCalibrationRequest() {
     if (!inputCaptureLegionControllerMotionRoute()) return {{"ok",false},{"reason","controller-route-unavailable"}};
     const auto now=GetTickCount64();
     const auto sample=legionMotionSnapshot(now);
-    if (!sample || !legionMotionSubmissionCurrent(*sample,now)) return {{"ok",false},{"reason","controller-source-unavailable"}};
-    const auto key=inputCaptureControllerCalibrationSourceKey(*sample);
+    const bool sampleCurrent=sample && legionMotionSubmissionCurrent(*sample,now);
+    const auto selected=inputCaptureControllerCalibrationSelectedKey();
+    if (!selected) return {{"ok",false},{"reason","controller-source-unavailable"}};
+    const auto key=sampleCurrent ? inputCaptureControllerCalibrationSourceKey(*sample) : *selected;
+    if (!(key==*selected)) return {{"ok",false},{"reason","controller-source-retired"}};
     ControllerCalibrationRequest request;
     {
         std::lock_guard<std::mutex> lock(g_controllerCalibrationMx);
         if (g_controllerCalibrationRequest && g_controllerCalibrationRequest->key==key &&
-            now>=g_controllerCalibrationRequest->requestedAt && now-g_controllerCalibrationRequest->requestedAt<6500)
+            now>=g_controllerCalibrationRequest->requestedAt && now-g_controllerCalibrationRequest->requestedAt<
+                (g_controllerCalibrationRequest->awaitingSource ? 3500u : 6500u))
             return {{"ok",false},{"reason","in-progress"}};
         if (++g_controllerCalibrationRequestSequence==0) ++g_controllerCalibrationRequestSequence;
-        request={key,g_controllerCalibrationRequestSequence,now};
+        request={key,g_controllerCalibrationRequestSequence,now,!sampleCurrent};
         g_controllerCalibrationRequest=request;
         g_controllerCalibrationHasRequest.store(true,std::memory_order_release);
     }
     appendNativeLifecycleLog("controller-gyro-calibration-request",{{"ok",true},{"requestId",request.id},
         {"physicalIdentity",key.physicalIdentity},{"sensorIndex",key.sensorIndex},{"captureEpoch",key.captureEpoch},
-        {"powerGeneration",key.power},{"rawGeneration",key.rawGeneration},{"sampleQueuedAt",sample->capturedAt}});
+        {"powerGeneration",key.power},{"rawGeneration",key.rawGeneration},{"sampleQueuedAt",sampleCurrent ? json(sample->capturedAt) : json(nullptr)},
+        {"initializingSource",request.awaitingSource},{"sourceWaitBudgetMs",request.awaitingSource ? 3500 : 0}});
     gamepadSerialPostEvent("gyro.calibrate.status",{{"status","calibrating"},{"trusted",false},
         {"attempts",0},{"provider","controller"},{"requestId",request.id}});
-    return {{"ok",true},{"pollWindowMs",5000},{"requestId",request.id},{"provider","controller"}};
+    return {{"ok",true},{"pollWindowMs",request.awaitingSource ? 8500 : 5000},{"requestId",request.id},
+        {"provider","controller"},{"initializingSource",request.awaitingSource}};
 }
 static json inputCaptureControllerCalibrationStatus() {
     const auto now=GetTickCount64();
     const auto sample=legionMotionSnapshot(now);
     const auto key=sample ? std::optional<ymcc::controller_motion::Key>(inputCaptureControllerCalibrationSourceKey(*sample)) : std::nullopt;
-    std::lock_guard<std::mutex> lock(g_controllerCalibrationMx);
     const bool current=sample && legionMotionSubmissionCurrent(*sample,now);
-    const bool busy=current && g_controllerCalibrationRequest && g_controllerCalibrationRequest->key==*key &&
-        now>=g_controllerCalibrationRequest->requestedAt && now-g_controllerCalibrationRequest->requestedAt<6500;
+    const bool waiting=inputCaptureControllerCalibrationWaitingForSource(now);
+    std::lock_guard<std::mutex> lock(g_controllerCalibrationMx);
+    const bool busy=waiting || (current && g_controllerCalibrationRequest && !g_controllerCalibrationRequest->awaitingSource &&
+        g_controllerCalibrationRequest->key==*key && now>=g_controllerCalibrationRequest->requestedAt &&
+        now-g_controllerCalibrationRequest->requestedAt<6500);
     const bool trusted=current && g_controllerCalibrationTrustedKey && *g_controllerCalibrationTrustedKey==*key;
     return {{"ok",true},{"status",busy ? "calibrating" : trusted ? "already-calibrated" : "uncalibrated"},
         {"trusted",!busy && trusted},{"attempts",0},{"provider","controller"}};
@@ -45579,9 +48957,18 @@ static std::optional<ymcc::controller_motion::MotionResult> inputCaptureControll
     };
     if (!g_controllerCalibrationActiveRequest && !g_controllerCalibrationHasRequest.load(std::memory_order_acquire)) return steadyProcess();
     std::optional<ControllerCalibrationRequest> request;
+    const auto firstSampleAt=GetTickCount64();
+    const bool firstSampleCurrent=legionMotionSubmissionCurrent(sample,firstSampleAt);
     {
         std::lock_guard<std::mutex> lock(g_controllerCalibrationMx);
         request=g_controllerCalibrationRequest;
+        if (request && request->awaitingSource && request->key==key && firstSampleCurrent &&
+            firstSampleAt>=request->requestedAt && firstSampleAt-request->requestedAt<3500) {
+            // Source initialization time cannot consume the actual calibration
+            // training window. The first current report starts that window.
+            request->awaitingSource=false; request->requestedAt=firstSampleAt;
+            g_controllerCalibrationRequest=request;
+        }
     }
     // The notification flag may lag a cancelled request. Only a real request
     // or active borrower can change mode; an empty snapshot preserves the cache.
@@ -45598,7 +48985,7 @@ static std::optional<ymcc::controller_motion::MotionResult> inputCaptureControll
     }
     if (!request) return steadyProcess();
     const auto now=GetTickCount64();
-    if (!(request->key==key) || now<request->requestedAt || now-request->requestedAt>=6500 ||
+    if (request->awaitingSource || !(request->key==key) || now<request->requestedAt || now-request->requestedAt>=6500 ||
         !legionMotionSubmissionCurrent(sample,now)) {
         inputCaptureControllerCalibrationComplete(*request,false,false,"request-source-retired-or-expired",0.0f);
         if (g_controllerCalibrationTransaction) g_controllerCalibrationTransaction->cancel(key,handle,ops);
@@ -45695,6 +49082,8 @@ static std::optional<ymcc::controller_motion::MotionResult> inputCaptureLegionMo
     const ymcc::controller_motion::RawSixAxes& axes, double nowSeconds) {
     if (!inputCaptureLegionControllerMotionRoute()) return std::nullopt;
     const bool reset=g_gmSessionResetRequested.exchange(false,std::memory_order_acq_rel);
+    if (!sample && !reset && g_controllerCalibrationHasRequest.load(std::memory_order_acquire) &&
+        inputCaptureControllerCalibrationWaitingForSource(GetTickCount64())) return std::nullopt;
     if(!sample&&!reset&&inputCaptureLegionSelectionPending()){
         if(g_controllerCalibrationActiveRequest||g_controllerCalibrationHasRequest.load(std::memory_order_acquire))
             inputCaptureControllerCalibrationAbort();
@@ -46154,6 +49543,7 @@ static void inputCaptureInit() {
         throw std::runtime_error("sensor STA start request did not complete");
     g_inputCaptureSensorsSuspended.store(!inputCaptureSensorPowerMayRun(), std::memory_order_release);
     inputHostTargetReturnQueueColdStartup(); // provenance before any BUS target; worker alone restores
+    superJoyLightingOwnerResume();
     g_inputCaptureReady = true;
     msiNativeForegroundUiEvent(true); // MSI-only native visibility after existing reader exemption is ready
     const InputCaptureSensorMeta meta = inputCaptureSensorMetaSnapshot();
@@ -46251,6 +49641,43 @@ static void inputCaptureCommonFrameEvidence(const json& hostFrame,bool semanticN
     }catch(...) {++g_commonFrameEvidenceFailures;}
 }
 
+// Display data only: callers still read every Host/persona fact on this tick.
+// Reuse the disabled frame while those facts match; this never authorizes output.
+static const json& inputCaptureInactiveHostFrame(bool hostActive, const std::string& lifecycle,
+    const std::string& persona, const std::string& targetStick) {
+    struct Key {
+        bool hostActive = false;
+        std::string lifecycle, persona, targetStick;
+    };
+    struct Cache {
+        bool ready = false;
+        Key key;
+        json frame;
+    };
+    thread_local Cache cache;
+    if (!cache.ready || cache.key.hostActive != hostActive ||
+        cache.key.lifecycle != lifecycle || cache.key.persona != persona ||
+        cache.key.targetStick != targetStick) {
+        Key nextKey{hostActive, lifecycle, persona, targetStick};
+        json nextFrame = {
+            {"hostSubmission", "publication-suppressed"},
+            {"publicationReason", "virtual-target-disabled"},
+            {"hostActive", nextKey.hostActive},
+            {"firstFrame", false},
+            {"lifecycle", nextKey.lifecycle},
+            {"persona", nextKey.persona},
+            {"targetStick", nextKey.targetStick},
+            {"motionAdmission", "safe-zero"},
+            {"leftStick", {{"x", 0.0}, {"y", 0.0}}},
+            {"rightStick", {{"x", 0.0}, {"y", 0.0}}}
+        };
+        cache.key = std::move(nextKey);
+        cache.frame = std::move(nextFrame);
+        cache.ready = true;
+    }
+    return cache.frame;
+}
+
 static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD primarySlot, DWORD connectedMask, const std::string& inputSource
 #ifdef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC
     , const ymcc::msi::virtualReportDiag::SourceStamp* msiDiagnosticSource
@@ -46277,7 +49704,7 @@ static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD pr
     const bool virtualUiCovered = focusPlan.steamDeckTarget || focusPlan.ps5Target || focusPlan.msiTarget;
     const bool virtualUiNeutral = virtualUiCovered ? (steamDeckUiNeutral || ps5UiNeutral || msiUiNeutral) : virtualUiOwnsInput(focusPlan);
     const bool submitNeutral = focusPlan.neutralCleanup || physicalReleaseWindowActive() || steamDeckUiNeutral || ps5UiNeutral || msiUiNeutral || virtualUiNeutral;
-    const bool dsuUiNeutral = g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled && focusPlan.virtualUiPersona[0] ? virtualUiNeutral : gamepadUiInputEligible();
+    const bool dsuUiNeutral = g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled && focusPlan.virtualUiPersona[0] ? virtualUiNeutral : gamepadUiOutputIsolationEligible();
     const bool dsuSubmitNeutral = submitNeutral || dsuUiNeutral;
     // 屏障位图与屏蔽结果在 canonicalPad 生成之后计算（见下）。
     // MOCK 伪装握手（2026-09-15 用户需求，原创测试设施，HC 无对应）：
@@ -46375,7 +49802,7 @@ static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD pr
     UINT64 gyroBindingGeneration = 0, accelBindingGeneration = 0;
     ymccResolveMachineIdentityOnce();
     inputCaptureResolveHcMotionSelector();
-    const auto windowsDefaultView=inputCaptureWindowsDefaultViewSnapshot(false);
+    auto windowsDefaultView=inputCaptureWindowsDefaultViewSnapshot(false);
     inputCaptureWindowsSelectionPublishContext(&windowsDefaultView);
     auto windowsSensorView=inputCaptureWindowsSensorViewSnapshot(&windowsDefaultView);
     const ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> windowsProcessingScope(
@@ -46718,13 +50145,22 @@ static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD pr
             appendDomainLog("gyro", "gyro-status-second", {
                 {"mode", g_realStickTest.motionMode},
                 {"trigger", g_realStickTest.motionTrigger},
-                {"triggerPressed", g_realStickTest.motionTriggerResolved},
+                {"triggerPressed", inputCaptureMotionTriggerPressed(g_realStickTest.motionTrigger, canonicalPad)},
+                {"triggerResolved", g_realStickTest.motionTriggerResolved},
+                {"motionTriggered", motionTriggered},
+                {"motionEnabled", g_realStickTest.motionEnabled},
+                {"processorReady", motionProcessorReady},
                 {"hostAlive", hostAlive},
                 {"epoch", g_inputHostEpoch},
                 {"persona", inputHostPersona()},
                 {"calOut", {{"x", scx}, {"y", scy}, {"z", scz}}},
                 {"raw", {{"x", mgx}, {"y", mgy}, {"z", mgz}}},
                 {"gyroSeq", gyroSequence},
+                {"accelSeq", accelSequence},
+                {"sourceFamily", sensorMeta.gyroFamily},
+                {"reportIntervalMs", sensorMeta.gyroIntervalMs},
+                {"gyroReceiptAgeMs", gyroReceiptTick && gyroReceiptTick <= statusTick ? json(statusTick - gyroReceiptTick) : json(nullptr)},
+                {"accelReceiptAgeMs", accelReceiptTick && accelReceiptTick <= statusTick ? json(statusTick - accelReceiptTick) : json(nullptr)},
                 {"firstFrameTs100ns", g_gyroFirstFrameTs},
                 // 批95：高频保活状态（sensor 线程单写，此处只读展示给日志）。
                 {"armCount", g_sensorRebindCount},
@@ -47135,9 +50571,11 @@ static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD pr
     // MotionManager. Keep publishing ordinary physical button/axis mapping
     // when gyro is off; only the motion contribution remains safe-zero.
     const bool publicationAllowed = g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled;
-    json hostFrame = json::object();
+    json ownedHostFrame;
+    const json* hostFrameView = &ownedHostFrame;
     bool publishedSemanticNeutral=submitNeutral;
     if (publicationAllowed) {
+        json& hostFrame = ownedHostFrame;
         // ── B1：在**最终输出提交处**落决策（与 DSU 同拍、同一归属）──
         // 中性只改内容，不改节拍：序号/时间戳仍由既有路径推进。
         // 决策必须在**实际发送边界**生效：Host 不可写时**不调用提交函数**，
@@ -47232,19 +50670,10 @@ static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD pr
             lifecycle = g_inputHostLifecycle;
         }
         inputHostNotePublicationStage(InputHostPublicationStage::TargetDisabled);
-        hostFrame = {
-            {"hostSubmission", "publication-suppressed"},
-            {"publicationReason", "virtual-target-disabled"},
-            {"hostActive", hostActive},
-            {"firstFrame", false},
-            {"lifecycle", lifecycle},
-            {"persona", inputHostPersona()},
-            {"targetStick", g_realStickTest.targetStick},
-            {"motionAdmission", "safe-zero"},
-            {"leftStick", {{"x", 0.0}, {"y", 0.0}}},
-            {"rightStick", {{"x", 0.0}, {"y", 0.0}}}
-        };
+        hostFrameView = &inputCaptureInactiveHostFrame(
+            hostActive, lifecycle, inputHostPersona(), g_realStickTest.targetStick);
     }
+    const json& hostFrame = *hostFrameView;
     inputCaptureCommonFrameEvidence(hostFrame,publishedSemanticNeutral);
     virtualUiOutputNote(focusPlan, virtualUiNeutral, publishedSemanticNeutral, hostFrame, live, inputSource);
     steamDeckUiOutputNote(steamDeckUiNeutral, publishedSemanticNeutral, hostFrame);
@@ -47642,7 +51071,9 @@ static void inputCaptureBusTick() {
                             {"policy", "bus-request-lifecycle-worker-reconcile"}
                         });
                     }
-                    if(queuedStart)inputHostPresentationDeferred(admissionStatusRequest, admissionStatusContext, false);
+                    // Accepted work owns pending; expired-player/fence refusals are terminal.
+                    // Retire only this captured display wait; queue/return owners stay intact.
+                    inputHostPresentationDeferred(admissionStatusRequest, admissionStatusContext, false);
                     // C（裁决14 §4.2）：persona 切换/首建目标标脏 ⇒ 工作线程执行前
                     // 的采样机会先做一次完整槽发现（不无界排队、不在此处枚举）。
                     if(queuedStart)xinputSlotsMarkDiscoveryDirty();
@@ -47780,6 +51211,10 @@ static std::uint64_t inputCaptureRetireResources(bool comReady) {
         oemHidReadServiceClosing(*value,"capture-retirement");
         if(value->readPending||value->device!=INVALID_HANDLE_VALUE||value->ovEvent)debts|=Debt::OemIo;
     }
+    legionMotionActivationStop(g_legionBack);
+    legionMotionActivationStop(g_legionSBack);
+    if(g_legionBack.activationOutstanding.load(std::memory_order_acquire) ||
+        g_legionSBack.activationOutstanding.load(std::memory_order_acquire))debts|=Debt::OemIo;
     onexBackServiceRead();onexBackServiceWrite();
     if(!g_onexBack.readPending&&!g_onexBack.writeInFlight)onexBackFinalizeClose();
     if(g_onexBack.readPending||g_onexBack.writeInFlight||g_onexBack.device!=INVALID_HANDLE_VALUE||g_onexBack.ovEvent||g_onexBack.writeEvent)debts|=Debt::OemIo;
@@ -47976,17 +51411,35 @@ static XINPUT_GAMEPAD xinputMergeConnectedPads(
 // Called only from the existing UI publication path, under g_gamepadReadMx.
 // try-lock avoids waiting behind driver I/O. A busy lifecycle is displayed separately;
 // an old observation cannot supply the new persona/epoch's positive evidence.
-static json virtualOutputRuntimeSnapshot(bool sourceLive, const ymcc::VirtualOutputSourceWindow& sourceWindow) {
+static const json& virtualOutputRuntimeSnapshot(bool sourceLive, const ymcc::VirtualOutputSourceWindow& sourceWindow) {
+    // Presentation only, serialized by g_gamepadReadMx. Every call still reads
+    // current Host/power/source facts; reuse only their identical unlocked JSON.
+    struct SnapshotKey {
+        std::string requested, bound;
+        unsigned long long hostEpoch = 0;
+        ymcc::VirtualOutputFacts facts;
+        int steamPresence = -1, suppressionVerdict = 0;
+        ymcc::VirtualStartProtection::View protection;
+        bool operator==(const SnapshotKey&) const = default;
+    };
+    static std::optional<SnapshotKey> previousKey;
+    static json snapshot;
     const std::string configuredPersona = inputHostConfiguredPersona();
-    if (const char* reason = inputHostMachineTargetRejectionReason(configuredPersona))
-        return {{"state", "disabled"}, {"reason", reason},
+    if (const char* reason = inputHostMachineTargetRejectionReason(configuredPersona)) {
+        previousKey.reset();
+        snapshot = {{"state", "disabled"}, {"reason", reason},
             {"startProtection",inputHostStartProtectionSnapshot()},
             {"requestedPersona", configuredPersona}, {"sourceLive", sourceLive}};
-    if (g_externalPriorityVirtualSuspended.load(std::memory_order_acquire))
-        return {{"state", "external-priority"}, {"reason", "external-controller-priority"},
+        return snapshot;
+    }
+    if (g_externalPriorityVirtualSuspended.load(std::memory_order_acquire)) {
+        previousKey.reset();
+        snapshot = {{"state", "external-priority"}, {"reason", "external-controller-priority"},
             {"startProtection",inputHostStartProtectionSnapshot()},
             {"requestedPersona", inputHostConfiguredPersona()}, {"sourceLive", sourceLive},
             {"externalPriority", externalControllerPrioritySnapshot()}};
+        return snapshot;
+    }
     struct HostObservation {
         bool observed = false, alive = false, prepared = false, neutralized = false;
         bool active = false, transportFault = false;
@@ -48057,18 +51510,33 @@ static json virtualOutputRuntimeSnapshot(bool sourceLive, const ymcc::VirtualOut
     facts.returnFailed=msiReturnOff && g_msiOwnedReturnFailed.load(std::memory_order_acquire);
     const auto verdict = ymcc::virtualOutputVerdict(facts);
     const int steamPresence = g_steamSettingsObserver.steamPresence();
-    return {{"state", verdict.state}, {"reason", verdict.reason},
+    const auto protectionView = g_virtualStartProtection.view(inputHostStartProtectionNow());
+    // Compare only displayed clocks after the UI wait; pass the untouched
+    // native observation to the existing formatter on every cache miss.
+    auto displayedProtection = protectionView;
+    if (!displayedProtection.locked) {
+        displayedProtection.remainingMs = 0;
+        displayedProtection.elapsedMs = 0;
+        displayedProtection.verificationRemainingMs = 0;
+    }
+    SnapshotKey key{requested, current ? previous.boundPersona : "",
+        current ? previous.epoch : 0, facts, steamPresence, suppressionVerdict, displayedProtection};
+    if (!protectionView.locked && previousKey && *previousKey == key) return snapshot;
+    snapshot = {{"state", verdict.state}, {"reason", verdict.reason},
         {"requestedPersona", requested}, {"boundPersona", current ? previous.boundPersona : ""},
         {"hostEpoch", current ? previous.epoch : 0},
         {"hostAlive", facts.hostAlive}, {"prepared", facts.prepared},
         {"neutralized", facts.neutralized}, {"frameAccepted", facts.frameAccepted},
         {"sourceLive", facts.sourceLive}, {"sourceCurrent", facts.sourceCurrent},
-        {"switchPending",facts.transitionPending},{"startProtection",inputHostStartProtectionSnapshot()},
+        {"switchPending",facts.transitionPending},{"startProtection",inputHostStartProtectionJson(protectionView)},
         {"physicalReturnPending",facts.returnPending},
         {"physicalReturnFailed",facts.returnFailed},
         {"steamRunning", steamPresence < 0 ? json(nullptr) : json(steamPresence == 1)},
         {"suppressionState", suppressionVerdict >= 2 ? "degraded" :
             (suppressionVerdict == 1 ? "verified" : "unknown")}};
+    if (!protectionView.locked) previousKey = std::move(key);
+    else previousKey.reset();
+    return snapshot;
 }
 
 static void gamepadReadStateUnlocked(bool publishUi) {
@@ -49002,17 +52470,22 @@ static void gamepadReadStateUnlocked(bool publishUi) {
     const int hidHideSetupNotice = (int)g_gamepadDriverSetup.hidHideNotice();
     const bool backendFault = g_inputHostFaultHoldsStart.load(std::memory_order_acquire);
     const int recoveryFallback = g_inputHostRecoveryFallbackState.load(std::memory_order_acquire);
-    const json virtualOutput = virtualOutputRuntimeSnapshot(live, statusSourceWindow);
+    const json& virtualOutput = virtualOutputRuntimeSnapshot(live, statusSourceWindow);
     // Event-only protection edges. The ordinary countdown never writes per-frame logs.
     static json publishedStartProtectionEdge;
     const auto& protection = virtualOutput.at("startProtection");
     const bool protectionLocked = protection.at("locked").get<bool>();
-    const json protectionEdge = {protection.at("requestId"),protection.at("phase"),protection.at("locked")};
-    if (protectionEdge != publishedStartProtectionEdge) {
+    const auto& protectionRequest = protection.at("requestId");
+    const auto& protectionPhase = protection.at("phase");
+    const auto& protectionLock = protection.at("locked");
+    if (publishedStartProtectionEdge.is_null() ||
+        publishedStartProtectionEdge[0] != protectionRequest ||
+        publishedStartProtectionEdge[1] != protectionPhase ||
+        publishedStartProtectionEdge[2] != protectionLock) {
         if (protection.value("requestId",0ULL)) {
             try { appendNativeLifecycleLog("virtual-start-protection-state",protection); } catch (...) {}
         }
-        publishedStartProtectionEdge = protectionEdge;
+        publishedStartProtectionEdge = {protectionRequest,protectionPhase,protectionLock};
     }
     const bool steamDeckSelfOutputBlocked = inputHostSteamDeckSelfOutputBlocked();
     const auto externalPriorityRevision = g_externalPriorityRevision.load(std::memory_order_acquire);
@@ -49047,7 +52520,7 @@ static void gamepadReadStateUnlocked(bool publishUi) {
         const float normalized = static_cast<float>(value) / 32767.0f;
         return std::max(-1.0f, std::min(1.0f, normalized));
     };
-    ipc_emit("gamepad.state", {
+    ipc_emit_owned_gamepad_state({
         {"connected", live},
         {"name", live ? "XInput Controller" : ""},
         {"inputSource", inputSource},
@@ -49254,7 +52727,15 @@ static HWND customSteamLibraryParentWindow() {
 static bool customSteamLibraryInputSuppressed() {
     // A process, bridge request, hidden/minimized window or old return phase is
     // never input ownership. Only the verified, visible foreground child owns it.
-    const HWND child = customSteamLibraryWindow();
+    // Reject unrelated foregrounds using the existing parent-owner properties.
+    // A declared candidate still receives the full fresh child identity checks.
+    const HWND foreground = GetForegroundWindow();
+    const bool foregroundClaimsParent = foreground &&
+        customSteamLibraryWindowProperty(foreground, kCustomSteamLibraryInputOwnerProperty) ==
+            kCustomSteamLibraryParentInputOwnerMarker &&
+        customSteamLibraryWindowProperty(foreground, kCustomSteamLibraryParentPidProperty) ==
+            static_cast<ULONG_PTR>(GetCurrentProcessId());
+    const HWND child = foregroundClaimsParent ? customSteamLibraryWindow() : nullptr;
     // Reject inactive windows before opening/querying their process on each
     // input tick. Foreground admission still performs fresh identity checks,
     // then repeats the cheap focus proof in case it changed during the query.
@@ -49354,6 +52835,14 @@ static bool gamepadUiInputEligible() {
     if (customSteamLibraryInputSuppressed()) return true;
     if (!g_hwnd || !IsWindow(g_hwnd) || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd)) return false;
     return focusMainWindowIsForeground();
+}
+
+// Output/visibility ownership is separate from navigation admission. The new
+// preference controls the main YMCC window; radial and child handoff ownership
+// remain independent so disabling it cannot leak a held wheel/child transition.
+static bool gamepadUiOutputIsolationEligible() {
+    if(radialHasInputOwner() || customSteamLibraryInputSuppressed())return true;
+    return g_controllerFrontendIsolationEnabled.load(std::memory_order_acquire) && gamepadUiInputEligible();
 }
 
 static void gamepadEmitUiAction(const char* action, bool repeat = false, ULONGLONG heldMs = 0) {
@@ -49573,11 +53062,14 @@ static void gamepadRecordShortcutClick(uint64_t bit) {
 // keyboard.* injects keys; input.* toggles are runtime-only internal actions
 // and use the same edge/hold/double/repeat evaluator (also while hidden).
 struct NativeKeyboardShortcutRule {
+    std::string outputId;
+    ymcc::keyboardSequence::Plan keyboardPlan;
     uint64_t requiredMask = 0;
     std::string trigger = "press";
     ULONGLONG holdMs = 500;
     ULONGLONG doubleWindowMs = 500;
     ULONGLONG intervalMs = 150;
+    bool linearAcceleration = false;
     WORD virtualKey = 0;
     bool requiresShift = false;
     bool forceExtendedKey = false;
@@ -49611,6 +53103,7 @@ struct NativeKeyboardShortcutRule {
 
 static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;
 static uint32_t g_nativeShortcutLegacyOverrideMask = 0; // UI-owned edited default slots
+static bool g_nativeShortcutRulesConfigured = false; // Listener-owned; the durable rule table outranks compatibility flags.
 static uint32_t g_nativeOemEdgeEpochSeen = 0; // UI evaluator-owned
 static bool g_nativeWmiAuthoritySeen = false; // UI-only QS fallback neutral boundary
 static ULONGLONG g_nativeKeyboardShortcutLastRefresh = 0;
@@ -49657,7 +53150,7 @@ static bool nativeKeyboardShortcutMaskBit(const std::string& code, uint64_t& bit
         // :44-54 BackEnum），其余 4 键（Y2/Y3/M2/M3）此前无位 —— 由审计 no-bit 抓出并补齐。
         {"legiony2", 1ull << 57}, {"legiony3", 1ull << 58},
         {"legionm2", 1ull << 59}, {"legionm3", 1ull << 60},
-        {"legionfrontl", 1ull << 61}, {"legionfrontr", 1ull << 62},
+        {"legionfrontl", 1ull << 61}, {"legionfrontr", 1ull << 62}, {"gkey", 1ull << 63},
     };
     for (const auto& entry : entries) {
         if (code == entry.first) {
@@ -49791,26 +53284,6 @@ static DWORD nativeKeyboardShortcutInputFlags(WORD virtualKey) {
     default:
         return 0;
     }
-}
-
-static void nativeKeyboardShortcutSend(WORD virtualKey, bool requiresShift, bool forceExtended = false) {
-    INPUT inputs[4]{};
-    size_t count = 0;
-    if (requiresShift) {
-        inputs[count].type = INPUT_KEYBOARD;
-        inputs[count++].ki.wVk = VK_LSHIFT;
-    }
-    const DWORD keyFlags = nativeKeyboardShortcutInputFlags(virtualKey) | (forceExtended ? KEYEVENTF_EXTENDEDKEY : 0);
-    inputs[count].type = INPUT_KEYBOARD;
-    inputs[count].ki.dwFlags = keyFlags;
-    inputs[count++].ki.wVk = virtualKey;
-    inputs[count] = inputs[count - 1];
-    inputs[count++].ki.dwFlags = keyFlags | KEYEVENTF_KEYUP;
-    if (requiresShift) {
-        inputs[count] = inputs[0];
-        inputs[count++].ki.dwFlags = KEYEVENTF_KEYUP;
-    }
-    (void)keyboardSelfSendWithEvidence(ymcc::keyboardEvents::SourceId::NativeKeyboardShortcut,static_cast<UINT>(count),inputs);
 }
 
 static ULONGLONG nativeKeyboardShortcutDuration(
@@ -50237,6 +53710,10 @@ static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool max
         return true;
     }
     // Show/notify first. Expensive game registration remains on its existing worker.
+    // Every summon action owns the captured return target. The legacy shoulder
+    // recognizer also seeds this slot, but custom chords/OEM keys need the same
+    // handoff to focusPrepareSummonSession before UI input ownership begins.
+    g_pendingSummonTarget = target;
     bringToFront(g_hwnd, maximizeWindow);
     focusShortcutInputEvidence("show-returned",generation,target.valid);
     ipc_emit("gamepad.summon", nativeSummonCandidateSnapshot(target, generation));
@@ -50397,9 +53874,10 @@ static bool nativeShortcutLegacyTemplateMatches(const json& raw, int slot) {
     }
     return true;
 }
-static bool nativeShortcutLegacyDefaultAllowed(const char* key) {
+static bool nativeShortcutLegacyDefaultAllowed(const char* key, bool legacyEnabled = true) {
     const int slot = nativeShortcutLegacyDefaultSlot(key);
-    return slot >= 0 && (g_nativeShortcutLegacyOverrideMask & (1u << slot)) == 0;
+    return slot >= 0 && (g_nativeShortcutLegacyOverrideMask & (1u << slot)) == 0 &&
+        (g_nativeShortcutRulesConfigured || legacyEnabled);
 }
 
 static void nativeKeyboardShortcutsRefresh(ULONGLONG now) {
@@ -50407,7 +53885,7 @@ static void nativeKeyboardShortcutsRefresh(ULONGLONG now) {
         now - g_nativeKeyboardShortcutLastRefresh < NATIVE_KEYBOARD_SHORTCUT_REFRESH_MS) return;
     g_nativeKeyboardShortcutLastRefresh = now;
 
-    const json input = ymSettingsSection("input");
+    const json input = ymSettingsFields("input", {"revision", "msiControllerShieldEnabled", "buttonMapping"});
     const long long revision = input.is_object() && input.contains("revision") && input["revision"].is_number_integer()
         ? input["revision"].get<long long>()
         : 0;
@@ -50420,6 +53898,7 @@ static void nativeKeyboardShortcutsRefresh(ULONGLONG now) {
     // not clear it (or touch ROG/GPD/common input paths).
     oemVendorStackShieldRequest(msiControllerShieldRequested(input));
     oemVendorStackSchedule(); // Retry a rejected queue publication; no repeated SCM attempts.
+    oemVendorStackRecordingRequest(g_shortcutRecordingActive.load(std::memory_order_acquire));
     if (revision == g_nativeKeyboardShortcutRevision && vendorFamilySeen == g_machineIdentity.family && radialTestingSeen == radialTesting) return;
     vendorFamilySeen = g_machineIdentity.family;
 #else
@@ -50428,70 +53907,87 @@ static void nativeKeyboardShortcutsRefresh(ULONGLONG now) {
     radialTestingSeen = radialTesting;
 
     std::vector<NativeKeyboardShortcutRule> parsed;
-    uint32_t legacyOverrides = 0;
+    uint32_t legacyOverrides = 0, legacyTemplates = 0;
+    bool hasConfiguredShortcuts = false;
     try {
-        const auto buttonMapping = input.find("buttonMapping");
-        if (buttonMapping != input.end() && buttonMapping->is_object()) {
-            const auto rules = buttonMapping->find("rules");
-            if (rules != buttonMapping->end() && rules->is_object()) {
-                const auto shortcuts = ymcc::bootModeShortcuts::effectiveRules(input);
-                if (shortcuts) {
-                    for (const auto& raw : *shortcuts) {
-                        if (!raw.is_object()) continue;
-                        // Retire only the tagged historical default; custom F7 rules remain supported.
-                        if (ymcc::inputShortcutString(raw,"origin") == "native-default" &&
-                            ymcc::inputShortcutString(raw,"defaultKey") == "startDoubleF7") continue;
-                        const bool enabled = !raw.contains("enabled") || !raw["enabled"].is_boolean() || raw["enabled"].get<bool>();
-                        const int legacySlot = ymcc::inputShortcutString(raw,"origin") == "native-default"
-                            ? nativeShortcutLegacyDefaultSlot(ymcc::inputShortcutString(raw,"defaultKey")) : -1;
-                        const bool legacyTemplate = nativeShortcutLegacyTemplateMatches(raw, legacySlot);
-                        if (legacySlot >= 0 && (!enabled || !legacyTemplate)) legacyOverrides |= 1u << legacySlot;
-                        if (!enabled || legacyTemplate) continue;
-                        const auto action = raw.find("actionId");
-                        const auto inputs = raw.find("inputs");
-                        const auto params = raw.find("params");
-                        if (action == raw.end() || inputs == raw.end() || params == raw.end() ||
-                            !action->is_string() || !params->is_object()) continue;
-                        const std::string actionId = action->get<std::string>();
-                        if (!ymcc::radial::userActionAvailable(actionId)) continue;
-                        NativeKeyboardShortcutRule rule;
-                        if (ymcc::inputShortcutAction(actionId)) {
-                            const auto preset = params->find("preset");
-                            if (preset == params->end() || !preset->is_string() ||
-                                !ymcc::inputShortcutPreset(actionId, preset->get<std::string>())) continue;
-                            if (!nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys)) continue;
-                            rule.inputAction = actionId; rule.preset = preset->get<std::string>();
-                        } else if (ymcc::shortcutUiAction(actionId)) {
-                            if (!nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys) ||
-                                !ymcc::shortcutUiParams(actionId, *params, rule.uiParams)) continue;
-                            rule.uiAction = actionId;
-                        } else if (nativeYmccShortcutAction(actionId)) {
-                            if (!nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys)) continue;
-                            if (!nativeYmccShortcutDelta(actionId, *params, rule.actionDelta)) continue;
-                            rule.ownAction = actionId;
-                        } else {
-                            const auto key = params->find("key");
-                            if (key == params->end() || !key->is_string() ||
-                                !nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys) ||
-                                !nativeKeyboardShortcutVirtualKey(actionId, key->get<std::string>(), rule.virtualKey, rule.requiresShift)) continue;
-                            rule.forceExtendedKey = key->get<std::string>() == "NumpadEnter";
+        const auto shortcuts = ymcc::bootModeShortcuts::effectiveRules(input);
+        if (shortcuts) {
+            hasConfiguredShortcuts = true;
+            for (const auto& raw : *shortcuts) {
+                if (!raw.is_object()) continue;
+                int legacySlot = -1;
+                try {
+                    // Retire only the tagged historical default; custom F7 rules remain supported.
+                    if (ymcc::inputShortcutString(raw,"origin") == "native-default" &&
+                        ymcc::inputShortcutString(raw,"defaultKey") == "startDoubleF7") continue;
+                    const bool enabled = !raw.contains("enabled") || !raw["enabled"].is_boolean() || raw["enabled"].get<bool>();
+                    legacySlot = ymcc::inputShortcutString(raw,"origin") == "native-default"
+                        ? nativeShortcutLegacyDefaultSlot(ymcc::inputShortcutString(raw,"defaultKey")) : -1;
+                    const bool legacyTemplate = nativeShortcutLegacyTemplateMatches(raw, legacySlot);
+                    // Only an explicitly saved, enabled original template owns
+                    // its legacy branch. A damaged or edited sibling cannot veto it.
+                    if (legacySlot >= 0 && enabled && legacyTemplate) legacyTemplates |= 1u << legacySlot;
+                    if (!enabled || legacyTemplate) continue;
+                    const auto action = raw.find("actionId");
+                    const auto inputs = raw.find("inputs");
+                    const auto params = raw.find("params");
+                    if (action == raw.end() || inputs == raw.end() || params == raw.end() ||
+                        !action->is_string() || !params->is_object()) continue;
+                    const std::string actionId = action->get<std::string>();
+                    if (!ymcc::radial::userActionAvailable(actionId)) continue;
+                    NativeKeyboardShortcutRule rule;
+                    if (ymcc::inputShortcutAction(actionId)) {
+                        const auto preset = params->find("preset");
+                        if (preset == params->end() || !preset->is_string() ||
+                            !ymcc::inputShortcutPreset(actionId, preset->get<std::string>())) continue;
+                        if (!nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys)) continue;
+                        rule.inputAction = actionId; rule.preset = preset->get<std::string>();
+                    } else if (ymcc::shortcutUiAction(actionId)) {
+                        if (!nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys) ||
+                            !ymcc::shortcutUiParams(actionId, *params, rule.uiParams)) continue;
+                        rule.uiAction = actionId;
+                    } else if (nativeYmccShortcutAction(actionId)) {
+                        if (!nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys)) continue;
+                        if (!nativeYmccShortcutDelta(actionId, *params, rule.actionDelta)) continue;
+                        rule.ownAction = actionId;
+                        if (actionId == "power.tdpAdjust" || actionId == "display.brightnessAdjust") {
+                            const auto acceleration = params->find("linearAcceleration");
+                            if (acceleration != params->end() && !acceleration->is_boolean()) continue;
+                            rule.linearAcceleration = acceleration == params->end() || acceleration->get<bool>();
                         }
-                        rule.trigger = raw.value("trigger", "press");
-                        if (rule.trigger != "press" && rule.trigger != "hold" && rule.trigger != "release" &&
-                            rule.trigger != "double" && rule.trigger != "repeat") continue;
-                        rule.holdMs = nativeKeyboardShortcutDuration(raw, "holdMs", 500, rule.trigger == "repeat" ? 0 : 100, 10000);
-                        rule.doubleWindowMs = nativeKeyboardShortcutDuration(raw, "doubleWindowMs", 500, 200, 2000);
-                        rule.intervalMs = nativeKeyboardShortcutDuration(raw, "intervalMs", 150, 40, 2000);
-                        parsed.push_back(rule);
+                    } else {
+                        const auto key = params->find("key");
+                        if (key == params->end() || !key->is_string() ||
+                            !nativeKeyboardShortcutAllInputs(*inputs, rule.requiredMask, rule.desktopKeys) ||
+                            !nativeKeyboardShortcutVirtualKey(actionId, key->get<std::string>(), rule.virtualKey, rule.requiresShift)) continue;
+                        rule.forceExtendedKey = key->get<std::string>() == "NumpadEnter";
+                        if (!ymcc::keyboardSequence::parse(*params, actionId, nativeKeyboardShortcutVirtualKey, rule.keyboardPlan)) continue;
+                        rule.outputId = raw.value("id", actionId + ":" + key->get<std::string>());
                     }
+                    rule.trigger = raw.value("trigger", "press");
+                    if (rule.trigger != "press" && rule.trigger != "hold" && rule.trigger != "release" &&
+                        rule.trigger != "double" && rule.trigger != "repeat") continue;
+                    if (rule.keyboardPlan.toggle && rule.trigger == "repeat") continue;
+                    rule.holdMs = nativeKeyboardShortcutDuration(raw, "holdMs", 500, rule.trigger == "repeat" ? 0 : 100, 10000);
+                    rule.doubleWindowMs = nativeKeyboardShortcutDuration(raw, "doubleWindowMs", 500, 200, 2000);
+                    rule.intervalMs = nativeKeyboardShortcutDuration(raw, "intervalMs", 150, 40, 2000);
+                    parsed.push_back(rule);
+                } catch (...) {
+                    // A damaged row must neither discard its siblings nor restore its legacy binding.
                 }
             }
         }
     } catch (...) {
-        parsed.clear();
+        // Preserve independently parsed rows if an unrelated container is malformed.
     }
+    // An explicit rule list replaces the hidden defaults, including an empty
+    // list or a custom replacement without origin/defaultKey. Only a present,
+    // enabled and pristine default row may delegate to its legacy handler.
+    // Missing configuration still uses the original first-run defaults.
+    if (hasConfiguredShortcuts) legacyOverrides = 0xffu & ~legacyTemplates;
     g_nativeKeyboardShortcuts = std::move(parsed);
     g_nativeShortcutLegacyOverrideMask = legacyOverrides;
+    g_nativeShortcutRulesConfigured = hasConfiguredShortcuts;
 #ifndef YMCC_SHORTCUT_FIXTURE
     bool wantedVendorStack = false;
     for (const auto& rule : g_nativeKeyboardShortcuts)
@@ -50535,9 +54031,16 @@ static void nativeOemKeyboardConsumePublish() {
     const bool knownMsi=g_oemBackProfileId.load(std::memory_order_acquire)==static_cast<int>(OemChordProfileId::Msi)&&msiClawKnownBoardAuthority()&&msiWmiShortcutAuthoritative();
     for(const auto& rule:g_nativeKeyboardShortcuts)qsMirror|=ymcc::msi::qsMirror::ruleMask(knownMsi,
         !rule.needsNeutral,rule.desktopKeys.empty(),rule.requiredMask,rule.trigger=="press"||rule.trigger=="double",kOemBitQs);
+    if (g_shortcutRecordingActive.load(std::memory_order_acquire)) {
+        const uint64_t recordingMask = g_shortcutRecordingOemMask.load(std::memory_order_acquire);
+        mask |= recordingMask;
+        if (knownMsi) qsMirror |= recordingMask & kOemBitQs;
+    }
     g_msiQsKeyboardMirrorPolicy.store(qsMirror,std::memory_order_release);
     g_msiQsKeyboardMirrorSourceGeneration.store(qsMirror?g_msiWmiActiveGeneration.load(std::memory_order_acquire):0,std::memory_order_release);
     mask=ymcc::msi::qsMirror::suppressionMask(mask,msiWmiShortcutAuthoritative(),qsMirror,kOemBitClaw|kOemBitQs);
+    if (g_shortcutRecordingActive.load(std::memory_order_acquire))
+        mask |= g_shortcutRecordingOemMask.load(std::memory_order_acquire);
     bool nativeRearWanted=false;
     if(g_oemBackProfileId.load(std::memory_order_acquire)==static_cast<int>(OemChordProfileId::Msi) && msiClawKnownBoardAuthority()) {
         for(const auto& rule:g_nativeKeyboardShortcuts)
@@ -50547,6 +54050,41 @@ static void nativeOemKeyboardConsumePublish() {
     g_oemConsumePolicyMask.store(mask, std::memory_order_release);
     g_oemConsumePolicyProfile.store(g_oemBackProfileId.load(std::memory_order_acquire), std::memory_order_release);
     g_oemConsumePolicyEpoch.store(g_oemShortcutEdgeEpoch.load(std::memory_order_acquire), std::memory_order_release);
+}
+// Shared recorder lifecycle: a temporary lease never mutates the saved rule owners.
+static uint64_t nativeShortcutRecordingCatalogMask() {
+    const auto& binding = oemUnifiedInputBindingFor(g_machineIdentity.family, g_machineIdentity.deviceClass);
+    const auto catalog = binding.catalog;
+    const std::string consumerClass = binding.model ? std::string(binding.model->consumerClass) : g_machineIdentity.deviceClass;
+    uint64_t mask = 0;
+    for (int index = 0; index < catalog.count; ++index) {
+        const auto& key = catalog.keys[index];
+        uint64_t bit = 0;
+        if (oemKeyCaptureImplemented(g_machineIdentity.family, consumerClass, key.keyId) &&
+            nativeKeyboardShortcutMaskBit(key.keyId, bit)) mask |= bit;
+    }
+    return mask;
+}
+static json nativeShortcutRecordingSnapshot() {
+    auto suppression = oemVendorStackRecordingSnapshot();
+    suppression["keyboardCaptureAvailable"] = g_oemKeyHooksActive.load(std::memory_order_acquire);
+    suppression["catalogMask"] = std::to_string(g_shortcutRecordingOemMask.load(std::memory_order_acquire));
+    return {{"active", g_shortcutRecordingActive.load(std::memory_order_acquire)},
+        {"reason", "current"}, {"suppression", suppression}};
+}
+static void nativeShortcutRecordingStop(bool flushOem = false) {
+    if (flushOem && g_shortcutRecordingActive.load(std::memory_order_acquire) && !g_shortcutRecordingAwaitNeutral) {
+        const uint64_t oem = nativeOemKeyMask(false) & g_shortcutRecordingOemMask.load(std::memory_order_acquire);
+        if (oem) gamepadRecordShortcutChord(gamepadShortcutRecordingMask(g_curW, g_curPad) | oem);
+        if (g_shortcutRecordingMask & g_shortcutRecordingOemMask.load(std::memory_order_acquire))
+            gamepadRecordShortcutChord(0); // Publish captured OEM data before the stopped notification.
+    }
+    g_shortcutRecordingActive.store(false, std::memory_order_release);
+    g_shortcutRecordingMask = 0;
+    g_shortcutRecordingOemMask.store(0, std::memory_order_release);
+    g_oemShortcutEdgeEpoch.fetch_add(1, std::memory_order_acq_rel);
+    oemVendorStackRecordingRequest(false);
+    nativeOemKeyboardConsumePublish();
 }
 #ifndef YMCC_SHORTCUT_FIXTURE
 static void msiRearSourceObservationPump(ULONGLONG now) noexcept {
@@ -50608,6 +54146,7 @@ static void nativeOemKeyboardConsumeMaintain(ULONGLONG now) {
         {"rogRawOwnerPreserved",true},{"mouseConsumptionSupported",true}});
 }
 
+#include "keyboard_shortcut_sequence_runtime.h"
 #include "shortcut_action_runtime.h"
 
 static bool nativeKeyboardShortcutDispatch(const NativeKeyboardShortcutRule& rule, uint64_t sourceEpoch, uint64_t wmiGeneration = 0, uint64_t wmiSequence = 0, OemProducerTokens producerTokens = {}) {
@@ -50622,13 +54161,7 @@ static bool nativeKeyboardShortcutDispatch(const NativeKeyboardShortcutRule& rul
                 return nativeYmccShortcutSubmit([action, preset, context] { nativeInputShortcutToggle(action, preset, context); },
                     SerialJobKind::YmccOwn, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
             } else {
-                const WORD virtualKey = rule.virtualKey;
-                const bool requiresShift = rule.requiresShift;
-                // Keep the original keyboard injection path unchanged.
-                const bool extended = rule.forceExtendedKey;
-                return nativeYmccShortcutSubmit([virtualKey, requiresShift, extended] {
-                    nativeKeyboardShortcutSend(virtualKey, requiresShift, extended);
-                }, SerialJobKind::ExternalInjection, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
+                return nativeKeyboardSequenceDispatch(rule, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
             }
 }
 
@@ -50726,25 +54259,31 @@ static void nativeKeyboardShortcutsEvaluate(WORD buttons, const XINPUT_GAMEPAD& 
     {
         static uint64_t s_oemRuleDigest = 0;
         uint64_t digest = 1469598103934665603ull;
-        json oemRules = json::array();
         size_t oemCount = 0;
         for (const auto& rule : g_nativeKeyboardShortcuts) {
             if ((rule.requiredMask >> 20) == 0) continue;
             ++oemCount;
             digest ^= rule.requiredMask; digest *= 1099511628211ull;
             digest ^= static_cast<uint64_t>(rule.virtualKey); digest *= 1099511628211ull;
-            for (char ch : rule.trigger + rule.uiAction + rule.ownAction + rule.inputAction + rule.preset) { digest ^= static_cast<unsigned char>(ch); digest *= 1099511628211ull; }
-            digest ^= static_cast<uint64_t>(rule.actionDelta); digest *= 1099511628211ull;
-            if (oemRules.size() < 8) {
-                oemRules.push_back({{"requiredMask", rule.requiredMask},
-                                    {"trigger", rule.trigger},
-                                    {"virtualKey", static_cast<int>(rule.virtualKey)},
-                                    {"actionId", !rule.uiAction.empty() ? rule.uiAction : rule.ownAction.empty() ? rule.inputAction : rule.ownAction}});
+            for (const auto* text : {&rule.trigger, &rule.uiAction, &rule.ownAction, &rule.inputAction, &rule.preset}) {
+                for (char ch : *text) { digest ^= static_cast<unsigned char>(ch); digest *= 1099511628211ull; }
             }
+            digest ^= static_cast<uint64_t>(rule.actionDelta); digest *= 1099511628211ull;
         }
         digest ^= static_cast<uint64_t>(oemCount); digest *= 1099511628211ull;
         digest ^= g_nativeShortcutLegacyOverrideMask; digest *= 1099511628211ull;
         if (digest != s_oemRuleDigest) {
+            // Stable inventories need no diagnostic JSON or temporary text.
+            json oemRules = json::array();
+            for (const auto& rule : g_nativeKeyboardShortcuts) {
+                if ((rule.requiredMask >> 20) == 0) continue;
+                if (oemRules.size() < 8) {
+                    oemRules.push_back({{"requiredMask", rule.requiredMask},
+                                        {"trigger", rule.trigger},
+                                        {"virtualKey", static_cast<int>(rule.virtualKey)},
+                                        {"actionId", !rule.uiAction.empty() ? rule.uiAction : rule.ownAction.empty() ? rule.inputAction : rule.ownAction}});
+                }
+            }
             s_oemRuleDigest = digest;
             appendNativeLifecycleLog("oem-shortcut-rules", {
                 {"oemRuleCount", static_cast<int>(oemCount)},
@@ -50795,7 +54334,7 @@ static void nativeKeyboardShortcutsEvaluate(WORD buttons, const XINPUT_GAMEPAD& 
         if (!rule.desktopKeys.empty()) {
             bool any = false;
             for (const auto key : rule.desktopKeys) {
-                const bool down = (GetAsyncKeyState(key) & 0x8000) != 0;
+                const bool down = !nativeKeyboardSequenceOwnsKey(key) && (GetAsyncKeyState(key) & 0x8000) != 0;
                 any = any || down; matched = matched && down;
             }
             neutral = neutral && !any;
@@ -50840,8 +54379,14 @@ static void nativeKeyboardShortcutsEvaluate(WORD buttons, const XINPUT_GAMEPAD& 
                 rule.lastEmitAt = 0;
             } else {
                 if (pressed) rule.holdStartedAt = now;
-                if (rule.holdStartedAt != 0 && now - rule.holdStartedAt >= rule.holdMs &&
-                    (rule.lastEmitAt == 0 || now - rule.lastEmitAt >= rule.intervalMs)) {
+                ULONGLONG interval = rule.intervalMs;
+                const ULONGLONG heldMs = now - rule.holdStartedAt;
+                if (rule.linearAcceleration && heldMs > 500) {
+                    const ULONGLONG decrease = (heldMs - 500) / 400 * 15;
+                    interval = decrease >= interval - 40 ? 40 : interval - decrease;
+                }
+                if (rule.holdStartedAt != 0 && heldMs >= rule.holdMs &&
+                    (rule.lastEmitAt == 0 || now - rule.lastEmitAt >= interval)) {
                     rule.lastEmitAt = now;
                     emit = true;
                 }
@@ -51163,8 +54708,7 @@ static void gamepadEval() {
         // A recorder is admitted only for YMCC foreground. If ownership or
         // focus changes, stop immediately and leave no held chord behind.
         if (!gamepadUiInputEligible() || customSessionSuppressed) {
-            g_shortcutRecordingActive.store(false, std::memory_order_release);
-            g_shortcutRecordingMask = 0;
+            nativeShortcutRecordingStop(!customSessionSuppressed);
             ipc_emit("shortcut.recording.stopped", {{"reason", customSessionSuppressed ? "owner-changed" : "focus-lost"}});
         } else {
             gamepadRecordShortcutChord(gamepadShortcutRecordingMask(w, g_curPad) | nativeOemKeyMask(true));
@@ -51198,7 +54742,7 @@ static void gamepadEval() {
     const bool shoulderDown = (w & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) != 0;
     const bool shoulderWasDown = (g_prevW & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) != 0;
     // 在首个肩键刚按下时就记录原前台，防止 Steam/Game Bar/LS 在0.5秒等待期内抢走前台。
-    if (g_summonEnabled && nativeShortcutLegacyDefaultAllowed("enabled") && shoulderDown && !shoulderWasDown && !focusMainWindowIsForeground())
+    if (nativeShortcutLegacyDefaultAllowed("enabled", g_summonEnabled) && shoulderDown && !shoulderWasDown && !focusMainWindowIsForeground())
         g_pendingSummonTarget = focusCaptureForegroundTarget();
 
     // Saving a replacement cannot leave a previous legacy double-B pending.
@@ -51210,7 +54754,7 @@ static void gamepadEval() {
 
     // ── 双击 B → 等待第二次B释放后隐藏并回焦，避免B键泄漏到游戏 ──
     if (bPressed && !gpPrevB && !g_bClosePending) {
-        const bool canClose = g_summonEnabled && g_bDoubleMinimize && nativeShortcutLegacyDefaultAllowed("bDoubleMinimize") &&
+        const bool canClose = nativeShortcutLegacyDefaultAllowed("bDoubleMinimize", g_bDoubleMinimize) &&
                               g_hwnd && IsWindow(g_hwnd) && IsWindowVisible(g_hwnd);
         if (canClose && gpLastBPress != 0 && (now - gpLastBPress) <= B_DOUBLE_MS) {
             gpLastBPress = 0;
@@ -51250,7 +54794,7 @@ static void gamepadEval() {
     // ── 按住 LB+RB 0.5s → 强制呼出/抢焦（任意窗口态，全局免点击）──
     if (both && nativeShortcutLegacyDefaultAllowed("enabled")) {
         if (gpHoldStart == 0) gpHoldStart = now;
-        if (gpArmed && g_summonEnabled && g_hwnd && (now - gpHoldStart) >= HOLD_MS) {
+        if (gpArmed && nativeShortcutLegacyDefaultAllowed("enabled", g_summonEnabled) && g_hwnd && (now - gpHoldStart) >= HOLD_MS) {
             gpArmed = false;
             const FocusTargetSnapshot summonTarget = g_pendingSummonTarget;
             nativeYmccShortcutSummon(summonTarget);
@@ -51264,7 +54808,7 @@ static void gamepadEval() {
     // ── Start + 方向键 全局快捷调节（TDP / RTSS 锁帧），按住自动连发 ──
     // 速度参数需与 src/gamepad/engine.ts 的 SLIDER_REPEAT_* / SLIDER_ACCEL_* 保持一致。
     if (startHeld) {
-        if (g_tdpShortcut && nativeShortcutLegacyDefaultAllowed("tdpShortcut") && (dpUp || dpDown)) {
+        if (nativeShortcutLegacyDefaultAllowed("tdpShortcut", g_tdpShortcut) && (dpUp || dpDown)) {
             int delta = dpUp ? 1 : -1;
             ULONGLONG nowMs = GetTickCount64();
             if (s_dpHeldStart == 0) { s_dpHeldStart = nowMs; s_dpLastEmit = nowMs; nativeAdjustTdp(delta); }
@@ -51275,7 +54819,7 @@ static void gamepadEval() {
                 if (nowMs - s_dpLastEmit >= interval) { s_dpLastEmit = nowMs; nativeAdjustTdp(delta); }
             }
         } else { s_dpHeldStart = 0; }
-        if (g_fpsShortcut && nativeShortcutLegacyDefaultAllowed("fpsShortcut") && (dpRight || dpLeft)) {
+        if (nativeShortcutLegacyDefaultAllowed("fpsShortcut", g_fpsShortcut) && (dpRight || dpLeft)) {
             int dir = dpRight ? 1 : -1;
             ULONGLONG nowMs = GetTickCount64();
             if (s_brightnessHeldStart == 0) { s_brightnessHeldStart = nowMs; s_brightnessLastEmit = nowMs; nativeAdjustBrightness(dir); }
@@ -51294,7 +54838,7 @@ static void gamepadEval() {
     // ── 选择(Back) + B 长按 0.5s → 结束当前游戏 ──
     if (selectHeld && bPressed && nativeShortcutLegacyDefaultAllowed("killGame")) {
         if (gpKbHoldStart == 0) gpKbHoldStart = now;
-        if (gpKbArmed && g_killGame && (now - gpKbHoldStart) >= HOLD_MS) {
+        if (gpKbArmed && nativeShortcutLegacyDefaultAllowed("killGame", g_killGame) && (now - gpKbHoldStart) >= HOLD_MS) {
             gpKbArmed = false;
             gamepadSerialSubmit([] { runKillBat(); });
         }
@@ -51303,7 +54847,7 @@ static void gamepadEval() {
     // ── 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘 ──
     if (selectHeld && xPressed && nativeShortcutLegacyDefaultAllowed("openKeyboard")) {
         if (gpKxHoldStart == 0) gpKxHoldStart = now;
-        if (gpKxArmed && g_openKeyboard && (now - gpKxHoldStart) >= HOLD_MS) {
+        if (gpKxArmed && nativeShortcutLegacyDefaultAllowed("openKeyboard", g_openKeyboard) && (now - gpKxHoldStart) >= HOLD_MS) {
             gpKxArmed = false;
             gamepadSerialSubmit([] { openTouchKeyboard(); });
         }
@@ -51312,14 +54856,14 @@ static void gamepadEval() {
     // ── 选择(Back) + A 组合按下瞬间 → 返回桌面（只在组合刚建立时触发一次） ──
     const bool comboNow = selectHeld && aPressed;
     const bool comboPrev = (g_prevW & XINPUT_GAMEPAD_BACK) && (g_prevW & XINPUT_GAMEPAD_A);
-    if (g_returnDesktop && nativeShortcutLegacyDefaultAllowed("returnDesktop") && comboNow && !comboPrev) {
+    if (nativeShortcutLegacyDefaultAllowed("returnDesktop", g_returnDesktop) && comboNow && !comboPrev) {
         returnToDesktop();
     }
 
     // ── 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关 ──
     if (selectHeld && yPressed && nativeShortcutLegacyDefaultAllowed("mouseToggle")) {
         if (gpKyHoldStart == 0) gpKyHoldStart = now;
-        if (gpKyArmed && g_mouseToggle && (now - gpKyHoldStart) >= HOLD_MS) {
+        if (gpKyArmed && nativeShortcutLegacyDefaultAllowed("mouseToggle", g_mouseToggle) && (now - gpKyHoldStart) >= HOLD_MS) {
             gpKyArmed = false;
             std::string backend;
             {
@@ -51691,6 +55235,8 @@ static RunOut runCapture(const std::wstring& cmdLine, DWORD timeoutMs = 10000, c
 // staging 快照，再从快照生成临时 ZIP；失败只清理本次临时物，最终 ZIP 直到候选归档
 // 验证通过后才更新。
 static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS = 2;
+// Steam snapshots can be large; the UI allows both attempts plus copy/hash time.
+static constexpr DWORD LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS = 300000;
 #include "log_archive_command.h"
 
 #include "sleep_export_diagnostics_native.inc"
@@ -51901,7 +55447,7 @@ static TarArchiveRetryResult createTarArchiveWithRetry(
                 }
                 if(!inputReady&&archiveInput){CloseHandle(archiveInput);archiveInput=nullptr;}
                 if(inputReady) {
-                const RunOut run = runCapture(command, 120000, {}, archiveInput, archiveOutput, stagingRoot.c_str());
+                const RunOut run = runCapture(command, LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS, {}, archiveInput, archiveOutput, stagingRoot.c_str());
                 result.completion=run.completion;
                 if(archiveInput)CloseHandle(archiveInput);
                 CloseHandle(archiveOutput);
@@ -52257,7 +55803,10 @@ static bool gameCorePolicyClassSelected(
     return false;
 }
 
-static json gameCorePolicyCapabilities() {
+// Read-only capability consumers share one OS-derived topology receipt. Actual
+// affinity/SMT writes below still enumerate and validate their live targets.
+static std::atomic<unsigned long long> g_cpuPolicyTopologyEpoch{1};
+static json readGameCorePolicyCapabilities() {
     const CoreArchitecture architecture = detectCoreArchitecture();
     const SmtLive smt = detectSmtLive();
     json classes = json::array();
@@ -52289,6 +55838,29 @@ static json gameCorePolicyCapabilities() {
         {"smtPhysical", smt.phys},
         {"source", architecture.source},
     };
+}
+
+static json gameCorePolicyCapabilities() {
+    static std::mutex mutex;
+    static json observed;
+    static unsigned long long topology = 0, power = 0;
+    const auto epoch = g_cpuPolicyTopologyEpoch.load(std::memory_order_acquire);
+    const auto generation = g_powerGeneration.load(std::memory_order_acquire);
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!observed.is_null() && topology == epoch && power == generation) return observed;
+    auto next = readGameCorePolicyCapabilities();
+    if (epoch != g_cpuPolicyTopologyEpoch.load(std::memory_order_acquire) ||
+        generation != g_powerGeneration.load(std::memory_order_acquire)) {
+        // An invalidated scan cannot become current authority. No replay loop.
+        return {{"detected",false},{"heterogeneous",false},{"smtAvailable",false},
+            {"efficiencyClasses",json::array()},{"groups",json::array()},
+            {"logical",0},{"physical",0},{"smtLogical",0},{"smtPhysical",0},{"source","topology-superseded"}};
+    }
+    if (next.value("detected",false) && next.value("logical",0)>0 && next.value("physical",0)>0 &&
+        next.value("smtLogical",0)>0 && next.value("smtPhysical",0)>0) {
+        topology = epoch; power = generation; observed = next;
+    }
+    return next; // Missing/failed topology is not cached as valid hardware.
 }
 
 static json gameCorePolicyApply(const json& args) {
@@ -52461,15 +56033,19 @@ struct CcdTopology {
     int logical = 0;
     int l3Domains = 0;
     int physicalCores = 0;
+    bool groupRepresentable = true;
     std::vector<std::string> ccdMasks;
+    std::vector<int> domainLogical;
 };
 
 static CcdTopology detectCcdTopology() {
     CcdTopology t;
+    // A single process affinity mask cannot represent targets across multiple
+    // active processor groups; keep the capability unavailable in that case.
+    if (GetActiveProcessorGroupCount() > 1) t.groupRepresentable = false;
     DWORD len = 0;
     if ((GetLogicalProcessorInformationEx(RelationCache, nullptr, &len) ||
          GetLastError() != ERROR_INSUFFICIENT_BUFFER) || len == 0) {
-        // 回退：只用 SMT 检测的逻辑核数
         SmtLive lv = detectSmtLive();
         t.logical = lv.logic;
         return t;
@@ -52482,18 +56058,16 @@ static CcdTopology detectCcdTopology() {
         return t;
     }
     std::vector<ULONG_PTR> masks;
-    int l3Records = 0;
     BYTE* ptr = buf.data();
     BYTE* end = buf.data() + len;
     while (ptr < end) {
         auto* rec = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
         if (rec->Relationship == RelationCache) {
-            // 注意：SDK 10.0.26100 的 CACHE_RELATIONSHIP 用 GroupMasks[]（无 Processor 成员），
-            // 必须用 rec->Cache.GroupMasks，不能用 rec->Processor.GroupMask（那是缓存记录里不存在的联合体成员）。
+            // SDK 10.0.26100 的 CACHE_RELATIONSHIP 使用 GroupMasks[]。
             auto& c = rec->Cache;
-            if (c.Level == 3) {              // L3 即一个 CCD 的缓存域
-                l3Records++;
+            if (c.Level == 3) {
                 for (WORD g = 0; g < c.GroupCount; g++) {
+                    if (c.GroupMasks[g].Group != 0) t.groupRepresentable = false;
                     ULONG_PTR m = (ULONG_PTR)c.GroupMasks[g].Mask;
                     if (m) masks.push_back(m);
                 }
@@ -52501,23 +56075,10 @@ static CcdTopology detectCcdTopology() {
         }
         ptr += rec->Size;
     }
-    // 去重（同一 L3 域可能跨多个 group 重复出现）
+    // 只保留真实上报的 L3 mask。没有真实/可表示 mask 时保持未知，
+    // 不用逻辑核均分推导伪 CCD 域。
     std::sort(masks.begin(), masks.end());
     masks.erase(std::unique(masks.begin(), masks.end()), masks.end());
-    // 兜底：掩码为空但确有 >=2 个 L3 域（少数 AMD 把 GroupMask 报空），按逻辑核数均分
-    if (masks.empty() && l3Records >= 2) {
-        DWORD total = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-        if (total > 0 && total <= 64) {
-            ULONG_PTR full = ((ULONG_PTR)1 << total) - 1;
-            int per = (int)(total / l3Records);
-            for (int i = 0; i < l3Records; i++) {
-                ULONG_PTR lo = (ULONG_PTR)i * per;
-                ULONG_PTR hi = (i + 1 == l3Records) ? (ULONG_PTR)total : (ULONG_PTR)(i + 1) * per;
-                ULONG_PTR m = full & (((ULONG_PTR)1 << hi) - 1) & ~(((ULONG_PTR)1 << lo) - 1);
-                if (m) masks.push_back(m);
-            }
-        }
-    }
     t.l3Domains = (int)masks.size();
     // 物理核数：读取 RelationProcessor，避免把 SMT 线程误显示为核心。
     DWORD pLen = 0;
@@ -52537,7 +56098,9 @@ static CcdTopology detectCcdTopology() {
     }
     for (auto m : masks) {
         t.ccdMasks.push_back("0x" + toHexU(m));
-        t.logical += popcountPtr(m);
+        const int count = popcountPtr(m);
+        t.domainLogical.push_back(count);
+        t.logical += count;
     }
     if (t.logical == 0) {
         SmtLive lv = detectSmtLive();
@@ -52546,14 +56109,76 @@ static CcdTopology detectCcdTopology() {
     return t;
 }
 
+static bool ccdTopologySupported(const CcdTopology& t) {
+    if (!t.groupRepresentable || t.l3Domains < 2 ||
+        (int)t.ccdMasks.size() != t.l3Domains ||
+        (int)t.domainLogical.size() != t.l3Domains ||
+        t.logical <= 0 || t.logical > 64) {
+        return false;
+    }
+    ULONG_PTR unionMask = 0;
+    int sum = 0;
+    for (int i = 0; i < t.l3Domains; ++i) {
+        ULONG_PTR mask = 0;
+        try {
+            mask = std::stoull(t.ccdMasks[i], nullptr, 16);
+        } catch (...) {
+            return false;
+        }
+        if (mask == 0 || (unionMask & mask) != 0) return false;
+        unionMask |= mask;
+        sum += t.domainLogical[i];
+    }
+    return sum == t.logical && popcountPtr(unionMask) == t.logical;
+}
+
 static std::atomic<int>       g_ccdMode{0};
 static std::vector<ULONG_PTR> g_ccdMasks;
 static std::mutex             g_ccdMutex;
+static std::mutex             g_ccdWriteMutex;
 static std::unordered_set<DWORD> g_ccdSeen;
 static std::atomic<bool>      g_ccdRunning{false};
 static std::atomic<bool>      g_ccdStop{false};
+static std::once_flag         g_ccdSelfOnce;
 static DWORD                  g_ccdSelfPid = 0;
 static std::wstring           g_ccdSelfExe;
+static HANDLE                 g_ccdThread = nullptr;
+
+struct CcdLeaseState {
+    bool active = false;
+    unsigned long long generation = 0;
+    int mode = 0;
+};
+struct CcdRestoreRecord {
+    DWORD pid = 0;
+    ULONGLONG created = 0;
+    ULONG_PTR originalMask = 0;
+    ULONG_PTR lastWrittenMask = 0;
+};
+struct CcdSweepResult {
+    int attempted = 0;
+    int verified = 0;
+    int openFailed = 0;
+    int setFailed = 0;
+    int verifyFailed = 0;
+    int captureFailed = 0;
+    int staleAborted = 0;
+    int ownerChanged = 0;
+};
+static CcdLeaseState g_ccdLease;
+static std::unordered_map<DWORD, CcdRestoreRecord> g_ccdOriginal;
+
+static void ccdEnsureSelfIdentity() {
+    std::call_once(g_ccdSelfOnce, [] {
+        g_ccdSelfPid = GetCurrentProcessId();
+        wchar_t path[MAX_PATH]{};
+        if (GetModuleFileNameW(nullptr, path, MAX_PATH)) {
+            g_ccdSelfExe = std::filesystem::path(path).filename().wstring();
+            std::transform(g_ccdSelfExe.begin(), g_ccdSelfExe.end(),
+                           g_ccdSelfExe.begin(), ::towlower);
+        }
+    });
+}
 
 static void ccdForgetProcess(DWORD pid) {
     if (!pid) return;
@@ -52563,10 +56188,9 @@ static void ccdForgetProcess(DWORD pid) {
 
 static void writeLog(const std::string& level, const std::string& msg);  // 定义在文件后部, 前置声明供 CCD 日志用
 
-static bool ccdSkipProcess(DWORD pid, const std::wstring& exe) {
-    if (pid == 0 || pid == g_ccdSelfPid) return true;
-    // 当前游戏若启用了专属 CPU Set/亲和性，CCD 的全局刷新不能覆盖它。
-    if (pid == g_gameCorePolicyPid.load(std::memory_order_acquire)) return true;
+static bool ccdSkipProcessValue(DWORD pid, const std::wstring& exe, DWORD selfPid,
+                                const std::wstring& selfExe, DWORD gamePid) {
+    if (pid == 0 || pid == selfPid || pid == gamePid) return true;
     static const wchar_t* skip[] = {
         L"system", L"registry", L"smss.exe", L"csrss.exe", L"wininit.exe",
         L"services.exe", L"lsass.exe", L"winlogon.exe", L"audiodg.exe",
@@ -52576,117 +56200,318 @@ static bool ccdSkipProcess(DWORD pid, const std::wstring& exe) {
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
     for (int i = 0; skip[i]; i++)
         if (lower == skip[i]) return true;
-    if (!g_ccdSelfExe.empty() && lower == g_ccdSelfExe) return true;
-    return false;
+    return !selfExe.empty() && lower == selfExe;
 }
 
-// 返回: 0=成功, -1=打开失败(进程已退出/受保护), >0=SetProcessAffinityMask 的错误码
-static int ccdApplyToPid(DWORD pid, ULONG_PTR mask) {
-    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!h) return -1;
-    BOOL ok = SetProcessAffinityMask(h, mask);
-    DWORD err = ok ? 0 : GetLastError();
-    CloseHandle(h);
-    return ok ? 0 : (int)err;
+static bool ccdSkipProcess(DWORD pid, const std::wstring& exe) {
+    ccdEnsureSelfIdentity();
+    return ccdSkipProcessValue(pid, exe, g_ccdSelfPid, g_ccdSelfExe,
+                               g_gameCorePolicyPid.load(std::memory_order_acquire));
 }
 
-static void ccdApplyMode(int mode) {
+static bool ccdGenerationMatches(unsigned long long sweepGeneration,
+                                 unsigned long long currentGeneration, bool active) {
+    return active && sweepGeneration != 0 && sweepGeneration == currentGeneration;
+}
+
+static bool ccdGenerationCurrent(unsigned long long generation) {
     std::lock_guard<std::mutex> lk(g_ccdMutex);
-    if (g_ccdMasks.empty()) return;
-    ULONG_PTR mask = 0;
+    return ccdGenerationMatches(generation, g_ccdLease.generation, g_ccdLease.active);
+}
+
+static bool ccdTakeSnapshot(int mode, unsigned long long& generation, ULONG_PTR& mask) {
+    std::lock_guard<std::mutex> lk(g_ccdMutex);
+    generation = g_ccdLease.generation;
+    mask = 0;
+    if (!g_ccdLease.active || g_ccdMasks.empty()) return false;
     if (mode == 0) {
         for (auto m : g_ccdMasks) mask |= m;
     } else if (mode >= 1 && mode <= (int)g_ccdMasks.size()) {
         mask = g_ccdMasks[mode - 1];
-    } else {
-        return;
     }
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W pe{ sizeof(pe) };
+    return mask != 0;
+}
+
+static ULONGLONG ccdProcessCreated(HANDLE process) {
+    FILETIME create{}, exit{}, kernel{}, user{};
+    return GetProcessTimes(process, &create, &exit, &kernel, &user)
+        ? focusFileTimeTicks(create) : 0;
+}
+
+// Capture the original affinity from the same opened process instance. A failed
+// capture means this process is not writable by this owner.
+static bool ccdRecordOriginal(DWORD pid, HANDLE process, ULONG_PTR targetMask) {
+    const ULONGLONG created = ccdProcessCreated(process);
+    if (!created) return false;
+    DWORD_PTR original = 0, system = 0;
+    if (!GetProcessAffinityMask(process, &original, &system) || original == 0) return false;
+    std::lock_guard<std::mutex> lk(g_ccdMutex);
+    auto existing = g_ccdOriginal.find(pid);
+    if (existing != g_ccdOriginal.end()) {
+        if (existing->second.created == created) return true;
+        g_ccdOriginal.erase(existing);
+    }
+    g_ccdOriginal[pid] = { pid, created, (ULONG_PTR)original, targetMask };
+    return true;
+}
+
+static bool ccdApplyToPid(DWORD pid, ULONG_PTR mask, unsigned long long generation,
+                          CcdSweepResult& result) {
+    if (!ccdGenerationCurrent(generation)) {
+        result.staleAborted++;
+        return false;
+    }
+    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION |
+                           PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) { result.openFailed++; return false; }
+    {
+        // The existing game owner uses this same mutex for its lease/CPU Set
+        // transition. Recheck under it so a game takeover after enumeration
+        // cannot be overwritten by CCD.
+        std::lock_guard<std::mutex> ownerLock(g_gameCorePolicyMutex);
+        if (pid == g_gameCorePolicyPid.load(std::memory_order_acquire)) {
+            result.ownerChanged++;
+            CloseHandle(h);
+            return false;
+        }
+        if (!ccdRecordOriginal(pid, h, mask)) {
+            result.captureFailed++;
+            CloseHandle(h);
+            return false;
+        }
+        if (!ccdGenerationCurrent(generation)) {
+            result.staleAborted++;
+            CloseHandle(h);
+            return false;
+        }
+        BOOL ok = SetProcessAffinityMask(h, mask);
+        if (!ok) { result.setFailed++; CloseHandle(h); return false; }
+        {
+            std::lock_guard<std::mutex> lk(g_ccdMutex);
+            auto record = g_ccdOriginal.find(pid);
+            if (record != g_ccdOriginal.end()) record->second.lastWrittenMask = mask;
+        }
+        DWORD_PTR current = 0, system = 0;
+        const bool verified = GetProcessAffinityMask(h, &current, &system) && current == mask;
+        if (verified) result.verified++;
+        else result.verifyFailed++;
+        CloseHandle(h);
+        return verified;
+    }
+}
+
+static CcdSweepResult ccdApplyMode(int mode, unsigned long long generation, ULONG_PTR mask) {
+    CcdSweepResult result;
+    if (!ccdGenerationCurrent(generation)) {
+        result.staleAborted++;
+        return result;
+    }
+    ccdEnsureSelfIdentity();
+    const auto topology = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+    if (topology->status != ymcc::processInventory::Status::Complete) return result;
     std::vector<DWORD> pids;
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (!ccdSkipProcess(pe.th32ProcessID, pe.szExeFile))
-                pids.push_back(pe.th32ProcessID);
-        } while (Process32NextW(snap, &pe));
+    for (const auto& pe : topology->rows) {
+        if (!ccdSkipProcess(pe.pid, pe.name)) pids.push_back(pe.pid);
     }
-    CloseHandle(snap);
-    int failOpen = 0, failSet = 0;
+    result.attempted = (int)pids.size();
     for (DWORD pid : pids) {
-        int e = ccdApplyToPid(pid, mask);
-        if (e < 0) failOpen++;
-        else if (e > 0) failSet++;
+        if (!ccdGenerationCurrent(generation)) {
+            result.staleAborted++;
+            break;
+        }
+        ccdApplyToPid(pid, mask, generation, result);
     }
-    g_ccdSeen.clear();
-    for (DWORD pid : pids) g_ccdSeen.insert(pid);
-    if (failOpen || failSet) {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "[ccd] mode=%d 应用完成: 打开失败=%d 设置失败=%d", mode, failOpen, failSet);
+    {
+        std::lock_guard<std::mutex> lk(g_ccdMutex);
+        g_ccdSeen.clear();
+        for (DWORD pid : pids) g_ccdSeen.insert(pid);
+    }
+    if (result.openFailed || result.setFailed || result.verifyFailed ||
+        result.captureFailed || result.staleAborted || result.ownerChanged) {
+        char buf[260];
+        snprintf(buf, sizeof(buf),
+                 "[ccd] mode=%d gen=%llu sweep: attempted=%d verified=%d openFailed=%d "
+                 "setFailed=%d verifyFailed=%d captureFailed=%d staleAborted=%d ownerChanged=%d",
+                 mode, generation, result.attempted, result.verified, result.openFailed,
+                 result.setFailed, result.verifyFailed, result.captureFailed,
+                 result.staleAborted, result.ownerChanged);
         writeLog("warn", buf);
     }
+    return result;
 }
 
-static void ccdApplyNew(int mode) {
-    std::lock_guard<std::mutex> lk(g_ccdMutex);
-    if (g_ccdMasks.empty()) return;
-    ULONG_PTR mask = 0;
-    if (mode == 0) {
-        for (auto m : g_ccdMasks) mask |= m;
-    } else if (mode >= 1 && mode <= (int)g_ccdMasks.size()) {
-        mask = g_ccdMasks[mode - 1];
-    } else {
-        return;
+static CcdSweepResult ccdApplyNew(int mode, unsigned long long generation, ULONG_PTR mask) {
+    CcdSweepResult result;
+    if (!ccdGenerationCurrent(generation)) {
+        result.staleAborted++;
+        return result;
     }
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W pe{ sizeof(pe) };
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            DWORD pid = pe.th32ProcessID;
-            if (ccdSkipProcess(pid, pe.szExeFile)) continue;
-            if (g_ccdSeen.count(pid)) continue;
-            g_ccdSeen.insert(pid);
-            ccdApplyToPid(pid, mask);
-        } while (Process32NextW(snap, &pe));
+    ccdEnsureSelfIdentity();
+    const auto topology = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+    if (topology->status != ymcc::processInventory::Status::Complete) return result;
+        for (const auto& pe : topology->rows) {
+            DWORD pid = pe.pid;
+            if (ccdSkipProcess(pid, pe.name)) continue;
+            {
+                std::lock_guard<std::mutex> lk(g_ccdMutex);
+                if (g_ccdSeen.count(pid)) continue;
+                g_ccdSeen.insert(pid);
+            }
+            if (!ccdGenerationCurrent(generation)) {
+                result.staleAborted++;
+                break;
+            }
+            result.attempted++;
+            ccdApplyToPid(pid, mask, generation, result);
+        }
+    return result;
+}
+
+static bool ccdRestoreAllowed(const CcdRestoreRecord& record, ULONGLONG currentCreated,
+                              ULONG_PTR currentMask) {
+    return record.created != 0 && record.originalMask != 0 &&
+        currentCreated == record.created && currentMask == record.lastWrittenMask;
+}
+
+struct CcdRestoreResult { int restored = 0; int skipped = 0; int failed = 0; };
+static CcdRestoreResult ccdRestoreOriginals() {
+    CcdRestoreResult result;
+    std::unordered_map<DWORD, CcdRestoreRecord> records;
+    {
+        std::lock_guard<std::mutex> lk(g_ccdMutex);
+        records.swap(g_ccdOriginal);
+        g_ccdSeen.clear();
     }
-    CloseHandle(snap);
+    for (const auto& entry : records) {
+        const auto& record = entry.second;
+        std::lock_guard<std::mutex> ownerLock(g_gameCorePolicyMutex);
+        if (record.pid == g_gameCorePolicyPid.load(std::memory_order_acquire)) {
+            result.skipped++;
+            continue;
+        }
+        HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION |
+                               PROCESS_QUERY_LIMITED_INFORMATION, FALSE, record.pid);
+        if (!h) { result.skipped++; continue; }
+        const ULONGLONG created = ccdProcessCreated(h);
+        DWORD_PTR current = 0, system = 0;
+        if (!GetProcessAffinityMask(h, &current, &system) ||
+            !ccdRestoreAllowed(record, created, (ULONG_PTR)current)) {
+            result.skipped++;
+            CloseHandle(h);
+            continue;
+        }
+        if (SetProcessAffinityMask(h, record.originalMask)) result.restored++;
+        else result.failed++;
+        CloseHandle(h);
+    }
+    return result;
 }
 
 static DWORD WINAPI ccdWorker(LPVOID) {
-    int lastMode = -1;
+    int lastMode = g_ccdMode.load();
     int fullCount = 0;
     while (!g_ccdStop.load()) {
         int mode = g_ccdMode.load();
+        bool full = false;
         if (mode != lastMode) {
-            ccdApplyMode(mode);
-            lastMode = mode;
+            full = true;
             fullCount = 0;
         } else if (mode != 0) {
-            // 每 ~30s 全量刷新一次: 兜住 PID 复用导致的漏应用, 同时限制 g_ccdSeen 无界增长
             if (++fullCount >= 25) {
-                ccdApplyMode(mode);
+                full = true;
                 fullCount = 0;
-            } else {
-                ccdApplyNew(mode);
             }
+        }
+        if (full || mode != 0) {
+            std::lock_guard<std::mutex> writeLock(g_ccdWriteMutex);
+            int liveMode = g_ccdMode.load();
+            unsigned long long generation = 0;
+            ULONG_PTR mask = 0;
+            if (ccdTakeSnapshot(liveMode, generation, mask)) {
+                if (full || liveMode != lastMode)
+                    ccdApplyMode(liveMode, generation, mask);
+                else
+                    ccdApplyNew(liveMode, generation, mask);
+            }
+            lastMode = liveMode;
         }
         Sleep(1200);
     }
+    g_ccdRunning.store(false);
     return 0;
 }
 
-static void ccdStartWorker() {
+static bool ccdStartWorker() {
+    ccdEnsureSelfIdentity();
     g_ccdStop.store(false);  // 窗口可能销毁重建(托盘/常驻切换), 允许 worker 重启
-    if (g_ccdRunning.exchange(true)) return;
-    g_ccdSelfPid = GetCurrentProcessId();
-    wchar_t path[MAX_PATH]{};
-    if (GetModuleFileNameW(nullptr, path, MAX_PATH)) {
-        g_ccdSelfExe = std::filesystem::path(path).filename().wstring();
-        std::transform(g_ccdSelfExe.begin(), g_ccdSelfExe.end(), g_ccdSelfExe.begin(), ::towlower);
-    }
+    if (g_ccdRunning.exchange(true)) return true;
     HANDLE h = CreateThread(nullptr, 0, ccdWorker, nullptr, 0, nullptr);
-    if (h) CloseHandle(h);
+    if (!h) {
+        g_ccdRunning.store(false);
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_ccdMutex);
+        if (g_ccdThread) CloseHandle(g_ccdThread);
+        g_ccdThread = h;
+    }
+    return true;
+}
+
+static void ccdShutdown() {
+    g_ccdStop.store(true);
+    HANDLE thread = nullptr;
+    bool running = false;
+    {
+        std::lock_guard<std::mutex> lk(g_ccdMutex);
+        thread = g_ccdThread;
+        running = g_ccdRunning.load();
+    }
+    if (!thread && !running) {
+        // Never activated, or the synchronous first sweep completed while
+        // CreateThread failed: there is no write loop to stop, so restore any
+        // synchronously recorded processes quietly under the write barrier.
+        std::lock_guard<std::mutex> writeLock(g_ccdWriteMutex);
+        ccdRestoreOriginals();
+        {
+            std::lock_guard<std::mutex> lk(g_ccdMutex);
+            g_ccdLease = {};
+            g_ccdMasks.clear();
+            g_ccdThread = nullptr;
+        }
+        g_ccdMode.store(0);
+        return;
+    }
+    if (!thread) {
+        // Running but no joinable handle: cannot prove the write loop stopped.
+        writeLog("warn", "[ccd] shutdown pending/unknown: running worker has no handle; restore skipped");
+        return;
+    }
+    const DWORD wait = WaitForSingleObject(thread, 1500);
+    if (wait != WAIT_OBJECT_0) {
+        // Keep the handle and the lease/records for a later confirmation; do not
+        // restore concurrently with a possibly active worker.
+        writeLog("warn", "[ccd] shutdown timeout: worker not proven stopped; handle retained, restore skipped");
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_ccdMutex);
+        if (g_ccdThread == thread) g_ccdThread = nullptr;
+    }
+    CloseHandle(thread);
+    g_ccdRunning.store(false);
+    {
+        std::lock_guard<std::mutex> writeLock(g_ccdWriteMutex);
+        ccdRestoreOriginals();
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_ccdMutex);
+        g_ccdLease = {};
+        g_ccdMasks.clear();
+    }
+    g_ccdMode.store(0);
 }
 
 // SMT 开关的真正实现：通过注册表 FeatureSettingsOverride 的 0x40 位（Speculative Store Bypass
@@ -52740,7 +56565,7 @@ static bool writeSmtReg(DWORD override, DWORD mask) {
 // 手柄 TDP 调节：只转发按键方向给前端（gamepad.tdp-delta），由前端程序统一调节/记录/刷新 UI，
 // 前端写入 control-config.json，native 不再直接读取或写入 tdp.txt。
 static void nativeAdjustTdp(int delta) {
-    if (!g_tdpShortcut) return;
+    if (!nativeShortcutLegacyDefaultAllowed("tdpShortcut", g_tdpShortcut)) return;
     gamepadSerialSubmit([delta] {
         if (!g_inputReady.load(std::memory_order_acquire) || !hardwareWriteAllowed()) return;
         gamepadSerialPostEvent("gamepad.tdp-delta", nativeShortcutTdpEvent(delta));
@@ -52748,7 +56573,7 @@ static void nativeAdjustTdp(int delta) {
 }
 // 手柄锁帧调节：统一转发方向，由程序更新 FPS 帧率上限并负责 RTSS 下发。
 static void nativeAdjustBrightness(int dir) {
-    const bool enabled = g_fpsShortcut;
+    const bool enabled = nativeShortcutLegacyDefaultAllowed("fpsShortcut", g_fpsShortcut);
     if (!enabled) return;
     gamepadSerialSubmit([dir, enabled] { nativeApplyBrightness(dir, enabled); });
 }
@@ -52866,7 +56691,7 @@ static void openTouchKeyboard() {
 }
 
 // 选择 + A：内部模拟 Win+D 返回桌面；不启动脚本、不等待、不切回游戏窗口。
-static void returnToDesktop() {
+static bool returnToDesktop() {
     if (g_hwnd && IsWindow(g_hwnd))
         // Use the common hide path so WebView2 visibility, UI lifecycle,
         // focus timers and owned TOPMOST state are released together.
@@ -52885,6 +56710,13 @@ static void returnToDesktop() {
     inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
     const UINT inserted = SendInput(4, inputs, sizeof(INPUT));
     keyboardModifierObserveSelfSend(ymcc::keyboardEvents::SourceId::ReturnToDesktop,inputs,4,inserted);
+    if (inserted > 0 && inserted < 4) {
+        // Partial insertion must not leave D or the Windows modifier held.
+        INPUT releases[2] = { inputs[2], inputs[3] };
+        const UINT released = SendInput(2, releases, sizeof(INPUT));
+        keyboardModifierObserveSelfSend(ymcc::keyboardEvents::SourceId::ReturnToDesktop,releases,2,released);
+    }
+    return inserted == 4;
 }
 
 // Sparse snapshots at this action only; producer and window behavior stay unchanged.
@@ -53212,8 +57044,13 @@ static json mouseModeApplyState(std::optional<bool> requested, const std::string
     auto state = mouseModeStateLocked();
     const bool actual = backend == "joyxoff" ? state.value("joyxoffOn", false) : state.value("gamebarOn", false);
     if (!state.value("controlAllowed", false) || !state.value("stateKnown", false) ||
-        (enabled ? !actual : state.value("on", true)))
-        return failure("mouse_state_not_confirmed", "模拟鼠标切换后的状态未确认。");
+        (enabled ? !actual : state.value("on", true))) {
+        // Preserve the final observation that failed confirmation, including
+        // UNKNOWN. A second read could both rescan and conceal that evidence.
+        state["ok"] = false; state["reason"] = "mouse_state_not_confirmed";
+        state["error"] = "模拟鼠标切换后的状态未确认。";
+        return state;
+    }
     state["reason"] = enabled ? "backend_started" : "backend_stopped";
     return state;
 }
@@ -53250,33 +57087,60 @@ static json mousePolicyRelease() {
     if(!state.value("ok",false)){state["reason"]="policy_release_failed";state["error"]="鼠标后端关闭未确认。";}
     return state;
 }
+static void mousePolicyGameContextChanged(){g_mousePolicy.wake();}
 static void CALLBACK mousePolicyForegroundEvent(HWINEVENTHOOK,DWORD,HWND,LONG,LONG,DWORD,DWORD) {
+    steamWallpaperForegroundSignal();
     g_mousePolicy.wake();
 }
 static json mousePolicyGet() {
-    auto result=mouseModeGetState();const auto policy=g_mousePolicy.state();
-    for(const auto& key:{"mode","scene","policyReason","requestedOn","pending","sequence","observedAt","foregroundPid","foregroundCreated","foregroundWindow"})
-        if(policy.contains(key))result[key]=policy[key];
-    if(policy.contains("ok")&&!policy.value("ok",true)){
-        result["ok"]=false;
-        for(const auto& key:{"error","reason"})if(policy.contains(key))result[key]=policy[key];
-    }
-    return result;
+    std::lock_guard<std::mutex> lock(g_mouseModeMx);
+    return g_mousePolicy.acceptBackendReadback(mouseModeStateLocked());
 }
-static json mousePolicySet(const std::string& mode) {
-    if(mode!="auto"&&mode!="on"&&mode!="off")return {{"ok",false},{"error","未知模拟鼠标挡位"}};
+static json mousePolicySet(const std::string& mode,bool cycle=false) {
+    using namespace ymcc::mousePolicy;
+    if(!cycle&&mode!="auto"&&mode!="on"&&mode!="off")return {{"ok",false},{"error","未知模拟鼠标挡位"}};
     if(mouseModeSteamDeckBlocked())return mouseModeSteamDeckState(true);
-    g_mousePolicyMode.store(mode=="auto"?1:mode=="on"?2:0);
-    {std::lock_guard<std::mutex> lock(g_gamepadSettingsMx);summonSave();}
-    return g_mousePolicy.set(ymcc::mousePolicy::mode(mode));
+    Mode selected;std::uint64_t wanted=0;
+    {
+        std::lock_guard<std::mutex> lock(g_gamepadSettingsMx);
+        const auto current=g_mousePolicy.current();
+        selected=cycle?(current==Mode::Off?Mode::Auto:current==Mode::Auto?Mode::On:Mode::Off):ymcc::mousePolicy::mode(mode);
+        g_mousePolicyMode.store(selected==Mode::Auto?1:selected==Mode::On?2:0);
+        summonSave();wanted=g_mousePolicy.request(selected);
+    }
+    return g_mousePolicy.wait(selected,wanted);
+}
+static json mouseAutoRulesSnapshot(){
+ const auto state=g_mouseAutoRules.load(std::memory_order_acquire);
+ auto result=state->data;result["ok"]=state->overrides.valid;
+ if(!state->error.empty())result["error"]=state->error;
+ return result;
+}
+static json mouseAutoRulesSet(const json& args){
+ std::lock_guard<std::mutex> lock(g_gamepadSettingsMx);
+ const auto before=g_mouseAutoRules.load(std::memory_order_acquire);
+ if(!before->overrides.valid)return {{"ok",false},{"error",before->error}};
+ if(!args.is_object()||args.size()!=1||(!args.contains("blacklist")&&!args.contains("whitelist")))return {{"ok",false},{"error","请一次编辑一份鼠标名单"}};
+ const std::string kind=args.contains("blacklist")?"blacklist":"whitelist";
+ auto raw=before->data;raw[kind]=args[kind];
+ // Validate syntax before moving a program from the opposite list.
+ auto single=mouseAutoRulesParse(json{{kind,args[kind]}},before->overrides.epoch+1);
+ if(!single->overrides.valid)return {{"ok",false},{"error",single->error}};
+ raw[kind]=single->data[kind];const auto other=kind=="blacklist"?"whitelist":"blacklist";
+ auto kept=json::array();for(const auto& item:raw[other])if(std::find(raw[kind].begin(),raw[kind].end(),item)==raw[kind].end())kept.push_back(item);
+ raw[other]=std::move(kept);
+ auto next=mouseAutoRulesParse(raw,before->overrides.epoch+1);
+ if(!next->overrides.valid)return {{"ok",false},{"error",next->error}};
+ if(!ymSettingsPatchSection("gamepad",json{{"mouseAutoRules",next->data}}))return {{"ok",false},{"error","鼠标名单保存失败，原配置已保留"}};
+ g_mouseAutoRules.store(std::move(next),std::memory_order_release);g_mousePolicy.wake();
+ return mouseAutoRulesSnapshot();
 }
 static json mousePolicyCycle() {
-    const auto current=g_mousePolicy.current();
-    return mousePolicySet(current==ymcc::mousePolicy::Mode::Off?"auto":current==ymcc::mousePolicy::Mode::Auto?"on":"off");
+    return mousePolicySet(std::string{},true);
 }
 static void mousePolicyStart() {
     if(g_mousePolicyStarted)return;g_mousePolicyStarted=true;
-    g_mousePolicy.start({[]{return ymcc::mousePolicy::observeForeground(mouseModeSteamDeckBlocked());},
+    g_mousePolicy.start({[]{return mouseModeObserveForeground();},
       [](bool on,const std::function<bool()>& valid){return mouseModeApplyState(on,std::string{},valid);},
       []{return mousePolicyRelease();},
       [](const json& state){
@@ -53285,10 +57149,12 @@ static void mousePolicyStart() {
         static std::string lastPresentation;
         const auto key=state.value("mode",std::string{})+"|"+state.value("scene",std::string{})+"|"+std::to_string(state.value("on",false))+"|"+std::to_string(state.value("ok",false));
         if(key!=lastPresentation){lastPresentation=key;gamepadSerialPostEvent("gamepad.mouse-toggle",state);}
-      }},g_mousePolicyMode.load()==1?ymcc::mousePolicy::Mode::Auto:g_mousePolicyMode.load()==2?ymcc::mousePolicy::Mode::On:ymcc::mousePolicy::Mode::Off);
+      },[](const json& receipt){return !mouseModeSteamDeckBlocked()&&receipt.value("backend",std::string{})==mouseModeSelectedBackend();}},g_mousePolicyMode.load()==1?ymcc::mousePolicy::Mode::Auto:g_mousePolicyMode.load()==2?ymcc::mousePolicy::Mode::On:ymcc::mousePolicy::Mode::Off);
     g_mouseForegroundHook=SetWinEventHook(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,nullptr,mousePolicyForegroundEvent,0,0,WINEVENT_OUTOFCONTEXT);
+    steamWallpaperForegroundObserver(g_mouseForegroundHook!=nullptr);
 }
 static void mousePolicyStop() {
+    steamWallpaperForegroundObserver(false);
     if(g_mouseForegroundHook){UnhookWinEvent(g_mouseForegroundHook);g_mouseForegroundHook=nullptr;}
     if(!g_mousePolicyStarted)return;g_mousePolicyStarted=false;g_mousePolicy.stop();
     const auto release=mousePolicyRelease();appendNativeLifecycleLog("mouse-mode-exit-release",release);
@@ -53306,46 +57172,157 @@ static void toggleMouseMode(const std::string& backend = std::string()) {
 // The recovery gate is checked once at startup or after a failed transaction;
 // ordinary game recognition adds no stat/JSON read/polling for this journal.
 static const std::wstring SG_GAME_RULE_JOURNAL = SG_DIR + L"\\game-rules.transaction.json";
+static const std::wstring SG_GAME_RULE_BACKUP = SG_DIR + L"\\game-rules.transaction.before.json";
 static std::mutex g_gameRuleFilesMtx;
 static bool g_gameRuleRecoveryNeeded = true; // Accessed only under files mutex.
+// Validate the complete rollback record before consuming either before-image.
+// Existing rule text reads keep their original hot-path cost; explicit edits
+// and pending recovery perform these bounded checks.
+static void sgValidateGameRuleText(const std::string& raw) {
+    if(raw.size()>1024*1024)throw std::runtime_error("Game-rule text exceeds its 1 MiB limit");
+    for(unsigned char byte:raw)if(byte<32&&byte!='\r'&&byte!='\n'&&byte!='\t')throw std::runtime_error("Game-rule text contains a control character");
+    const std::size_t skip=raw.starts_with(std::string("\xef\xbb\xbf",3))?3:0;
+    if(raw.size()>skip&&MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,raw.data()+skip,static_cast<int>(raw.size()-skip),nullptr,0)<=0)
+        throw std::runtime_error("Game-rule text must be valid UTF-8");
+}
+static bool sgGameRuleJournalValid(const json& j) {
+    try {
+        if(!j.is_object()||!j.contains("schemaVersion")||!j["schemaVersion"].is_number_integer()||(j["schemaVersion"]!=1&&j["schemaVersion"]!=2))return false;
+        if(!j.contains("phase")||!j["phase"].is_string()||(j["phase"]!="prepared"&&j["phase"]!="committed"))return false;
+        for(const auto* key:{"blacklistExisted","whitelistExisted"})if(!j.contains(key)||!j[key].is_boolean())return false;
+        for(const auto* key:{"oldBlacklist","oldWhitelist"})if(!j.contains(key)||!j[key].is_string()||j[key].get_ref<const std::string&>().size()>1024*1024||j[key].get_ref<const std::string&>().find('\0')!=std::string::npos)return false;
+        if((!j["blacklistExisted"].get<bool>()&&!j["oldBlacklist"].get_ref<const std::string&>().empty())||(!j["whitelistExisted"].get<bool>()&&!j["oldWhitelist"].get_ref<const std::string&>().empty()))return false;
+        if(j.contains("owner")&&(!j["owner"].is_string()||j["owner"]!="YMCC.GameRules"))return false;
+        if(j.contains("transactionId")&&(!j["transactionId"].is_string()||j["transactionId"].get_ref<const std::string&>().empty()||j["transactionId"].get_ref<const std::string&>().size()>128||j["transactionId"].get_ref<const std::string&>().find('\0')!=std::string::npos))return false;
+        const bool black=j.contains("newBlacklist"),white=j.contains("newWhitelist");if(black!=white)return false;
+        if(black)for(const auto* key:{"newBlacklist","newWhitelist"})if(!j[key].is_string()||j[key].get_ref<const std::string&>().size()>1024*1024||j[key].get_ref<const std::string&>().find('\0')!=std::string::npos)return false;
+        if(j["schemaVersion"]==2&&(!j.contains("owner")||!j.contains("transactionId")||!black||!white))return false;
+        const bool blackExists=j.contains("newBlacklistExisted"),whiteExists=j.contains("newWhitelistExisted");
+        if(blackExists!=whiteExists)return false;
+        if(blackExists&&(!j["newBlacklistExisted"].is_boolean()||!j["newWhitelistExisted"].is_boolean()||!black||!white))return false;
+        if(blackExists&&((!j["newBlacklistExisted"].get<bool>()&&!j["newBlacklist"].get_ref<const std::string&>().empty())||(!j["newWhitelistExisted"].get<bool>()&&!j["newWhitelist"].get_ref<const std::string&>().empty())))return false;
+        for(const auto* key:{"oldBlacklist","oldWhitelist"})sgValidateGameRuleText(j[key].get_ref<const std::string&>());
+        if(black)for(const auto* key:{"newBlacklist","newWhitelist"})sgValidateGameRuleText(j[key].get_ref<const std::string&>());
+        return true;
+    }catch(...){return false;}
+}
+static json sgParseGameRuleDocument(const std::string& raw,bool* future=nullptr,bool* foreign=nullptr) {
+    if(future)*future=false;if(foreign)*foreign=false;
+    if(raw.empty()||raw.size()>4*1024*1024)return json::object();
+    try {
+        std::array<std::set<std::string>,17> keys;std::string rootKey;
+        auto value=json::parse(raw,[&](int depth,json::parse_event_t event,json& item){
+            if(depth<0||depth>16)throw std::runtime_error("Game-rule journal depth exceeded");
+            if(event==json::parse_event_t::object_start)keys[depth].clear();
+            if(event==json::parse_event_t::key&&(depth==0||!keys[depth-1].insert(item.get<std::string>()).second))throw std::runtime_error("Duplicate game-rule field");
+            if(event==json::parse_event_t::key&&depth==1)rootKey=item.get<std::string>();
+            if(future&&event==json::parse_event_t::value&&depth==1&&rootKey=="schemaVersion"&&item.is_number_integer()&&item>2)*future=true;
+            if(foreign&&event==json::parse_event_t::value&&depth==1&&rootKey=="owner"&&item.is_string()&&item!="YMCC.GameRules")*foreign=true;
+            return true;
+        },false);
+        return value;
+    }catch(...){return json::object();}
+}
+static json sgParseGameRuleJournal(const std::string& raw) {
+    auto value=sgParseGameRuleDocument(raw);
+    return sgGameRuleJournalValid(value)?value:json::object();
+}
+static bool sgManagedGameRuleJournal(const json& value) {
+    return sgGameRuleJournalValid(value)&&value["schemaVersion"]==2&&value.contains("transactionId")&&value.contains("owner")&&value.contains("newBlacklist")&&value.contains("newWhitelist");
+}
+static bool sgFutureGameRuleJournal(const json& value) {
+    return value.is_object()&&value.contains("schemaVersion")&&value["schemaVersion"].is_number_integer()&&value["schemaVersion"]>2;
+}
+static std::wstring sgGameRuleArchivePath(const std::wstring& path,const std::string& raw) {
+    std::uint64_t hash=14695981039346656037ULL;
+    for(unsigned char byte:raw){hash^=byte;hash*=1099511628211ULL;}
+    return path+L".ymcc-invalid-"+std::to_wstring(hash)+L"-"+std::to_wstring(raw.size());
+}
+static bool sgGameRuleImageMatches(const std::wstring& path,bool existed,const std::string& content) {
+    std::error_code ec;const bool actual=fspath::exists(path,ec);
+    if(ec||actual!=existed)return false;
+    return !actual||ymSettingsReadRaw(path)==content;
+}
+static bool sgWriteGameRuleVerified(const std::wstring& path,const std::string& content) {
+    if(!sgWriteFileAtomic(path,content))return false;
+    return sgGameRuleImageMatches(path,true,content);
+}
 static bool sgRestoreGameRuleFile(const std::wstring& path, bool existed, const std::string& content) {
-    if (existed) return sgWriteFileAtomic(path, content);
-    if (DeleteFileW(path.c_str())) return true;
-    const DWORD error = GetLastError();
-    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    if(existed)return sgGameRuleImageMatches(path,true,content)||sgWriteGameRuleVerified(path,content);
+    if(!DeleteFileW(path.c_str())){const auto error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return false;}
+    return sgGameRuleImageMatches(path,false,{});
+}
+static bool sgRemoveGameRuleJournal(const std::wstring& path,const std::string& expected) {
+    if(!sgGameRuleImageMatches(path,true,expected))return false;
+    return DeleteFileW(path.c_str())!=FALSE;
+}
+static bool sgArchiveGameRuleJournal(const std::wstring& path,const std::string& raw) {
+    if(!sgGameRuleImageMatches(path,true,raw))return false;
+    const auto base=sgGameRuleArchivePath(path,raw);
+    for(unsigned slot=0;slot<8;++slot){
+        const auto archive=slot?base+L"-"+std::to_wstring(slot):base;std::error_code ec;
+        const bool exists=fspath::exists(archive,ec);if(ec)return false;
+        if(exists){if(sgGameRuleImageMatches(archive,true,raw))return sgGameRuleImageMatches(path,true,raw);continue;}
+        return sgWriteGameRuleVerified(archive,raw)&&sgGameRuleImageMatches(path,true,raw);
+    }
+    return false;
 }
 static bool sgRecoverGameRuleFilesUnlocked() {
-    if (!g_gameRuleRecoveryNeeded) return true;
-    const auto raw = ymSettingsReadRaw(SG_GAME_RULE_JOURNAL);
-    if (raw.empty()) {
-        std::error_code ec;
-        if (fspath::exists(SG_GAME_RULE_JOURNAL, ec) || ec) return false;
-        g_gameRuleRecoveryNeeded = false;
-        return true;
-    }
-    json journal;
+    if(!g_gameRuleRecoveryNeeded)return true;
     try {
-        journal = json::parse(raw);
-        if (!journal.is_object() || journal.value("schemaVersion", 0) != 1) return false;
-        const auto phase = journal.value("phase", std::string{});
-        if (phase != "committed" && phase != "prepared") return false;
-        if (phase == "prepared") {
-            if (!sgRestoreGameRuleFile(SG_GAME_PLAYER_BLACKLIST, journal.at("blacklistExisted").get<bool>(), journal.at("oldBlacklist").get<std::string>())) return false;
-            if (!sgRestoreGameRuleFile(SG_GAME_WHITELIST, journal.at("whitelistExisted").get<bool>(), journal.at("oldWhitelist").get<std::string>())) return false;
-            // A failed cleanup must not turn a recovered old state into a new
-            // rollback after another writer/user changes the text files.
-            journal["phase"] = "committed";
-            if (!sgWriteFileAtomic(SG_GAME_RULE_JOURNAL, journal.dump())) return false;
+        std::error_code ec;
+        const bool primaryExists=fspath::exists(SG_GAME_RULE_JOURNAL,ec);if(ec)return false;
+        const bool backupExists=fspath::exists(SG_GAME_RULE_BACKUP,ec);if(ec)return false;
+        if(!primaryExists&&!backupExists){g_gameRuleRecoveryNeeded=false;return true;}
+        const auto raw=ymSettingsReadRaw(SG_GAME_RULE_JOURNAL),backupRaw=ymSettingsReadRaw(SG_GAME_RULE_BACKUP);
+        if(raw.size()>4*1024*1024||backupRaw.size()>4*1024*1024)return false;
+        bool primaryFuture=false,backupFuture=false,primaryForeign=false,backupForeign=false;
+        const auto primaryDocument=sgParseGameRuleDocument(raw,&primaryFuture,&primaryForeign),backupDocument=sgParseGameRuleDocument(backupRaw,&backupFuture,&backupForeign);
+        if(primaryFuture||backupFuture||primaryForeign||backupForeign||sgFutureGameRuleJournal(primaryDocument)||sgFutureGameRuleJournal(backupDocument))return false;
+        const bool primaryValid=primaryExists&&sgGameRuleJournalValid(primaryDocument);
+        const bool backupValid=backupExists&&sgManagedGameRuleJournal(backupDocument);
+        if(!primaryValid&&!backupValid)return false;
+        if(primaryValid&&backupValid){auto left=primaryDocument,right=backupDocument;left.erase("phase");right.erase("phase");if(left!=right)return false;}
+        auto journal=primaryValid?primaryDocument:backupDocument;
+        // Either matching terminal copy proves that rollback has already ended.
+        if((primaryValid&&primaryDocument["phase"]=="committed")||(backupValid&&backupDocument["phase"]=="committed"))journal["phase"]="committed";
+        const bool managed=sgManagedGameRuleJournal(journal);
+        if((primaryExists&&!primaryValid||backupExists&&!backupValid)&&!managed)return false;
+        if(journal["phase"]=="prepared"){
+            const bool blackOld=sgGameRuleImageMatches(SG_GAME_PLAYER_BLACKLIST,journal["blacklistExisted"].get<bool>(),journal["oldBlacklist"].get<std::string>());
+            const bool whiteOld=sgGameRuleImageMatches(SG_GAME_WHITELIST,journal["whitelistExisted"].get<bool>(),journal["oldWhitelist"].get<std::string>());
+            const bool blackNew=journal.contains("newBlacklist")&&sgGameRuleImageMatches(SG_GAME_PLAYER_BLACKLIST,journal.value("newBlacklistExisted",true),journal["newBlacklist"].get<std::string>());
+            const bool whiteNew=journal.contains("newWhitelist")&&sgGameRuleImageMatches(SG_GAME_WHITELIST,journal.value("newWhitelistExisted",true),journal["newWhitelist"].get<std::string>());
+            if((!blackOld&&!blackNew)||(!whiteOld&&!whiteNew))return false;
         }
-    } catch (...) { return false; }
-    g_gameRuleRecoveryNeeded = false;
-    DeleteFileW(SG_GAME_RULE_JOURNAL.c_str()); // A committed receipt is safe to retain.
-    return true;
+        // Preserve damaged bytes before replacing a recoverable primary/copy.
+        if(primaryExists&&!primaryValid&&!sgArchiveGameRuleJournal(SG_GAME_RULE_JOURNAL,raw))return false;
+        if(backupExists&&!backupValid&&!sgArchiveGameRuleJournal(SG_GAME_RULE_BACKUP,backupRaw))return false;
+        if(!sgGameRuleImageMatches(SG_GAME_RULE_JOURNAL,primaryExists,raw)||!sgGameRuleImageMatches(SG_GAME_RULE_BACKUP,backupExists,backupRaw))return false;
+        if(managed&&!backupValid&&!sgWriteGameRuleVerified(SG_GAME_RULE_BACKUP,journal.dump()))return false;
+        if(journal["phase"]=="prepared"){
+            if(!sgRestoreGameRuleFile(SG_GAME_PLAYER_BLACKLIST,journal["blacklistExisted"].get<bool>(),journal["oldBlacklist"].get<std::string>())||
+               !sgRestoreGameRuleFile(SG_GAME_WHITELIST,journal["whitelistExisted"].get<bool>(),journal["oldWhitelist"].get<std::string>()))return false;
+            journal["phase"]="committed";
+        }
+        const auto committed=journal.dump();
+        if(!sgWriteGameRuleVerified(SG_GAME_RULE_JOURNAL,committed))return false;
+        if(managed&&!sgWriteGameRuleVerified(SG_GAME_RULE_BACKUP,committed))return false;
+        g_gameRuleRecoveryNeeded=false;
+        sgRemoveGameRuleJournal(SG_GAME_RULE_JOURNAL,committed);
+        if(managed)sgRemoveGameRuleJournal(SG_GAME_RULE_BACKUP,committed);
+        return true;
+    }catch(...){return false;}
 }
 static std::string sgReadGameRulesText(const std::wstring& path) {
+    ymcc::gamerules::FilesGuard coordinated(SG_DIR);
     std::lock_guard<std::mutex> lock(g_gameRuleFilesMtx);
+    if(coordinated.abandoned())g_gameRuleRecoveryNeeded=true;
     if (!sgRecoverGameRuleFilesUnlocked()) throw std::runtime_error("Game rules recovery is pending; original data retained");
-    return ymSettingsReadRaw(path);
+    auto text=ymSettingsReadRaw(path);
+    sgValidateGameRuleText(text);
+    if(text.starts_with(std::string("\xef\xbb\xbf",3)))text.erase(0,3);
+    return text;
 }
 
 // 系统内置黑名单（基名小写，不含 .exe）。WebView2 进程也排除，保护壳自身。
@@ -53379,8 +57356,12 @@ static std::vector<std::wstring> sgExcludes() {
 // running process is always resolved to a real PID by the detector; a name in
 // either list is never used as a process-control target by itself.
 static std::wstring sgNormalizeGameRule(const std::string& raw) {
-    const std::string trimmed = trim_ascii(raw);
-    if (trimmed.empty()) return {};
+    if(raw.size()>1024*1024)return {};
+    std::size_t first=0,last=raw.size();
+    while(first<last&&std::isspace(static_cast<unsigned char>(raw[first])))++first;
+    while(last>first&&std::isspace(static_cast<unsigned char>(raw[last-1])))--last;
+    if(first==last)return {};
+    const auto trimmed=raw.substr(first,last-first);
     std::wstring rule = sgBaseName(U2W(trimmed));
     std::transform(rule.begin(), rule.end(), rule.begin(), ::towlower);
     if (rule.size() > 4 && rule.compare(rule.size() - 4, 4, L".exe") == 0)
@@ -53399,6 +57380,7 @@ static std::wstring sgMatchingGameWhitelistRule(
 
 static std::vector<std::wstring> sgReadGameRuleFile(const std::wstring& path) {
     std::vector<std::wstring> rules;
+    std::set<std::wstring> seen;
     std::istringstream iss(sgReadGameRulesText(path));
     std::string line;
     while (std::getline(iss, line)) {
@@ -53406,20 +57388,21 @@ static std::vector<std::wstring> sgReadGameRuleFile(const std::wstring& path) {
         if (comment != std::string::npos) line.resize(comment);
         const std::wstring rule = sgNormalizeGameRule(line);
         if (rule.empty()) continue;
-        if (std::find(rules.begin(), rules.end(), rule) == rules.end()) rules.push_back(rule);
+        if (seen.insert(rule).second) rules.push_back(rule);
     }
     return rules;
 }
 
 static std::vector<std::wstring> sgGameSystemBlacklist() {
     std::vector<std::wstring> rules;
+    std::set<std::wstring> seen;
     for (const wchar_t* value : SG_BLACKLIST) {
         const auto rule = sgNormalizeGameRule(W2U(value));
-        if (!rule.empty() && std::find(rules.begin(), rules.end(), rule) == rules.end())
+        if (!rule.empty() && seen.insert(rule).second)
             rules.push_back(rule);
     }
     for (const auto& rule : sgReadGameRuleFile(SG_GAME_SYSTEM_BLACKLIST)) {
-        if (std::find(rules.begin(), rules.end(), rule) == rules.end()) rules.push_back(rule);
+        if (seen.insert(rule).second) rules.push_back(rule);
     }
     return rules;
 }
@@ -53437,27 +57420,58 @@ static std::vector<std::wstring> sgGameWhitelist() {
 
 static std::string sgGameRuleFileContent(const std::vector<std::wstring>& rules) {
     std::string content;
-    for (const auto& rule : rules) {
-        content += W2U(rule);
-        content += "\n";
+    for(const auto& rule:rules){
+        if(rule.empty()||rule.size()>1024*1024)throw std::runtime_error("Game rule cannot be represented in the text format");
+        const int count=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,rule.data(),static_cast<int>(rule.size()),nullptr,0,nullptr,nullptr);
+        if(count<=0||count>1024*1024)throw std::runtime_error("Game rule must be valid Unicode");
+        std::string entry(static_cast<std::size_t>(count),'\0');
+        if(WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,rule.data(),static_cast<int>(rule.size()),entry.data(),count,nullptr,nullptr)!=count)throw std::runtime_error("Game rule conversion failed");
+        sgValidateGameRuleText(entry);
+        if(entry.find_first_of("\r\n\t#")!=std::string::npos)throw std::runtime_error("Game rule contains a reserved comment or line separator");
+        // A leading U+FEFF in a real name needs a separate optional file BOM.
+        if(content.empty()&&entry.starts_with(std::string("\xef\xbb\xbf",3)))content=std::string("\xef\xbb\xbf",3);
+        if(content.size()+entry.size()+1>1024*1024)throw std::runtime_error("Game-rule text exceeds its 1 MiB limit");
+        content+=entry;content+='\n';
     }
     return content;
 }
 
-static bool sgWriteGameRuleFile(const std::wstring& path,
-                                const std::vector<std::wstring>& rules) {
-    std::error_code ec;
-    fspath::create_directories(SG_DIR, ec);
-    return sgWriteFileAtomic(path, sgGameRuleFileContent(rules));
+// Native edits preserve the existing library-owned subset as a managed block.
+// Flattening those lines into manual rules would make later library deletion
+// unable to remove them without guessing ownership from historical state.
+static std::string sgGameRuleWhitelistContent(const std::string& original,const std::vector<std::wstring>& rules) {
+    static constexpr const char* begin="# BEGIN YMCC custom-steam-library managed rules";
+    static constexpr const char* end="# END YMCC custom-steam-library managed rules";
+    bool opened=false,closed=false;std::set<std::wstring> managed;std::string raw=original;
+    if(raw.starts_with(std::string("\xef\xbb\xbf",3)))raw.erase(0,3);
+    std::istringstream input(raw);std::string line;
+    while(std::getline(input,line)){
+        if(!line.empty()&&line.back()=='\r')line.pop_back();
+        if(line==begin){if(opened||closed)throw std::runtime_error("Ambiguous managed game-rule block; original retained");opened=true;continue;}
+        if(line==end){if(!opened||closed)throw std::runtime_error("Unpaired managed game-rule block; original retained");closed=true;continue;}
+        if(opened&&!closed){const auto comment=line.find('#');if(comment!=std::string::npos)line.resize(comment);const auto rule=sgNormalizeGameRule(line);if(!rule.empty())managed.insert(rule);}
+    }
+    if(opened!=closed)throw std::runtime_error("Incomplete managed game-rule block; original retained");
+    if(!opened)return sgGameRuleFileContent(rules);
+    std::vector<std::wstring> manual,owned;
+    for(const auto& rule:rules)(managed.contains(rule)?owned:manual).push_back(rule);
+    auto content=sgGameRuleFileContent(manual);
+    if(!owned.empty()){
+        auto block=sgGameRuleFileContent(owned);
+        if(owned.front().starts_with(std::wstring(1,L'\ufeff')))block.erase(0,3); // No file BOM in the middle of a document.
+        content+=std::string(begin)+"\n"+block+end+"\n";
+    }
+    sgValidateGameRuleText(content);return content;
 }
 
 static std::vector<std::wstring> sgRemoveSameGameRules(
     const std::vector<std::wstring>& rules,
     const std::vector<std::wstring>& existingRules) {
+    const std::set<std::wstring> existing(existingRules.begin(),existingRules.end());
     std::vector<std::wstring> filtered;
     filtered.reserve(rules.size());
     for (const auto& rule : rules) {
-        if (std::find(existingRules.begin(), existingRules.end(), rule) == existingRules.end())
+        if (!existing.contains(rule))
             filtered.push_back(rule);
     }
     return filtered;
@@ -53466,37 +57480,105 @@ static std::vector<std::wstring> sgRemoveSameGameRules(
 // Callers retain the existing g_gameRulesMx ownership/policy. This narrower
 // files lock also covers readers that build Sleep Guard's plain blacklist.
 static bool sgWriteGameRuleFiles(const std::vector<std::wstring>& blacklist,
-                                 const std::vector<std::wstring>& whitelist) {
+                                 const std::vector<std::wstring>& whitelist,
+                                 const std::wstring* onlyPath = nullptr) {
+    if(onlyPath&&*onlyPath!=SG_GAME_PLAYER_BLACKLIST&&*onlyPath!=SG_GAME_WHITELIST)return false;
+    ymcc::gamerules::FilesGuard coordinated(SG_DIR);
     std::lock_guard<std::mutex> filesLock(g_gameRuleFilesMtx);
-    if (!sgRecoverGameRuleFilesUnlocked()) return false;
-    std::error_code ec;
-    fspath::create_directories(SG_DIR, ec);
-    if (ec) return false;
-    const bool blacklistExisted = fspath::exists(SG_GAME_PLAYER_BLACKLIST, ec);
-    if (ec) return false;
-    const auto oldBlacklist = ymSettingsReadRaw(SG_GAME_PLAYER_BLACKLIST);
-    const bool whitelistExisted = fspath::exists(SG_GAME_WHITELIST, ec);
-    if (ec) return false;
-    const auto oldWhitelist = ymSettingsReadRaw(SG_GAME_WHITELIST);
-    json journal{{"schemaVersion", 1}, {"phase", "prepared"},
-        {"blacklistExisted", blacklistExisted}, {"whitelistExisted", whitelistExisted},
-        {"oldBlacklist", oldBlacklist}, {"oldWhitelist", oldWhitelist}};
-    const auto prepared = journal.dump();
-    if (prepared.size() > 4 * 1024 * 1024 || !sgWriteFileAtomic(SG_GAME_RULE_JOURNAL, prepared)) return false;
-    g_gameRuleRecoveryNeeded = true;
-    if (!sgWriteFileAtomic(SG_GAME_PLAYER_BLACKLIST, sgGameRuleFileContent(blacklist)) ||
-        !sgWriteFileAtomic(SG_GAME_WHITELIST, sgGameRuleFileContent(whitelist))) {
-        sgRecoverGameRuleFilesUnlocked(); // Failure retains the journal for the next read/startup.
+    // Explicit user actions recheck a late journal once; ordinary recognition
+    // never adds a journal stat/read/poll.
+    g_gameRuleRecoveryNeeded=true;
+    if(!sgRecoverGameRuleFilesUnlocked())return false;
+    std::error_code ec;fspath::create_directories(SG_DIR,ec);if(ec)return false;
+    const bool blackExisted=fspath::exists(SG_GAME_PLAYER_BLACKLIST,ec);if(ec)return false;
+    const auto oldBlack=ymSettingsReadRaw(SG_GAME_PLAYER_BLACKLIST);
+    const bool whiteExisted=fspath::exists(SG_GAME_WHITELIST,ec);if(ec)return false;
+    const auto oldWhite=ymSettingsReadRaw(SG_GAME_WHITELIST);
+    sgValidateGameRuleText(oldBlack);sgValidateGameRuleText(oldWhite);
+    const bool changeBlack=!onlyPath||*onlyPath==SG_GAME_PLAYER_BLACKLIST,changeWhite=!onlyPath||*onlyPath==SG_GAME_WHITELIST;
+    const auto newBlack=changeBlack?sgGameRuleFileContent(blacklist):oldBlack,newWhite=changeWhite?sgGameRuleWhitelistContent(oldWhite,whitelist):oldWhite;
+    const bool newBlackExists=changeBlack||blackExisted,newWhiteExists=changeWhite||whiteExisted;
+    static std::atomic<unsigned long long> transactionSequence{0};
+    const auto transactionId=std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64())+"-"+std::to_string(++transactionSequence);
+    json journal={{"schemaVersion",2},{"owner","YMCC.GameRules"},{"transactionId",transactionId},{"phase","prepared"},{"blacklistExisted",blackExisted},{"whitelistExisted",whiteExisted},
+        {"oldBlacklist",oldBlack},{"oldWhitelist",oldWhite},{"newBlacklist",newBlack},{"newWhitelist",newWhite},{"newBlacklistExisted",newBlackExists},{"newWhitelistExisted",newWhiteExists}};
+    if(!sgGameRuleJournalValid(journal))return false;
+    const auto prepared=journal.dump();if(prepared.size()>4*1024*1024)return false;
+    g_gameRuleRecoveryNeeded=true;
+    if(!sgWriteGameRuleVerified(SG_GAME_RULE_BACKUP,prepared))return false;
+    if(!sgWriteGameRuleVerified(SG_GAME_RULE_JOURNAL,prepared)){
+        // A rejected first publish did not begin replacement. Retire only our
+        // confirmed copy when both text preimages still match and no primary exists.
+        if(sgGameRuleImageMatches(SG_GAME_RULE_JOURNAL,false,{})&&sgGameRuleImageMatches(SG_GAME_PLAYER_BLACKLIST,blackExisted,oldBlack)&&sgGameRuleImageMatches(SG_GAME_WHITELIST,whiteExisted,oldWhite))
+            sgRemoveGameRuleJournal(SG_GAME_RULE_BACKUP,prepared);
         return false;
     }
-    journal["phase"] = "committed";
-    if (!sgWriteFileAtomic(SG_GAME_RULE_JOURNAL, journal.dump())) {
-        sgRecoverGameRuleFilesUnlocked();
-        return false;
+    // A foreign edit made during preparation is not our rollback target.
+    if(!sgGameRuleImageMatches(SG_GAME_PLAYER_BLACKLIST,blackExisted,oldBlack)||!sgGameRuleImageMatches(SG_GAME_WHITELIST,whiteExisted,oldWhite))return false;
+    const auto publish=[&](const std::wstring& path,bool exists,const std::string& bytes){
+        return sgGameRuleImageMatches(path,exists,bytes)||(exists&&sgWriteGameRuleVerified(path,bytes));
+    };
+    if(!publish(SG_GAME_PLAYER_BLACKLIST,newBlackExists,newBlack)||!publish(SG_GAME_WHITELIST,newWhiteExists,newWhite)){
+        sgRecoverGameRuleFilesUnlocked();return false;
     }
-    g_gameRuleRecoveryNeeded = false;
-    DeleteFileW(SG_GAME_RULE_JOURNAL.c_str());
+    journal["phase"]="committed";
+    if(!sgWriteGameRuleVerified(SG_GAME_RULE_JOURNAL,journal.dump())){sgRecoverGameRuleFilesUnlocked();return false;}
+    const auto committed=journal.dump();
+    if(!sgWriteGameRuleVerified(SG_GAME_RULE_BACKUP,committed))return false;
+    g_gameRuleRecoveryNeeded=false;
+    sgRemoveGameRuleJournal(SG_GAME_RULE_JOURNAL,committed);
+    sgRemoveGameRuleJournal(SG_GAME_RULE_BACKUP,committed);
     return true;
+}
+
+static bool sgWriteGameRuleFile(const std::wstring& path,const std::vector<std::wstring>& rules) {
+    if(path==SG_GAME_WHITELIST)return sgWriteGameRuleFiles({},rules,&path);
+    if(path==SG_GAME_PLAYER_BLACKLIST)return sgWriteGameRuleFiles(rules,{},&path);
+    return false;
+}
+
+static ymcc::mousePolicy::Context mouseModeObserveForeground() {
+    using namespace ymcc::mousePolicy;
+    auto context=observeForeground(mouseModeSteamDeckBlocked(),g_mousePolicy.current()==Mode::Auto);
+    if(context.steam||context.ymcc||!context.identityKnown||g_mousePolicy.current()!=Mode::Auto)return context;
+    const auto image=lower(U2W(context.foregroundImage));
+    context=applyAutoOverrides(context,image,g_mouseAutoRules.load(std::memory_order_acquire)->overrides);
+    GameContextRules rules;
+    const auto target=g_gameValveObservation.load(std::memory_order_acquire);
+    rules.observation=target?nativeGameDiscoveryStateName(target->discoveryState):"unavailable";
+    if(target&&target->generation!=0){
+        // Positive game identity remains useful while recognition is refreshing.
+        // No complete/no-game receipt is required to allow an ordinary app.
+        rules.targetPid=target->game.pid;rules.targetCreated=target->game.processCreated;
+        rules.targetPath=lower(target->game.path);
+    }
+    // Only this existing policy worker uses the parsing cache. Keep its last
+    // rules while the shared owner is busy; do not infer an app exclusion.
+    static unsigned long long cachedEpoch=0,attemptedEpoch=0;static bool ready=false,attempted=false;
+    static std::vector<std::wstring> whitelist,configured;
+    const auto epoch=g_gameRulesEpoch.load(std::memory_order_acquire);
+    if(!attempted||attemptedEpoch!=epoch){
+        std::unique_lock lock(g_gameRulesMx,std::try_to_lock);
+        if(lock.owns_lock()){
+            // One IO attempt per shared epoch, including faults. Keep old rules
+            // until their owner publishes a change; never retry from the 1s wake.
+            attemptedEpoch=g_gameRulesEpoch.load(std::memory_order_acquire);attempted=true;
+            try {
+                auto nextWhitelist=sgGameWhitelist();auto nextConfigured=nativeConfiguredGameExes();
+                whitelist=std::move(nextWhitelist);configured=std::move(nextConfigured);
+                cachedEpoch=attemptedEpoch;ready=true;
+            }catch(...){rules.observation="rules-unavailable";}
+        }
+    }
+    if(attempted&&(!ready||attemptedEpoch!=cachedEpoch))rules.observation="rules-unavailable";
+    // Disk freshness belongs to the existing game owner. No new polling scan.
+    if(ready){rules.rulesEpoch=cachedEpoch;rules.whitelist=whitelist;rules.configured=configured;}
+    rules.observationKnown=target&&ready&&target->generation!=0&&target->rulesEpoch==cachedEpoch&&
+        g_gameRulesEpoch.load(std::memory_order_acquire)==cachedEpoch&&
+        target->discoveryState==NativeGameDiscoveryState::Complete;
+    auto classified=classifyApplications(context,image,rules);
+    if(GetForegroundWindow()!=reinterpret_cast<HWND>(context.window))return Context{0,0,0,false,false,context.steam};
+    return classified;
 }
 
 static json sgGameRulesSnapshot() {
@@ -53509,6 +57591,14 @@ static json sgGameRulesSnapshot() {
     return json{
         {"blacklist", std::move(blacklist)},
         {"whitelist", std::move(whitelist)},
+        {"applicationCategories", []{
+            json emulators=json::array(),libraries=json::array();
+            for(const auto& name:ymcc::gameApplications::emulators())emulators.push_back(W2U(name));
+            for(const auto& name:ymcc::gameApplications::gameLibraries())libraries.push_back(W2U(name));
+            return json{{"emulators",std::move(emulators)},{"gameLibraries",std::move(libraries)},
+                {"mouseAutoBlocks",{"game","emulator","game-library","ymcc"}},
+                {"gameBlacklistIsNotMouseBlacklist",true}};
+        }()},
     };
 }
 
@@ -53579,6 +57669,7 @@ static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target) {
         // or a settings-page edit may have admitted the same rule, or a user
         // may have blacklisted it while this process was being validated.
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+        ymcc::gamerules::FilesGuard coordinated(SG_DIR);
         const auto latestExcludes = sgExcludes();
         auto latestWhitelist = sgGameWhitelist();
         const bool latestWhitelisted = sgNameExcludedBy(name, latestWhitelist);
@@ -53738,7 +57829,10 @@ static json sgSuspendGameByPidUnlocked(
         {"paused", false}, {"rootPid", static_cast<int>(rootPid)},
         {"pids", json::array()}, {"processes", json::array()},
         {"failedPids", json::array()},
-        {"okCount", 0}, {"failCount", 0}
+        {"okCount", 0}, {"failCount", 0},
+        {"ntApiAttempted", false}, {"ntStatus", nullptr},
+        {"processOpenError", nullptr}, {"identityMatches", false},
+        {"existingMarkerReused", false}, {"pauseReason", "not-attempted"}
     };
     try {
         NativeDetectedGame valveTarget;
@@ -53746,11 +57840,13 @@ static json sgSuspendGameByPidUnlocked(
             if (prevalidatedValveTarget->pid != rootPid ||
                 prevalidatedValveTarget->processCreated != expectedCreated) {
                 out["error"] = "sleep target identity changed";
+                out["pauseReason"] = "target-identity-changed";
                 return out;
             }
             valveTarget = *prevalidatedValveTarget;
         } else if (!nativeValveValidateCurrentTarget(rootPid, expectedCreated, &valveTarget)) {
             out["error"] = "PID is not the current game valve target";
+                out["pauseReason"] = "not-current-valve-target";
             return out;
         }
         sgInitNt();
@@ -53760,6 +57856,7 @@ static json sgSuspendGameByPidUnlocked(
             !fnNtSuspend ||
             !ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
             !ProcessIdToSessionId(rootPid, &rootSession) || rootSession != currentSession) {
+            out["pauseReason"] = "invalid-pid-api-or-session";
             return out;
         }
         // The event-receipt fence also protects a manual pause made while
@@ -53771,12 +57868,14 @@ static json sgSuspendGameByPidUnlocked(
             out["failedPids"].push_back(static_cast<int>(rootPid));
             out["failCount"] = 1;
             out["error"] = "previous wake recovery cannot yet confirm a new pause";
+                out["pauseReason"] = "previous-recovery-unconfirmed";
             return out;
         }
         if (releaseConflictingLease && !sgReleaseConflictingPauseLeaseUnlocked(rootPid)) {
             out["failedPids"].push_back(static_cast<int>(rootPid));
             out["failCount"] = 1;
             out["error"] = "previous pause lease could not be released";
+                out["pauseReason"] = "previous-pause-lease-unreleased";
             return out;
         }
         if (prevalidatedValveTarget) {
@@ -53786,12 +57885,14 @@ static json sgSuspendGameByPidUnlocked(
                 out["failedPids"].push_back(static_cast<int>(rootPid));
                 out["failCount"] = 1;
                 out["error"] = "sleep target process instance changed";
+                out["pauseReason"] = "process-instance-changed";
                 return out;
             }
         } else if (!nativeValveValidateCurrentTarget(rootPid, expectedCreated, &valveTarget)) {
             out["failedPids"].push_back(static_cast<int>(rootPid));
             out["failCount"] = 1;
             out["error"] = "game valve target changed while releasing previous pause lease";
+                out["pauseReason"] = "valve-target-changed";
             return out;
         }
 
@@ -53813,9 +57914,12 @@ static json sgSuspendGameByPidUnlocked(
                 out["failedPids"].push_back(static_cast<int>(pid));
                 out["failCount"] = 1;
                 out["error"] = "sleep lease belongs to another power generation";
+                out["pauseReason"] = "other-power-generation-marker";
                 return out;
             }
             if (!marker.empty() && fspath::exists(marker)) {
+                out["existingMarkerReused"] = true;
+                out["pauseReason"] = "existing-suspended-marker";
                 out["pids"].push_back(static_cast<int>(pid));
                 out["processes"].push_back({
                     {"pid", static_cast<int>(pid)},
@@ -53833,6 +57937,7 @@ static json sgSuspendGameByPidUnlocked(
             // identity that startup recovery can always retry.
             if (!markerDir.empty() &&
                 !sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration)) {
+                out["pauseReason"] = "marker-write-failed";
                 out["failedPids"].push_back(static_cast<int>(pid));
                 if (pid == rootPid) break;
                 continue;
@@ -53840,11 +57945,26 @@ static json sgSuspendGameByPidUnlocked(
 
             HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION,
                                    FALSE, pid);
+            const DWORD processOpenError = h ? 0 : GetLastError();
             const bool identityMatches = h &&
                 nativeProcessCreatedFromHandle(h) == valveTarget.processCreated;
-            const LONG status = identityMatches && fnNtSuspend
+            const bool ntApiAttempted = identityMatches && fnNtSuspend;
+            const ULONGLONG apiDispatchTick = ntApiAttempted ? GetTickCount64() : 0;
+            const LONG status = ntApiAttempted
                 ? fnNtSuspend(h) : static_cast<LONG>(-1);
+            const ULONGLONG apiReturnTick = GetTickCount64();
             if (h) CloseHandle(h);
+            // Diagnostic serialization follows the real call and handle release.
+            try {
+                out["processOpenError"] = processOpenError;
+                out["identityMatches"] = identityMatches;
+                out["ntApiAttempted"] = ntApiAttempted;
+                out["apiDispatchTickMs"] = ntApiAttempted ? json(apiDispatchTick) : json(nullptr);
+                out["apiReturnTickMs"] = ntApiAttempted ? json(apiReturnTick) : json(nullptr);
+                out["ntStatus"] = ntApiAttempted ? json(static_cast<long long>(status)) : json(nullptr);
+                out["pauseReason"] = !h ? "process-open-failed" : !identityMatches ? "process-identity-changed" :
+                    !ntApiAttempted ? "nt-suspend-unavailable" : status >= 0 ? "nt-suspend-accepted" : "nt-suspend-rejected";
+            } catch (...) {}
             if (status >= 0) {
                 if (!markerDir.empty())
                     sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration);
@@ -53864,7 +57984,7 @@ static json sgSuspendGameByPidUnlocked(
         }
         out["failCount"] = static_cast<int>(out["failedPids"].size());
         out["paused"] = rootPaused;
-    } catch (...) {}
+    } catch (...) { out["pauseReason"] = "pause-exception"; }
     return out;
 }
 
@@ -54364,21 +58484,127 @@ static SgResumeResult sgResumeSleepTarget(
 // intentionally limited to one already-admitted PID and does not wait for
 // hardware writers; the query callback is the last reliable point before a
 // game can veto entry into sleep.
+// Reuse each completed manual command result; diagnostics never rediscover a PID.
+static void sgRecordManualGameControlReceipt(
+    const char* event, const char* source, const json& request, const json& result) noexcept {
+    if (!sensorDetailLoggingGate()) return;
+    try {
+        sgRecordFact(event, {
+            {"schemaVersion", 1}, {"source", source ? source : "unknown"},
+            {"generation", currentPowerGeneration()},
+            {"requestedPid", request.value("pid", 0)},
+            {"requestedProcessCreated", request.value("processCreated", json(nullptr))},
+            {"requestedCount", request.contains("pids") && request["pids"].is_array()
+                ? request["pids"].size() : size_t{0}},
+            {"result", result}, {"detailLogsRequired", true}, {"periodic", false},
+            {"scope", "completed-native-manual-command;no-extra-discovery-or-thread-probe"}
+        });
+    } catch (...) {}
+}
+
+// Detailed pause evidence is one observation per existing attempt, never a poll.
+// API acceptance, reused markers and an observed suspended thread set are distinct.
+static void sgRecordSleepPauseReceipt(
+    unsigned long long generation, const SgSuspendResult& result,
+    const NativeDetectedGame& candidate, unsigned long long valveGeneration,
+    const char* reason, const json& invocation) noexcept {
+    if (!sensorDetailLoggingGate()) return;
+    HANDLE process = nullptr;
+    try {
+        const ULONGLONG begin = GetTickCount64();
+        json verification = {{"attempted", false}, {"known", false},
+            {"snapshotKnown", false}, {"snapshotAllSuspended", nullptr},
+            {"threads", 0}, {"suspendedThreads", 0}, {"allSuspended", nullptr},
+            {"status", "no-paused-target"}};
+        const auto sameContext = [generation]() {
+            const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
+            return currentPowerGeneration() == generation &&
+                (phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended);
+        };
+        if (result.frozen && candidate.pid && candidate.processCreated) {
+            verification["status"] = "context-changed";
+            if (sameContext()) {
+                process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, candidate.pid);
+                verification["processOpenError"] = process ? 0 : GetLastError();
+                const bool identityBefore = process &&
+                    nativeProcessCreatedFromHandle(process) == candidate.processCreated;
+                verification["status"] = "process-identity-unconfirmed";
+                if (identityBefore) {
+                    verification["attempted"] = true;
+                    const auto threads = WakeGameResume::queryThreads(candidate.pid);
+                    const bool identityAfter =
+                        nativeProcessCreatedFromHandle(process) == candidate.processCreated;
+                    const bool valid = identityAfter && sameContext();
+                    verification["threads"] = threads.total;
+                    verification["suspendedThreads"] = threads.suspended;
+                    // Preserve query completeness separately from the enclosing
+                    // sleep phase: a concurrent wake must not erase what was read.
+                    verification["snapshotKnown"] = threads.known;
+                    verification["snapshotAllSuspended"] = threads.known
+                        ? json(threads.allSuspended()) : json(nullptr);
+                    verification["identityMatches"] = identityAfter;
+                    verification["contextMatches"] = valid;
+                    verification["known"] = valid && threads.known;
+                    if (valid && threads.known) verification["allSuspended"] = threads.allSuspended();
+                    verification["status"] = !valid ? "context-or-identity-changed" :
+                        !threads.known ? "thread-state-unknown" :
+                        threads.allSuspended() ? "all-threads-suspended" : "not-all-threads-suspended";
+                }
+                if (process) { CloseHandle(process); process = nullptr; }
+            }
+        }
+        const ULONGLONG completed = GetTickCount64();
+        const bool ntApiAttempted = invocation.value("ntApiAttempted", false);
+        const bool ntStatusKnown = ntApiAttempted && invocation.contains("ntStatus") &&
+            invocation["ntStatus"].is_number_integer();
+        const bool leaseReused = invocation.value("existingMarkerReused", false) ||
+            (reason && std::strcmp(reason, "existing-sleep-lease") == 0);
+        sgRecordFact("sleep-game-pause-receipt", {
+            {"schemaVersion", 1}, {"generation", generation},
+            {"currentGeneration", currentPowerGeneration()},
+            {"powerPhase", static_cast<int>(g_powerLifecycle.load(std::memory_order_acquire))},
+            {"pid", static_cast<unsigned long long>(result.pid)},
+            {"candidatePid", static_cast<unsigned long long>(candidate.pid)},
+            {"processCreated", std::to_string(candidate.processCreated)},
+            {"valveGeneration", valveGeneration}, {"paused", result.frozen},
+            {"reason", reason ? reason : "unknown"}, {"invocation", invocation},
+            {"ntApiAttempted", ntApiAttempted}, {"ntStatusKnown", ntStatusKnown},
+            {"ntApiAccepted", ntStatusKnown ? json(invocation["ntStatus"].get<long long>() >= 0) : json(nullptr)},
+            {"existingLeaseReused", leaseReused},
+            {"threadVerification", verification}, {"probeElapsedMs", completed - begin},
+            {"detailLogsRequired", true}, {"periodic", false},
+            {"scope", "pause-call-and-single-thread-snapshot;not-visual-or-whole-standby-proof"}
+        });
+    } catch (...) { if (process) CloseHandle(process); }
+}
+
 static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
     SgSuspendResult result;
+    NativeDetectedGame target{};
+    unsigned long long valveGeneration = 0;
+    json invocation;
+    const ULONGLONG attemptStartedTick = GetTickCount64();
+    const auto finish = [&](const char* reason) {
+        // Evidence failure must never change the existing pause result.
+        if (sensorDetailLoggingGate()) try {
+            invocation["attemptStartedTickMs"] = attemptStartedTick;
+            invocation["resultReadyTickMs"] = GetTickCount64();
+            sgRecordSleepPauseReceipt(generation, result, target, valveGeneration, reason, invocation);
+        } catch (...) {}
+        return result;
+    };
     const auto initialPhase = g_powerLifecycle.load(std::memory_order_acquire);
     if (!g_sgPauseResume || !g_sgRepairEligible ||
         currentPowerGeneration() != generation ||
         (initialPhase != PowerLifecycle::Suspending &&
          initialPhase != PowerLifecycle::Suspended))
-        return result;
+        return finish(!g_sgPauseResume ? "pause-disabled" : !g_sgRepairEligible ? "repair-ineligible" :
+            currentPowerGeneration() != generation ? "power-generation-changed" : "power-phase-changed");
 
-    NativeDetectedGame target;
-    unsigned long long valveGeneration = 0;
     if (!nativeValveReadCurrentTarget(&target, &valveGeneration)) {
         traceLog("sleep target capture skipped generation=%llu reason=no-current-valve-target",
                  generation);
-        return result;
+        return finish("no-current-valve-target");
     }
 
     SgSleepTarget existing;
@@ -54392,7 +58618,7 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
         traceLog("sleep target capture skipped generation=%llu reason=existing-sleep-lease leaseGeneration=%llu pid=%lu",
                  generation, existing.powerGeneration,
                  static_cast<unsigned long>(existing.pid));
-        return result;
+        return finish(result.frozen ? "existing-sleep-lease" : "other-sleep-lease");
     }
 
     // Manual pause and sleep pause are separate owners. Never suspend the
@@ -54402,7 +58628,7 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
         result.pid = target.pid;
         traceLog("sleep target capture skipped generation=%llu pid=%lu reason=manual-lease",
                  generation, static_cast<unsigned long>(target.pid));
-        return result;
+        return finish("manual-lease");
     }
 
     {
@@ -54427,7 +58653,7 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
     if (currentPowerGeneration() != generation ||
         (phaseBeforePause != PowerLifecycle::Suspending &&
          phaseBeforePause != PowerLifecycle::Suspended))
-        return result;
+        return finish("pause-context-changed");
     if (nativeValveValidateOwnedSuspendedTarget(
             SG_MANUAL_DIR, target.pid, target.processCreated)) {
         sgClearSleepTargetIfMatches({
@@ -54436,7 +58662,7 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
         });
         traceLog("sleep pause canceled generation=%llu pid=%lu reason=manual-lease-race",
                  generation, static_cast<unsigned long>(target.pid));
-        return result;
+        return finish("manual-lease-race");
     }
     // Recover only exact stale YeManCC sleep markers before creating this
     // generation. If recovery fails, the generation check below fails closed
@@ -54446,6 +58672,7 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
     const json paused = sgSuspendGameByPidUnlocked(
         target.pid, SG_SLEEP_LEASE_DIR, target.processCreated, &target,
         false, generation);
+    if (sensorDetailLoggingGate()) try { invocation = paused; } catch (...) {}
     result.pid = target.pid;
     result.frozen = paused.value("paused", false) ||
         (sgMarkerGeneration(SG_SLEEP_LEASE_DIR, target.pid) == generation &&
@@ -54469,7 +58696,10 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
         };
         sgClearSleepTargetIfMatches(failedTarget);
     }
-    return result;
+    const auto pauseReasonField = paused.find("pauseReason");
+    const char* pauseReason = pauseReasonField != paused.end() && pauseReasonField->is_string()
+        ? pauseReasonField->get_ref<const std::string&>().c_str() : "pause-result-unclassified";
+    return finish(result.frozen && !paused.value("paused", false) ? "sleep-marker-observed" : pauseReason);
 }
 
 static SgResumeResult sgResumeAll(bool allowEligibleFallback = false) {
@@ -54777,6 +59007,7 @@ static void sgQueueWork(SgWork work, unsigned long long generation) {
 // that exact lease before reopening the hardware gate; otherwise the canceled
 // sleep leaves the game paused with no later resume broadcast to repair it.
 static void sgAbortSleepIntent(const char* reason) {
+    sgSleepTimeoutStop(reason ? reason : "sleep-intent-canceled");
     sgClearInternalSleepRequest(reason ? reason : "sleep-intent-canceled");
     sgClearUserStandby("sleep-intent-canceled");
     const unsigned long long generation = g_sgTask.generation != 0
@@ -54965,9 +59196,7 @@ static void sgWorkLoop() {
                              item.generation);
                     continue;
                 }
-                if (powerLifecycleMatches(PowerLifecycle::Resuming, item.generation) &&
-                    g_resumeReadyGeneration.exchange(item.generation, std::memory_order_acq_rel) != item.generation && g_hwnd)
-                    PostMessageW(g_hwnd, WM_POWER_RESUME_READY, 0, 0);
+                publishPowerResumeReady(item.generation);
             } else if (item.kind == SgWork::WakeHibernate) {
                 if (currentPowerGeneration() != item.generation &&
                     !sgSleepLeaseOwnedByGeneration(item.generation)) continue;
@@ -54987,9 +59216,7 @@ static void sgWorkLoop() {
                     sgStopSleepRetry();
                 traceLog("sleep game resume source=kernel-s4-107 generation=%llu",
                          item.generation);
-                if (powerLifecycleMatches(PowerLifecycle::Resuming, item.generation) &&
-                    g_resumeReadyGeneration.exchange(item.generation, std::memory_order_acq_rel) != item.generation && g_hwnd)
-                    PostMessageW(g_hwnd, WM_POWER_RESUME_READY, 0, 0);
+                publishPowerResumeReady(item.generation);
             } else if (item.kind == SgWork::WakeSuspend) {
                 if (currentPowerGeneration() != item.generation &&
                     !sgSleepLeaseOwnedByGeneration(item.generation)) continue;
@@ -55013,9 +59240,7 @@ static void sgWorkLoop() {
                 // Include manual/orphan games even if volatile sleep flags vanished.
                 sgRealWake("resume_suspend", item.generation);
                 traceLog("sleep game resume source=resume-user generation=%llu", item.generation);
-                if (powerLifecycleMatches(PowerLifecycle::Resuming, item.generation) &&
-                    g_resumeReadyGeneration.exchange(item.generation, std::memory_order_acq_rel) != item.generation && g_hwnd)
-                    PostMessageW(g_hwnd, WM_POWER_RESUME_READY, 0, 0);
+                publishPowerResumeReady(item.generation);
             }
         } catch (...) {
             if (item.generation == 0) {
@@ -55152,11 +59377,47 @@ static std::wstring exportControllerMotionEvidence() noexcept {
     struct RestoreError {DWORD value;~RestoreError(){SetLastError(value);}} restoreError{saved};
     try {
         auto snapshot=inputCaptureControllerSensorStatus();
-        snapshot["nativeEvidenceVersion"]=1;snapshot["exportEntry"]="logs.exportAll";
+        {
+            std::lock_guard<std::mutex> selectedLock(g_hidHidePhysicalIdentityMx);
+            const auto binding=legionMotionModelBinding();
+            LegionBackSession& owner=binding.known() && binding.descriptor()->protocol==ymcc::capabilities::controller_motion::ProtocolKind::GoS
+                ? static_cast<LegionBackSession&>(g_legionSBack) : g_legionBack;
+            std::lock_guard<std::mutex> lock(owner.activationMx);
+            const auto value=owner.activation.inspect();
+            snapshot["activation"]={{"scope","controller-source-initialization;not-firmware-or-game-acceptance"},
+                {"phase",static_cast<unsigned>(value.phase)},{"completedCommands",value.completedCommands},
+                {"commandCount",value.commandCount},{"outputReportBytes",value.outputReportBytes},
+                {"pending",value.pending},{"resourceTerminal",value.resourceTerminal},{"error",owner.activation.port.error},
+                {"physicalIdentity",value.key.physicalIdentity},{"powerGeneration",value.key.power},
+                {"rawGeneration",value.key.raw},{"sourceOwnerGeneration",value.key.owner},
+                {"capabilityToken",value.key.token},{"captureEpoch",value.key.captureEpoch},
+                {"contextCurrent",value.key.valid() && value.key.power==currentPowerGeneration() &&
+                    value.key.raw==g_hidResolveCacheGeneration.load(std::memory_order_acquire) &&
+                    value.key.captureEpoch==g_legionMotionCaptureEpoch.load(std::memory_order_acquire) &&
+                    value.key.physicalIdentity==legionMotionStableIdentity(g_hidHidePhysicalIdentity)},
+                {"firmwareAcceptanceProven",false}};
+        }
+        snapshot["nativeEvidenceVersion"]=3;snapshot["exportEntry"]="logs.exportAll";
         snapshot["observedAt"]=nativeLifecycleTimestamp();
         const auto path=yemancc_data_dir()+L"\\controller-motion-evidence.json";
         if(sgWriteFileAtomic(path,snapshot.dump(2,' ',false,json::error_handler_t::replace)))return path;
     }catch(...){/* Missing evidence never authorizes input repair or a mode write. */}
+    return {};
+}
+
+// Explicit log export only: bounded read-only PnP/driver/service metadata.
+// This is separate from cached SensorAPI/WinRT observations and never opens
+// a motion stream, requests permissions, repairs a driver or changes input.
+static std::wstring exportWindowsSensorDeviceEvidence() noexcept {
+    const DWORD saved=GetLastError();
+    struct RestoreError {DWORD value;~RestoreError(){SetLastError(value);}} restoreError{saved};
+    try {
+        auto snapshot=ymcc::sensors::device_evidence::snapshot<json>();
+        snapshot["nativeEvidenceVersion"]=1;snapshot["exportEntry"]="logs.exportAll";
+        snapshot["observedAt"]=nativeLifecycleTimestamp();
+        const auto path=yemancc_data_dir()+L"\\windows-sensor-devices.json";
+        if(sgWriteFileAtomic(path,snapshot.dump(2,' ',false,json::error_handler_t::replace)))return path;
+    }catch(...){/* Failed snapshots are missing evidence, never driver-repair authority. */}
     return {};
 }
 
@@ -55571,6 +59832,7 @@ static std::string nativeLifecycleTimestamp() {
 static bool nativeLifecycleEventIsBase(const char* event) {
     if (!event || !*event) return false;
     static const char* const kBaseEvents[] = {
+        "network-acceleration-wake", // At most one result per wake generation; no credentials or polling.
         "gpu-schedule-first-run", // One configuration-bootstrap attempt; include denied writes/readback failures.
         "monitor-notice-native", // Lease/owner receipts only; never frame telemetry.
         "input-capture-worker-stop", "input-capture-sensor-owner-rejected", "input-host-process-retirement", "input-host-primary-thread-retirement",
@@ -55648,6 +59910,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "ps5-ui-output", // GP-UIINPUT-4: source snapshot + first accepted neutral, not per-frame.
         "msi-native-foreground-isolation", // MSI native-only temporary visibility lease.
         "native-foreground-isolation",
+        "controller-frontend-isolation",
         "input-host.native-helper-diagnostic", // One terminal failure; ordinary export even with detail off.
         "hidhide.owned-game-reconnect-plan", // Four deferred observations + one exhaustion per bound episode.
         "hidhide.family-game-visibility-plan",
@@ -55707,7 +59970,9 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         // 未登记则默认配置（详细门关）下被静默丢弃 ⇒ 真机读不到"是否真切到 DInput、
         // 是否在窗口内确认、耗尽后是否回退 XInput"。每次路线各 ≤4 行，零周期开销。
         "msi-claw-dinput-route",
-        "legion-back-bind", "legion-back-buttons", "legion-back-gate",
+        // One request/result per explicit calibration; ordinary exports must retain the cold-source wait outcome.
+        "controller-gyro-calibration-request", "controller-gyro-calibration-result",
+        "legion-back-bind", "legion-back-buttons", "legion-back-gate", "controller-motion-activation",
         "legion-s-back-bind", "legion-s-back-buttons", "legion-s-back-gate",
         "gpd-back-bind", "gpd-back-buttons", "gpd-back-gate",
         // GP-BACKKEY-CAPABILITY-2 C3：GPD chord/背键诊断三事件（边沿触发，非周期刷日志）。
@@ -55754,6 +60019,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "input-host-started", "input-host-start-blocked", "input-host-start-deferred",
         "virtual-start-protection", "virtual-start-protection-state", "input-host-switch-recovery", "input-host-switch-verification",
         "input-host-msi-source-before-target",
+        "input-host-rog-source-before-target", "input-host-rog-hide-continuation",
         "input-host-switch-execution", "input-host-tuple-recovery", "input-host-wake-execution", "input-host-player-start-work", "input-host-ps-return-proof",
         "msi-crash-record-read",
         "input-host-xbox-startup",
@@ -55805,7 +60071,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         // L2（2026-09-17 用户授权测试接口，pendingDelete — 测试期后回收，回收时
         // 同步移除本条目）：外部命令文件接口回执行（仅人工放 flag 时）。
         "input-capture-test-command",
-        "hidhide.app-reg-resident", "hidhide.cloak-resident", "hidhide.cloak-resident-unproven",
+        "hidhide.app-reg-resident", "hidhide.cloak-resident", "hidhide.cloak-resident-unproven", "hidhide.command-failed",
         "hidhide.driver-degraded", "hidhide.service-not-running",
         "hidhide.unplugged-unhide", "hidhide.unplugged-unhide-held",
         // 2026-09-24 W3 批105（D1，F 系列可判性前置；06-C.3 登记的缺口）：
@@ -55882,9 +60148,9 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "gyro-calibration-restored", "gyro-calibration-result", "gyro-motion-action",
         "gyro-wake-poll-armed", "gyro-wake-poll-succeeded", "gyro-wake-poll-invalidated",
         "gyro-wake-poll-abandoned", "gyro-wake-poll-retry",
-        "gyro-judge-verdict", "gyro-judge-locked", "gyro-judge-abandoned",
+        "gyro-judge-verdict", "gyro-judge-locked", "gyro-judge-abandoned", "gyro-judge-observe",
         "gyro-judge-rearm", "gyro-judge-skipped", "gyro-mock-ignored-real-sensor",
-        "gyro-motion-config-changed",
+        "gyro-motion-config-changed", "gyro-virtual-link-wake",
         // 采集器自身健康（异常才写 + 启动一次性）
         "input-capture-bus-rate", "input-capture-scheduler", "input-capture-timer-resolution",
         "display-idle-state",
@@ -56044,6 +60310,8 @@ static bool nativeLifecycleRecordIsStreaming(const char* event, const json& deta
     if (std::strcmp(event, "rog-raw-input-window") == 0) return true;
 #endif
     if (std::strcmp(event, "input-native-signal-window") == 0) return true;
+    if (std::strcmp(event, "physical-controller-identity") == 0)
+        return detail.value("snapshotReason", "") == "repeat";
     if (std::strcmp(event, "msi-dinput-trigger-evidence") == 0 &&
         !detail.value("legacyRecordSelected",true)) return true; // Sustained/context witnesses follow the detail gate.
     if (std::strcmp(event, "input-host-frame-evidence") == 0)
@@ -56066,28 +60334,72 @@ static bool nativeLifecycleRecordIsStreaming(const char* event, const json& deta
     const bool slotAssign = std::strcmp(event, "gamepad-openxinput-assign-slot") == 0;
     const bool screen = std::strcmp(event, "screen-touchpads-state") == 0;
     const bool oemUsage = std::strcmp(event, "oem-key-usage-query") == 0;
-    const bool playerWork = std::strcmp(event, "input-host-player-start-work") == 0 && detail.value("action", "") == "consuming";
+    const bool playerEvent = std::strcmp(event, "input-host-player-start-work") == 0;
+    const bool playerWork = playerEvent && detail.value("action", "") == "consuming";
+    const bool settle = std::strcmp(event, "input-host-switch-settle") == 0;
+    const bool lateHideEnqueue = std::strcmp(event, "late-hide-enqueue") == 0;
     const bool switchAudit = std::strcmp(event, "input-host-switch-audit") == 0;
     const auto beat = switchAudit ? detail.value("beat", std::string{}) : std::string{};
     const bool throttle = switchAudit && beat == "throttled";
     const bool enqueue = switchAudit && beat == "enqueue";
+    const bool dequeue = switchAudit && beat == "dequeue";
     if (rogDiscovery) return true; // per-interface discovery belongs to detail only
-    if (!rog && !rogSummary && !feedback && !hud && !screen && !oemWakePass && !oemWakeStart && !slotGuard && !slotAssign && !oemUsage && !playerWork && !switchAudit) return false;
+    if (!rog && !rogSummary && !feedback && !hud && !screen && !oemWakePass && !oemWakeStart && !slotGuard && !slotAssign && !oemUsage && !playerEvent && !switchAudit && !settle && !lateHideEnqueue) return false;
     static std::mutex snapshotMx;
     static ymcc::logging::JsonSnapshotLogState rogState, rogSummaryState, feedbackState, hudState, screenState, oemWakePassState, slotGuardState, slotAssignState;
     static ymcc::logging::JsonSnapshotLogState oemUsageState, playerWorkState, throttleState, enqueueState;
+    static ymcc::logging::JsonSnapshotLogState dequeueState, settleState, lateHideEnqueueState;
     const auto generation = g_powerGeneration.load(std::memory_order_acquire);
     std::lock_guard<std::mutex> lock(snapshotMx);
     if (oemWakeStart) { oemWakePassState.known = false; return false; }
-    if (switchAudit && !throttle && !enqueue) {
+    if (switchAudit && !throttle && !enqueue && !dequeue) {
         // A real request/dispatch/result starts a new diagnostic episode.
+        // Re-dequeueing the same waiting item must not erase its first evidence.
         throttleState.known = enqueueState.known = playerWorkState.known = false;
+        dequeueState.known = settleState.known = false;
         return false;
     }
     using Kind = ymcc::logging::SnapshotKind;
-    if (playerWork) return !playerWorkState.observe(detail, generation);
+    if (playerEvent) {
+        if (!playerWork) { playerWorkState.known = false; return false; }
+        return !playerWorkState.observe(detail, generation);
+    }
     if (throttle) return !throttleState.observe(detail, generation, Kind::throttle);
     if (enqueue) return !enqueueState.observe(detail, generation, Kind::queue);
+    const auto validCounter = [&](const char* key) {
+        const auto it = detail.find(key);
+        return it != detail.end() && (it->is_number_unsigned() ||
+            (it->is_number_integer() && it->get<long long>() >= 0));
+    };
+    if (dequeue) {
+        // Only the elapsed wait and revisit count are telemetry; target/reason
+        // changes and unknown fields remain semantic, including schema errors.
+        if (!validCounter("waitedMs") || !validCounter("deferCount")) {
+            dequeueState.known = false; return false;
+        }
+        return !dequeueState.observe(detail, generation, Kind::dequeue);
+    }
+    if (settle) {
+        if (!validCounter("deferMs") || !validCounter("settleMs")) {
+            settleState.known = false; return false;
+        }
+        // A rising countdown opens another settle window, even if its reason
+        // repeats. Remember the last scalar without copying an unchanged JSON.
+        const auto countdown = detail.find("deferMs");
+        if (settleState.known && *countdown > settleState.value["deferMs"])
+            settleState.known = false;
+        const bool changed = settleState.observe(detail, generation, Kind::settle);
+        if (!changed) settleState.value["deferMs"] = *countdown;
+        return !changed;
+    }
+    if (lateHideEnqueue) {
+        const auto coalesced = detail.find("coalesced");
+        if (detail.value("outcome", "") != "coalesced" || coalesced == detail.end() ||
+            !coalesced->is_boolean() || !coalesced->get<bool>()) {
+            lateHideEnqueueState.known = false; return false;
+        }
+        return !lateHideEnqueueState.observe(detail, generation);
+    }
     if (oemUsage) return !oemUsageState.observe(detail, generation);
     // A settings write is an action receipt even if its effective state repeats.
     if (screen && detail.value("callSite", "") == "screenTouchpads.set") return false;
@@ -56670,43 +60982,171 @@ static std::string available_webview_runtime_version() {
     return result;
 }
 
+// Startup preferences are read-only inputs. Faults are defaults in memory and
+// never permission to overwrite a damaged user file or revive stale geometry.
+static bool startupParseJson(const std::string& raw, json& document) noexcept {
+    try {
+        if (raw.size() > (1u << 20)) return false;
+        struct Invalid {};
+        std::vector<std::set<std::string>> containers;
+        document = json::parse(raw, [&](int depth, json::parse_event_t event, json& value) {
+            if (depth > 64) throw Invalid{};
+            if (event == json::parse_event_t::object_start || event == json::parse_event_t::array_start) {
+                if (containers.size() >= 64) throw Invalid{};
+                containers.emplace_back();
+            } else if (event == json::parse_event_t::key) {
+                if (containers.empty() || !containers.back().insert(value.get<std::string>()).second) throw Invalid{};
+            } else if (event == json::parse_event_t::object_end || event == json::parse_event_t::array_end) {
+                if (containers.empty()) throw Invalid{};
+                containers.pop_back();
+            }
+            return true;
+        });
+        if (!document.is_object()) return false;
+        const auto schema = document.find("schemaVersion");
+        return schema == document.end() || (schema->is_number_integer() && *schema >= 0 && *schema <= 1);
+    } catch (...) { return false; }
+}
+
+static bool startupReadJsonFile(const std::wstring& path, json& document, bool& missing,
+    std::string* preimage = nullptr, bool* complete = nullptr) noexcept {
+    missing = false;
+    if (preimage) preimage->clear();
+    if (complete) *complete = false;
+    document = json(json::value_t::discarded);
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            try {
+                auto parent = fspath::path(path).parent_path();
+                while (!parent.empty()) {
+                    const auto attributes = GetFileAttributesW(parent.c_str());
+                    if (attributes != INVALID_FILE_ATTRIBUTES) {
+                        missing = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                        return false;
+                    }
+                    const auto parentError = GetLastError();
+                    if (parentError != ERROR_FILE_NOT_FOUND && parentError != ERROR_PATH_NOT_FOUND) return false;
+                    const auto next = parent.parent_path();
+                    if (next == parent) return false;
+                    parent = next;
+                }
+                missing = true;
+            } catch (...) {}
+        }
+        return false;
+    }
+    struct Close { HANDLE file; ~Close() { CloseHandle(file); } } close{file};
+    try {
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandle(file, &info) || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+        const auto size = (static_cast<unsigned long long>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
+        if (size > (1u << 20)) return false;
+        std::string raw(static_cast<size_t>(size), '\0');
+        size_t offset = 0;
+        while (offset < raw.size()) {
+            DWORD count = 0;
+            if (!ReadFile(file, raw.data() + offset, static_cast<DWORD>(raw.size() - offset), &count, nullptr) || !count) return false;
+            offset += count;
+        }
+        if (preimage) *preimage = raw;
+        if (complete) *complete = true;
+        return startupParseJson(raw, document);
+    } catch (...) { return false; }
+}
+
+static std::mutex& webViewRecoveryConfigMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+static bool webViewGpuStateValid(const json& state) {
+    if (!state.is_object()) return false;
+    if (state.contains("schemaVersion") && (!state["schemaVersion"].is_number_integer() || state["schemaVersion"] < 0 || state["schemaVersion"] > 1)) return false;
+    for (const auto* key : {"mode", "runtimeVersion"})
+        if (!state.contains(key) || !state[key].is_string() || state[key].get_ref<const std::string&>().empty() ||
+            state[key].get_ref<const std::string&>().size() > 4096 || state[key].get_ref<const std::string&>().find('\0') != std::string::npos) return false;
+    if (state["mode"] != "software") return false;
+    for (const auto* key : {"healthyBoots", "failureCount"}) {
+        const auto it = state.find(key);
+        if (it != state.end() && (!it->is_number_integer() || *it < 0 || *it > (std::string(key) == "healthyBoots" ? 3 : INT_MAX))) return false;
+    }
+    for (const auto* key : {"reason", "time"}) {
+        const auto it = state.find(key);
+        if (it != state.end() && (!it->is_string() || it->get_ref<const std::string&>().size() > (std::string(key) == "reason" ? 160u : 64u) ||
+            it->get_ref<const std::string&>().find('\0') != std::string::npos)) return false;
+    }
+    return true;
+}
+
+static bool webViewPreserveDamagedState(const fspath::path& path, const std::string& original) {
+    static std::atomic<unsigned long long> sequence{1};
+    const auto archive = path.wstring() + L".corrupt-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+        std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(sequence.fetch_add(1));
+    if (!sgWriteFileAtomic(archive, original)) return false;
+    json ignored;
+    bool missing = false, complete = false;
+    std::string preserved;
+    startupReadJsonFile(archive, ignored, missing, &preserved, &complete);
+    return complete && preserved == original;
+}
+
+static bool webViewWriteStateVerified(const fspath::path& path, const json& state) {
+    const auto text = state.dump(2);
+    if (text.size() > (1u << 20) || !sgWriteFileAtomic(path.wstring(), text)) return false;
+    json confirmed;
+    bool missing = false, complete = false;
+    std::string written;
+    return startupReadJsonFile(path.wstring(), confirmed, missing, &written, &complete) &&
+        complete && written == text && confirmed == state;
+}
+
 static WebViewGpuMode persistedWebViewGpuMode() {
     try {
-        const auto raw = sgReadFile(webview_gpu_state_path().wstring());
-        if (raw.empty()) return WebViewGpuMode::Default;
-        const auto state = json::parse(raw);
-        if (!state.is_object() || state.value("mode", std::string{}) != "software")
+        json state;
+        bool missing = false;
+        if (!startupReadJsonFile(webview_gpu_state_path().wstring(), state, missing) || !webViewGpuStateValid(state))
             return WebViewGpuMode::Default;
         const auto runtime = available_webview_runtime_version();
-        if (runtime.empty() || state.value("runtimeVersion", std::string{}) != runtime)
+        if (runtime.empty() || state["runtimeVersion"] != runtime || state.value("healthyBoots", 0) >= 3)
             return WebViewGpuMode::Default;
-        if (state.value("healthyBoots", 0) >= 3) return WebViewGpuMode::Default;
         return WebViewGpuMode::Software;
-    } catch (...) {
-        return WebViewGpuMode::Default;
-    }
+    } catch (...) { return WebViewGpuMode::Default; }
 }
 
 static void persistSoftwareWebViewGpuMode(const char* reason) {
     try {
         const auto runtime = available_webview_runtime_version();
         if (runtime.empty()) return;
-        auto state = json::object();
-        const auto raw = sgReadFile(webview_gpu_state_path().wstring());
-        if (!raw.empty()) {
-            try {
-                const auto old = json::parse(raw);
-                if (old.is_object() && old.value("runtimeVersion", std::string{}) == runtime)
-                    state = old;
-            } catch (...) {}
+        std::lock_guard<std::mutex> lock(webViewRecoveryConfigMutex());
+        const auto path = webview_gpu_state_path();
+        json previous;
+        bool missing = false, complete = false;
+        std::string original;
+        const bool parsed = startupReadJsonFile(path.wstring(), previous, missing, &original, &complete);
+        if (!missing && !complete) return;
+        if (previous.is_object() && previous.contains("schemaVersion") &&
+            (!previous["schemaVersion"].is_number_integer() || previous["schemaVersion"] < 0 || previous["schemaVersion"] > 1)) return;
+        const bool valid = parsed && webViewGpuStateValid(previous);
+        if (!missing && !valid && !webViewPreserveDamagedState(path, original)) return;
+        auto state = valid ? previous : json::object();
+        const int failures = valid && previous["runtimeVersion"] == runtime ? previous.value("failureCount", 0) : 0;
+        std::string note = reason ? reason : "WebView2 process failure";
+        if (note.size() > 160) {
+            size_t end = 160;
+            while (end && (static_cast<unsigned char>(note[end]) & 0xc0) == 0x80) --end;
+            note.resize(end);
         }
+        try { (void)json(note).dump(); } catch (...) { note = "WebView2 process failure"; }
         state["mode"] = "software";
         state["runtimeVersion"] = runtime;
-        state["reason"] = std::string(reason ? reason : "WebView2 process failure").substr(0, 160);
-        state["failureCount"] = state.value("failureCount", 0) + 1;
+        state["reason"] = note;
+        state["failureCount"] = failures < INT_MAX ? failures + 1 : INT_MAX;
         state["healthyBoots"] = 0;
         state["time"] = webViewLocalTimestamp(false);
-        sgWriteFileAtomic(webview_gpu_state_path().wstring(), state.dump(2));
+        if (webViewGpuStateValid(state)) (void)webViewWriteStateVerified(path, state);
     } catch (...) {}
 }
 
@@ -56714,22 +61154,19 @@ static void recordHealthyWebViewGpuBoot() {
     try {
         const auto runtime = available_webview_runtime_version();
         if (runtime.empty()) return;
+        std::lock_guard<std::mutex> lock(webViewRecoveryConfigMutex());
         const auto path = webview_gpu_state_path();
-        const auto raw = sgReadFile(path.wstring());
-        if (raw.empty()) return;
-        auto state = json::parse(raw);
-        if (!state.is_object() || state.value("mode", std::string{}) != "software" ||
-            state.value("runtimeVersion", std::string{}) != runtime) {
-            return;
-        }
-        const int healthyBoots = state.value("healthyBoots", 0) + 1;
-        if (healthyBoots >= 3) {
+        json state;
+        bool missing = false;
+        if (!startupReadJsonFile(path.wstring(), state, missing) || !webViewGpuStateValid(state) || state["runtimeVersion"] != runtime) return;
+        const int healthyBoots = state.value("healthyBoots", 0);
+        if (healthyBoots >= 2) {
             std::error_code ec;
             fspath::remove(path, ec);
             return;
         }
-        state["healthyBoots"] = healthyBoots;
-        sgWriteFileAtomic(path.wstring(), state.dump(2));
+        state["healthyBoots"] = healthyBoots + 1;
+        (void)webViewWriteStateVerified(path, state);
     } catch (...) {}
 }
 
@@ -56911,8 +61348,42 @@ static void appendWebViewFailureDiagnostic(const WebViewFailureInfo& info) {
     });
 }
 
+static bool webViewFailureMarkerValid(const json& marker) {
+    if (!marker.is_object()) return false;
+    if (marker.contains("schemaVersion") && (!marker["schemaVersion"].is_number_integer() || marker["schemaVersion"] < 0 || marker["schemaVersion"] > 1)) return false;
+    for (const auto* key : {"time", "kind", "reason", "description", "module", "gpuMode"}) {
+        const auto it = marker.find(key);
+        if (it == marker.end() || !it->is_string() || it->get_ref<const std::string&>().find('\0') != std::string::npos) return false;
+    }
+    const auto& time = marker["time"].get_ref<const std::string&>();
+    if (time.size() != 23) return false;
+    for (size_t i = 0; i < time.size(); ++i) {
+        const char separator = i == 4 || i == 7 ? '-' : i == 10 ? 'T' : i == 13 || i == 16 ? ':' : i == 19 ? '.' : '\0';
+        if (separator ? time[i] != separator : time[i] < '0' || time[i] > '9') return false;
+    }
+    auto number = [&](size_t begin, size_t count) { unsigned value = 0; for (size_t i = begin; i < begin + count; ++i) value = value * 10 + time[i] - '0'; return static_cast<WORD>(value); };
+    SYSTEMTIME recorded{};
+    recorded.wYear = number(0, 4); recorded.wMonth = number(5, 2); recorded.wDay = number(8, 2);
+    recorded.wHour = number(11, 2); recorded.wMinute = number(14, 2); recorded.wSecond = number(17, 2); recorded.wMilliseconds = number(20, 3);
+    FILETIME ignored{};
+    if (!SystemTimeToFileTime(&recorded, &ignored)) return false;
+    if (marker["kind"] != "browser") return false;
+    bool knownReason = false;
+    for (const auto* reason : {"unexpected", "unresponsive", "terminated", "crashed", "launch-failed", "out-of-memory", "profile-deleted", "unknown"})
+        if (marker["reason"] == reason) knownReason = true;
+    if (!knownReason || (marker["gpuMode"] != "default" && marker["gpuMode"] != "legacy" && marker["gpuMode"] != "software")) return false;
+    if (marker["description"].get_ref<const std::string&>().size() > (1u << 16) || marker["module"].get_ref<const std::string&>().size() > (1u << 17)) return false;
+    if (!marker.contains("exitCode") || !marker["exitCode"].is_number_integer() || marker["exitCode"] < INT_MIN || marker["exitCode"] > INT_MAX) return false;
+    for (const auto* key : {"generation", "browserProcessId"}) {
+        const auto it = marker.find(key);
+        if (it == marker.end() || !it->is_number_integer() || *it < 0) return false;
+    }
+    return marker["browserProcessId"] <= 0xffffffffull;
+}
+
 static bool writeWebViewFailureMarker(const WebViewFailureInfo& info) {
     try {
+        std::lock_guard<std::mutex> lock(webViewRecoveryConfigMutex());
         std::error_code ec;
         fspath::create_directories(webview_profile_dir(), ec);
         if (ec) return false;
@@ -56927,10 +61398,22 @@ static bool writeWebViewFailureMarker(const WebViewFailureInfo& info) {
             {"generation", info.generation},
             {"browserProcessId", info.browserProcessId}
         };
-        return sgWriteFileAtomic(webview_failure_marker_path().wstring(), marker.dump(2));
-    } catch (...) {
-        return false;
-    }
+        if (!webViewFailureMarkerValid(marker)) return false;
+        json previous;
+        bool missing = false, complete = false;
+        std::string original;
+        const auto path = webview_failure_marker_path();
+        const bool parsed = startupReadJsonFile(path.wstring(), previous, missing, &original, &complete);
+        if (!missing && !complete) return false;
+        if (previous.is_object() && previous.contains("schemaVersion") &&
+            (!previous["schemaVersion"].is_number_integer() || previous["schemaVersion"] < 0 || previous["schemaVersion"] > 1)) return false;
+        if (!missing && (!parsed || !webViewFailureMarkerValid(previous))) {
+            if (!webViewPreserveDamagedState(path, original)) return false;
+        } else if (!missing) {
+            for (const auto& [key, value] : previous.items()) if (!marker.contains(key)) marker[key] = value;
+        }
+        return webViewWriteStateVerified(path, marker);
+    } catch (...) { return false; }
 }
 
 static bool isolateWebViewProfile(const char* trigger, fspath::path* movedTo = nullptr) {
@@ -57018,14 +61501,16 @@ static void reportBrowserCrashModule(const fspath::path& profileDir, int maxAtte
 }
 
 static void isolateMarkedWebViewProfile() {
-    const auto marker = webview_failure_marker_path();
-    std::error_code ec;
-    if (!fspath::exists(marker, ec) || ec) return;
-    fspath::path movedTo;
-    isolateWebViewProfile("startup-browser-marker", &movedTo);
-    // 上一次会话在隔离完成前就退出了 ⇒ 崩溃模块证据随 profile 一起被挪到了 movedTo。
-    // 启动路径不等待（崩溃早已发生、Crashpad 早已落盘），单次读取即可。
-    reportBrowserCrashModule(movedTo, 1);
+    try {
+        std::lock_guard<std::mutex> lock(webViewRecoveryConfigMutex());
+        json marker;
+        bool missing = false;
+        if (!startupReadJsonFile(webview_failure_marker_path().wstring(), marker, missing) || !webViewFailureMarkerValid(marker)) return;
+        fspath::path movedTo;
+        if (!isolateWebViewProfile("startup-browser-marker", &movedTo)) return;
+        // Only a valid recorded browser failure authorizes this startup action.
+        reportBrowserCrashModule(movedTo, 1);
+    } catch (...) {}
 }
 
 static std::wstring webViewBrowserArguments(WebViewGpuMode mode) {
@@ -57211,27 +61696,75 @@ static void applyFramelessDwmAttrs() {
     }
 }
 
-static json loadConfig() {
-    for (const auto& dir : production_asset_dirs()) {
-        auto path = dir + L"\\app.config.json";
-        std::ifstream f(path);
-        if (f) {
-            try {
-                json j;
-                f >> j;
-                return j;
-            } catch (...) {
-                // 外部配置损坏不能阻断窗口创建；继续尝试下一候选，最终回退内置/默认配置。
-            }
+static json startupNormalizeAppConfig(json document, const json& defaults) {
+    if (!document.is_object()) return defaults;
+    const auto fallback = defaults.value("window", json::object());
+    if (document.contains("window")) {
+        auto& window = document["window"];
+        if (!window.is_object()) window = fallback;
+        auto repair = [&](const char* key, bool valid) {
+            if (valid || !window.contains(key)) return;
+            if (fallback.contains(key)) window[key] = fallback[key];
+            else window.erase(key);
+        };
+        for (const auto* key : {"title", "singleInstanceKey", "effect", "backgroundColor", "lightBackgroundColor", "darkBackgroundColor"}) {
+            const auto it = window.find(key);
+            repair(key, it == window.end() || (it->is_string() && it->get_ref<const std::string&>().size() <= 4096 &&
+                it->get_ref<const std::string&>().find('\0') == std::string::npos));
+        }
+        for (const auto* key : {"width", "height", "minWidth", "minHeight"}) {
+            const auto it = window.find(key);
+            repair(key, it == window.end() || (it->is_number_integer() && *it >= 1 && *it <= 32768));
+        }
+        for (const auto* key : {"frameless", "resizable", "alwaysOnTop", "singleInstance", "rounded", "center", "showWhenReady", "splash",
+            "saveWindowState", "fullHeight", "visible", "allowWebviewPermissions", "followSystemTheme"}) {
+            const auto it = window.find(key);
+            repair(key, it == window.end() || it->is_boolean());
         }
     }
-#ifdef SINGLE_EXE
-    auto cfg = loadResourceString(IDR_CONFIG);
-    if (!cfg.empty()) {
-        try { return json::parse(cfg); } catch (...) {}
+    if (document.contains("permissions")) {
+        auto& permissions = document["permissions"];
+        if (!permissions.is_object()) permissions = json::object();
+        for (auto& [_, value] : permissions.items()) if (!value.is_boolean()) value = false;
     }
+    return document;
+}
+
+static json startupNormalizeWindowState(const json& document) {
+    if (!document.is_object()) return json::object();
+    for (const auto* key : {"x", "y", "w", "h"}) {
+        const auto it = document.find(key);
+        if (it == document.end() || !it->is_number_integer()) return json::object();
+        if (it->is_number_unsigned()) {
+            if (it->get<unsigned long long>() > static_cast<unsigned long long>(INT_MAX)) return json::object();
+        } else {
+            const auto value = it->get<long long>();
+            if (value < INT_MIN || value > INT_MAX) return json::object();
+        }
+    }
+    if (!document.contains("maximized") || !document["maximized"].is_boolean()) return json::object();
+    const auto x = document["x"].get<long long>(), y = document["y"].get<long long>();
+    const auto w = document["w"].get<long long>(), h = document["h"].get<long long>();
+    if (w < 1 || h < 1 || w > 32768 || h > 32768 || x + w > INT_MAX || y + h > INT_MAX) return json::object();
+    return document;
+}
+
+static json loadConfig() {
+    try {
+        auto defaults = json::object();
+#ifdef SINGLE_EXE
+        json embedded;
+        if (startupParseJson(loadResourceString(IDR_CONFIG), embedded))
+            defaults = startupNormalizeAppConfig(std::move(embedded), defaults);
 #endif
-    return json::object();
+        for (const auto& dir : production_asset_dirs()) {
+            json document;
+            bool missing = false;
+            if (startupReadJsonFile(dir + L"\\app.config.json", document, missing))
+                return startupNormalizeAppConfig(std::move(document), defaults);
+        }
+        return defaults;
+    } catch (...) { return json::object(); }
 }
 
 // ================================================================
@@ -58180,22 +62713,26 @@ static bool ipc_cmd_async(const std::string& cmd) {
     if (cmd == "sleep.staticWake.get" || cmd == "sleep.staticWake.scan" || cmd == "sleep.staticWake.restore") return true; // Explicit bounded IO; never block the UI, including legacy mode.
     if (cmd == "gpu.fsr.page") return false; // Metadata-only cancellation must never queue behind AMD driver IO.
     if (cmd == "gamepad.driverSetup.get") return true; // On-demand USB/IP read-only helper must never block the UI.
+    if (cmd == "proc.identities" || cmd == "rtss.setAffinityExact") return true; // Bounded owner discovery / held-instance process write.
     if (cmd == "fxsound.getState" || cmd == "fxsound.setEnabled") return true; // Bounded silent config/normal-quit transaction.
     if (cmd == "lossless.ensureRunning" || cmd == "lossless.getState" || cmd == "lossless.ensureScaling" || cmd == "lossless.detect" || cmd == "lossless.watch" || cmd == "lossless.resetFailed") return true; // Bounded process/UIA IO; explicit scaling may refresh one game window, no input injection.
     // This command owns UI focus state; keep it synchronous in every async mode.
-    if (cmd == "game.losslessReturnTarget") return false;
+    if (cmd == "game.losslessReturnTarget" || cmd == "shell.returnDesktop") return false;
     // Mouse provider startup/stop and COM calls must never occupy the UI.
     if (cmd == "mouseMode.get" || cmd == "mouseMode.set" || cmd == "mouseMode.toggle" ||
         cmd == "mouseMode.setBackend" || cmd == "mouseMode.releaseJoyxoff" ||
-        cmd == "mouseMode.setPolicy" || cmd == "mouseMode.history") return true;
+        cmd == "mouseMode.setPolicy" || cmd == "mouseMode.history" ||
+        cmd == "mouseMode.rules.get" || cmd == "mouseMode.rules.set") return true;
     if (cmd.rfind("gameMedia.", 0) == 0) return true;
     // Export drains detailed buffers and packages files; never run it on the UI, even in legacy modes.
     if (cmd == "logs.deleteCurrent") return true;
     if (cmd == "logs.exportAll") return true;
     if (cmd == "monitor.hwinfo.manage") return true;
+    if (cmd == "updateAccel.get" || cmd == "updateAccel.set" || cmd == "updateAccel.resume") return true; // Shared process-owner reads and bounded explicit task/process actions.
     // A bounded external Shell request must never occupy the UI, including legacy mode 0.
     if (cmd == "shell.taskView" || cmd == "deckySidebar.repairConnection") return true;
     if (cmd == "customSteamLibrary.gameLogo") return true;
+    if (cmd == "gpuSchedule.getState") return true; // One read-only adapter query; never block the UI thread.
     if (cmd == "gpu.dedicatedMemory.get" || cmd == "gpu.dedicatedMemory.set") return true;
     if (cmd == "gpu.fsr.get" || cmd == "gpu.fsr.initialize" || cmd == "gpu.fsr.set") return true;
     if (cmd == "model.secondaryDisplay.get" || cmd == "model.secondaryDisplay.set" || cmd == "model.secondaryDisplay.toggle" || cmd == "model.secondaryDisplay.release") return true;
@@ -58285,7 +62822,26 @@ struct IpcResultEnvelope {
     unsigned long long generation = 0;
     int childId = 0;
     json response;
+    std::string command;
 };
+
+using IpcResultMailbox = ymcc::ipc::ResultMailbox<IpcResultEnvelope>;
+// Workers retain this owner through completion, including bounded-exit detach.
+static auto g_ipcResultMailbox = std::make_shared<IpcResultMailbox>();
+static void ipc_complete_async(const std::shared_ptr<IpcResultMailbox>& mailbox,
+                               unsigned long long generation, int childId,
+                               json response, std::string command = {}) noexcept {
+    try {
+        auto result = std::unique_ptr<IpcResultEnvelope>(
+            new IpcResultEnvelope{generation, childId, std::move(response), std::move(command)});
+        mailbox->post(std::move(result), [](std::uintptr_t token) {
+            return PostMessageW(g_hwnd, WM_IPC_RESULT, 0, static_cast<LPARAM>(token)) != FALSE;
+        });
+    } catch (...) {
+        // No exception may cross a Windows work-item callback or the UI pump.
+        // Ownership is local or in the mailbox; never fall back to a raw pointer.
+    }
+}
 
 static std::atomic<unsigned long long> g_aiIsolationDenied{0};
 static bool aiIsolatedPathAllowed(const std::wstring& input) {
@@ -58330,7 +62886,7 @@ static bool aiIsolatedIpcAllowed(const std::string& cmd, const json& a) {
         "app.aiFanMockSession", "app.aiFanMockAcceptRequest", "app.aiCpuIsolatedSession", "app.fanStateDir", "app.fanActivity",
         "settings.read", "settings.write", "settings.reset", "settings.location", "settings.inputSnapshot",
         "monitor.start", "monitor.stop", "monitor.snapshot", "monitor.takeover", "monitor.releaseRelay",
-        "power.lifecycle", "power.fanLifecycle", "power.activeScheme", "power.hibernateState", "power.resumeComplete", "power.fanManualWake",
+        "power.lifecycle", "power.fanLifecycle", "power.activeScheme", "power.schemeExists", "power.setActiveScheme", "power.hibernateState", "power.resumeComplete", "power.fanManualWake",
         "proc.running", "proc.findExact", "process.identity", "input.gameOverride.session", "bootMode.startup.identity", "input.shortcutRuntime.clear", "input.shortcutRuntime.get",
         "os.isDarkMode", "os.version", "os.hostname", "os.info", "os.memory", "os.cpu",
         "display.getModes", "display.getBrightness", "display.getScale", "display.getInfo",
@@ -58428,10 +62984,40 @@ static void ipc_broadcast_controller_snapshot(const json& message) {
         if (cw && cw->view) post(id);
     }
 }
-static void ipc_post_json(int childId, const json& message) {
-    auto target = ipc_view_for_child(childId);
-    if (!target) return;
-    target->PostWebMessageAsJson(U2W(message.dump()).c_str());
+static void ipc_post_json(int childId, const json& message, const std::string& command = {}) noexcept {
+    // The handler catch ends before this UI-thread delivery. File bytes can
+    // still fail strict JSON serialization here; never unwind through WndProc.
+    try {
+        const auto target = ipc_view_for_child(childId);
+        if (!target) return;
+        std::wstring wire;
+        try {
+            wire = U2W(message.dump());
+        } catch (const json::exception& error) {
+            const auto id = message.find("id");
+            const bool response = id != message.end() && id->is_number_integer();
+            try { appendNativeLifecycleLog("ipc-response-serialization-failed", {
+                {"childId", childId}, {"command", command},
+                {"requestId", response ? *id : json(nullptr)}, {"jsonError", error.id}
+            }); } catch (...) {}
+            // Reject the matching request; damaged text is never valid data.
+            // Events have no pending request and are dropped after the receipt.
+            if (!response) return;
+            wire = U2W(json{{"id", *id}, {"error", "NATIVE_RESPONSE_SERIALIZATION_FAILED"}}.dump());
+        }
+        const HRESULT hr = target->PostWebMessageAsJson(wire.c_str());
+        if (FAILED(hr)) {
+            try { appendNativeLifecycleLog("ipc-response-delivery-failed", {
+                {"childId", childId}, {"command", command}, {"hresult", static_cast<long>(hr)}
+            }); } catch (...) {}
+        }
+    } catch (...) {
+        // Allocation/COM errors must also stay inside the response boundary.
+        // No retries, polling or controller teardown occurs in this callback.
+        try { appendNativeLifecycleLog("ipc-response-delivery-exception", {
+            {"childId", childId}, {"command", command}
+        }); } catch (...) {}
+    }
 }
 
 static void ipc_emit(const std::string& ev, const json& data = {}) {
@@ -58480,6 +63066,17 @@ static void ipc_emit(const std::string& ev, const json& data = {}) {
             if (cw && cw->view) ipc_post_json(id, acdc);
         }
     }
+}
+
+// Fixed controller-state snapshots already own their payload. Preserve generic event enrichment.
+static void ipc_emit_owned_gamepad_state(json data) {
+    UiCostIpcScope ipcCost("gamepad.state");
+    if (!g_view && g_children.empty()) return;
+    if (!data.is_object()) data = json::object();
+    json message = json::object();
+    message["event"] = "gamepad.state";
+    message["data"] = std::move(data);
+    ipc_broadcast_controller_snapshot(message);
 }
 
 // HUD pulses own their local envelope and have no power-event enrichment.
@@ -58573,13 +63170,19 @@ static std::wstring updateTransactionStatePath() {
 }
 
 static void updateProgressPost(const json& data) {
+    json view=ymcc::updateconfig::diagnosticsValid(data)?data:json{{"phase","failed"},{"message","更新状态字段未通过验证，可重新检查"}};
+    if(!ymcc::updateconfig::diagnosticsValid(data)&&data.is_object())for(const auto* key:{"message","error"})
+        if(data.contains(key)&&ymcc::updateconfig::text(data[key],16384))view[key]=data[key];
     {
         std::lock_guard<std::mutex> lock(g_updateProgressMtx);
-        g_updateProgress = data;
-        sgWriteFileAtomic(updateProgressPath(), data.dump());
+        try{ymcc::updateconfig::save(updateProgressPath(),view,262144,
+            [](const json& value){return ymcc::updateconfig::diagnosticsValid(value);},
+            [](const std::wstring& path,const std::string& text){return sgWriteFileAtomic(path,text);});}
+        catch(...){view["snapshotPersistenceError"]="updater-progress-not-persisted";}
+        g_updateProgress = view;
     }
     if (!g_hwnd || !IsWindow(g_hwnd)) return;
-    auto* heap = new json(data);
+    auto* heap = new json(view);
     if (!PostMessageW(g_hwnd, WM_UPDATE_PROGRESS, 0, reinterpret_cast<LPARAM>(heap)))
         delete heap;
 }
@@ -58587,64 +63190,35 @@ static void updateProgressPost(const json& data) {
 static json updateProgressRead() {
     {
         std::lock_guard<std::mutex> lock(g_updateProgressMtx);
-        if (!g_updateProgress.empty()) return g_updateProgress;
+        if (!g_updateProgress.empty()) return ymcc::updateconfig::diagnosticsValid(g_updateProgress) ? g_updateProgress : json::object();
     }
-    const auto raw = sgReadFile(updateProgressPath());
-    if (raw.empty()) return json::object();
-    try {
-        auto parsed = json::parse(raw);
-        return parsed.is_object() ? parsed : json::object();
-    } catch (...) {
-        return json::object();
-    }
+    const auto stored=ymcc::updateconfig::read(updateProgressPath(),262144);
+    return stored.kind==ymcc::updateconfig::Kind::ready&&ymcc::updateconfig::diagnosticsValid(stored.value) ? stored.value : json::object();
 }
 
 static json updateTransactionStateRead() {
-    auto raw = sgReadFile(updateTransactionStatePath());
-    if (raw.size() >= 3 && static_cast<unsigned char>(raw[0]) == 0xEF &&
-        static_cast<unsigned char>(raw[1]) == 0xBB &&
-        static_cast<unsigned char>(raw[2]) == 0xBF) {
-        raw.erase(0, 3);
-    }
-    if (raw.empty()) return json::object();
-    try {
-        auto parsed = json::parse(raw);
-        return parsed.is_object() ? parsed : json::object();
-    } catch (...) {
-        return json::object();
-    }
+    const auto stored=ymcc::updateconfig::read(updateTransactionStatePath(),65536);
+    return stored.kind==ymcc::updateconfig::Kind::ready&&ymcc::updateconfig::diagnosticsValid(stored.value,true) ? stored.value : json::object();
 }
 
 static json updateStateReadWithTransaction() {
     auto progress = updateProgressRead();
-    // Writable diagnostic state can be truncated or have old/wrong field types.
-    // It must never prevent the protected recovery journal from being read.
-    for (const auto* key : {"phase", "stage", "version", "sha256", "operationId", "message", "error"})
-        if (progress.contains(key) && !progress[key].is_string()) progress.erase(key);
     auto state = updateTransactionStateRead();
-    for (const auto* key : {"phase", "version"})
-        if (state.contains(key) && !state[key].is_string()) state.erase(key);
     const auto statePhase = state.value("phase", std::string{});
     const auto stateVersion = state.value("version", std::string{});
     const auto progressVersion = progress.value("version", std::string{});
-    const bool legacyStartedState = statePhase == "started" && stateVersion.empty() &&
-        progress.value("phase", std::string{}) == "installing";
-    if ((!stateVersion.empty() && stateVersion == progressVersion && statePhase == "committed") ||
-        legacyStartedState) {
-        progress["phase"] = "completed";
-        progress["percent"] = 100;
-        progress["message"] = "更新已完成";
-        progress["error"] = "";
-    } else if (stateVersion.empty() || stateVersion == progressVersion) {
+    // A writable launch handshake or committed marker is diagnostic evidence,
+    // not proof that the protected installation transaction actually committed.
+    if (stateVersion.empty() || stateVersion == progressVersion) {
         if (progress.value("phase", std::string{}) == "installing" &&
-            (statePhase == "copying" || statePhase == "tdp-verified" ||
-             statePhase == "launching")) {
+            (statePhase == "started" || statePhase == "copying" || statePhase == "tdp-verified" || statePhase == "launching" || statePhase == "committed")) {
             progress["phase"] = "interrupted";
-            progress["message"] = "上次安装在提交前中断，可重试安装";
+            progress["message"] = "上次安装尚未确认提交，可重新检查或修复";
         }
     }
-    // Protected journal is authoritative even after the EXE already reports the
-    // target version or writable progress was lost. Never replay cached scripts.
+    progress["repairAuthorized"] = false;
+    progress["installerActive"] = false;
+    bool committed=false;
     wchar_t currentExe[32768]{};
     if (GetModuleFileNameW(nullptr, currentExe, 32768)) {
         const auto journal = ymcc::updaterecovery::read(currentExe, POWER_CONTROL_DIR);
@@ -58659,10 +63233,16 @@ static json updateStateReadWithTransaction() {
             progress["installerActive"] = installerActive;
             progress["message"] = installerActive ? "安装助手正在完成更新，请稍候" : "上次安装未完成，可重新安装以修复";
             progress["error"] = "";
-        } else {
-            progress["repairAuthorized"] = false;
-            progress["installerActive"] = false;
+        } else if (!journal.empty() && journal.value("phase",std::string{})=="committed" &&
+            (progressVersion.empty() || journal.value("version",std::string{})==progressVersion) &&
+            (progress.value("sha256",std::string{}).empty() || ymcc::updaterecovery::same(journal.value("sha256",std::string{}),progress.value("sha256",std::string{}))) &&
+            (progress.value("operationId",std::string{}).empty() || journal.value("operationId",std::string{})==progress.value("operationId",std::string{}))) {
+            committed=true;progress["version"]=journal.value("version",std::string{});progress["sha256"]=journal.value("sha256",std::string{});
+            progress["phase"]="completed";progress["stage"]="install";progress["percent"]=100;progress["message"]="更新已完成";progress["error"]="";
         }
+    }
+    if (!committed && progress.value("phase",std::string{})=="completed") {
+        progress["phase"]="interrupted";progress["message"]="更新完成状态缺少可信提交记录，请重新检查";
     }
     return progress;
 }
@@ -58775,26 +63355,30 @@ static void ipc_dispatch(ICoreWebView2* sourceView, LPCWSTR raw) {
         if(cmd=="lossless.resetFailed"){
             // A wedged UIA provider may occupy the normal IPC workers. The
             // bounded reset has its own on-demand Windows work item.
-            struct ResetWork {json response,args;IpcFn fn;decltype(generation) gen;int child;};
-            auto* work=new ResetWork{resp,args,it->second,generation,targetChildId};
+            struct ResetWork {json response,args;IpcFn fn;decltype(generation) gen;int child;std::shared_ptr<IpcResultMailbox> mailbox;};
+            auto* work=new ResetWork{resp,args,it->second,generation,targetChildId,g_ipcResultMailbox};
             const auto callback=[](LPVOID raw)->DWORD {
                 std::unique_ptr<ResetWork> owned(static_cast<ResetWork*>(raw));
                 try{owned->response["result"]=owned->fn(owned->args);}
                 catch(const std::exception& e){owned->response["error"]=e.what();}
                 catch(...){owned->response["error"]="lossless reset failed";}
-                auto* envelope=new IpcResultEnvelope{owned->gen,owned->child,std::move(owned->response)};
-                if(!PostMessageW(g_hwnd,WM_IPC_RESULT,0,reinterpret_cast<LPARAM>(envelope)))delete envelope;
+                ipc_complete_async(owned->mailbox, owned->gen, owned->child, std::move(owned->response));
                 return 0;
             };
             if(!QueueUserWorkItem(callback,work,WT_EXECUTEDEFAULT)){delete work;resp["error"]="lossless reset worker unavailable";ipc_post_json(targetChildId,resp);}
             return;
         }
 
+        if (cmd == "rtss.setAffinityExact") {
+            args["_nativeRtssPowerGeneration"] = currentPowerGeneration();
+            args["_nativeRtssDeadlineTick"] = GetTickCount64() + 5000;
+        }
+
         if (ipc_cmd_async(cmd)) {
             IpcFn fn = it->second;
             ULONGLONG tq = GetTickCount64();
             if (cmd == "http.request") args["_nativeHttpDeadlineTick"] = tq + ymcc::http::timeoutBudget(args.value("timeoutMs", 30000LL));
-            const bool queued = poolSubmit([resp, args, fn = std::move(fn), cmd, tq, generation, targetChildId]() mutable {
+            const bool queued = poolSubmit([resp, args, fn = std::move(fn), cmd, tq, generation, targetChildId, mailbox = g_ipcResultMailbox]() mutable {
                 ULONGLONG ts = GetTickCount64();
                 try { resp["result"] = fn(args); }
                 catch (const std::exception& e) { resp["error"] = e.what(); }
@@ -58811,11 +63395,9 @@ static void ipc_dispatch(ICoreWebView2* sourceView, LPCWSTR raw) {
                 traceLog("IPC %-28s pool wait=%llums exec=%llums", cmd.c_str(),
                          (unsigned long long)(ts - tq),
                          (unsigned long long)(GetTickCount64() - ts));
-                // WebView2 仅允许 UI 线程调用 → 结果经 WM_IPC_RESULT 回传
-                //（对齐 watcher 的 WM_FILE_CHANGED 堆分配 + WndProc delete 模式）
-                auto* heap = new IpcResultEnvelope{generation, targetChildId, std::move(resp)};
-                if (!PostMessageW(g_hwnd, WM_IPC_RESULT, 0, (LPARAM)heap))
-                    delete heap; // 窗口已销毁（进程退出中）
+                // The UI message carries only a token. The mailbox still owns
+                // successfully posted results if root destruction discards them.
+                ipc_complete_async(mailbox, generation, targetChildId, std::move(resp), std::move(cmd));
             });
             if (!queued) {
                 resp["error"] = "IPC worker queue is full or stopping";
@@ -58907,7 +63489,7 @@ static void showWindowAnimated(HWND hwnd, int showCmd, bool activate) {
     }
 
     if (hwnd == g_hwnd) {
-        if (isMinimize) cancelTaskbarLayoutRecheck();
+        if (isMinimize) stopTaskbarLayoutObserver();
         else if (g_fullHeight || IsZoomed(hwnd)) {
             focusReflowMainWindow();
             scheduleTaskbarLayoutRecheck();
@@ -58942,7 +63524,7 @@ static void hideWindowAnimated(HWND hwnd) {
     if (!hwnd) return;
 
     const bool isMainWindow = hwnd == g_hwnd;
-    if (isMainWindow) cancelTaskbarLayoutRecheck();
+    if (isMainWindow) stopTaskbarLayoutObserver();
     const bool scheduleRogEnsure =
         isMainWindow && IsWindowVisible(hwnd) && !g_rogHideEnsureDone;
     if (scheduleRogEnsure) {
@@ -59978,6 +64560,20 @@ static std::string tdpObservationRunId() {
 static void appendTdpObservation(const char* event, json detail, bool raw = false) noexcept {
     try {
         if(!detail.is_object())detail=json::object();
+        const bool floating=detail.value("source","")=="autofloat";
+        const bool explicitFailure=std::strcmp(event,"tdp.failed")==0 || std::strcmp(event,"tdp.skipped")==0 ||
+            (detail.contains("rc")&&detail["rc"].is_number_integer()&&detail["rc"].get<long long>()!=0) ||
+            (detail.contains("ok")&&detail["ok"].is_boolean()&&!detail["ok"].get<bool>());
+        const bool floatingSuccess=ymcc::tdpdiag::successfulFloatingDetail(event,detail);
+        static std::atomic<unsigned> floatingCompleted{0};
+        const unsigned completedCount=floatingSuccess && std::strcmp(event,"tdp.completed")==0
+            ? floatingCompleted.fetch_add(1,std::memory_order_relaxed)+1 : 0;
+        const bool aggregate=completedCount && completedCount%32==0;
+        const bool detailEnabled=g_domainLogEnabled[1].load(std::memory_order_acquire);
+        // Default-off detail rows have no consumer. Retain the completion count
+        // and original aggregate cadence before skipping timestamp/redaction/JSON.
+        if(floatingSuccess){raw=true;if(!detailEnabled && !aggregate)return;}
+        else if(raw && !floating && !detailEnabled)return;
         for(const auto* key:{"stdout","stderr","error","reason"})if(detail.contains(key)&&detail[key].is_string()){
             const auto value=detail[key].get<std::string>();detail[std::string(key)+"Truncated"]=value.size()>4096 || detail.value(std::string(key)+"Truncated",false);
             detail[key]=ymcc::tdpdiag::boundedText(value);
@@ -59990,12 +64586,7 @@ static void appendTdpObservation(const char* event, json detail, bool raw = fals
         detail["runId"]=tdpObservationRunId();detail["pid"]=GetCurrentProcessId();
         detail["powerGeneration"]=g_powerGeneration.load(std::memory_order_acquire);
         detail["powerLifecycle"]=powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire));
-        const bool floating=detail.value("source","")=="autofloat";
-        const bool explicitFailure=std::strcmp(event,"tdp.failed")==0 || std::strcmp(event,"tdp.skipped")==0 ||
-            (detail.contains("rc")&&detail["rc"].is_number_integer()&&detail["rc"].get<long long>()!=0) ||
-            (detail.contains("ok")&&detail["ok"].is_boolean()&&!detail["ok"].get<bool>());
         std::lock_guard<std::mutex> lock(g_tdpObservationMx);
-        static unsigned floatingCompleted=0;
         struct FailureSummary { std::string key,firstOperationId; unsigned long long count=0,firstSeen=0,lastSeen=0; };
         static std::array<FailureSummary,4> failures{};static size_t replacement=0;
         if(floating && explicitFailure){
@@ -60018,34 +64609,95 @@ static void appendTdpObservation(const char* event, json detail, bool raw = fals
                 }
             }
         }
-        if(floating && !explicitFailure && std::strcmp(event,"tdp.runtime-identity")!=0){
-            raw=true;
-            if(std::strcmp(event,"tdp.completed")==0 && ++floatingCompleted%32==0){
+        if(aggregate){
                 json aggregate={{"event","tdp.autofloat-summary"},{"time",detail["time"]},{"runId",detail["runId"]},{"pid",detail["pid"]},
-                    {"powerGeneration",detail["powerGeneration"]},{"completedCount",floatingCompleted},{"lastOperationId",detail.value("operationId","")},
+                    {"powerGeneration",detail["powerGeneration"]},{"completedCount",completedCount},{"lastOperationId",detail.value("operationId","")},
                     {"verificationScope","software-receipts-only-not-continuous-power-proof"}};
                 const auto path=yemancc_data_dir()+L"\\tdp.log";
                 if(!g_tdpObservationStreams[0].append(path,aggregate.dump(),now,true,kLogMaxBytes,[](const auto& p,auto n){rotateOneLogFile(p,n);}))++g_tdpObservationFailures;
-            }
         }
         if(raw && !g_domainLogEnabled[1].load(std::memory_order_acquire))return;
         const auto path=yemancc_data_dir()+(raw?L"\\tdp-detail.log":L"\\tdp.log");
         if(!g_tdpObservationStreams[raw?1:0].append(path,detail.dump(),now,!raw,kLogMaxBytes,[](const auto& p,auto n){rotateOneLogFile(p,n);}))++g_tdpObservationFailures;
     }catch(...){++g_tdpObservationFailures;}
 }
+static bool tdpRuntimeIdentityDocumentValid(const json& value) {
+    if (!value.is_object() || !value.contains("schemaVersion") || !value["schemaVersion"].is_number_integer() || value["schemaVersion"] != 1) return false;
+    for (const auto* key : {"revision", "sampleTick"}) {
+        const auto it = value.find(key);
+        if (it == value.end() || !it->is_number_integer() || *it < 0 || (std::string(key) == "revision" && *it == 0)) return false;
+    }
+    if (value.value("observedOnly", json{}) != true || !value.contains("failureTriggered") || !value["failureTriggered"].is_boolean()) return false;
+    for (const auto* key : {"powerControlDirectory", "helperPath"})
+        if (!value.contains(key) || !value[key].is_string()) return false;
+    if (!value.contains("files") || !value["files"].is_array()) return false;
+    for (const auto& file : value["files"]) {
+        if (!file.is_object() || !file.contains("readable") || !file["readable"].is_boolean()) return false;
+        for (const auto* key : {"name", "status", "sha256"}) if (!file.contains(key) || !file[key].is_string()) return false;
+        if (file.contains("bytes") && (!file["bytes"].is_number_integer() || file["bytes"] < 0)) return false;
+    }
+    return true;
+}
+
+static bool publishTdpRuntimeIdentitySnapshot(const std::wstring& path, json current) {
+    if (!tdpRuntimeIdentityDocumentValid(current)) return false;
+    json previous;
+    bool missing = false, complete = false;
+    std::string original;
+    const bool parsed = startupReadJsonFile(path, previous, missing, &original, &complete);
+    if (!missing && !complete) return false;
+    if (previous.is_object() && previous.contains("schemaVersion") &&
+        (!previous["schemaVersion"].is_number_integer() || previous["schemaVersion"] < 0 || previous["schemaVersion"] > 1)) return false;
+    const bool valid = parsed && tdpRuntimeIdentityDocumentValid(previous);
+    if (valid) {
+        // Extension fields carry no control authority; known evidence is rebuilt
+        // from this process's actual cache, never inferred from the saved file.
+        for (const auto& [key, value] : previous.items()) if (!current.contains(key)) current[key] = value;
+        if (previous == current) return true;
+    } else if (!missing) {
+        static std::atomic<unsigned long long> sequence{1};
+        const auto archive = path + L".corrupt-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+            std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(sequence.fetch_add(1));
+        if (!sgWriteFileAtomic(archive, original)) return false;
+        json ignored;
+        bool archiveMissing = false, archiveComplete = false;
+        std::string preserved;
+        startupReadJsonFile(archive, ignored, archiveMissing, &preserved, &archiveComplete);
+        if (!archiveComplete || preserved != original) return false;
+    }
+    auto text = current.dump(2);
+    if (text.size() > (1u << 20)) text = current.dump();
+    if (text.size() > (1u << 20) || !sgWriteFileAtomic(path, text)) return false;
+    json confirmed;
+    bool confirmMissing = false, confirmComplete = false;
+    std::string written;
+    return startupReadJsonFile(path, confirmed, confirmMissing, &written, &confirmComplete) &&
+        confirmComplete && written == text && confirmed == current;
+}
+
 static void observeTdpRuntimeIdentity(bool failure=false) noexcept {
     try {
-        static std::mutex identityMx;static ymcc::tdpdiag::RuntimeIdentityCache cache;static unsigned long long published=0, failurePublished=0;
+        static std::mutex identityMx;
+        static ymcc::tdpdiag::RuntimeIdentityCache cache;
+        static unsigned long long attemptedLogRevision = 0, attemptedFailureLogRevision = 0, failureObservedRevision = 0;
         std::lock_guard<std::mutex> lock(identityMx);
-        auto identity=cache.snapshot(fspath::path(kTdpDaemonExe),GetTickCount64(),failure,sha256File);
-        const auto revision=identity.value("revision",0ULL);if(revision==published&&(!failure||failurePublished==revision))return;
-        identity["powerControlDirectory"]=ymcc::tdpdiag::boundedText(W2U(POWER_CONTROL_DIR));
-        identity["helperPath"]=ymcc::tdpdiag::boundedText(W2U(kTdpDaemonExe));
-        identity["failureTriggered"]=failure;identity["observedOnly"]=true;
-        appendTdpObservation("tdp.runtime-identity",identity);
-        std::ofstream file(fspath::path(yemancc_data_dir())/L"tdp-runtime-identity.json",std::ios::binary|std::ios::trunc);
-        file<<identity.dump(2);if(!file)++g_tdpObservationFailures;published=revision;if(failure)failurePublished=revision;
-    }catch(...){++g_tdpObservationFailures;}
+        auto identity = cache.snapshot(fspath::path(kTdpDaemonExe), GetTickCount64(), failure, sha256File);
+        const auto revision = identity.value("revision", 0ULL);
+        if (failure) failureObservedRevision = revision;
+        identity["powerControlDirectory"] = ymcc::tdpdiag::boundedText(W2U(POWER_CONTROL_DIR));
+        identity["helperPath"] = ymcc::tdpdiag::boundedText(W2U(kTdpDaemonExe));
+        identity["failureTriggered"] = failureObservedRevision == revision;
+        identity["observedOnly"] = true;
+        if (attemptedLogRevision != revision || (failure && attemptedFailureLogRevision != revision)) {
+            appendTdpObservation("tdp.runtime-identity", identity);
+            attemptedLogRevision = revision;
+            if (failure) attemptedFailureLogRevision = revision;
+        }
+        // These are existing request/export/error edges, never a monitor tick.
+        // A successful earlier write cannot conceal later corruption or IO failure.
+        if (!publishTdpRuntimeIdentitySnapshot((fspath::path(yemancc_data_dir()) / L"tdp-runtime-identity.json").wstring(), identity))
+            ++g_tdpObservationFailures;
+    } catch (...) { ++g_tdpObservationFailures; }
 }
 static std::mutex g_tdpBootstrapMx;
 static std::shared_ptr<ymcc::tdpdiag::DaemonStartupCapture> g_tdpBootstrapCapture;
@@ -60132,7 +64784,7 @@ static constexpr bool tdpIsG3eCpu(std::string_view vendor, std::string_view proc
     }
     return false;
 }
-static constexpr bool tdpG3eOemRecipeBoard(std::string_view board) { return board == "MS-1T91"; }
+static constexpr bool tdpG3eOemRecipeBoard(std::string_view board) { return board == ymcc::capabilities::tdp::msiBoard; }
 static_assert(tdpIsG3eCpu("GenuineIntel", "Intel Arc G3 Extreme"));
 static_assert(tdpIsG3eCpu("GenuineIntel", "Intel(R) Arc(TM) G3 Extreme"));
 // Exact adapter/log representation: 12 vendor characters + REG_SZ terminator.
@@ -60148,7 +64800,7 @@ static_assert(!tdpIsG3eCpu("GenuineIntel", "Intel Arc G3"));
 static_assert(!tdpIsG3eCpu("GenuineIntel", "Intel Core Ultra 7 258V"));
 static_assert(tdpG3eOemRecipeBoard("MS-1T91") && !tdpG3eOemRecipeBoard("ONEXPLAYER"));
 // Shared Intel single-target policy; OEM transport does not redefine PL1/PL2.
-static constexpr int tdpIntelDefaultPl2Offset = 1;
+static constexpr int tdpIntelDefaultPl2Offset = ymcc::capabilities::tdp::intelPl2Offset;
 static_assert(30 + tdpIntelDefaultPl2Offset == 31);
 static json tdpExecutionCapability() {
     if (!g_machineIdentity.attempted) throw std::runtime_error("TDP machine identity is not ready");
@@ -60160,16 +64812,22 @@ static json tdpExecutionCapability() {
     // No manufacturer gate and no unknown-board CG3EM fallback.
     const bool selected = tdpG3eOemRecipeBoard(ymccDmiNormalize(g_machineIdentity.product));
     const bool ready = !selected || g3e;
+    const auto requestDomain = ymcc::capabilities::tdp::requestDomain(selected);
+    const auto unifiedModelId = ymcc::capabilities::tdp::modelId(g_machineIdentity.deviceClass);
     json result = {{"provider", selected ? "msi-g3e-wmi" : "default"}, {"selected", selected}, {"ready", ready},
         {"cpuFamily", g3e ? "intel-arc-g3-extreme" : "other-or-unverified"},
         {"cpuIdentitySource", "registry-VendorIdentifier-terminal-NUL-trimmed-and-startup-ProcessorNameString-not-numeric-CPUID"},
         {"cpuVendorIdentity", std::string(tdpRegistryIdentityText(vendor))},
         {"cpuVendorRegistryByteLength", vendor.size()},
         {"cpuVendorTerminalNulBytes", vendor.size() - tdpRegistryIdentityText(vendor).size()},
-        {"minPL1", selected ? 8 : 2}, {"maxPL1", 200}, // application request domain, NOT a machine maximum
+        {"minPL1", requestDomain.minimumW}, {"maxPL1", requestDomain.maximumW}, // application request domain, NOT a machine maximum
         {"machineMaximumKnown", false},
         {"rangeSource", "application-request-domain-NOT-machine-maximum"},
         {"powerPolicy", selected ? "OEM-owned-acceptance-no-unlock-no-maximum-probing" : "existing-default-no-CPU-watt-cap"}};
+    result["capabilityCatalog"] = {{"libraryId", std::string(ymcc::capabilities::tdp::libraryId)},
+        {"version", std::string(ymcc::capabilities::tdp::version)}, {"policySha256", std::string(ymcc::capabilities::tdp::policySha256)},
+        {"modelId", std::string(unifiedModelId)}, {"modelRegistered", !unifiedModelId.empty()},
+        {"sourceLimitsApplied", false}, {"hardwareAcceptance", false}};
     if (selected) {
         result.update({{"model", "ClawCG3EM"}, {"pl2Offset", tdpIntelDefaultPl2Offset},
             {"error", ready ? "" : "G3E OEM TDP requires a verified Intel G3 Extreme CPU identity"},
@@ -60505,15 +65163,140 @@ static json tdpExportCoverage(const std::wstring& directory) noexcept {
 }
 static void reg_tdp_observation() {
     ipc_on("tdp.observe",[](const json& a)->json {
-        const auto event=a.value("event",std::string{});
-        static const std::set<std::string> allowed={"tdp.request","tdp.route-selected","tdp.helper-result","tdp.completed","tdp.failed","tdp.skipped","tdp.lifecycle","tdp.operator-marker"};
-        if(!allowed.count(event))return {{"ok",false}};
-        json detail=json::object();if(a.contains("detail")&&a["detail"].is_object()){
-            const auto& incoming=a["detail"];
-            for(const auto* key:{"operationId","source","requestedW","clampedW","requestedMode","observedMode","vendor","apply","save","configSaved","route","fallbackReason","durationMs","powerEpoch","stale","ignored","processStarted","hardwareCommandReturned","readbackMatched","verificationScope","error","reason","skipped","phase","hardwareWritesAllowed","generation","marker","cpuIdentifier","policy"})
-                if(incoming.contains(key)&&!incoming[key].is_structured())detail[key]=incoming[key];
+        static const std::set<std::string> allowed={"tdp.request","tdp.target-resolved","tdp.route-selected","tdp.helper-result","tdp.completed","tdp.failed","tdp.skipped","tdp.lifecycle","tdp.operator-marker","tdp.unverified","tdp.accepted"};
+        const bool batch=a.contains("events");
+        if(batch&&(!a["events"].is_array()||a["events"].empty()||a["events"].size()>16))return {{"ok",false}};
+        const auto valid=[&](const json& row){return row.is_object()&&row.contains("event")&&row["event"].is_string()&&allowed.count(row["event"].get<std::string>())&&(!row.contains("detail")||row["detail"].is_object());};
+        if(batch){for(const auto& row:a["events"])if(!valid(row))return {{"ok",false}};}
+        else if(!valid(a))return {{"ok",false}};
+        const auto append=[&](const json& row){
+            const auto event=row["event"].get<std::string>();
+            // Completion still reaches the original 32-operation counter.
+            // Unknown/failure and enabled detail always retain the original path.
+            if(event!="tdp.completed" && !g_domainLogEnabled[1].load(std::memory_order_acquire) &&
+                row.contains("detail") && ymcc::tdpdiag::successfulFloatingDetail(event.c_str(),row["detail"]))return;
+            json detail=json::object();
+            if(row.contains("detail")){const auto& incoming=row["detail"];
+                for(const auto* key:{"operationId","source","requestedW","clampedW","requestedMode","observedMode","vendor","apply","save","configSaved","route","fallbackReason","durationMs","powerEpoch","stale","ignored","processStarted","hardwareCommandReturned","readbackMatched","verificationScope","error","reason","skipped","phase","hardwareWritesAllowed","generation","marker","cpuIdentifier","policy","intentW","effectiveW","rangeLimited","minPL1","maxPL1","provider","acceptedW","outcome","requestMatched","machineMaximumKnown","note"})
+                    if(incoming.contains(key)&&!incoming[key].is_structured())detail[key]=incoming[key];
+            }
+            appendTdpObservation(event.c_str(),std::move(detail));
+        };
+        if(batch){for(const auto& row:a["events"])append(row);}else append(a);
+        return {{"ok",true}};
+    });
+}
+
+// Opt-in for Windows INI files consumed by RTSS. Ordinary UTF-8 application
+// files retain their original API; malformed declared encodings are rejected.
+static std::string decodeWindowsConfigText(const std::string& bytes, UINT ansiCodePage = CP_ACP) {
+    if (bytes.empty()) return {};
+    const auto utf8 = [](const std::wstring& wide) {
+        if (wide.empty()) return std::string{};
+        const int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+        if (count <= 0) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+        std::string text(count, '\0');
+        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), static_cast<int>(wide.size()), text.data(), count, nullptr, nullptr) != count)
+            throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+        return text;
+    };
+    const auto convert = [&](const std::string& text, UINT codePage) {
+        if (text.empty()) return std::string{};
+        const int count = MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+        if (count <= 0) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+        std::wstring wide(count, L'\0');
+        if (MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), count) != count)
+            throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+        return utf8(wide);
+    };
+    const auto first = static_cast<unsigned char>(bytes[0]);
+    const auto second = bytes.size() > 1 ? static_cast<unsigned char>(bytes[1]) : 0;
+    if ((first == 0xff && second == 0xfe) || (first == 0xfe && second == 0xff)) {
+        if ((bytes.size() - 2) % 2) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+        const bool little = first == 0xff;
+        std::wstring wide;
+        wide.reserve((bytes.size() - 2) / 2);
+        for (size_t i = 2; i < bytes.size(); i += 2) {
+            const auto a = static_cast<unsigned char>(bytes[i]);
+            const auto b = static_cast<unsigned char>(bytes[i + 1]);
+            const wchar_t unit = static_cast<wchar_t>(little ? (a | (b << 8)) : ((a << 8) | b));
+            if (!unit) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+            wide.push_back(unit);
         }
-        appendTdpObservation(event.c_str(),std::move(detail));return {{"ok",true}};
+        return utf8(wide);
+    }
+    if (bytes.find('\0') != std::string::npos) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+    if (bytes.size() >= 3 && first == 0xef && second == 0xbb && static_cast<unsigned char>(bytes[2]) == 0xbf)
+        return convert(bytes.substr(3), CP_UTF8);
+    // UTF-8 has priority. Only unmarked non-UTF-8 uses the machine's actual
+    // Windows ANSI code page; do not guess another locale or replace bad bytes.
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0) > 0) return bytes;
+    return convert(bytes, ansiCodePage);
+}
+
+// Read/modify/write callers opt in explicitly; keep their original Windows
+// text encoding and refuse a stale source instead of silently rewriting it.
+static std::string encodeWindowsConfigText(const std::string& text, const std::string& original, UINT ansiCodePage = CP_ACP) {
+    if (text.find('\0') != std::string::npos || text.size() > 3 * (1u << 20)) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+    const int count = text.empty() ? 0 : MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (!text.empty() && count <= 0) throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+    std::wstring wide(count, L'\0');
+    if (count && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), count) != count)
+        throw std::runtime_error("CONFIG_TEXT_ENCODING_INVALID");
+    // Validate the original before encoding; malformed data is never replaced.
+    decodeWindowsConfigText(original, ansiCodePage);
+    const auto byte = [&](size_t i) { return i < original.size() ? static_cast<unsigned char>(original[i]) : 0; };
+    std::string encoded;
+    if ((byte(0) == 0xff && byte(1) == 0xfe) || (byte(0) == 0xfe && byte(1) == 0xff)) {
+        const bool little = byte(0) == 0xff;
+        encoded = original.substr(0, 2);
+        for (const wchar_t unit : wide) {
+            encoded.push_back(static_cast<char>(little ? unit & 255 : unit >> 8));
+            encoded.push_back(static_cast<char>(little ? unit >> 8 : unit & 255));
+        }
+    } else if (byte(0) == 0xef && byte(1) == 0xbb && byte(2) == 0xbf) {
+        encoded = original.substr(0, 3) + text;
+    } else if (original.empty() || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, original.data(), static_cast<int>(original.size()), nullptr, 0) > 0) {
+        encoded = text;
+    } else {
+        const UINT cp = ansiCodePage == CP_ACP ? GetACP() : ansiCodePage;
+        BOOL substituted = FALSE;
+        const DWORD flags = cp == CP_UTF8 || cp == 54936 ? WC_ERR_INVALID_CHARS : WC_NO_BEST_FIT_CHARS;
+        const auto usedDefault = cp == CP_UTF8 || cp == 54936 ? nullptr : &substituted;
+        const int bytes = count ? WideCharToMultiByte(cp, flags, wide.data(), count, nullptr, 0, nullptr, usedDefault) : 0;
+        if (count && (bytes <= 0 || substituted)) throw std::runtime_error("CONFIG_TEXT_ENCODING_UNREPRESENTABLE");
+        encoded.resize(bytes);
+        substituted = FALSE;
+        if (count && (WideCharToMultiByte(cp, flags, wide.data(), count, encoded.data(), bytes, nullptr, usedDefault) != bytes || substituted))
+            throw std::runtime_error("CONFIG_TEXT_ENCODING_UNREPRESENTABLE");
+    }
+    if (encoded.size() > (1u << 20)) throw std::runtime_error("CONFIG_TEXT_SIZE_LIMIT_EXCEEDED");
+    if (decodeWindowsConfigText(encoded, ansiCodePage) != text) throw std::runtime_error("CONFIG_TEXT_ENCODING_UNREPRESENTABLE");
+    return encoded;
+}
+static bool writeWindowsConfigTextAtomic(const std::wstring& path, const std::string& text, const json& expected) {
+    if (!expected.is_string() && !expected.is_null()) throw std::runtime_error("CONFIG_TEXT_EXPECTED_SOURCE_REQUIRED");
+    std::string encoded;
+    return sgWriteFileAtomicFlags(path, encoded, true, [&] {
+        std::ifstream input(path, std::ios::binary | std::ios::ate);
+        std::string original;
+        if (!input) {
+            const DWORD attributes = GetFileAttributesW(path.c_str()), error = GetLastError();
+            if (attributes != INVALID_FILE_ATTRIBUTES || (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND))
+                throw std::runtime_error("CONFIG_TEXT_SOURCE_UNREADABLE");
+            if (!expected.is_null()) throw std::runtime_error("CONFIG_TEXT_SOURCE_MISSING");
+        } else {
+            if (expected.is_null()) throw std::runtime_error("CONFIG_TEXT_CHANGED");
+            const auto size = input.tellg();
+            if (size < 0 || size > (1LL << 20)) throw std::runtime_error("CONFIG_TEXT_SIZE_LIMIT_EXCEEDED");
+            original.resize(static_cast<size_t>(size));input.seekg(0);
+            if (size > 0) input.read(original.data(), static_cast<std::streamsize>(size));
+            if ((size > 0 && input.gcount() != size) || input.bad() || input.peek() != std::char_traits<char>::eof())
+                throw std::runtime_error("CONFIG_TEXT_READ_INCOMPLETE");
+            input.close();
+            if (decodeWindowsConfigText(original) != expected.get_ref<const std::string&>()) throw std::runtime_error("CONFIG_TEXT_CHANGED");
+        }
+        encoded = encodeWindowsConfigText(text, original);
     });
 }
 
@@ -60529,7 +65312,41 @@ static void reg_fs() {
         auto path = a.value("path", std::string{});
         std::ifstream f(U2W(path), std::ios::binary);
         if (!f) throw std::runtime_error("Cannot open: " + path);
-        return std::string((std::istreambuf_iterator<char>(f)), {});
+        if (a.value("textEncoding", std::string{}) == "windows-config") {
+            const auto limit = a.value("maxBytes", 1LL << 20);
+            if (limit <= 0 || limit > (1LL << 20)) throw std::runtime_error("CONFIG_TEXT_SIZE_LIMIT_INVALID");
+            f.seekg(0, std::ios::end);
+            const auto size = f.tellg();
+            if (size < 0 || size > limit) throw std::runtime_error("CONFIG_TEXT_SIZE_LIMIT_EXCEEDED");
+            f.seekg(0);
+            std::string bytes(static_cast<size_t>(size), '\0');
+            if (size > 0) f.read(bytes.data(), static_cast<std::streamsize>(size));
+            if ((size > 0 && f.gcount() != size) || f.bad() || f.peek() != std::char_traits<char>::eof())
+                throw std::runtime_error("CONFIG_TEXT_READ_INCOMPLETE");
+            return decodeWindowsConfigText(bytes);
+        }
+        // The generic API receives the same explicit budget as the frontend.
+        // Reject changed/partial reads rather than handing a truncated document
+        // or an unbounded allocation to response serialization.
+        const auto requested = a.find("maxBytes");
+        if (requested != a.end() && (!requested->is_number_integer() || *requested <= 0))
+            throw std::runtime_error("FILE_READ_LIMIT_INVALID");
+        const auto limit = requested == a.end() ? uint64_t{1} << 20 : requested->get<uint64_t>();
+        if (limit > static_cast<uint64_t>((std::numeric_limits<std::streamsize>::max)()) ||
+            limit > static_cast<uint64_t>((std::numeric_limits<size_t>::max)()))
+            throw std::runtime_error("FILE_READ_LIMIT_INVALID");
+        f.seekg(0, std::ios::end);
+        const auto size = f.tellg();
+        if (size < 0) throw std::runtime_error("FILE_READ_INCOMPLETE");
+        if (static_cast<uint64_t>(size) > limit) throw std::runtime_error("FILE_READ_LIMIT_EXCEEDED");
+        if (!f.seekg(0)) throw std::runtime_error("FILE_READ_INCOMPLETE");
+        std::string bytes(static_cast<size_t>(size), '\0');
+        if (size > 0) f.read(bytes.data(), static_cast<std::streamsize>(size));
+        const bool incomplete = (size > 0 && f.gcount() != size) || f.bad();
+        const auto trailing = f.peek();
+        if (incomplete || f.bad() || trailing != std::char_traits<char>::eof())
+            throw std::runtime_error("FILE_READ_INCOMPLETE");
+        return bytes;
     });
     // Range read for large/growing files: returns a window [offset, offset+maxBytes) plus the
     // file's total size, so a frontend can poll a growing log without re-reading the whole file.
@@ -60579,11 +65396,17 @@ static void reg_fs() {
         auto path    = a.value("path", std::string{});
         auto content = a.value("content", std::string{});
         std::wstring wp = U2W(path);
+        if (a.value("textEncoding", std::string{}) == "windows-config") {
+            if (!a.contains("expectedContent")) throw std::runtime_error("CONFIG_TEXT_EXPECTED_SOURCE_REQUIRED");
+            return writeWindowsConfigTextAtomic(wp, content, a.at("expectedContent"));
+        }
         return sgWriteFileAtomic(wp, content);
     });
     // Frontend must discover the same effective root before any shared-settings I/O.
     ipc_on("deckySidebar.mirrorAttach", [](const json&) -> json {
-        auto peer=g_deckyMirrorBroker.status(); deckySidebarDiagnostic("mirror-host-attach",peer); peer["owner"]="YMCC-native"; peer["pid"]=GetCurrentProcessId(); return peer; // Metadata only. Does not enable or start anything.
+        const auto generation=g_powerGeneration.load(std::memory_order_acquire);auto peer=g_deckyMirrorBroker.status();
+        peer["powerGeneration"]=generation;peer["hardwareWritesAllowed"]=hardwareWriteAllowed()&&generation==g_powerGeneration.load(std::memory_order_acquire);
+        deckySidebarDiagnostic("mirror-host-attach",peer);peer["owner"]="YMCC-native";peer["pid"]=GetCurrentProcessId();return peer; // Metadata only. Does not enable or start anything.
     });
     ipc_on("deckySidebar.mirrorReply", [](const json& args) -> json {
         if (args.size() != 2 || !args.contains("connection") || !args["connection"].is_string() ||
@@ -60597,7 +65420,11 @@ static void reg_fs() {
             const auto runtime=g_deckySidebarRuntime.snapshot();
             const auto provenance=snapshot.value("provenance",json::object());
             if(runtime.enabled&&runtime.pid&&snapshot.value("ready",false)&&provenance.value("kind",std::string{})=="ymcc-native"&&provenance.value("pid",0u)==GetCurrentProcessId())
-                g_deckyAutomaticRepair.confirmed(g_steamSettingsObserver.sessionSnapshot());
+            {
+                const auto session=g_steamSettingsObserver.sessionSnapshot();
+                g_deckyAutomaticRepair.confirmed(session);
+                deckySidebarQueueManagedReady(session,runtime.pid,message.value("runId",std::string{}),args.at("connection").get<std::string>(),snapshot.value("revision",0ull));
+            }
             deckySidebarDiagnostic("mirror-snapshot-queued",snapshot); // Allowlisted readiness/revision only, never business content.
         }
         }catch(...){} // Diagnostics cannot change an already queued reply's success.
@@ -60679,7 +65506,7 @@ static void reg_fs() {
         if (!args.is_object() || !args.empty()) throw std::runtime_error("Invalid CSS idle policy read");
         const auto session = g_steamSettingsObserver.sessionSnapshot();
         return {{"supported", g_steamCssUse.ready() && !g_aiFanMockSession.isolated && !g_exitRequested.load(std::memory_order_acquire)},
-            {"version", 3}, {"resident", true}, {"manualObservationProtocol", 1}, {"pid", session.pid}, {"birth", std::to_string(session.created)}};
+            {"version", 3}, {"resident", true}, {"processQuery", W2U(g_steamCssUse.processQuery())}, {"manualObservationProtocol", 1}, {"pid", session.pid}, {"birth", std::to_string(session.created)}};
     });
     ipc_on("steamAppearance.beginUse", [](const json& args) -> json {
         if (g_aiFanMockSession.isolated || g_exitRequested.load(std::memory_order_acquire) || !args.is_object() || !args.empty())
@@ -60735,15 +65562,22 @@ static void reg_fs() {
             throw std::runtime_error("Explicit recovery confirmation is required");
         if (!sameWindowsPath(U2W(a.value("path", std::string{})), YM_SETTINGS_FILE))
             throw std::runtime_error("Invalid unified settings path");
-        const auto result = ymSettingsResetApplication(a.value("defaults", json::object()));
-        g_fxSoundRecovery.configure(fxSoundRecoveryEnabled());
-        PostMessageW(g_hwnd, ymcc::gesturesummon::kRefreshMessage, 0, 0);
+        auto result = ymSettingsResetApplication(a.value("defaults", json::object()));
+        steamWallpaperForegroundPreference(a.value("defaults",json::object()));
+        json warnings=json::array();
+        ymcc::settingsBaseline::attemptRefresh(warnings,"fxsound",[&]{g_fxSoundRecovery.configure(fxSoundRecoveryEnabled());});
+        ymcc::settingsBaseline::attemptRefresh(warnings,"gesture",[&]{PostMessageW(g_hwnd, ymcc::gesturesummon::kRefreshMessage, 0, 0);});
+        if(!warnings.empty()) {
+            result["refreshWarnings"]=warnings;
+            try{appendNativeLifecycleLog("settings-reset-refresh-warning",{{"consumers",warnings},{"committed",true}});}catch(...){}
+        }
         return result;
     });
     ipc_on("settings.read", [](const json& a) -> json {
-        if (!sameWindowsPath(U2W(a.value("path", std::string{})), YM_SETTINGS_FILE))
+        const auto path=U2W(a.value("path",std::string{}));
+        if(!sameWindowsPath(path,YM_SETTINGS_FILE)&&!sameWindowsPath(path,YM_SETTINGS_BACKUP_FILE))
             throw std::runtime_error("Invalid unified settings path");
-        return ymSettingsReadSnapshot(a.contains("stamp") && a["stamp"].is_string() ? a["stamp"].get<std::string>() : std::string{});
+        return ymSettingsReadSnapshot(a.contains("stamp") && a["stamp"].is_string() ? a["stamp"].get<std::string>() : std::string{},path);
     });
     ipc_on("settings.write", [](const json& a) -> json {
         if (!sameWindowsPath(U2W(a.value("path", std::string{})), YM_SETTINGS_FILE))
@@ -60767,26 +65601,45 @@ static void reg_fs() {
         if (inputRevisionConflict) return {{"ok", false}, {"reason", "revision-conflict"}, {"content", committed.dump()}};
         if (startProtectionBlocked) return {{"ok",false},{"reason","virtual-start-protection-active"},
             {"content",committed.dump()},{"startProtection",inputHostStartProtectionSnapshot()}};
-        // 裁决20 §3：过期整文档快照被保护时留一行证据（事件级，不周期写）。
-        if (staleDroppedRev >= 0)
+        json refreshWarnings=json::array();
+        // Use the committed document; diagnostic logging must not turn a saved
+        // transaction into an apparent failed save or re-read settings under a lock.
+        if (staleDroppedRev >= 0) ymcc::settingsBaseline::attemptRefresh(refreshWarnings,"stale-diagnostic",[&] {
             appendNativeLifecycleLog("settings-write-stale-guard", {
                 {"droppedInputRevision", staleDroppedRev},
-                {"keptInputRevision", ymSettingsSection("input").value("revision", -1LL)},
-                {"scope", "input+domainLogs"},
-                {"path", "yeman-settings.json"}
+                {"keptInputRevision", ymcc::settingsBaseline::integerOr(committed.value("input",json::object()),"revision",-1LL)},
+                {"scope", "input+domainLogs"}, {"path", "yeman-settings.json"}
             });
-        // HC parity（2026-09-13）：设置生效改为事件驱动（16ms 轮询桥已退役）。
-        // 前端每次保存 = 一次原子写盘 = 一次立即刷新（HC 无文件轮询，
-        // SettingsManager 事件即生效）。无新增逻辑：复用现有 forced 刷新。
+        });
+        // Refresh is event driven. Each consumer gets its own failure boundary;
+        // a warning describes runtime work, while ok/content describe disk commit.
         if (result) {
-            sgStaticScanPreference(sgStaticScanEnabled(committed.value("sleep",json::object())));
-            g_fxSoundRecovery.configure(fxSoundRecoveryEnabled());
-            inputCaptureRefreshRealStickSettings(true);
-            ipc_emit("input.shortcutRuntime", inputShortcutRuntimeSnapshot());
-            if (!baseline || baseline->value("ui", json::object()) != committed.value("ui", json::object()))
-                PostMessageW(g_hwnd, ymcc::gesturesummon::kRefreshMessage, 0, 0);
+            steamWallpaperForegroundPreference(committed);
+            ymcc::settingsBaseline::attemptRefresh(refreshWarnings,"sleep",[&] {
+                sgStaticScanPreference(sgStaticScanEnabled(committed.value("sleep",json::object())));
+            });
+            ymcc::settingsBaseline::attemptRefresh(refreshWarnings,"fxsound",[&] {
+                g_fxSoundRecovery.configure(fxSoundRecoveryEnabled());
+            });
+            ymcc::settingsBaseline::attemptRefresh(refreshWarnings,"input-refresh",[&] {
+                inputCaptureRefreshRealStickSettings(true);
+            });
+            ymcc::settingsBaseline::attemptRefresh(refreshWarnings,"input-shortcuts",[&] {
+                ipc_emit("input.shortcutRuntime", inputShortcutRuntimeSnapshot());
+            });
+            ymcc::settingsBaseline::attemptRefresh(refreshWarnings,"gesture",[&] {
+                if (!baseline || baseline->value("ui", json::object()) != committed.value("ui", json::object()))
+                    PostMessageW(g_hwnd, ymcc::gesturesummon::kRefreshMessage, 0, 0);
+            });
         }
-        if (baseline) return {{"ok", result}, {"content", result ? committed.dump() : std::string{}}};
+        if(!refreshWarnings.empty()) {
+            try {appendNativeLifecycleLog("settings-write-refresh-warning",{{"consumers",refreshWarnings},{"committed",result}});}catch(...) {}
+        }
+        if (baseline) {
+            json receipt={{"ok",result},{"content",result?committed.dump():std::string{}}};
+            if(!refreshWarnings.empty())receipt["refreshWarnings"]=std::move(refreshWarnings);
+            return receipt;
+        }
         return result;
     });
     // FAN-927 §2.2：部署边界只对少量清单文件取摘要；复用本进程已有的 SHA-256 实现，
@@ -61049,6 +65902,23 @@ static void reg_fs() {
         } catch(...) { /* Failed export must not reuse an earlier snapshot. */ }
         if(monitorSnapshotSaved)addFile(monitorSnapshotPath.wstring());
         else availability["files"].push_back({{"name","monitor-export-state.json"},{"present",false},{"missingReason","current-export-snapshot-not-saved"}});
+        // Explicit export only; reuse the RTSS path validated by prepare/load.
+        // No discovery/start/SDK or installed-configuration writes here.
+        const auto rtssConfigSnapshotPath=fspath::path(dataDir)/L"rtss-config-export.json";
+        bool rtssConfigSnapshotSaved=false;
+        try {
+            const auto snapshot=ymcc::rtssconfigevidence::capture(ymcc::monitorrtss::globalPath(),GetTickCount64());
+            if(snapshot.is_object()) {
+                std::ofstream out(rtssConfigSnapshotPath,std::ios::binary|std::ios::trunc);
+                out<<snapshot.dump(2)<<'\n';out.close();rtssConfigSnapshotSaved=bool(out);
+            }
+        } catch(...) { /* Never pack an earlier diagnostic as current. */ }
+        if(rtssConfigSnapshotSaved)addFile(rtssConfigSnapshotPath.wstring());
+        else availability["files"].push_back({{"name","rtss-config-export.json"},{"present",false},{"missingReason","current-export-snapshot-not-saved"}});
+        availability["rtssConfigurationEvidence"]={{"file","rtss-config-export.json"},{"saved",rtssConfigSnapshotSaved},
+            {"pathSource","existing-validated-directory-cache"},{"maxBytesPerFile",ymcc::rtssconfigevidence::maxFileBytes},
+            {"captureScope","original-byte-base64;not-live-RTSS-readback-or-atomic-session"}};
+
         // Static export-time summaries; no controller/helper is started.
         const auto tdpCoverage=tdpExportCoverage(dataDir);
         const auto tdpCoveragePath=fspath::path(dataDir)/L"tdp-export-coverage.json";
@@ -61086,10 +65956,12 @@ static void reg_fs() {
         addRotated(dataDir + L"\\hardware-coordinator.log");
         addRotated(dataDir + L"\\input-host-fatal.log");
         addRotated(dataDir + L"\\input-host-rejects.log");
-        addRotated(dataDir + L"\\input-host-cost.log");
-        // Exact owned compressed volumes and an immutable pending source, copied
-        // before tar reads them. Never collect an in-progress .tmp archive.
-        addFile(dataDir + L"\\input-host-cost.log.pending");
+        // Single newest-lines activity file (20 MB), no nested cost ZIPs or
+        // legacy rotations. Discovery below keeps their omission inventory.
+        addFile(dataDir + L"\\input-host-cost.log");
+        availability["costLogRetention"]={{"policy","single-active-newest-lines"},{"fileMaxBytes",20'000'000ULL},
+            {"compressedVolumesEnabled",false},{"legacyPendingAndRotationsIncluded",false},
+            {"sourceHistoryComplete",false},{"legacyCleanup","Host-owned-one-shot;export-does-not-delete"}};
         addFile(dataDir + L"\\input-host-cost-retention.json");
         {
             std::error_code archiveEc;
@@ -61183,6 +66055,10 @@ static void reg_fs() {
         if(!controllerSensorBankEvidence.empty())addFile(controllerSensorBankEvidence);
         else availability["files"].push_back({{"name","controller-sensor-banks-evidence.json"},{"present",false},
             {"missingReason","current-controller-bank-snapshot-not-saved"}});
+        const auto windowsSensorDeviceEvidence=exportWindowsSensorDeviceEvidence();
+        if(!windowsSensorDeviceEvidence.empty())addFile(windowsSensorDeviceEvidence);
+        else availability["files"].push_back({{"name","windows-sensor-devices.json"},{"present",false},
+            {"missingReason","current-windows-sensor-device-snapshot-not-saved"}});
         const auto windowsSensorEvidence=exportWindowsSensorEvidence();
         if(!windowsSensorEvidence.empty())addFile(windowsSensorEvidence);
         else availability["files"].push_back({{"name","windows-sensor-evidence.json"},{"present",false},
@@ -61321,6 +66197,7 @@ static void reg_fs() {
                          << ";fileMax" << ymcc::monitordetail::Limits{}.fileBytes
                          << ";retainedFiles2\n";
                 manifest << "monitorExportSummaryMaxBytes=32768;metadataOnly=true;customImageBytesIncluded=false\n";
+                manifest << "rtssConfigurationEvidence=rtss-config-export.json;originalBytesBase64=true;maxBytesEach=1048576;existingDirectoryCacheOnly=true;notLiveOrAtomic=true\n";
                 manifest << "fanDiagnosticEnabled=" << (g_fanLogEnabled.load() ? "1" : "0") << "\n";
                 manifest << "snapshotReceipt=log-export-snapshot.json actualStagedBytes=true partialTailRetained=true\n";
                 // REQUIRED ordinary sleep evidence; export must not start a source or scan.
@@ -61334,6 +66211,7 @@ static void reg_fs() {
                 manifest << "availabilityReceipt=log-export-availability.json missingIsNotError=true\n";
                 manifest << "controllerSensorBanks=controller-sensor-banks-evidence.json;readOnly=true;rawDataOnly=true;selectionAndProcessingUnchanged=true\n";
                 manifest << "windowsSensorEvidence=windows-sensor-evidence.json;readOnly=true;metadataAndExplicitRawProbeEvidence=true;queryDoesNotEnumerate=true;hostAndGameConsumptionNotProven=true\n";
+                manifest << "windowsSensorDeviceEvidence=windows-sensor-devices.json;explicit-export-only;read-only-PnP-driver-service-metadata;no-sampling-or-repair;empty-not-hardware-absence-proof\n";
                 manifest << "controllerPnpVetoEvidence=controller-pnp-veto-evidence.json;export-only-read-existing-System-Kernel-PnP225;no-subscription-device-or-process-control;empty-not-no-veto-proof\n";
                 manifest << "controllerMotionEvidence=controller-motion-evidence.json;readOnly=true;queueTimeNotFirmwareSampling=true;hostAndGameConsumptionNotProven=true\n";
                 manifest << "controllerAxisCalibrationEvidence=controller-axis-calibration-evidence.json;cached-memory-only;single-try-owner-locks;max32768-bytes;no-settings-refresh-or-source-read;not-hardware-or-game-proof\n";
@@ -61366,7 +66244,7 @@ static void reg_fs() {
                 manifest << "inputSignalKeyStateEvidenceFile=focus-trace.log;native-detail.log event=input-signal-activity field=keyStateEvidence\n";
                 manifest << "injectedGamepadKeyEvidenceVersion=1;eventContext=focus-trace.log input-edge-window events[].injectedGamepadForeground;heldAge=input-signal-activity keyStateEvidence.keys[].injectedGamepadHold;diagnostic-only;no-auto-release\n";
                 manifest << "costArchiveExportBudgetBytes=" << ymcc::logexport::HostCostArchiveExportMaxBytes << "\n";
-                manifest << "costArchiveExportPolicy=recent-whole-volumes;inventory=log-export-availability.json costArchiveDiscovery.exportSelection;omitted-sources-not-deleted\n";
+                manifest << "costArchiveExportPolicy=single-active-log-only;fileMaxBytes=20000000;newest-overwrites-oldest;legacy-volumes-omitted;inventory=log-export-availability.json costArchiveDiscovery.exportSelection;export-does-not-delete\n";
                 manifest << "inputSignalKeyStateEvidenceBudget=existing-5000ms-drain;max16-async-reads;max1-queue-read;no-background-thread\n";
                 manifest << "taskViewDispatchBackend=shell-api-self-worker-v2\n";
                 manifest << "taskViewDispatchBudgetMs=4500 helperWaitMs=3000 cleanupWaitMs=500\n";
@@ -61725,6 +66603,129 @@ static DownloadAttemptResult downloadFileAttempt(
 static bool downloadFile(const std::string& url, const std::wstring& dest,
                          const std::function<void(uint64_t, uint64_t)>& progress = {});
 static bool webmDurationSeconds(const std::wstring& path, double& seconds);
+// Steam media demand is authorized by a native foreground lease. The existing
+// foreground WinEvent only revokes and posts; no CDP, file IO or process scan.
+static std::atomic<bool> g_steamWallpaperForegroundPending{false};
+static std::atomic<bool> g_steamWallpaperPreferenceKnown{false};
+static std::atomic<bool> g_steamWallpaperForegroundObserverReady{false};
+static std::atomic<bool> g_steamWallpaperPreferenceUpdating{false};
+static std::mutex g_steamWallpaperPreferenceMutex;
+static std::atomic<bool> g_steamWallpaperPreferenceEnabled{false};
+static ymcc::steamwallpaperForeground::Authority& steamWallpaperForegroundOwner() {
+    static ymcc::steamwallpaperForeground::Authority owner(
+        std::to_string(GetCurrentProcessId())+"-"+ymcc::media::randomId());
+    return owner;
+}
+static void steamWallpaperForegroundWake() {
+    if(g_hwnd&&!g_exitRequested.load(std::memory_order_acquire)&&
+       !g_steamWallpaperForegroundPending.exchange(true,std::memory_order_acq_rel))
+        if(!PostMessageW(g_hwnd,WM_STEAM_WALLPAPER_FOREGROUND,0,0))
+            g_steamWallpaperForegroundPending.store(false,std::memory_order_release);
+}
+static void steamWallpaperForegroundSignal() {
+    try {steamWallpaperForegroundOwner().revoke();steamWallpaperForegroundWake();}
+    catch(...){g_steamWallpaperPreferenceKnown.store(false,std::memory_order_release);}
+}
+static void steamWallpaperForegroundObserver(bool active) {
+    g_steamWallpaperForegroundObserverReady.store(active,std::memory_order_release);
+    steamWallpaperForegroundSignal();
+}
+static void steamWallpaperForegroundPreference(const json& committedDocument) {
+    std::lock_guard serial(g_steamWallpaperPreferenceMutex);
+    // Only settings events read disk. A slow older post-commit refresh must not
+    // resurrect ON after a newer OFF commit; take the latest compatible bytes.
+    json document;
+    try{const auto latest=ymSettingsReadSnapshot("");if(!latest.contains("readFault"))
+        document=ymcc::settingsBaseline::parseDocument(latest.value("content",std::string{}));}catch(...){}
+    (void)committedDocument;
+    bool known=false,enabled=false;
+    if(document.is_object()&&ymcc::settingsBaseline::supported(document)) {
+        const auto ui=document.find("ui");
+        if(ui==document.end()||ui->is_object()) {
+            known=true;enabled=true;
+            if(ui!=document.end()) {
+                const auto value=ui->find("steamDynamicWallpaperEnabled");
+                if(value!=ui->end()){known=value->is_boolean();enabled=known&&value->get<bool>();}
+            }
+        }
+    }
+    const bool wasKnown=g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire);
+    const bool wasEnabled=g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire);
+    if(wasKnown==known&&wasEnabled==enabled)return;
+    g_steamWallpaperPreferenceUpdating.store(true,std::memory_order_release);
+    steamWallpaperForegroundSignal();
+    g_steamWallpaperPreferenceKnown.store(known,std::memory_order_release);
+    g_steamWallpaperPreferenceEnabled.store(enabled,std::memory_order_release);
+    g_steamWallpaperPreferenceUpdating.store(false,std::memory_order_release);
+}
+static json steamWallpaperForegroundRead() {
+    using namespace ymcc::steamwallpaperForeground;
+    auto& owner=steamWallpaperForegroundOwner();const auto ticket=owner.ticket();Facts facts;
+    facts.enabled=!g_steamWallpaperPreferenceUpdating.load(std::memory_order_acquire)&&
+        g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire)&&
+        g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire);
+    facts.ready=!g_exitRequested.load(std::memory_order_acquire)&&
+        g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready&&
+        g_steamWallpaperForegroundObserverReady.load(std::memory_order_acquire);
+    facts.power=currentPowerGeneration();
+    const auto session=g_steamSettingsObserver.sessionSnapshot();
+    const auto mode=g_steamModeObserver.snapshot(session);
+    facts.steamPid=session.pid;facts.steamBirth=session.created;
+    facts.modeEpoch=mode.value("modeEpoch",std::string{});
+    facts.known=session.pid&&session.created&&!session.root.empty()&&mode.value("known",false)&&
+        mode.value("running",false)&&mode.value("mode",std::string{})=="bigpicture"&&
+        mode.value("pid",0u)==session.pid&&mode.value("birth",std::string{})==std::to_string(session.created)&&
+        !facts.modeEpoch.empty();
+    if(!facts.enabled||!facts.ready||!facts.known||!g_deckySidebarRuntime.snapshot().enabled)
+        return owner.observe(facts,ticket);
+    const HWND foreground=GetForegroundWindow();
+    const HWND window=foreground?GetAncestor(foreground,GA_ROOT):nullptr;
+    if(!window||window!=foreground||!IsWindow(window)||!IsWindowVisible(window)||IsIconic(window))
+        return owner.observe(facts,ticket);
+    wchar_t type[128]{},title[256]{};
+    if(!GetClassNameW(window,type,128)||!GetWindowTextW(window,title,256)||!bigPictureSurface(type,title))
+        return owner.observe(facts,ticket);
+    DWORD pid=0;if(!GetWindowThreadProcessId(window,&pid)||!pid)return owner.observe(facts,ticket);
+    const HANDLE raw=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+    if(!raw)return owner.observe(facts,ticket);
+    std::unique_ptr<void,decltype(&CloseHandle)> process(raw,&CloseHandle);
+    wchar_t image[32768]{};DWORD count=32768,processSession=0,ownSession=0;
+    FILETIME birth{},exit{},kernel{},user{};
+    if(!QueryFullProcessImageNameW(raw,0,image,&count)||!GetProcessTimes(raw,&birth,&exit,&kernel,&user)||
+       WaitForSingleObject(raw,0)!=WAIT_TIMEOUT||!ProcessIdToSessionId(pid,&processSession)||
+       !ProcessIdToSessionId(GetCurrentProcessId(),&ownSession)||processSession!=ownSession)
+        return owner.observe(facts,ticket);
+    const std::wstring path(image,count);
+    const bool imageMatches=sameWindowsPath(path,session.root+L"\\steam.exe")||
+        sameWindowsPath(path,session.root+L"\\bin\\cef\\cef.win64\\steamwebhelper.exe")||
+        sameWindowsPath(path,session.root+L"\\bin\\cef\\cef.win7\\steamwebhelper.exe");
+    if(!imageMatches)return owner.observe(facts,ticket);
+    ULONGLONG rootBirth=0;const HANDLE rootRaw=ymcc::steamsession::verifiedProcess(session.pid,session.root,&rootBirth);
+    if(!rootRaw)return owner.observe(facts,ticket);
+    std::unique_ptr<void,decltype(&CloseHandle)> root(rootRaw,&CloseHandle);
+    if(rootBirth!=session.created)return owner.observe(facts,ticket);
+    DWORD afterPid=0;const auto after=g_steamModeObserver.snapshot(session);
+    if(GetForegroundWindow()!=foreground||!IsWindow(window)||!IsWindowVisible(window)||IsIconic(window)||
+       !GetWindowThreadProcessId(window,&afterPid)||afterPid!=pid||WaitForSingleObject(raw,0)!=WAIT_TIMEOUT||
+       WaitForSingleObject(rootRaw,0)!=WAIT_TIMEOUT||!(g_steamSettingsObserver.sessionSnapshot()==session)||
+       !after.value("known",false)||!after.value("running",false)||after.value("mode",std::string{})!="bigpicture"||
+       after.value("modeEpoch",std::string{})!=facts.modeEpoch||!g_deckySidebarRuntime.snapshot().enabled||
+       g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready||currentPowerGeneration()!=facts.power||
+       g_steamWallpaperPreferenceUpdating.load(std::memory_order_acquire)||
+       !g_steamWallpaperForegroundObserverReady.load(std::memory_order_acquire)||
+       !g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire)||
+       !g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire)||g_exitRequested.load(std::memory_order_acquire))
+        return owner.observe(Facts{},ticket);
+    facts.pid=pid;facts.birth=(static_cast<ULONGLONG>(birth.dwHighDateTime)<<32)|birth.dwLowDateTime;
+    facts.window=static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(window));facts.physical=true;
+    return owner.observe(facts,ticket);
+}
+static void steamWallpaperForegroundPublish() {
+    g_steamWallpaperForegroundPending.store(false,std::memory_order_release);
+    try {static json published;auto proof=ymcc::media::steamDemand::foreground();
+        if(proof!=published){published=proof;ipc_emit("gameMedia.steamForegroundChanged",proof);}}
+    catch(...){/* Missing/failed readers continue to deny Steam media demand. */}
+}
 static ymcc::media::Store& sharedGameMediaStore() {
     static ymcc::media::Store store([]{const auto root=custom_steam_library::defaultDataRoot(fspath::path(exe_dir()) / L"CustomSteamLibrary");ymcc::media::diagnostics::rememberRoot(root);return root;}());
     return store;
@@ -61775,31 +66776,52 @@ static json default_background_state() {
     };
 }
 
+static bool backgroundAssetValid(const json& cfg) noexcept {
+    try {
+        if (!cfg.is_object()) return false;
+        if (cfg.contains("schemaVersion") && (!cfg["schemaVersion"].is_number_integer() || cfg["schemaVersion"] < 0 || cfg["schemaVersion"] > 1)) return false;
+        if (cfg.contains("disabled") && !cfg["disabled"].is_boolean()) return false;
+        if (cfg.value("disabled", false)) return true;
+        if (!cfg.contains("file") || !cfg["file"].is_string()) return false;
+        const auto& file = cfg["file"].get_ref<const std::string&>();
+        if (file.empty() || file.size() > 4096 || file == "." || file == ".." ||
+            file.find_first_of("/\\:") != std::string::npos || file.find('\0') != std::string::npos) return false;
+        if (cfg.contains("stamp")) {
+            const auto& stamp = cfg["stamp"];
+            if (!stamp.is_number_integer() || (!stamp.is_number_unsigned() && stamp.get<long long>() < 0)) return false;
+        }
+        if (cfg.contains("kind") && (!cfg["kind"].is_string() || (cfg["kind"] != "image" && cfg["kind"] != "video"))) return false;
+        return true;
+    } catch (...) { return false; }
+}
+
 static json background_state() {
-    json cfg = ymSettingsSection("background").value("asset", json::object());
-    // Explicit clear must survive refresh/restart without re-enabling the factory MP4.
-    if (cfg.is_object() && cfg.value("disabled", false))
-        return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
-    if (!cfg.is_object() || cfg.empty()) {
-        std::ifstream f(background_config_path(), std::ios::binary);
-        if (!f) return default_background_state();
-        try { f >> cfg; } catch (...) { return {{"enabled", false}, {"kind", "image"}, {"url", ""}}; }
-    }
-    auto file = cfg.value("file", std::string{});
-    if (file.empty() || file.find('/') != std::string::npos || file.find('\\') != std::string::npos)
-        return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
-    auto path = background_assets_dir() + L"\\" + U2W(file);
-    std::error_code ec;
-    if (!fspath::is_regular_file(path, ec)) return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
-    auto stamp = cfg.value("stamp", uint64_t{0});
-    auto kind = cfg.value("kind", file == "background.mp4" ? std::string{"video"} : std::string{"image"});
-    if (kind != "video") kind = "image";
-    return {
-        {"enabled", true},
-        {"kind", kind},
-        {"file", file},
-        {"url", "https://user-assets.localhost/" + file + "?v=" + std::to_string(stamp)}
-    };
+    const json disabled{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    try {
+        const auto section = ymSettingsSection("background");
+        if (!section.is_object()) return disabled;
+        json cfg = json::object();
+        if (section.contains("asset")) {
+            cfg = section["asset"];
+            if (!cfg.is_object()) return disabled;
+        }
+        if (cfg.empty()) {
+            bool missing = false;
+            if (!startupReadJsonFile(background_config_path(), cfg, missing))
+                return missing ? default_background_state() : disabled;
+        }
+        if (!backgroundAssetValid(cfg) || cfg.value("disabled", false)) return disabled;
+        const auto file = cfg["file"].get<std::string>();
+        const auto path = background_assets_dir() + L"\\" + U2W(file);
+        std::error_code ec;
+        if (!fspath::is_regular_file(path, ec) || ec) return disabled;
+        const auto stamp = cfg.value("stamp", uint64_t{0});
+        const auto kind = cfg.value("kind", file == "background.mp4" ? std::string{"video"} : std::string{"image"});
+        return {
+            {"enabled", true}, {"kind", kind}, {"file", file},
+            {"url", "https://user-assets.localhost/" + file + "?v=" + std::to_string(stamp)}
+        };
+    } catch (...) { return disabled; }
 }
 
 // Dynamic Steam media is a consumer of the game recognition valve, not a
@@ -61831,74 +66853,272 @@ static bool nativeDynamicValveTargetMatches(
     return true;
 }
 
+// BEGIN YMCC_STATIC_BACKGROUND_TRANSACTION
+// Only these three recorded generations are owned by this transaction. Legacy
+// filenames and unrelated directory entries are never garbage-collected here.
+struct BackgroundStaticHandle {
+    HANDLE value = INVALID_HANDLE_VALUE;
+    ~BackgroundStaticHandle() { close(); }
+    bool close() { const auto h=value;value=INVALID_HANDLE_VALUE;return h==INVALID_HANDLE_VALUE||CloseHandle(h)!=FALSE; }
+};
+static std::string backgroundStaticIdentity(const BY_HANDLE_FILE_INFORMATION& info) {
+    return std::to_string(info.dwVolumeSerialNumber)+"-"+std::to_string(info.nFileIndexHigh)+"-"+std::to_string(info.nFileIndexLow);
+}
+static bool backgroundStaticRemoveOwned(const std::wstring& path, const std::string& identity) noexcept {
+    try {
+        BackgroundStaticHandle file;
+        file.value=CreateFileW(path.c_str(),GENERIC_READ|DELETE,0,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        if(file.value==INVALID_HANDLE_VALUE){const auto error=GetLastError();return error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND;}
+        BY_HANDLE_FILE_INFORMATION info{};
+        if(!GetFileInformationByHandle(file.value,&info)||(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))||backgroundStaticIdentity(info)!=identity)return false;
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        if(!SetFileInformationByHandle(file.value,FileDispositionInfo,&disposition,sizeof(disposition))||!file.close())return false;
+        const auto attributes=GetFileAttributesW(path.c_str());const auto error=GetLastError();
+        return attributes==INVALID_FILE_ATTRIBUTES&&(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND);
+    } catch(...) { return false; }
+}
+static bool backgroundStaticParseSelector(const std::string& raw, json& document) {
+    if(raw.size()>4u*1024u*1024u)return false;
+    try {
+        struct Invalid{};std::vector<std::set<std::string>> containers;
+        document=json::parse(raw,[&](int depth,json::parse_event_t event,json& value){
+            if(depth>64)throw Invalid{};
+            if(event==json::parse_event_t::object_start||event==json::parse_event_t::array_start){if(containers.size()>=64)throw Invalid{};containers.emplace_back();}
+            else if(event==json::parse_event_t::key){if(containers.empty()||!containers.back().insert(value.get<std::string>()).second)throw Invalid{};}
+            else if(event==json::parse_event_t::object_end||event==json::parse_event_t::array_end){if(containers.empty())throw Invalid{};containers.pop_back();}
+            return true;
+        });
+        return ymcc::settingsBaseline::supported(document);
+    } catch(...) { return false; }
+}
+static bool backgroundStaticSelector(const std::wstring& path, json& document, bool& missing) {
+    const auto snapshot=ymSettingsReadSnapshot("",path);
+    missing=false;
+    if(!snapshot.is_object()||snapshot.contains("readFault")||!snapshot.contains("content")||!snapshot["content"].is_string())return false;
+    const auto& raw=snapshot["content"].get_ref<const std::string&>();
+    if(snapshot.value("stamp",std::string{})=="missing"){missing=raw.empty();return missing;}
+    return backgroundStaticParseSelector(raw,document);
+}
+// Win32 selectors can differ only in case while selecting the same media.
+// Use the OS ordinal comparison for ownership protection; ambiguous trailing
+// dot/space aliases are unknown selectors and never authorize collection.
+struct BackgroundStaticReferenceLess {
+    bool operator()(const std::string& left, const std::string& right) const {
+        return CompareStringOrdinal(U2W(left).c_str(),-1,U2W(right).c_str(),-1,TRUE)==CSTR_LESS_THAN;
+    }
+};
+using BackgroundStaticReferences = std::set<std::string,BackgroundStaticReferenceLess>;
+static bool backgroundStaticAddReference(const json& asset, BackgroundStaticReferences& references) {
+    if(!asset.is_object())return false;
+    if(asset.empty())return true;
+    if(!backgroundAssetValid(asset))return false;
+    if(asset.contains("file")){
+        if(!asset["file"].is_string())return false;
+        const auto& file=asset["file"].get_ref<const std::string&>();
+        if(file.empty()||file.back()=='.'||file.back()==' ')return false;
+        auto active=asset;active.erase("disabled");
+        if(!backgroundAssetValid(active))return false;
+        references.insert(asset["file"].get<std::string>());
+    }
+    return true;
+}
+static BackgroundStaticReferences backgroundStaticReferences() {
+    BackgroundStaticReferences references;
+    for(const auto* path:{&YM_SETTINGS_FILE,&YM_SETTINGS_BACKUP_FILE}){
+        json document;bool missing=false;
+        if(!backgroundStaticSelector(*path,document,missing))throw std::runtime_error("Background selector is unknown; media retained");
+        if(missing)continue;
+        if(document.contains("background")){
+            const auto& section=document["background"];
+            if(!section.is_object()||(section.contains("asset")&&!backgroundStaticAddReference(section["asset"],references)))throw std::runtime_error("Background selector is invalid; media retained");
+        }
+    }
+    json legacy;bool missing=false;
+    if(!startupReadJsonFile(background_config_path(),legacy,missing)){
+        if(!missing)throw std::runtime_error("Legacy background selector is unknown; media retained");
+    } else if(!backgroundStaticAddReference(legacy,references))throw std::runtime_error("Legacy background selector is invalid; media retained");
+    return references;
+}
+static std::wstring backgroundStaticSlotPath(int slot, const wchar_t* suffix) {
+    return background_assets_dir()+L"\\.ymcc-static-background-slot"+std::to_wstring(slot)+suffix;
+}
+static bool backgroundStaticRecordValid(const json& record, int slot) {
+    try {
+        if(!record.is_object()||record.value("owner",std::string{})!="YMCC.static-background.v1")return false;
+        if(!record.contains("schemaVersion")||!record["schemaVersion"].is_number_integer()||record["schemaVersion"]!=1||
+            !record.contains("slot")||!record["slot"].is_number_integer()||record["slot"]!=slot)return false;
+        if(!record.contains("file")||!record["file"].is_string()||!record.contains("identity")||!record["identity"].is_string()||!record.contains("bytes")||!record["bytes"].is_number_unsigned())return false;
+        const auto file=record["file"].get<std::string>(),id=record["identity"].get<std::string>(),prefix="background-static-"+std::to_string(slot)+"-";
+        if(file.size()>128||file.rfind(prefix,0)!=0||id.empty()||id.size()>64||id.find_first_not_of("0123456789-")!=std::string::npos)return false;
+        const auto dot=file.rfind('.');if(dot==std::string::npos||dot<=prefix.size()||file.substr(prefix.size(),dot-prefix.size()).find_first_not_of("0123456789-")!=std::string::npos)return false;
+        const auto ext=file.substr(dot);if(ext!=".png"&&ext!=".jpg"&&ext!=".mp4")return false;
+        return record["bytes"].get<unsigned long long>()>0&&record["bytes"].get<unsigned long long>()<=(ext==".mp4"?2ULL*1024*1024*1024:20ULL*1024*1024);
+    } catch(...) { return false; }
+}
+static bool backgroundStaticLoadRecord(int slot, json& record, bool& missing) {
+    const auto path=backgroundStaticSlotPath(slot,L".json");
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    if(GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&attributes)){
+        if(attributes.nFileSizeHigh||attributes.nFileSizeLow>8192||(attributes.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))return false;
+    } else {const auto error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return false;}
+    if(!startupReadJsonFile(path,record,missing))return missing;
+    return backgroundStaticRecordValid(record,slot);
+}
+static bool backgroundStaticStoreRecord(int slot, const json& record) {
+    const auto raw=record.dump();if(raw.size()>8192)return false;
+    const auto temp=backgroundStaticSlotPath(slot,L".json.new"),target=backgroundStaticSlotPath(slot,L".json");
+    BackgroundStaticHandle output;
+    output.value=CreateFileW(temp.c_str(),GENERIC_READ|GENERIC_WRITE|DELETE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
+    if(output.value==INVALID_HANDLE_VALUE)return false;
+    BY_HANDLE_FILE_INFORMATION info{};const bool identified=GetFileInformationByHandle(output.value,&info)!=FALSE;
+    DWORD written=0;const bool ready=identified&&WriteFile(output.value,raw.data(),static_cast<DWORD>(raw.size()),&written,nullptr)&&written==raw.size()&&FlushFileBuffers(output.value);
+    if(!ready){FILE_DISPOSITION_INFO remove{TRUE};SetFileInformationByHandle(output.value,FileDispositionInfo,&remove,sizeof(remove));return false;}
+    if(!output.close())return false;
+    if(MoveFileExW(temp.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return true;
+    backgroundStaticRemoveOwned(temp,backgroundStaticIdentity(info));return false;
+}
+static bool backgroundStaticOwnedOrMissing(const std::wstring& path, const std::string& identity) {
+    BackgroundStaticHandle input;
+    input.value=CreateFileW(path.c_str(),GENERIC_READ|DELETE,0,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(input.value==INVALID_HANDLE_VALUE){const auto error=GetLastError();return error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND;}
+    BY_HANDLE_FILE_INFORMATION info{};
+    return GetFileInformationByHandle(input.value,&info)&&!(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))&&backgroundStaticIdentity(info)==identity;
+}
+// A missing ownership record does not make an older generation ours to
+// delete, or make its slot empty. Inspect at most the recorded name plus one
+// unexpected reserved name; this lookup only refuses allocation, never deletes.
+static bool backgroundStaticNamespaceKnown(int slot, const json* record) {
+    const auto pattern=background_assets_dir()+L"\\background-static-"+std::to_wstring(slot)+L"-*";
+    WIN32_FIND_DATAW found{};const auto search=FindFirstFileW(pattern.c_str(),&found);
+    if(search==INVALID_HANDLE_VALUE)return GetLastError()==ERROR_FILE_NOT_FOUND;
+    struct Close{HANDLE value;~Close(){FindClose(value);}}close{search};
+    if(!record||_wcsicmp(found.cFileName,U2W((*record)["file"].get<std::string>()).c_str())!=0)return false;
+    if(FindNextFileW(search,&found))return false;
+    return GetLastError()==ERROR_NO_MORE_FILES;
+}
+static bool backgroundStaticReclaim(int slot, const json& record, const BackgroundStaticReferences& references, const std::string& sourceIdentity) {
+    const auto file=record["file"].get<std::string>(),identity=record["identity"].get<std::string>();
+    if(references.count(file)||identity==sourceIdentity)return false;
+    const auto final=background_assets_dir()+L"\\"+U2W(file),pending=backgroundStaticSlotPath(slot,L".pending");
+    if(!backgroundStaticOwnedOrMissing(final,identity)||!backgroundStaticOwnedOrMissing(pending,identity))return false;
+    return backgroundStaticRemoveOwned(final,identity)&&backgroundStaticRemoveOwned(pending,identity);
+}
+struct BackgroundStaticCandidate {
+    BackgroundStaticHandle output;
+    json record;
+    std::wstring pending,final;
+    bool preserve=false,activated=false;
+    ~BackgroundStaticCandidate(){
+        if(preserve)return;
+        if(output.value!=INVALID_HANDLE_VALUE){FILE_DISPOSITION_INFO remove{TRUE};SetFileInformationByHandle(output.value,FileDispositionInfo,&remove,sizeof(remove));output.close();}
+        if(record.contains("identity")){backgroundStaticRemoveOwned(pending,record["identity"].get<std::string>());if(activated)backgroundStaticRemoveOwned(final,record["identity"].get<std::string>());}
+    }
+};
+static void backgroundStaticReserve(BackgroundStaticCandidate& candidate, const std::string& extension, unsigned long long bytes, const std::string& sourceIdentity) {
+    static std::atomic<unsigned long long> sequence{1};
+    SettingsFileGuard guard;
+    const auto references=backgroundStaticReferences();
+    for(int slot=0;slot<3;slot++){
+        const auto recordTemp=backgroundStaticSlotPath(slot,L".json.new");
+        const auto attributes=GetFileAttributesW(recordTemp.c_str());const auto recordError=GetLastError();
+        if(attributes!=INVALID_FILE_ATTRIBUTES||(recordError!=ERROR_FILE_NOT_FOUND&&recordError!=ERROR_PATH_NOT_FOUND))continue;
+        json prior;bool missing=false;
+        if(!backgroundStaticLoadRecord(slot,prior,missing))continue;
+        if(!backgroundStaticNamespaceKnown(slot,missing?nullptr:&prior))continue;
+        if(!missing&&!backgroundStaticReclaim(slot,prior,references,sourceIdentity))continue;
+        const auto pending=backgroundStaticSlotPath(slot,L".pending");
+        candidate.output.value=CreateFileW(pending.c_str(),GENERIC_READ|GENERIC_WRITE|DELETE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+        if(candidate.output.value==INVALID_HANDLE_VALUE)continue;
+        candidate.pending=pending;
+        BY_HANDLE_FILE_INFORMATION info{};
+        if(!GetFileInformationByHandle(candidate.output.value,&info))throw std::runtime_error("Cannot identify background staging file");
+        const auto generation=std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64())+"-"+std::to_string(sequence.fetch_add(1));
+        const auto file="background-static-"+std::to_string(slot)+"-"+generation+extension;
+        candidate.final=background_assets_dir()+L"\\"+U2W(file);
+        candidate.record=missing?json::object():prior;
+        candidate.record["owner"]="YMCC.static-background.v1";candidate.record["schemaVersion"]=1;candidate.record["slot"]=slot;candidate.record["file"]=file;candidate.record["identity"]=backgroundStaticIdentity(info);candidate.record["bytes"]=bytes;
+        if(!backgroundStaticStoreRecord(slot,candidate.record))throw std::runtime_error("Cannot record background staging ownership");
+        json confirmed;bool absent=false;
+        if(!backgroundStaticLoadRecord(slot,confirmed,absent)||absent||confirmed!=candidate.record)throw std::runtime_error("Background staging ownership was not confirmed");
+        return;
+    }
+    throw std::runtime_error("Background media slots are protected, busy, or unknown");
+}
+static void backgroundStaticCopyAndVerify(HANDLE source, HANDLE target, unsigned long long size) {
+    LARGE_INTEGER zero{};if(!SetFilePointerEx(source,zero,nullptr,FILE_BEGIN))throw std::runtime_error("Cannot rewind background source");
+    char buffer[65536];unsigned long long total=0;
+    while(total<size){const auto amount=static_cast<DWORD>((std::min)(size-total,static_cast<unsigned long long>(sizeof(buffer))));DWORD read=0,written=0;if(!ReadFile(source,buffer,amount,&read,nullptr)||read!=amount||!WriteFile(target,buffer,read,&written,nullptr)||written!=read)throw std::runtime_error("Failed to copy background file");total+=read;}
+    if(!FlushFileBuffers(target)||!SetFilePointerEx(source,zero,nullptr,FILE_BEGIN)||!SetFilePointerEx(target,zero,nullptr,FILE_BEGIN))throw std::runtime_error("Cannot confirm background copy");
+    char actual[65536];total=0;
+    while(total<size){const auto amount=static_cast<DWORD>((std::min)(size-total,static_cast<unsigned long long>(sizeof(buffer))));DWORD left=0,right=0;if(!ReadFile(source,buffer,amount,&left,nullptr)||!ReadFile(target,actual,amount,&right,nullptr)||left!=amount||right!=amount||memcmp(buffer,actual,amount)!=0)throw std::runtime_error("Background copy readback mismatch");total+=amount;}
+}
+static bool backgroundStaticConfirm(const json& expected) {
+    SettingsFileGuard guard;json document;bool missing=false;
+    if(!backgroundStaticSelector(YM_SETTINGS_FILE,document,missing)||missing||!document.contains("background")||!document["background"].is_object())return false;
+    const auto& section=document["background"];
+    return section.contains("asset")&&section["asset"]==expected;
+}
+static json backgroundInstallStaticAsset(const json& args) {
+    const auto source=U2W(args.value("source",std::string{}));
+    if(source.empty())throw std::runtime_error("Background image not found");
+    auto extension=fspath::path(source).extension().wstring();std::transform(extension.begin(),extension.end(),extension.begin(),::towlower);
+    const bool video=extension==L".mp4";
+    if(extension!=L".png"&&extension!=L".jpg"&&extension!=L".jpeg"&&!video)throw std::runtime_error("Only JPG, JPEG, PNG and MP4 are supported");
+    BackgroundStaticHandle input;
+    input.value=CreateFileW(source.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+    BY_HANDLE_FILE_INFORMATION info{};
+    if(input.value==INVALID_HANDLE_VALUE||!GetFileInformationByHandle(input.value,&info)||(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)||GetFileType(input.value)!=FILE_TYPE_DISK)throw std::runtime_error("Background image not found or unreadable");
+    const auto size=(static_cast<unsigned long long>(info.nFileSizeHigh)<<32)|info.nFileSizeLow;
+    if(!size||size>(video?2ULL*1024*1024*1024:20ULL*1024*1024))throw std::runtime_error("Background file size is invalid");
+    unsigned char header[16]{};DWORD count=0;
+    if(!ReadFile(input.value,header,sizeof(header),&count,nullptr))throw std::runtime_error("Cannot read background header");
+    const bool mp4=count>=12&&header[4]=='f'&&header[5]=='t'&&header[6]=='y'&&header[7]=='p';
+    const bool png=count>=8&&header[0]==0x89&&header[1]==0x50&&header[2]==0x4e&&header[3]==0x47&&header[4]==0x0d&&header[5]==0x0a&&header[6]==0x1a&&header[7]==0x0a;
+    const bool jpeg=count>=3&&header[0]==0xff&&header[1]==0xd8&&header[2]==0xff;
+    if((video&&!mp4)||(!video&&extension==L".png"&&!png)||(!video&&extension!=L".png"&&!jpeg))throw std::runtime_error("Invalid background media data");
+    const auto directory=background_assets_dir();std::error_code ec;fspath::create_directories(directory,ec);if(ec)throw std::runtime_error("Cannot create background directory");
+    BackgroundStaticHandle transaction;
+    const auto lock=directory+L"\\.ymcc-static-background.lock";
+    transaction.value=CreateFileW(lock.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_HIDDEN,nullptr);
+    if(transaction.value==INVALID_HANDLE_VALUE)throw std::runtime_error("Background media transaction is busy");
+    BackgroundStaticCandidate candidate;
+    backgroundStaticReserve(candidate,video?".mp4":extension==L".png"?".png":".jpg",size,backgroundStaticIdentity(info));
+    backgroundStaticCopyAndVerify(input.value,candidate.output.value,size);
+    if(!candidate.output.close()||!MoveFileExW(candidate.pending.c_str(),candidate.final.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Failed to activate background candidate");
+    candidate.activated=true;
+    // From this point an error/false ACK may follow an actual settings commit.
+    // Keep the immutable candidate; the next proven-reference GC can reclaim it.
+    candidate.preserve=true;
+    const json asset={{"file",candidate.record["file"]},{"kind",video?"video":"image"},{"stamp",GetTickCount64()}};
+    if(!ymSettingsPatchSection("background",json{{"asset",asset}}))throw std::runtime_error("Failed to write background config");
+    if(!backgroundStaticConfirm(asset))throw std::runtime_error("Background selector was not confirmed after commit");
+    const auto state=background_state();
+    if(!state.value("enabled",false)||state.value("file",std::string{})!=asset["file"].get<std::string>())throw std::runtime_error("Background selection changed after commit");
+    return state;
+}
+// END YMCC_STATIC_BACKGROUND_TRANSACTION
+
 static void reg_background() {
+    ymcc::media::steamDemand::setForegroundReader([]{return steamWallpaperForegroundRead();});
+    try{const auto snapshot=ymSettingsReadSnapshot("");
+        if(!snapshot.contains("readFault"))steamWallpaperForegroundPreference(ymcc::settingsBaseline::parseDocument(snapshot.value("content",std::string{})));
+    }catch(...){steamWallpaperForegroundPreference(json());}
+    ipc_on("gameMedia.steamForeground",[](const json&)->json{return ymcc::media::steamDemand::foreground();});
     ipc_on("background.get", [](const json&) -> json {
         std::lock_guard<std::mutex> lock(g_backgroundMtx);
         return background_state();
     });
     ipc_on("background.install", [](const json& a) -> json {
         std::lock_guard<std::mutex> lock(g_backgroundMtx);
-        auto source = U2W(a.value("source", std::string{}));
-        std::error_code ec;
-        if (source.empty() || !fspath::is_regular_file(source, ec))
-            throw std::runtime_error("Background image not found");
-        auto size = fspath::file_size(source, ec);
-        if (ec || size == 0) throw std::runtime_error("Background file size is invalid");
-        auto ext = fspath::path(source).extension().wstring();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
-        const bool isVideo = ext == L".mp4";
-        const uint64_t maxSize = isVideo ? 2ULL * 1024ULL * 1024ULL * 1024ULL : 20ULL * 1024ULL * 1024ULL;
-        if (size > maxSize) throw std::runtime_error(isVideo ? "MP4 background must be 1 byte to 2 GB" : "Background image must be 1 byte to 20 MB");
-        if (ext != L".jpg" && ext != L".jpeg" && ext != L".png" && !isVideo)
-            throw std::runtime_error("Only JPG, JPEG and MP4 are supported");
-        std::string file;
-        if (isVideo) {
-            std::ifstream sig(source, std::ios::binary);
-            unsigned char header[16] = {};
-            sig.read(reinterpret_cast<char*>(header), sizeof(header));
-            const bool mp4 = sig.gcount() >= 12 && header[4] == 'f' && header[5] == 't' && header[6] == 'y' && header[7] == 'p';
-            if (!mp4) throw std::runtime_error("Invalid MP4 container");
-            file = "background.mp4";
-        } else {
-            std::ifstream sig(source, std::ios::binary);
-            unsigned char header[8] = {};
-            sig.read(reinterpret_cast<char*>(header), sizeof(header));
-            const bool jpeg = header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
-            const bool png = header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
-                             header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A;
-            if ((ext == L".png" && !png) || (ext != L".png" && !jpeg))
-                throw std::runtime_error("Invalid background image data");
-            file = ext == L".png" ? "background.png" : "background.jpg";
-        }
-        auto dir = background_assets_dir();
-        auto target = dir + L"\\" + U2W(file);
-        auto temp = target + L".tmp";
-        fspath::copy_file(source, temp, fspath::copy_options::overwrite_existing, ec);
-        if (ec) throw std::runtime_error("Failed to copy background file");
-        if (!MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            DeleteFileW(temp.c_str());
-            throw std::runtime_error("Failed to activate background file");
-        }
-        for (const auto& old : {L"background.jpg", L"background.png", L"background.mp4"}) {
-            if (W2U(old) != file) DeleteFileW((dir + L"\\" + old).c_str());
-        }
-        uint64_t stamp = GetTickCount64();
-        {
-            if (!ymSettingsPatchSection("background", json{{"asset", json{{"file", file}, {"kind", isVideo ? "video" : "image"}, {"stamp", stamp}}}}))
-                throw std::runtime_error("Failed to write background config");
-        }
-        return background_state();
+        return backgroundInstallStaticAsset(a);
     });
     ipc_on("background.clear", [](const json&) -> json {
         std::lock_guard<std::mutex> lock(g_backgroundMtx);
         if (!ymSettingsPatchSection("background", json{{"asset", json{{"disabled", true}}}}))
             throw std::runtime_error("Failed to clear background config");
-        auto dir = background_assets_dir();
-        DeleteFileW((dir + L"\\background.jpg").c_str());
-        DeleteFileW((dir + L"\\background.png").c_str());
-        DeleteFileW((dir + L"\\background.mp4").c_str());
-        DeleteFileW(background_config_path().c_str());
-        return json{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+        // Backups may still reference any old media. Clearing selects disabled;
+        // a later proven slot transaction owns collection, never this handler.
+        return background_state();
     });
 
     ipc_on("gameMedia.watch", [](const json& a) -> json {
@@ -62497,11 +67717,16 @@ static void reg_shell_app() {
     ipc_on("fxsound.getState", [fxSoundStateJson](const json& args)->json {
         if(!args.is_object()||!args.empty())throw std::runtime_error("FXSOUND_INVALID_REQUEST");
         const auto hr=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
-        const auto result=fxSoundStateJson(ymcc::fxsound::observe());if(SUCCEEDED(hr))CoUninitialize();return result;
+        const auto result=fxSoundStateJson(ymcc::fxsound::observe(250));if(SUCCEEDED(hr))CoUninitialize();return result;
     });
     ipc_on("fxsound.setEnabled", [fxSoundStateJson](const json& args)->json {
-        if(!args.is_object()||args.size()!=1||!args.contains("enabled")||!args["enabled"].is_boolean())throw std::runtime_error("FXSOUND_INVALID_REQUEST");
+        // Optional mirror admission. Existing YMCC one-field callers keep their
+        // original route; client metadata can constrain, never grant a write.
+        const bool admitted=args.contains("expectedGeneration");
+        if(!args.is_object()||args.size()!=(admitted?2u:1u)||!args.contains("enabled")||!args["enabled"].is_boolean()||
+           admitted&&(!args["expectedGeneration"].is_number_integer()||args["expectedGeneration"].get<unsigned long long>()==0||args["expectedGeneration"].get<unsigned long long>()>9007199254740991ull))throw std::runtime_error("FXSOUND_INVALID_REQUEST");
         const auto generation=currentPowerGeneration();
+        if(admitted&&args["expectedGeneration"].get<unsigned long long>()!=generation)throw std::runtime_error("FXSOUND_POWER_NOT_READY");
         const auto hr=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
         const auto result=ymcc::fxsound::setEnabled(args["enabled"].get<bool>(),fspath::path(POWER_CONTROL_DIR)/L"fxsound",
             [generation]{return !g_exitRequested.load(std::memory_order_acquire)&&hardwareWriteAllowed()&&currentPowerGeneration()==generation;});
@@ -62574,11 +67799,19 @@ static void reg_shell_app() {
     });
     ipc_on("game.detect", [](const json& args) -> json {
         const DWORD preferredPid = args.value("pid", 0u);
+        const bool manual = !args.value("automatic", false);
+        ymcc::gameInventory::ManualScope manualScan(manual);
+        if (manual) ymcc::gameInventory::invalidate();
         NativeGameValveSnapshot observation;
         nativeValveAcquire(preferredPid, 0, &observation);
         if (!observation.generation) throw std::runtime_error("GAME_TARGET_OBSERVATION_UNAVAILABLE");
         const auto& game = observation.game;
-        if (!game.pid) return nativeGameTargetJson(observation);
+        if (!game.pid) {
+            auto reply = nativeGameTargetJson(observation);
+            if (preferredPid && observation.rejectedPreferredPid == preferredPid)
+                reply["requestedPidRejected"] = preferredPid;
+            return reply;
+        }
         // 共享检测结果同时作为外部缩放/插帧覆盖层的真实游戏记忆。
         // Lossless Scaling 启动后可能成为最上层窗口，回焦必须仍指向其下方游戏。
         FocusTargetSnapshot remembered;
@@ -62728,19 +67961,23 @@ static void reg_shell_app() {
     });
     ipc_on("game.rules.set", [](const json& a) -> json {
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+        ymcc::gamerules::FilesGuard coordinated(SG_DIR);
         const bool hasBlacklist = a.contains("blacklist");
         const bool hasWhitelist = a.contains("whitelist");
         if (hasBlacklist == hasWhitelist)
             return json{{"ok", false}, {"error", "只允许同时编辑一个名单"}};
 
         std::vector<std::wstring> next;
+        std::set<std::wstring> seen;
         const auto& values = hasBlacklist ? a["blacklist"] : a["whitelist"];
         if (!values.is_array()) return json{{"ok", false}, {"error", "名单格式无效"}};
         for (const auto& value : values) {
-            if (!value.is_string()) continue;
-            const auto rule = sgNormalizeGameRule(value.get<std::string>());
-            if (!rule.empty() && std::find(next.begin(), next.end(), rule) == next.end())
-                next.push_back(rule);
+            if (!value.is_string()) return json{{"ok", false}, {"error", "名单条目必须是进程名称"}};
+            const auto& text=value.get_ref<const std::string&>();
+            if(text.size()>1024*1024)return json{{"ok",false},{"error","名单条目过长"}};
+            const auto rule = sgNormalizeGameRule(text);
+            if(rule.empty())return json{{"ok",false},{"error","名单包含空条目"}};
+            if (seen.insert(rule).second) next.push_back(rule);
         }
 
         std::vector<std::wstring> nextBlacklist = sgGamePlayerBlacklist();
@@ -62776,13 +68013,18 @@ static void reg_shell_app() {
         g_gameRulesEpoch.fetch_add(1, std::memory_order_acq_rel);
         const auto snapshot = sgGameRulesSnapshot();
         ipc_emit("game.rules.changed", snapshot);
+        mousePolicyGameContextChanged();
         json result = snapshot;
         result["ok"] = true;
         return result;
     });
     ipc_on("game.suspend", [](const json& a) -> json {
         const int pid = a.value("pid", 0);
-        if (pid <= 0) return json{{"paused", false}, {"error", "invalid pid"}};
+        if (pid <= 0) {
+            const json result = {{"paused", false}, {"error", "invalid pid"}};
+            sgRecordManualGameControlReceipt("manual-game-pause-receipt", "game.suspend", a, result);
+            return result;
+        }
         const ULONGLONG expectedCreated = nativeJsonProcessCreated(a.value("processCreated", json{}));
         const auto result = sgSuspendGameByPid(
             static_cast<DWORD>(pid), expectedCreated);
@@ -62792,6 +68034,7 @@ static void reg_shell_app() {
                  result.value("error", std::string{}).c_str());
         if (result.value("paused", false))
             g_manualPausedPid.store(static_cast<DWORD>(pid), std::memory_order_release);
+        sgRecordManualGameControlReceipt("manual-game-pause-receipt", "game.suspend", a, result);
         return result;
     });
     ipc_on("game.resume", [](const json& a) -> json {
@@ -62805,6 +68048,7 @@ static void reg_shell_app() {
                  result.value("stalePids", json::array()).size());
         if (!sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0))
             g_manualPausedPid.store(0, std::memory_order_release);
+        sgRecordManualGameControlReceipt("manual-game-resume-receipt", "game.resume", a, result);
         SgResumeResult resumed;
         resumed.count = result.value("resumed", 0);
         sgAppendJsonResumedPids(resumed, result);
@@ -62886,6 +68130,11 @@ static void reg_shell_app() {
         HANDLE job = ensureTdpDaemonJob();
         if (!job)
             throw std::runtime_error("Failed to create TDP daemon lifetime job");
+        if (tdpDaemonSessionAlive()) {
+            settleTdpDaemonBootstrap(true);
+            try{auto row=observation;row["processStarted"]=false;row["reusedExistingProcess"]=true;row["daemonReady"]=true;appendTdpObservation("tdp.daemon-start-result",row);}catch(...){++g_tdpObservationFailures;}
+            return json{{"ok", true}};
+        }
         if (WaitNamedPipeW(kTdpDaemonPipeName, 200)) {
             HANDLE pipe = CreateFileW(kTdpDaemonPipeName, GENERIC_READ | GENERIC_WRITE, 0,
                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -62944,7 +68193,8 @@ static void reg_shell_app() {
         const bool diagnosticTdp = a.value("op",std::string{})=="set" || a.value("op",std::string{})=="resume";
         json observation=json::object();const auto observationStarted=GetTickCount64();
         const auto observationGeneration=g_powerGeneration.load();
-        if(diagnosticTdp){try{observation=tdpParentContext(a,"daemon");observeTdpRuntimeIdentity();appendTdpObservation("tdp.helper-start",observation);}catch(...){++g_tdpObservationFailures;}}
+        const bool floatingDetail=a.contains("tdpObservation") && ymcc::tdpdiag::successfulFloatingDetail("tdp.helper-start",a["tdpObservation"]);
+        if(diagnosticTdp && (!floatingDetail || g_domainLogEnabled[1].load(std::memory_order_acquire))){try{observation=tdpParentContext(a,"daemon");if(a.value("op",std::string{})=="resume")observeTdpRuntimeIdentity();appendTdpObservation("tdp.helper-start",observation);}catch(...){++g_tdpObservationFailures;}}
         try {
         auto op = a.value("op", std::string{});
         if (op != "ping" && op != "set" && op != "resume" && op != "quit")
@@ -62957,6 +68207,7 @@ static void reg_shell_app() {
             if (!std::isfinite(w) || w < 2.0 || w > 200.0)
                 throw std::runtime_error("TDP daemon watts out of range");
         }
+        if (op == "resume") args["generation"] = g_powerGeneration.load();
         json req = {{"version", 1}, {"requestId", nextTdpRequestId()},
                     {"op", op}, {"args", args}};
         DWORD timeoutMs = a.value("timeoutMs", 3000u);
@@ -62967,7 +68218,9 @@ static void reg_shell_app() {
             lease = std::make_unique<HardwareWriteLease>("tdp-daemon");
         const auto response=tdpDaemonPipeRequest(req, timeoutMs);
         settleTdpDaemonBootstrap(response.value("version",0)==1 && response.value("requestId",std::string{})==req["requestId"].get<std::string>());
-        if(diagnosticTdp){try{auto row=observation;row["requestId"]=req["requestId"];row["responseRequestId"]=response.value("requestId",std::string{});
+        if(diagnosticTdp && (!floatingDetail || g_domainLogEnabled[1].load(std::memory_order_acquire) || !response.value("ok",false) || response.value("rc",-1)!=0)){try{
+            if(observation.empty())observation=tdpParentContext(a,"daemon");
+            auto row=observation;row["requestId"]=req["requestId"];row["responseRequestId"]=response.value("requestId",std::string{});
             row["rc"]=response.value("rc",-1);row["ok"]=response.value("ok",false);row["error"]=response.value("error",std::string{});
             row["durationMs"]=GetTickCount64()-observationStarted;row["helperCommandReturned"]=response.contains("rc");row["hardwareCommandReturned"]="not-observed";row["readbackMatched"]="not-observed";
             if(response.contains("result")){row["helperResult"]=response["result"];
@@ -62986,7 +68239,8 @@ static void reg_shell_app() {
     
         } catch(const std::exception& error) {
             settleTdpDaemonBootstrap();
-            if(diagnosticTdp){try{auto row=observation;row["error"]=error.what();row["durationMs"]=GetTickCount64()-observationStarted;
+            if(diagnosticTdp){try{if(observation.empty())observation=tdpParentContext(a,"daemon");
+                auto row=observation;row["error"]=error.what();row["durationMs"]=GetTickCount64()-observationStarted;
                 row["processStarted"]=row.value("processStarted",false);row["hardwareCommandReturned"]=row["processStarted"].get<bool>()?json("not-observed"):json(false);row["readbackMatched"]="not-observed";
                 row["bootstrapFailureKind"]=ymcc::tdpdiag::bootstrapKind(error.what(),row["processStarted"].get<bool>());appendTdpObservation("tdp.failed",row);observeTdpRuntimeIdentity(true);
             }catch(...){++g_tdpObservationFailures;}}throw;
@@ -63320,6 +68574,8 @@ static void reg_shell_app() {
     ipc_on("sleepGuard.set", [](const json& a) -> json {
         bool on = a.value("on", false);
         g_guardEnabled = on;
+        if (!on) {sgSleepActivityEnd("guard-disabled",0,-1);sgSleepTimeoutStop("guard-disabled");
+            sgCancelEntryFailureRetry("guard-disabled",SgRetryKind::SleepTimeout);}
         sgSyncEnableMirror();
         return true;
     });
@@ -63350,6 +68606,7 @@ static void reg_shell_app() {
             {"suspended", suspended},
             {"pauseGameOnSleep", g_sgPauseResume},
             {"retryOnEntryFailure", g_sgRetryEntryFailure},
+        {"retryOnSleepTimeout", g_sgRetrySleepTimeout},
             {"retryOnNonUserWake", g_sgResleepEnabled},
             {"steamOverlayOffFix", false},
         {"autoWakeRecovery", g_sleepRecoveryAutoEnabled.load(std::memory_order_acquire)},
@@ -63436,11 +68693,14 @@ static void reg_shell_app() {
         if (a.contains("pauseGameOnSleep")) g_sgPauseResume = a.value("pauseGameOnSleep", g_sgPauseResume);
         else if (a.contains("pauseResume")) g_sgPauseResume = a.value("pauseResume", g_sgPauseResume);
         if (a.contains("retryOnEntryFailure")) g_sgRetryEntryFailure = a.value("retryOnEntryFailure", g_sgRetryEntryFailure);
+        if (a.contains("retryOnSleepTimeout")) g_sgRetrySleepTimeout = a.value("retryOnSleepTimeout", g_sgRetrySleepTimeout);
         if (a.contains("retryOnNonUserWake")) {
             g_sgResleepEnabled = a.value("retryOnNonUserWake", g_sgResleepEnabled);
         }
         sgSaveConfig();
         g_guardEnabled = sgConfigWantsGuard();
+        if (!g_guardEnabled) {sgSleepActivityEnd("guard-disabled",0,-1);sgSleepTimeoutStop("guard-disabled");
+            sgCancelEntryFailureRetry("guard-disabled",SgRetryKind::SleepTimeout);}
         if (!sgNonUserWakeGuardEnabled()) {
             sgClearUnexpectedWake("non-user-wake-setting-disabled", true);
             if (sgSleepRetryActive() && g_sgTask.retryKind == SgRetryKind::UnexpectedWake)
@@ -63459,7 +68719,9 @@ static void reg_shell_app() {
         return {{"resumed", rr.count}};
     });
     ipc_on("sleepGuard.suspendCurrent", [](const json& a) -> json {
-        return sgSuspendCurrent();
+        const auto result = sgSuspendCurrent();
+        sgRecordManualGameControlReceipt("manual-game-pause-receipt", "sleepGuard.suspendCurrent", a, result);
+        return result;
     });
 
     ipc_on("window.controllerEditorWidth", [](const json& a) -> json {
@@ -63677,7 +68939,10 @@ static void reg_http() {
         auto url    = a.value("url", std::string{});
         auto method = a.value("method", std::string{"GET"});
         auto body   = a.value("body", std::string{});
-        auto hdrs   = a.value("headers", json::object());
+        // IPC arguments are immutable for this invocation; borrow headers only.
+        const auto headerField = a.find("headers");
+        const json missingHeaders = headerField == a.end() ? json::object() : json(nullptr);
+        const json& hdrs = headerField != a.end() ? *headerField : missingHeaders;
         const DWORD requestTimeoutMs = ymcc::http::timeoutBudget(a.value("timeoutMs", 30000LL));
         const auto deadline = a.value("_nativeHttpDeadlineTick", GetTickCount64() + requestTimeoutMs);
         ymcc::http::requireDeadline(deadline, "queue");
@@ -63775,7 +69040,7 @@ static void reg_http() {
         std::wstring respHdrs(hdrSize / sizeof(wchar_t), 0);
         const bool responseHeadersAvailable = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_RAW_HEADERS_CRLF,
                             WINHTTP_HEADER_NAME_BY_INDEX, respHdrs.data(), &hdrSize, WINHTTP_NO_HEADER_INDEX) != FALSE;
-        const auto rawResponseHeaders = W2U(respHdrs);
+        auto rawResponseHeaders = W2U(respHdrs);
 
         // Body shares the original deadline. Fan read failure is an unconfirmed
         // receipt, never permission to promote a parseable prefix or retry a POST.
@@ -63824,7 +69089,7 @@ static void reg_http() {
             if (fanBodyComplete && parsedFanResponsePtr)
                 g_monitorFanDisplay.observe(monitorFanEpoch, statusCode, *parsedFanResponsePtr, static_cast<long long>(sgNowEpoch() * 1000.0));
         }
-        json response{{"status", statusCode}, {"headers", rawResponseHeaders}, {"body", respBody}};
+        json response{{"status", statusCode}, {"headers", std::move(rawResponseHeaders)}, {"body", std::move(respBody)}};
         if (monitorFanRequest) response["bodyComplete"] = fanBodyComplete;
         return response;
     });
@@ -64213,9 +69478,11 @@ static constexpr ULONGLONG kFanAuthRejectThrottleMs = 60000;
 
 static std::string fanHostReadSessionToken();   // 定义见本区下部；实例/凭据行需要它
 
-static unsigned long long fanHostProcessStartMs(DWORD pid) {
+static unsigned long long fanHostProcessStartMs(DWORD pid, HANDLE retainedProcess = nullptr) {
     if (!pid) return 0;
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    // The keepalive owner already holds this exact process object. Read current
+    // creation time through it; other callers keep their original fresh PID open.
+    HANDLE process = retainedProcess ? retainedProcess : OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process) return 0;
     FILETIME create{}, exitTime{}, kernel{}, user{};
     unsigned long long startMs = 0;
@@ -64224,7 +69491,7 @@ static unsigned long long fanHostProcessStartMs(DWORD pid) {
         const ULONGLONG ticks = focusFileTimeTicks(create);
         if (ticks > kEpochDeltaTicks) startMs = (ticks - kEpochDeltaTicks) / 10000ULL;
     }
-    CloseHandle(process);
+    if (!retainedProcess) CloseHandle(process);
     return startMs;
 }
 
@@ -64291,10 +69558,12 @@ static std::string fanHostHexFieldFromBody(const std::string& body, const char* 
 
 // 三要素分列：进程 / 凭据版本 / HC 会话。native 只持有前两项 + 自己**观察到**的事实；
 // HC 会话不在 native 手里（不得用凭据版本或 pid 冒充会话 / 实例）。
-static json fanHostInstanceSplit(DWORD pid, const std::string& credentialForThisRequest) {
+static json fanHostInstanceSplit(DWORD pid, const std::string& credentialForThisRequest,
+                                 std::optional<unsigned long long> observedStartMs = std::nullopt) {
     json detail = fanCredentialVersionDetail(credentialForThisRequest);
     detail["hostProcessPid"] = static_cast<unsigned long>(pid);
-    detail["hostProcessStartMs"] = pid ? fanHostProcessStartMs(pid) : 0ULL;
+    // The instance event publishes the same observation it compared above.
+    detail["hostProcessStartMs"] = observedStartMs ? *observedStartMs : (pid ? fanHostProcessStartMs(pid) : 0ULL);
     detail["hostInstanceSource"] = "native-observed-pid+creation-time";
     detail["hcSession"] = "unknown";
     detail["hcSessionSource"] = "native-does-not-track-hc-session";
@@ -64565,13 +69834,13 @@ static void fanHostNoteRequestHeaderFailed(const char* source, const std::string
     appendFanLifecycleLog("fan-host-request-header-failed", detail);
 }
 
-// 实例启动证据（事件级：只在 pid / 创建时间变化时写一次，零周期开销）。
-static void fanHostNoteInstanceObserved(const FanHostIdentityProbe& probe) {
+// 实例启动证据：pid/创建时间变化时才写；续租借用原句柄，仍实时读取创建时间。
+static void fanHostNoteInstanceObserved(const FanHostIdentityProbe& probe, HANDLE retainedProcess = nullptr) {
     if (!probe.matchedPid) return;
     static std::mutex instanceMx;
     static DWORD lastPid = 0;
     static unsigned long long lastStartMs = 0;
-    const unsigned long long startMs = fanHostProcessStartMs(probe.matchedPid);
+    const unsigned long long startMs = fanHostProcessStartMs(probe.matchedPid, retainedProcess);
     {
         std::lock_guard<std::mutex> lock(instanceMx);
         if (lastPid == probe.matchedPid && lastStartMs == startMs) return;
@@ -64579,7 +69848,7 @@ static void fanHostNoteInstanceObserved(const FanHostIdentityProbe& probe) {
         lastStartMs = startMs;
     }
     // 实例身份只在变化时写一次；凭据版本单列，绝不与实例身份互相代替。
-    json detail = fanHostInstanceSplit(probe.matchedPid, fanHostReadSessionToken());
+    json detail = fanHostInstanceSplit(probe.matchedPid, fanHostReadSessionToken(), startMs);
     detail["source"] = "fanHostExactProcessRunning";
     detail["gates"] = json{{"process", probe.processFound},
                            {"image", probe.imageMatched},
@@ -64609,6 +69878,7 @@ static bool fanHostExactProcessRunningForKeepalive() {
     auto& selection = fanKeepaliveProcessSelection();
     const auto expected = POWER_CONTROL_DIR + L"\\fan-host-v2\\YeManFanHost.exe";
     DWORD matchedPid = 0;
+    HANDLE matchedProcess = nullptr;
     if (selection.matches([&](DWORD pid, HANDLE process) {
         if (g_aiFanMockSession.enabled && !g_aiFanMockHost.owns(pid)) return false;
         wchar_t image[32768];
@@ -64616,12 +69886,13 @@ static bool fanHostExactProcessRunningForKeepalive() {
         if (!QueryFullProcessImageNameW(process, 0, image, &length) || !length || length > 32768) return false;
         if (!sameFinalPath(std::wstring(image, length), expected) || !fanHostOwnsLoopbackPort(pid)) return false;
         matchedPid = pid;
+        matchedProcess = process;
         return true;
     })) {
         FanHostIdentityProbe probe;
         probe.processFound = probe.imageMatched = probe.portFound = true;
         probe.matchedPid = matchedPid;
-        fanHostNoteInstanceObserved(probe);
+        fanHostNoteInstanceObserved(probe, matchedProcess);
         return true;
     }
     const auto probe = fanHostIdentityProbe();
@@ -64925,6 +70196,8 @@ static bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId, std::stri
     if (statusOut) *statusOut = 0;
     const auto monitorFanEpoch = g_monitorFanDisplay.epoch();
     if (errorCodeOut) errorCodeOut->clear();
+    auto& connectionOwner = ymcc::fan_http::currentThreadTransport();
+    ymcc::fan_http::RetireFailedTransport retireOnFailure{connectionOwner};
     const auto sessionToken = fanHostReadSessionToken();
     if (sessionToken.empty()) {
         fanHostNoteCredentialUnavailable("native-lease-keepalive");
@@ -64937,12 +70210,7 @@ static bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId, std::stri
     // Keep the existing 650ms phase timeout; the three network phases also
     // share one absolute budget. Small body packets cannot keep extending it.
     const auto deadline = GetTickCount64() + 3ULL * 650ULL;
-    HINTERNET session = WinHttpOpen(
-        L"YeManCC-FanKeepalive/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC);
-    if (!session) return false;
-    setHttpTimeouts(session, 650);
-    HINTERNET connect = WinHttpConnect(session, L"127.0.0.1", 8765, 0);
+    HINTERNET connect = connectionOwner.connect(8765, fanKeepaliveProcessSelection().revision());
     HINTERNET request = connect
         ? WinHttpOpenRequest(connect, L"POST", L"/api/heartbeat", nullptr,
                              WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
@@ -64954,13 +70222,11 @@ static bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId, std::stri
     std::string hostRequestId;
     bool headerAdded = false;
     if (request) {
-        // AsyncRequest owns all three handles, including setup-failure cleanup.
-        // Retire the outer raw owners before transfer so no path double-closes.
-        const auto ownedSession = std::exchange(session, nullptr);
-        const auto ownedConnect = std::exchange(connect, nullptr);
+        // Each fresh request owns its callback state and handle. The same worker
+        // retains parents only for this exact still-validated Host process object.
         const auto ownedRequest = std::exchange(request, nullptr);
         try {
-            ymcc::http::AsyncRequest transport(ownedSession, ownedConnect, ownedRequest, deadline, [] {
+            ymcc::http::AsyncRequest transport(nullptr, nullptr, ownedRequest, deadline, [] {
                 return g_fanLeaseKeepaliveStop.load(std::memory_order_acquire) ||
                     g_exitRequested.load(std::memory_order_acquire);
             });
@@ -65008,8 +70274,7 @@ static bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId, std::stri
         }
     }
     if (request) WinHttpCloseHandle(request);
-    if (connect) WinHttpCloseHandle(connect);
-    if (session) WinHttpCloseHandle(session);
+
     if (status == 401 || status == 403) {
         // Authentication refusal remains separately recorded, without tokens.
         fanHostNoteAuthRejected("native-lease-keepalive", "POST", "/api/heartbeat", status,
@@ -65019,6 +70284,7 @@ static bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId, std::stri
     } else if (!headerAdded) {
         fanHostNoteRequestHeaderFailed("native-lease-keepalive", "POST", "/api/heartbeat", sessionToken);
     }
+    retireOnFailure.accepted = ok;
     return ok;
 }
 
@@ -65145,6 +70411,7 @@ static void fanLeaseKeepaliveThreadProc() {
         if (g_fanLeaseKeepaliveStop.load(std::memory_order_acquire) ||
             g_exitRequested.load(std::memory_order_acquire)) break;
         if (!g_fanLeaseKeepaliveArmed.load(std::memory_order_acquire)) fanKeepaliveProcessSelection().reset();
+        if (!g_fanLeaseKeepaliveArmed.load(std::memory_order_acquire)) ymcc::fan_http::currentThreadTransport().reset();
         HANDLE wake = g_fanLeaseKeepaliveWake;
         // No lease means no timed work. Auto-reset notifications retain an arm
         // that arrives just before the wait, and shutdown still wakes this owner.
@@ -65159,6 +70426,7 @@ static void fanLeaseKeepaliveThreadProc() {
         } catch (...) {
         }
     }
+    ymcc::fan_http::currentThreadTransport().reset();
     fanKeepaliveProcessSelection().reset();
 }
 
@@ -65622,6 +70890,9 @@ struct FanBoundaryEvidence {
     std::string hostReleaseActionKind = "absent";
     std::string hostReleaseActionClass = "absent";
     bool hostReleaseActionProven = false;
+    bool sourceFanMode = false;
+    bool sourceResourcesRetired = false;
+    bool sourceReleaseSafe = false;
 };
 
 // 释放动作分类（纯函数，与 Host ParseReleaseAction / IsOemReleaseSafe **同名同义**）：
@@ -65631,11 +70902,13 @@ struct FanBoundaryEvidence {
 static bool fanReleaseActionKindProven(const std::string& kind) {
     return kind == "proven-by-scope-receipts" ||
         kind == "proven-by-host-hc-acpi-fallback" ||
-        kind == "compat-route-without-scope";
+        kind == "compat-route-without-scope" ||
+        kind == "proven-by-source-auto-register-and-terminal-close";
 }
 
 static FanBoundaryEvidence fanBoundaryEvidenceFromState(const json& state, bool suspendBoundary) {
     FanBoundaryEvidence evidence;
+    if (!ymcc::fan_response::stateValid(state)) return evidence;
     const auto stateName = state.value("state", std::string{});
     const bool hasCanonicalLiveWrites = state.contains("hardwareWritesEnabled");
     const bool hasLegacyLiveWrites = state.contains("hardwareWrites");
@@ -65692,6 +70965,17 @@ static FanBoundaryEvidence fanBoundaryEvidenceFromState(const json& state, bool 
     evidence.releaseEvidence = !evidence.writesHistory ||
         (evidence.hostReleaseActionPresent ? evidence.hostReleaseActionProven
                                            : evidence.releaseReceipt);
+    evidence.sourceFanMode = state.value("sourceFanMode", false);
+    if (evidence.sourceFanMode) {
+        evidence.sourceResourcesRetired = ymcc::fan_response::sourceResourcesRetired(state);
+        evidence.sourceReleaseSafe = ymcc::fan_response::sourceReleaseSafe(state);
+        evidence.hcCloseEvidenceAcceptable = evidence.sourceResourcesRetired;
+        evidence.hcCleanupTerminal = false;
+        evidence.releaseEvidence = evidence.sourceReleaseSafe;
+        evidence.hostReleaseActionProven = evidence.writesHistory && evidence.sourceReleaseSafe;
+    } else if (evidence.hostReleaseActionKind == "proven-by-source-auto-register-and-terminal-close") {
+        evidence.releaseEvidence = false; // Source proof cannot authorize an HC route.
+    }
     return evidence;
 }
 
@@ -65723,7 +71007,10 @@ static json fanBoundaryEvidenceDetail(const FanBoundaryEvidence& evidence) {
         {"sessionOpen", evidence.sessionOpen},
         {"unknownState", evidence.unknownState},
         {"cleanupPending", evidence.cleanupPending},
-        {"physicalOwnerKnown", evidence.physicalOwnerKnown}};
+        {"physicalOwnerKnown", evidence.physicalOwnerKnown},
+        {"sourceFanMode", evidence.sourceFanMode},
+        {"sourceResourcesRetired", evidence.sourceResourcesRetired},
+        {"sourceReleaseSafe", evidence.sourceReleaseSafe}};
 }
 
 static bool fanHostEmergencyPost(const wchar_t* endpoint, const char* reason,
@@ -66216,11 +71503,14 @@ static void fanHostScheduleEmergencySuspend(const char* reason,
     if(generation)fanHostQueueSuspend(reason,generation);
 }
 static void fanHostQueueSuspend(const char* reason,unsigned long long generation) {
-    // Invalidate the renderer before queueing a single Close worker. No HTTP in callback.
+    // Invalidate only a newly admitted Close boundary. Duplicate manual wake
+    // requests must not re-suspend an already recovering renderer. A newer
+    // queued generation still invalidates immediately, before its worker turn.
+    const auto admission=g_fanPhysicalWake.admitClose(generation);
+    if(admission==ymcc::fan_wake::Observation::CloseAdmission::Ignored)return;
     fanLeaseKeepaliveDisarm("power-suspend");
-    if(!generation || !g_fanPhysicalWake.current(generation))return;
     ipc_emit("fan.suspending", {{"generation",generation},{"scope","fan-only"}});
-    if(!g_fanPhysicalWake.beginClose(generation))return;
+    if(admission!=ymcc::fan_wake::Observation::CloseAdmission::StartWorker)return;
     g_fanSleepCleanupInFlight.store(true,std::memory_order_release);
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     try {
@@ -66760,6 +72050,7 @@ static void reg_amd_fsr_upgrade() {
 }
 
 static void reg_gpu_dedicated_memory() {
+    ipc_on("gpuSchedule.getState", [](const json&) -> json { return ymcc::gpuschedule::readWindowsState(); });
     // Register only. Probe/write happen on the worker after an explicit frontend request.
     const auto root = yemancc_data_dir();
     ipc_on("gpu.dedicatedMemory.get", [root](const json&) -> json {
@@ -66946,40 +72237,69 @@ static void reg_watcher() {
 
 static std::wstring g_stateFile;
 
-static void saveWindowState() {
-    if (g_controllerEditorWidth.active()) return;
-    if (!g_saveWindowState || g_stateFile.empty()) return;
-    WINDOWPLACEMENT wp{sizeof(wp)};
-    GetWindowPlacement(g_hwnd, &wp);
-    json state = {
-        {"x",         wp.rcNormalPosition.left},
-        {"y",         wp.rcNormalPosition.top},
-        {"w",         wp.rcNormalPosition.right - wp.rcNormalPosition.left},
-        {"h",         wp.rcNormalPosition.bottom - wp.rcNormalPosition.top},
-        {"maximized", wp.showCmd == SW_MAXIMIZE},
-    };
-    std::ofstream f(g_stateFile, std::ios::binary);
-    if (f) f << state.dump(2);
+static bool saveWindowState() {
+    if (g_controllerEditorWidth.active() || !g_saveWindowState || g_stateFile.empty()) return false;
+    try {
+        // Serialize native save requests through inspection, preservation and readback.
+        static std::mutex saveMutex;
+        std::lock_guard<std::mutex> lock(saveMutex);
+        WINDOWPLACEMENT wp{sizeof(wp)};
+        if (!GetWindowPlacement(g_hwnd, &wp)) return false;
+        json measured = {
+            {"x", wp.rcNormalPosition.left}, {"y", wp.rcNormalPosition.top},
+            {"w", static_cast<long long>(wp.rcNormalPosition.right) - wp.rcNormalPosition.left},
+            {"h", static_cast<long long>(wp.rcNormalPosition.bottom) - wp.rcNormalPosition.top},
+            {"maximized", wp.showCmd == SW_MAXIMIZE},
+        };
+        if (startupNormalizeWindowState(measured).empty()) return false;
+        json previous;
+        bool missing = false, complete = false;
+        std::string original;
+        const bool parsed = startupReadJsonFile(g_stateFile, previous, missing, &original, &complete);
+        if (!missing && !complete) return false;
+        // Future documents remain owned by the newer writer, including on explicit save.
+        if (previous.is_object() && previous.contains("schemaVersion") &&
+            (!previous["schemaVersion"].is_number_integer() || previous["schemaVersion"] < 0 || previous["schemaVersion"] > 1)) return false;
+        auto state = parsed ? startupNormalizeWindowState(previous) : json::object();
+        if (!missing && state.empty()) {
+            static std::atomic<unsigned long long> archiveSequence{1};
+            const auto archive = g_stateFile + L".corrupt-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(archiveSequence.fetch_add(1));
+            if (!sgWriteFileAtomic(archive, original)) return false;
+            json ignored;
+            bool archiveMissing = false, archiveComplete = false;
+            std::string preserved;
+            startupReadJsonFile(archive, ignored, archiveMissing, &preserved, &archiveComplete);
+            if (!archiveComplete || preserved != original) return false;
+        }
+        for (const auto& [key, value] : measured.items()) state[key] = value;
+        const auto serialized = state.dump(2);
+        if (serialized.size() > (1u << 20) || !sgWriteFileAtomic(g_stateFile, serialized)) return false;
+        json confirmed;
+        bool confirmMissing = false, confirmComplete = false;
+        std::string written;
+        return startupReadJsonFile(g_stateFile, confirmed, confirmMissing, &written, &confirmComplete) &&
+            confirmComplete && written == serialized && startupNormalizeWindowState(confirmed) == state;
+    } catch (...) { return false; }
 }
 
 static json loadWindowState() {
-    if (!g_saveWindowState || g_stateFile.empty()) return {};
-    auto readState = [](const std::wstring& path) -> json {
-        std::ifstream f(path);
-        if (!f) return {};
-        try { json j; f >> j; return j; }
-        catch (...) { return {}; }
-    };
-    auto state = readState(g_stateFile);
-    if (!state.empty()) return state;
-    // One-time compatibility read for older builds that stored this preference in AppData.
-    return readState(app_data_dir() + L"\\window-state.json");
+    if (!g_saveWindowState || g_stateFile.empty()) return json::object();
+    try {
+        json document;
+        bool missing = false;
+        if (startupReadJsonFile(g_stateFile, document, missing)) return startupNormalizeWindowState(document);
+        if (!missing) return json::object();
+        // Legacy geometry is compatible only when the current file is genuinely absent.
+        if (startupReadJsonFile(app_data_dir() + L"\\window-state.json", document, missing))
+            return startupNormalizeWindowState(document);
+    } catch (...) {}
+    return json::object();
 }
 
 static void reg_state() {
     ipc_on("window.saveState", [](const json&) -> json {
-        saveWindowState();
-        return true;
+        return saveWindowState();
     });
     ipc_on("window.loadState", [](const json&) -> json {
         return loadWindowState();
@@ -70130,24 +75450,59 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
                                  BYTE r1, BYTE g1, BYTE b1,
                                  BYTE r2, BYTE g2, BYTE b2,
                                  int speed, int brightness, const std::string& presetId = {}) {
+    const bool superJoyOwnerRoute = ymcc::superjoy_owner::sourceModel(g_machineIdentity.deviceClass);
+    // A source whitelist is not admission: the sole catalog must admit the
+    // complete native/CEc provider before any discovery or process creation.
+    if (superJoyOwnerRoute && !superJoyLightingRouteAdmitted())
+        return json{{"ok", false}, {"reason", "superjoy-lighting-route-not-connected"},
+                    {"ownerAdmitted", false}, {"runtimeRouteAdmitted", false}};
+    if (superJoyOwnerRoute && enabled && mode != "solid")
+        return json{{"ok", false}, {"reason", "superjoy-solid-only"}, {"ownerAdmitted", false}};
     if (GetFileAttributesW(kLightSetterExe.c_str()) == INVALID_FILE_ATTRIBUTES)
         return json{{"ok", false}, {"reason", "light-setter-missing"}};
     const std::wstring hcDll = kLightSetterHcRuntimeRoot + L"\\HandheldCompanion.dll";
     const bool presetAction = enabled && mode == "preset";
     const std::string action = !enabled ? "off" : presetAction ? "preset" : "color";
-    const bool independentCore = ymcc::lighting::useIndependentDeviceCore(
+    const bool independentCore = !superJoyOwnerRoute && ymcc::lighting::useIndependentDeviceCore(
         g_machineIdentity.deviceClass, action, mode);
+    if (ymcc::lighting::sourceAdapter(g_machineIdentity.deviceClass) == ymcc::lighting::SourceAdapter::OneXX2MiniHid &&
+        !independentCore)
+        return json{{"ok", false}, {"reason", "x2mini-lighting-operation-unavailable"}};
     const std::wstring coreDll = POWER_CONTROL_DIR + ymcc::lighting::kIndependentDeviceCorePathSuffix;
     if (independentCore && GetFileAttributesW(coreDll.c_str()) == INVALID_FILE_ATTRIBUTES)
         return json{{"ok", false}, {"reason", "light-device-core-missing"}};
-    if (!independentCore && GetFileAttributesW(hcDll.c_str()) == INVALID_FILE_ATTRIBUTES)
+    if (!superJoyOwnerRoute && !independentCore && GetFileAttributesW(hcDll.c_str()) == INVALID_FILE_ATTRIBUTES)
         return json{{"ok", false}, {"reason", "hc-runtime-missing"}};
     if (presetAction && !ymcc::lighting::validPreset(g_machineIdentity.deviceClass, presetId))
         return json{{"ok", false}, {"reason", "invalid-or-unavailable-preset"}};
-    const bool brightnessSupported = ymcc::lighting::brightnessImplemented(g_machineIdentity.deviceClass);
+    const bool brightnessSupported = superJoyOwnerRoute || ymcc::lighting::brightnessImplemented(g_machineIdentity.deviceClass);
+    // Historical owner ABI name; source-specific writers remain separate.
+    const bool oxp3OwnerRoute = ymcc::lighting::usesOneXVendorOwner(g_machineIdentity.deviceClass);
+    std::string ownerReason;
+    std::string ownerGenerationToken, ownerInterfacePath;
+    bool ownerAdmitted = false;
+    std::optional<ymcc::superjoy_owner::Admission> superJoyAdmission;
+    if (superJoyOwnerRoute) {
+        superJoyAdmission = superJoyLightingAdmit(ownerReason);
+        if (!superJoyAdmission) return json{{"ok", false}, {"reason", ownerReason}, {"ownerAdmitted", false}};
+        ownerAdmitted = true;
+        ownerGenerationToken = superJoyAdmission->token;
+        ownerInterfacePath = W2U(superJoyAdmission->path);
+    }
+    if (oxp3OwnerRoute) {
+        if (!oxp3OwnerAdmit(GetTickCount64() + 250, ownerReason))
+            return json{{"ok", false}, {"reason", ownerReason}, {"ownerAdmitted", false},
+                        {"backend", "hc-direct-light-setter"}};
+        ownerAdmitted = true;
+        g_oxp3OwnerApplyOutstanding.store(true, std::memory_order_release);
+        ownerGenerationToken = g_oxp3OwnerLease.generationToken;
+        ownerInterfacePath = g_oxp3OwnerLease.interfacePath;
+    }
     std::wostringstream cmd;
     cmd << L'"' << kLightSetterExe << L'"';
-    if (independentCore) {
+    if (superJoyOwnerRoute) {
+        cmd << L" --hc-runtime-root \"" << kLightSetterHcRuntimeRoot << L'"';
+    } else if (independentCore) {
         cmd << L" --device-core-assembly \"" << coreDll << L'"'
             << L" --device-core-sha256 " << U2W(ymcc::lighting::kIndependentDeviceCoreSha256);
     } else {
@@ -70156,12 +75511,22 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
             << L" --hc-profile ymcc-device-core-v1";
     }
     cmd << L" --expected-device-class \"" << U2W(g_machineIdentity.deviceClass) << L'"';
+    if (ownerAdmitted) {
+        cmd << L" --owner-interface-path \"" << U2W(ownerInterfacePath) << L'"'
+            << L" --owner-generation " << U2W(ownerGenerationToken);
+    }
     if (!enabled) {
         // HC DynamicLightingManager.UpdateLED() turn-off 分支同构（子进程内
         // 执行 SetLedStatus(false)+SetLedBrightness(0)+Black Solid）。
         cmd << L" --action off";
     } else if (presetAction) {
         cmd << L" --action preset --preset-id " << U2W(presetId);
+        if (g_machineIdentity.deviceClass == "HandheldCompanion.Devices.OneXPlayer3") {
+            cmd << L" --r " << static_cast<int>(r1) << L" --g " << static_cast<int>(g1)
+                << L" --b " << static_cast<int>(b1)
+                << L" --r2 " << static_cast<int>(r2) << L" --g2 " << static_cast<int>(g2)
+                << L" --b2 " << static_cast<int>(b2) << L" --speed " << speed;
+        }
         if (brightnessSupported) cmd << L" --brightness " << brightness;
     } else {
         cmd << L" --action color --level " << U2W(mode)
@@ -70185,6 +75550,12 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE hOutR = nullptr, hOutW = nullptr;
     if (!CreatePipe(&hOutR, &hOutW, &sa, 64 * 1024)) {
+        if (superJoyAdmission) {
+            (void)superJoyLightingOwner().cancelBeforeSpawn(ownerGenerationToken);
+        } else if (ownerAdmitted) {
+            (void)oxp3OwnerRelease(ownerGenerationToken, GetTickCount64() + 500, true);
+            g_oxp3OwnerApplyOutstanding.store(false, std::memory_order_release);
+        }
         return json{{"ok", false}, {"reason", "light-setter-pipe-failed"},
                     {"error", static_cast<unsigned long long>(GetLastError())}};
     }
@@ -70198,20 +75569,48 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     PROCESS_INFORMATION pi{};
     if (!ymcc::processEfficiency::createProcess(nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+                        CREATE_NO_WINDOW | (superJoyOwnerRoute ? CREATE_SUSPENDED : 0), nullptr, nullptr, &si, &pi)) {
         const DWORD err = GetLastError();
         CloseHandle(hOutR);
         CloseHandle(hOutW);
+        if (superJoyAdmission) {
+            (void)superJoyLightingOwner().cancelBeforeSpawn(ownerGenerationToken);
+        } else if (ownerAdmitted) {
+            (void)oxp3OwnerRelease(ownerGenerationToken, GetTickCount64() + 500, true);
+            g_oxp3OwnerApplyOutstanding.store(false, std::memory_order_release);
+        }
         return json{{"ok", false}, {"reason", "light-setter-spawn-failed"},
                     {"error", static_cast<unsigned long long>(err)}};
     }
     CloseHandle(hOutW);  // 父进程不持写端：子进程退出后读端立即断管/EOF
+    g_oxp3OwnerHelperAlive.store(oxp3OwnerRoute && ownerAdmitted, std::memory_order_release);
 
-    const DWORD wait = WaitForSingleObject(pi.hProcess, 30000);
     DWORD exitCode = 1;
-    const bool timedOut = (wait != WAIT_OBJECT_0);
-    if (!timedOut) GetExitCodeProcess(pi.hProcess, &exitCode);
-    else TerminateProcess(pi.hProcess, 1);
+    bool timedOut = false, ownerChildReturned = false, ownerGenerationStable = true;
+    bool ownerLeaseReleased = true, retainProcessHandle = false;
+    if (superJoyAdmission) {
+        auto& owner = superJoyLightingOwner();
+        // Exact suspended child is registered before Active/resume. A failed
+        // identity or resume still owns cleanup debt until observed process return.
+        const bool attached = owner.attachChild(ownerGenerationToken, pi.hProcess, superJoyLightingContext());
+        const bool resumed = attached && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
+        if (!resumed) owner.retire();
+        const auto waited = owner.waitChild(ownerGenerationToken, resumed ? 30000 : 0, 5000, superJoyLightingContext);
+        ownerChildReturned = waited.returned; timedOut = waited.deadlineExpired; exitCode = waited.exitCode;
+        ownerGenerationStable = resumed && owner.current(ownerGenerationToken, superJoyLightingContext());
+        ownerLeaseReleased = owner.finish(ownerGenerationToken);
+        retainProcessHandle = true;
+    } else {
+        ownerChildReturned = oxp3OwnerWaitChild(pi.hProcess, 30000, 5000, timedOut, exitCode);
+        ownerGenerationStable = ownerAdmitted ? oxp3OwnerSequenceCurrent() : true;
+    }
+    if (oxp3OwnerRoute && ownerAdmitted) {
+        // Retains the exact unsignaled child/token when required; HelperAlive
+        // and ApplyOutstanding stay true as debt markers until observed return.
+        ownerLeaseReleased = oxp3OwnerParentTransition(pi.hProcess, true, ownerChildReturned,
+            ownerGenerationToken, timedOut);
+        retainProcessHandle = !ownerChildReturned;
+    }
 
     // R1-3：有界读取。写端被继承（子进程已死但句柄未关）时不无界阻塞；
     //      同时限制累计长度，防止异常子进程刷爆内存。
@@ -70253,7 +75652,7 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     }
     CloseHandle(hOutR);
     CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
+    if (!retainProcessHandle) CloseHandle(pi.hProcess);
 
     // 子进程输出契约（LightSetter/Program.cs）：成功
     // {ok:true,result:{deviceClass,hcSha256,ready,opened,action,note}}，失败
@@ -70266,6 +75665,7 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     std::string note;
     json helperReceipt = json::object();
     bool childIdentityAccepted = false, childCatalogAccepted = false, childOperationAccepted = false;
+    bool childOwnerAccepted = !superJoyOwnerRoute;
     std::string resolvedCapabilityId, resolvedDeviceClass;
     try {
         const json cj = json::parse(childOut);
@@ -70276,7 +75676,7 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
             const auto& child = cj["result"];
             note = child.value("note", std::string());
             // Bounded operation evidence only; not physical-effect verification.
-            for (const char* key : {"queuedWriteManaged", "queuedWritesCompleted"})
+            for (const char* key : {"queuedWriteManaged", "queuedWritesCompleted", "handbackAttempted", "handbackCompleted"})
                 if (child.contains(key) && child[key].is_boolean()) helperReceipt[key] = child[key];
             for (const char* key : {"queuedWriteTasks", "queuedWriteFailures"})
                 if (child.contains(key) && child[key].is_number_integer()) helperReceipt[key] = child[key];
@@ -70285,12 +75685,21 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
             const auto actualClass = child.value("deviceClass", std::string());
             const auto actualId = child.value("capabilityId", std::string());
             const auto* actual = ymcc::capabilities::find(actualClass);
-            childIdentityAccepted = actual && actual->deviceId == actualId &&
+            const bool actualKnown = actual ? actual->deviceId == actualId
+                : actualId == ymcc::lighting::deviceId(actualClass);
+            childIdentityAccepted = actualKnown &&
                 ymcc::lighting::identityMatches(actualClass, g_machineIdentity.deviceClass);
             childCatalogAccepted = child.value("capabilityCatalogSha256", std::string()) == ymcc::lighting::kCatalogSha256;
             const std::string operation = "lighting." + action + (action == "color" ? "." + mode : "");
             childOperationAccepted = child.value("capabilityOperation", std::string()) == operation &&
                 child.value("action", std::string()) == action && (!presetAction || child.value("presetId", std::string()) == presetId);
+            if (superJoyAdmission) {
+                childOwnerAccepted = child.value("backend", std::string()) == "superjoy-cec-v1" &&
+                    child.value("ownerAdmission", std::string()) == "native-owner-handoff-v2" &&
+                    child.value("ownerGeneration", std::uint64_t(0)) == superJoyAdmission->generation &&
+                    child.value("handbackAttempted", false) && child.value("handbackCompleted", false) &&
+                    child.value("queuedWritesCompleted", false);
+            }
             if (childIdentityAccepted) { resolvedCapabilityId = actualId; resolvedDeviceClass = actualClass; }
         }
         if (note.empty() && cj.contains("error"))
@@ -70301,9 +75710,10 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
 
     const bool childReportedOk = hasJson && hasChildOkField && childDeclaredOk;
     // R2-3：读取超时/截断/实际读取错误必须进入接受门——已捕获的合法 JSON 不能覆盖它们。
-    const bool resultAccepted = !timedOut && !outputReadTimedOut && !outputTruncated &&
-                                !outputReadError && exitCode == 0 && childReportedOk &&
-                                childIdentityAccepted && childCatalogAccepted && childOperationAccepted;
+    const bool resultAccepted = oxp3OwnerReceiptAccepted(
+        timedOut, outputReadTimedOut, outputTruncated, outputReadError, exitCode,
+        childReportedOk, childIdentityAccepted, childCatalogAccepted, childOperationAccepted && childOwnerAccepted,
+        ownerGenerationStable, ownerChildReturned, ownerLeaseReleased);
     // 色彩效果落地与亮度落地的严格推导（仅在本次调用接受结果时成立）：
     //   note=="ok"                    → 色+亮度均落地
     //   note=="setLedBrightness-false"→ 色落地、亮度未落地
@@ -70326,9 +75736,13 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     else if (!hasChildOkField) reason = "light-setter-result-unreported";
     else if (!childDeclaredOk) reason = "light-setter-result-not-ok";
     else if (exitCode != 0) reason = "light-setter-exit-" + std::to_string(exitCode);
+    else if (!ownerGenerationStable) reason = "light-setter-owner-generation-changed";
+    else if (!ownerChildReturned) reason = "light-setter-owner-child-not-returned";
+    else if (!ownerLeaseReleased) reason = "light-setter-owner-lease-not-returned";
     else if (!childIdentityAccepted) reason = "light-setter-identity-mismatch";
     else if (!childCatalogAccepted) reason = "light-setter-catalog-mismatch";
     else if (!childOperationAccepted) reason = "light-setter-operation-mismatch";
+    else if (!childOwnerAccepted) reason = "light-setter-owner-receipt-mismatch";
     else if (note != "ok" && note != "setLedBrightness-false")
         reason = note.empty() ? "light-setter-effect-not-applied" : note;
     else reason = "ok";
@@ -70346,9 +75760,17 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
                 {"childIdentityAccepted", childIdentityAccepted},
                 {"childCatalogAccepted", childCatalogAccepted},
                 {"childOperationAccepted", childOperationAccepted},
-                {"requestedCapabilityId", std::string(ymcc::capabilities::deviceId(g_machineIdentity.deviceClass))},
-                {"capabilityId", resolvedCapabilityId.empty() ? std::string(ymcc::capabilities::deviceId(g_machineIdentity.deviceClass)) : resolvedCapabilityId},
+                {"childOwnerAccepted", childOwnerAccepted},
+                {"requestedCapabilityId", std::string(ymcc::lighting::deviceId(g_machineIdentity.deviceClass))},
+                {"capabilityId", resolvedCapabilityId.empty() ? std::string(ymcc::lighting::deviceId(g_machineIdentity.deviceClass)) : resolvedCapabilityId},
                 {"deviceClass", resolvedDeviceClass},
+                {"ownerAdmitted", ownerAdmitted},
+                {"ownerGenerationStable", ownerGenerationStable},
+                {"ownerChildReturned", ownerChildReturned},
+                {"ownerLeaseReleased", ownerLeaseReleased},
+                {"ownerPendingDebt", superJoyOwnerRoute ?
+                    superJoyLightingOwner().observation().phase != ymcc::superjoy_owner::Phase::Idle :
+                    g_oxp3OwnerPendingDebt.load(std::memory_order_acquire)},
                 {"outputBytes", static_cast<unsigned long long>(childOut.size())},
                 {"outputTruncated", outputTruncated},
                 {"outputReadTimedOut", outputReadTimedOut},
@@ -70716,9 +76138,10 @@ static ymcc::touchhaptic::Receipt nativePhysicalFeedbackStart(int strength,int d
     if(game&&(*gameMotors)[0]==0&&(*gameMotors)[1]==0&&g_feedbackPulseActive&&g_feedbackPulseTarget.game&&!activeSourceMatches(*expected)){
         (void)gamepadSerialScheduleFeedbackStop(g_rogVibratePulseGen,0);receipt.reason=Reason::SourceChanged;return receipt;
     }
-    // Only call after releasing the read mutex. Failed old zeros retain their
-    // original owner and use the existing stop scheduler before any new write.
-    const auto settleFormerGameOwner=[&](){
+    // Only call after releasing the read mutex. Every source replacement must
+    // settle the former owner, including manual pulses. Failed zeros retain
+    // that owner and use the existing stop scheduler before any new write.
+    const auto settleFormerOwner=[&](){
         bool unresolved=false,zeroAccepted=false;DWORD stopError=0;
         physicalFeedbackStopTarget(g_feedbackPulseTarget,g_feedbackPulseTouch,&unresolved,&zeroAccepted,&stopError);
         if(unresolved){(void)gamepadSerialScheduleFeedbackStop(g_rogVibratePulseGen,0);receipt.reason=Reason::StopUnavailable;return false;}
@@ -70742,8 +76165,7 @@ static ymcc::touchhaptic::Receipt nativePhysicalFeedbackStart(int strength,int d
             receipt.reason=Reason::SourcePending;return receipt;}
         const bool sameMsi=g_feedbackPulseTarget.msi&&g_feedbackPulseTarget.record==source&&
             g_feedbackPulseTarget.msiModeGeneration==target.msiModeGeneration&&g_feedbackPulseTarget.powerGeneration==target.powerGeneration&&g_feedbackPulseTarget.sourceTopology==target.sourceTopology;
-        if(g_feedbackPulseActive&&(game||g_feedbackPulseTarget.game)&&!sameMsi&&!settleFormerGameOwner())return receipt;
-        if(g_feedbackPulseActive&&!g_feedbackPulseTarget.msi)physicalFeedbackStopTarget(g_feedbackPulseTarget,g_feedbackPulseTouch);
+        if(g_feedbackPulseActive&&!sameMsi&&!settleFormerOwner())return receipt;
         const bool a1m=g_machineIdentity.deviceClass=="HandheldCompanion.Devices.ClawA1M";
         receipt.motor=a1m?(receipt.strength>0?193:0):(receipt.strength*255+50)/100;
         const SourceToken token{Backend::Msi,record.generation,target.msiModeGeneration,target.powerGeneration,4,target.sourceTopology};
@@ -70770,18 +76192,12 @@ static ymcc::touchhaptic::Receipt nativePhysicalFeedbackStart(int strength,int d
         const bool sameXinput=!g_feedbackPulseTarget.msi&&g_feedbackPulseTarget.slot==target.slot&&
             g_feedbackPulseTarget.identityEpoch==target.identityEpoch&&g_feedbackPulseTarget.sourceGeneration==target.sourceGeneration&&
             g_feedbackPulseTarget.powerGeneration==target.powerGeneration&&g_feedbackPulseTarget.sourceTopology==target.sourceTopology;
-        if(g_feedbackPulseActive&&(game||g_feedbackPulseTarget.game)&&!sameXinput){
-            sourceLock.unlock();if(!settleFormerGameOwner())return receipt;sourceLock.lock();
+        if(g_feedbackPulseActive&&!sameXinput){
+            sourceLock.unlock();if(!settleFormerOwner())return receipt;sourceLock.lock();
             const auto proof=g_xinputFeedbackIdentity[target.slot].capture(target.identityEpoch,target.powerGeneration);
             if(!physicalFeedbackSlotCurrent(target)||!proof.valid||proof.episode!=target.xinputIdentity.episode||
                 target.sourceTopology!=g_xinputTopologyEpoch.load()||!hardwareWriteAllowed()||target.powerGeneration!=currentPowerGeneration()){
                 receipt.reason=Reason::SourceChanged;return receipt;}
-        }
-        // Retire the former MSI or physical slot only after leaving the source lock.
-        if(g_feedbackPulseActive&&g_feedbackPulseTarget.msi){
-            physicalFeedbackStopTarget(g_feedbackPulseTarget,g_feedbackPulseTouch);
-        }else if(g_feedbackPulseActive&&g_feedbackPulseTarget.slot!=target.slot&&physicalFeedbackSlotCurrent(g_feedbackPulseTarget)){
-            XINPUT_VIBRATION zero{};(void)g_feedbackSetState(g_feedbackPulseTarget.slot,&zero);
         }
         // A resumed/replaced controller can retain a cached nonzero request while
         // its firmware has already stopped. Establish a fresh zero -> pulse edge
@@ -71324,7 +76740,9 @@ static void reg_gamepad_feedback() {
         json ledPresets = json::array();
         if (rogLightingFamily && presetImplemented)
             for (const auto& preset : ymcc::lighting::kOneXPresets)
-                ledPresets.push_back({{"id", preset.id}, {"label", preset.label}});
+                if (ymcc::lighting::validPreset(fbDeviceClass, preset.id))
+                    ledPresets.push_back({{"id", preset.id}, {"label", preset.label}});
+        const auto* lightingUiRoute = ymcc::lighting::resolve(fbDeviceClass);
         const char* lightingBackend = !lightingBackendImplemented ? "none" : nativeRogLighting ? "rog-aura"
             : msiNativeLighting ? "msi-claw-native-hid"
             : lightSetterPresent ? "hc-light-setter" : "none";
@@ -71359,6 +76777,8 @@ static void reg_gamepad_feedback() {
         json result = {
             {"ledAvailable", ledAvailable},
             {"brightnessAvailable", brightnessAvailable},
+            {"lightingFixedSpeed", lightingUiRoute && lightingUiRoute->fixedSpeed},
+            {"presetSupportsSecondColor", lightingUiRoute && lightingUiRoute->presetSecondColor},
             {"ledEffects", ledEffects},
             {"ledPresets", ledPresets},
             {"presetDeclared", presetImplemented || ymcc::lighting::presetDeclaredButUnavailable(fbDeviceClass)},
@@ -71449,8 +76869,11 @@ static void reg_gamepad_feedback() {
 
     ipc_on("gamepad.setLed", [](const json& a) -> json {
         const auto* catalogDevice = ymcc::capabilities::find(g_machineIdentity.deviceClass);
-        const auto* lightingRoute = ymcc::lighting::resolve(catalogDevice);
-        const std::string capabilityId(catalogDevice ? catalogDevice->deviceId : std::string_view{});
+        const auto* lightingRoute = catalogDevice
+            ? ymcc::lighting::resolve(catalogDevice)
+            : ymcc::lighting::resolve(g_machineIdentity.deviceClass);
+        const std::string capabilityId(catalogDevice ? catalogDevice->deviceId
+            : ymcc::lighting::deviceId(g_machineIdentity.deviceClass));
         const bool enabled = a.value("enabled", true);
         const std::string mode = a.value("mode", std::string{"solid"});
         const int speed = std::clamp(a.value("speed", 65), 0, 100);
@@ -71976,7 +77399,9 @@ static void closeJoyXoffAsync(const char* reason) {
             {"closed", 0}
         };
         std::vector<DWORD> pids;
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        DWORD currentSession = 0;
+        bool uncertain = !ProcessIdToSessionId(GetCurrentProcessId(), &currentSession);
+        HANDLE snap = uncertain ? INVALID_HANDLE_VALUE : CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snap != INVALID_HANDLE_VALUE) {
             PROCESSENTRY32W pe{sizeof(pe)};
             if (Process32FirstW(snap, &pe)) {
@@ -71992,6 +77417,17 @@ static void closeJoyXoffAsync(const char* reason) {
             HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
                                    FALSE, pid);
             if (!h) continue;
+            const DWORD heldPid = GetProcessId(h);
+            DWORD heldSession = 0;
+            if (!heldPid || heldPid != pid || !ProcessIdToSessionId(heldPid, &heldSession)) {
+                uncertain = true; CloseHandle(h); continue;
+            }
+            if (heldSession != currentSession) { CloseHandle(h); continue; }
+            const DWORD alive = WaitForSingleObject(h, 0);
+            if (alive != WAIT_TIMEOUT) {
+                if (alive != WAIT_OBJECT_0) uncertain = true;
+                CloseHandle(h); continue;
+            }
             wchar_t path[MAX_PATH * 4]{};
             DWORD pathLen = static_cast<DWORD>(std::size(path));
             const bool pathOk = QueryFullProcessImageNameW(h, 0, path, &pathLen) != FALSE;
@@ -72010,6 +77446,8 @@ static void closeJoyXoffAsync(const char* reason) {
             result["status"] = result["closed"].get<int>() == attempted ? "closed" : "failed";
             result["attempted"] = attempted;
         }
+        if (uncertain) result["status"] = attempted > 0 ? "failed" : "unknown";
+        result["uncertain"] = uncertain;
         traceLog("joyxoff auto-close reason=%s status=%s attempted=%d closed=%d",
                  reasonText.c_str(), result["status"].get<std::string>().c_str(),
                  attempted, result["closed"].get<int>());
@@ -72028,6 +77466,7 @@ static void closeJoyXoffAsync(const char* reason) {
 
 static void sgFinishSleepRetryFailure(const char* reason) {
     const SgRetryKind kind = g_sgTask.retryKind;
+    if(kind==SgRetryKind::SleepTimeout)sgSleepTimeoutStop("timeout-retry-exhausted");
     const unsigned int attempts = g_sgTask.retryAttempt;
     if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
     sgClearInternalSleepRequest(reason ? reason : "sleep-retry-failed");
@@ -72089,12 +77528,12 @@ static void sgScheduleNextSleepRetry(const char* reason) {
     });
 }
 
-static void sgCancelEntryFailureRetry(const char* reason) {
-    if (!sgSleepRetryActive() || g_sgTask.retryKind != SgRetryKind::EntryFailure)
+static void sgCancelEntryFailureRetry(const char* reason,SgRetryKind only) {
+    if (!sgSleepRetryActive() || g_sgTask.retryKind != only)
         return;
     const auto generation = g_sgTask.generation;
     const bool requestPending = g_sgRetryDueTick == 0 &&
-        g_sgInternalSleepRequest.kind == SgRetryKind::EntryFailure &&
+        g_sgInternalSleepRequest.kind == only &&
         g_sgInternalSleepRequest.dispatchFileTime != 0 &&
         g_sgAutomaticSleepTarget.load(std::memory_order_acquire) != ymcc::sleeprequest::Mode::None;
     const auto entry = g_sgLastKernel506EventFileTime.load(std::memory_order_acquire);
@@ -72107,7 +77546,7 @@ static void sgCancelEntryFailureRetry(const char* reason) {
     // An accepted OS call retains its marker until Windows supplies its boundary.
     sgStopSleepRetry();
     sgRecordFact("sleep-retry-canceled", {
-        {"kind", "entry-failure"}, {"reason", reason ? reason : "unknown"},
+        {"kind", sgRetryKindName(only)}, {"reason", reason ? reason : "unknown"},
         {"generation", generation}, {"requestPending", requestPending},
         {"windowsOwnsSleep", windowsOwnsSleep}
     });
@@ -72120,6 +77559,10 @@ static void sgCancelEntryFailureRetry(const char* reason) {
 }
 
 static void sgDispatchSameModeRetry() {
+    if(sgSleepRetryActive()&&g_sgTask.retryKind==SgRetryKind::SleepTimeout&&!sgSleepTimeoutDispatchPermitted()) {
+        sgSleepTimeoutStop("timeout-request-veto");
+        sgCancelEntryFailureRetry("timeout-request-veto",SgRetryKind::SleepTimeout);return;
+    }
     if (sgSleepRetryActive() && g_sgTask.retryKind == SgRetryKind::UnexpectedWake) {
         ULONGLONG ageMs = 0;
         // Callback-side button evidence wins even before its window message.
@@ -72231,8 +77674,9 @@ static void sgDispatchSameModeRetry() {
     if (request.requestError == ERROR_CANCELLED) {
         if (currentPowerGeneration() != retryGeneration || g_sgTask.generation != retryGeneration)
             return;
-        if (kind == SgRetryKind::EntryFailure && (!g_sgRetryEntryFailure || !sgSleepRetryActive())) {
-            sgCancelEntryFailureRetry("entry-failure-request-canceled");
+        if ((kind == SgRetryKind::EntryFailure && (!g_sgRetryEntryFailure || !sgSleepRetryActive())) ||
+            (kind == SgRetryKind::SleepTimeout && (!g_sgRetrySleepTimeout || !sgSleepRetryActive()))) {
+            sgCancelEntryFailureRetry("sleep-repair-request-canceled",kind);
             return;
         }
         sgAbortSleepIntent("sleep-request-canceled");
@@ -72249,6 +77693,11 @@ static void sgDispatchSameModeRetry() {
 static void sgStartSleepRetry(SgRetryKind kind, const char* reason) {
     if (kind == SgRetryKind::None || !g_guardEnabled || sgSleepRetryActive())
         return;
+    if (kind == SgRetryKind::SleepTimeout) {
+        if(!sgSleepTimeoutDispatchPermitted())return;
+        g_sgTask.generation=currentPowerGeneration();
+        g_sgTask.mode=SgSleepMode::S3;
+    }
     if (kind == SgRetryKind::UnexpectedWake) {
         // UI/game recovery may already have completed this task. The guarded
         // sleep intent is separate and can still request the same S0/S3 mode.
@@ -72875,54 +78324,72 @@ static bool unzipTar(const std::wstring& zip, const std::wstring& dest) {
 
 // ── 更新加速器（steamcommunity_302 等）：辅助 GitHub 更新下载 ──
 // 路径固定指向 C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe。native 的 WinHTTP 已改为
-// 自动跟随系统代理，该工具运行后更新请求即走加速通道。此功能为手动触发，不会随程序启动。
+// 自动跟随系统代理。手动开关保持原样；仅开机任务开启时，另有一次唤醒后补启动检查。
 static const std::wstring g_updateAccelPath = L"C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe";
-static bool isUpdateAccelRunning() {
-    std::wstring target = sgBaseName(g_updateAccelPath);
-    if (target.empty()) return false;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return false;
-    PROCESSENTRY32W pe{ sizeof(pe) };
-    bool running = false;
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            std::wstring exe = pe.szExeFile;
-            if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
-                exe.resize(exe.size() - 4);
-            if (_wcsicmp(exe.c_str(), target.c_str()) == 0) { running = true; break; }
-        } while (Process32NextW(snap, &pe));
-    }
-    CloseHandle(snap);
-    return running;
-}
-static bool startUpdateAccel() {
-    if (g_updateAccelPath.empty() || !fspath::exists(g_updateAccelPath)) return false;
-    if (isUpdateAccelRunning()) return true;
-    HINSTANCE r = ymcc::processEfficiency::shellExecute(nullptr, L"open", g_updateAccelPath.c_str(), nullptr, nullptr, SW_HIDE);
-    return (reinterpret_cast<intptr_t>(r) > 32);
-}
-static bool stopUpdateAccel() {
-    std::wstring target = sgBaseName(g_updateAccelPath);
-    if (target.empty()) return false;
-    bool killed = false;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W pe{ sizeof(pe) };
-        if (Process32FirstW(snap, &pe)) {
-            do {
-                std::wstring exe = pe.szExeFile;
-                if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
-                    exe.resize(exe.size() - 4);
-                if (_wcsicmp(exe.c_str(), target.c_str()) == 0) {
-                    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-                    if (h) { TerminateProcess(h, 0); CloseHandle(h); killed = true; }
-                }
-            } while (Process32NextW(snap, &pe));
+using UpdateAccelProcessSnapshot = std::shared_ptr<const ymcc::processInventory::Snapshot>;
+static UpdateAccelProcessSnapshot readUpdateAccelProcesses(ULONGLONG maxAge = 250) {
+    try {
+        const auto snapshot = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, maxAge);
+        if (!snapshot || snapshot->status != ymcc::processInventory::Status::Complete) {
+            SetLastError(snapshot && snapshot->error ? snapshot->error : ERROR_GEN_FAILURE);
+            return {};
         }
-        CloseHandle(snap);
-    }
-    return killed;
+        return snapshot;
+    } catch (...) { SetLastError(ERROR_GEN_FAILURE); return {}; }
 }
+static std::optional<bool> updateAccelRunningIn(const UpdateAccelProcessSnapshot& snapshot) {
+    try {
+        if (!snapshot || snapshot->status != ymcc::processInventory::Status::Complete) return std::nullopt;
+        const auto target = nativeIdentityNormalizeName(g_updateAccelPath);
+        if (target.empty()) { SetLastError(ERROR_INVALID_NAME); return std::nullopt; }
+        for (const auto& entry : snapshot->rows)
+            if (entry.pid && nativeIdentityNormalizeName(entry.name) == target) return true;
+        return false; // Only a complete receipt may confirm absence.
+    } catch (...) { SetLastError(ERROR_GEN_FAILURE); return std::nullopt; }
+}
+static std::optional<bool> readUpdateAccelRunning(ULONGLONG maxAge = 250) {
+    return updateAccelRunningIn(readUpdateAccelProcesses(maxAge));
+}
+static bool startUpdateAccel(const UpdateAccelProcessSnapshot& before) {
+    const auto running = updateAccelRunningIn(before);
+    if (!running.has_value()) return false;
+    if (*running) return true;
+    std::error_code error;
+    if (!fspath::is_regular_file(g_updateAccelPath, error) || error) return false;
+    HINSTANCE result = ymcc::processEfficiency::shellExecute(nullptr, L"open", g_updateAccelPath.c_str(), nullptr, nullptr, SW_HIDE);
+    const bool accepted = reinterpret_cast<intptr_t>(result) > 32;
+    if (accepted) ymcc::processInventory::invalidate();
+    return accepted;
+}
+static bool stopUpdateAccel(const UpdateAccelProcessSnapshot& before) {
+    if (!before || before->status != ymcc::processInventory::Status::Complete) return false;
+    const auto target = nativeIdentityNormalizeName(g_updateAccelPath);
+    bool stopped = false, failed = false;
+    unsigned matched = 0;
+    for (const auto& entry : before->rows) {
+        if (!entry.pid || nativeIdentityNormalizeName(entry.name) != target) continue;
+        if (++matched > 16) { failed = true; break; }
+        // Inventory rows select candidates only. The held process handle and
+        // exact image path authorize this explicit manual stop, never a cached PID.
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.pid);
+        if (!process) { failed = true; continue; }
+        wchar_t image[32768]{}; DWORD size = static_cast<DWORD>(std::size(image)), code = 0;
+        const bool exact = QueryFullProcessImageNameW(process, 0, image, &size) &&
+            _wcsicmp(image, g_updateAccelPath.c_str()) == 0 &&
+            GetExitCodeProcess(process, &code) && code == STILL_ACTIVE;
+        if (!exact || !TerminateProcess(process, 0)) failed = true;
+        else {
+            stopped = true;
+            ymcc::processInventory::invalidate();
+            if (WaitForSingleObject(process, 1000) != WAIT_OBJECT_0) failed = true;
+        }
+        CloseHandle(process);
+    }
+    return stopped && !failed;
+}
+
+#include "network_acceleration_wake.h"
 
 // Move the support page produced by the first updater version from the shared
 // root into the program directory. New releases keep it beside YeManCC.exe.
@@ -73002,29 +78469,19 @@ static void migrate_legacy_power_control_dir() {
 static std::mutex g_updatePredownloadPolicyMtx;
 static std::wstring updatePredownloadPolicyPath() { return app_data_dir() + L"\\update\\predownload-policy.json"; }
 static json updatePredownloadPolicyRead() {
-    json policy = {{"schemaVersion",1},{"enabled",true},{"failureCount",0},{"nextCheckAt",0},{"lastNotifiedBoot",""}};
-    const auto path = updatePredownloadPolicyPath();
-    if (!fspath::exists(path)) return policy;
-    const auto bytes = fspath::file_size(path);
-    if (bytes == 0 || bytes > 65536) return policy;
-    const auto raw = sgReadFile(path);
-    if (raw.empty()) throw std::runtime_error("Cannot read background update policy");
-    auto stored = raw.size() <= 65536 ? json::parse(raw,nullptr,false) : json{};
-    if (!stored.is_object() || stored.value("schemaVersion",json{}) != 1) return policy;
-    if (stored.contains("enabled") && stored["enabled"].is_boolean()) policy["enabled"]=stored["enabled"];
-    for (const auto* key : {"failureCount","nextCheckAt","cacheQuietUntil"})
-        if (stored.contains(key) && stored[key].is_number_integer() && stored[key].get<int64_t>() >= 0)
-            policy[key]=stored[key];
-    for (const auto* key : {"targetVersion","targetSha256"})
-        if (stored.contains(key) && stored[key].is_string() && stored[key].get<std::string>().size() <= 128) policy[key]=stored[key];
-    if (stored.contains("lastNotifiedBoot") && stored["lastNotifiedBoot"].is_string() && stored["lastNotifiedBoot"].get<std::string>().size() < 256)
-        policy["lastNotifiedBoot"]=stored["lastNotifiedBoot"];
+    const auto stored=ymcc::updateconfig::read(updatePredownloadPolicyPath(),65536);
+    auto policy=ymcc::updateconfig::policyDefaults(stored.kind==ymcc::updateconfig::Kind::missing);
+    if(stored.kind==ymcc::updateconfig::Kind::ready&&ymcc::updateconfig::policyValid(stored.value)){
+        policy.update(stored.value);return policy;
+    }
+    if(stored.kind!=ymcc::updateconfig::Kind::missing)policy["configReadError"]="background-policy-unconfirmed";
     return policy;
 }
 static void updatePredownloadPolicyWrite(const json& policy) {
     std::error_code ec; fspath::create_directories(fspath::path(updatePredownloadPolicyPath()).parent_path(),ec);
-    if (ec || !sgWriteFileAtomic(updatePredownloadPolicyPath(),policy.dump()))
-        throw std::runtime_error("Cannot save background update policy");
+    if(ec)throw std::runtime_error("Cannot create background update policy directory");
+    ymcc::updateconfig::save(updatePredownloadPolicyPath(),policy,65536,ymcc::updateconfig::policyValid,
+        [](const std::wstring& path,const std::string& text){return sgWriteFileAtomic(path,text);},true);
 }
 static json updatePredownloadPolicyView(json policy) {
     // Existing read-only Windows boot identity survives app/WebView restarts,
@@ -73199,7 +78656,7 @@ static void reg_updater() {
                     const auto bytes = fspath::file_size(part);
                     if (!MoveFileExW(part.c_str(),dest.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
                         throw std::runtime_error("Failed to finalize the cached partial package");
-                    fspath::remove(partMeta,ec);
+                    ymcc::updateconfig::archive(partMeta,65536);
                     updateProgressPost({{"operationId",operationId},{"phase","downloaded"},{"stage","install"},
                         {"version",version},{"sha256",ascii_lower(sha)},{"url",url},{"percent",100},
                         {"downloadedBytes",bytes},{"totalBytes",bytes},{"message","已恢复校验通过的完整下载缓存"}});
@@ -73213,36 +78670,29 @@ static void reg_updater() {
                 {"url", url}, {"sha256", ascii_lower(sha)}, {"version", version}
             };
             bool resumeStateValid = false;
-            if (fspath::exists(part) && fspath::exists(partMeta) &&
-                fspath::file_size(partMeta) <= 64 * 1024) {
-                try {
-                    auto stored = json::parse(sgReadFile(partMeta));
-                    resumeStateValid = stored.is_object() &&
-                        stored.value("url", std::string{}) == url &&
-                        ascii_lower(stored.value("sha256", std::string{})) == ascii_lower(sha) &&
-                        stored.value("version", std::string{}) == version &&
-                        (!stored.contains("etag") || stored["etag"].is_string()) &&
-                        (!stored.contains("lastModified") || stored["lastModified"].is_string()) &&
-                        (!stored.contains("totalBytes") || stored["totalBytes"].is_number_unsigned() ||
-                            (stored["totalBytes"].is_number_integer() && stored["totalBytes"].get<int64_t>() >= 0));
-                    if (resumeStateValid) resumeMeta = std::move(stored);
-                } catch (...) {
-                    resumeStateValid = false;
-                }
+            const auto metadataImage=ymcc::updateconfig::read(partMeta,65536);
+            if(metadataImage.kind==ymcc::updateconfig::Kind::unsupported || metadataImage.kind==ymcc::updateconfig::Kind::unavailable)
+                throw std::runtime_error("Download resume metadata is unreadable or requires a newer version");
+            if(fspath::exists(part)&&metadataImage.kind==ymcc::updateconfig::Kind::ready){
+                resumeStateValid=ymcc::updateconfig::resumeValid(metadataImage.value,url,sha,version);
+                if(resumeStateValid)resumeMeta=metadataImage.value;
             }
             auto persistResumeMetadata = [&]() {
-                if (!sgWriteFileAtomic(partMeta, resumeMeta.dump()))
-                    throw std::runtime_error("Cannot save download resume metadata");
+                try{ymcc::updateconfig::save(partMeta,resumeMeta,65536,
+                    [&](const json& value){return ymcc::updateconfig::resumeValid(value,url,sha,version);},
+                    [](const std::wstring& path,const std::string& text){return sgWriteFileAtomic(path,text);});}
+                catch(const std::exception& error){throw std::runtime_error(std::string("Cannot save download resume metadata: ")+error.what());}
             };
-            auto discardPartial = [&]() {
+            auto discardPartial = [&](bool preserveUnknown=false) {
                 for (const auto& path : {part, partMeta}) {
+                    if(preserveUnknown){ymcc::updateconfig::archive(path,path==partMeta?65536:0);continue;}
                     std::error_code removeError;
                     fspath::remove(path, removeError);
                     if (removeError) throw std::runtime_error("Cannot reset the stale partial package");
                 }
                 resumeMeta = {{"url", url}, {"sha256", ascii_lower(sha)}, {"version", version}};
             };
-            if (!resumeStateValid) discardPartial();
+            if (!resumeStateValid) discardPartial(true);
             persistResumeMetadata();
             uint64_t existingBytes = 0;
             if (fspath::exists(part)) {
@@ -73351,7 +78801,7 @@ static void reg_updater() {
                     if (isStrictUpdateSha256(got) && _stricmp(got.c_str(), sha.c_str()) == 0) {
                         if (!MoveFileExW(part.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
                             throw std::runtime_error("Failed to finalize the downloaded package");
-                        fspath::remove(partMeta, ec);
+                        ymcc::updateconfig::archive(partMeta,65536);
                         downloaded = true;
                         break;
                     }
@@ -73652,7 +79102,7 @@ static void reg_updater() {
              // host 二进制 / …）后必须实算重填，禁止手改哈希；build-workspace.ps1
              // Assert-PublishPreGate 会自动对拍，不一致即 halt 并打印实算值，
              // 更新安装 ps1 侧（Assert-FanHostV2Payload）同用此常量。
-             f << "$expectedFanHostV2ManifestSha256 = 'ee6c11e8bc3128a6351b86d9f52b0272cdeed24de717ab11d60e25ebec5b127b'\n";
+             f << "$expectedFanHostV2ManifestSha256 = '00d9aa83d3d035bffe93293b43342ca81b06be325514b4b1e8f77b70b168d46f'\n";
              f << "$expectedFanHostV2ManifestFileCount = 9\n";
              f << "$expectedFanHostV2LhmSha256 = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'\n";
              f << "function Write-Utf8Atomic([string]$path, [string]$text) {\n";
@@ -74393,31 +79843,33 @@ static void reg_updater() {
     });
 
     // ── 更新加速器（steamcommunity_302 等）：手动切换、查看运行状态 ──
+    ipc_on("updateAccel.resume", [](const json& args) -> json {
+        if (!args.is_object() || !args.contains("generation") || !args["generation"].is_number_integer() ||
+            args["generation"].get<long long>() <= 0 || args["generation"].get<unsigned long long>() > 9007199254740991ULL)
+            return {{"ok", false}, {"reason", "invalid-generation"}};
+        return recheckNetworkAccelerationAfterWake(args["generation"].get<unsigned long long>());
+    });
     ipc_on("updateAccel.get", [](const json&) -> json {
-        bool exists = fspath::exists(g_updateAccelPath);
-        bool running = exists && isUpdateAccelRunning();
-        return {
-            {"exists", exists},
-            {"running", running}
-        };
+        std::error_code error;
+        const bool exists = fspath::is_regular_file(g_updateAccelPath, error);
+        const auto running = readUpdateAccelRunning();
+        return {{"exists", exists && !error}, {"running", running.value_or(false)}, {"known", running.has_value() && !error}};
     });
     ipc_on("updateAccel.set", [](const json&) -> json {
-        bool exists = fspath::exists(g_updateAccelPath);
-        bool running = exists && isUpdateAccelRunning();
-        bool ok = true;
-        if (running) {
-            ok = stopUpdateAccel();
-        } else if (exists) {
-            ok = startUpdateAccel();
-        } else {
-            ok = false;
+        std::error_code error;
+        const bool exists = fspath::is_regular_file(g_updateAccelPath, error);
+        // One fresh shared receipt makes the ON/OFF action decision. Never
+        // convert UNKNOWN into an absent process or enumerate independently.
+        const auto before = readUpdateAccelProcesses(0);
+        const auto runningBefore = updateAccelRunningIn(before);
+        bool ok = false;
+        if (runningBefore.has_value() && !error) {
+            if (*runningBefore) ok = stopUpdateAccel(before);
+            else if (exists) ok = startUpdateAccel(before);
         }
-        running = exists && isUpdateAccelRunning();
-        return {
-            {"exists", exists},
-            {"running", running},
-            {"ok", ok}
-        };
+        const auto running = ok ? readUpdateAccelRunning(0) : runningBefore;
+        return {{"exists", exists && !error}, {"running", running.value_or(false)},
+            {"known", running.has_value() && !error}, {"ok", ok}};
     });
 }
 
@@ -74653,7 +80105,10 @@ static void reg_desktop_monitor_hud() {
         return g_desktopMonitorHud.create(pid, birth, a.value("nonce", std::string{}));
     });
     ipc_on("desktopHud.frame", [](const json& a) -> json {
-        return g_desktopMonitorHud.frame(a.value("hudId", 0), a.value("nonce", std::string{}), a.value("frame", json::object()));
+        const auto frame = a.find("frame");
+        if (frame != a.end())
+            return g_desktopMonitorHud.frame(a.value("hudId", 0), a.value("nonce", std::string{}), *frame);
+        return g_desktopMonitorHud.frame(a.value("hudId", 0), a.value("nonce", std::string{}), json::object());
     });
     ipc_on("desktopHud.close", [](const json& a) -> json {
         return g_desktopMonitorHud.close(a.value("hudId", 0), a.value("nonce", std::string{}));
@@ -74782,6 +80237,10 @@ static void reg_extras() {
         return ymcc::bootmode::setPlatform(args);
     });
     // 触摸屏/鼠标聚焦进程名输入框时，使用可见路径启动 Windows TabTip。
+    // This bounded action also owns YMCC window visibility; dispatch on the UI thread.
+    ipc_on("shell.returnDesktop", [](const json&) -> json {
+        return returnToDesktop();
+    });
     ipc_on("keyboard.open", [](const json&) -> json {
         openTouchKeyboard();
         return true;
@@ -74863,7 +80322,9 @@ static void reg_extras() {
                  consumerClass == "HandheldCompanion.Devices.OneXPlayerX2MiniPro")) {
                 const bool implemented = oemKeyCaptureImplemented(g_machineIdentity.family, consumerClass, key.keyId);
                 arr.back()["captureImplemented"] = implemented;
-                arr.back()["captureRoute"] = std::string(key.keyId) == "home" ? "onex-x2-vendor-click" :
+                arr.back()["captureRoute"] = consumerClass == "HandheldCompanion.Devices.OneXPlayer3" &&
+                    (std::string(key.keyId) == "home" || std::string(key.keyId) == "gkey") ? "onex-x2-vendor-held" :
+                    std::string(key.keyId) == "home" ? "onex-x2-vendor-click" :
                     (consumerClass != "HandheldCompanion.Devices.OneXPlayerX2MiniPro" &&
                      (std::string(key.keyId) == "l4" || std::string(key.keyId) == "r4")) ? "onex-x2-vendor-held" : "keyboard-vk";
                 if (!implemented) arr.back()["captureReason"] = "vendor-hid-reader-not-integrated";
@@ -75015,8 +80476,7 @@ static void reg_extras() {
         const bool active = a.value("active", false);
         g_oemShortcutEdgeEpoch.fetch_add(1, std::memory_order_acq_rel);
         if (!active) {
-            g_shortcutRecordingActive.store(false, std::memory_order_release);
-            g_shortcutRecordingMask = 0;
+            nativeShortcutRecordingStop();
             return {{"active", false}, {"reason", "stopped"}};
         }
         if (!gamepadUiInputEligible() || customSteamLibraryInputSuppressed()) {
@@ -75024,14 +80484,22 @@ static void reg_extras() {
         }
         g_shortcutRecordingMask = 0;
         g_shortcutRecordingAwaitNeutral = true;
+        g_shortcutRecordingOemMask.store(nativeShortcutRecordingCatalogMask(), std::memory_order_release);
         g_shortcutRecordingActive.store(true, std::memory_order_release);
-        return {{"active", true}, {"reason", "armed"}};
+        nativeOemKeyboardConsumePublish();
+        oemVendorStackRecordingRequest(true); // Try takeover, but allow recording even if unavailable/failed.
+        auto result = nativeShortcutRecordingSnapshot(); result["reason"] = "armed";
+        return result;
     });
+
+    ipc_on("shortcut.recording.get", [](const json&) -> json { return nativeShortcutRecordingSnapshot(); });
 
     // 模拟鼠标方案与统一开关。只在页面进入/用户操作时读取，不新增后台轮询。
     ipc_on("mouseMode.get", [](const json&) -> json {
         return mousePolicyGet();
     });
+    ipc_on("mouseMode.rules.get", [](const json&) -> json {return mouseAutoRulesSnapshot();});
+    ipc_on("mouseMode.rules.set", [](const json& args) -> json {return mouseAutoRulesSet(args);});
     ipc_on("mouseMode.setPolicy", [](const json& a) -> json {
         return mousePolicySet(a.value("mode",std::string{}));
     });
@@ -75040,7 +80508,7 @@ static void reg_extras() {
     });
     ipc_on("mouseMode.setBackend", [](const json& a) -> json {
         auto state=mouseModeSetBackend(a.value("backend", std::string{}));
-        if(state.value("ok",false))return g_mousePolicy.set(g_mousePolicy.current());
+        if(state.value("ok",false))return g_mousePolicy.refresh();
         return state;
     });
     ipc_on("mouseMode.releaseJoyxoff", [](const json&) -> json {
@@ -75269,6 +80737,68 @@ static void reg_extras() {
             {"reactivated", result.reactivated}, {"rollbackOk", result.rollbackOk}, {"preferenceSaved", preferenceSaved}};
     });
 
+    // Fresh read-only existence check. Do not create powercfg or capture its
+    // complete settings text merely to turn an exit code into a boolean.
+    ipc_on("power.schemeExists", [](const json& a) -> json {
+        if (!a.is_object() || a.size() != 1 || !a.contains("scheme") || !a["scheme"].is_string())
+            throw std::runtime_error("power scheme must be a string");
+        auto scheme = a["scheme"].get<std::string>();
+        const auto answer = [](bool ok, bool exists, DWORD code) -> json {
+            return json{{"ok", ok}, {"exists", exists}, {"code", code}};
+        };
+        const auto alias = ascii_lower(scheme);
+        GUID wanted{};
+        if (alias == "scheme_current") {
+            GUID* active = nullptr;
+            const DWORD rc = PowerGetActiveScheme(nullptr, &active);
+            if (rc != ERROR_SUCCESS || !active) {
+                if (active) LocalFree(active);
+                return answer(false, false, rc == ERROR_SUCCESS ? ERROR_INVALID_DATA : rc);
+            }
+            wanted = *active;
+            LocalFree(active);
+        } else {
+            if (alias == "scheme_balanced") scheme = "381b4222-f694-41f0-9685-ff5bb260df2e";
+            else if (alias == "scheme_min") scheme = "8c5e7fda-e8bf-4a96-9a85-a6e23a8b102c";
+            else if (alias == "scheme_max") scheme = "a1841308-3541-4fab-bc81-f71556f20b4a";
+            if (scheme.size() == 36) scheme = "{" + scheme + "}";
+            if (scheme.size() != 38 || scheme.front() != '{' || scheme.back() != '}')
+                return answer(true, false, ERROR_SUCCESS);
+            const auto text = U2W(scheme);
+            if (FAILED(CLSIDFromString(text.c_str(), &wanted)))
+                return answer(true, false, ERROR_SUCCESS);
+        }
+        // A size-only query touches this exact scheme, not every setting.
+        // No friendly-name text or heap buffer is needed by this consumer.
+        DWORD nameBytes = 0;
+        const DWORD probe = PowerReadFriendlyName(nullptr, &wanted, nullptr, nullptr, nullptr, &nameBytes);
+        if (probe == ERROR_SUCCESS || probe == ERROR_MORE_DATA)
+            return answer(true, true, ERROR_SUCCESS);
+        if (probe != ERROR_FILE_NOT_FOUND && probe != ERROR_PATH_NOT_FOUND && probe != ERROR_NOT_FOUND)
+            return answer(false, false, probe);
+        // Missing name metadata alone must not prove that a scheme is absent.
+        // Fall back to binary GUIDs; only exhaustion is a confirmed negative.
+        for (ULONG index = 0;; ++index) {
+            GUID current{};
+            DWORD bytes = sizeof(current);
+            const DWORD rc = PowerEnumerate(nullptr, nullptr, nullptr, ACCESS_SCHEME, index,
+                reinterpret_cast<UCHAR*>(&current), &bytes);
+            if (rc == ERROR_NO_MORE_ITEMS) return answer(true, false, ERROR_SUCCESS);
+            if (rc != ERROR_SUCCESS) return answer(false, false, rc);
+            if (bytes != sizeof(current)) return answer(false, false, ERROR_INVALID_DATA);
+            if (IsEqualGUID(current, wanted)) return answer(true, true, ERROR_SUCCESS);
+            if (index == MAXDWORD) return answer(false, false, ERROR_ARITHMETIC_OVERFLOW);
+        }
+    });
+    ipc_on("power.setActiveScheme", [](const json& a) -> json {
+        const auto scheme=a.value("scheme",std::string{});
+        if(scheme.size()!=36)throw std::runtime_error("invalid active power scheme");
+        auto text=U2W("{"+scheme+"}");GUID guid{};
+        if(FAILED(CLSIDFromString(text.c_str(),&guid)))throw std::runtime_error("invalid active power scheme");
+        HardwareWriteLease lease("power.setActiveScheme");
+        const DWORD rc=PowerSetActiveScheme(nullptr,&guid);
+        return json{{"ok",rc==ERROR_SUCCESS},{"code",rc}};
+    });
     ipc_on("power.activeScheme", [](const json&) -> json {
         GUID* g = nullptr;
         if (PowerGetActiveScheme(nullptr, &g) != ERROR_SUCCESS || !g)
@@ -75444,9 +80974,9 @@ static void reg_extras() {
                     {"reason", "manual_fan_wake"}, {"admitted", true}};
     });
 
-    // ── proc.running：Toolhelp32 进程枚举（取代 Get-Process 子进程）。
-    //    args: { names: ["RTSS","steam"] }（不带 .exe，不区分大小写；
-    //    支持 * 结尾前缀匹配，如 "RTSSHooksLoader*"）。返回 {"RTSS":true,...} ──
+    // ── proc.running：consume the single native inventory owner (fresh).
+    // args: { names: ["RTSS","steam"] }, optional trailing * prefix match.
+    // An unavailable/partial census rejects the request; it never confirms absence.
     ipc_on("proc.running", [](const json& a) -> json {
         std::vector<std::wstring> names;
         if (a.contains("names") && a["names"].is_array())
@@ -75454,31 +80984,65 @@ static void reg_extras() {
                 if (n.is_string()) names.push_back(U2W(n.get<std::string>()));
         json out = json::object();
         for (auto& n : names) out[W2U(n)] = false;
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap == INVALID_HANDLE_VALUE) return out;
-        PROCESSENTRY32W pe{ sizeof(pe) };
-        if (Process32FirstW(snap, &pe)) {
-            do {
-                std::wstring exe = pe.szExeFile;
-                // 去 .exe 后缀
-                if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
-                    exe.resize(exe.size() - 4);
-                for (auto& n : names) {
-                    if (n.empty()) continue;
-                    bool hit;
-                    if (n.back() == L'*') {
-                        std::wstring pre = n.substr(0, n.size() - 1);
-                        hit = exe.size() >= pre.size() &&
-                              _wcsnicmp(exe.c_str(), pre.c_str(), pre.size()) == 0;
-                    } else {
-                        hit = _wcsicmp(exe.c_str(), n.c_str()) == 0;
-                    }
-                    if (hit) out[W2U(n)] = true;
+        if (names.empty()) return out;
+        const auto snapshot = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+        if (snapshot->status != ymcc::processInventory::Status::Complete)
+            throw std::runtime_error("PROCESS_INVENTORY_UNAVAILABLE");
+        for (const auto& entry : snapshot->rows) {
+            std::wstring exe = entry.name;
+            if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
+                exe.resize(exe.size() - 4);
+            for (auto& n : names) {
+                if (n.empty()) continue;
+                bool hit;
+                if (n.back() == L'*') {
+                    std::wstring pre = n.substr(0, n.size() - 1);
+                    hit = exe.size() >= pre.size() &&
+                          _wcsnicmp(exe.c_str(), pre.c_str(), pre.size()) == 0;
+                } else {
+                    hit = _wcsicmp(exe.c_str(), n.c_str()) == 0;
                 }
-            } while (Process32NextW(snap, &pe));
+                if (hit) out[W2U(n)] = true;
+            }
         }
-        CloseHandle(snap);
         return out;
+    });
+
+    ipc_on("proc.identities", [](const json& args) -> json {
+        if(!args.is_object()||args.size()!=1||!args.contains("names")||!args["names"].is_array()||args["names"].size()>16)
+            throw std::runtime_error("PROCESS_IDENTITIES_INVALID_REQUEST");
+        std::vector<std::wstring> names;
+        for(const auto& name:args["names"]){if(!name.is_string())throw std::runtime_error("PROCESS_IDENTITIES_INVALID_REQUEST");names.push_back(U2W(name.get<std::string>()));}
+        const auto observation=ymcc::rtssprocess::observe(names);json processes=json::array();
+        if(observation.known)for(const auto& item:observation.processes)processes.push_back({
+            {"pid",item.pid},{"name",W2U(item.name)},{"path",W2U(item.path)},
+            {"processCreated",std::to_string(item.processCreated)}});
+        return {{"known",observation.known},{"processes",processes},{"error",observation.error},
+            {"generation",std::to_string(observation.generation)},{"observedAt",std::to_string(observation.observedAt)}};
+    });
+    ipc_on("rtss.setAffinityExact", [](const json& args) -> json {
+        if(!args.is_object()||!args.contains("pid")||!args["pid"].is_number_integer()||
+            !args.contains("processCreated")||!args["processCreated"].is_string()||!args.contains("path")||!args["path"].is_string())
+            throw std::runtime_error("RTSS_AFFINITY_INVALID_REQUEST");
+        const auto rawPid=args["pid"].get<unsigned long long>();
+        const auto birth=args["processCreated"].get<std::string>();
+        if(rawPid<=4||rawPid>MAXDWORD||birth.empty()||birth.size()>64||
+            !std::all_of(birth.begin(),birth.end(),[](char c){return c>='0'&&c<='9';}))
+            throw std::runtime_error("RTSS_AFFINITY_INVALID_REQUEST");
+        ULONGLONG created=0;try{created=std::stoull(birth);}catch(...){throw std::runtime_error("RTSS_AFFINITY_INVALID_REQUEST");}
+        const ymcc::rtssprocess::Identity identity{static_cast<DWORD>(rawPid),created,U2W(args["path"].get<std::string>()),{}};
+        const auto generation=args.value("_nativeRtssPowerGeneration",0ULL);
+        const auto deadline=args.value("_nativeRtssDeadlineTick",0ULL);
+        // Share the existing per-game affinity lock: a dedicated lease may not
+        // be overwritten between its owner check and this exact process write.
+        std::lock_guard<std::mutex> policyLock(g_gameCorePolicyMutex);
+        const auto result=ymcc::rtssprocess::setFixedAffinity(identity,[&]{
+            return generation!=0&&generation==currentPowerGeneration()&&deadline!=0&&GetTickCount64()<deadline&&hardwareWriteAllowed()&&
+                !g_exitRequested.load(std::memory_order_acquire)&&
+                g_gameCorePolicyPid.load(std::memory_order_acquire)!=identity.pid;
+        });
+        return {{"ok",result.ok},{"matched",result.matched},{"applied",result.applied},{"error",result.error},{"reason",result.reason}};
     });
 
     // Exact executable lookup used by Fan Host startup recovery. A process
@@ -75524,61 +81088,155 @@ static void reg_extras() {
     });
 
     // ── cpu.topology：检测 L3 缓存域（CCD）拓扑，决定 CPU 核心控制卡片是否显示。
-    //    返回 { logical, l3Domains, ccdMasks:["0x...", ...] } ──
+    //    明确声明为进程亲和性作用域，不把 L3 域或亲和性结果说成物理 CCD 断电。──
     ipc_on("cpu.topology", [](const json&) -> json {
         CcdTopology t = detectCcdTopology();
+        const bool supported = ccdTopologySupported(t);
+        std::string reason;
+        if (!t.groupRepresentable)
+            reason = "cross_group_unrepresentable";
+        else if (t.l3Domains < ymcc::capabilities::tdp::ccdMinimumDomains)
+            reason = "fewer_than_two_domains";
+        else if (t.logical <= 0 || t.logical > 64)
+            reason = "unsupported_logical_range";
+        else if (!supported)
+            reason = "invalid_topology";
+        json domains = json::array();
+        for (int i = 0; i < (int)t.ccdMasks.size(); ++i) {
+            domains.push_back({
+                {"index", i + 1},
+                {"mask", t.ccdMasks[i]},
+                {"logical", i < (int)t.domainLogical.size() ? t.domainLogical[i] : 0},
+            });
+        }
+        CcdLeaseState lease;
+        {
+            std::lock_guard<std::mutex> lk(g_ccdMutex);
+            lease = g_ccdLease;
+        }
         json r;
-        r["logical"]    = t.logical;
+        r["available"] = supported;
+        r["supported"] = supported;
+        r["reason"]    = reason;
+        r["logical"]   = t.logical;
         r["physicalCores"] = t.physicalCores;
-        r["l3Domains"]  = t.l3Domains;
-        r["ccdMasks"]   = t.ccdMasks;
+        r["l3Domains"] = t.l3Domains;
+        r["ccdMasks"]  = t.ccdMasks;
+        r["domains"]   = domains;
+        r["singleGroupRepresentable"] = t.groupRepresentable;
+        r["operation"] = std::string(ymcc::capabilities::tdp::ccdOperation);
+        r["effectScope"] = std::string(ymcc::capabilities::tdp::ccdEffectScope);
+        r["mechanism"] = std::string(ymcc::capabilities::tdp::ccdMechanism);
+        r["physicalCcdPowerOff"] = ymcc::capabilities::tdp::ccdPhysicalPowerOff;
+        r["topologySource"] = std::string(ymcc::capabilities::tdp::ccdTopologySource);
+        r["lease"] = {{"owner", "native.ccd"}, {"generation", lease.generation},
+                      {"mode", lease.mode}, {"active", lease.active}};
         return r;
     });
 
     // ── cpu.architecture：只读检测 Windows 是否报告混合效率等级。──
     //    该探针不读取或写入电源方案；前端只有 heterogeneous=true 时显示大小核心编辑。
     ipc_on("cpu.architecture", [](const json&) -> json {
-        const CoreArchitecture a = detectCoreArchitecture();
-        json classes = json::array();
-        for (int value : a.classes) classes.push_back(value);
+        const auto a = gameCorePolicyCapabilities();
         return {
-            {"detected", a.detected},
-            {"heterogeneous", a.heterogeneous},
-            {"efficiencyClasses", classes},
-            {"source", a.source},
-            {"logical", a.logical},
-            {"physical", a.physical},
+            {"detected", a.at("detected")},
+            {"heterogeneous", a.at("heterogeneous")},
+            {"efficiencyClasses", a.at("efficiencyClasses")},
+            {"source", a.at("source")},
+            {"logical", a.at("logical")},
+            {"physical", a.at("physical")},
         };
     });
 
-    // ── cpu.setCcdMode：全局进程亲和性，0=全核，1..N=仅第 N-1 个 CCD。
-    //    首次调用启动后台轮询线程，新启动的进程会被自动限制到目标 CCD。──
+    // ── cpu.setCcdMode：全局进程亲和性，0=全核，1..N=仅第 N-1 个 L3 域。
+    //    返回可审计的回执：接受、首轮逐进程读回结果与后台刷新分开呈现。──
     ipc_on("cpu.setCcdMode", [](const json& a) -> json {
         if (!hardwareWriteAllowed())
             throw std::runtime_error("hardware writes are blocked during power transition");
         int mode = a.value("mode", 0);
         if (mode < 0) throw std::runtime_error("mode must be >= 0");
         CcdTopology t = detectCcdTopology();
-        if (t.ccdMasks.size() < 2)
-            throw std::runtime_error("this CPU has fewer than 2 L3 domains");
+        if (!ccdTopologySupported(t))
+            throw std::runtime_error("CCD topology is not a supported single-group L3 domain set");
         if (mode > (int)t.ccdMasks.size())
             throw std::runtime_error("CCD mode exceeds detected L3 domains");
+        unsigned long long generation = 0;
+        ULONG_PTR targetMask = 0;
+        CcdSweepResult sweep;
         {
-            std::lock_guard<std::mutex> lk(g_ccdMutex);
-            g_ccdMasks.clear();
-            for (auto& s : t.ccdMasks) {
-                ULONG_PTR m = 0;
-                try {
-                    m = std::stoull(s, nullptr, 16);
-                } catch (...) {}
-                if (m) g_ccdMasks.push_back(m);
+            // One write serialization: the new generation/mask and its first sweep
+            // cannot interleave with an older worker sweep.
+            std::lock_guard<std::mutex> writeLock(g_ccdWriteMutex);
+            {
+                std::lock_guard<std::mutex> lk(g_ccdMutex);
+                g_ccdMasks.clear();
+                for (auto& s : t.ccdMasks) {
+                    ULONG_PTR m = 0;
+                    try {
+                        m = std::stoull(s, nullptr, 16);
+                    } catch (...) {}
+                    if (m) g_ccdMasks.push_back(m);
+                }
+                if (g_ccdMasks.empty())
+                    throw std::runtime_error("no usable L3 affinity mask");
+                ++g_ccdLease.generation;
+                g_ccdLease.active = true;
+                g_ccdLease.mode = mode;
+                generation = g_ccdLease.generation;
             }
+            g_ccdMode.store(mode);
+            if (!ccdTakeSnapshot(mode, generation, targetMask))
+                throw std::runtime_error("CCD generation snapshot unavailable");
+            sweep = ccdApplyMode(mode, generation, targetMask);
         }
-        ccdStartWorker();
-        g_ccdMode.store(mode);
+        // Background refresh is claimed only if the worker actually exists.
+        const bool backgroundRefresh = ccdStartWorker();
+        std::string applicationState, reason;
+        if (sweep.staleAborted > 0) {
+            applicationState = "unknown";
+            reason = "generation_changed_during_sweep";
+        } else if (sweep.attempted == 0) {
+            applicationState = "pending";
+            reason = "no_current_process_targets";
+        } else if (sweep.verified == sweep.attempted) {
+            applicationState = "applied";
+        } else if (sweep.verified == 0) {
+            applicationState = "failed";
+            reason = "no_verified_process_target";
+        } else {
+            applicationState = "pending";
+            reason = "partial_verified_process_targets";
+        }
         json r;
+        r["ok"] = true;
+        r["requestId"] = "ccd-" + std::to_string(generation) + "-" +
+            std::to_string(GetTickCount64());
+        r["generation"] = generation;
         r["mode"] = mode;
-        r["applied"] = true;
+        r["operation"] = std::string(ymcc::capabilities::tdp::ccdOperation);
+        r["effectScope"] = std::string(ymcc::capabilities::tdp::ccdEffectScope);
+        r["mechanism"] = std::string(ymcc::capabilities::tdp::ccdMechanism);
+        r["physicalCcdPowerOff"] = ymcc::capabilities::tdp::ccdPhysicalPowerOff;
+        r["targetMask"] = "0x" + toHexU(targetMask);
+        r["accepted"] = true;
+        r["applicationState"] = applicationState;
+        r["applied"] = applicationState == "applied";
+        r["observed"] = nullptr;
+        r["verification"] = "per_process_affinity_readback";
+        r["affected"] = {
+            {"attempted", sweep.attempted},
+            {"verified", sweep.verified},
+            {"openFailed", sweep.openFailed},
+            {"setFailed", sweep.setFailed},
+            {"verifyFailed", sweep.verifyFailed},
+            {"captureFailed", sweep.captureFailed},
+            {"staleAborted", sweep.staleAborted},
+            {"ownerChanged", sweep.ownerChanged},
+        };
+        r["backgroundRefresh"] = backgroundRefresh;
+        r["lease"] = {{"owner", "native.ccd"}, {"generation", generation},
+                      {"mode", mode}, {"active", true}};
+        if (!reason.empty()) r["reason"] = reason;
         return r;
     });
 
@@ -75588,6 +81246,43 @@ static void reg_extras() {
         const auto observationGeneration=g_powerGeneration.load();
         if(diagnosticTdp){try{observation=tdpParentContext(a,"cli");observeTdpRuntimeIdentity();appendTdpObservation("tdp.helper-start",observation);}catch(...){++g_tdpObservationFailures;}}
         try {
+        // Optional user-intent generation; legacy callers keep their original route.
+        std::optional<unsigned long long> expectedPowerGeneration;
+        if (a.contains("expectedPowerGeneration")) {
+            const auto& value = a["expectedPowerGeneration"];
+            if (!value.is_number_unsigned() && (!value.is_number_integer() || value.get<long long>() <= 0))
+                throw std::runtime_error("shell.run expectedPowerGeneration must be a positive integer");
+            const auto requested = value.get<unsigned long long>();
+            if (!requested || requested > 9007199254740991ull)
+                throw std::runtime_error("shell.run expectedPowerGeneration is out of range");
+            expectedPowerGeneration = requested;
+        }
+        struct ExpectedMirrorPeer {std::string connection,runId;unsigned long long revision;};
+        std::optional<ExpectedMirrorPeer> expectedMirrorPeer;
+        if (a.contains("expectedMirrorPeer")) {
+            const auto& peer = a["expectedMirrorPeer"];
+            if (!expectedPowerGeneration || !peer.is_object() || peer.size()!=3 ||
+                !peer.contains("connection") || !peer["connection"].is_string() ||
+                !peer.contains("runId") || !peer["runId"].is_string() || !peer.contains("connectionRevision"))
+                throw std::runtime_error("shell.run expectedMirrorPeer is invalid");
+            const auto connection=peer["connection"].get<std::string>(),runId=peer["runId"].get<std::string>();
+            const auto& serial=peer["connectionRevision"];
+            if(connection.empty() || connection.size()>20 ||
+                !std::all_of(connection.begin(),connection.end(),[](char c){return c>='0'&&c<='9';}) ||
+                runId.size()!=32 || !std::all_of(runId.begin(),runId.end(),[](char c){return c>='0'&&c<='9'||c>='a'&&c<='f';}) ||
+                (!serial.is_number_unsigned() && (!serial.is_number_integer() || serial.get<long long>()<=0)))
+                throw std::runtime_error("shell.run expectedMirrorPeer identity is invalid");
+            const auto revision=serial.get<unsigned long long>();
+            if(!revision || revision>9007199254740991ull)throw std::runtime_error("shell.run expectedMirrorPeer revision is invalid");
+            expectedMirrorPeer=ExpectedMirrorPeer{connection,runId,revision};
+        }
+        const auto intentCurrent = [&] {
+            return (!expectedPowerGeneration || (hardwareWriteAllowed() &&
+                g_powerGeneration.load(std::memory_order_acquire) == *expectedPowerGeneration)) &&
+                (!expectedMirrorPeer || g_deckyMirrorBroker.acceptsRequest(expectedMirrorPeer->connection,
+                    expectedMirrorPeer->runId,expectedMirrorPeer->revision));
+        };
+        if (!intentCurrent()) throw std::runtime_error("shell.run user intent expired before dispatch");
         auto program = a.value("program", std::string{});
         if (program.empty()) throw std::runtime_error("program is required");
         const auto programName = ascii_lower(W2U(fspath::path(U2W(program)).filename().wstring()));
@@ -75704,7 +81399,7 @@ static void reg_extras() {
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread); CloseHandle(job);
             throw std::runtime_error("Failed to assign process job");
         }
-        if (gatedHardwareWrite && !hardwareWriteAllowed()) {
+        if ((gatedHardwareWrite && !hardwareWriteAllowed()) || !intentCurrent()) {
             TerminateProcess(pi.hProcess, ERROR_OPERATION_ABORTED);
             WaitForSingleObject(pi.hProcess, 1000);
             CloseHandle(hOutR); CloseHandle(hErrR);
@@ -75754,7 +81449,7 @@ static void reg_extras() {
         bool outputOverflow = false;
         const ULONGLONG deadline = GetTickCount64() + timeoutMs;
         for (;;) {
-            if (g_poolCancel.load(std::memory_order_acquire)) {
+            if (g_poolCancel.load(std::memory_order_acquire) || !intentCurrent()) {
                 cancelled = true;
                 break;
             }
@@ -75777,6 +81472,8 @@ static void reg_extras() {
             }
         }
 
+        // A normal root exit can race the final wait; do not accept its stale receipt.
+        if (!intentCurrent()) cancelled = true;
         if (timedOut || cancelled || outputOverflow) {
             TerminateJobObject(job, timedOut ? ERROR_TIMEOUT :
                 (cancelled ? ERROR_CANCELLED : ERROR_BUFFER_OVERFLOW));
@@ -75808,8 +81505,9 @@ static void reg_extras() {
             appendTdpObservation("tdp.helper-result",row);
             if(exitCode||timedOut||cancelled||outputOverflow){observeTdpRuntimeIdentity(true);appendTdpObservation("tdp.failed",row);}
         }catch(...){++g_tdpObservationFailures;}}
+        if (!intentCurrent()) cancelled = true;
         if (timedOut) throw std::runtime_error("Process timed out");
-        if (cancelled) throw std::runtime_error("Process cancelled during shutdown");
+        if (cancelled) throw std::runtime_error(expectedPowerGeneration ? "Process cancelled after user intent expired or shutdown" : "Process cancelled during shutdown");
         if (outputOverflow) throw std::runtime_error("Process output exceeded 8 MiB limit");
         return json{{"exitCode", static_cast<int>(exitCode)},
                     {"stdout", oemToUtf8(outCapture.data)},
@@ -77775,7 +83473,11 @@ static void sgHandleModernStandbyWake(bool userWake) {
         sgStartSleepRetry(SgRetryKind::EntryFailure, "s0-kernel-entry-failure");
         return;
     }
-    if (phase != PowerLifecycle::Resuming) {
+    // PBT may have already committed this generation before Kernel-Power 507
+    // classifies the S0 wake. Preserve Ready: reopening the same transaction
+    // would strand CPU/TDP behind generation-deduplicated resume-ready work.
+    // The game lease below still receives its original user/automatic wake.
+    if (phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended) {
         g_powerLifecycle.store(PowerLifecycle::Resuming, std::memory_order_release);
         if (sgShouldKeepInputDuringStandby()) {
             // Game pause is independent: keep the virtual writer alive while
@@ -77918,6 +83620,8 @@ static ULONGLONG sgKernelPowerEventFileTime(const std::string& xml) {
 }
 
 #include "sleep_abnormal_resleep_native.inc"
+#include "sleep_activity_evidence_native.inc"
+#include "sleep_timeout_native.inc"
 
 static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION action, PVOID, EVT_HANDLE event) {
     if (action != EvtSubscribeActionDeliver || !event) return ERROR_SUCCESS;
@@ -77936,6 +83640,9 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
     const bool userInitiatedSleep = reason == 1 || reason == 3;
     const ULONGLONG eventFileTime = sgKernelPowerEventFileTime(xml);
     const ULONGLONG recordedFileTime = eventFileTime != 0 ? eventFileTime : sgNowFileTime();
+    // A restored hiberfile settles this deadline before queued GUI/timer work.
+    // Do not use collection time to retire a newer original human intent.
+    if(hibernateWake&&eventFileTime)sgSleepTimeoutRecordSystemSuccess(eventFileTime);
     // Publish the manual veto before logging/UI work; late older events cannot
     // erase a newer confirmed wake while an automatic deadline is due.
     if(leaving&&reason1) {
@@ -77982,6 +83689,7 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
         // Preserve the OS's completed-session accounting in ordinary exports.
         // A 506/507 pair alone never establishes effective hardware low power.
         auto residency = ymcc::sleep_residency::makeEvidence(xml);
+        sgSleepTimeoutObserveCompleted(residency,eventFileTime);
         residency["fileTime"] = sgFormatFactFileTime(recordedFileTime);
         residency["generation"] = currentPowerGeneration();
         sgRecordFact("s0-low-power-residency", residency);
@@ -78042,6 +83750,8 @@ static void sgStartKernelPowerSubscription() {
 }
 
 static void sgStopKernelPowerSubscription() {
+    sgSleepActivityEnd("application-exit",0,-1);
+    sgSleepTimeoutStop("application-exit");
     sgAbnormalStop("application-exit");
     if (g_sgKernelPowerSubscription) {
         EvtClose(g_sgKernelPowerSubscription);
@@ -78067,7 +83777,10 @@ static bool steamAppearanceResumeCommitted(unsigned long long generation) {
         g_exitRequested.load(std::memory_order_acquire) || g_aiFanMockSession.isolated) return false;
     const auto session = g_steamSettingsObserver.sessionSnapshot();
     const bool requested = g_steamCssGuard.requestResumeRecovery(session, generation);
-    if (requested) deckySidebarDiagnostic("steam-css-resume", {{"generation", generation}, {"steamPid", session.pid}, {"reason", "committed-ready-event"}}, true);
+    // Revoke bounded pre-sleep work immediately, once per admitted Ready.
+    // The delayed guard performs a new mode/DOM check; the resident CSS survives.
+    if (requested) g_steamCssUse.invalidateForResume(session);
+    if (requested) deckySidebarDiagnostic("steam-css-resume", {{"generation", generation}, {"steamPid", session.pid}, {"steamBirth", std::to_string(session.created)}, {"reason", "committed-ready-event"}}, true);
     return requested;
 }
 
@@ -78232,6 +83945,73 @@ static LRESULT gamepadDispatchRawInput(HWND h, WPARAM w, LPARAM l) {
         return 0;
 }
 
+// Windows source events and the existing 30s app heartbeat share one owner.
+// TDP dispatch never queries the supply or creates a second polling loop.
+static bool acceptAcDcSource(HWND h, int ac, const char* source) {
+    if (ac != 0 && ac != 1) return false;
+                if (g_lastAcState < 0) {
+                    // 注册后系统会立即回调一次当前状态：仅记录，不算切换、不刷新
+                    g_lastAcState = ac;
+                } else if (ac != g_lastAcState) {
+                    g_lastAcState = ac;
+                    const auto generation = currentPowerGeneration();
+                    g_acdcDebounceGeneration.store(generation, std::memory_order_release);
+                    sgRecordFact("acdc-change", {
+                        {"ac", ac == 1},
+                        {"generation", generation},
+                        {"source", source}
+                    });
+                    sgNoteExternalDeviceAcDcChange();
+                    // 视频背景专用轻量事件：即时暂停/恢复；不触发 CPU/TDP 等重型链路。
+                    ipc_emit("power.sourceChanged", {
+                        {"ac", ac == 1},
+                        {"generation", generation},
+                        {"source", source}
+                    });
+                    // ── 熔断：5s 滑动窗口内真实切换 >10 次 → 请求完整退出，避免系统卡死且不绕过 Sleep Guard 恢复。──
+                    DWORD now = GetTickCount();
+                    g_acSwitchTicks.push_back(now);
+                    g_acSwitchTicks.erase(
+                        std::remove_if(g_acSwitchTicks.begin(), g_acSwitchTicks.end(),
+                            [now](DWORD t){ return (now - t) > ACDC_BURST_MS; }),
+                        g_acSwitchTicks.end());
+                    if ((int)g_acSwitchTicks.size() > ACDC_BURST_LIMIT) {
+                        KillTimer(h, TIMER_ID_ACDC);
+                        // 批132（T0 风扇安全 / 退出归因）：AC-DC 风暴自退出必须可归因（此前静默）。
+                        appendNativeLifecycleLog("app-exit-request", {
+                            {"source", "ac-dc-burst"}, {"burstCount", (unsigned long long)g_acSwitchTicks.size()},
+                            {"burstLimit", ACDC_BURST_LIMIT}, {"burstWindowMs", ACDC_BURST_MS}
+                        });
+                        PostMessageW(h, WM_APP_EXIT, 0, 0);
+                        return true;
+                    }
+                    // ── 尾防抖：连续切换只在最后一次之后 5s 触发一次刷新 ──
+                    // SetTimer 同 id 会重置倒计时 → 天然实现「顺延到最后一次重新计时」。
+                        SetTimer(h, TIMER_ID_ACDC, ACDC_DEBOUNCE_MS,
+                        [](HWND hh, UINT, UINT_PTR id, DWORD) {
+                            KillTimer(hh, id);
+                            ipc_emit("power.acChanged", {
+                                {"ac", g_lastAcState == 1},
+                                {"generation", g_acdcDebounceGeneration.load(std::memory_order_acquire)},
+                                {"source", "native.acdc.debounced"}
+                            });
+                        });
+                }
+    return false;
+}
+
+static void reconcileAcDcSourceHeartbeat(HWND h) {
+    if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) return;
+    SYSTEM_POWER_STATUS status{};
+    if (GetSystemPowerStatus(&status) && (status.ACLineStatus == 0 || status.ACLineStatus == 1)) {
+        const bool ac=status.ACLineStatus == 1;
+        if (acceptAcDcSource(h, ac ? 1 : 0, "native.acdc.heartbeat")) return;
+        // Re-publish checked state so a dropped WebView notification is repaired
+        // even when Windows itself has not changed side since the last sample.
+        ipc_emit("power.sourceHeartbeat", {{"ac",ac},{"generation",currentPowerGeneration()},{"source","native.acdc.heartbeat"}});
+    }
+}
+
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     // Bounded stage notifications carry no command/data. The matching current
     // child report is authenticated by PID/root/session before presentation.
@@ -78247,8 +84027,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         g_memTrayLevel = -1;
         if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
         applyResidentMode();
-        focusScheduleDisplayReflow();
+        stopTaskbarLayoutObserver();
         scheduleTaskbarLayoutRecheck();
+        focusScheduleDisplayReflow();
         return 0;
     }
     if (g_showExistingInstanceMsg && m == g_showExistingInstanceMsg) {
@@ -78337,7 +84118,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 SetTimer(g_hwnd, WEBVIEW_POST_SHOW_NUDGE_TIMER_ID, 80, nullptr);
             }
         } else {
-            cancelTaskbarLayoutRecheck();
+            stopTaskbarLayoutObserver();
             g_webviewNeedsShowNudge = true;
             if (g_ctrl) g_ctrl->put_IsVisible(FALSE);
         }
@@ -78400,7 +84181,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             PostMessageW(h, ymcc::gesturesummon::kRefreshMessage, 0, 0);
         msiNativeForegroundUiEvent();
         if (w == SIZE_MINIMIZED || (w == SIZE_RESTORED && !g_fullHeight))
-            cancelTaskbarLayoutRecheck();
+            stopTaskbarLayoutObserver();
         else if (w == SIZE_MAXIMIZED && !g_taskbarLayoutRecheck.active())
             scheduleTaskbarLayoutRecheck();
         // During resize drag (WM_ENTERSIZEMOVE→WM_EXITSIZEMOVE), Windows floods
@@ -78471,6 +84252,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         if (l) {
             auto setting = W2U((LPCWSTR)l);
+            // Tablet posture changes and taskbar work-area changes are OS
+            // events, not a reason to poll SM_TABLETPC or infer mode from DPI.
+            if (setting == "ConvertibleSlateMode" || setting == "SystemDockMode") {
+                gestureSummonRefresh(true);
+                focusScheduleDisplayReflow();
+            }
             if (setting == "ImmersiveColorSet") {
                 applyNativeTheme();
                 ipc_emit("os.themeChanged", systemThemeInfo());
@@ -78524,6 +84311,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             KillTimer(g_hwnd, POWER_RESUME_NUDGE_TIMER_ID);
             if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Resuming) {
                 const auto generation = currentPowerGeneration();
+                // Recover a lost Ready message only from this generation's
+                // actual completed worker receipt. No timeout-based admission.
+                reconcilePowerResumeReady(generation);
                 if (g_resumeProbeGeneration == generation)
                     probePowerResumeStability(generation);
                 else
@@ -78593,12 +84383,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 }
             }
         }
-        if (w == FOCUS_DISPLAY_TIMER_ID) {
-            KillTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID);
-            focusReflowMainWindow();
-        }
+        if (w == FOCUS_DISPLAY_TIMER_ID) taskbarDisplayReflowTick();
         if (w == MONITOR_HUD_PULSE_TIMER_ID) monitorHudPulseTick();
         if (w == MEM_TRAY_TIMER_ID) {
+            reconcileAcDcSourceHeartbeat(h);
             // Existing 30s tick is the fallback when capture initialization was skipped/failed.
             // Completed setup returns immediately; no new timer, reader or install attempt.
             gamepadDriverSetupRequestRead();
@@ -78611,6 +84399,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == SG_ABNORMAL_TIMER_ID) {
             KillTimer(g_hwnd,SG_ABNORMAL_TIMER_ID);
             sgAbnormalTick();
+        }
+        if (w == SG_SLEEP_TIMEOUT_TIMER_ID) {
+            sgSleepTimeoutTick();return 0;
         }
         if (w == SG_RETRY_TIMER_ID) {
             KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
@@ -78684,7 +84475,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             focusReflowMainWindow();
             scheduleTaskbarLayoutRecheck();
         } else if ((w & 0xFFF0) == SC_MINIMIZE || (w & 0xFFF0) == SC_RESTORE) {
-            cancelTaskbarLayoutRecheck();
+            stopTaskbarLayoutObserver();
         }
         // 拦截最小化：工具窗口(WS_EX_TOOLWINDOW)最小化后 DWM 会残留一个缩略图黑块
         // （用户实测「最小化才会出现黑块」）。改为直接隐藏到托盘，不真正最小化。
@@ -78743,6 +84534,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         { std::lock_guard lock(g_deckyEventMutex); packets.swap(g_deckyEvents); g_deckyEventPosted = false; }
         for (const auto& packet : packets) { try {
             if(packet.value("event",std::string{})=="deckySidebar.safetyStop"){deckySidebarAcceptSafetyStop(packet.at("data"));continue;}
+            if(packet.value("event",std::string{})=="deckySidebar.mirrorRequest") {
+                const auto& data=packet.at("data");
+                if(!g_deckyMirrorBroker.acceptsRequest(data.value("connection",std::string{}),data.value("runId",std::string{}),data.value("connectionRevision",0ull)))continue;
+            }
             ipc_post_json(0, packet);
             // Publish the current authenticated transport on its existing owner
             // event; no settings-page polling or stale peer payload is trusted.
@@ -78809,7 +84604,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, RESUME_GAME_FOCUS_TIMER_ID);
         KillTimer(h, WAKE_FOCUS_NUDGE_TIMER_ID);
-        cancelTaskbarLayoutRecheck();
+        stopTaskbarLayoutObserver();
         KillTimer(h, FOCUS_DISPLAY_TIMER_ID);
         KillTimer(h, MEM_TRAY_TIMER_ID);
         KillTimer(h, SG_RETRY_TIMER_ID);
@@ -78830,6 +84625,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_POWER_RESUME_READY:
+        if (static_cast<unsigned long long>(w) != currentPowerGeneration()) return 0;
         if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Resuming) {
             const auto generation = currentPowerGeneration();
             g_resumeReadyTick = GetTickCount64();
@@ -78859,11 +84655,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {
             stopPowerResumeWatchdog();
             steamAppearanceResumeCommitted(currentPowerGeneration()); // CSS only; repeated Ready is coalesced.
-            // YMCC Decky: one transport rebind per committed generation; no restart/polling.
-            g_deckySidebarRuntime.requestPreparationRefresh(currentPowerGeneration());
-            const auto rebound=g_deckySidebarRuntime.requestBindingRefresh(currentPowerGeneration());
-            g_deckySidebarRuntime.requestConnectionCheck();
-            deckySidebarDiagnostic("wake-connection-check",{{"generation",currentPowerGeneration()},{"bindingRequested",rebound},{"scope","committed-ready"}},true);
+            // YMCC Decky: same Ready consumer as S0; missing Loader also refreshes admission/mode.
+            deckySidebarResumeAfterIntent(currentPowerGeneration(),"committed-ready");
             ipc_emit("power.resumed", {
                 {"generation", currentPowerGeneration()},
                 {"inputReady", g_inputReady.load(std::memory_order_acquire)},
@@ -78982,6 +84775,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         msiNativeForegroundStartObserver();
         return 0;
     case WM_DESTROY:
+            ymcc::batterycharge::seal();
+            // Retire before shutdown callbacks can pump/discard queued results.
+            // WebView recovery alone must not retire the process-lifetime owner.
+            g_ipcResultMailbox->retire();
             if (g_rawInputSinkHwnd) {
                 DestroyWindow(g_rawInputSinkHwnd);
                 g_rawInputSinkHwnd = nullptr;
@@ -79017,11 +84814,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             (void)gameCoreRestoreLeaseLocked();
         }
         if (g_exitRequested.load()) {
+            // 正常退出：停止 CCD worker 并恢复已记录进程的原始亲和性。
+            // 异常强退无法保证收尾，这是进程级亲和性限制本身的边界。
+            ccdShutdown();
             g_summonQuit = true;
             PostQuitMessage((int)g_exitCode.load(std::memory_order_relaxed));
             return 0;
         }
-        // CCD worker 退出（收尾清理）
+        // 窗口异常销毁：只停止 CCD worker；不声称已恢复所有进程。
         g_ccdStop.store(true);
         gamepadSerialStop(500);
         poolStop(1000);
@@ -79040,7 +84840,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, RESUME_GAME_FOCUS_TIMER_ID);
         KillTimer(h, WAKE_FOCUS_NUDGE_TIMER_ID);
-        cancelTaskbarLayoutRecheck();
+        stopTaskbarLayoutObserver();
         KillTimer(h, FOCUS_DISPLAY_TIMER_ID);
         KillTimer(h, MEM_TRAY_TIMER_ID);
         KillTimer(h, GP_HOLD_TIMER_ID);
@@ -79084,18 +84884,17 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_IPC_RESULT: {
         // worker 线程池完成的 IPC 响应，在 UI 线程回传给 WebView2
-        auto* result = reinterpret_cast<IpcResultEnvelope*>(l);
+        auto result = g_ipcResultMailbox->take(static_cast<std::uintptr_t>(l));
         if (result) {
             if (result->childId != 0) {
                 // A closed popup simply drops late work; never redirect its
                 // result into the main renderer.
-                ipc_post_json(result->childId, result->response);
+                ipc_post_json(result->childId, result->response, result->command);
             } else if (g_view &&
                        result->generation == g_webviewGeneration.load(std::memory_order_acquire)) {
-                ipc_post_json(0, result->response);
+                ipc_post_json(0, result->response, result->command);
             }
         }
-        delete result;
         return 0;
     }
     case WM_UPDATE_PROGRESS: {
@@ -79174,7 +84973,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_DEVICECHANGE:
         {
+            if (w == DBT_DEVNODES_CHANGED || w == DBT_DEVICEARRIVAL || w == DBT_DEVICEREMOVECOMPLETE)
+                g_cpuPolicyTopologyEpoch.fetch_add(1, std::memory_order_acq_rel);
             onexX2ObserveDeviceChange(w, l);
+            superJoyLightingObserveDeviceChange(w, l);
             ULONGLONG standbyAgeMs = 0;
             const bool standbyAgeEligible =
                 sgExternalDeviceWakeIntentAge(standbyAgeMs);
@@ -79191,6 +84993,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 {"retryCandidate", retryCandidate}
             });
             if (retryCandidate) {
+                inputCaptureNoteWindowsSensorDeviceChange();
                 sgNoteExternalDeviceNodeChange();
                 // 批次B：设备树变化（含 CyclePort 重枚举/恢复）→ 解析缓存失效。
                 hidHideInvalidateRawInputIdentityCache();
@@ -79278,6 +85081,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         break;
 
+    case WM_STEAM_WALLPAPER_FOREGROUND:
+        steamWallpaperForegroundPublish();return 0;
     case WM_SG_STATIC_SCAN:
         sgStaticScanMessage(w,l);
         return 0;
@@ -79338,6 +85143,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_sgLastPowerButtonSleepIntentFileTime.store(eventFileTime, std::memory_order_release);
                 sgMarkUserStandby("kernel-power-506-delayed", reason, eventFileTime);
                 sgRecordFact("s0-intent-joined-delayed-resume", {{"generation", currentPowerGeneration()}});
+                sgSleepTimeoutArm(reason,eventFileTime);
                 sgEvaluateExternalDeviceWake();
                 return 0;
             }
@@ -79350,11 +85156,13 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         sgRecordFact("user-initiated-sleep", {
             {"label", "主动按键睡眠"},
             {"evidence", "Kernel-Power EventID=506 Reason=1 or Reason=3"},
+            {"fileTime100ns", eventFileTime},
             {"reason", reason},
             {"fileTime", sgFormatFactFileTime(eventFileTime)}
         });
         sgBeginModernStandbyIntent();
         sgAbnormalArm(reason,eventFileTime);
+        sgSleepTimeoutArm(reason,eventFileTime);
         return 0;
     }
     case WM_FAN_KERNEL_POWER_FACT: {
@@ -79366,7 +85174,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if(fanGeneration && fanActivityIntentPresent())fanHostQueueSuspend("kernel-power-506-physical",fanGeneration);
         }
         else if (fact->eventId==507 && g_fanPhysicalWake.recordWake(generation,fact->fileTime,
-                     sgSleepRetryActive(),fanActivityIntentPresent())) {
+                     sgSleepRetryActive())) {
             appendFanLifecycleLog("fan-physical-wake-observed", {{"generation",currentFanPowerGeneration()},
                 {"sharedGeneration",generation},{"source","kernel-power-507"},{"scope","fan-only"},
                 {"globalLifecycle",powerLifecycleName(g_powerLifecycle.load())},
@@ -79394,11 +85202,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         const bool reason7EntryFailure = g_sgLastS0WakeReason == 7 && entryFailure;
         const bool reason8EntryFailure = g_sgLastS0WakeReason == 8 && entryFailure;
         sgRecordFact("s0-wake-message", {
+            {"latestKernel507FileTime100ns", g_sgLastKernel507EventFileTime.load(std::memory_order_acquire)},
             {"reason", g_sgLastS0WakeReason}, {"acceptedUserWake", w == 1},
             {"reason7EntryFailure", reason7EntryFailure},
             {"reason8EntryFailure", reason8EntryFailure},
             {"entryFailure", entryFailure}
         });
+        if(g_sgSleepTimeoutWindow.active()&&!sgSleepTimeoutCurrent())
+            sgSleepTimeoutStop("classified-wake-or-windows-success");
         if (w == 1) {
             const auto intent=g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire);
             const auto buttonWake=g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire);
@@ -79409,6 +85220,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 return 0;
             }
             sgAbnormalStop("power-button-wake");
+            sgSleepTimeoutStop("power-button-wake");
             g_sgAutomaticSleepTarget.store(ymcc::sleeprequest::Mode::None, std::memory_order_release);
             g_sgAutomaticSleepBudget.confirmedUserWake();
             // 507 Reason=1 is a confirmed user wake. Consume the prior
@@ -79458,6 +85270,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_SG_S4_WAKE:
+        sgSleepTimeoutStop("kernel-s4-wake");
         g_sgAutomaticSleepTarget.store(ymcc::sleeprequest::Mode::None, std::memory_order_release);
         g_sgModernStandbyActive = false;
         sgRecordFact("s4-wake-message", {
@@ -79490,7 +85303,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_POWERBROADCAST: {
+        sgSleepTimeoutPowerBroadcast(static_cast<ULONG>(w));
         g_sleepNotificationEvidence.handled(static_cast<ULONG>(w),GetTickCount64());
+        if(w==PBT_APMSUSPEND||w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND||
+           w==PBT_APMRESUMECRITICAL||w==PBT_APMPOWERSTATUSCHANGE)steamWallpaperForegroundSignal();
         if (w == PBT_APMSUSPEND || w == PBT_APMRESUMEAUTOMATIC ||
             w == PBT_APMRESUMESUSPEND || w == PBT_APMRESUMECRITICAL)
             focusLosslessReturnCancel();
@@ -79547,54 +85363,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 pbs->DataLength >= sizeof(DWORD)) {
                 DWORD cond = *reinterpret_cast<DWORD*>(pbs->Data); // SYSTEM_POWER_CONDITION
                 int ac = (cond == 0 /*PoAc*/) ? 1 : 0;            // 0=插电 1/2=离电
-                if (g_lastAcState < 0) {
-                    // 注册后系统会立即回调一次当前状态：仅记录，不算切换、不刷新
-                    g_lastAcState = ac;
-                } else if (ac != g_lastAcState) {
-                    g_lastAcState = ac;
-                    const auto generation = currentPowerGeneration();
-                    g_acdcDebounceGeneration.store(generation, std::memory_order_release);
-                    sgRecordFact("acdc-change", {
-                        {"ac", ac == 1},
-                        {"generation", generation},
-                        {"source", "native.acdc"}
-                    });
-                    sgNoteExternalDeviceAcDcChange();
-                    // 视频背景专用轻量事件：即时暂停/恢复；不触发 CPU/TDP 等重型链路。
-                    ipc_emit("power.sourceChanged", {
-                        {"ac", ac == 1},
-                        {"generation", generation},
-                        {"source", "native.acdc"}
-                    });
-                    // ── 熔断：5s 滑动窗口内真实切换 >10 次 → 请求完整退出，避免系统卡死且不绕过 Sleep Guard 恢复。──
-                    DWORD now = GetTickCount();
-                    g_acSwitchTicks.push_back(now);
-                    g_acSwitchTicks.erase(
-                        std::remove_if(g_acSwitchTicks.begin(), g_acSwitchTicks.end(),
-                            [now](DWORD t){ return (now - t) > ACDC_BURST_MS; }),
-                        g_acSwitchTicks.end());
-                    if ((int)g_acSwitchTicks.size() > ACDC_BURST_LIMIT) {
-                        KillTimer(h, TIMER_ID_ACDC);
-                        // 批132（T0 风扇安全 / 退出归因）：AC-DC 风暴自退出必须可归因（此前静默）。
-                        appendNativeLifecycleLog("app-exit-request", {
-                            {"source", "ac-dc-burst"}, {"burstCount", (unsigned long long)g_acSwitchTicks.size()},
-                            {"burstLimit", ACDC_BURST_LIMIT}, {"burstWindowMs", ACDC_BURST_MS}
-                        });
-                        PostMessageW(h, WM_APP_EXIT, 0, 0);
-                        return 0;
-                    }
-                    // ── 尾防抖：连续切换只在最后一次之后 5s 触发一次刷新 ──
-                    // SetTimer 同 id 会重置倒计时 → 天然实现「顺延到最后一次重新计时」。
-                        SetTimer(h, TIMER_ID_ACDC, ACDC_DEBOUNCE_MS,
-                        [](HWND hh, UINT, UINT_PTR id, DWORD) {
-                            KillTimer(hh, id);
-                            ipc_emit("power.acChanged", {
-                                {"ac", g_lastAcState == 1},
-                                {"generation", g_acdcDebounceGeneration.load(std::memory_order_acquire)},
-                                {"source", "native.acdc.debounced"}
-                            });
-                        });
-                }
+                if (acceptAcDcSource(h, ac, "native.acdc")) return 0;
             }
         else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_ACTIVE_POWERSCHEME)) {
                 // Windows 活动电源方案变化广播：仅转发事件，方案是否恢复由前端 CPU guard 决定。
@@ -79715,11 +85484,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     const SgRetryKind completedKind = g_sgTask.retryKind;
                     const unsigned int attempt = g_sgTask.retryAttempt;
                     KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
-                    // Keep unexpected-wake request identity for delayed 506s;
-                    // they must not look like a fresh interactive sleep.
-                    if (completedKind != SgRetryKind::UnexpectedWake)
-                        sgClearInternalSleepRequest("sleep-retry-suspend-confirmed");
-                    else
+                    // Every automatic suspend call can deliver its own506 late.
+                    // Retain the bounded original-time identity for all retry kinds.
+                    if (completedKind == SgRetryKind::UnexpectedWake)
                         sgArmNonUserWakeGuard("retry-suspend-confirmed");
                     g_sgRetryInProgress = false;
                     g_sgRetryDueTick = 0;
@@ -85658,7 +91425,7 @@ static json screenTouchpadsWireSelfTest() {
 int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // Private binding operation exits before ordinary startup or device ownership.
     int deckyBindingWorkerExit=0;
-    if(ymcc::deckybinding::entry::tryRunCommandLine(GetCommandLineW(),deckyBindingWorkerExit))return deckyBindingWorkerExit;
+    if(ymcc::deckybinding::entry::tryRunCommandLine(GetCommandLineW(),deckyBindingWorkerExit,deckySidebarRunContextCleanupWorker))return deckyBindingWorkerExit;
     const ULONGLONG optiStartupTick = GetTickCount64();
     const auto initialEfficiency=ymcc::processEfficiency::applyCurrent();
     // Only the explicit OS logon command can consume the user's boot setting.
@@ -85676,10 +91443,14 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     {
         int count=0;auto args=CommandLineToArgvW(GetCommandLineW(),&count);
         const bool identityOnly=args&&count==2&&wcscmp(args[1],L"--battery-runtime-identity")==0;
+        const bool componentOnly=args&&count==2&&wcscmp(args[1],L"--battery-component-identity")==0;
         if(args)LocalFree(args);
-        if(identityOnly){
-            auto text=ymcc::batterycharge::runtimeIdentity(POWER_CONTROL_DIR).dump()+"\n";DWORD written=0;
-            return WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()?0:2;
+        if(identityOnly||componentOnly){
+            try{
+                auto result=componentOnly?ymcc::batterycharge::componentIdentity(POWER_CONTROL_DIR):ymcc::batterycharge::runtimeIdentity(POWER_CONTROL_DIR);
+                auto text=result.dump()+"\n";DWORD written=0;
+                return WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()?0:2;
+            }catch(const std::exception& error){auto text=json{{"ok",false},{"error",error.what()}}.dump()+"\n";DWORD written=0;WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),text.data(),static_cast<DWORD>(text.size()),&written,nullptr);return 2;}
         }
     }
     if (wcsstr(GetCommandLineW(), L"--controller-persona-selftest")) {
@@ -86085,7 +91856,11 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     cleanupExitArtifacts();
     // Repair the first updater layout before startup workers read PowerControl.
     if (!g_aiFanMockSession.isolated) migrate_legacy_power_control_dir();
-    initializeGpuScheduleFirstRunDefault(); // AMD 395 only, when both settings files are absent.
+    initializeGpuScheduleFirstRunDefault(); // AI Max 385 / Max+ 388, 395 only; both settings files must be absent.
+    // Load the saved main-window isolation choice before HWND/input ownership
+    // exists; a remembered OFF must not briefly hide a controller during boot.
+    g_controllerFrontendIsolationEnabled.store(controllerFrontendIsolationSetting(ymSettingsSection("input")),
+        std::memory_order_release);
     // GP-PREREQ-2: first-install is common to every model; runs before any target admission.
     if (!g_aiFanMockSession.isolated) g_gamepadDriverSetup.start(ymcc::GamepadDriverSetup::ResolveRoot(exe_dir(),POWER_CONTROL_DIR),
         yemancc_data_dir() + L"\\gamepad-driver-setup.json",
@@ -86532,6 +92307,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // 兜底：即使通过 WM_QUIT 直接离开消息循环，也确保冻结进程被解除。
     closeScreenTouchpadsForExit("message-loop-finally");
     shutdownSplashGraphics();
+    appendNativeLifecycleLog("battery-in-process-final-exit",ymcc::batterycharge::shutdown(yemancc_data_dir()));
     joinStartupResumeThread(1000);
     sgStopWorkThread(1000);
     g_deckySidebarRuntime.shutdown();

@@ -35,16 +35,17 @@ const legacyAdapter = (id, title, mode, port, timeoutMs = 120000) => adapter(id,
   });
 
 /** Keep missing inputs in the catalog: the runner must report BLOCKED, not omit them. */
-export function getSleepAdapters(repoRoot, { identityOnly = false } = {}) {
+export function getSleepAdapters(repoRoot, { identityOnly = false, selectedIds } = {}) {
+  const deferred=id=>identityOnly||(Array.isArray(selectedIds)&&selectedIds.length>0&&!selectedIds.includes(id));
   return [
-    getResidencyAdapter(repoRoot,{identityOnly}),
+    getResidencyAdapter(repoRoot,{identityOnly:deferred('sleep.residency-evidence-consumer')}),
     // Execute the original cases through a fixture which migrates only stale
     // native symbol/membership assertions; all behavioral expectations remain.
     adapter('power-resume', 'Product wake transaction: ordering, bounded retries and generation fencing',
       'node', 'tools/ymcc_sim/global/sleep-fixtures/power-resume-entry.mjs',
       ['tools/power_resume_selftest.ts', 'src/bridge/powerResume.ts', 'src/App.vue', 'native/main.cpp', ...POWER_RESUME_TOOL_SOURCES],
       { args: ['--output', '{outDir}/power-resume.json'], resultFiles: ['power-resume.json'],
-        ...(identityOnly ? {registrationIdentityOnly:true,blockedReason:'POWER_RESUME_EXECUTION_IDENTITY_DEFERRED'} : powerResumeToolDeclaration(repoRoot)) }),
+        ...(deferred('sleep.power-resume') ? {registrationIdentityOnly:true,blockedReason:'POWER_RESUME_EXECUTION_IDENTITY_DEFERRED'} : powerResumeToolDeclaration(repoRoot)) }),
     adapter('steam-dispatch', 'Production Steam sleep dispatch with isolated API transports',
       'node', 'tools/steam_sleep_dispatch_guard_selftest.mjs', ['native/steam_live.js'],
       { args: ['--output', '{outDir}/dispatch.json'], resultFiles: ['dispatch.json'] }),

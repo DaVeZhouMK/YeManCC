@@ -22,5 +22,60 @@
     "minimal base class and capability/transport constructor scaffolding"
   ],
   "generatedSha256": "e4904be4ee0cf0a9ba2d32f73a5bfaa7a4b6413d2fdcaaf97439312b18e031c3",
-  "physicalDeviceVerified": false
+  "physicalDeviceVerified": false,
+  "exactExtensions": {
+    "onex-x2mini-hid-v1": {
+      "sourceRoot": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion",
+      "sourceCommit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+      "files": {
+        "Devices/OneXPlayer/OneXPlayerX2MiniPro.cs": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+        "Devices/OneXPlayer/OneXPlayerX2.cs": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b",
+        "Devices/OneXPlayer/OneXPlayerX1.cs": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485",
+        "Devices/OneXPlayer/OneXAOKZOE.cs": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718",
+        "Devices/IDevice.cs": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+      },
+      "inheritance": [
+        "OneXPlayerX2MiniPro : OneXPlayerX2",
+        "OneXPlayerX2 : OneXPlayerX1",
+        "OneXPlayerX1 : OneXAOKZOE"
+      ],
+      "methods": {
+        "Devices/OneXPlayer/OneXPlayerX2MiniPro.cs": [
+          "SetLedBrightness",
+          "SetLedColor"
+        ],
+        "Devices/OneXPlayer/OneXAOKZOE.cs": [
+          "BuildV1Command",
+          "SendV1Brightness",
+          "SendV1SolidColor"
+        ],
+        "Devices/IDevice.cs": [
+          "WithReportID"
+        ]
+      },
+      "reportLengths": {
+        "BuildV1CommandPayload": 64,
+        "WithReportIDDefault": 65
+      },
+      "descriptorOutputReportByteLength": {
+        "value": 65,
+        "basis": "WithReportID default 1+64; checked by actual WindowsHidTransport; physical descriptor NOT_VERIFIED"
+      },
+      "hardwareVerified": false,
+      "methodSha256": {
+        "Devices/OneXPlayer/OneXPlayerX2MiniPro.cs": {
+          "SetLedBrightness": "6fed2f56fe9c4e4647f5d4b0cb5b34604b93dd78346442e3c12359e9a4b2ee25",
+          "SetLedColor": "f60c2a17209f663a80b83f03631174d9865921157d1ad53f5f912fdc5d5198f3"
+        },
+        "Devices/OneXPlayer/OneXAOKZOE.cs": {
+          "BuildV1Command": "143196d9e8f4c50539ef0b3c0c02fc3151f755c3405856f753b6471ec1b87bf7",
+          "SendV1Brightness": "857b74a631910a96eca11faf27a46c8cd29ddcb34cb0e55621108661413c6be2",
+          "SendV1SolidColor": "8eaed376df206df522d948de7cc69051afc40a9e4d5aff39a74748041810db42"
+        },
+        "Devices/IDevice.cs": {
+          "WithReportID": "8b76bd52e824bfef90a6a4e532a0ebc0bb9020ffe627becc28c2a03d0b4477d1"
+        }
+      }
+    }
+  }
 }

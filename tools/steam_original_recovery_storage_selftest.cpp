@@ -2,6 +2,8 @@
 #include <fstream>
 #include <iostream>
 #include <functional>
+#include "json.hpp"
+#include "steam_original_recovery_config.h"
 namespace fs=std::filesystem;
 using ymcc::steamOriginalStorage::prepare;
 static void check(bool ok){if(!ok)throw std::runtime_error("selftest-assertion");}
@@ -9,15 +11,16 @@ static void put(const fs::path& p,const std::string& s){fs::create_directories(p
 static std::string get(const fs::path& p){std::ifstream f(p,std::ios::binary);return {std::istreambuf_iterator<char>(f),{}};}
 static void refused(const std::function<void()>& fn,const char* reason){try{fn();}catch(const std::runtime_error& e){check(std::string(e.what())==reason);return;}throw std::runtime_error("selftest-expected-refusal");}
 int main(int argc,char** argv){try{
-    check(argc==2);const auto evidence=fs::absolute(argv[1]);check(fs::is_directory(evidence));
+    check(argc==2||(argc==3&&std::string(argv[2])=="--config-storm"));const bool storm=argc==3;const auto evidence=fs::absolute(argv[1]);check(fs::is_directory(evidence));
     const auto base=evidence/("fixtures-"+std::to_string(
 #ifdef _WIN32
     GetCurrentProcessId()
 #else
     ::getpid()
 #endif
-    ));check(!fs::exists(base));fs::create_directory(base);int cases=0;
-    auto test=[&](const char* name,const std::function<void(const fs::path&,const fs::path&)>& fn){auto d=base/name;fs::create_directories(d);fn(d/"legacy",d/"runtime");++cases;std::cout<<"PASS "<<name<<"\n";};
+    ));check(!fs::exists(base));fs::create_directory(base);int cases=0,failures=0;
+    auto test=[&](const char* name,const std::function<void(const fs::path&,const fs::path&)>& fn){const std::string n=name;if(storm&&(n=="total-size"||n=="file-count"||n=="symlink"||n=="junction"||n=="mapped-image-log-deletion"))return;
+        auto d=base/name;fs::create_directories(d);++cases;try{fn(d/"legacy",d/"runtime");std::cout<<"PASS "<<name<<"\n";}catch(const std::exception& e){++failures;std::cout<<"FAIL "<<name<<" "<<e.what()<<"\n";}};
     test("copy-commit-isolation",[](const auto& l,const auto& r){std::string binary("{\"x\":1}\r\n\0tail",16);for(auto p:{"enabled.json","seed.json","DISABLED.json","references/a.json","consumed/a.json","disabled/a.json"})put(l/p,binary);put(l/"work/build/x.dll","inert");put(l/"monitor/status.json","log");put(l/"last-recovery-summary.json","log");put(l/"x.dll","inert");auto a=prepare(l,r);check(a.legacyImported&&a.filesCopied==6&&a.filesAlreadyPresent==0);for(auto p:{"enabled.json","seed.json","DISABLED.json","references/a.json","consumed/a.json","disabled/a.json"})check(get(r/p)==binary&&get(l/p)==binary);check(!fs::exists(r/"work")&&!fs::exists(r/"monitor")&&!fs::exists(r/"x.dll"));put(l/"enabled.json","changed");put(l/"consumed/new.json","changed");auto b=prepare(l,r);check(!b.legacyImported&&b.filesCopied==0&&get(r/"enabled.json")==binary&&!fs::exists(r/"consumed/new.json"));fs::remove_all(l);prepare(l,r);check(get(r/"consumed/a.json")==binary);});
     test("real-legacy-export-layout",[](const auto& l,const auto& r){for(auto p:{"enabled.json","references/ref.json","consumed/event.json"})put(l/p,"preserved-state");for(auto p:{"last-event.json","last-summary.json","last-recovery-summary.json","status.json","current-export.json","monitor/status.json","work/build/old.dll"})put(l/p,"legacy-evidence");auto a=prepare(l,r);check(a.legacyImported&&a.filesCopied==3);for(auto p:{"enabled.json","references/ref.json","consumed/event.json"})check(get(r/p)=="preserved-state");for(auto p:{"last-event.json","last-summary.json","last-recovery-summary.json","status.json","current-export.json","monitor/status.json","work/build/old.dll"})check(!fs::exists(r/p)&&get(l/p)=="legacy-evidence");});
     test("audited-transfer-is-explicit-json-ledger",[](const auto& l,const auto& r){put(l/"consumed/original.json","old-spent");prepare(l,r);put(r/"audited-prepublication-transfer/life.json","explicit-audit");put(r/"audited-prepublication-transfer/life.source.json","pinned-source");auto a=prepare(l,r);check(a.filesCopied==0&&get(r/"consumed/original.json")=="old-spent"&&get(r/"audited-prepublication-transfer/life.json")=="explicit-audit");});
@@ -41,6 +44,29 @@ int main(int argc,char** argv){try{
     test("mapped-image-log-deletion",[](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(l/"monitor/status.json","log");prepare(l,r);wchar_t system[MAX_PATH]{};check(GetSystemDirectoryW(system,MAX_PATH)>0);const auto image=r/"work/own-inert.dll";fs::create_directories(image.parent_path());check(CopyFileW((fs::path(system)/"version.dll").c_str(),image.c_str(),TRUE));HMODULE mapped=LoadLibraryExW(image.c_str(),nullptr,DONT_RESOLVE_DLL_REFERENCES);check(mapped!=nullptr);std::error_code ec;const auto removed=fs::remove_all(l,ec);check(!ec&&removed>0&&!fs::exists(l));check(get(r/"consumed/a.json")=="spent-once");SetLastError(0);const BOOL deleted=DeleteFileW(image.c_str());const DWORD error=deleted?0:GetLastError();std::cout<<"OBSERVATION mapped-image-delete="<<(deleted?"allowed":"refused")<<" win32="<<error<<" legacy-recursive-delete=ok ledger=unchanged\n";prepare(l,r);check(get(r/"consumed/a.json")=="spent-once");check(FreeLibrary(mapped));if(!deleted)check(DeleteFileW(image.c_str())!=0);});
 #endif
     test("empty-commit",[](const auto& l,const auto& r){auto a=prepare(l,r);check(!a.legacyImported&&a.filesCopied==0);put(l/"seed.json","late");prepare(l,r);check(!fs::exists(r/"seed.json"));});
-    std::cout<<"PASS total="<<cases<<" fixture-data-retained\n";return 0;
+
+    test("enabled-duplicate-blocks-before-runtime-parse",[](const auto& l,const auto& r){prepare(l,r);const std::string raw=R"({"enabled":false,"enabled":true})";put(r/"enabled.json",raw);refused([&]{prepare(l,r);},"storage-json-duplicate");check(get(r/"enabled.json")==raw);put(r/"enabled.json",R"({"enabled":false,"unknown":7})");prepare(l,r);check(get(r/"enabled.json").find("unknown")!=std::string::npos);});
+    test("enabled-depth-blocks-before-runtime-parse",[](const auto& l,const auto& r){prepare(l,r);const auto raw=std::string(80,'[')+"0"+std::string(80,']');put(r/"enabled.json",raw);refused([&]{prepare(l,r);},"storage-json-depth");check(get(r/"enabled.json")==raw);});
+    test("enabled-read-sharing-denial-retries",[](const auto& l,const auto& r){prepare(l,r);put(r/"enabled.json",R"({"enabled":true})");
+#ifdef _WIN32
+      HANDLE h=CreateFileW((r/"enabled.json").c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(h!=INVALID_HANDLE_VALUE);bool blocked=false;try{prepare(l,r);}catch(const std::runtime_error& e){blocked=std::string(e.what())=="storage-read-failed";}CloseHandle(h);check(blocked);prepare(l,r);
+#endif
+    });
+    const auto pendingBytes=[](const fs::path& l,const fs::path& r){const auto rootText=[](const fs::path& p){const auto text=fs::path(ymcc::steamOriginalStorage::detail::key(p)).generic_u8string();return std::string(text.begin(),text.end());};return nlohmann::json{{"schema","ymcc.steam-original-storage.v2"},{"committed",true},{"migration",{{"sourceRoot",rootText(l)},{"targetRoot",rootText(r)},{"files",nlohmann::json::array({"consumed/a.json"})}}}}.dump()+"\n";};
+    test("verified-pending-retry",[&](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(r/"consumed/a.json","spent-once");put(r/"storage-layout-v2.pending",pendingBytes(l,r));auto receipt=prepare(l,r);check(receipt.filesAlreadyPresent==1&&receipt.filesCopied==0&&fs::exists(r/"storage-layout-v2.json")&&!fs::exists(r/"storage-layout-v2.pending"));check(get(l/"consumed/a.json")=="spent-once"&&get(r/"consumed/a.json")=="spent-once");fs::remove_all(l);prepare(l,r);});
+    test("verified-pending-conflict-preserved",[&](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(r/"consumed/a.json","partial");const auto pending=pendingBytes(l,r);put(r/"storage-layout-v2.pending",pending);refused([&]{prepare(l,r);},"storage-copy-conflict");check(get(r/"storage-layout-v2.pending")==pending&&get(r/"consumed/a.json")=="partial");});
+    test("pending-wrong-owner-preserved",[&](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(r/"consumed/a.json","spent-once");auto pending=nlohmann::json::parse(pendingBytes(l,r));pending["migration"]["targetRoot"]="old-owner";const auto bytes=pending.dump();put(r/"storage-layout-v2.pending",bytes);refused([&]{prepare(l,r);},"storage-marker-interrupted");check(get(r/"storage-layout-v2.pending")==bytes);});
+    test("pending-new-debt-cannot-be-dropped",[&](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(r/"consumed/a.json","spent-once");put(r/"storage-layout-v2.pending",pendingBytes(l,r));put(r/"consumed/extra.json","");refused([&]{prepare(l,r);},"storage-target-uncommitted");check(fs::exists(r/"consumed/extra.json"));});
+
+    test("verified-pending-rename-denial-and-retry",[&](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(r/"consumed/a.json","spent-once");const auto bytes=pendingBytes(l,r);put(r/"storage-layout-v2.pending",bytes);
+#ifdef _WIN32
+      HANDLE h=CreateFileW((r/"storage-layout-v2.pending").c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);check(h!=INVALID_HANDLE_VALUE);bool blocked=false;try{prepare(l,r);}catch(const std::runtime_error& error){blocked=std::string(error.what())=="storage-marker-commit-failed";}CloseHandle(h);check(blocked&&!fs::exists(r/"storage-layout-v2.json")&&get(r/"storage-layout-v2.pending")==bytes);prepare(l,r);check(fs::exists(r/"storage-layout-v2.json")&&get(r/"consumed/a.json")=="spent-once");
+#endif
+    });
+    test("pending-path-escape-and-future-schema-preserved",[&](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");put(r/"consumed/a.json","spent-once");auto pending=nlohmann::json::parse(pendingBytes(l,r));for(const auto& variant:{std::string("path"),std::string("schema")}){auto invalid=pending;if(variant=="path")invalid["migration"]["files"]=nlohmann::json::array({"../consumed/a.json"});else invalid["schema"]="ymcc.steam-original-storage.v99";const auto bytes=invalid.dump();put(r/"storage-layout-v2.pending",bytes);refused([&]{prepare(l,r);},"storage-marker-interrupted");check(get(r/"storage-layout-v2.pending")==bytes&&get(r/"consumed/a.json")=="spent-once");}});
+
+    test("enabled-malformed-off-explicit-edit-selfheals",[](const auto& l,const auto& r){put(l/"consumed/a.json","spent-once");prepare(l,r);const std::string bad="{\"enabled\":";put(r/"enabled.json",bad);prepare(l,r);auto config=ymcc::steamOriginal::configuration(nlohmann::json::parse(get(r/"enabled.json"),nullptr,false),true,false);check(config.at("enabled")==false&&get(r/"enabled.json")==bad);put(r/"enabled.json",R"({"enabled":true,"extension":{"keep":7}})");prepare(l,r);config=ymcc::steamOriginal::configuration(nlohmann::json::parse(get(r/"enabled.json")),true,false);check(config.at("enabled")==true&&config.at("extension").at("keep")==7&&get(r/"consumed/a.json")=="spent-once");});
+    test("enabled-future-preserved-off",[](const auto& l,const auto& r){prepare(l,r);const std::string bytes=R"({"schema":"ymcc.steam-original-recovery-enabled.v99","enabled":true,"unknown":7})";put(r/"enabled.json",bytes);prepare(l,r);const auto config=ymcc::steamOriginal::configuration(nlohmann::json::parse(get(r/"enabled.json")),true,false);check(config.at("enabled")==false&&get(r/"enabled.json")==bytes);});
+    std::cout<<"PASS total="<<cases<<" failures="<<failures<<" fixture-data-retained\n";return failures?1:0;
 }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}
 

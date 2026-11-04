@@ -2545,6 +2545,10 @@
       "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
       "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b",
       "role": "compiler/linker/Node executable"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\psapi.h",
+      "sha256": "4166fbce43622f469aa46cd1cea27a73171353df8101643c2e850124622d5ef9"
     }
   ],
   "meaning": "Static predeclared Node, compiler directory executables/runtime, actual bootstrap compiler headers and requested library paths. Public execution must independently observe every header/library and reject any missing member. OS-loaded module graph is not claimed."

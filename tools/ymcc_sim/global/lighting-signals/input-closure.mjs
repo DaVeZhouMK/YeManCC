@@ -41,8 +41,26 @@ export function localImportClosure(repo,seeds){
  }
  return [...seen];
 }
+// Reuse the original fixture files; generated scratch sources remain bound by its receipts.
+export function lightingFixtureSourceInputs(repo){
+ return [...new Set([...sources(repo,'tools/fixtures/lightsetter_devicecore',/\.(?:cs|csproj|py|ps1|json|md|cpp)$/),
+  'tools/hc_lighting_native_consumer_selftest.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs',
+  'native/onex_x2_protocol.h','native/onex_x2_session.h','native/oxp3_lighting_owner.h',
+  'FanLab/LightSetter/DeviceCore/SOURCE-NOTICE.md'])];
+}
+export function lightingFixedSourceInputs(repo){
+ const lock=read(path.join(repo,'tools/fixtures/lightsetter_devicecore/source-lock.json'));
+ const extension=lock.exactExtensions?.['onex-x2mini-hid-v1'];
+ need(extension&&typeof extension.sourceRoot==='string'&&path.isAbsolute(extension.sourceRoot),'LIGHTING_FIXED_SOURCE_ROOT');
+ need(extension.files&&Object.keys(extension.files).length>0,'LIGHTING_FIXED_SOURCE_FILES');
+ return Object.entries(extension.files).map(([relative,sha256])=>{
+  const file=path.resolve(extension.sourceRoot,relative);
+  need(relative&&!path.isAbsolute(relative)&&inside(extension.sourceRoot,file)&&/^[a-f0-9]{64}$/.test(sha256),'LIGHTING_FIXED_SOURCE_DECLARATION');
+  return {path:file,sha256,origin:'source-lock.exactExtensions.onex-x2mini-hid-v1'};
+ });
+}
 export function completeLightingSourceInputs(repo,legacy){
- const direct=['deps/ymcc-device-core-runtime/profile.json',MODULE+'/input-closure.mjs',MODULE+'/input-closure.test.mjs',MODULE+'/tool-inputs.json',
+ const direct=[...lightingFixtureSourceInputs(repo),'tools/lib/hc_lighting_source_adapters.mjs',...['OneXPlayer3','AYANEO3','AYANEONEXT2','AYANEODeviceCEc','AYANEOSuperJoyRgb'].map(name=>'capabilities/upstream/f2e58468/'+name+'.cs'),'deps/ymcc-device-core-runtime/profile.json',MODULE+'/input-closure.mjs',MODULE+'/input-closure.test.mjs',MODULE+'/tool-inputs.json',
   'tools/fixtures/lightsetter_devicecore/ReplayCore.csproj','tools/fixtures/lightsetter_devicecore/AssemblyReferenceAudit.csproj',
   'FanLab/LightSetter/DeviceCore/YeManLightDeviceCore.csproj','FanLab/LightSetter/YeManLightSetter.json',
   'tools/oem_capability_evidence_matrix.py','deps/json/json.hpp'];
@@ -107,11 +125,13 @@ export function lightingToolDeclaration(repo,{environment=process.env}={}){
 }
 export function lightingArtifactInputs(repo){
  const runtime=resolveLightingRuntimeInputs(repo),tool=lightingToolDeclaration(repo);
- return [...new Set([runtime.hcCore,runtime.sharedDll,...tool.files.map(row=>row.path)])];
+ return [...new Set([runtime.hcCore,runtime.sharedDll,...tool.files.map(row=>row.path),...lightingFixedSourceInputs(repo).map(row=>row.path)])];
 }
 export function verifyLightingToolInputs(repo){
  const declaration=lightingToolDeclaration(repo);
  for(const row of declaration.files)need(fs.existsSync(row.path)&&fs.statSync(row.path).isFile()&&hash(row.path)===row.sha256,'LIGHTING_TOOL_INPUT_CHANGED:'+row.path);
+ const fixedSources=lightingFixedSourceInputs(repo);
+ for(const row of fixedSources)need(fs.existsSync(row.path)&&hash(row.path)===row.sha256,'LIGHTING_FIXED_SOURCE_CHANGED:'+row.path);
  const runtime=resolveLightingRuntimeInputs(repo);
  for(const file of [runtime.hcCore,runtime.sharedDll])need(fs.existsSync(file)&&fs.statSync(file).isFile(),'LIGHTING_RUNTIME_INPUT_MISSING:'+file);
  const packageSnapshot=Object.fromEntries(declaration.files.map(row=>[row.path,row.sha256]));

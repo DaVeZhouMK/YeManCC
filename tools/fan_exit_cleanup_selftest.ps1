@@ -125,7 +125,7 @@ Require-Contains $native 'fan-exit-recovery-handed-off' 'unconfirmed recovery is
 Require-Contains $native 'static std::atomic<bool> g_exitReadyPosted{false};' 'single final-exit message guard'
 Require-Contains $native 'static void postExitReadyOnce(HWND hwnd, WPARAM code = 0)' 'idempotent final-exit notifier'
 Require-Contains $native '#define EXIT_CLEANUP_WATCHDOG_MS 8000' 'global exit cleanup deadline'
-Require-Contains $native 'SetTimer(hwnd, EXIT_CLEANUP_WATCHDOG_TIMER_ID,' 'exit cleanup watchdog is armed'
+Require-Contains $native 'SetTimer(hwnd,EXIT_CLEANUP_WATCHDOG_TIMER_ID,' 'exit cleanup watchdog is armed'
 Require-Contains $native 'appendNativeLifecycleLog("exit-cleanup-deadline"' 'exit deadline is diagnosable'
 Require-Contains $native 'static bool joinThreadBoundedForExit' 'bounded native worker join helper'
 Require-Contains $exitBody 'sgStopWorkThread(1000);' 'sleep worker exit wait is bounded'
@@ -136,7 +136,7 @@ Require-Contains $native 'if (!opLock.try_lock()) {' 'sleep cleanup does not wai
 Require-Contains $native '"sleep-exit-cleanup-deferred"' 'deferred sleep recovery is diagnosable'
 Require-Contains $exitBody 'sgCleanupBeforeExit(true)' 'exit uses non-blocking sleep cleanup'
 Require-Contains $readyBody 'gamepadSerialStop(500);' 'UI-thread serial worker wait is bounded'
-Require-Contains $readyBody 'WaitForSingleObject(g_exitCleanupThread, 0);' 'UI never waits for cleanup worker'
+Require-Contains $readyBody 'WaitForSingleObject(g_exitCleanupThread,0)'  'UI never waits for cleanup worker'
 if ($exitBody.Contains('.join()')) {
     throw 'fan exit cleanup source check failed: exit worker still performs an unbounded thread join'
 }
@@ -275,3 +275,108 @@ $failed = @($scenarios | Where-Object { -not $_.value })
 if ($failed.Count -gt 0) { throw "fan exit cleanup simulation failed: $($failed.name -join ', ')" }
 Write-Output ('fan exit cleanup selftest: PASS (' + ($scenarios.name -join ', ') + '; hardwareWrites=false)')
 
+
+# Exact production JSON decision, no OS/HTTP/device entry linked. Original guards/simulations retained.
+$exactRoot = if ($env:YMCC_FAN_EXIT_TEST_OUTPUT) { $env:YMCC_FAN_EXIT_TEST_OUTPUT } else {
+    Join-Path ([IO.Path]::GetFullPath((Join-Path $repoRoot '..\..'))) 'Build\Validation\FanExitBoundary'
+}
+$exactRun = Join-Path $exactRoot ([guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $exactRun -Force | Out-Null
+$exactStart = $nativeText.IndexOf('struct FanBoundaryEvidence {')
+$exactEnd = $nativeText.IndexOf('static bool fanHostEmergencyPost(', $exactStart)
+if ($exactStart -lt 0 -or $exactEnd -le $exactStart) { throw 'NATIVE_BOUNDARY_EXTRACT_MISSING' }
+$productionBoundary = $nativeText.Substring($exactStart, $exactEnd - $exactStart)
+$cpp = @'
+#include "fan_response_contract.h"
+#include <iostream>
+#include <stdexcept>
+#include <fstream>
+using json = nlohmann::json;
+'@ + $productionBoundary + @'
+static int sourceChecks=0;
+static void require(bool value,const char* name) {++sourceChecks;if(!value)throw std::runtime_error(name);}
+int main(int argc, char** argv) {
+    json source={{"state","Stopped"},{"hardwareWrites",false},{"hardwareWritesEnabled",false},{"hardwareWritesObserved",true},
+        {"unknownState",false},{"hcCloseCleanupPending",false},{"openCalled",false},{"openEventsCalled",false},
+        {"oemRestoreConfirmed",false},{"hcVirtualCloseReturned",false},{"hcDeviceManagerStopCompleted",false},
+        {"sourceFanMode",true},{"sourceFanOwnerEntered",true},{"sourceFanClosePending",false},{"sourceFanClosed",true},
+        {"sourceFanAutomaticReturned",true},{"sourceFanGeneration",7},
+        {"recoveryClaimEvidence",{{"sourceFanGeneration",7},{"oemReleaseActionKind","proven-by-source-auto-register-and-terminal-close"},{"oemReleaseActionClass","release-action-proven"}}}};
+    const auto safe=[](const json& state,bool suspend=false){return fanBoundaryIsSafe(fanBoundaryEvidenceFromState(state,suspend));};
+    require(ymcc::fan_response::accepted("/api/close",200,json{{"ok",true},{"state",source}}),"source wire accepted");
+    require(safe(source),"native consumes honest source release");
+    auto suspended=source;suspended["state"]="Suspended";
+    require(safe(suspended,true)&&!safe(suspended),"endpoint-specific terminal");
+    const auto detail=fanBoundaryEvidenceDetail(fanBoundaryEvidenceFromState(source,false));
+    require(detail["sourceReleaseSafe"]==true&&detail["hcCleanupTerminal"]==false&&detail["physicalOwnerKnown"]==false,"no fake HC or physical evidence");
+    for(const char* field:{"sourceFanMode","sourceFanOwnerEntered","sourceFanClosePending","sourceFanClosed","sourceFanAutomaticReturned","sourceFanGeneration","recoveryClaimEvidence","hardwareWritesObserved"}) {
+        auto bad=source;bad.erase(field);require(!safe(bad),"missing source evidence denied");
+    }
+    for(const char* field:{"sourceFanMode","sourceFanOwnerEntered","sourceFanClosePending","sourceFanClosed","sourceFanAutomaticReturned"}) {
+        auto bad=source;bad[field]="true";require(!safe(bad),"malformed boolean denied");
+    }
+    for(const json generation:{json(0),json(-1),json(7.5),json("7"),json(nullptr),json(8)}) {
+        auto bad=source;bad["sourceFanGeneration"]=generation;require(!safe(bad),"generation invalid or mismatched");
+    }
+    for(const char* field:{"sourceFanClosePending","hcCloseCleanupPending","unknownState","hardwareWrites","hardwareWritesEnabled","openCalled","openEventsCalled"}) {
+        auto bad=source;bad[field]=true;require(!safe(bad),"pending/live debt denied");
+    }
+    for(const char* field:{"sourceFanClosed","sourceFanAutomaticReturned"}) {auto bad=source;bad[field]=false;require(!safe(bad),"cleanup cannot replace automatic return");}
+    for(const json kind:{json("proven-by-scope-receipts"),json("unknown"),json(nullptr),json(5)}) {
+        auto bad=source;bad["recoveryClaimEvidence"]["oemReleaseActionKind"]=kind;bad["oemRestoreConfirmed"]=true;
+        require(!safe(bad),"HC receipt cannot replace source proof");
+    }
+    auto wrongClass=source;wrongClass["recoveryClaimEvidence"]["oemReleaseActionClass"]="release-action-unknown";
+    require(!safe(wrongClass),"release class must agree");
+    auto noWrite=source;noWrite["hardwareWritesObserved"]=false;noWrite["sourceFanAutomaticReturned"]=false;
+    require(safe(noWrite),"no-write return invents no write");
+    noWrite["sourceFanOwnerEntered"]=false;noWrite["sourceFanGeneration"]=nullptr;noWrite["recoveryClaimEvidence"]["sourceFanGeneration"]=nullptr;
+    require(safe(noWrite),"never-entered source owner distinct");
+    const auto actualReceipt=[&](const json& receipt) {
+        const auto& state=receipt.at("state");
+        require(ymcc::fan_response::accepted("/api/state",200,receipt),"actual Host serialized wire accepted");
+        const bool closed=state.at("state")=="Stopped"&&ymcc::fan_response::sourceReleaseSafe(state);
+        const bool suspended=state.at("state")=="Suspended"&&ymcc::fan_response::sourceReleaseSafe(state);
+        require(safe(state)==closed,"actual native process boundary consumes current source JSON axes");
+        require(safe(state,true)==suspended,"actual native suspend boundary consumes current source JSON axes");
+        auto stale=state;stale["sourceFanGeneration"]=state["sourceFanGeneration"].is_null()?json(1):json(state["sourceFanGeneration"].get<int>()+1);
+        require(!safe(stale)&&!safe(stale,true),"actual Host wire generation mismatch denied at both boundaries");
+    };
+    for(int i=1;i<argc;++i) {
+        std::ifstream stream(argv[i]);json receipt;stream>>receipt;
+        if(receipt.is_array())for(const auto& item:receipt)actualReceipt(item);else actualReceipt(receipt);
+    }
+    auto hc=source;for(const char* field:{"sourceFanMode","sourceFanOwnerEntered","sourceFanClosePending","sourceFanClosed","sourceFanAutomaticReturned","sourceFanGeneration"})hc.erase(field);
+    hc["hcVirtualCloseReturned"]=true;hc["hcDeviceManagerStopCompleted"]=true;
+    require(!safe(hc),"source kind cannot authorize HC cleanup");
+    hc["recoveryClaimEvidence"]["oemReleaseActionKind"]="proven-by-scope-receipts";
+    require(safe(hc),"existing HC release retained");
+    hc.erase("recoveryClaimEvidence");hc["oemRestoreConfirmed"]=true;require(safe(hc),"legacy action receipt retained");
+    hc["oemRestoreConfirmed"]=false;require(!safe(hc),"HC cleanup alone is not release");
+    std::cout<<json{{"ok",true},{"sourceBoundaryChecks",sourceChecks},{"hardwareCalls",0},{"scope","exact-production-native-boundary-JSON-only"}}.dump()<<std::endl;
+}
+'@
+$cppPath=Join-Path $exactRun 'exact-fan-boundary.cpp'
+[IO.File]::WriteAllText($cppPath,$cpp,[Text.UTF8Encoding]::new($false))
+$vcvars='C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+if (!(Test-Path -LiteralPath $vcvars)) { throw 'NATIVE_BOUNDARY_TOOLCHAIN_MISSING' }
+$batPath=Join-Path $exactRun 'compile-and-test.bat'
+@"
+@echo off
+set "CL="
+set "_CL_="
+set "LINK="
+set "_LINK_="
+call "$vcvars" >nul
+if errorlevel 1 exit /b 1
+set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%"
+set "LIB=C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%"
+cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /Z7 /sourceDependencies "$exactRun\source-dependencies.json" /I"$repoRoot\native" "$cppPath" /Fo"$exactRun\selftest.obj" /Fe"$exactRun\selftest.exe"
+if errorlevel 1 exit /b 1
+"$exactRun\selftest.exe" $env:YMCC_FAN_SOURCE_WIRE_ARGS
+"@ | Set-Content -LiteralPath $batPath -Encoding ascii
+& $batPath *> (Join-Path $exactRun 'compile-and-test.log')
+$nativeCode=$LASTEXITCODE
+Get-Content -LiteralPath (Join-Path $exactRun 'compile-and-test.log') -Tail 8
+Write-Output ('FAN_EXIT_EXACT_BOUNDARY_OUTPUT='+$exactRun)
+if ($nativeCode) { throw ('NATIVE_EXACT_BOUNDARY_FAILED '+$nativeCode) }

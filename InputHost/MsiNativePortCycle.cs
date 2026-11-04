@@ -13,12 +13,19 @@ internal static class MsiNativePortCycle
 {
     internal const string Command = "--msi-native-cycle";
     internal const string GameXusbCycle = "--game-xusb-cycle";
+    internal const string RogNativeRootCycle = "--rog-native-xusb-root-cycle";
     private const uint DnStarted = 0x00000008, DnHasProblem = 0x00000400;
     private const uint CycleWaitTimeout = 0x00000102;
     private const ulong MaxInitialCycleBudgetMs = 30000;
     private static bool ExactGpdXusbCycleRoot(string root,string target) =>
         ValidRoot(root) && root.StartsWith(@"USB\VID_045E&PID_028E\",StringComparison.OrdinalIgnoreCase) &&
         root.Equals(target,StringComparison.OrdinalIgnoreCase);
+    // Use the registered ROG root set and the existing exact XUSB identity
+    // contract for both USB and HID game interfaces. Device authority is
+    // re-read before and after preparing the same physical root port cycle.
+    internal static bool ExactRogNativeRootTarget(string root,string target) =>
+        ValidRoot(root) && root.StartsWith(@"USB\VID_0B05&",StringComparison.OrdinalIgnoreCase) &&
+        ValidXusbInstance(target,root);
     private static readonly Guid LocationFormat = new("a45c254e-df1c-4efd-8020-67d146a850e0");
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey { public Guid Format; public uint Id; }
     private static readonly PropertyKey LocationKey = new() { Format = LocationFormat, Id = 37 };
@@ -37,7 +44,9 @@ internal static class MsiNativePortCycle
         if(args.Length==7 && !args[1].StartsWith(@"USB\VID_0DB0&PID_1901\",StringComparison.OrdinalIgnoreCase))return false;
         if(args.Length==15 && (args[7]!=GameXusbCycle || !ExactGpdXusbCycleRoot(args[1],args[8]) ||
             !TryCycleLifetimeArguments(args,out _,out _,out _)))return false;
-        if(args.Length==9 && (args[7] is not ("--game-hid" or "--game-xusb") ||
+        if(args.Length==9 && args[7]==RogNativeRootCycle &&
+            !ExactRogNativeRootTarget(args[1],args[8]))return false;
+        if(args.Length==9 && args[7]!=RogNativeRootCycle && (args[7] is not ("--game-hid" or "--game-xusb") ||
             (args[7]=="--game-hid"?!ValidGameInstance(args[8]):!ValidXusbInstance(args[8],args[1])) ||
             !args[8].AsSpan(4,17).Equals(args[1].AsSpan(4,17),StringComparison.OrdinalIgnoreCase)))return false;
         location=args[3];
@@ -294,6 +303,13 @@ internal static class MsiNativePortCycle
         }
         using var lifetime=ParentProcessLifetime.TryOpen(parent);
         if(lifetime is null)return 3;
+        if(args.Length==9 && args[7]==RogNativeRootCycle){
+            // Exact current XUSB ancestry authorizes the existing USB CyclePort
+            // factory; this route never calls the HID-node Disable/Enable leaf.
+            var rootFacts=GameAuthorityFacts.TryCreate();
+            return ExecuteVerified(root,location,()=>lifetime.IsAlive,()=>CurrentBoardAllowed(root),CurrentLocations,
+                PrepareDeviceCycle,()=>CurrentGameHid(args[8],root,true,rootFacts),rootFacts);
+        }
         if(args.Length==9){
             var target=args[8];var facts=GameAuthorityFacts.TryCreate();
             var xusb=args[7]=="--game-xusb";
@@ -869,6 +885,60 @@ internal static class MsiNativePortCycle
             Check(result==(fault=="match"?0:3) && cycleCalls==(fault=="match"?1:0) && factoryCalls==(reachesFactory?1:0) &&
                 birthReads==(reachesFactory || fault=="birth-mismatch"?1:0));
         }
+        // ROG native root cycling is a separate exact-target contract. All
+        // checks below are parser/fake execution only; no CM or SDK IO.
+        var rogRoot=@"USB\VID_0B05&PID_1B4C\ROG-SELFTEST";
+        var rogGame=@"HID\VID_0B05&PID_1B4C&MI_05&IG_00\ROG-SELFTEST";
+        var rogArgs=new[]{Command,rogRoot,"--location",position,"--parent-pid",pid,"--once",RogNativeRootCycle,rogGame};
+        Check(TryArguments(rogArgs,out var parsedRog,out _,out _) && parsedRog==rogRoot);
+        Check(TryArguments(rogArgs.Select((v,i)=>i is 1 or 8?v.ToLowerInvariant():v).ToArray(),out _,out _,out _));
+        Check(!TryArguments(rogArgs.Take(7).ToArray(),out _,out _,out _)); // keep MSI-only legacy root entry
+        Check(TryArguments(rogArgs.Select(v=>v.Replace("1B4C","1ABE")).ToArray(),out _,out _,out _));
+        Check(TryArguments(rogArgs.Select((v,i)=>i==8?rogRoot:v).ToArray(),out _,out _,out _)); // USB root still needs live XUSB authority
+        Check(!GameXusbAdmitted(rogRoot,rogRoot,new[]{rogRoot},false));
+        Check(!TryArguments(rogArgs.Select((v,i)=>i==8?rogGame.Replace("1B4C","028E"):v).ToArray(),out _,out _,out _));
+        Check(!TryArguments(rogArgs.Select((v,i)=>i==7?"--ROG-NATIVE-XUSB-ROOT-CYCLE":v).ToArray(),out _,out _,out _));
+        Check(!TryArguments(rogArgs.Concat(new[]{"--extra"}).ToArray(),out _,out _,out _));
+        for(var failureStep=0;failureStep<5;++failureStep){
+            var executed=0;var authorityCalls=0;var boardCalls=0;var locationCalls=0;
+            var result=ExecuteVerified(rogRoot,position,()=>failureStep!=1,()=>{++boardCalls;return failureStep!=2;},
+                _=>{++locationCalls;return failureStep==3?Array.Empty<string>():new[]{position};},
+                rootId=>()=>{Check(rootId==rogRoot);++executed;},()=>{++authorityCalls;return failureStep!=4;});
+            Check(failureStep==0?result==0&&executed==1:result!=0&&executed==0);
+        }
+        // The family upgrade covers the already registered Ally/Ally X and
+        // Xbox Ally boards. These are actual parser/authority consumers using
+        // fake facts; no device, SDK or service entry is executed here.
+        foreach(var familyPid in new[]{"1ABE","1B4C"}){
+            var familyRoot=$@"USB\VID_0B05&PID_{familyPid}\ROG-FAMILY";
+            var otherRoot=familyRoot+"-EXTERNAL";
+            foreach(var bus in new[]{"HID","USB"}){
+                var familyTarget=$@"{bus}\VID_0B05&PID_{familyPid}&MI_05\ROG-FAMILY-GAME";
+                var familyArgs=new[]{Command,familyRoot,"--location",position,"--parent-pid",pid,"--once",RogNativeRootCycle,familyTarget};
+                Check(TryArguments(familyArgs,out _,out _,out _));
+                Check(ExactRogNativeRootTarget(familyRoot,familyTarget));
+                Check(GameXusbAdmitted(familyTarget,familyRoot,new[]{familyTarget,familyRoot},true));
+                Check(!GameXusbAdmitted(familyTarget,familyRoot,new[]{familyTarget,otherRoot},true));
+                Check(!GameXusbAdmitted(familyTarget,familyRoot,new[]{familyTarget,familyRoot},false));
+                Check(!TryArguments(familyArgs.Select((v,i)=>i==8?v.Replace(familyPid,familyPid=="1ABE"?"1B4C":"1ABE"):v).ToArray(),out _,out _,out _));
+            }
+            foreach(var familyBoard in new[]{"RC71L","RC72LA","RC73XA","RC73YA"}){
+                Check(KnownMachineRoot(familyRoot,"ASUSTeK COMPUTER INC.",familyBoard));
+                Check(!KnownMachineRoot(familyRoot,"ASUSTeK COMPUTER INC.",familyBoard+"-UNKNOWN"));
+            }
+            Check(!KnownMachineRoot(familyRoot,"MICRO-STAR INTERNATIONAL","MS-1T91"));
+            var familyCycles=0;var familyAuthorityReads=0;
+            var lostAuthority=ExecuteVerified(familyRoot,position,()=>true,()=>true,_=>new[]{position},
+                _=>()=>{++familyCycles;},()=>++familyAuthorityReads==1);
+            Check(lostAuthority==8 && familyCycles==0 && familyAuthorityReads==2);
+            var familyLocationReads=0;
+            var movedPort=ExecuteVerified(familyRoot,position,()=>true,()=>true,
+                _=>++familyLocationReads==1?new[]{position}:Array.Empty<string>(),_=>()=>{++familyCycles;},()=>true);
+            Check(movedPort!=0 && familyCycles==0 && familyLocationReads==2);
+        }
+        Check(!ExactRogNativeRootTarget(root,root)); // MSI never enters the ROG protocol
+        Check(!ExactRogNativeRootTarget(@"USB\VID_045E&PID_028E\GPD",@"USB\VID_045E&PID_028E\GPD"));
+        Check(!ExactRogNativeRootTarget(@"USB\VID_0B05&PID_FFFF\UNKNOWN",@"HID\VID_0B05&PID_FFFF&MI_05\UNKNOWN"));
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{cases=count,originalCases,candidateCases=count-originalCases,failures=fail,realHardwareAccess=false,noTargetCreation=true}));
         return fail==0;
     }

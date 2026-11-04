@@ -9,13 +9,14 @@ const clone = x => structuredClone(x);
 function evaluate(file, imports = {}, globals = {}) {
   const module = {exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:'ts',format:'cjs'}).code,
-    {module,exports:module.exports,require:n=>{if(n in imports)return imports[n];throw Error('Unexpected import '+n)},console,structuredClone,performance,Date,setTimeout,clearTimeout,queueMicrotask,...globals});
+    {module,exports:module.exports,require:n=>{if(n in imports)return imports[n];throw Error('Unexpected import '+n)},console,structuredClone,performance,TextEncoder,Date,setTimeout,clearTimeout,queueMicrotask,...globals});
   return module.exports;
 }
 const models = evaluate('src/bridge/performanceControls.ts');
 const frameModel = evaluate('src/bridge/frameRateModel.ts');
 const personas = evaluate('src/bridge/controllerPersona.ts');
 let failFileWrites=false;
+let gameStatusCurrent=true;
 let side='ac', game=null, generation=1, flipOnTdp=false, failSave=false, acceptedLimit=150, clockMs=Date.now(), deviceTemplate='portable';
 class TestDate extends Date { static now(){return clockMs} }
 let settings={rtss:{frameRates:frameModel.frameRatePair({}),future:'KEEP'},performanceSchedule:{configured:false,enabled:false},other:{keep:42}};
@@ -25,7 +26,10 @@ files.set(sourcePath,JSON.stringify({version:1,entries:{},rtss:{}}));
 const frames={...frameModel,ensureGlobalFrameRates:async()=>clone(settings.rtss.frameRates),
   applyIndependentFrameRates:async()=>{writes.push({kind:'fps'});return true},publishFrameRatesChanged(){}};
 const target={getPolicyGame:()=>game,detectPolicyGame:async()=>game,gamePolicyKey:g=>(g.path||g.name).split(/[\\/]/).pop().toLowerCase(),isPolicyTargetCurrent:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated};
-const repository={getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
+const sectionRevisions=new Map();
+const repository={SETTINGS_FILE:sourcePath.replace(/game-custom\.json$/i,'yeman-settings.json'),
+  getSettingsSectionRevision:key=>{const json=JSON.stringify(settings[key]??{}),previous=sectionRevisions.get(key);if(!previous||previous.json!==json||previous.generation!==generation)sectionRevisions.set(key,{json,generation,revision:(previous?.revision||0)+1});return sectionRevisions.get(key).revision},
+  getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
   readSettingsSection:async key=>clone(settings[key]||{}),mergeSettings:(a,b)=>({...a,...b}),
   saveSettingsSection:async(key,value)=>{if(failSave)throw Error('disk full');settings[key]=clone(value)},replaceSettingsSection:async(key,value)=>{settings[key]=clone(value)},
   updateSettings:async mutate=>{const next=clone(settings);mutate(next);if(failSave)throw Error('disk full');settings=next}};
@@ -35,14 +39,54 @@ const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:a
   setCoreModeAc:async mode=>writes.push({kind:'core',side:'ac',mode}),setCoreModeDc:async mode=>writes.push({kind:'core',side:'dc',mode}),
   setTdp:async(s,w,opts={})=>{opts.onAccepted?.(Math.min(acceptedLimit,w));writes.push({kind:'tdp',side:s,w});if(flipOnTdp){side='dc';source.value='dc';flipOnTdp=false}return true},
   applyManualPowerParams:async p=>{writes.push({kind:'cpu',...clone(p)});return true},applyCpuProfilePowerParams:async()=>{},rebuildYemanScheme:async()=>{},setRtssLimit:async()=>{},readRtssLimit:async()=>120};
+// The existing hardware port owns one in-memory float run; edits retain its lease.
+let floatOwner=null;
+const autofloat={
+  disableFloat:async()=>{floatOwner=null;writes.push({kind:'stop'})},
+  enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{floatOwner={bank:clone(bank),side:s,current,receipt,tdpApplied:receipt?.accepted??0,paused:false};writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},
+  getFloatInfo:()=>({enabled:floatOwner!==null,tdpApplied:floatOwner?.tdpApplied??0}),
+  pauseContinuousFloatForTdpEdit:async()=>{
+    const owner=floatOwner;if(!owner||owner.paused)return null;
+    owner.paused=true;
+    const current=()=>floatOwner===owner;
+    const release=()=>{owner.paused=false};
+    try {
+      if(!await owner.current()||!current()){release();return null}
+      return {current,release,accept(requested,accepted){
+        if(!current())return;
+        const maximum=Math.max(yeman.getTdpHardwareMinimum(),Math.min(yeman.getTdpHardwareMaximum(),requested));
+        const confirmed=accepted!==null&&Number.isFinite(accepted)&&accepted>=yeman.getTdpHardwareMinimum()&&accepted<=maximum;
+        owner.bank.tdp=confirmed?accepted:maximum;owner.tdpApplied=confirmed?accepted:0;owner.receipt={requested,accepted};
+      }};
+    } catch(error) {release();throw error}
+  },
+  updateContinuousFloatCoreRules:bank=>{if(floatOwner)for(const key of ['coreSplit','coreLow','coreHigh'])floatOwner.bank.auto[key]=bank.auto[key]},
+  holdContinuousFloatAfterCoreChange:()=>{if(floatOwner)floatOwner.holdUntil=clockMs+10000},
+  setFloatRtssLinked(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{},
+};
+const snapshots=evaluate('src/bridge/settingsSnapshot.ts',{vue:require('vue')});
 const schedule=evaluate('src/bridge/performanceSchedule.ts',{
+  './settingsSnapshot':snapshots,
   './controllerPersona':personas,
   './performanceControls':models,'./powerSource':{powerSourceMode:source},'./gameCorePolicy':{detectGameCorePolicy:async()=>({detected:true,heterogeneous:true,smtAvailable:true}),applyGameCorePolicy:async(t,m,h)=>{writes.push({kind:'smt',pid:t.pid,h});return {ok:true,applied:true}}},
   './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})},fs:{exists:async p=>files.has(p),readTextFile:async p=>files.get(p),writeTextFileAtomic:async(p,v)=>{if(failFileWrites&&p===sourcePath)throw Error("disk full");files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},
-  './frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{detectGame:async()=>game},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
-  './autofloat':{disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
+  './frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{detectGame:async()=>game,isGameStatusCurrent:()=>gameStatusCurrent,isCurrentGameTarget:t=>!!game&&game.pid===t.pid&&String(game.processCreated)===String(t.processCreated)&&(!t.path||t.path.toLowerCase()===game.path.toLowerCase())&&(t.identityGeneration===undefined||t.identityGeneration===game.identityGeneration),validateGameTarget:async()=>game},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
+  './autofloat':autofloat,
 },{Date:TestDate});
 
+if(process.argv.includes('--target-identity')){
+ repository.loadSettings=async()=>clone(settings);
+ const {verifyTargetIdentity}=await import('./fixtures/game_profile_target/verify.mjs');
+ const keyModule=evaluate('src/bridge/gamePolicyHysteresis.ts');
+ const helper=evaluate('src/bridge/gameCustomProfileTarget.ts',{'./gamePolicyHysteresis':keyModule});
+ const index=process.argv.indexOf('--out-dir');if(index<0||!process.argv[index+1])throw Error('--out-dir is required');
+ const output=path.resolve(process.argv[index+1]);
+ await verifyTargetIdentity({output,schedule,models,frames,clone,
+  capture:helper.captureGameCustomProfileTarget,
+  setGame:value=>{game=value},setGeneration:value=>{generation=value},setCurrent:value=>{gameStatusCurrent=value},
+  state:()=>({files:[...files],settings:clone(settings),writes:clone(writes),custom:files.get(sourcePath)}),evaluate,keyModule});
+ process.exit(process.exitCode||0);
+}
 const cases=[];
 async function check(name,run){await run();cases.push(name)}
 const normalized=v=>JSON.parse(JSON.stringify(v));
@@ -56,7 +100,6 @@ const policyListeners=new Set();target.subscribePolicyGameStatus=cb=>{policyList
 function setGame(value){game=value;for(const cb of [...policyListeners])cb(game)}
 const gyroModel=evaluate('src/bridge/gyroPresetModel.ts',{'./hcInputUtils':{HC_MIN_GYRO_THRESHOLD_DPS:0.1}});
 const overlay=evaluate('src/bridge/gameInputOverride.ts',{'./gyroPresetModel':gyroModel,'@/bridge/settingsRepository':repository,'@/bridge/gamePolicyTarget':target,'@/bridge/ipc':{invoke:async()=> 'fixture-session'},'@/scheduler':{registerScheduledTask:()=>()=>{}},'@/bridge/performanceSchedule':schedule});
-const snapshots=evaluate('src/bridge/settingsSnapshot.ts',{vue:require('vue')});
 const editor=evaluate('src/bridge/gameInputEditor.ts',{'./settingsSnapshot':snapshots,'./settingsRepository':repository,'./performanceSchedule':schedule,'./gamePolicyTarget':target,'./gameInputOverride':overlay,'./gamedetect':{detectedGameName:g=>g?.title||g?.name||''}});
 const makeGame=(pid,name='a.exe')=>({pid,processCreated:String(1000+pid),name,path:'C:/Games/'+name,title:name,ts:0});
 const a=makeGame(9);setGame(a);

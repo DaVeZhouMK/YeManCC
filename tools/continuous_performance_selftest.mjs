@@ -9,12 +9,13 @@ const clone = x => structuredClone(x);
 function evaluate(file, imports = {}, globals = {}) {
   const module = {exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:'ts',format:'cjs'}).code,
-    {module,exports:module.exports,require:n=>{if(n in imports)return imports[n];throw Error('Unexpected import '+n)},console,structuredClone,performance,Date,setTimeout,clearTimeout,...globals});
+    {module,exports:module.exports,require:n=>{if(n in imports)return imports[n];throw Error('Unexpected import '+n)},console,structuredClone,performance,Date,setTimeout,clearTimeout,TextEncoder,TextDecoder,...globals});
   return module.exports;
 }
 const models = evaluate('src/bridge/performanceControls.ts');
 const frameModel = evaluate('src/bridge/frameRateModel.ts');
-let tdpWriteMode='ack';
+let afterSettingsCommit=null;
+let tdpWriteMode='ack';let residentOwner=null;const ownerReads={settings:0,files:0,source:0};let sectionJson='',sectionRevision=0;
 let side='ac', game=null, generation=1, flipOnTdp=false, failSave=false, acceptedLimit=150, clockMs=Date.now(), deviceTemplate='portable';
 class TestDate extends Date { static now(){return clockMs} }
 let settings={rtss:{frameRates:frameModel.frameRatePair({}),future:'KEEP'},performanceSchedule:{configured:false,enabled:false},other:{keep:42}};
@@ -24,11 +25,12 @@ files.set(sourcePath,JSON.stringify({version:1,entries:{},rtss:{}}));
 const frames={...frameModel,ensureGlobalFrameRates:async()=>clone(settings.rtss.frameRates),
   applyIndependentFrameRates:async()=>{writes.push({kind:'fps'});return true},publishFrameRatesChanged(){}};
 const target={getPolicyGame:()=>game,detectPolicyGame:async()=>game,gamePolicyKey:g=>(g.path||g.name).split(/[\\/]/).pop().toLowerCase(),isPolicyTargetCurrent:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated};
-const repository={getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
-  readSettingsSection:async key=>clone(settings[key]||{}),mergeSettings:(a,b)=>({...a,...b}),
+const repository={loadSettings:async()=>clone(settings),SETTINGS_FILE:'C:\\SOFT\\YeMan\\PowerControl\\yeman-settings.json',getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
+  getSettingsSectionRevision:key=>{const json=JSON.stringify(settings[key]||{});if(json!==sectionJson){sectionJson=json;++sectionRevision}return sectionRevision},
+  readSettingsSection:async key=>{ownerReads.settings++;return clone(settings[key]||{})},mergeSettings:(a,b)=>({...a,...b}),
   saveSettingsSection:async(key,value)=>{if(failSave)throw Error('disk full');settings[key]=clone(value)},replaceSettingsSection:async(key,value)=>{settings[key]=clone(value)},
-  updateSettings:async mutate=>{const next=clone(settings);mutate(next);if(failSave)throw Error('disk full');settings=next}};
-const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:async()=>side,detectPowerModeReliable:async()=>side,ensureRememberedYemanSchemeActive:async()=>{},
+  updateSettings:async mutate=>{const next=clone(settings);mutate(next);if(failSave)throw Error('disk full');settings=next;afterSettingsCommit?.()}};
+const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:async()=>side,detectPowerModeReliable:async()=>{ownerReads.source++;return side},ensureRememberedYemanSchemeActive:async()=>{},
   getTdpHardwareMinimum:()=>2,getTdpHardwareMaximum:()=>150,getTdpExecutionCapability:async()=>({selected:'fixture'}),
   detectCoreArchitecture:async()=>({heterogeneous:true}),PW:{YEMAN:'test-yeman'},getActiveScheme:async()=> 'test-yeman',setActiveScheme:async()=>{},
   setCoreModeAc:async mode=>writes.push({kind:'core',side:'ac',mode}),setCoreModeDc:async mode=>writes.push({kind:'core',side:'dc',mode}),
@@ -37,9 +39,9 @@ const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:a
 const schedule=evaluate('src/bridge/performanceSchedule.ts',{
  './controllerPersona':evaluate('src/bridge/controllerPersona.ts'),
   './performanceControls':models,'./powerSource':{powerSourceMode:source},'./gameCorePolicy':{detectGameCorePolicy:async()=>({detected:true,heterogeneous:true,smtAvailable:true}),applyGameCorePolicy:async(t,m,h)=>{writes.push({kind:'smt',pid:t.pid,h});return {ok:true,applied:true}}},
-  './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})},fs:{exists:async p=>files.has(p),readTextFile:async p=>files.get(p),writeTextFileAtomic:async(p,v)=>{files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},
-  './frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{detectGame:async()=>game},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
-  './autofloat':{disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),updateContinuousFloatCoreRules(){},holdContinuousFloatAfterCoreChange(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
+  './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})},fs:{exists:async p=>files.has(p),readTextFile:async p=>{ownerReads.files++;return files.get(p)},writeTextFileAtomic:async(p,v)=>{files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},
+  './settingsSnapshot':evaluate('src/bridge/settingsSnapshot.ts',{'vue':require('vue')}),'./frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{detectGame:async()=>game,validateGameTarget:async()=>true,isCurrentGameTarget:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
+  './autofloat':{pauseContinuousFloatForTdpEdit:async()=>{const owner=residentOwner;if(!owner)return null;return {current:()=>residentOwner===owner,accept:(requested,accepted)=>{owner.lastReceipt={requested,accepted}},release(){}}},disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{residentOwner={current,applyCore};writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),updateContinuousFloatCoreRules(){},holdContinuousFloatAfterCoreChange(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
 },{Date:TestDate});
 const cases=[];
 async function check(name,run){await run();cases.push(name)}
@@ -228,5 +230,56 @@ await check('轮盘排队操作撤回后不能继续保存或写入',async()=>{
  const snapshot=await schedule.getContinuousPerformanceSnapshot('effective'),before=writes.length;
  await assert.rejects(schedule.updateContinuousPerformanceControls(snapshot.identity,{tdp:19},()=>false));assert.equal(writes.length,before);
 });
+await check('常驻浮动100次所有权检查与核心保持不重复读配置/探测电源',async()=>{
+ game=null;side='ac';source.value='ac';tdpWriteMode='ack';acceptedLimit=150;
+ let snapshot=await schedule.getContinuousPerformanceSnapshot('global');
+ await schedule.updateContinuousPerformanceControls(snapshot.identity,{mode:'auto',tdp:27,tdpCeiling:35,auto:{saving:'aggressive'}});
+ assert.ok(residentOwner);await residentOwner.current();
+ ownerReads.settings=ownerReads.files=ownerReads.source=0;
+ for(let i=0;i<100;i++){assert.equal(await residentOwner.current(),true);await residentOwner.applyCore(27)}
+ assert.deepEqual(ownerReads,{settings:0,files:0,source:0});
+ settings.input={unrelated:'changed'};assert.equal(await residentOwner.current(),true);
+ assert.deepEqual(ownerReads,{settings:0,files:0,source:0});
+});
+await check('浮动检查不再分支ACDC，游戏出生/目录失效仍内存立即拒绝',async()=>{
+ const prior={...ownerReads};source.value='dc';assert.equal(await residentOwner.current(),true);source.value='ac';
+ game={pid:99,processCreated:'new-birth',name:'fixture.exe'};assert.equal(await residentOwner.current(),false);game=null;
+ generation++;assert.equal(await residentOwner.current(),false);generation--;
+ assert.deepEqual(ownerReads,prior);
+});
+await check('已观察的配置变化才重核，控制库变化拒绝旧浮动所有者',async()=>{
+ settings.performanceSchedule.controls.ac.tdp=26;
+ assert.equal(await residentOwner.current(),false);assert.ok(ownerReads.settings>0);
+});
+await check('电源事件撤销回调后，旧核心链也立即失效且不检测供电侧',async()=>{
+ const before={...ownerReads};assert.equal(typeof residentOwner.current.revoke,'function');residentOwner.current.revoke();
+ assert.equal(await residentOwner.current(),false);await residentOwner.applyCore(27);assert.deepEqual(ownerReads,before);
+});
+
+await check('只改TDP的连续编辑不重套CPU、不停止重启浮动或FPS资源',async()=>{
+ const cost=[];game=null;side='ac';source.value='ac';tdpWriteMode='ack';acceptedLimit=150;
+ for(const mode of ['manual','auto']){
+  let snapshot=await schedule.getContinuousPerformanceSnapshot('effective');
+  await schedule.updateContinuousPerformanceControls(snapshot.identity,{mode,tdp:20,tdpCeiling:50,auto:{saving:'aggressive'}});
+  const offset=writes.length,reads={...ownerReads},started=performance.now();
+  for(let n=0;n<50;n++){snapshot=await schedule.getContinuousPerformanceSnapshot('effective');const updated=await schedule.updateContinuousPerformanceControls(snapshot.identity,{tdp:21+n%5});assert.equal(updated.bank.tdp,21+n%5);assert.equal(updated.tdpWriteReceipt.accepted,21+n%5);assert.equal(updated.tdpWriteReceipt.ok,true);}
+  const delta=writes.slice(offset),row={mode,edits:50,cpuWrites:delta.filter(w=>w.kind==='cpu').length,floatStops:delta.filter(w=>w.kind==='stop').length,floatStarts:delta.filter(w=>w.kind==='float').length,fpsActions:delta.filter(w=>w.kind==='fps').length,tdpWrites:delta.filter(w=>w.kind==='tdp').length,settingsReads:ownerReads.settings-reads.settings,fileReads:ownerReads.files-reads.files,sourceReads:ownerReads.source-reads.source,wallMs:performance.now()-started};cost.push(row);
+ }
+ console.log('TDP_ONLY_COST '+JSON.stringify(cost));
+ assert.ok(cost.every(c=>c.tdpWrites===c.edits),'each changed TDP still writes exactly once');
+ assert.ok(cost.every(c=>c.cpuWrites===0&&c.floatStops===0&&c.floatStarts===0&&c.fpsActions===0),'TDP-only edits must preserve the existing CPU/monitor/FPS owner');
+});
+
+await check('TDP字段提交后快捷操作撤销，旧增量不能绕过新admit写硬件',async()=>{
+ game=null;side='ac';source.value='ac';tdpWriteMode='ack';acceptedLimit=150;
+ let snapshot=await schedule.getContinuousPerformanceSnapshot('effective');await schedule.updateContinuousPerformanceControls(snapshot.identity,{mode:'auto',tdp:30,tdpCeiling:50,auto:{saving:'aggressive'}});
+ snapshot=await schedule.getContinuousPerformanceSnapshot('effective');const before=writes.filter(w=>w.kind==='tdp').length;let allowed=true;afterSettingsCommit=()=>{allowed=false};
+ try{await assert.rejects(schedule.updateContinuousPerformanceControls(snapshot.identity,{tdp:31},()=>allowed));}
+ finally{afterSettingsCommit=null}
+ assert.equal(writes.filter(w=>w.kind==='tdp').length,before);assert.equal(settings.performanceSchedule.controls.ac.tdp,31);
+ const current=await schedule.getContinuousPerformanceSnapshot('effective');const recovered=await schedule.updateContinuousPerformanceControls(current.identity,{tdp:32},()=>true);assert.equal(recovered.tdpWriteReceipt.accepted,32);
+});
+
 const output=process.argv[2]||path.resolve('../../../Build/Tasks/ContinuousPerformance-20261017');fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'state-tests.json'),JSON.stringify({pass:true,count:cases.length,cases},null,2));
 console.log(JSON.stringify({pass:true,count:cases.length,cases},null,2));
+

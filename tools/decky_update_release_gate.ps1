@@ -6,6 +6,15 @@ param(
   [string]$LifecycleEvidenceRoot=''
 )
 $ErrorActionPreference='Stop'
+# Budget dispatch happens before the original gate allocates outputs or starts tests.
+. (Join-Path $PSScriptRoot 'ymcc_sim/optimization/release-full-budget.ps1')
+$fixtureProjectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+if(-not $env:YMCC_RELEASE_FIXTURE_ATTEMPT){
+  Invoke-YmccFullReleaseFixtureStage -ProjectRoot $fixtureProjectRoot -Stage $Stage -WorkspaceRoot $WorkspaceRoot -CandidatePackage $CandidatePackage -LifecycleEvidenceRoot $LifecycleEvidenceRoot
+  exit $LASTEXITCODE
+}
+Assert-YmccFullReleaseFixtureWorker -ProjectRoot $fixtureProjectRoot -Stage $Stage -WorkspaceRoot $WorkspaceRoot -CandidatePackage $CandidatePackage -LifecycleEvidenceRoot $LifecycleEvidenceRoot
+$fixtureStageTimer=[Diagnostics.Stopwatch]::StartNew()
 $windowsPowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 # Standalone CI/desktop invocations can inherit PowerShell 7 module paths.
 # Resolve this Windows PowerShell host's built-in hashing/JSON commands first.
@@ -18,21 +27,29 @@ New-Item -ItemType Directory -Path $gateRoot -Force | Out-Null
 . (Join-Path $PSScriptRoot 'release-export-identity.ps1')
 $sourceDigest=Get-ExportIndexHash @(Get-ExportSourceIndex $ProjectRoot)
 $steps=New-Object 'System.Collections.Generic.List[object]'
+$script:recoveryRequirement=$null
+$script:packageMaintenanceRequirement=$null
+$script:resourceRequirements=$null
+$script:javascriptRequirements=$null
+$script:javascriptReferenceRequest=$null
 $receiptPath=Join-Path $gateRoot ($Stage.ToUpperInvariant()+'.json')
 function Invoke-Required([string]$Name,[string]$Program,[string[]]$Arguments) {
   $log=Join-Path $gateRoot ($Name+'.log')
-  $null=Get-Command $Program -ErrorAction Stop
+  $stepStarted=[DateTime]::UtcNow.ToString('o')
+  $stepTimer=[Diagnostics.Stopwatch]::StartNew()
   $priorPreference=$ErrorActionPreference
-  $stepExit=-1
+  $stepExit=-1;$launchError=$null
   try {
-    # Windows PowerShell 5 treats a native stderr progress line as an error
-    # record. Admission is based on process exit, with both streams retained.
+    $null=Get-Command $Program -ErrorAction Stop
+    # Windows PowerShell 5 stderr progress remains evidence; native exit decides.
     $ErrorActionPreference='Continue'
     & $Program @Arguments *> $log
     $stepExit=$LASTEXITCODE
-  } finally { $ErrorActionPreference=$priorPreference }
-  if($stepExit -ne 0){throw ('DECKY_UPDATE_REQUIRED_CHECK_FAILED '+$Name+' exit='+$stepExit+' log='+$log)}
-  $steps.Add([ordered]@{name=$Name;passed=$true;log=$log;sha256=(Get-FileHash -LiteralPath $log).Hash.ToLowerInvariant()})|Out-Null
+  } catch { $launchError=$_.Exception.Message }
+  finally { $ErrorActionPreference=$priorPreference;$stepTimer.Stop() }
+  $logSha=if(Test-Path -LiteralPath $log -PathType Leaf){(Get-FileHash -LiteralPath $log).Hash.ToLowerInvariant()}else{$null}
+  $steps.Add([ordered]@{name=$Name;execution='ACTUAL';passed=($stepExit -eq 0 -and -not $launchError);exitCode=$stepExit;startedAtUtc=$stepStarted;wallMs=$stepTimer.Elapsed.TotalMilliseconds;log=$log;sha256=$logSha;launchError=$launchError})|Out-Null
+  if($stepExit -ne 0 -or $launchError){throw ('DECKY_UPDATE_REQUIRED_CHECK_FAILED '+$Name+' exit='+$stepExit+' log='+$log+' launchError='+$launchError)}
 }
 function Test-DeckyLifecycleTrue($Value) { return ($Value -is [bool] -and $Value) }
 function Get-DeckyLifecycleFullPath([string]$Path) {
@@ -186,14 +203,172 @@ function Invoke-DeckyLifecycleRequired {
   $steps[$steps.Count-1]['lifecycleProof']=$proof
 }
 
+
+# These are the five original consumers already executed completely in the parent.
+function Get-DeckyJavascriptReferenceSteps {
+  return @('decky_loader_official_selftest','decky_sidebar_safety_selftest','decky_sidebar_client_selftest','decky_sidebar_host_selftest','decky_sidebar_stability_matrix_selftest')
+}
+function New-DeckyJavascriptReferenceRequest {
+  $node=Get-Command node -CommandType Application -ErrorAction Stop|Select-Object -First 1
+  $program=Get-Item -LiteralPath $node.Source
+  $environment=[ordered]@{}
+  foreach($name in @('SystemRoot','ComSpec','PATH','PSModulePath','NODE_OPTIONS','NODE_PATH','ESBUILD_BINARY_PATH','ESBUILD_WORKER_THREADS','YMCC_MIRROR_CLIENT_SOURCE_OVERRIDE','YMCC_FAN_MIRROR_HOST_SOURCE_OVERRIDE','YMCC_DECKY_ARTIFACT_ROOT','YEMAN_WORKSPACE_ROOT','YMCC_SIM_RAW_PROGRAM_PWSH')){
+    $environment[$name]=[Environment]::GetEnvironmentVariable($name)
+  }
+  $request=[ordered]@{schemaVersion=1;kind='ymcc-release-javascript-reference-request';program=@{path=[IO.Path]::GetFullPath($node.Source);sha256=(Get-FileHash -LiteralPath $node.Source -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$program.Length};cwd=$ProjectRoot;environment=$environment;steps=@(Get-DeckyJavascriptReferenceSteps)}
+  $file=Join-Path $gateRoot ('javascript-reference-request-'+[Guid]::NewGuid().ToString('N')+'.json')
+  $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($request|ConvertTo-Json -Depth 8))
+  $stream=[IO.FileStream]::new($file,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+  try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+  return [ordered]@{path=$file;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$bytes.Length}
+}
+function Assert-DeckyJavascriptSharedScope($Row,[string]$Name) {
+  if($null -eq $Row -or $Row.status -cne 'SHARED_REFERENCE' -or $Row.requiredReleaseStep -cne $Name -or $Row.originalProducerExecutionsWithinParent -ne 1 -or $Row.originalProducerExecutionsByThisReference -ne 0){throw 'DECKY_JAVASCRIPT_SHARED_SCOPE_INVALID'}
+  foreach($field in @('cached','executedThisRun','actualPassedThisRun')){if($Row.$field -isnot [bool] -or $Row.$field -ne $false){throw 'DECKY_JAVASCRIPT_SHARED_EXECUTION_FLAG_INVALID'}}
+}
+function Assert-DeckyJavascriptSharedBuildReceipt($Receipt) {
+  if(-not $Receipt.javascriptReferenceRequest -or (Get-FileHash -LiteralPath $Receipt.javascriptReferenceRequest.path -Algorithm SHA256).Hash -ine $Receipt.javascriptReferenceRequest.sha256){throw 'DECKY_JAVASCRIPT_SHARED_REQUEST_CHANGED'}
+  $names=@(Get-DeckyJavascriptReferenceSteps)
+  if(-not $Receipt.javascriptRequirements -or @($Receipt.javascriptRequirements.PSObject.Properties).Count -ne $names.Count){throw 'DECKY_JAVASCRIPT_SHARED_RECEIPT_REQUIRED'}
+  $common=$null;$reference=$null
+  foreach($name in $names){
+    $rows=@($Receipt.steps|Where-Object{$_.name -ceq $name})
+    $requirement=$Receipt.javascriptRequirements.$name
+    if($rows.Count -ne 1 -or $rows[0].execution -cne 'SHARED_REFERENCE' -or -not(Test-DeckyLifecycleTrue $rows[0].passed) -or $rows[0].originalProducerExecutions -ne 0 -or $requirement.status -cne 'SHARED_REFERENCE'){throw 'DECKY_JAVASCRIPT_SHARED_RECEIPT_REQUIRED'}
+    foreach($field in @('cached','executedThisRun','actualPassedThisRun')){if($rows[0].$field -isnot [bool] -or $rows[0].$field -ne $false){throw 'DECKY_JAVASCRIPT_SHARED_EXECUTION_FLAG_INVALID'}}
+    if($requirement.name -cne $name -or $requirement.originalProducerExecutionsWithinParent -ne 1 -or $requirement.originalProducerExecutionsByThisReference -ne 0){throw 'DECKY_JAVASCRIPT_SHARED_RECEIPT_BINDING'}
+    foreach($field in @('cached','executedThisRun','actualPassedThisRun')){if($requirement.$field -isnot [bool] -or $requirement.$field -ne $false){throw 'DECKY_JAVASCRIPT_SHARED_EXECUTION_FLAG_INVALID'}}
+    $proof=$rows[0].sharedReference
+    if(-not $proof -or -not $requirement.proof -or $proof.path -ine $requirement.proof.path -or $proof.sha256 -cne $requirement.proof.sha256){throw 'DECKY_JAVASCRIPT_SHARED_RECEIPT_BINDING'}
+    if(-not $common){
+      if((Get-FileHash -LiteralPath $proof.path -Algorithm SHA256).Hash -ine $proof.sha256){throw 'DECKY_JAVASCRIPT_SHARED_REFERENCE_CHANGED'}
+      $common=$proof;$reference=Get-Content -LiteralPath $proof.path -Raw -Encoding UTF8|ConvertFrom-Json
+      if($reference.status -cne 'SHARED_REFERENCE' -or @($reference.javascript).Count -ne $names.Count){throw 'DECKY_JAVASCRIPT_SHARED_REFERENCE_REQUIRED'}
+    }elseif($proof.path -ine $common.path -or $proof.sha256 -cne $common.sha256){throw 'DECKY_JAVASCRIPT_SHARED_REFERENCE_MIXED'}
+    $shared=@($reference.javascript|Where-Object{$_.requiredReleaseStep -ceq $name})
+    if($shared.Count -ne 1){throw 'DECKY_JAVASCRIPT_SHARED_REFERENCE_REQUIRED'}
+    Assert-DeckyJavascriptSharedScope $shared[0] $name
+    foreach($field in @('originalProcess','originalResult')){
+      $actual=$shared[0].$field;$bound=$proof.$field
+      if(-not $actual -or -not $bound -or $actual.path -ine $bound.path -or $actual.sha256 -cne $bound.sha256 -or (Get-FileHash -LiteralPath $actual.path -Algorithm SHA256).Hash -ine $actual.sha256){throw 'DECKY_JAVASCRIPT_SHARED_RAW_CHANGED'}
+    }
+  }
+}
+
+function Assert-DeckyNativeSharedScope($Shared,[ValidateSet('health','runtime')][string]$Family) {
+  $prefix='DECKY_NATIVE_'+$Family.ToUpperInvariant()
+  if(-not $Shared -or $Shared.status -cne 'SHARED_REFERENCE' -or $Shared.requiredReleaseBuildStep -cne ('official-native-'+$Family+'-build') -or $Shared.requiredReleaseRunStep -cne ('official-native-'+$Family) -or $Shared.originalProducerExecutionsWithinParent -ne 1 -or $Shared.originalProducerExecutionsByThisReference -ne 0 -or $Shared.compilerInvocationsWithinParent -ne 1 -or $Shared.compilerInvocationsByThisReference -ne 0){throw ($prefix+'_SHARED_SCOPE_INVALID')}
+  foreach($field in @('cached','executedThisRun','actualPassedThisRun')){if($Shared.$field -isnot [bool] -or $Shared.$field -ne $false){throw ($prefix+'_SHARED_EXECUTION_FLAG_INVALID')}}
+  foreach($field in @('originalCompileProcess','originalRunProcess','originalProgram','compilerGraph')){
+    $pin=$Shared.$field
+    if(-not $pin -or -not $pin.path -or $pin.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not(Test-Path -LiteralPath $pin.path -PathType Leaf) -or (Get-FileHash -LiteralPath $pin.path -Algorithm SHA256).Hash -ine $pin.sha256){throw ($prefix+'_SHARED_RAW_CHANGED')}
+  }
+}
+function Assert-DeckyNativeSharedBuildReceipt($Receipt,[ValidateSet('health','runtime')][string]$Family) {
+  $prefix='DECKY_NATIVE_'+$Family.ToUpperInvariant();$fieldName='native'+$Family.Substring(0,1).ToUpperInvariant()+$Family.Substring(1)
+  $required=$Receipt.($fieldName+'Requirement')
+  if(-not $required -or $required.name -cne $Family -or $required.status -cne 'SHARED_REFERENCE' -or $required.originalProducerExecutionsWithinParent -ne 1 -or $required.originalProducerExecutionsByThisReference -ne 0 -or $required.compilerInvocationsWithinParent -ne 1 -or $required.compilerInvocationsByThisReference -ne 0){throw ($prefix+'_SHARED_RECEIPT_REQUIRED')}
+  foreach($field in @('cached','executedThisRun','actualPassedThisRun')){if($required.$field -isnot [bool] -or $required.$field -ne $false){throw ($prefix+'_SHARED_EXECUTION_FLAG_INVALID')}}
+  $common=$required.proof
+  if(-not $common -or -not $common.path -or (Get-FileHash -LiteralPath $common.path -Algorithm SHA256).Hash -ine $common.sha256){throw ($prefix+'_SHARED_REFERENCE_CHANGED')}
+  $reference=Get-Content -LiteralPath $common.path -Raw -Encoding UTF8|ConvertFrom-Json
+  if($reference.status -cne 'SHARED_REFERENCE'){throw ($prefix+'_SHARED_REFERENCE_REQUIRED')}
+  Assert-DeckyNativeSharedScope $reference.$fieldName $Family
+  foreach($name in @(('official-native-'+$Family+'-build'),('official-native-'+$Family))){
+    $rows=@($Receipt.steps|Where-Object{$_.name -ceq $name})
+    if($rows.Count -ne 1 -or $rows[0].execution -cne 'SHARED_REFERENCE' -or -not(Test-DeckyLifecycleTrue $rows[0].passed) -or $rows[0].exitCode -ne 0 -or $rows[0].originalProducerExecutions -ne 0 -or $rows[0].compilerInvocations -ne 0){throw ($prefix+'_SHARED_RECEIPT_REQUIRED')}
+    foreach($field in @('cached','executedThisRun','actualPassedThisRun')){if($rows[0].$field -isnot [bool] -or $rows[0].$field -ne $false){throw ($prefix+'_SHARED_EXECUTION_FLAG_INVALID')}}
+    $proof=$rows[0].sharedReference
+    if(-not $proof -or $proof.path -ine $common.path -or $proof.sha256 -cne $common.sha256){throw ($prefix+'_SHARED_RECEIPT_BINDING')}
+    foreach($field in @('originalCompileProcess','originalRunProcess','originalProgram','compilerGraph')){
+      $actual=$reference.$fieldName.$field
+      foreach($bound in @($proof.$field,$common.$field)){
+        if(-not $bound -or $bound.path -ine $actual.path -or $bound.sha256 -cne $actual.sha256){throw ($prefix+'_SHARED_RECEIPT_BINDING')}
+      }
+    }
+  }
+}
+
+function Assert-DeckyNativeHealthSharedScope($Shared) { Assert-DeckyNativeSharedScope $Shared 'health' }
+function Assert-DeckyNativeHealthSharedBuildReceipt($Receipt) { Assert-DeckyNativeSharedBuildReceipt $Receipt 'health' }
+function Assert-DeckyNativeRuntimeSharedBuildReceipt($Receipt) { Assert-DeckyNativeSharedBuildReceipt $Receipt 'runtime' }
+
+function Complete-DeckyRecoverySharedRequirement($LifecycleStep) {
+  $proof=$LifecycleStep.lifecycleProof
+  if(-not $proof -or -not $script:recoveryRequirement -or $script:recoveryRequirement.status -cne 'NOT_RUN_DEFERRED_TO_PARENT' -or -not $script:packageMaintenanceRequirement -or $script:packageMaintenanceRequirement.status -cne 'NOT_RUN_DEFERRED_TO_PARENT'){throw 'DECKY_RECOVERY_PARENT_REFERENCE_REQUIRED'}
+  if(-not $script:javascriptRequirements -or @($script:javascriptRequirements.Keys).Count -ne @(Get-DeckyJavascriptReferenceSteps).Count -or -not $script:javascriptReferenceRequest -or (Get-FileHash -LiteralPath $script:javascriptReferenceRequest.path -Algorithm SHA256).Hash -ine $script:javascriptReferenceRequest.sha256){throw 'DECKY_JAVASCRIPT_PARENT_REFERENCE_REQUIRED'}
+  foreach($name in @(Get-DeckyJavascriptReferenceSteps)){if($script:javascriptRequirements[$name].status -cne 'NOT_RUN_DEFERRED_TO_PARENT'){throw 'DECKY_JAVASCRIPT_PARENT_REFERENCE_REQUIRED'}}
+  $sharedFile=Join-Path (Split-Path -Parent $proof.globalResult.path) 'release-baseline-shared-reference.json'
+  Invoke-Required 'decky_update_recovery_selftest' 'node' @((Join-Path $PSScriptRoot 'ymcc_sim/optimization/release-baseline-reference.mjs'),'--global-result',$proof.globalResult.path,'--global-sha256',$proof.globalResult.sha256,'--parent-result',$proof.producerResult.path,'--parent-sha256',$proof.producerResult.sha256,'--out',$sharedFile,'--javascript-request',$script:javascriptReferenceRequest.path,'--native-health-reference','required','--native-runtime-reference','required')
+  $reference=Get-Content -LiteralPath $sharedFile -Raw -Encoding UTF8|ConvertFrom-Json
+  if($reference.status -cne 'SHARED_REFERENCE' -or $reference.originalProducerExecutionsWithinParent -ne 1 -or $reference.originalProducerExecutionsByThisReference -ne 0 -or $reference.cached -ne $false){throw 'DECKY_RECOVERY_SHARED_SCOPE_INVALID'}
+  if($reference.packageMaintenance.status -cne 'SHARED_REFERENCE' -or $reference.packageMaintenance.requiredReleaseStep -cne 'decky-package-maintenance' -or $reference.packageMaintenance.originalProducerExecutionsWithinParent -ne 1 -or $reference.packageMaintenance.originalProducerExecutionsByThisReference -ne 0 -or $reference.packageMaintenance.cached -ne $false){throw 'DECKY_PACKAGE_MAINTENANCE_SHARED_SCOPE_INVALID'}
+  if(-not $script:resourceRequirements){throw 'DECKY_RESOURCE_SHARED_SCOPE_INVALID'}
+  foreach($family in @('cache','worker')){
+    $requiredName=if($family -ceq 'cache'){'decky-local-resource-cache'}else{'decky-owned-resource-worker'}
+    $required=$script:resourceRequirements[$family];$shared=$reference.resources.$family
+    if(-not $required -or $required.status -cne 'NOT_RUN_DEFERRED_TO_PARENT' -or -not $shared -or $shared.status -cne 'SHARED_REFERENCE' -or $shared.requiredReleaseStep -cne $requiredName -or $shared.originalProducerExecutionsWithinParent -ne 1 -or $shared.originalProducerExecutionsByThisReference -ne 0 -or $shared.cached -ne $false){throw 'DECKY_RESOURCE_SHARED_SCOPE_INVALID'}
+  }
+  if(@($reference.javascript).Count -ne @(Get-DeckyJavascriptReferenceSteps).Count){throw 'DECKY_JAVASCRIPT_SHARED_REFERENCE_REQUIRED'}
+  foreach($name in @(Get-DeckyJavascriptReferenceSteps)){
+    $shared=@($reference.javascript|Where-Object{$_.requiredReleaseStep -ceq $name})
+    if($shared.Count -ne 1){throw 'DECKY_JAVASCRIPT_SHARED_REFERENCE_REQUIRED'}
+    Assert-DeckyJavascriptSharedScope $shared[0] $name
+  }
+  if(-not $script:nativeHealthRequirement -or $script:nativeHealthRequirement.status -cne 'NOT_RUN_DEFERRED_TO_PARENT'){throw 'DECKY_NATIVE_HEALTH_PARENT_REFERENCE_REQUIRED'}
+  Assert-DeckyNativeHealthSharedScope $reference.nativeHealth
+  if(-not $script:nativeRuntimeRequirement -or $script:nativeRuntimeRequirement.status -cne 'NOT_RUN_DEFERRED_TO_PARENT'){throw 'DECKY_NATIVE_RUNTIME_PARENT_REFERENCE_REQUIRED'}
+  Assert-DeckyNativeSharedScope $reference.nativeRuntime 'runtime'
+  $step=$steps[$steps.Count-1]
+  $step['execution']='SHARED_REFERENCE';$step['originalProducerExecutions']=0;$step['verificationExecuted']=$true
+  $step['sharedReference']=[ordered]@{path=$sharedFile;sha256=(Get-FileHash -LiteralPath $sharedFile).Hash.ToLowerInvariant();originalProcess=$reference.originalProcess;originalResult=$reference.originalResult;originalElapsedMs=$reference.originalElapsedMs}
+  $script:recoveryRequirement=[ordered]@{name='decky_update_recovery_selftest';status='SHARED_REFERENCE';originalExecutedInThisParent=$true;originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;proof=$step.sharedReference}
+  $packageProof=[ordered]@{path=$sharedFile;sha256=$step.sharedReference.sha256;originalProcess=$reference.packageMaintenance.originalProcess;originalResult=$reference.packageMaintenance.originalResult;originalElapsedMs=$reference.packageMaintenance.originalElapsedMs}
+  $steps.Add([ordered]@{name='decky-package-maintenance';execution='SHARED_REFERENCE';passed=$true;exitCode=0;wallMs=0;originalProducerExecutions=0;verificationExecuted=$false;verificationSharedWith='decky_update_recovery_selftest';sharedReference=$packageProof})|Out-Null
+  $script:packageMaintenanceRequirement=[ordered]@{name='decky-package-maintenance';status='SHARED_REFERENCE';originalExecutedInThisParent=$true;originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;proof=$packageProof}
+  foreach($family in @('cache','worker')){
+    $shared=$reference.resources.$family;$requiredName=$shared.requiredReleaseStep
+    $resourceProof=[ordered]@{path=$sharedFile;sha256=$step.sharedReference.sha256;originalProcess=$shared.originalProcess;originalResult=$shared.originalResult;originalElapsedMs=$shared.originalElapsedMs}
+    $steps.Add([ordered]@{name=$requiredName;execution='SHARED_REFERENCE';passed=$true;exitCode=0;wallMs=0;originalProducerExecutions=0;verificationExecuted=$false;verificationSharedWith='decky_update_recovery_selftest';sharedReference=$resourceProof})|Out-Null
+    $script:resourceRequirements[$family]=[ordered]@{name=$requiredName;status='SHARED_REFERENCE';originalExecutedInThisParent=$true;originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;proof=$resourceProof}
+  }
+  foreach($name in @(Get-DeckyJavascriptReferenceSteps)){
+    $shared=@($reference.javascript|Where-Object{$_.requiredReleaseStep -ceq $name})[0]
+    $jsProof=[ordered]@{path=$sharedFile;sha256=$step.sharedReference.sha256;originalProcess=$shared.originalProcess;originalResult=$shared.originalResult;originalElapsedMs=$shared.originalElapsedMs}
+    $steps.Add([ordered]@{name=$name;execution='SHARED_REFERENCE';passed=$true;exitCode=0;wallMs=0;originalProducerExecutions=0;verificationExecuted=$false;verificationSharedWith='decky_update_recovery_selftest';cached=$false;executedThisRun=$false;actualPassedThisRun=$false;sharedReference=$jsProof})|Out-Null
+    $script:javascriptRequirements[$name]=[ordered]@{name=$name;status='SHARED_REFERENCE';originalExecutedInThisParent=$true;originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;cached=$false;executedThisRun=$false;actualPassedThisRun=$false;proof=$jsProof}
+  }
+
+  foreach($family in @('health','runtime')){
+  $fieldName='native'+$family.Substring(0,1).ToUpperInvariant()+$family.Substring(1);$shared=$reference.$fieldName
+  $nativeProof=[ordered]@{path=$sharedFile;sha256=$step.sharedReference.sha256;originalCompileProcess=$shared.originalCompileProcess;originalRunProcess=$shared.originalRunProcess;originalProgram=$shared.originalProgram;compilerGraph=$shared.compilerGraph}
+  foreach($name in @(('official-native-'+$family+'-build'),('official-native-'+$family))){
+    $steps.Add([ordered]@{name=$name;execution='SHARED_REFERENCE';passed=$true;exitCode=0;wallMs=0;originalProducerExecutions=0;compilerInvocations=0;verificationExecuted=$false;verificationSharedWith='decky_update_recovery_selftest';cached=$false;executedThisRun=$false;actualPassedThisRun=$false;sharedReference=$nativeProof})|Out-Null
+  }
+  $required=[ordered]@{name=$family;status='SHARED_REFERENCE';originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;compilerInvocationsWithinParent=1;compilerInvocationsByThisReference=0;cached=$false;executedThisRun=$false;actualPassedThisRun=$false;proof=$nativeProof}
+  Set-Variable -Scope Script -Name ($fieldName+'Requirement') -Value $required
+  }
+}
+
 function Assert-BuildReceipt {
   $file=Join-Path $gateRoot 'BUILD.json'
   if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw 'DECKY_UPDATE_BUILD_RECEIPT_MISSING'}
   $receipt=Get-Content -LiteralPath $file -Raw -Encoding UTF8|ConvertFrom-Json
   if($receipt.passed -ne $true -or $receipt.sourceDigest -ne $sourceDigest){throw 'DECKY_UPDATE_BUILD_RECEIPT_STALE'}
+  if($receipt.fixtureBudgetSession -ine $env:YMCC_RELEASE_FIXTURE_SESSION){throw 'FULL_RELEASE_BUILD_SESSION_CHANGED'}
   $lifecycleSteps=@($receipt.steps|Where-Object{$_.name -eq 'decky-persistent-lifecycle'})
   if($lifecycleSteps.Count -ne 1 -or -not (Test-DeckyLifecycleTrue $lifecycleSteps[0].passed)){throw 'DECKY_UPDATE_LIFECYCLE_RECEIPT_MISSING_OR_DUPLICATED'}
   Assert-DeckyLifecycleProof $lifecycleSteps[0].lifecycleProof
+  $packageSteps=@($receipt.steps|Where-Object{$_.name -ceq 'decky-package-maintenance'})
+  if($receipt.packageMaintenanceRequirement.status -cne 'SHARED_REFERENCE' -or $packageSteps.Count -ne 1 -or $packageSteps[0].execution -cne 'SHARED_REFERENCE' -or -not (Test-DeckyLifecycleTrue $packageSteps[0].passed) -or $packageSteps[0].originalProducerExecutions -ne 0){throw 'DECKY_PACKAGE_MAINTENANCE_SHARED_RECEIPT_REQUIRED'}
+  foreach($family in @('cache','worker')){
+    $name=if($family -ceq 'cache'){'decky-local-resource-cache'}else{'decky-owned-resource-worker'}
+    $resourceSteps=@($receipt.steps|Where-Object{$_.name -ceq $name})
+    if($receipt.resourceRequirements.$family.status -cne 'SHARED_REFERENCE' -or $resourceSteps.Count -ne 1 -or $resourceSteps[0].execution -cne 'SHARED_REFERENCE' -or -not (Test-DeckyLifecycleTrue $resourceSteps[0].passed) -or $resourceSteps[0].originalProducerExecutions -ne 0){throw 'DECKY_RESOURCE_SHARED_RECEIPT_REQUIRED'}
+  }
+  Assert-DeckyJavascriptSharedBuildReceipt $receipt
+  Assert-DeckyNativeHealthSharedBuildReceipt $receipt
+  Assert-DeckyNativeRuntimeSharedBuildReceipt $receipt
   $exe=Join-Path $WorkspaceRoot 'Build\App\Native\YeManCC.exe'
   if((Get-FileHash -LiteralPath $exe).Hash -ine $receipt.nativeSha256){throw 'DECKY_UPDATE_NATIVE_BUILD_CHANGED'}
 }
@@ -204,24 +379,42 @@ try {
   Invoke-Required 'health-script-identity' 'node' @((Join-Path $PSScriptRoot 'decky_sidebar_health_embed.mjs'),'--check')
   Invoke-Required 'package-maintenance-identity' 'node' @((Join-Path $PSScriptRoot 'decky_package_maintenance_embed.mjs'),'--check')
   if($Stage -eq 'Build'){
-    Invoke-Required 'decky-local-resource-cache' 'node' @((Join-Path $PSScriptRoot 'decky_resource_cache_selftest.mjs'),(Join-Path $gateRoot ('resource-cache-'+[Guid]::NewGuid().ToString('N'))))
-    Invoke-Required 'decky-owned-resource-worker' 'node' @((Join-Path $PSScriptRoot 'decky_resource_worker_selftest.mjs'),(Join-Path $gateRoot ('resource-worker-'+[Guid]::NewGuid().ToString('N'))))
+    # The complete original resource producers execute within the single parent baseline.
+    $script:resourceRequirements=@{cache=[ordered]@{name='decky-local-resource-cache';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0};worker=[ordered]@{name='decky-owned-resource-worker';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0}}
     Invoke-Required 'decky-steam-session-lease' 'node' @((Join-Path $PSScriptRoot 'decky_binding_steam_lease_selftest.mjs'),(Join-Path $gateRoot ('steam-lease-'+[Guid]::NewGuid().ToString('N'))))
-    Invoke-Required 'decky-package-maintenance' $windowsPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'decky_package_maintenance_selftest.ps1'),'-EvidenceDir',(Join-Path $gateRoot 'package-maintenance'))
+    # The parent baseline executes this exact full original, including all three mutations.
+    $script:packageMaintenanceRequirement=[ordered]@{name='decky-package-maintenance';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0}
     $null=Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
     $priorArtifactRoot=$env:YMCC_DECKY_ARTIFACT_ROOT
     try {
       $env:YMCC_DECKY_ARTIFACT_ROOT=Join-Path $gateRoot 'scenarios'
+      $script:nativeHealthRequirement=[ordered]@{name='health';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0;compilerInvocationsByThisReference=0}
+      $script:nativeRuntimeRequirement=[ordered]@{name='runtime';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0;compilerInvocationsByThisReference=0}
+      $script:javascriptRequirements=@{}
+      $script:javascriptReferenceRequest=New-DeckyJavascriptReferenceRequest
+      $remainingJavascriptTests=[Collections.Generic.List[string]]::new()
     foreach($test in @('decky_loader_official_selftest','decky_ymcc_update_selftest','decky_update_recovery_selftest','decky_sidebar_safety_selftest','decky_sidebar_safety_owner_selftest','decky_sidebar_health_dom_selftest','decky_sidebar_bootstrap_expression_selftest','decky_updater_service_selftest','decky_updater_ui_selftest','decky_sidebar_client_selftest','decky_sidebar_host_selftest','decky_sidebar_stability_matrix_selftest')){
       $scenarioOutput=$gateRoot
       if($test -eq 'decky_update_recovery_selftest'){
-        $recoveryOwner=Initialize-DeckyRecoveryEvidence
-        $scenarioOutput=Join-Path $recoveryOwner.root ('r-'+[Guid]::NewGuid().ToString('N').Substring(0,12))
+        # The current parent runs the exact complete original once under its original deadline.
+        $script:recoveryRequirement=[ordered]@{name=$test;status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0}
+        continue
       }
-      Invoke-Required $test 'node' @((Join-Path $PSScriptRoot ($test+'.mjs')),$scenarioOutput)
+      if(@(Get-DeckyJavascriptReferenceSteps) -ccontains $test){
+        $script:javascriptRequirements[$test]=[ordered]@{name=$test;status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0}
+        continue
+      }
+      $remainingJavascriptTests.Add($test)
     }
+      if(-not $script:recoveryRequirement){throw 'DECKY_RECOVERY_REQUIRED_STEP_NOT_DECLARED'}
+      Invoke-DeckyLifecycleRequired
+      Complete-DeckyRecoverySharedRequirement $steps[$steps.Count-1]
+      # Required parent/reference failures stop the remaining original JS consumers.
+      foreach($test in $remainingJavascriptTests){
+        $scenarioOutput=$gateRoot
+        Invoke-Required $test 'node' @((Join-Path $PSScriptRoot ($test+'.mjs')),$scenarioOutput)
+      }
     } finally {$env:YMCC_DECKY_ARTIFACT_ROOT=$priorArtifactRoot}
-    Invoke-DeckyLifecycleRequired
     Invoke-Required 'official-loader-upgrade-transaction' $windowsPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'decky_loader_upgrade_selftest.ps1'),'-EvidenceDir',(Join-Path $gateRoot 'official-upgrade-transaction'))
     foreach($test in @('updater_manager_resume_selftest','decky_updater_owner_loopback_selftest')){
       Invoke-Required ($test+'-bundle') 'node' @((Join-Path $ProjectRoot 'node_modules\esbuild\bin\esbuild'),(Join-Path $PSScriptRoot ($test+'.ts')),'--bundle','--platform=node','--format=esm',('--alias:@='+($ProjectRoot+'/src')),('--outfile='+(Join-Path $gateRoot ($test+'.mjs'))))
@@ -234,6 +427,7 @@ try {
     Invoke-Required 'native-crash-breaker-build' 'cl.exe' @('/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE',(Join-Path $PSScriptRoot 'decky_sidebar_crash_breaker_selftest.cpp'),('/I'+(Join-Path $ProjectRoot 'deps\json')),('/Fo'+(Join-Path $gateRoot 'crash-breaker.obj')),('/Fe'+$crashTest),'/link','/SUBSYSTEM:CONSOLE','/MACHINE:x64','advapi32.lib','user32.lib','userenv.lib','winhttp.lib','ws2_32.lib','bcrypt.lib')
     Invoke-Required 'native-crash-breaker' $crashTest @((Join-Path $gateRoot 'crash-fixture'))
     foreach($consumerNative in @('runtime','setup','health','health_close','bootstrap_watch','bootstrap')){
+      if($consumerNative -cin @('health','runtime')){$fieldName='native'+$consumerNative.Substring(0,1).ToUpperInvariant()+$consumerNative.Substring(1)+'Requirement';$required=Get-Variable -Scope Script -Name $fieldName -ValueOnly -ErrorAction SilentlyContinue;if(-not $required -or $required.status -cne 'SHARED_REFERENCE'){throw ('DECKY_NATIVE_'+$consumerNative.ToUpperInvariant()+'_PARENT_REFERENCE_REQUIRED')};continue}
       $consumerTest=Join-Path $gateRoot ('decky-official-'+$consumerNative+'-test.exe')
       Invoke-Required ('official-native-'+$consumerNative+'-build') 'cl.exe' @('/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE',(Join-Path $PSScriptRoot ('decky_sidebar_'+$consumerNative+'_selftest.cpp')),('/I'+(Join-Path $ProjectRoot 'deps\json')),('/Fo'+(Join-Path $gateRoot ($consumerNative+'.obj'))),('/Fe'+$consumerTest),'/link','/SUBSYSTEM:CONSOLE','/MACHINE:x64','advapi32.lib','user32.lib','userenv.lib','winhttp.lib','ws2_32.lib','bcrypt.lib')
       $consumerArguments=@();if($consumerNative -eq 'setup'){$consumerArguments=@((Join-Path $gateRoot 'setup-fixture'))};if($consumerNative -eq 'health_close'){$consumerArguments=@((Join-Path $gateRoot 'health-close-fixture'))}
@@ -279,11 +473,11 @@ try {
     if((Get-FileHash -LiteralPath $releasePackage).Hash -ine $r.packageSha256){throw 'DECKY_UPDATE_RELEASE_PACKAGE_CHANGED'}
   }
   if((Get-ExportIndexHash @(Get-ExportSourceIndex $ProjectRoot)) -ne $sourceDigest){throw 'DECKY_UPDATE_SOURCE_CHANGED_DURING_CHECK'}
-  $result=[ordered]@{schemaVersion=1;passed=$true;stage=$Stage;checkedAt=[DateTime]::UtcNow.ToString('o');sourceDigest=$sourceDigest;nativeSha256=(Get-FileHash -LiteralPath (Join-Path $WorkspaceRoot 'Build\App\Native\YeManCC.exe')).Hash.ToLowerInvariant();packageSha256=$(if($Stage -eq 'Package'){$packageSha}else{$null});steps=@($steps.ToArray());liveSteamActions=0;userSoftwareInstallations=0;physicalControllerTested=$false}
-  $result|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $receiptPath -Encoding UTF8
+  $result=[ordered]@{schemaVersion=1;passed=$true;stage=$Stage;fixtureWallMs=$fixtureStageTimer.Elapsed.TotalMilliseconds;fixtureBudgetSession=$env:YMCC_RELEASE_FIXTURE_SESSION;fixtureBudgetAttempt=$env:YMCC_RELEASE_FIXTURE_ATTEMPT;recoveryRequirement=$script:recoveryRequirement;packageMaintenanceRequirement=$script:packageMaintenanceRequirement;resourceRequirements=$script:resourceRequirements;javascriptRequirements=$script:javascriptRequirements;javascriptReferenceRequest=$script:javascriptReferenceRequest;nativeHealthRequirement=$script:nativeHealthRequirement;nativeRuntimeRequirement=$script:nativeRuntimeRequirement;stepAccounting=@{actualOriginalCommands=@($steps|Where-Object {$_.execution -eq 'ACTUAL'}).Count;sharedOriginalRequirements=@($steps|Where-Object {$_.execution -eq 'SHARED_REFERENCE'}).Count;referenceVerificationCommands=@($steps|Where-Object {$_.verificationExecuted -eq $true}).Count};checkedAt=[DateTime]::UtcNow.ToString('o');sourceDigest=$sourceDigest;nativeSha256=(Get-FileHash -LiteralPath (Join-Path $WorkspaceRoot 'Build\App\Native\YeManCC.exe')).Hash.ToLowerInvariant();packageSha256=$(if($Stage -eq 'Package'){$packageSha}else{$null});steps=@($steps.ToArray());liveSteamActions=0;userSoftwareInstallations=0;physicalControllerTested=$false}
+  $result|ConvertTo-Json -Depth 16|Set-Content -LiteralPath $receiptPath -Encoding UTF8
   Write-Output ('DECKY_UPDATE_RELEASE_GATE_OK stage='+$Stage+' checks='+$steps.Count)
 }catch{
-  @{passed=$false;stage=$Stage;sourceDigest=$sourceDigest;error=$_.Exception.Message}|ConvertTo-Json|Set-Content -LiteralPath $receiptPath -Encoding UTF8
+  @{passed=$false;stage=$Stage;sourceDigest=$sourceDigest;error=$_.Exception.Message;fixtureWallMs=$fixtureStageTimer.Elapsed.TotalMilliseconds;fixtureBudgetSession=$env:YMCC_RELEASE_FIXTURE_SESSION;fixtureBudgetAttempt=$env:YMCC_RELEASE_FIXTURE_ATTEMPT;recoveryRequirement=$script:recoveryRequirement;packageMaintenanceRequirement=$script:packageMaintenanceRequirement;resourceRequirements=$script:resourceRequirements;javascriptRequirements=$script:javascriptRequirements;javascriptReferenceRequest=$script:javascriptReferenceRequest;nativeHealthRequirement=$script:nativeHealthRequirement;nativeRuntimeRequirement=$script:nativeRuntimeRequirement;steps=@($steps.ToArray())}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $receiptPath -Encoding UTF8
   throw
 }
 

@@ -1,5 +1,14 @@
 import { evaluateInputCas, evaluateInputCasWrite, normalizeSettings, type InputSettingsSnapshot } from '../src/bridge/settingsRepository';
 
+// Missing/invalid timeout choices default on; explicit false survives normalization and partial merges.
+for (const value of [undefined, false, true, null, 'true', 1]) {
+  const sleep = { pauseGameOnSleep: false, retryOnEntryFailure: false, retryOnNonUserWake: true, ...(value === undefined ? {} : { retryOnSleepTimeout: value }) };
+  const normalized = normalizeSettings({ sleep });
+  if (normalized.sleep.retryOnSleepTimeout !== (value !== false) || normalized.sleep.retryOnEntryFailure !== false || normalized.sleep.retryOnNonUserWake !== true || normalized.sleep.pauseGameOnSleep !== false)
+    throw new Error('sleep timeout defaults or explicit legacy retry choices changed');
+  if (normalizeSettings(normalized).sleep.retryOnSleepTimeout !== (value !== false)) throw new Error('sleep timeout round trip changed');
+}
+
 // Automatic wake scanning inherits the old choice once, then stays independent.
 for (const [sleep, expected] of [
   [{}, true],
@@ -43,6 +52,27 @@ if (thresholdAboveDefault.input.gyroMotion.gyroThreshold !== 2400) throw new Err
 // field normalizes to 'disabled' so an old snapshot cannot silently enable motion.
 const absentOutputMode = normalizeSettings({ input: { gyroMotion: { enabled: true } } });
 if (absentOutputMode.input.gyroMotion.outputMode !== 'disabled') throw new Error('absent outputMode must normalize to disabled (matches native fallback)');
+
+// Frontend isolation defaults on; only an explicit false disables it.
+for (const [value, expected] of [[undefined, true], [null, true], [true, true], [false, false], ['false', true]] as const) {
+  const first = normalizeSettings({ input: { ownership: { frontendIsolationEnabled: value, externalControllerPriority: true, futureOwnership: { keep: 'yes' } } } });
+  const roundTrip = normalizeSettings(JSON.parse(JSON.stringify(first))).input.ownership;
+  if (first.input.ownership.frontendIsolationEnabled !== expected || roundTrip.frontendIsolationEnabled !== expected ||
+      roundTrip.externalControllerPriority !== true || roundTrip.futureOwnership.keep !== 'yes')
+    throw new Error('frontend isolation default/false round trip must retain external priority and unknown ownership');
+}
+if (normalizeSettings({}).input.ownership.frontendIsolationEnabled !== true)
+  throw new Error('missing frontend isolation configuration must default on');
+const isolationBase = normalizeSettings({ input: { revision: 4, ownership: { externalControllerPriority: true, futureOwnership: { keep: 'yes' } } } }).input;
+const isolationOff = evaluateInputCas(isolationBase, 4, { ownership: { frontendIsolationEnabled: false } });
+if (!isolationOff.ok || isolationOff.value.ownership.frontendIsolationEnabled !== false ||
+    isolationOff.value.ownership.externalControllerPriority !== true || isolationOff.value.ownership.futureOwnership.keep !== 'yes')
+  throw new Error('frontend isolation CAS must preserve external priority and unknown ownership');
+const priorityOff = evaluateInputCas(isolationOff.value, isolationOff.value.revision, { ownership: { externalControllerPriority: false } });
+if (!priorityOff.ok || priorityOff.value.ownership.frontendIsolationEnabled !== false ||
+    priorityOff.value.ownership.externalControllerPriority !== false || priorityOff.value.ownership.futureOwnership.keep !== 'yes' ||
+    normalizeSettings({ input: priorityOff.value }).input.ownership.frontendIsolationEnabled !== false)
+  throw new Error('external priority CAS must preserve disabled frontend isolation and unknown ownership');
 
 const current: InputSettingsSnapshot = {
   schemaVersion: 1, revision: 4, appliedRevision: null, appliedConfigHash: null, applyStatus: 'unknown',
@@ -113,3 +143,41 @@ for (const [previous, current] of [['xbox360', 'elite'], ['dualshock4', 'dualsen
   }
 }
 console.log('retired controller persona migration: PASS (12 target/overlay/startup/receipt cases)');
+
+// Config storm: defaults describe known scalar types; unknown keys stay opaque.
+// Keep the original CAS, bounds, persona migration and write-failure assertions above.
+const scalarDefaults = normalizeSettings({});
+const scalarPaths: string[][] = [];
+function collectScalars(value: Record<string, any>, path: string[] = []): void {
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'configurationBaseline') continue; // Future receipts must reject, never repair.
+    if (child !== null && typeof child === 'object' && !Array.isArray(child)) collectScalars(child, [...path, key]);
+    else if (['string', 'number', 'boolean'].includes(typeof child)) scalarPaths.push([...path, key]);
+  }
+}
+collectScalars(scalarDefaults);
+let scalarChecks = 0;
+for (const path of scalarPaths) {
+  const expected = path.reduce((value: any, key) => value[key], scalarDefaults);
+  for (const wrong of [null, [], {}, NaN, Infinity, true, 123, 'wrong-type']) {
+    if (typeof wrong === typeof expected && !(typeof wrong === 'number' && !Number.isFinite(wrong))) continue;
+    const document: any = structuredClone(scalarDefaults);
+    const parent = path.slice(0, -1).reduce((value: any, key) => value[key], document);
+    parent[path[path.length - 1]] = wrong;
+    document.futureExtension = { nested: [1, 'keep', { flag: true }] };
+    const repaired = normalizeSettings(document);
+    const actual = path.reduce((value: any, key) => value[key], repaired);
+    if (actual !== expected) throw new Error(`wrong scalar type did not use default: ${path.join('.')} ${String(wrong)} => ${String(actual)}`);
+    if (JSON.stringify(repaired.futureExtension) !== JSON.stringify(document.futureExtension)) throw new Error('storm erased unknown extension');
+    scalarChecks++;
+  }
+}
+for (const invalid of [true, false, '', '8', [], {}, NaN, Infinity]) {
+  const repaired = normalizeSettings({ input: { appliedRevision: invalid, hostAcknowledgedRevision: invalid } });
+  if (repaired.input.appliedRevision !== null || repaired.input.hostAcknowledgedRevision !== null)
+    throw new Error('invalid nullable revision fabricated an acknowledgement');
+}
+const legal = normalizeSettings({ ui: { theme: 'custom', backgroundOpacity: 0.35 }, music: { volume: 0.42 },
+  input: { revision: 48, outputTarget: { persona: 'disabled', future: { marker: 37 } } }, extensions: { future: ['keep'] } });
+if (JSON.stringify(normalizeSettings(legal)) !== JSON.stringify(legal)) throw new Error('legal config was not stable across normalization');
+console.log(`settings scalar storm: PASS (${scalarChecks} wrong-type cases, nullable revisions and legal round trip)`);

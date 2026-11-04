@@ -198,7 +198,16 @@ function Test-SleepTypeFixture {
 }
 
 function Invoke-SleepTypes {
-  Write-Host '=== S0/S3/S4 分型（本机能力 + 判据 + 离线 golden fixtures）===' -ForegroundColor White
+  param(
+    [ValidateSet('all','software')][string]$TypingScope='all',
+    [string]$S3EvidencePath='',
+    [string]$S3EvidenceSha256=''
+  )
+  if(($S3EvidencePath -and -not $S3EvidenceSha256) -or ($S3EvidenceSha256 -and -not $S3EvidencePath)){throw 'S3_EVIDENCE_PATH_AND_SHA256_REQUIRED_TOGETHER'}
+  if($S3EvidenceSha256 -and $S3EvidenceSha256 -notmatch '^[a-f0-9]{64}$'){throw 'S3_EVIDENCE_SHA256_INVALID'}
+  if($TypingScope -eq 'software' -and $S3EvidencePath){throw 'SOFTWARE_TYPING_DOES_NOT_CONSUME_FIELD_EVIDENCE'}
+  $script:Run.extra['typingScope']=$TypingScope
+  if($TypingScope -eq 'software'){Write-Host '=== S0/S3/S4 离线分类（仅 golden fixtures，现场证据未运行）===' -ForegroundColor White}else{Write-Host '=== S0/S3/S4 分型（本机能力 + 判据 + 离线 golden fixtures）===' -ForegroundColor White}
   $typesPath = Join-Path $scriptDir 'sleep_types.json'
   $fixturesDir = Join-Path $scriptDir 'fixtures'
   $types = $null
@@ -206,44 +215,56 @@ function Invoke-SleepTypes {
   Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '类型定义文件存在且可解析' ($null -ne $types -and @($types.types).Count -ge 3) ("types=" + $(if ($types) { @($types.types | ForEach-Object { $_.type }) -join ',' } else { 'missing' }))
   $script:Run.extra['sleepTypes'] = $types
 
-  # 本机能力（field-observed）
-  $pcfg = ((& powercfg /a 2>&1) -join "`n")
-  $script:Run.extra['powercfgA'] = $pcfg
-  $cap = Get-SleepPlatformCapability -Text $pcfg
-  $script:Run.extra['platformCapability'] = $cap
-  $capS0 = $cap.s0ix
-  $capS3 = $cap.s3
-  $capS4 = $cap.s4
-  Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '本机能力与登记一致（S3 可用 / S0ix 不可用 / 休眠可用）' ($capS3 -and (-not $capS0) -and $capS4) ("s0ix={0} s3={1} hibernate={2}" -f $capS0, $capS3, $capS4)
-  Add-SimStatus -Run $script:Run -Scope 'S0ix 真机分型' -Status 'NOT_APPLICABLE' -Detail '9950 固件不支持 S0 Low Power Idle ⇒ 该形态只能离线分型（DEVICE_PENDING）' -Required $false
+  if($TypingScope -eq 'all'){
+    # 本机能力（field-observed）
+    $pcfg = ((& powercfg /a 2>&1) -join "`n")
+    $script:Run.extra['powercfgA'] = $pcfg
+    $cap = Get-SleepPlatformCapability -Text $pcfg
+    $script:Run.extra['platformCapability'] = $cap
+    $capS0 = $cap.s0ix
+    $capS3 = $cap.s3
+    $capS4 = $cap.s4
+    Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '本机能力与登记一致（S3 可用 / S0ix 不可用 / 休眠可用）' ($capS3 -and (-not $capS0) -and $capS4) ("s0ix={0} s3={1} hibernate={2}" -f $capS0, $capS3, $capS4)
+    Add-SimStatus -Run $script:Run -Scope 'S0ix 真机分型' -Status 'NOT_APPLICABLE' -Detail '9950 固件不支持 S0 Low Power Idle ⇒ 该形态只能离线分型（DEVICE_PENDING）' -Required $false
 
-  # 真机证据判型（复用已产出的 S3 周期证据）
-  $s3Evidence = 'g:\YeManCC-Work\_scratch\Repair202GateA-20260922-075435\window-s3-20260922\s3-result-20260922-230911.json'
-  if (Test-Path -LiteralPath $s3Evidence) {
-    $ev = Get-Content -LiteralPath $s3Evidence -Raw -Encoding UTF8 | ConvertFrom-Json
-    $cycles = @($ev.cycles)
-    $facts42 = @()
-    foreach ($c in $cycles) {
-      foreach ($ln in @($c.sleepFactsDelta)) {
-        if ("$ln" -match '"event":"kernel-power"') {
-          $t = $null
-          if ("$ln" -match '"targetState":(\d+)') { $t = [int]$Matches[1] }
-          $facts42 += [ordered]@{ targetState = $t; raw = ("$ln").Substring(0, [Math]::Min(200, ("$ln").Length)) }
+    # 真机证据判型（复用已产出的 S3 周期证据）
+    $s3Evidence = if($S3EvidencePath){[IO.Path]::GetFullPath($S3EvidencePath)}else{'g:\YeManCC-Work\_scratch\Repair202GateA-20260922-075435\window-s3-20260922\s3-result-20260922-230911.json'}
+    if (Test-Path -LiteralPath $s3Evidence -PathType Leaf) {
+      $actualEvidenceSha=(Get-FileHash -LiteralPath $s3Evidence -Algorithm SHA256).Hash
+      $script:Run.extra['s3EvidenceInput']=[ordered]@{path=$s3Evidence;sha256=$actualEvidenceSha;expectedSha256=$S3EvidenceSha256;meaning='Historical input identity, not current physical acceptance'}
+      if($S3EvidenceSha256 -and $actualEvidenceSha -ine $S3EvidenceSha256){
+        Add-SimCheck -Run $script:Run -Form 'TYPES' -Name 'S3 historical evidence identity' $false ('expected='+$S3EvidenceSha256+' actual='+$actualEvidenceSha)
+      }else{
+      $ev = Get-Content -LiteralPath $s3Evidence -Raw -Encoding UTF8 | ConvertFrom-Json
+      $cycles = @($ev.cycles)
+      $facts42 = @()
+      foreach ($c in $cycles) {
+        foreach ($ln in @($c.sleepFactsDelta)) {
+          if ("$ln" -match '"event":"kernel-power"') {
+            $t = $null
+            if ("$ln" -match '"targetState":(\d+)') { $t = [int]$Matches[1] }
+            $facts42 += [ordered]@{ targetState = $t; raw = ("$ln").Substring(0, [Math]::Min(200, ("$ln").Length)) }
+          }
         }
       }
+      $gapMax = 0
+      foreach ($c in $cycles) { if ($c.gapSeconds -and [double]$c.gapSeconds -gt $gapMax) { $gapMax = [double]$c.gapSeconds } }
+      $allDelta = @()
+      foreach ($c in $cycles) { $allDelta += @($c.sleepFactsDelta) }
+      $script:Run.extra['kernelPowerRows'] = @($facts42 | ForEach-Object { $_.raw })
+      $f = @{ pcfgA = $pcfg; requested = 's3'; gapSeconds = $gapMax; productFacts = $allDelta }
+      $v = Get-SleepTypeVerdict -Facts $f
+      $script:Run.extra['s3TypeVerdict'] = $v
+      Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '真 S3 证据判型 = S3' ($v.type -eq 'S3') ("type={0} conf={1} evidence={2}" -f $v.type, $v.confidence, ($v.evidence -join ' '))
+      Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '产品 sleep-facts 的 kernel-power 字段已采集（原值保留，不做跨来源等价假设）' (@($facts42).Count -gt 0) ("rows=" + @($facts42).Count + " raw targetState=" + ((@($facts42 | ForEach-Object { $_.targetState }) -join ',')))
+      }
+    } else {
+      Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '真 S3 证据文件存在（用于判型）' $false $s3Evidence
     }
-    $gapMax = 0
-    foreach ($c in $cycles) { if ($c.gapSeconds -and [double]$c.gapSeconds -gt $gapMax) { $gapMax = [double]$c.gapSeconds } }
-    $allDelta = @()
-    foreach ($c in $cycles) { $allDelta += @($c.sleepFactsDelta) }
-    $script:Run.extra['kernelPowerRows'] = @($facts42 | ForEach-Object { $_.raw })
-    $f = @{ pcfgA = $pcfg; requested = 's3'; gapSeconds = $gapMax; productFacts = $allDelta }
-    $v = Get-SleepTypeVerdict -Facts $f
-    $script:Run.extra['s3TypeVerdict'] = $v
-    Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '真 S3 证据判型 = S3' ($v.type -eq 'S3') ("type={0} conf={1} evidence={2}" -f $v.type, $v.confidence, ($v.evidence -join ' '))
-    Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '产品 sleep-facts 的 kernel-power 字段已采集（原值保留，不做跨来源等价假设）' (@($facts42).Count -gt 0) ("rows=" + @($facts42).Count + " raw targetState=" + ((@($facts42 | ForEach-Object { $_.targetState }) -join ',')))
-  } else {
-    Add-SimCheck -Run $script:Run -Form 'TYPES' -Name '真 S3 证据文件存在（用于判型）' $false $s3Evidence
+
+  }else{
+    $script:Run.extra['fieldTyping']=[ordered]@{status='NOT_RUN';reason='Explicit software-only scope';historicalEvidenceConsumed=$false;platformQueried=$false}
+    Add-SimStatus -Run $script:Run -Scope 'historical-field-typing' -Status 'NOT_RUN' -Detail 'Software-only scope; no powercfg query or physical-history proof' -Required $false
   }
 
   # 离线 golden fixtures

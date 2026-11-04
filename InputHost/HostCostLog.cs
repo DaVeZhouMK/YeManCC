@@ -7,24 +7,24 @@ using System.Threading;
 
 namespace YeManInputHost.Diagnostics;
 
-// Called only by the existing opt-in cost producers. Compression never runs here.
+// Opt-in diagnostics only. One bounded active JSONL; no compressed volumes.
 internal static class HostCostLog
 {
-    internal const int FileMaxBytes = 5 * 1024 * 1024;
+    internal const int FileMaxBytes = 20_000_000;
     internal const int RecordMaxBytes = 64 * 1024;
     private static readonly UTF8Encoding Utf8 = new(false);
-    private static long _rotations, _ioFailures, _contended, _oversize, _archiveBackpressure;
+    private static long _compactions, _ioFailures, _contended, _oversize;
     private static string? _recoveryRoot;
 
     internal static object Snapshot() => new
     {
-        schemaVersion = 2, fileMaxBytes = FileMaxBytes, recordMaxBytes = RecordMaxBytes,
+        schemaVersion = 3, fileMaxBytes = FileMaxBytes, recordMaxBytes = RecordMaxBytes,
         retainedBytesBudget = HostCostArchive.TotalMaxBytes,
-        budgetScope = "active-and-one-pending-and-one-ZIP-temp-reserved;remaining-budget-compressed-archives;legacy-and-failure-exceptions-explicit",
-        archive = HostCostArchive.Snapshot(), rotations = Interlocked.Read(ref _rotations),
+        budgetScope = "single-active-file;newest-complete-lines;no-new-archives;legacy-cleanup-status-explicit",
+        archive = HostCostArchive.Snapshot(), compactions = Interlocked.Read(ref _compactions), rotations = 0,
         ioFailures = Interlocked.Read(ref _ioFailures), contended = Interlocked.Read(ref _contended),
-        oversizeRows = Interlocked.Read(ref _oversize), archiveBackpressure = Interlocked.Read(ref _archiveBackpressure),
-        scope = "writer-process-counters;not-atomic-with-export-or-other-Host-processes"
+        oversizeRows = Interlocked.Read(ref _oversize), archiveBackpressure = 0,
+        scope = "active-payload-byte-cap;receipt-excluded;writer-process-counters;not-atomic-with-export-or-other-Host-processes"
     };
 
     internal static bool Append(string directory, string line,
@@ -75,18 +75,12 @@ internal static class HostCostLog
                     if (size + (separator ? 1 : 0) + bytes.Length + 1 > fileMaxBytes)
                     {
                         stream.Dispose(); stream = null;
-                        // One immutable pending slot bounds backlog. Never overwrite evidence
-                        // when compression/IO is unavailable, and never wait for the worker.
-                        if (File.Exists(path + ".pending"))
-                        {
-                            Interlocked.Increment(ref _archiveBackpressure);
-                            archiveRequest = true;
-                            return false;
-                        }
-                        File.Move(path, path + ".pending");
-                        Interlocked.Increment(ref _rotations);
-                        archiveRequest = true;
-                        stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                        // New records replace the oldest diagnostics. An old pending
+                        // ZIP must never reject the current row or start compression.
+                        stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+                        CompactNewest(stream, fileMaxBytes, bytes.Length + 1);
+                        Interlocked.Increment(ref _compactions);
+                        archiveRequest = true; // Retry one-shot legacy cleanup, never compression.
                         separator = false;
                     }
                     else stream.Seek(0, SeekOrigin.End);
@@ -104,6 +98,64 @@ internal static class HostCostLog
             }
         }
         catch { Interlocked.Increment(ref _ioFailures); return false; }
+    }
+
+    private static void CompactNewest(FileStream stream, int cap, int incomingBytes)
+    {
+        long original = stream.Length;
+        // Amortize compaction: keep at most half the file, leaving room for new rows.
+        long keep = Math.Max(0, Math.Min(cap / 2L, cap - incomingBytes - 2048L));
+        long start = Math.Max(0, original - keep);
+        var buffer = new byte[65536];
+        if (start > 0 && start < original)
+        {
+            stream.Position = start - 1;
+            if (stream.ReadByte() != '\n')
+            {
+                stream.Position = start;
+                bool boundary = false;
+                while (stream.Position < original && !boundary)
+                {
+                    long begin = stream.Position;
+                    int count = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, original - begin));
+                    if (count == 0) throw new EndOfStreamException("Cost log changed during compaction");
+                    int newline = Array.IndexOf(buffer, (byte)'\n', 0, count);
+                    if (newline >= 0) { start = begin + newline + 1; boundary = true; }
+                }
+                if (!boundary) start = original; // An oversized partial row is not a complete retained record.
+            }
+        }
+        if (keep == 0) start = original;
+        var compactionId = Guid.NewGuid().ToString("N");
+        bool endedWithNewline = original == 0;
+        if (original > 0) { stream.Position = original - 1; endedWithNewline = stream.ReadByte() == '\n'; }
+        byte[] beginMarker = JsonSerializer.SerializeToUtf8Bytes(new {
+            @event = "log-retention-begin", compactionId, policy = "newest-lines-single-active-20MB", writerPid = Environment.ProcessId,
+            sourceBytes = original, droppedPrefixBytes = start, retainedSourceBytes = original - start,
+            historyComplete = false, sourceEndedWithNewline = endedWithNewline, sourceOrder = "retained-file-order;not-process-session-proof"
+        });
+        byte[] endMarker = JsonSerializer.SerializeToUtf8Bytes(new {
+            @event = "log-retention-end", compactionId, retainedSourceBytes = original - start,
+            historyComplete = false, partialTailRetained = original > start && !endedWithNewline, newRowsFollow = true
+        });
+        // Production caps leave ample marker space; small fixture caps can keep
+        // only the incoming row. Every write, including markers, stays under cap.
+        if (beginMarker.Length + endMarker.Length + original - start + incomingBytes + 3 > cap)
+        { stream.SetLength(0); stream.Position = 0; return; }
+        stream.Position = 0; stream.Write(beginMarker); stream.WriteByte((byte)'\n');
+        long writeAt = stream.Position, readAt = start;
+        while (readAt < original)
+        {
+            stream.Position = readAt;
+            int count = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, original - readAt));
+            if (count == 0) throw new EndOfStreamException("Cost log changed during compaction");
+            stream.Position = writeAt; stream.Write(buffer, 0, count);
+            readAt += count; writeAt += count;
+        }
+        stream.Position = writeAt;
+        if (writeAt > 0) { stream.Position = writeAt - 1; if (stream.ReadByte() != '\n') { stream.Position = writeAt; stream.WriteByte((byte)'\n'); } }
+        stream.Write(endMarker); stream.WriteByte((byte)'\n');
+        stream.SetLength(stream.Position);
     }
 
     internal static string LockId(string root) =>

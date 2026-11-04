@@ -12,6 +12,7 @@ static void check(bool ok,const char* reason){if(!ok)throw std::runtime_error(re
 template<class F>static void test(const char* name,F f){const auto tick=GetTickCount64();f();++passed;cases.push_back({{"name",name},{"passed",true},{"elapsedMs",GetTickCount64()-tick}});std::cout<<"PASS "<<name<<std::endl;}
 static bool until(const std::function<bool()>& f,DWORD limit=5000){const auto end=GetTickCount64()+limit;do{if(f())return true;Sleep(10);}while(GetTickCount64()<end);return f();}
 static fs::path self(){return startup::image(GetCurrentProcess());}
+static void optiOwnedRootRecord(const fs::path& root){fs::create_directories(root);std::ofstream out(root/L"data-root.json",std::ios::binary);out<<json{{"schemaVersion",2},{"dataLayoutVersion",2},{"dataRoot",toUtf8(root.wstring())}}.dump();if(!out)throw std::runtime_error("Cannot seed owned root identity");}
 static unsigned windows(){unsigned n=0;EnumWindows([](HWND h,LPARAM p)->BOOL{DWORD pid=0;GetWindowThreadProcessId(h,&pid);if(pid==GetCurrentProcessId())++*reinterpret_cast<unsigned*>(p);return TRUE;},reinterpret_cast<LPARAM>(&n));return n;}
 struct Fixture {
     fs::path root,child;
@@ -20,10 +21,10 @@ struct Fixture {
     std::string original="[{\"Name\":\"OPT only\",\"IsFavorite\":true}]";
     Fixture(const fs::path& base,const std::string& name,std::string mode="normal"){
         root=base/toWide(name);child=self().parent_path()/L"CustomSteamLibrary"/L"CustomSteamLibrary.exe";
-        fs::create_directories(root/L"NativeGame");
+        fs::create_directories(root/L"NativeGame");optiOwnedRootRecord(root);
         writeJsonWithLocalBackup(root/L"fixture.json",{{"mode",mode}},false);
         writeJsonWithLocalBackup(root/L"state"/L"library-scan.json",{{"games",json::array({{{"steamNative",true},{"nativeSteamAppId",123},
-            {"gameDirectory",toUtf8((root/L"NativeGame").wstring())},{"directoryName","Native fixture"},{"primaryExecutable",nullptr}}})}},false);
+            {"gameDirectory",toUtf8((root/L"NativeGame").wstring())},{"directoryName","Native fixture"},{"primaryExecutable",""}}})}},false);
         // Explicit OFF is persisted and never changed by this startup task.
         writeJsonWithLocalBackup(root/L"config"/L"game-media-downloads.json",{{"enabled",false},{"session","wallpaper-off"}},false);
         writeHostBytesAtomic(root/L"OptiscalerClient"/L"games.json",original);
@@ -42,7 +43,9 @@ int wmain(int argc,wchar_t** argv){try{
         const auto root=custom_steam_library::configuredDataRoot();
         const auto config=readJson(root/L"fixture.json",json::object());const auto mode=config.value("mode",std::string{});
         const auto appRoot=self().parent_path();
-        writeJsonWithLocalBackup(root/L"child-started.json",{{"pid",GetCurrentProcessId()}},false);
+        JOBOBJECT_CPU_RATE_CONTROL_INFORMATION cpu{};
+        const bool known=QueryInformationJobObject(nullptr,JobObjectCpuRateControlInformation,&cpu,sizeof cpu,nullptr)!=FALSE;
+        writeJsonWithLocalBackup(root/L"child-started.json",{{"pid",GetCurrentProcessId()},{"cpuLimitKnown",known},{"cpuRate",cpu.CpuRate},{"cpuFlags",cpu.ControlFlags}},false);
         until([&]{return fs::exists(root/L"child-observed");},2000);
         std::optional<int> result;
         if(mode=="hang"||mode=="wait-cancel") {
@@ -74,6 +77,9 @@ int wmain(int argc,wchar_t** argv){try{
         const auto tick=GetTickCount64();f.start(startup::delayMs,5000);
         check(!f.owner.start(f.child,tick),"Repeated startup scheduled twice");Sleep(150);check(f.owner.launches()==0,"Launched before delay");f.unchanged();
         f.observe(35000);check(GetTickCount64()-tick>=30000,"Production startup delay bypassed");f.finished(5000);
+        const auto admitted=readJson(f.root/L"child-started.json",json::object());
+        check(admitted["cpuLimitKnown"]==true&&admitted["cpuRate"]==startup::workerCpuRate&&
+            (admitted["cpuFlags"].get<DWORD>()&(JOB_OBJECT_CPU_RATE_CONTROL_ENABLE|JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP))==(JOB_OBJECT_CPU_RATE_CONTROL_ENABLE|JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP),"Optional child did not inherit its CPU hard cap");
         const auto done=readJson(f.root/L"child-finished.json",json::object());
         check(done["result"]["status"]=="synced"&&done["topLevelWindows"]==0&&done["hostWindow"]==false&&done["webview"]==false&&done["backgroundThreads"]==0,"Startup supplement did not stay headless");
         const auto games=json::parse(readText(f.root/L"OptiscalerClient"/L"games.json"));check(games.size()==2&&games[0]["Name"]=="OPT only"&&games[1]["AppId"]=="123","Startup catalog metadata wrong");
@@ -109,6 +115,11 @@ int wmain(int argc,wchar_t** argv){try{
         Fixture f(base,"cancel-active","wait-cancel");f.start();f.observe();const auto tick=GetTickCount64();f.owner.stop();
         check(GetTickCount64()-tick<2500&&WaitForSingleObject(f.observed.value,0)==WAIT_OBJECT_0,"Active child survived owner stop");f.unchanged();
     });
+    test("YMCC exit interrupts a serial item wait before catalog commit",[&]{
+        Fixture f(base,"cancel-paced");f.start();f.observe();Sleep(250);const auto tick=GetTickCount64();f.owner.stop();
+        check(GetTickCount64()-tick<2500&&WaitForSingleObject(f.observed.value,0)==WAIT_OBJECT_0,"Paced child survived cancellation");f.unchanged();
+        check(!fs::exists(f.root/L"OptiscalerClient"/L"games.json.ymcc.bak"),"Cancelled pacing reached catalog commit");
+    });
     test("hung startup callback is forcibly ended by its own Job within deadline",[&]{
         Fixture f(base,"hung","hang");f.start();f.observe();const auto tick=GetTickCount64();f.owner.stop();
         check(GetTickCount64()-tick<2500&&WaitForSingleObject(f.observed.value,0)==WAIT_OBJECT_0,"Hung child survived owner fallback");f.unchanged();
@@ -122,7 +133,7 @@ int wmain(int argc,wchar_t** argv){try{
         check(!runLibraryOptiStartupEntrypoint(self().parent_path()/L"CustomSteamLibrary")&&calls==0,"Visible command admitted OPT startup");
     });
     test("fresh commit cancellation rejects writes",[&]{
-        const auto root=base/L"commit-cancel";writeHostBytesAtomic(root/L"games.json","[]");bool rejected=false;
+        const auto root=base/L"commit-cancel";g_dataRoot=root;optiOwnedRootRecord(root);writeHostBytesAtomic(root/L"games.json","[]");bool rejected=false;
         const std::vector<custom_steam_library::opti_catalog::Candidate> games{{"D:\\Games\\Native","","Native","",123}};
         try{supplementOptiCatalog(root,games,[]{return false;},[]{return false;},[]{return false;});}catch(...){rejected=true;}
         check(rejected&&readText(root/L"games.json")=="[]","Revoked commit wrote catalog");

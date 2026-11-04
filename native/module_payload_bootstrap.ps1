@@ -6,11 +6,14 @@ try {
   $pc=Resolve-YmccDeckyPath $root 'PowerControl'
   $manifestPath=Resolve-YmccDeckyPath $root 'YeManCC/module-package.json'
   if (([IO.FileInfo]$manifestPath).Length -gt 4194304) { throw 'MODULE_MANIFEST_TOO_LARGE' }
-  $manifest=Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  $manifest=Read-YmccModuleJournalJson $manifestPath
   Assert-YmccModuleManifest $manifest
   $bootstrapLease=Enter-YmccModuleMaintenance -WaitMilliseconds 10000
+  $knownStages=Assert-YmccBootstrapStagesReadable $root $pc
+  $receiptNeedsTransaction=Test-YmccBootstrapReceiptNeedsTransaction $pc $manifest
   $postCommitStage=Register-YmccPostCommitHcCleanup $root $pc $manifest $manifestPath $UpdateCommitState $UpdateOwnerPid
-  if (!(Test-YmccBootstrapPayloadCurrent $pc $manifest)) {
+  if (!(Test-YmccBootstrapPayloadCurrent $pc $manifest) -or $receiptNeedsTransaction) {
+    if($knownStages -ge 64){throw 'MODULE_BOOTSTRAP_STAGE_BUDGET'}
     if($manifest.compatibility.sourceKind -cne 'full-package-v1' -or $manifest.compatibility.payloadHashScope -cne 'manifest-files-v1'){throw 'MODULE_FULL_PACKAGE_SOURCE_CONTRACT_REQUIRED'}
     if([string]::IsNullOrWhiteSpace($SourceArchive)){$SourceArchive=Join-Path $root 'Packages/YeManCC.zip'}
     $sourceFull=[IO.Path]::GetFullPath($SourceArchive)
@@ -53,7 +56,7 @@ try {
     [IO.Directory]::CreateDirectory($payloadRoot) | Out-Null
     Move-Item -LiteralPath (Join-Path $bootstrapStage 'feature-assets') -Destination $payloadRoot
     $plan=Get-YmccModulePlan $payloadRoot $pc $manifest ([string]$manifest.packageVersion)
-    Write-YmccBootstrapStage $bootstrapStage $pc ([string]$manifest.packageVersion) ([string]$manifest.compatibility.payloadSha256) 'applying' @($manifest.files.path)
+    Write-YmccBootstrapStage $bootstrapStage $pc ([string]$manifest.packageVersion) ([string]$manifest.compatibility.payloadSha256) 'applying' @($manifest.files.path) -TransactionPlan $plan
     $bootstrapMutationStarted=$true
     $transaction=Install-YmccModulePackage $plan (Join-Path $bootstrapStage 'rollback')
     if (!(Test-YmccBootstrapPayloadCurrent $pc $manifest)) { throw 'MODULE_BOOTSTRAP_FINAL_HASH_MISMATCH' }

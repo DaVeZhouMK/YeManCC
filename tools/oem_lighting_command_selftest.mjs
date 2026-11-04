@@ -3,29 +3,39 @@ import fs from 'node:fs';import path from 'node:path';import crypto from 'node:c
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),out=path.resolve(process.argv[2]);fs.mkdirSync(out,{recursive:true});const s=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8');const begin=s.indexOf('static json ymccLightSetterApply('),end=s.indexOf('    // 单一实参只取一次 str()',begin);if(begin<0||end<0)throw Error('Missing production helper builder');const functionPrefix=s.slice(begin,end);
 const handlerStart=s.indexOf('ipc_on("gamepad.setLed"'),at=s.indexOf('        if (enabled && mode == "preset"',handlerStart),admission=s.slice(at,s.indexOf('        BYTE r1',at));if(at<0||!admission.includes('validPreset'))throw Error('Missing live IPC admission');
 const parserStart=s.indexOf('    bool hasJson = false',begin),parserEnd=s.indexOf('\n}',parserStart);const resultParser=s.slice(parserStart,parserEnd);
-const cpp='#include '+JSON.stringify(path.join(repo,'native/oem_lighting_operations.h').replaceAll('\\','/'))+'\n#include '+JSON.stringify(path.join(repo,'native/lighting_device_core_binding.h').replaceAll('\\','/'))+String.raw`
+const ownerReceiptStart=s.indexOf('static bool oxp3OwnerReceiptAccepted('),ownerReceiptEnd=s.indexOf('\n}',ownerReceiptStart);if(ownerReceiptStart<0||ownerReceiptEnd<0)throw Error('Missing production owner receipt gate');const ownerReceiptAccepted=s.slice(ownerReceiptStart,ownerReceiptEnd+2);
+const cpp='#include '+JSON.stringify(path.join(repo,'native/oxp3_lighting_owner.h').replaceAll('\\','/'))+'\n#include '+JSON.stringify(path.join(repo,'native/oem_lighting_operations.h').replaceAll('\\','/'))+'\n#include '+JSON.stringify(path.join(repo,'native/lighting_device_core_binding.h').replaceAll('\\','/'))+String.raw`
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <sstream>
 #include <vector>
 #include <iostream>
 #include <stdexcept>
 #include "json.hpp"
-using json=nlohmann::json;using BYTE=unsigned char;constexpr unsigned INVALID_FILE_ATTRIBUTES=~0u;
+using json=nlohmann::json;using BYTE=unsigned char;using DWORD=std::uint32_t;constexpr unsigned INVALID_FILE_ATTRIBUTES=~0u;
 struct{std::string deviceClass;}g_machineIdentity;
 std::wstring kLightSetterExe=L"G:\\Program Files\\YMCC\\light-setter.exe",kLightSetterHcRuntimeRoot=L"G:\\Program Files\\YMCC\\HC";
 std::wstring POWER_CONTROL_DIR=L"G:\\Program Files\\YMCC\\PowerControl";
 bool missingHc=false,missingCore=false;
 unsigned GetFileAttributesW(const wchar_t* path){const std::wstring p(path);if(missingHc&&p.find(L"HandheldCompanion.dll")!=std::wstring::npos)return INVALID_FILE_ATTRIBUTES;if(missingCore&&p.find(L"YeManLightDeviceCore.dll")!=std::wstring::npos)return INVALID_FILE_ATTRIBUTES;return 0;}
 std::wstring U2W(const std::string&s){return std::wstring(s.begin(),s.end());}
-`+functionPrefix+String.raw`
+// Command/parser-only terminal: no owner reservation, clock, child or hardware.
+// OXP3 command admission fails closed; parser completion flags are explicit inputs.
+static ymcc::oxp3_owner::Lease g_oxp3OwnerLease;
+static std::atomic<bool> g_oxp3OwnerApplyOutstanding{false},g_oxp3OwnerPendingDebt{false};
+static std::uint64_t GetTickCount64(){return 0;}
+static bool oxp3OwnerAdmit(std::uint64_t,std::string& reason){reason="command-parser-owner-terminal-inert";return false;}
+`+ownerReceiptAccepted+'\n'+functionPrefix+String.raw`
  return json{{"command",std::string(cmd.str().begin(),cmd.str().end())}};
 }
 static json actualIpcAdmission(bool enabled,const std::string& mode,const std::string& presetId){auto receipt=[](const json& result){return result;};const auto* lightingRoute=ymcc::lighting::resolve(g_machineIdentity.deviceClass);if(!lightingRoute)return json{{"ok",false}};
 `+admission+String.raw`
  return json{{"ok",true},{"admitted",true}};
 }
-static json parseReply(const std::string& childOut,unsigned exitCode,bool brightnessSupported=true,bool timedOut=false,const std::string& action="preset"){
+static json parseReply(const std::string& childOut,unsigned exitCode,bool brightnessSupported=true,bool timedOut=false,const std::string& action="preset",bool ownerGenerationStable=true,bool ownerChildReturned=true,bool ownerLeaseReleased=true){
  const bool outputReadTimedOut=false,outputTruncated=false,outputReadError=false,enabled=true,presetAction=action=="preset";const std::string presetId="LEDPreset_OneXPlayerX1_Preset09",mode="solid";
+ const bool ownerAdmitted=g_machineIdentity.deviceClass=="HandheldCompanion.Devices.OneXPlayer3";
 `+resultParser+String.raw`
 }
 int main(){unsigned checks=0;auto check=[&](bool ok,const char* msg){++checks;if(!ok)throw std::runtime_error(msg);};try{
@@ -75,10 +85,20 @@ int main(){unsigned checks=0;auto check=[&](bool ok,const char* msg){++checks;if
  auto color=queued;color["deviceClass"]="HandheldCompanion.Devices.LokiMax6800U";color["capabilityId"]="hc.device.LokiMax6800U";color["action"]="color";color["capabilityOperation"]="lighting.color.solid";
  auto loki=parseReply(json{{"ok",true},{"result",color}}.dump(),0,false,false,"color");check(loki.at("ok")==true&&loki.at("brightnessApplied")==false&&loki.at("capabilityId")=="hc.device.LokiMax6800U","color-only actual factory helper result does not claim unsupported brightness");
  g_machineIdentity.deviceClass="HandheldCompanion.Devices.LokiMax6800U";color["deviceClass"]="HandheldCompanion.Devices.AynLoki";color["capabilityId"]="hc.device.AynLoki";check(parseReply(json{{"ok",true},{"result",color}}.dump(),0,false,false,"color").at("ok")==false,"base-to-factory permission cannot be reversed");
+ g_machineIdentity.deviceClass="HandheldCompanion.Devices.OneXPlayer3";
+ const json oxp3={{"deviceClass",g_machineIdentity.deviceClass},{"capabilityId","ymcc.device.OneXPlayer3"},{"capabilityOperation","lighting.color.solid"},{"capabilityCatalogSha256",ymcc::lighting::kCatalogSha256},{"action","color"},{"note","ok"}};
+ const auto unreturned=parseReply(json{{"ok",true},{"result",oxp3}}.dump(),0,true,false,"color",true,false,true);
+ check(unreturned.at("childDeclaredOk")==true&&unreturned.at("childIdentityAccepted")==true&&unreturned.at("childCatalogAccepted")==true&&unreturned.at("childOperationAccepted")==true&&
+       unreturned.at("ownerAdmitted")==true&&unreturned.at("ownerGenerationStable")==true&&unreturned.at("ownerChildReturned")==false&&unreturned.at("ownerLeaseReleased")==true&&
+       unreturned.at("ok")==false&&unreturned.at("resultAccepted")==false&&unreturned.at("effectApplied")==false&&unreturned.at("brightnessApplied")==false&&unreturned.at("reason")=="light-setter-owner-child-not-returned",
+       "OXP3 valid child result cannot pass production receipt gate before owner child returns");
  std::cout<<"OEM_LIGHTING_COMMAND_OK checks="<<checks<<" actual_native_command=true child_processes=0 hardware_io=none\n";return 0;
 }catch(const std::exception&e){std::cerr<<"OEM_LIGHTING_COMMAND_FAIL "<<e.what()<<'\n';return 1;}}
 `;
 // Preserve one std::wstring object when converting: iterator pairs from distinct
 // cmd.str() temporaries are invalid (the product builder already keeps one).
 const fixed=cpp.replace('return json{{"command",std::string(cmd.str().begin(),cmd.str().end())}};','const auto value=cmd.str();return json{{"command",std::string(value.begin(),value.end())}};');
-fs.writeFileSync(path.join(out,'actual-lighting-command.cpp'),fixed);const sha=x=>crypto.createHash('sha256').update(x).digest('hex');fs.writeFileSync(path.join(out,'source-binding.json'),JSON.stringify({mainSha256:sha(s),helperCommandPrefixSha256:sha(functionPrefix),ipcAdmissionSha256:sha(admission),hardwareIo:false,childProcesses:0},null,2));console.log('Generated actual native command/admission harness; no process API linked.');
+fs.writeFileSync(path.join(out,'actual-lighting-command.cpp'),fixed);const sha=x=>crypto.createHash('sha256').update(x).digest('hex');
+const sourceSlices=[['helperCommandPrefix',begin,functionPrefix],['ipcAdmission',at,admission],['resultParser',parserStart,resultParser],['ownerReceiptAccepted',ownerReceiptStart,ownerReceiptAccepted]].map(([name,start,text])=>({name,source:'native/main.cpp',startByte:Buffer.byteLength(s.slice(0,start)),bytes:Buffer.byteLength(text),sha256:sha(text),compiledInto:'actual-lighting-command.cpp'}));
+const ownerHeader=fs.readFileSync(path.join(repo,'native/oxp3_lighting_owner.h'));
+fs.writeFileSync(path.join(out,'source-binding.json'),JSON.stringify({mainSha256:sha(s),helperCommandPrefixSha256:sha(functionPrefix),ipcAdmissionSha256:sha(admission),resultParserSha256:sha(resultParser),ownerReceiptAcceptedSha256:sha(ownerReceiptAccepted),sourceSlices,ownerHeader:{path:'native/oxp3_lighting_owner.h',bytes:ownerHeader.length,sha256:sha(ownerHeader)},ownerTerminal:'inert-deny-admission; parser completion supplied in memory',hardwareIo:false,childProcesses:0},null,2));console.log('Generated actual native command/admission harness; no process API linked.');

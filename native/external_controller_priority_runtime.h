@@ -33,11 +33,10 @@ static std::atomic<bool> g_externalPriorityPolicyEnabled{false};
 static std::wstring externalPriorityDebtPath(){return app_data_dir()+L"\\external-controller-priority-return-v1.json";}
 static bool externalPriorityHasDebt(const ymcc::externalpad::VisibilityDebt& d){return !d.hiddenPaths.empty() || !d.applications.empty() || d.cloakChanged || d.refreshPending;}
 static bool externalPriorityDesired(){
-    const auto input=ymSettingsSection("input");
-    const auto ownership=input.find("ownership");
-    if(ownership==input.end() || !ownership->is_object())return false;
-    const auto flag=ownership->find("externalControllerPriority");
-    return flag!=ownership->end() && flag->is_boolean() && flag->get<bool>();
+    const auto ownership=ymSettingsField("input","ownership");
+    if(!ownership.is_object())return false;
+    const auto flag=ownership.find("externalControllerPriority");
+    return flag!=ownership.end() && flag->is_boolean() && flag->get<bool>();
 }
 static void externalPriorityStatus(const char* state,const std::string& reason){
     auto& r=g_externalPriority;

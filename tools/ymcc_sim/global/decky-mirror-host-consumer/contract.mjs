@@ -13,7 +13,33 @@ export function freshEvidence(value,repo){need(typeof value==='string'&&path.isA
 export function repoFile(root,relative){need(typeof relative==='string'&&!path.isAbsolute(relative)&&!relative.split(/[\\/]/).includes('..'),'REPO_RELATIVE_REQUIRED');return safeRealPath(root,path.join(root,relative));}
 export function fingerprint(root,files){need(files.length<=MAX_INPUTS,'INPUT_BUDGET_EXCEEDED');return [...new Set(files)].sort().map(relative=>({path:relative,actualPath:repoFile(root,relative),sha256:hash(repoFile(root,relative))}));}
 export function verifyRows(rows){for(const row of rows)need(hash(row.actualPath??row.path)===row.sha256,'INPUT_CHANGED',row);}
-export function casesIn(text){return [...text.matchAll(/await check\('([^']+)'/g)].map(m=>({name:m[1],line:text.slice(0,m.index).split('\n').length}));}
+export function casesIn(text){
+ const matches=[...text.matchAll(/await check\((?:'([^']+)'|([A-Za-z_$][\w$]*)\+'([^']+)')/g)];
+ need(matches.length===[...text.matchAll(/await check\(/g)].length,'SOURCE_CASE_EXPRESSION_UNSUPPORTED');
+ return matches.map(m=>({name:m[1]??m[2]+'+'+m[3],line:text.slice(0,m.index).split('\n').length}));
+}
+// Source calls and parameter-expanded report rows have distinct exact contracts.
+export function reportCaseNames(suite){
+ const literal=suite.cases.map(row=>row.name),expansions=suite.expansions??{};
+ need(literal.length>0&&new Set(literal).size===literal.length,'SOURCE_CASE_MEMBERSHIP_INVALID');
+ for(const [name,rows] of Object.entries(expansions))need(literal.includes(name)&&Array.isArray(rows)&&rows.length>0&&rows.every(row=>typeof row==='string'&&row.length>0),'CASE_EXPANSION_INVALID',name);
+ const names=literal.flatMap(name=>expansions[name]??[name]);
+ need(new Set(names).size===names.length,'RUNTIME_CASE_DUPLICATE');return names;
+}
+export function bindOriginalSuite(suite,text){
+ const cases=casesIn(text);
+ need(JSON.stringify(cases.map(row=>row.name))===JSON.stringify(suite.cases.map(row=>row.name)),'ORIGINAL_SUITE_CONTRACT_CHANGED',suite.name);
+ const bound={...suite,cases};reportCaseNames(bound);return bound;
+}
+export function verifyOriginalReport(suite,report){
+ const names=suite.name==='client'?report.results?.map(row=>row.name):suite.name==='connection_probe'?report.tests:report.cases;
+ const expected=reportCaseNames(suite);
+ need(Array.isArray(names)&&JSON.stringify(names)===JSON.stringify(expected),'ORIGINAL_CASES_CHANGED_OR_MISSING',{suite:suite.name,names});
+ if(suite.name==='client')need(report.cases===expected.length&&report.results.every(row=>row.status==='passed'),'ORIGINAL_CLIENT_REPORT_FAILED');
+ else if(suite.name==='connection_probe')need(report.passed===expected.length,'ORIGINAL_PROBE_REPORT_FAILED');
+ else need(report.status==='passed','ORIGINAL_SUITE_REPORT_FAILED');
+ return expected.length;
+}
 export function mutateHost(text,fault){const start=text.indexOf('export function startDeckyMirrorHost(');need(start>=0,'FAULT_PRODUCT_FUNCTION_MISSING');const index=text.indexOf(fault.from,start);need(index>=start&&text.indexOf(fault.from,index+1)===-1,'FAULT_ANCHOR_NOT_UNIQUE');const candidate=text.slice(0,index)+fault.to+text.slice(index+fault.from.length);need(candidate!==text&&candidate.slice(0,index)===text.slice(0,index)&&candidate.slice(index+fault.to.length)===text.slice(index+fault.from.length),'FAULT_OUTSIDE_FUNCTION');return {candidate,offset:index,before:fault.from,after:fault.to,function:fault.function};}
 export function faultVerdict({exit,stderr,trace,loads,suite,fault,override}){
  const expected=suite.cases.find(row=>row.name===fault.expectedName);need(expected,'FAULT_EXPECTATION_MISSING');

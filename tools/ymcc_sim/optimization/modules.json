@@ -3,8 +3,7 @@
   "meaning": "Reuse existing registered test IDs; minimum is explicitly partial coverage, not acceptance",
   "aliases": {
     "gamepad": "controller",
-    "input": "controller",
-    "decky": "plugins"
+    "input": "controller"
   },
   "modules": {
     "controller": {
@@ -119,6 +118,15 @@
         "game-library.account-status"
       ],
       "description": "游戏库账号状态模型"
+    },
+    "decky": {
+      "minimum": [
+        "plugins.decky-owned-runtime-lifecycle"
+      ],
+      "domains": [
+        "plugins"
+      ],
+      "description": "Decky自有运行资源的原生命周期场景；不包含更新恢复整链、壁纸或真实Steam验收；动态闭包需显式定向执行"
     }
   }
 }

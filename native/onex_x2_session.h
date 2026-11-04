@@ -143,11 +143,13 @@ public:
             return true;
         }
         if (frame->button == Button::None) return true;
-        if (clickOnly(frame->button)) {
+        if (clickOnly(bound_, frame->button)) {
             if (frame->pressed) push({EventKind::Click, frame->button, rearBits_, generation_, now, context_, frame->buttonId}, now);
             return true;
         }
-        const std::uint8_t bit = frame->button == Button::L4 ? 1 : 2;
+        const std::uint8_t bit = frame->button == Button::L4 ? 1 : frame->button == Button::R4 ? 2 :
+            frame->button == Button::Home ? 4 : frame->button == Button::GKey ? 8 : 0;
+        if (!bit) return true;
         const std::uint8_t next = frame->pressed ? static_cast<std::uint8_t>(rearBits_ | bit)
                                                : static_cast<std::uint8_t>(rearBits_ & static_cast<std::uint8_t>(~bit));
         if (next != rearBits_) { rearBits_ = next; push({EventKind::RearChanged, frame->button, rearBits_, generation_, now, context_, frame->buttonId}, now); }

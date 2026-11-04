@@ -18,6 +18,12 @@ export function oracle(workspace, repo) {
   if(input.hcCommit!==commit || input.identities.length!==63) throw Error('Fixed HC commit/63 alias contract changed');
   const upstream=path.join(workspace,'Docs/Research/PcCapabilities-HC-CTW-20261014/upstream');
   const manifest=JSON.parse(fs.readFileSync(path.join(upstream,'source-manifest.json')));
+  // Upgrade one existing row from independently pinned HC bytes; all other
+  // a250 source expectations remain immutable. No production table supplies axes.
+  const upgradeBytes=fs.readFileSync(path.join(repo,'capabilities/upstream/f2e58468/OneXPlayer3.json'));
+  const upgradeSha='5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a';
+  if(sha(upgradeBytes)!==upgradeSha || createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${upgradeBytes.length}\0`),upgradeBytes])).digest('hex')!=='d55789fc4b965decf8ceb32ca453239e271a22cd') throw Error('HC f2e58468 OneXPlayer3 resource changed');
+  const upgrade=JSON.parse(upgradeBytes);if(upgrade.DeviceClass!=='OneXPlayer3')throw Error('Upstream motion model mismatch');
   const models=input.models.map(m=>{
     if(m.name==='SteamMachine') {
       if(m.matrices.length!==0) throw Error('SteamMachine unexpectedly has an IMU');
@@ -31,6 +37,8 @@ export function oracle(workspace, repo) {
       if(!row || row.commit!==commit || row.sha256.toLowerCase()!==digest || row.gitBlob!==blob) throw Error(`Bad resource pin ${x.source}`);
       const config=JSON.parse(bytes), matrix=config[x.sensor==='gyro'?'GyroMatrix':'AcceleroMatrix'];
       if(JSON.stringify(matrix)!==JSON.stringify(x.matrix)) throw Error('Resource/oracle matrix disagreement');
+      const updated=m.name==='OneXPlayer3';
+      const selectedMatrix=updated?upgrade[x.sensor==='gyro'?'GyroMatrix':'AcceleroMatrix']:matrix;
       const axes=['X','Y','Z'];
       // Deliberately use different gyro/accel inputs, including basis and signed fractions.
       const samples=(x.sensor==='gyro'
@@ -38,18 +46,20 @@ export function oracle(workspace, repo) {
         : [[11,13,-17],[-1,0,0],[0,-1,0],[0,0,-1],[19.5,-23.25,0.0625],[-1e-6,2e-7,3e-8]])
         .map(raw=>{
           const output=[NaN,NaN,NaN];
-          for(let i=0;i<3;i++) output[axes.indexOf(matrix.AxisSwap[axes[i]])]=raw[i];
-          return {input:raw,output:output.map((v,i)=>v*matrix.Axis[axes[i]])};
+          for(let i=0;i<3;i++) output[axes.indexOf(selectedMatrix.AxisSwap[axes[i]])]=raw[i];
+          return {input:raw,output:output.map((v,i)=>v*selectedMatrix.Axis[axes[i]])};
         });
-      return {...x,id:`hc-a250b19a:${slugs[m.name]}:${x.sensor}:${x.recipe}`,sourceSha256:digest,samples};
+      return {...x,matrix:selectedMatrix,recipe:updated?'neg-y-neg-z-x':x.recipe,id:`hc-${updated?'f2e58468':'a250b19a'}:${slugs[m.name]}:${x.sensor}:${updated?'neg-y-neg-z-x':x.recipe}`,sourceSha256:updated?upgradeSha:digest,samples};
     });
-    return {...m,admitted:true,selectorId:`hc-a250b19a:model:${m.name}`,matrices};
+    return {...m,admitted:true,selectorId:`hc-${m.name==='OneXPlayer3'?'f2e58468':'a250b19a'}:model:${m.name}`,matrices,
+      ...(m.name==='OneXPlayer3'?{previousResourceIdentity:{gyro:`hc-a250b19a:${slugs[m.name]}:gyro:${m.matrices[0].recipe}`,accel:`hc-a250b19a:${slugs[m.name]}:accel:${m.matrices[1].recipe}`}}:{})};
   });
   if(models.filter(m=>m.admitted).length!==9) throw Error('Expected nine IMU classes including NEXT2');
   const legacy=legacyOracle(workspace,repo),reviewed=reviewedResourceOracle(workspace,repo,legacy);
   for(const selected of reviewed){const r=legacy.recipes.find(r=>r.deviceClass===selected.deviceClass&&r.gyroMatrixId===selected.identityGyroMatrixId&&r.accelMatrixId===selected.identityAccelMatrixId);if(!r)throw Error('Missing reviewed legacy tuple');r.selectedRecipe=selected;}
   return {...input,schema:'hc-model-motion-consumer-oracle-v3',models,legacy,reviewed,motionCapabilityPolicy:capabilityPolicy(),genericFallbackPolicy:genericFallbackPolicy(workspace),
-    expectationBoundary:'Pinned HC a250 aliases, inherited JSON, matrices and resource SHA256; application selector spelling is explicit contract. No candidate C++ supplies expected values.'};
+    upstreamMotionOverride:{commit:'f2e58468d9917189d4be7ccfc242385ce2c3035b',model:'OneXPlayer3',sha256:upgradeSha},
+    expectationBoundary:'Pinned HC a250 aliases plus independently pinned f2e58468 OneXPlayer3 resource; inherited JSON, matrices and resource SHA256; application selector spelling is explicit contract. No candidate C++ supplies expected values.'};
 }
 // Legacy expectations may consume provenance metadata, but re-derive all axes
 // and bundle hashes from pinned C# bytes, independently of the generated header.

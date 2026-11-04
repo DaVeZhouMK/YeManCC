@@ -41,7 +41,7 @@ export function expectations(workspace, protocolFixtures) {
       transportBoundary: 'Session exposes no submitted marker; transport must never call discardPreparedWrite after kernel submission',
     },
     // Named tags are an API contract, not obtained by querying the candidate.
-    roles: { None: 0, Turbo: 1, Keyboard: 2, Home: 3, L4: 4, R4: 5 },
+    roles: { None: 0, Turbo: 1, Keyboard: 2, Home: 3, L4: 4, R4: 5, GKey: 6 },
     protocol,
   };
 }

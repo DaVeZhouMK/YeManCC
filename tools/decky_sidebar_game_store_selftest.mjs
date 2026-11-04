@@ -9,6 +9,16 @@ async function check(name,action){const result=await action();cases.push(name);i
 const plain=value=>JSON.parse(JSON.stringify(value));
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
+await check('normalizing valid optional undefined fields stays idempotent while explicit malformed values remain inactive',()=>{
+ const f=fixture(),first=f.store.normalizeGameMemoryView(seed()),second=f.store.normalizeGameMemoryView(first);
+ assert(Object.hasOwn(first.entries['game.exe'],'controls')&&first.entries['game.exe'].controls===undefined,'exercise the normalizer-generated optional undefined field');
+ assert.deepEqual(plain(second),plain(first),'normalizer data must remain valid on its next pass');
+ assert.equal(second.entries['game.exe'].enabled,true);assert.equal(second.entries['other.exe'].enabled,true);
+ for(const field of ['controls','inputOverrides'])for(const value of [null,'broken',3,[]]){
+  const bad=seed();bad.entries['game.exe'][field]=value;
+  assert.equal(f.store.normalizeGameMemoryView(bad).entries['game.exe'].enabled,false,field+' explicit malformed value remains blocked');
+ }
+});
 await check('valid old document loads without migration, new file or business writes',async()=>{const f=fixture();const value=await f.store.loadGameCustomConfig();assert.equal(value.entries['game.exe'].acMode,'balanced');assert.equal(f.stats().fakeWrites,0);assert.equal(f.documents.size,1);return f.stats();});
 await check('Steam and non-Steam observations reach the same remembered EXE entry',async()=>{const f=fixture();const value=await f.store.loadGameCustomConfig();const a=gamePolicyKey({path:'C:/Games/Game.exe',steamAppId:'480'}),b=gamePolicyKey({path:'C:/Games/Game.exe'});assert.equal(a,b);assert.equal(value.entries[a].acMode,value.entries[b].acMode);assert.deepEqual(Object.keys(value.entries).sort(),['game.exe','other.exe']);});
 await check('normal old EXE edit uses original atomic main/backup paths only',async()=>{const f=fixture();const value=await f.store.loadGameCustomConfig();value.entries['game.exe'].acMode='performance';await f.store.saveGameCustomConfig(value);assert.equal(f.raw().entries['game.exe'].acMode,'performance');assert.deepEqual([...f.documents.keys()].sort(),[main,backup].sort());assert.ok(f.calls.every(call=>call[1]===main||call[1]===backup));assert.ok(!Object.hasOwn(f.raw().entries['game.exe'],'steamAppId'));return f.stats();});

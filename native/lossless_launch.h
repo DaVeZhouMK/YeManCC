@@ -3,6 +3,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include "process_inventory.h"
 #include <tlhelp32.h>
 #include <functional>
 #include <vector>
@@ -45,34 +46,24 @@ public:
     }
     void unlock() { if (mutex_) ReleaseMutex(mutex_); }
     Scan scan() {
-        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snapshot == INVALID_HANDLE_VALUE) return {ScanState::Unknown, {}, GetLastError()};
-        PROCESSENTRY32W entry{}; entry.dwSize = sizeof(entry);
+        // Launch admission needs a fresh complete table; the same native owner
+        // performs this explicit read, retaining all live instance checks below.
+        const auto snapshot = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, 0);
+        if (snapshot->status != ymcc::processInventory::Status::Complete)
+            return {ScanState::Unknown, {}, snapshot->error};
         bool found = false; Identity exact;
-        if (!Process32FirstW(snapshot, &entry)) {
-            const DWORD failure = GetLastError(); CloseHandle(snapshot);
-            return {ScanState::Unknown, {}, failure};
-        }
-        do {
-            if (_wcsicmp(entry.szExeFile, L"LosslessScaling.exe") != 0) continue;
+        for (const auto& entry : snapshot->rows) {
+            if (_wcsicmp(entry.name.c_str(), L"LosslessScaling.exe") != 0) continue;
             DWORD session = 0;
-            if (!ProcessIdToSessionId(entry.th32ProcessID, &session)) {
-                const DWORD failure = GetLastError(); CloseHandle(snapshot);
-                return {ScanState::Unknown, {}, failure};
-            }
+            if (!ProcessIdToSessionId(entry.pid, &session)) return {ScanState::Unknown, {}, GetLastError()};
             if (session != session_) continue;
             Identity identity;
-            if (!readIdentity(entry.th32ProcessID, identity)) {
-                const DWORD failure = error_; CloseHandle(snapshot);
-                return {ScanState::Unknown, {}, failure};
-            }
-            if (found || _wcsicmp(identity.path.c_str(), executable_.c_str()) != 0) {
-                CloseHandle(snapshot); return {ScanState::Conflict, {}, 0};
-            }
+            if (!readIdentity(entry.pid, identity)) return {ScanState::Unknown, {}, error_};
+            if (found || _wcsicmp(identity.path.c_str(), executable_.c_str()) != 0)
+                return {ScanState::Conflict, {}, 0};
             found = true; exact = std::move(identity);
-        } while (Process32NextW(snapshot, &entry));
-        const DWORD finished = GetLastError(); CloseHandle(snapshot);
-        if (finished != ERROR_NO_MORE_FILES) return {ScanState::Unknown, {}, finished};
+        }
         return {found ? ScanState::Exact : ScanState::Absent, std::move(exact), 0};
     }
     bool matches(const Identity& before) {
@@ -111,19 +102,30 @@ public:
 private:
     static std::uint64_t ticks(const FILETIME& value) { return (std::uint64_t(value.dwHighDateTime) << 32) | value.dwLowDateTime; }
     bool readIdentity(DWORD pid, Identity& identity) {
-        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
-        if (!process) { error_ = GetLastError(); return false; }
+        const auto fail = [this](DWORD error) { error_ = error ? error : ERROR_GEN_FAILURE; return false; };
+        ymcc::processInventory::detail::SnapshotHandle process(
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid));
+        if (!process.get()) return fail(GetLastError());
+        const auto live = [&] {
+            const DWORD wait = WaitForSingleObject(process.get(), 0);
+            return wait == WAIT_TIMEOUT || fail(wait == WAIT_FAILED ? GetLastError() : ERROR_PROCESS_ABORTED);
+        };
+        if (!live()) return false;
+        const DWORD heldPid = GetProcessId(process.get());
+        if (!heldPid) return fail(GetLastError());
+        if (heldPid != pid) return fail(ERROR_INVALID_DATA);
+        DWORD heldSession = 0;
+        if (!ProcessIdToSessionId(heldPid, &heldSession)) return fail(GetLastError());
+        if (heldSession != session_) return fail(ERROR_INVALID_DATA);
         std::vector<wchar_t> image(32768); DWORD size = static_cast<DWORD>(image.size());
         FILETIME created{}, exited{}, kernel{}, user{};
-        const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-        const bool queried = alive && QueryFullProcessImageNameW(process, 0, image.data(), &size) &&
-            GetProcessTimes(process, &created, &exited, &kernel, &user) &&
-            WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-        if (!queried) error_ = GetLastError();
-        CloseHandle(process);
-        if (!queried) return false;
-        identity = {pid, ticks(created), std::wstring(image.data(), size)};
-        return identity.created != 0;
+        if (!QueryFullProcessImageNameW(process.get(), 0, image.data(), &size) ||
+            !GetProcessTimes(process.get(), &created, &exited, &kernel, &user)) return fail(GetLastError());
+        if (!live()) return false;
+        const auto birth = ticks(created);
+        if (!birth) return fail(ERROR_INVALID_DATA);
+        identity = {heldPid, birth, std::wstring(image.data(), size)};
+        return true;
     }
     std::wstring executable_;
     Ready ready_;

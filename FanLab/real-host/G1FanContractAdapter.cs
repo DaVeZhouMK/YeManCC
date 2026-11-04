@@ -5,10 +5,12 @@ using System.Reflection;
 namespace YeManFanHost;
 internal static class G1FanContractAdapter
 {
-    internal const string UpstreamCommit = "9333ba47e16ea9a0dd5d73b38a679cc041fa38f5";
-    // PE metadata of the deployed 0C5132A9... HC. This is a cheap loaded-module check;
-    // the existing deployment boundary still owns full file hashing/authorization.
+    internal const string UpstreamCommit = "f2e58468d9917189d4be7ccfc242385ce2c3035b";
+    // Exact modules witnessed from the retained candidate 0C5132A9 and shipping 08A38660.
+    // This is a cheap loaded-module check after the original deployment identity gate;
+    // it never replaces full file hashing/authorization or admits other HC builds.
     internal static readonly Guid PinnedHcMvid = new("12247d92-9727-45a3-9934-dbfcb914ea90");
+    internal static readonly Guid ShippingHcMvid = new("80cb2df3-7340-9bd5-a675-3df4f6dc631d");
     private const string EcWriter = "HandheldCompanion.Devices.OneXAOKZOE";
     private static readonly string[] Fields = ["AddressFanControl", "AddressFanDuty",
         "AddressStatusCommandPort", "AddressDataPort", "FanValueMin", "FanValueMax"];
@@ -37,21 +39,37 @@ internal static class G1FanContractAdapter
     {
         completed = observed;
         if (declared != true || !CanComplete(observed)) return false;
-        var type = device.GetType();
-        if (type.FullName != observed!.FactoryType || type.Module.ModuleVersionId != PinnedHcMvid)
-            return false;
-        var field = type.GetField("ECDetails", BindingFlags.Instance | BindingFlags.Public);
-        if (field?.DeclaringType?.FullName != "HandheldCompanion.Devices.IDevice"
-            || field.FieldType.FullName != "HandheldCompanion.Devices.ECDetails"
-            || field.FieldType.Assembly != type.Assembly
-            || type.GetMethod("SetFanControl", [typeof(bool), typeof(int)])?.DeclaringType?.FullName != EcWriter
-            || type.GetMethod("SetFanDuty", [typeof(double)])?.DeclaringType?.FullName != EcWriter)
-            return false;
+        var field = CompletionField(device.GetType(), observed!.FactoryType);
+        if (field is null) return false;
         var expected = Expected(observed.FactoryType)!;
         if (!TrySetEmptyDetails(device, field, expected)) return false;
         completed = expected;
         return true;
     }
+
+    // Resolve the same field used by TryComplete, without constructing a device or
+    // reading instance state. Both approved images must satisfy the full owner ABI.
+    internal static FieldInfo? CompletionField(Type type, string factory)
+    {
+        if (Expected(factory) is null || type.FullName != factory
+            || type.Assembly.GetName().Name != "HandheldCompanion"
+            || type.Module != type.Assembly.ManifestModule
+            || (type.Module.ModuleVersionId != PinnedHcMvid
+                && type.Module.ModuleVersionId != ShippingHcMvid)) return null;
+        var field = type.GetField("ECDetails", BindingFlags.Instance | BindingFlags.Public);
+        if (field is null || field.IsStatic || field.IsInitOnly || !field.FieldType.IsValueType
+            || field.DeclaringType?.FullName != "HandheldCompanion.Devices.IDevice"
+            || field.DeclaringType.Assembly != type.Assembly || field.DeclaringType.Module != type.Module
+            || field.FieldType.FullName != "HandheldCompanion.Devices.ECDetails"
+            || field.FieldType.Assembly != type.Assembly || field.FieldType.Module != type.Module
+            || !IsOwnedWriter(type.GetMethod("SetFanControl", [typeof(bool), typeof(int)]), type)
+            || !IsOwnedWriter(type.GetMethod("SetFanDuty", [typeof(double)]), type)) return null;
+        return field;
+    }
+    private static bool IsOwnedWriter(MethodInfo? method, Type deviceType) => method is not null
+        && !method.IsStatic && !method.IsAbstract && !method.IsGenericMethod
+        && method.ReturnType == typeof(void) && method.DeclaringType?.FullName == EcWriter
+        && method.DeclaringType.Assembly == deviceType.Assembly && method.Module == deviceType.Module;
 
     // Reflection is restricted to a public six-field value type. Stage a boxed copy,
     // validate EVERY member first, then assign once and read back. No method invoked.

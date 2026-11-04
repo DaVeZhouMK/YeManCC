@@ -1,5 +1,5 @@
-[CmdletBinding()]
-param([string]$OutputRoot='',[string]$ProductSourceRoot='')
+﻿[CmdletBinding()]
+param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly)
 $ErrorActionPreference='Stop'
 
 # Windows PowerShell launched by pnpm/pwsh must resolve its own built-in modules first.
@@ -16,6 +16,11 @@ if (!$run.StartsWith($base+'\',[StringComparison]::OrdinalIgnoreCase)) {throw 'U
 $probe=$base
 while($probe -and $probe.Length -gt 3){if(Test-Path -LiteralPath $probe){if((Get-Item -LiteralPath $probe -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'REPARSE_TEST_ROOT'}};$probe=Split-Path -Parent $probe}
 New-Item -ItemType Directory -Path $run -Force|Out-Null
+$identityNames=@('native/main.cpp','native/update_config_state.h','native/update_download_resume.h','native/update_download_control.h','native/update_cache_maintenance.h','native/update_install_recovery.h','native/version.h','native/shared_game_media_capacity.h','deps/json/json.hpp')
+$sourceBefore=[ordered]@{}
+foreach($name in $identityNames){$candidate=Join-Path $project $name;if(Test-Path -LiteralPath $candidate -PathType Leaf){$sourceBefore[$name]=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash}}
+$sourceBefore['harness']=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
+$sourceBefore['template']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'updater_resume_native_fixture.cpp') -Algorithm SHA256).Hash
 $main=[IO.File]::ReadAllText((Join-Path $project 'native\main.cpp'))
 $fixture=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'updater_resume_native_fixture.cpp'))
 function Slice([string]$Start,[string]$End){$a=$main.IndexOf($Start);$b=$main.IndexOf($End,$a+1);if($a -lt 0 -or $b -le $a){throw ('PRODUCTION_BOUNDARY_MISSING '+$Start)};return $main.Substring($a,$b-$a)}
@@ -43,6 +48,19 @@ $handler=$main.Substring($a+$start.Length,$b-$a-$start.Length)
 $handler=[regex]::Replace($handler,'\s*\}\);\s*$','')
 $fixture=$fixture.Replace('//__PRODUCTION_UPDATE_HANDLER__',$handler)
 $fixture=$fixture.Replace('//__PRODUCTION_PREDOWNLOAD_POLICY__',(Slice '// Dedicated updater policy;' 'static void reg_updater()'))
+# Same production file readers and state projection, independent of the normal
+# downloader's in-memory progress port. Only protected-journal IO is inert.
+$stateFunctions=Slice 'static json updateProgressRead() {' 'static void ipc_dispatch('
+$stateFunctions=$stateFunctions.Replace('updateProgressRead','fixtureActualProgressRead').Replace('updateTransactionStateRead','fixtureActualTransactionRead').Replace('updateStateReadWithTransaction','fixtureActualStateRead')
+$stateFunctions=$stateFunctions.Replace('ymcc::updaterecovery::read(','fixtureRecoveryRead(')
+$fixture=$fixture.Replace('//__PRODUCTION_CONFIG_READERS__',$stateFunctions)
+$snapshotWriter=Slice 'static void updateProgressPost(const json& data) {' 'static json updateProgressRead() {'
+$fixture=$fixture.Replace('//__PRODUCTION_CONFIG_WRITER__',$snapshotWriter.Replace('updateProgressPost','fixtureActualProgressPost'))
+$atomicWriter=Slice 'bool sgWriteFileAtomicFlags(const std::wstring& path, const std::string& content, bool durable) {' 'static bool sgWriteFileAtomic(const std::wstring& path, const std::string& content) {'
+$fixture=$fixture.Replace('//__PRODUCTION_ATOMIC_WRITER__',$atomicWriter.Replace('sgWriteFileAtomicFlags','fixtureAtomicFlags'))
+
+
+
 $fixture=$fixture.Replace('//__PRODUCTION_PREDOWNLOAD_REGISTRATION__',(Slice '    ipc_on("app.updatePredownloadActivity"' '    ipc_on("app.version"'))
 $fixture=$fixture.Replace('//__PRODUCTION_CACHE_REGISTRATION__',(Slice '    ipc_on("app.retireUpdateDownload"' '    ipc_on("app.downloadUpdate"'))
 $source=Join-Path $run 'updater-resume-selftest.cpp'
@@ -50,14 +68,23 @@ $source=Join-Path $run 'updater-resume-selftest.cpp'
 $vcvars='C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
 if (!(Get-Command cl.exe -ErrorAction SilentlyContinue) -and !(Test-Path -LiteralPath $vcvars)) { throw 'MSVC_TOOLCHAIN_UNAVAILABLE' }
 $bat=Join-Path $run 'compile-and-test.bat'
+$toolchainLine=''
+if($env:YMCC_NATIVE_TOOLCHAIN_CMD){
+  $toolchain=[IO.Path]::GetFullPath($env:YMCC_NATIVE_TOOLCHAIN_CMD)
+  if(!(Test-Path -LiteralPath $toolchain -PathType Leaf)){throw 'DECLARED_TOOLCHAIN_MISSING'}
+  $toolchainLine='call "'+$toolchain+'" >nul'
+}
+
 @"
 @echo off
+$toolchainLine
+if errorlevel 1 exit /b 1
 where cl.exe >nul 2>nul
 if errorlevel 1 call "$vcvars" >nul
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++20 /utf-8 /EHsc /W4 /MT /I"$project\deps\json" /I"$project\native" "$source" /Fo"$run\updater-resume-selftest.obj" /Fe"$run\updater-resume-selftest.exe" /link advapi32.lib user32.lib
 if errorlevel 1 exit /b 1
-"$run\updater-resume-selftest.exe" "$run\fixtures"
+"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}else{''})
 "@ | Set-Content -LiteralPath $bat -Encoding ascii
 & $bat *> (Join-Path $run 'compile-and-test.log')
 $code=$LASTEXITCODE
@@ -65,6 +92,15 @@ Get-Content -LiteralPath (Join-Path $run 'compile-and-test.log') -Tail 12
 $record=@{status=$(if($code -eq 0){'PASS'}else{'FAIL'});exit=$code;evidence=$run;mainSourceSha256=(Get-FileHash -LiteralPath (Join-Path $project 'native\main.cpp')).Hash;policySha256=(Get-FileHash -LiteralPath (Join-Path $project 'native\update_download_resume.h')).Hash;scope='No hardware or network/product operation; extracted production native logic with inert WinHTTP transport'}
 $record['productSourceRoot']=$project;$record['harnessSha256']=(Get-FileHash -LiteralPath $PSCommandPath).Hash;$record['templateSha256']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'updater_resume_native_fixture.cpp')).Hash
 $record['versionAdmission']='Actual version/parser/repair-admission source with the two protected-journal reads supplied by a scoped inert fixture; actual authorizes/live functions and version.h compiled.'
+$sourceAfter=[ordered]@{};$sourceDrift=@()
+foreach($name in $identityNames){$candidate=Join-Path $project $name;if(Test-Path -LiteralPath $candidate -PathType Leaf){$sourceAfter[$name]=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash}}
+$sourceAfter['harness']=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
+$sourceAfter['template']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'updater_resume_native_fixture.cpp') -Algorithm SHA256).Hash
+foreach($name in $sourceBefore.Keys){if($sourceAfter[$name] -ne $sourceBefore[$name]){$sourceDrift+=$name}}
+$record['sourceInputsBefore']=$sourceBefore;$record['sourceInputsAfter']=$sourceAfter;$record['sourceDrift']=$sourceDrift;$record['configurationOnly']=[bool]$ConfigStormOnly
+if($toolchainLine){$record['toolchainPath']=$toolchain;$record['toolchainSha256']=(Get-FileHash -LiteralPath $toolchain -Algorithm SHA256).Hash}
+if($sourceDrift.Count){$record['status']='SOURCE_DRIFT';if(!$code){$code=1}}
+
 $record|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $run 'run.json') -Encoding UTF8
 Write-Output ('UPDATER_RESUME_TEST_EVIDENCE='+$run)
 if($code){throw ('UPDATER_RESUME_NATIVE_TEST_FAILED '+$code)}

@@ -3,9 +3,8 @@ $script:TrainerCatalogMemory = @{}
 function Test-GcmCatalogRows($Rows, [string]$Kind) {
     if ($Rows -isnot [array] -or $Rows.Count -eq 0 -or $Rows.Count -gt 100000) { return $false }
     foreach ($row in $Rows) {
-        if ($Kind -eq 'translations.json') {
-            if (-not ([string](Get-TrainerProperty $row 'en_US' '')).Trim()) { return $false }
-        } elseif (-not ([string](Get-TrainerProperty $row 'game_name' '')).Trim()) { return $false }
+        $field=if($Kind -eq 'translations.json'){'en_US'}else{'game_name'}
+        if($null -eq $row -or $null -eq $row.PSObject.Properties[$field] -or $row.$field -isnot [string] -or -not $row.$field.Trim()){return $false}
     }
     return $true
 }
@@ -15,18 +14,20 @@ function Get-GcmCatalogRows([string]$DatabasePath, [string]$Name) {
     $snapshot = Join-Path $DatabasePath ('ymcc-validated\' + $Name)
     try {
         Assert-TrainerNotReparse $DatabasePath
-        if (-not [IO.File]::Exists($path) -or (Get-Item -LiteralPath $path).Length -gt 8388608) { throw 'GCM 数据文件不可用' }
-        $raw = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
-        if (-not $raw.TrimStart().StartsWith('[')) { throw 'GCM 数据根格式发生变化' }
-        # Re-read bytes on every lookup; reuse parsing only when the actual content is identical.
-        $contentHash = Get-TrainerHash $raw
+        $sourceBytes=Get-TrainerJsonBytes $path
+        if(-not $sourceBytes.exists){throw 'GCM 数据文件不可用'}
+        $raw=(New-Object Text.UTF8Encoding($false,$true)).GetString($sourceBytes.bytes).TrimStart([char]0xFEFF)
+        if(-not $raw.TrimStart().StartsWith('[')){throw 'GCM 数据根格式发生变化'}
+        # Parsing, cache identity and snapshot provenance use the same bounded bytes.
+        $contentHash=$sourceBytes.hash
         $cacheKey = [IO.Path]::GetFullPath($path).ToLowerInvariant()
         if ($script:TrainerCatalogMemory.ContainsKey($cacheKey) -and $script:TrainerCatalogMemory[$cacheKey].hash -eq $contentHash) { return $script:TrainerCatalogMemory[$cacheKey].rows }
         # Enumerate once to remove PS 5.1's decorated JSON-array wrapper before snapshotting.
-        $rows = @($raw | ConvertFrom-Json | ForEach-Object { $_ })
+        $rows = @(ConvertFrom-TrainerJsonBytes $sourceBytes $path | ForEach-Object { $_ })
         if (-not (Test-GcmCatalogRows $rows $Name)) { throw 'GCM 数据格式发生变化或数据不完整' }
-        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-        $previous = Read-TrainerJson $snapshot
+        $hash=$sourceBytes.hash
+        $previous=$null
+        try{$previous=Read-TrainerJson $snapshot}catch{if($_.Exception.Data['ymccTrainerJson'] -ne 'corrupt'){throw}}
         if (-not $previous -or (Get-TrainerProperty $previous 'sourceSha256' '') -ne $hash -or -not (Test-GcmCatalogRows @(Get-TrainerProperty $previous 'rows') $Name)) {
             Write-TrainerJson $snapshot @{schema=1;sourceSha256=$hash;importedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();rows=$rows}
         }
@@ -80,7 +81,11 @@ function Update-TrainerPublicCatalog($Context, [string]$LibraryRoot, [string]$Da
         if ((Get-TrainerProperty $saved 'schema' 0) -ne 1) { throw '后台数据更新记录无效，未重置下载额度' }
         if ($null -eq $saved.PSObject.Properties['attempts'] -or $saved.attempts -isnot [array] -or
             $null -eq $saved.PSObject.Properties['nextCheckAt'] -or $null -eq $saved.PSObject.Properties['lastSuccessAt'] -or $null -eq $saved.PSObject.Properties['etag']) { throw '后台数据记录不完整，未重置下载额度' }
+        $integer={param($value) ($value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]) -and -not [double]::IsNaN([double]$value) -and -not [double]::IsInfinity([double]$value) -and [Math]::Floor([double]$value) -eq [double]$value}
+        foreach($field in @('nextCheckAt','lastSuccessAt')){if(-not (& $integer $saved.$field) -or [double]$saved.$field -lt 0){throw '后台数据时间字段类型无效，未重置下载额度'}}
+        if($saved.etag -isnot [string]){throw '后台数据标签类型无效，未重置下载额度'}
         foreach ($entry in $saved.attempts) {
+            if(-not (& $integer $entry.at) -or -not (& $integer $entry.chargedBytes)){throw '后台数据计费字段类型无效，未重置下载额度'}
             if ($null -eq $entry.PSObject.Properties['at'] -or $null -eq $entry.PSObject.Properties['chargedBytes'] -or
                 [long]$entry.at -le 0 -or [long]$entry.chargedBytes -lt 0) { throw '后台数据预算记录无效，未重置下载额度' }
         }
@@ -88,7 +93,7 @@ function Update-TrainerPublicCatalog($Context, [string]$LibraryRoot, [string]$Da
         $state.attempts = @(Get-TrainerProperty $saved 'attempts' @() | ForEach-Object { ConvertTo-TrainerMap $_ })
     }
     $oldCatalog = $null
-    try { $oldCatalog = Read-TrainerJson $catalogPath } catch { }
+    try { $oldCatalog = Read-TrainerJson $catalogPath } catch { if($_.Exception.Data['ymccTrainerJson'] -ne 'corrupt'){throw} }
     $hasCatalog = $oldCatalog -and (Get-TrainerProperty $oldCatalog 'schema' 0) -eq 1 -and (Test-GcmCatalogRows @(Get-TrainerProperty $oldCatalog 'rows') 'fling_main.json')
     if ([long]$state.nextCheckAt -gt $now) {
         return @{updated=$false;available=[bool]$hasCatalog;nextCheckAt=$state.nextCheckAt;imports=$imports;reason='cooldown'}
@@ -144,7 +149,8 @@ function Invoke-TrainerDataRefresh {
     Assert-TrainerNotReparse $CacheRoot
     $ResultPath = Assert-TrainerChild $ResultPath (Join-Path $CacheRoot 'requests')
     if ($RequestId -notmatch '^[a-zA-Z0-9-]{10,80}$' -or [IO.Path]::GetFileName($ResultPath) -ne ($RequestId+'.json')) { throw '数据更新任务身份无效' }
-    $context = @{GameName='YMCC Trainer Catalog';RequestId=$RequestId;ResultPath=$ResultPath;CancelPath=$ResultPath+'.cancel';Deadline=[DateTime]::UtcNow.AddSeconds(45)}
+    $requestBinding=Get-TrainerRequestBinding $ResultPath $RequestId
+    $context = @{RequestBinding=$requestBinding;GameName='YMCC Trainer Catalog';RequestId=$RequestId;ResultPath=$ResultPath;CancelPath=$ResultPath+'.cancel';Deadline=[DateTime]::UtcNow.AddSeconds(45)}
     $owned=$false;$mutex=$null
     try {
         $library = Get-GcmTrainerRoot $GcmSettingsRoot $GcmDefaultRoot

@@ -54,6 +54,7 @@ struct MsiNativeForegroundLease {
     std::vector<NativeForegroundRefreshTarget> refreshTargets;
     std::size_t nextRefreshTarget=0;
     bool refreshSeriesActive=false;
+    bool nativeRootPortCycle=false; // ROG: existing exact-root USB CyclePort helper
     uint64_t refreshPlanAttemptEdge=0;
     bool refreshPlanForRestore=false;
     bool active=false,cloakChanged=false,restorePending=false,cycleForRestore=false;
@@ -87,7 +88,7 @@ struct MsiNativeForegroundLease {
     HidHideVisibilitySnapshot before;
     std::vector<std::wstring> diagnosticSelectedPaths;
     bool diagnosticSelectedPathsComplete=false;
-    json diagnosticBeforeConfiguration,diagnosticReturnConfiguration; // null = not captured, no proof
+    json diagnosticBeforeConfiguration,diagnosticHiddenConfiguration,diagnosticReturnConfiguration; // null = not captured, no proof
     HANDLE cycleProcess=nullptr;
     std::unique_ptr<ymcc::nativeRefreshWriter::LaunchScope> nativeRefreshWriter; // GPD only, same root owner
     json nativeRefreshWriterDiagnostic;
@@ -121,7 +122,12 @@ struct MsiNativeForegroundTestIo {
     std::function<std::vector<HidHideInterfaceRecord>(const HidHidePhysicalIdentity&)> inventory;
     std::function<MsiNativeForegroundXusbInventory(const HidHidePhysicalIdentity&)> xusbInventory;
     std::function<bool(HidHideVisibilitySnapshot&)> snapshot;
+    std::function<ULONGLONG()> clock;
+    std::function<bool()> readerExemption;
+    std::function<bool()> readerInverseOff;
     std::function<bool(const std::wstring&,bool)> visibility;
+    std::function<bool(const HidHidePhysicalIdentity&,const std::vector<std::string>&,const HidHideVisibilitySnapshot&)> durableHide;
+    std::function<void(const HidHideVisibilitySnapshot&)> durableReturn;
     std::function<bool()> inventoryComplete;
     std::function<int(const HidHidePhysicalIdentity&,const std::wstring&)> gameRefresh;
     std::function<int(const HidHidePhysicalIdentity&,const std::wstring&)> xusbRefresh;
@@ -143,11 +149,51 @@ struct MsiNativeForegroundTestIo {
 };
 static MsiNativeForegroundTestIo g_msiNativeForegroundTestIo;
 #endif
+struct MsiNativeForegroundRetry {
+    uint64_t power=0,edge=0;
+    ULONGLONG started=0,due=0;
+    unsigned attempts=0;
+};
+static MsiNativeForegroundRetry g_msiNativeForegroundRetry;
+static ULONGLONG msiNativeForegroundRetryTick() {
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    if(g_msiNativeForegroundTestIo.clock)return g_msiNativeForegroundTestIo.clock();
+#endif
+    return GetTickCount64();
+}
+static void msiNativeForegroundScheduleRetryLocked() {
+    if(nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Msi)return;
+    auto& retry=g_msiNativeForegroundRetry;
+    const auto power=currentPowerGeneration(),edge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
+    const auto now=msiNativeForegroundRetryTick();
+    if(retry.power!=power || retry.edge!=edge)retry={power,edge,now,0,0};
+    if(retry.due || retry.attempts>=5 || now<retry.started || now-retry.started>=30000)return;
+    retry.due=now+(1000ULL<<retry.attempts);
+}
+static ymcc::msi::NativeForegroundFacts msiNativeForegroundFacts();
+static bool msiNativeForegroundRepairReaderLocked(uint64_t power,uint64_t edge) {
+    const auto current=[&] {
+        const auto facts=msiNativeForegroundFacts();
+        return hardwareWriteAllowed() && ymcc::msi::nativeForegroundMayEnter(facts) &&
+            facts.currentPower==power && facts.currentEdge==edge;
+    };
+    if(!current())return false;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    if(!g_msiNativeForegroundTestIo.readerInverseOff || !g_msiNativeForegroundTestIo.readerInverseOff() || !current())return false;
+    return g_msiNativeForegroundTestIo.readerExemption && g_msiNativeForegroundTestIo.readerExemption();
+#else
+    std::string inverse;DWORD exit=ERROR_GEN_FAILURE;
+    if(!hidHideRun(L"--inv-state",&inverse,&exit) || exit!=ERROR_SUCCESS ||
+        hidHideInverseApplicationListState(inverse)!="off" || !current())return false;
+    const auto module=hidHideCurrentModulePath();
+    return !module.empty() && hidHideRun(L"--app-reg \""+module+L"\"");
+#endif
+}
 static bool msiNativeForegroundUiEligible() {
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
-    if(g_msiNativeForegroundTestIo.ui) return g_msiNativeForegroundTestIo.ui();
+    if(g_msiNativeForegroundTestIo.ui) return g_controllerFrontendIsolationEnabled.load(std::memory_order_acquire) && g_msiNativeForegroundTestIo.ui();
 #endif
-    return gamepadUiInputEligible(); // the SAME authoritative boundary, never an MSI alternative
+    return gamepadUiOutputIsolationEligible(); // the SAME authoritative boundary, never an MSI alternative
 }
 static bool msiNativeForegroundSnapshot(HidHideVisibilitySnapshot& snapshot) {
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
@@ -194,6 +240,24 @@ static bool msiNativeForegroundVisibility(const std::wstring& path,bool hide) {
 #endif
     return hidHideRun(std::wstring(hide?L"--dev-hide \"":L"--dev-unhide \"")+path+L"\"");
 }
+static bool msiNativeForegroundDurableHide(const HidHidePhysicalIdentity& source,
+        const std::vector<std::string>& targets,const HidHideVisibilitySnapshot& before) {
+    if(nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Msi)return true;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    return !g_msiNativeForegroundTestIo.durableHide || g_msiNativeForegroundTestIo.durableHide(source,targets,before);
+#else
+    return msiCrashRecoveryBeforeNativeHide(source,targets,before,"native-foreground:"+
+        std::to_string(g_msiNativeForegroundLease.power)+":"+std::to_string(g_msiNativeForegroundLease.edge));
+#endif
+}
+static void msiNativeForegroundDurableReturn(const HidHideVisibilitySnapshot& returned) {
+    if(nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Msi)return;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    if(g_msiNativeForegroundTestIo.durableReturn)g_msiNativeForegroundTestIo.durableReturn(returned);
+#else
+    msiCrashRecoveryAfterOwnedRestore(returned,returned.valid);
+#endif
+}
 static bool msiNativeForegroundCloak(bool enabled) {
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
     if(g_msiNativeForegroundTestIo.cloak) return g_msiNativeForegroundTestIo.cloak(enabled);
@@ -227,18 +291,23 @@ static json msiNativeForegroundConfigurationEvidence(const HidHideVisibilitySnap
     } catch(...) { return nullptr; }
 }
 static void msiNativeForegroundReceipt(const char* phase,const char* reason) {
+    if(strcmp(phase,"restore-failed")==0 || strcmp(phase,"deferred")==0)msiNativeForegroundScheduleRetryLocked();
+    else if(strcmp(phase,"restored")==0 || strcmp(phase,"config-cycle-accepted")==0)g_msiNativeForegroundRetry.due=0;
     const auto& s=g_msiNativeForegroundLease; // caller owns native lease lock
     json targets=json::array(),locations=json::array();
     for(const auto& path:s.owned)targets.push_back(W2U(path));
     for(const auto& path:s.locations)locations.push_back(W2U(path));
     appendNativeLifecycleLog(s.profile==ymcc::nativeForeground::Profile::Msi?"msi-native-foreground-isolation":"native-foreground-isolation",{
-        {"family",ymcc::nativeForeground::name(s.profile)},{"rootPortCycleAllowed",s.profile==ymcc::nativeForeground::Profile::Msi || s.postHideCycle},
+        {"family",ymcc::nativeForeground::name(s.profile)},{"rootPortCycleAllowed",s.profile==ymcc::nativeForeground::Profile::Msi || s.postHideCycle || s.nativeRootPortCycle},
         {"refreshSeriesActive",s.refreshSeriesActive},{"refreshTargetIndex",s.nextRefreshTarget},{"refreshTargetCount",s.refreshTargets.size()},
         {"phase",phase},{"reason",reason},{"virtualTargetCreated",false},{"modeWrite",false},
+        {"selfHealAttempts",g_msiNativeForegroundRetry.attempts},{"selfHealDueTick",g_msiNativeForegroundRetry.due},
+        {"selfHealMaxAttempts",5},{"selfHealMaxMs",30000},
+        {"isolationMode",s.nativeRootPortCycle?"visibility-and-root-port-cycle":"visibility-and-device-refresh"},
         {"edge",s.edge},{"powerGeneration",s.power},{"sourceRoot",s.root},
         {"ownedPaths",targets},{"locationPaths",locations},{"cycleAccepted",s.cycleAccepted},
         {"xusbGameTargets",s.xusbTargets},{"xusbTargetEvidence","active-XUSB-interface-and-exact-PnP-ancestor"},
-        {"helperOperation",s.postHideCycle?"selected-xusb-post-hide-port-cycle":s.helperGameTarget.empty()?"physical-root-cycle":s.helperXusbTarget?"xusb-game-interface-refresh":"game-interface-refresh"},
+        {"helperOperation",s.nativeRootPortCycle?"verified-physical-root-port-cycle":s.postHideCycle?"selected-xusb-post-hide-port-cycle":s.helperGameTarget.empty()?"physical-root-cycle":s.helperXusbTarget?"xusb-game-interface-refresh":"game-interface-refresh"},
         {"helperGameTarget",s.helperGameTarget},{"gameSourceAttemptCount",s.gameSourceAttempts.size()},
         {"postHideCycle",s.postHideCycle},{"postHideTicket",s.postHideTicket},
         {"postHideTerminalTick",s.postHideTerminalTick},{"postHideSourceBaselineSequence",s.postHideBaselineSequence},
@@ -247,7 +316,7 @@ static void msiNativeForegroundReceipt(const char* phase,const char* reason) {
         {"externalSuppressionVerified",false},
         {"gameSourceCandidate",s.gameSourceCandidate},{"gameSourceCacheGeneration",s.gameSourceCacheGeneration},
         {"virtualHandoffHeld",s.virtualHandoffHeld},{"virtualHandoffRequest",s.virtualHandoffRequest},
-        {"configurationReturned",s.configurationReturned},{ "beforeConfigurationEvidence",s.diagnosticBeforeConfiguration},{"returnConfigurationEvidence",s.diagnosticReturnConfiguration},{"refreshFailed",s.refreshFailed},
+        {"configurationReturned",s.configurationReturned},{ "beforeConfigurationEvidence",s.diagnosticBeforeConfiguration},{"hiddenConfigurationEvidence",s.diagnosticHiddenConfiguration},{"returnConfigurationEvidence",s.diagnosticReturnConfiguration},{"refreshFailed",s.refreshFailed},
         {"helperPending",g_msiNativeForegroundCyclePending.load(std::memory_order_acquire)},
         {"helperExitCode",s.helperExitCode},{"helperError",s.helperError},{"helperFailure",s.helperFailure},
         {"helperDiagnostic",s.helperDiagnostic},{"nativeRefreshWriter",s.nativeRefreshWriterDiagnostic},
@@ -561,6 +630,9 @@ static int msiNativeForegroundPollCycleLocked();
 static bool msiPostHideContextCurrentLocked();
 static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalIdentity* gameSource=nullptr,bool xusbSource=false) {
     auto& s=g_msiNativeForegroundLease;
+    if(s.nativeRootPortCycle && gameSource){
+        msiNativeForegroundReceipt("refresh-deferred","root-cycle-owner-cannot-refresh-a-hid-leaf");return 2;
+    }
     // The leaf owns unresolved helper lifetime as well as its callers. A second
     // request must not replace its target, direction, hashes or evidence before
     // the existing lifecycle poll consumes this same operation's terminal state.
@@ -579,8 +651,14 @@ static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalId
         s.helperFailure="rog-hid-game-node-refresh-unvalidated";
         msiNativeForegroundReceipt("refresh-deferred",s.helperFailure.c_str());return 2;
     }
-    if(!gameSource && s.profile!=ymcc::nativeForeground::Profile::Msi){s.helperFailure="root-port-cycle-not-admitted";return 2;}
+    if(!gameSource && s.profile!=ymcc::nativeForeground::Profile::Msi &&
+        !(s.nativeRootPortCycle && ymcc::nativeForeground::nativeRootPortCycleAllowed(s.profile,s.root))){
+        s.helperFailure="root-port-cycle-not-admitted";return 2;
+    }
     if(s.locations.empty()){s.helperFailure="helper-location-missing";return 2;}
+    if(s.nativeRootPortCycle && !restoring && !msiNativeForegroundLeaseCurrent()){
+        s.helperFailure="native-root-cycle-context-ended";return 2;
+    }
     s.cycleForRestore=restoring;s.cycleIssued=true;s.cycleAccepted=false;
     s.refreshAttemptEdge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
     if(s.postHideCycle && !msiPostHideContextCurrentLocked()){s.helperFailure="post-hide-context-ended-before-helper";return 2;}
@@ -615,11 +693,20 @@ static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalId
     s.helperExePath=W2U(exe);s.helperExeSha256=sha256File(exe);
     s.helperDllPath=W2U(fspath::path(exe).replace_extension(L".dll").wstring());
     s.helperDllSha256=sha256File(U2W(s.helperDllPath));
+    if(s.nativeRootPortCycle && !restoring && !msiNativeForegroundLeaseCurrent()){
+        s.helperFailure="native-root-cycle-context-ended-after-identity-capture";return 2;
+    }
     const std::wstring root=U2W(s.root),location=s.locations.front();
     if(root.find(L'"')!=std::wstring::npos || location.find(L'"')!=std::wstring::npos){s.helperFailure="invalid-cycle-arguments";return 2;}
     auto command=L"\""+exe+L"\" --msi-native-cycle \""+root+L"\" --location \""+location+
         L"\" --parent-pid "+std::to_wstring(GetCurrentProcessId())+L" --once";
-    if(gameSource){
+    if(s.nativeRootPortCycle){
+        if(s.xusbTargets.empty()){s.helperFailure="root-cycle-current-xusb-target-missing";return 2;}
+        const auto target=U2W(s.xusbTargets.front());
+        if(target.find(L'"')!=std::wstring::npos){s.helperFailure="invalid-root-cycle-target";return 2;}
+        s.helperGameTarget=s.xusbTargets.front();s.helperXusbTarget=true;
+        command+=L" --rog-native-xusb-root-cycle \""+target+L"\"";
+    }else if(gameSource){
         const auto target=U2W(gameSource->deviceInstanceId);
         if(target.find(L'"')!=std::wstring::npos){s.helperFailure="invalid-game-refresh-arguments";return 2;}
         command+=(s.postHideCycle?L" --game-xusb-cycle \"":xusbSource?L" --game-xusb \"":L" --game-hid \"")+target+L"\"";
@@ -639,7 +726,7 @@ static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalId
     const auto dir=fspath::path(exe).parent_path().wstring();
     // Optional evidence; an unavailable sink preserves the original launch.
     std::unique_ptr<ymcc::input::OneShotHelperDiagnostic> capture;
-    try {if(gameSource){capture=std::make_unique<ymcc::input::OneShotHelperDiagnostic>();if(!capture->prepare())capture.reset();}}catch(...){capture.reset();}
+    try {if(gameSource || s.nativeRootPortCycle){capture=std::make_unique<ymcc::input::OneShotHelperDiagnostic>();if(!capture->prepare())capture.reset();}}catch(...){capture.reset();}
     if(s.profile==ymcc::nativeForeground::Profile::Gpd){
         // A GPD refresh may still be returning a disabled node after native
         // death. No kill-on-close, no post-create association, no bare fallback.
@@ -739,6 +826,12 @@ static int msiNativeForegroundPollCycleLocked() {
 }
 static int nativeForegroundRefreshLocked(bool restoring) {
     auto& lease=g_msiNativeForegroundLease;
+    if(lease.nativeRootPortCycle){
+        lease.refreshPlanAttemptEdge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
+        lease.refreshPlanForRestore=restoring;
+        if(!ymcc::nativeForeground::nativeRootPortCycleAllowed(lease.profile,lease.root))return 2;
+        return msiNativeForegroundCycleLocked(restoring);
+    }
     if(lease.profile==ymcc::nativeForeground::Profile::Msi)return msiNativeForegroundCycleLocked(restoring);
     if(g_msiNativeForegroundCyclePending)return 1;
     lease.refreshPlanAttemptEdge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
@@ -1078,12 +1171,13 @@ static bool msiNativeForegroundRestoreLocked(const char* reason) {
     s.restorePending=true;
     if(!s.configurationReturned){
         HidHideVisibilitySnapshot before;
-        if(!msiNativeForegroundSnapshot(before)){msiNativeForegroundReceipt("restore-failed","visibility-query-failed");return false;}
+        const bool beforeRead=msiNativeForegroundSnapshot(before) && before.valid;
+        if(!beforeRead && s.profile!=ymcc::nativeForeground::Profile::Msi){msiNativeForegroundReceipt("restore-failed","visibility-query-failed");return false;}
         bool ok=true;
-        for(const auto& path:s.owned)if(hidHideContainsPath(before.hidden,W2U(path)))
+        for(const auto& path:s.owned)if(!beforeRead || hidHideContainsPath(before.hidden,W2U(path)))
             ok=msiNativeForegroundVisibility(path,false) && ok;
         HidHideVisibilitySnapshot after;
-        if(!ok || !msiNativeForegroundSnapshot(after)){msiNativeForegroundReceipt("restore-failed","unhide-or-readback-failed");return false;}
+        if(!ok || !msiNativeForegroundSnapshot(after) || !after.valid){msiNativeForegroundReceipt("restore-failed","unhide-or-readback-failed");return false;}
         for(const auto& path:s.owned)if(hidHideContainsPath(after.hidden,W2U(path))){msiNativeForegroundReceipt("restore-failed","own-path-still-hidden");return false;}
         bool cloakRestored=false;
         if(s.cloakChanged){
@@ -1094,11 +1188,12 @@ static bool msiNativeForegroundRestoreLocked(const char* reason) {
             }else msiNativeForegroundReceipt("cloak-retained","third-party-state-changed");
         }
         HidHideVisibilitySnapshot returned;
-        if(!msiNativeForegroundSnapshot(returned)){msiNativeForegroundReceipt("restore-failed","final-readback-failed");return false;}
+        if(!msiNativeForegroundSnapshot(returned) || !returned.valid){msiNativeForegroundReceipt("restore-failed","final-readback-failed");return false;}
         for(const auto& path:s.owned)if(hidHideContainsPath(returned.hidden,W2U(path))){msiNativeForegroundReceipt("restore-failed","returned-path-hidden-again");return false;}
         if(cloakRestored && returned.cloaking!=s.before.cloaking){msiNativeForegroundReceipt("restore-failed","cloak-readback-mismatch");return false;}
         s.diagnosticReturnConfiguration=msiNativeForegroundConfigurationEvidence(returned,
             s.diagnosticSelectedPaths,s.diagnosticSelectedPathsComplete,s.owned);
+        msiNativeForegroundDurableReturn(returned);
         s.configurationReturned=true;
         msiNativeForegroundReceipt("config-returned",reason);
     }
@@ -1108,6 +1203,7 @@ static bool msiNativeForegroundRestoreLocked(const char* reason) {
     if(g_msiNativeForegroundCyclePending.load(std::memory_order_acquire)){
         msiNativeForegroundReceipt("restore-wait","same-cycle-helper-still-live");return false;
     }
+
     if(s.cycleForRestore && s.cycleIssued && s.cycleAccepted && !s.refreshSeriesActive){
         msiNativeForegroundReceipt("restored",reason);msiNativeForegroundClearLeaseLocked();return true;
     }
@@ -1326,16 +1422,16 @@ static void msiNativeForegroundRefreshGameSourceLocked() {
     if(g_msiNativeForegroundTestIo.candidates)discovered=g_msiNativeForegroundTestIo.candidates();else
 #endif
     hidHideResolvePhysicalIdentities(discovered);
-    unsigned nativeSources=0;bool mixed=false;HidHidePhysicalIdentity source;
+    std::vector<std::string> nativeRoots;bool mixed=false;HidHidePhysicalIdentity source;
     for(const auto& candidate:discovered){
         const bool physical=candidate.resolved && !hidHideIsVirtualIdentity(candidate.deviceInstanceId,candidate.baseContainerDeviceInstanceId);
         if(lease.profile==ymcc::nativeForeground::Profile::Msi && physical && candidate.vendorId==0x0db0 && candidate.productId==0x1902 &&
             candidate.usagePage==1 && (candidate.usage==4 || candidate.usage==5))mixed=true;
         if(physical && nativeForegroundGameInputAdmitted(true,false,candidate.vendorId,candidate.productId,candidate.usagePage,candidate.usage)){
-            ++nativeSources;source=candidate;
+            nativeRoots.push_back(candidate.baseContainerDeviceInstanceId);source=candidate;
         }
     }
-    if(mixed || nativeSources!=1 || ascii_lower(source.baseContainerDeviceInstanceId)!=ascii_lower(lease.root)){
+    if(mixed || !ymcc::nativeForeground::uniqueSourceRoot(lease.profile,nativeRoots) || ascii_lower(source.baseContainerDeviceInstanceId)!=ascii_lower(lease.root)){
         msiNativeForegroundReceipt("game-source-deferred","current-source-not-unique");return;
     }
     bool complete=false;std::vector<HidHideInterfaceRecord> inventory;
@@ -1367,6 +1463,10 @@ static void msiNativeForegroundRefreshGameSourceLocked() {
     if(hidHideContainsPath(before.hidden,target)){
         msiNativeForegroundReceipt("game-source-covered","inherited-current-game-interface");return;
     }
+    if(!msiNativeForegroundDurableHide(observed.first,{target},before)){
+        msiNativeForegroundReceipt("game-source-deferred","durable-native-hide-not-admitted");return;
+    }
+    if(!msiNativeForegroundLeaseCurrent())return;
     lease.owned.push_back(U2W(target));
     bool hidden=msiNativeForegroundVisibility(U2W(target),true);
     HidHideVisibilitySnapshot after;
@@ -1376,7 +1476,10 @@ static void msiNativeForegroundRefreshGameSourceLocked() {
     if(!hidden || !msiNativeForegroundLeaseCurrent()){
         (void)msiNativeForegroundRestoreLocked("game-source-hide-failed-or-owner-changed");return;
     }
-    const int refresh=msiNativeForegroundCycleLocked(false,&observed.first);
+    lease.diagnosticHiddenConfiguration=msiNativeForegroundConfigurationEvidence(after,
+        lease.diagnosticSelectedPaths,lease.diagnosticSelectedPathsComplete,lease.owned);
+    const int refresh=lease.nativeRootPortCycle?nativeForegroundRefreshLocked(false):
+        msiNativeForegroundCycleLocked(false,&observed.first);
     if(refresh==2){(void)msiNativeForegroundRestoreLocked("game-source-refresh-failed");return;}
     msiNativeForegroundReceipt(refresh==0?"game-source-refresh-accepted":"game-source-refresh-wait","current-same-root-game-interface");
     if(refresh==0 && !lease.pendingGameSources.empty())msiNativeForegroundQueue();
@@ -1430,6 +1533,18 @@ static void msiNativeForegroundHandleWork() {
     if(!ymcc::msi::nativeForegroundMayEnter(facts) || s.attemptedEdge==facts.edge)return;
     g_msiNativeForegroundSourceRetryNeeded=false;
     s.attemptedEdge=facts.edge;s.edge=facts.edge;s.power=facts.power;s.profile=nativeForegroundProfile();
+    if(s.profile==ymcc::nativeForeground::Profile::Msi && g_msiNativeForegroundRetry.attempts && g_msiNativeForegroundRetry.edge==facts.edge &&
+        g_msiNativeForegroundRetry.power==facts.power){
+        HidHideVisibilitySnapshot control;
+        const bool repair=!msiNativeForegroundSnapshot(control) || !control.valid ||
+            !hidHideContainsPath(control.applications,W2U(hidHideCurrentModulePath()));
+        const auto controlFacts=msiNativeForegroundFacts();
+        if(!hardwareWriteAllowed() || !ymcc::msi::nativeForegroundMayEnter(controlFacts) ||
+            controlFacts.currentPower!=facts.power || controlFacts.currentEdge!=facts.edge)return;
+        if(repair)
+            (void)msiNativeForegroundRepairReaderLocked(facts.power,facts.edge);
+        if(!ymcc::msi::nativeForegroundMayEnter(msiNativeForegroundFacts()))return;
+    }
     s.xusbTargets.clear();
     std::vector<HidHidePhysicalIdentity> discovered;
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
@@ -1448,20 +1563,27 @@ static void msiNativeForegroundHandleWork() {
     // A unique 1901 alone is insufficient if a CURRENT 1902 gaming source is
     // also present (transient two-mode topology or another MSI controller).
     // Do not assume which one is this machine's integrated controller.
-    facts.currentUniqueSource=candidates.size()==1 && !otherPhysicalMsiGameSource;
+    std::vector<std::string> candidateRoots;
+    for(const auto& candidate:candidates)candidateRoots.push_back(candidate.baseContainerDeviceInstanceId);
+    facts.currentUniqueSource=ymcc::nativeForeground::uniqueSourceRoot(s.profile,candidateRoots) && !otherPhysicalMsiGameSource;
     if(!facts.currentUniqueSource){g_msiNativeForegroundSourceRetryNeeded=true;msiNativeForegroundReceipt("deferred",otherPhysicalMsiGameSource?
         "mixed-msi-native-and-dinput-sources":"native-source-not-unique");return;}
     const auto source=candidates.front();s.root=source.baseContainerDeviceInstanceId;
     if(!nativeForegroundRootCandidate(s.root)){
         g_msiNativeForegroundSourceRetryNeeded=true;msiNativeForegroundReceipt("deferred","native-source-usb-root-unverified");return;
     }
+    s.nativeRootPortCycle=ymcc::nativeForeground::nativeRootPortCycleAllowed(s.profile,s.root);
     s.locations=msiForegroundIsolationLocations(s.root);
     if(s.locations.empty()){g_msiNativeForegroundSourceRetryNeeded=true;msiNativeForegroundReceipt("deferred","physical-location-unresolved");return;}
-    std::vector<HidHideInterfaceRecord> inventory;
+    bool inventoryComplete=false;std::vector<HidHideInterfaceRecord> inventory;
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
-    if(g_msiNativeForegroundTestIo.inventory)inventory=g_msiNativeForegroundTestIo.inventory(source);else
+    if(g_msiNativeForegroundTestIo.inventory){
+        inventory=g_msiNativeForegroundTestIo.inventory(source);
+        inventoryComplete=!g_msiNativeForegroundTestIo.inventoryComplete || g_msiNativeForegroundTestIo.inventoryComplete();
+    }else
 #endif
-    inventory=hidHideBuildSourceInterfaceInventory(s.root,source.deviceInstanceId);
+    inventory=hidHideBuildSourceInterfaceInventory(s.root,source.deviceInstanceId,&inventoryComplete);
+    if(s.profile==ymcc::nativeForeground::Profile::Rog && !inventoryComplete){g_msiNativeForegroundSourceRetryNeeded=true;msiNativeForegroundReceipt("deferred","game-interface-inventory-incomplete");return;}
     auto targets=s.profile==ymcc::nativeForeground::Profile::Msi?hidHidePhysicalTargets(source):std::vector<std::string>{source.deviceInstanceId};bool mainCurrent=false;
     for(const auto& item:inventory)if(nativeForegroundGameInputAdmitted(
         ascii_lower(item.baseContainerDeviceInstanceId)==ascii_lower(s.root),
@@ -1476,9 +1598,9 @@ static void msiNativeForegroundHandleWork() {
         hidHideAppendTarget(targets,item.instanceId);
         hidHideAppendTarget(s.xusbTargets,item.instanceId);
     }
-    // Preflight before cloak/dev-hide, so denial cannot strand a private hide.
-    // XUSB-class identity alone did not prove stop/start safety on ROGX.
-    for(const auto& target:targets)if(!ymcc::nativeForeground::gameNodeRefreshMutationAllowed(s.profile,s.root,target)){
+    // The ROG root-port route never disables a HID leaf. Keep the leaf
+    // quarantine for every route that actually requests HID-node refresh.
+    for(const auto& target:targets)if(!s.nativeRootPortCycle && !ymcc::nativeForeground::gameNodeRefreshMutationAllowed(s.profile,s.root,target)){
         g_msiNativeForegroundSourceRetryNeeded=false;
         msiNativeForegroundReceipt("deferred","rog-hid-game-node-refresh-unvalidated");return;
     }
@@ -1515,6 +1637,12 @@ static void msiNativeForegroundHandleWork() {
             ymcc::msi::nativeForegroundMayEnter(facts) && facts.readerExempt && facts.inverseOff;
         msiNativeForegroundReceipt("deferred","native-visibility-contract-not-admitted");return;
     }
+    if(!msiNativeForegroundDurableHide(source,targets,s.before)){
+        msiNativeForegroundReceipt("deferred","durable-native-hide-not-admitted");return;
+    }
+    const auto persistedFacts=msiNativeForegroundFacts();
+    if(!ymcc::msi::nativeForegroundMayEnter(persistedFacts) || persistedFacts.currentPower!=facts.power ||
+        persistedFacts.currentEdge!=facts.edge)return;
     s.active=true;
     if(!s.before.cloaking){
         s.cloakChanged=true;
@@ -1533,6 +1661,11 @@ static void msiNativeForegroundHandleWork() {
         hidHideContainsPath(after.applications,W2U(hidHideCurrentModulePath()));
     if(ok)for(const auto& target:targets)ok=hidHideContainsPath(after.hidden,target) && ok;
     if(!ok || !msiNativeForegroundLeaseCurrent()){(void)msiNativeForegroundRestoreLocked("hide-failed-or-owner-changed");return;}
+    s.diagnosticHiddenConfiguration=msiNativeForegroundConfigurationEvidence(after,
+        s.diagnosticSelectedPaths,s.diagnosticSelectedPathsComplete,s.owned);
+    // Existing consumers can keep reading through pre-hide handles. The ROG
+    // route now uses the exact-root USB port cycle instead of a HID-leaf
+    // disable/enable. Helper completion remains separate from input proof.
     // Refresh is necessary for consumers with handles opened before this hide.
     // It requests the SAME physical root, not a blanket restart or mode toggle.
     const int cycle=nativeForegroundRefreshLocked(false);
@@ -1588,6 +1721,24 @@ static void msiNativeForegroundMaintenance() {
         g_msiNativeForegroundResumePending=false;g_msiNativeForegroundPowerHold=false;
         g_msiNativeForegroundLastResumeGeneration=g_powerGeneration.load(std::memory_order_acquire);
         msiNativeForegroundUiEvent(true);
+    }
+    {
+        std::unique_lock<std::mutex> lock(g_msiNativeForegroundMx,std::try_to_lock);
+        if(lock.owns_lock() && nativeForegroundProfile()==ymcc::nativeForeground::Profile::Msi){
+            auto& retry=g_msiNativeForegroundRetry;
+            const auto now=msiNativeForegroundRetryTick();
+            if(retry.due && now>=retry.due && !inputHostExitFenceRaised() &&
+                g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready &&
+                !g_msiNativeForegroundPowerHold.load(std::memory_order_acquire)){
+                retry.due=0;
+                if(retry.power==currentPowerGeneration() && retry.edge==g_msiNativeForegroundEdge.load(std::memory_order_acquire) &&
+                    now>=retry.started && now-retry.started<30000 && retry.attempts<5){
+                    ++retry.attempts;
+                    if(!g_msiNativeForegroundLease.active)g_msiNativeForegroundLease.attemptedEdge=0;
+                    msiNativeForegroundQueue();
+                }else msiNativeForegroundReceipt("retry-exhausted","original-context-ended-or-budget-exhausted");
+            }
+        }
     }
     if(!g_msiNativeForegroundCyclePending.load(std::memory_order_acquire))return;
     std::lock_guard<std::mutex> lock(g_msiNativeForegroundMx);

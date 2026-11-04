@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "status": "PINNED_ORIGINAL_SOURCE_NOT_EXECUTED",
+  "sourcePins": [
+    {
+      "source": "native/fxsound_recovery.h",
+      "bytes": 10907,
+      "sha256": "64f013c2c0609f1a0c91523b885787fe376ab9b46944d778ad1d4e86f3fb6727"
+    },
+    {
+      "source": "native/fxsound_control.h",
+      "bytes": 34167,
+      "sha256": "de61ad70c3ecc6de05d5b2faf857917ccc47ecfc8e0618904bb61f57328d91ad"
+    }
+  ],
+  "slices": {
+    "processState": "inline ProcessState processState() {\n    DWORD session = 0;\n    if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) return ProcessState::unknown;\n    HANDLE handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);\n    if (handle == INVALID_HANDLE_VALUE) return ProcessState::unknown;\n    PROCESSENTRY32W entry{}; entry.dwSize = sizeof(entry);\n    bool uncertain = false;\n    if (!Process32FirstW(handle, &entry)) { CloseHandle(handle); return ProcessState::unknown; }\n    do {\n        if (_wcsicmp(entry.szExeFile, L\"FxSound.exe\") != 0) continue;\n        DWORD owner = 0;\n        if (!ProcessIdToSessionId(entry.th32ProcessID, &owner)) { uncertain = true; continue; }\n        if (owner == session) { CloseHandle(handle); return ProcessState::running; }\n    } while (Process32NextW(handle, &entry));\n    const DWORD error = GetLastError(); CloseHandle(handle);\n    return uncertain || error != ERROR_NO_MORE_FILES ? ProcessState::unknown : ProcessState::stopped;\n}",
+    "identityType": "struct FxIdentity { DWORD pid=0; ULONGLONG birth=0; };",
+    "identity": "inline FxIdentity identity() {\n    auto expected=executable();if(expected.empty())return {};\n    DWORD session=0;ProcessIdToSessionId(GetCurrentProcessId(),&session);\n    HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0); if(snapshot==INVALID_HANDLE_VALUE)return {};\n    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry); FxIdentity result;\n    if(Process32FirstW(snapshot,&entry))do {\n        if(_wcsicmp(entry.szExeFile,L\"FxSound.exe\"))continue;\n        DWORD owner=0;if(!ProcessIdToSessionId(entry.th32ProcessID,&owner)||owner!=session)continue;\n        HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,entry.th32ProcessID);if(!process)continue;\n        wchar_t name[32768]{};DWORD n=32768; FILETIME created{},ended{},kernel{},user{};\n        if(QueryFullProcessImageNameW(process,0,name,&n)&&_wcsicmp(name,expected.c_str())==0&&GetProcessTimes(process,&created,&ended,&kernel,&user))\n            result={entry.th32ProcessID,(ULONGLONG(created.dwHighDateTime)<<32)|created.dwLowDateTime};\n        CloseHandle(process);if(result.pid)break;\n    }while(Process32NextW(snapshot,&entry));\n    CloseHandle(snapshot);return result;\n}",
+    "current": "inline bool current(const FxIdentity& expected) {auto now=identity();return now.pid==expected.pid&&now.birth==expected.birth&&now.pid;}"
+  }
+}

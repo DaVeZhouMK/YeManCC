@@ -8121,9 +8121,9 @@
         "admission": "actual live source, identity, connected mask, freshness, generation and target owner; metadata alone UNKNOWN"
       },
       "oem": {
-        "profileExpression": "id(OemChordProfileId::OneXX1)",
-        "catalogExpression": "oemCatalogOf(kOneXX2Keys)",
-        "keyTable": "kOneXX2Keys",
+        "profileExpression": "id(OemChordProfileId::OneXX3)",
+        "catalogExpression": "oemCatalogOf(kOneXX3Keys)",
+        "keyTable": "kOneXX3Keys",
         "keys": [
           {
             "keyId": "turbo",
@@ -8144,7 +8144,7 @@
             "label": "Home",
             "backIndex": 0,
             "form": "HidButton",
-            "clickOnly": true
+            "clickOnly": false
           },
           {
             "keyId": "l4",
@@ -8159,10 +8159,18 @@
             "backIndex": 2,
             "form": "HidButton",
             "clickOnly": false
+          },
+          {
+            "keyId": "gkey",
+            "label": "G-Key",
+            "backIndex": 0,
+            "form": "HidButton",
+            "clickOnly": false
           }
         ],
         "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
-        "profileNoneIsNotNoController": true
+        "profileNoneIsNotNoController": true,
+        "lastCorrection": "2026-10-31 re-read from current native/main.cpp after f2e58468: OemChordProfileId::OneXX3 + oemCatalogOf(kOneXX3Keys); six keys with held Home and G-Key"
       },
       "motion": {
         "recipeTableMembership": [

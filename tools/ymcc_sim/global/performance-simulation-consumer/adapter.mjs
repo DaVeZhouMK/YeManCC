@@ -3,7 +3,7 @@ import {ID,MODULE,lockToolsSync,sourceDeclaration} from './contract.mjs';
 
 /** Synchronous public descriptor factory. Full capture/source before-after stays in async run.mjs. */
 export function getPerformanceSimulationConsumerAdapters(repoRoot=path.resolve(import.meta.dirname,'../../../..'),options={}){
- const root=path.resolve(repoRoot),declaration=sourceDeclaration();let context,blockedReason;
+ const root=path.resolve(repoRoot),declaration=sourceDeclaration();let context,blockedReason='TS_REPLACEMENT: legacy iframe consumer retired; TS model/draft/navigation are tested through the production TS entries';
  try{context=lockToolsSync(root,options)}catch(error){blockedReason='PERFORMANCE_SIMULATION_AUTHORITY_UNAVAILABLE:'+error.message}
  const effectiveEnv=options.env??process.env;const supplied=options.binding??{bindingManifestFile:effectiveEnv.YMCC_BATTERY_UI_NODE_TOOLS_BINDING,expectedBindingSha256:effectiveEnv.YMCC_BATTERY_UI_NODE_TOOLS_BINDING_SHA256};
  const bindingArgs=context?.bindingFile?[context.bindingFile,context.bindingSha256]:supplied.bindingManifestFile&&supplied.expectedBindingSha256?[supplied.bindingManifestFile,supplied.expectedBindingSha256]:[];

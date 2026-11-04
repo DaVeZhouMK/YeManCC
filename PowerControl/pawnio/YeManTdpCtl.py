@@ -152,173 +152,749 @@ AMD_DEFAULT_MW = 170000
 #   - Raphael 桌面(7950X)与 DragonRange(7945HX) 同 CPUID 19h/61h; Granite Ridge(9950X)与
 #     FireRange(9955HX) 同 CPUID 1Ah/44h → 必须用型号名区分, 纯 CPUID 会误判(历史回归教训)
 #   - Dragon/Fire Range 的 TDP 命令与桌面相同(0x4F/0x3E/0x5F), CO 走 PSMU(0x7/0x6, 未实现通道)
-FAM_DESKTOP_AM5 = {   # Raphael / Granite Ridge (7950X / 9950X 等桌面 Zen4/5)
-    "name": "Desktop-AM5", "tag": "desktop", "power_feature": "desktop_ppt",
-    # 普通 set W 对齐 UXTU 的 stapm/fast/slow 三窗口。显式 pbo 命令才改 PPT/TDC/EDC。
-    "tdp_mode": "stapm",
-    "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10530, "rsp": 0x3B1057C, "arg": 0x3B109C4,
-    # PSMU 地址 (UXTU 26.2.0 AM5 Socket): 用于 PBO PPT/TDC/EDC
-    "psmu_msg": 0x3B10524, "psmu_rsp": 0x3B10570, "psmu_arg": 0x3B10A40,
-    "stapm": 0x4F, "fast": 0x3E, "slow": 0x5F,
-    # AM5 PBO 命令 (UXTU): ppt=0x3E(mp1)/0x56(rsmu), tdc=0x3C/0x57, edc=0x3D/0x58
-    "pbo_ppt_mp1": 0x3E, "pbo_tdc_mp1": 0x3C, "pbo_edc_mp1": 0x3D,
-    "pbo_ppt_rsmu": 0x56, "pbo_tdc_rsmu": 0x57, "pbo_edc_rsmu": 0x58,
-    # 完整 PPT/TDC/EDC 双邮箱路径尚未真机闭环验证，API/命令已实现但默认 fail-closed。
-    "pbo_supported": True, "pbo_transport_verified": True,
-    "pbo_ops": (("PPT", "mp1", 0x3E), ("PPT", "rsmu", 0x56),
-                 ("TDC", "mp1", 0x3C), ("TDC", "rsmu", 0x57),
-                 ("EDC", "mp1", 0x3D), ("EDC", "rsmu", 0x58)),
-    "coall": 0x36, "coper": 0x35, "co_enc": "u32",
-    "co_supported": True, "co_scopes": ("all_core",), "pm_readback": False,
+# BEGIN GENERATED UXTU CAPABILITY DATA
+# Source: capabilities/uxtu-tdp-policy.json; semantic SHA256 ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d
+UXTU_CAPABILITY_LIBRARY_ID = "ymcc.uxtu.tdp"
+UXTU_CAPABILITY_LIBRARY_VERSION = "26.3.1"
+UXTU_CAPABILITY_POLICY_SHA256 = "ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d"
+CCD_POLICY = {
+    "operation": "process_affinity",
+    "effectScope": "global_process_affinity_by_l3_domain",
+    "mechanism": "SetProcessAffinityMask",
+    "topologySource": "windows_relation_cache_l3",
+    "minimumDomains": 2,
+    "physicalCcdPowerOff": False,
+    "activation": True,
+    "semantics": "OS process affinity grouped by Windows L3 cache domains; not a firmware or physical CCD power-off.",
 }
-# ★ 现代 APU 地址拆分 (依据 UXTU 26.2.0 RyzenSmu.cs Socket_FT6_FP7_FP8 / Socket_FT6):
-#   新 FT6 (Strix Point/Krackan/Strix Halo): msg=0x3B10928 rsp=0x3B10978 arg=0x3B10998
-#   旧 FT6 (Phoenix/Hawk Point/Rembrandt):  msg=0x3B10528 rsp=0x3B10578 arg=0x3B10998
-#   FP6  (Renoir/Lucienne/Cezanne):         msg=0x3B10528 rsp=0x3B10564 arg=0x3B10998
-# FT6/FP7/FP8 地址、命令和 transport 均来自 UXTU 对应 socket；未知协议仍拒绝写入。
-FAM_APU_FT6_NEW = {   # Strix Point / Krackan / Strix Halo (新 FT6)
-    "name": "APU-FT6-New(Strix)", "tag": "apu_ft6_new", "power_feature": "stapm_ppt",
-    "tdp_mode": "stapm",
-    "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10928, "rsp": 0x3B10978, "arg": 0x3B10998,
-    "stapm": 0x14, "fast": 0x15, "slow": 0x16,
-    "psmu_msg": 0x3B10A20, "psmu_rsp": 0x3B10A80, "psmu_arg": 0x3B10A88,
-    "mirror_transport": "rsmu", "mirror_stapm": 0x31, "mirror_fast": 0x32, "mirror_slow": 0x33,
-    "coall": 0x4C, "coper": 0x4B, "co_enc": "u20",
-    "co_supported": True, "co_scopes": ("all_core",), "pm_readback": True,
+UV_POLICY = {
+    "operation": "static_offset",
+    "activation": True,
+    "amd": {
+    "unit": "co_step",
+    "minimum": -60,
+    "maximum": 60,
+    "step": 1,
+    "scope": "all_core",
+    "readback": False,
+    "encodingSource": "familyRecipes.co_enc",
+    "semantics": "Signed all-core Curve Optimizer steps; no verified current-value readback.",
+    "encodingProducer": {
+    "nonHsmp": "u20",
+    "hsmp": "u16",
+    "source": "Views/Windows/MainWindow.xaml.cs::EncodeCurveOptimiserOffset",
+    "staticAllCoreSource": "Views/Pages/CustomPresets.xaml.cs",
+    "translatorSource": "Scripts/RyzenAdj_To_UXTU.cs",
+    "scope": "YMCC static all-core CPU offset only",
+},
+    "candidateSelection": {
+    "recipeField": "co_commands",
+    "primaryFields": ["co_transport", "coall"],
+    "order": "existing-primary-then-upstream",
+    "retryOnly": {
+    "origin": "firmware_response",
+    "mailboxStatuses": [254, 255],
+},
+    "stopOnSuccess": True,
+    "retryOnTransportFailure": False,
+    "retryOnUnknownResult": False,
+    "eachCandidateAtMostOnce": True,
+    "originalArgumentsPerAttempt": True,
+    "hardwareAcceptanceFromDeclaration": False,
+},
+},
+    "intel": {
+    "unit": "mv",
+    "minimum": -150,
+    "maximum": 0,
+    "step": 1,
+    "scope": "fivr_plane",
+    "planes": ["core", "cache"],
+    "readback": True,
+    "encoding": "msr_0x150_offset_bits_31_21_signed11_scale1.024",
+    "command": "set_vf_direct",
+    "semantics": "Signed FIVR offset per verified plane; direct write has no mailbox readback.",
+    "protocol": {
+    "msr": 336,
+    "planeDomains": {
+    "core": 0,
+    "cache": 2,
+},
+    "setCommand": 17,
+    "offsetScale": 1.024,
+    "offsetBits": 11,
+    "offsetShift": 21,
+    "settleMs": 100,
+},
+},
+    "requestDomainSemantics": "YMCC bounded signed user request domain, not a manufacturer silicon safety limit or automatic tuning range.",
 }
-FAM_APU_FT6_NEW_GENERIC = dict(FAM_APU_FT6_NEW)
-FAM_APU_FT6_NEW_GENERIC.update({
-    "name": "APU-FT6-New(Strix/Krackan)",
-    "tag": "apu_ft6_new_generic",
-    # Strix Point / Krackan 仅地址来自 UXTU；没有完成项目真机闭环，必须 fail-closed。
+AMD_CPU_IDENTITIES = [{
+    "family": 23,
+    "models": [1],
+    "upstreamFamily": "SummitRidge",
+    "recipe": "FAM_DESKTOP_AM4_V1",
+}, {
+    "family": 23,
+    "models": [8],
+    "upstreamFamily": "PinnacleRidge",
+    "recipe": "FAM_DESKTOP_AM4_V1",
+}, {
+    "family": 23,
+    "models": [17, 18],
+    "upstreamFamily": "RavenRidge",
+    "recipe": "FAM_APU_FT5_FP5",
+}, {
+    "family": 23,
+    "models": [24],
+    "upstreamFamily": "Picasso",
+    "recipe": "FAM_APU_FT5_FP5",
+}, {
+    "family": 23,
+    "models": [32],
+    "upstreamFamily": "Pollock",
+    "recipe": "FAM_APU_FT5_FP5",
+    "nameContainsAny": ["15e", "15Ce", "20e"],
+}, {
+    "family": 23,
+    "models": [32],
+    "upstreamFamily": "Dali",
+    "recipe": "FAM_APU_FT5_FP5",
+}, {
+    "family": 23,
+    "models": [80],
+    "upstreamFamily": "FireFlight",
+    "recipe": "FAM_APU_FT5_FP5",
+}, {
+    "family": 23,
+    "models": [96],
+    "upstreamFamily": "Renoir",
+    "recipe": "FAM_APU_FP6",
+}, {
+    "family": 23,
+    "models": [104],
+    "upstreamFamily": "Lucienne",
+    "recipe": "FAM_APU_FP6",
+}, {
+    "family": 23,
+    "models": [113],
+    "upstreamFamily": "Matisse",
+    "recipe": "FAM_DESKTOP_AM4_V2",
+}, {
+    "family": 23,
+    "models": [144, 145],
+    "upstreamFamily": "VanGogh",
+    "recipe": "FAM_APU_VANGOGH",
+}, {
+    "family": 23,
+    "models": [160],
+    "upstreamFamily": "Mendocino",
+    "recipe": "FAM_APU_FT6_OLD",
+}, {
+    "family": 25,
+    "models": [33],
+    "upstreamFamily": "Vermeer",
+    "recipe": "FAM_DESKTOP_AM4_V2",
+}, {
+    "family": 25,
+    "models": [63, 68],
+    "upstreamFamily": "Rembrandt",
+    "recipe": "FAM_APU_FT6_OLD",
+}, {
+    "family": 25,
+    "models": [80],
+    "upstreamFamily": "Cezanne_Barcelo",
+    "recipe": "FAM_APU_FP6",
+}, {
+    "family": 25,
+    "models": [97],
+    "upstreamFamily": "DragonRange",
+    "recipe": "FAM_DRAGON_FIRE",
+    "nameContainsAny": ["HX"],
+}, {
+    "family": 25,
+    "models": [97],
+    "upstreamFamily": "Raphael",
+    "recipe": "FAM_DESKTOP_AM5",
+}, {
+    "family": 25,
+    "models": [116],
+    "upstreamFamily": "PhoenixPoint",
+    "recipe": "FAM_APU_FT6_OLD",
+}, {
+    "family": 25,
+    "models": [120],
+    "upstreamFamily": "PhoenixPoint2",
+    "recipe": "FAM_APU_FT6_OLD",
+}, {
+    "family": 25,
+    "models": [117],
+    "upstreamFamily": "HawkPoint",
+    "recipe": "FAM_APU_FT6_OLD",
+}, {
+    "family": 25,
+    "models": [124],
+    "upstreamFamily": "HawkPoint2",
+    "recipe": "FAM_APU_FT6_OLD",
+}, {
+    "family": 26,
+    "models": [68],
+    "upstreamFamily": "FireRange",
+    "recipe": "FAM_DRAGON_FIRE",
+    "nameContainsAny": ["HX"],
+}, {
+    "family": 26,
+    "models": [68],
+    "upstreamFamily": "GraniteRidge",
+    "recipe": "FAM_DESKTOP_AM5",
+}, {
+    "family": 26,
+    "models": [96],
+    "upstreamFamily": "KrackanPoint",
+    "recipe": "FAM_APU_FT6_NEW_GENERIC",
+}, {
+    "family": 26,
+    "models": [104],
+    "upstreamFamily": "KrackanPoint2",
+    "recipe": "FAM_APU_FT6_NEW_GENERIC",
+}, {
+    "family": 26,
+    "models": [32, 36],
+    "upstreamFamily": "StrixPoint",
+    "recipe": "FAM_APU_FT6_NEW_GENERIC",
+}, {
+    "family": 26,
+    "models": [112],
+    "upstreamFamily": "StrixHalo",
+    "recipe": "FAM_APU_FT6_NEW",
+}, {
+    "family": 26,
+    "models": [128, 129, 130, 131, 132, 133, 134, 135],
+    "upstreamFamily": "Medusa1",
+    "recipe": "FAM_HSMP_FP10_AM5",
+}, {
+    "family": 26,
+    "models": [136, 137, 138, 139, 140, 141, 142, 143],
+    "upstreamFamily": "OlympicRidge",
+    "recipe": "FAM_HSMP_FP10_AM5",
+}, {
+    "family": 26,
+    "models": [224, 225, 226, 227],
+    "upstreamFamily": "Medusa2",
+    "recipe": "FAM_HSMP_FP10_AM5",
+}]
+INTEL_CPU_POLICY = {
+    "admission": "cpu_identity_and_runtime_channel",
+    "vendor": "Intel",
+    "familyModelRequired": True,
+    "modelNames": "diagnostics_only",
+    "tdp": {
+    "candidate": True,
+    "mechanism": "package_rapl_msr_0x610",
+    "runtimeChecks": ["msr_0x606_unit", "msr_0x610_lock", "original_write_receipt"],
+},
+    "voltage": {
+    "candidate": True,
+    "planes": ["core", "cache"],
+    "mechanism": "fivr_msr_0x150",
+    "probe": "readonly_get_mailbox_completion_checked",
+    "write": "existing_set_vf_direct_no_mailbox_readback",
+},
+    "hardwareAcceptance": False,
+    "diagnosticModelLabels": [{
+    "family": 6,
+    "model": 151,
+    "name": "AlderLake-S",
+}, {
+    "family": 6,
+    "model": 183,
+    "name": "RaptorLake-S",
+}, {
+    "family": 6,
+    "model": 154,
+    "name": "AlderLake-P",
+}, {
+    "family": 6,
+    "model": 186,
+    "name": "RaptorLake-P",
+}, {
+    "family": 6,
+    "model": 170,
+    "name": "MeteorLake-H",
+}, {
+    "family": 6,
+    "model": 189,
+    "name": "LunarLake-H",
+}, {
+    "family": 6,
+    "model": 198,
+    "name": "ArrowLake-S",
+}, {
+    "family": 6,
+    "model": 205,
+    "name": "ArrowLake-H",
+}, {
+    "family": 6,
+    "model": 207,
+    "name": "ArrowLake-U",
+}],
+}
+FAM_DESKTOP_AM5 = {
+    "name": "Desktop-AM5",
+    "tag": "desktop",
+    "power_feature": "desktop_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
     "verified_transport": True,
     "tdp_supported": True,
+    "msg": 61932848,
+    "rsp": 61932924,
+    "arg": 61934020,
+    "psmu_msg": 61932836,
+    "psmu_rsp": 61932912,
+    "psmu_arg": 61934144,
+    "stapm": 79,
+    "fast": 62,
+    "slow": 95,
+    "pbo_ppt_mp1": 62,
+    "pbo_tdc_mp1": 60,
+    "pbo_edc_mp1": 61,
+    "pbo_ppt_rsmu": 86,
+    "pbo_tdc_rsmu": 87,
+    "pbo_edc_rsmu": 88,
+    "pbo_supported": True,
+    "pbo_transport_verified": True,
+    "pbo_ops": (("PPT", "mp1", 62), ("PPT", "rsmu", 86), ("TDC", "mp1", 60), ("TDC", "rsmu", 87), ("EDC", "mp1", 61), ("EDC", "rsmu", 88)),
+    "coall": 54,
+    "coper": 53,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": False,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 54,
+}, {
+    "transport": "rsmu",
+    "command": 7,
+}],
+}
+FAM_APU_FT6_NEW = {
+    "name": "APU-FT6-New(Strix)",
+    "tag": "apu_ft6_new",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61933864,
+    "rsp": 61933944,
+    "arg": 61933976,
+    "stapm": 20,
+    "fast": 21,
+    "slow": 22,
+    "psmu_msg": 61934112,
+    "psmu_rsp": 61934208,
+    "psmu_arg": 61934216,
+    "mirror_transport": "rsmu",
+    "mirror_stapm": 49,
+    "mirror_fast": 50,
+    "mirror_slow": 51,
+    "coall": 76,
+    "coper": 75,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": True,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 76,
+}, {
+    "transport": "rsmu",
+    "command": 93,
+}],
+}
+FAM_APU_FT6_NEW_GENERIC = {
+    "name": "APU-FT6-New(Strix/Krackan)",
+    "tag": "apu_ft6_new_generic",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61933864,
+    "rsp": 61933944,
+    "arg": 61933976,
+    "stapm": 20,
+    "fast": 21,
+    "slow": 22,
+    "psmu_msg": 61934112,
+    "psmu_rsp": 61934208,
+    "psmu_arg": 61934216,
+    "mirror_transport": "rsmu",
+    "mirror_stapm": 49,
+    "mirror_fast": 50,
+    "mirror_slow": 51,
+    "coall": 76,
+    "coper": 75,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": False,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 76,
+}, {
+    "transport": "rsmu",
+    "command": 93,
+}],
+}
+FAM_APU_FT6_OLD = {
+    "name": "APU-FT6-Old(Phoenix/Rembrandt)",
+    "tag": "apu_ft6_old",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932840,
+    "rsp": 61932920,
+    "arg": 61933976,
+    "psmu_msg": 61934112,
+    "psmu_rsp": 61934208,
+    "psmu_arg": 61934216,
+    "stapm": 20,
+    "fast": 21,
+    "slow": 22,
+    "mirror_transport": "rsmu",
+    "mirror_stapm": 49,
+    "mirror_fast": 50,
+    "mirror_slow": 51,
+    "coall": 76,
+    "coper": 75,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": True,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 76,
+}, {
+    "transport": "rsmu",
+    "command": 93,
+}],
+}
+FAM_APU_FP6 = {
+    "name": "APU-FP6(Renoir/Cezanne)",
+    "tag": "apu_fp6",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932840,
+    "rsp": 61932900,
+    "arg": 61933976,
+    "psmu_msg": 61934112,
+    "psmu_rsp": 61934208,
+    "psmu_arg": 61934216,
+    "stapm": 20,
+    "fast": 21,
+    "slow": 22,
+    "mirror_transport": "rsmu",
+    "mirror_stapm": 49,
+    "mirror_fast": None,
+    "mirror_slow": None,
+    "coall": 85,
+    "coper": 84,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": True,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 85,
+}],
+}
+FAM_APU_FT5_FP5 = {
+    "name": "APU-FT5/FP5(Raven/Picasso/Dali)",
+    "tag": "apu_ft5_fp5",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932840,
+    "rsp": 61932900,
+    "arg": 61933976,
+    "psmu_msg": 61934112,
+    "psmu_rsp": 61934208,
+    "psmu_arg": 61934216,
+    "stapm": 26,
+    "fast": 27,
+    "slow": 28,
+    "mirror_transport": "rsmu",
+    "mirror_stapm": 46,
+    "mirror_fast": None,
+    "mirror_slow": None,
+    "coall": 89,
+    "coper": None,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": True,
+    "co_transport": "rsmu",
+    "co_commands": [{
+    "transport": "rsmu",
+    "command": 89,
+}],
+}
+FAM_APU_VANGOGH = {
+    "name": "APU-FF3(VanGogh)",
+    "tag": "apu_ff3",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932840,
+    "rsp": 61932920,
+    "arg": 61933976,
+    "psmu_msg": 61934112,
+    "psmu_rsp": 61934208,
+    "psmu_arg": 61934216,
+    "stapm": 20,
+    "fast": 21,
+    "slow": 22,
+    "mirror_transport": "rsmu",
+    "mirror_stapm": 49,
+    "mirror_fast": None,
+    "mirror_slow": None,
+    "coall": 76,
+    "coper": 75,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": True,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 76,
+}],
+}
+FAM_DESKTOP_AM4_V1 = {
+    "name": "Desktop-AM4-V1(Summit/Pinnacle)",
+    "tag": "desktop_am4_v1",
+    "power_feature": "desktop_ppt",
+    "tdp_mode": "ppt",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932840,
+    "rsp": 61932900,
+    "arg": 61932952,
+    "psmu_msg": 61932828,
+    "psmu_rsp": 61932904,
+    "psmu_arg": 61932944,
+    "pbo_supported": True,
+    "pbo_transport_verified": True,
+    "pbo_ops": (("PPT", "mp1", 49), ("PPT", "rsmu", 100), ("TDC", "rsmu", 101), ("EDC", "rsmu", 102)),
+    "stapm": None,
+    "fast": None,
+    "slow": None,
+    "coall": None,
+    "coper": None,
+    "co_enc": "u32",
     "co_supported": False,
     "co_scopes": (),
     "pm_readback": False,
-})
-FAM_APU_FT6_OLD = {   # Phoenix / Hawk Point / Rembrandt (旧 FT6/FP7/FP8)
-    "name": "APU-FT6-Old(Phoenix/Rembrandt)", "tag": "apu_ft6_old", "power_feature": "stapm_ppt",
-    "tdp_mode": "stapm",
-    "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10528, "rsp": 0x3B10578, "arg": 0x3B10998,
-    "psmu_msg": 0x3B10A20, "psmu_rsp": 0x3B10A80, "psmu_arg": 0x3B10A88,
-    "stapm": 0x14, "fast": 0x15, "slow": 0x16,
-    "mirror_transport": "rsmu", "mirror_stapm": 0x31, "mirror_fast": 0x32, "mirror_slow": 0x33,
-    "coall": 0x4C, "coper": 0x4B, "co_enc": "u20",          # CO 命令号按新 FT6 同源, 未经实测
-    "co_supported": False, "co_scopes": (), "pm_readback": True,
+    "co_commands": [],
 }
-FAM_APU_FP6 = {        # Renoir / Lucienne / Cezanne (FP6, AM4 封装 APU)
-    "name": "APU-FP6(Renoir/Cezanne)", "tag": "apu_fp6", "power_feature": "stapm_ppt",
-    "tdp_mode": "stapm",
-    "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10528, "rsp": 0x3B10564, "arg": 0x3B10998,
-    "psmu_msg": 0x3B10A20, "psmu_rsp": 0x3B10A80, "psmu_arg": 0x3B10A88,
-    "stapm": 0x14, "fast": 0x15, "slow": 0x16,
-    "mirror_transport": "rsmu", "mirror_stapm": 0x31, "mirror_fast": 0x32, "mirror_slow": 0x33,
-    "coall": 0x55, "coper": 0x54, "co_enc": "u20",          # CO 命令号: 55/54 (UXTU), 未经实测
-    "co_supported": False, "co_scopes": (), "pm_readback": True,
-}
-
-FAM_APU_FT5_FP5 = {
-    "name": "APU-FT5/FP5(Raven/Picasso/Dali)", "tag": "apu_ft5_fp5", "power_feature": "stapm_ppt",
-    "tdp_mode": "stapm", "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10528, "rsp": 0x3B10564, "arg": 0x3B10998,
-    "psmu_msg": 0x3B10A20, "psmu_rsp": 0x3B10A80, "psmu_arg": 0x3B10A88,
-    "stapm": 0x1A, "fast": 0x1B, "slow": 0x1C,
-    "mirror_transport": "rsmu", "mirror_stapm": 0x2E, "mirror_fast": 0x30, "mirror_slow": 0x2F,
-    "coall": None, "coper": None, "co_enc": "u20",
-    "co_supported": False, "co_scopes": (), "pm_readback": True,
-}
-
-FAM_APU_VANGOGH = dict(FAM_APU_FT6_OLD)
-FAM_APU_VANGOGH.update({
-    "name": "APU-FF3(VanGogh)", "tag": "apu_ff3", "mirror_transport": "rsmu",
-    "rsp": 0x3B10578,
-    "mirror_stapm": 0x31, "mirror_fast": None, "mirror_slow": None,
-})
-
-FAM_DESKTOP_AM4_V1 = {
-    "name": "Desktop-AM4-V1(Summit/Pinnacle)", "tag": "desktop_am4_v1", "power_feature": "desktop_ppt",
-    "tdp_mode": "ppt", "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10528, "rsp": 0x3B10564, "arg": 0x3B10598,
-    "psmu_msg": 0x3B1051C, "psmu_rsp": 0x3B10568, "psmu_arg": 0x3B10590,
-    "pbo_supported": True, "pbo_transport_verified": True,
-    "pbo_ops": (("PPT", "mp1", 0x31), ("PPT", "rsmu", 0x64),
-                 ("TDC", "rsmu", 0x65), ("EDC", "rsmu", 0x66)),
-    "stapm": None, "fast": None, "slow": None,
-    "coall": None, "coper": None, "co_enc": "u32",
-    "co_supported": False, "co_scopes": (), "pm_readback": False,
-}
-
 FAM_DESKTOP_AM4_V2 = {
-    "name": "Desktop-AM4-V2(Matisse/Vermeer)", "tag": "desktop_am4_v2", "power_feature": "desktop_ppt",
-    "tdp_mode": "ppt", "transport": "mp1", "allow_legacy_fallback": False,
-    "verified_transport": True, "tdp_supported": True,
-    "msg": 0x3B10530, "rsp": 0x3B1057C, "arg": 0x3B109C4,
-    "psmu_msg": 0x3B10524, "psmu_rsp": 0x3B10570, "psmu_arg": 0x3B10A40,
-    "pbo_supported": True, "pbo_transport_verified": True,
-    "pbo_ops": (("PPT", "mp1", 0x3D), ("PPT", "rsmu", 0x53),
-                 ("TDC", "mp1", 0x3B), ("TDC", "rsmu", 0x54),
-                 ("EDC", "mp1", 0x3C), ("EDC", "rsmu", 0x55)),
-    "stapm": None, "fast": None, "slow": None,
-    "coall": 0x36, "coper": 0x35, "co_enc": "u32",
-    "co_supported": False, "co_scopes": (), "pm_readback": False,
+    "name": "Desktop-AM4-V2(Matisse/Vermeer)",
+    "tag": "desktop_am4_v2",
+    "power_feature": "desktop_ppt",
+    "tdp_mode": "ppt",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932848,
+    "rsp": 61932924,
+    "arg": 61934020,
+    "psmu_msg": 61932836,
+    "psmu_rsp": 61932912,
+    "psmu_arg": 61934144,
+    "pbo_supported": True,
+    "pbo_transport_verified": True,
+    "pbo_ops": (("PPT", "mp1", 61), ("PPT", "rsmu", 83), ("TDC", "mp1", 59), ("TDC", "rsmu", 84), ("EDC", "mp1", 60), ("EDC", "rsmu", 85)),
+    "stapm": None,
+    "fast": None,
+    "slow": None,
+    "coall": 54,
+    "coper": 53,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": False,
+    "co_transport": "mp1",
+    "co_commands": [{
+    "transport": "mp1",
+    "command": 54,
+}, {
+    "transport": "rsmu",
+    "command": 11,
+}],
 }
-# 向后兼容别名 (旧代码引用 FAM_APU / FAM_APU_OLD)
+FAM_DRAGON_FIRE = {
+    "name": "Dragon/Fire-Range(HX)",
+    "tag": "hx",
+    "power_feature": "desktop_ppt",
+    "tdp_mode": "stapm",
+    "transport": "mp1",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "msg": 61932848,
+    "rsp": 61932924,
+    "arg": 61934020,
+    "psmu_msg": 61932836,
+    "psmu_rsp": 61932912,
+    "psmu_arg": 61934144,
+    "stapm": 79,
+    "fast": 62,
+    "slow": 95,
+    "pbo_ppt_mp1": 62,
+    "pbo_tdc_mp1": 60,
+    "pbo_edc_mp1": 61,
+    "pbo_ppt_rsmu": 86,
+    "pbo_tdc_rsmu": 87,
+    "pbo_edc_rsmu": 88,
+    "pbo_supported": True,
+    "pbo_transport_verified": True,
+    "pbo_ops": (("PPT", "mp1", 62), ("PPT", "rsmu", 86), ("TDC", "mp1", 60), ("TDC", "rsmu", 87), ("EDC", "mp1", 61), ("EDC", "rsmu", 88)),
+    "coall": 7,
+    "coper": 53,
+    "co_enc": "u20",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pm_readback": False,
+    "co_transport": "rsmu",
+    "co_commands": [{
+    "transport": "rsmu",
+    "command": 7,
+}],
+}
+FAM_ZEN2_DESKTOP = {
+    "name": "Desktop-17h(Zen~Zen2)",
+    "tag": "zen2_desktop",
+    "power_feature": "pbo_ppt_tdc_edc",
+    "transport": "unsupported",
+    "allow_legacy_fallback": False,
+    "verified_transport": False,
+    "tdp_supported": False,
+    "msg": None,
+    "rsp": None,
+    "arg": None,
+    "stapm": None,
+    "fast": None,
+    "slow": None,
+    "coall": None,
+    "coper": None,
+    "co_enc": "u32",
+    "co_supported": False,
+    "co_scopes": (),
+    "pm_readback": False,
+    "co_commands": [],
+}
+FAM_NO_CO = {
+    "name": "APU-NoCO(Raven/Dali)",
+    "tag": "no_co",
+    "power_feature": "unsupported",
+    "transport": "unsupported",
+    "allow_legacy_fallback": False,
+    "verified_transport": False,
+    "tdp_supported": False,
+    "msg": None,
+    "rsp": None,
+    "arg": None,
+    "stapm": None,
+    "fast": None,
+    "slow": None,
+    "co_supported": False,
+    "co_scopes": (),
+    "pm_readback": False,
+    "co_commands": [],
+}
+FAM_UNKNOWN = {
+    "name": "Unknown",
+    "tag": "unknown",
+    "power_feature": "unknown",
+    "transport": "unsupported",
+    "allow_legacy_fallback": False,
+    "verified_transport": False,
+    "tdp_supported": False,
+    "msg": None,
+    "rsp": None,
+    "arg": None,
+    "stapm": None,
+    "fast": None,
+    "slow": None,
+    "coall": None,
+    "coper": None,
+    "co_enc": "u20",
+    "co_supported": False,
+    "co_scopes": (),
+    "pm_readback": False,
+    "co_commands": [],
+}
+FAM_HSMP_FP10_AM5 = {
+    "name": "FP10-AM5(Medusa/OlympicRidge)",
+    "tag": "hsmp_fp10_am5",
+    "power_feature": "stapm_ppt",
+    "tdp_mode": "stapm",
+    "transport": "hsmp",
+    "allow_legacy_fallback": False,
+    "verified_transport": True,
+    "tdp_supported": True,
+    "hsmp_msg": 61934220,
+    "hsmp_rsp": 61934224,
+    "hsmp_arg": 61934228,
+    "stapm": 21,
+    "fast": 9,
+    "slow": 22,
+    "coall": 8,
+    "coper": 7,
+    "co_enc": "u16",
+    "co_transport": "hsmp",
+    "co_supported": True,
+    "co_scopes": ("all_core",),
+    "pbo_supported": False,
+    "pbo_transport_verified": False,
+    "capabilityEvidence": "Fixed UXTU26.3.1 Socket_FP10_AM5 and ConvertHsmpPsmMargin; source verified, actual runtime readiness requires module/channel, no hardware acceptance inferred",
+    "co_commands": [{
+    "transport": "hsmp",
+    "command": 8,
+}],
+}
 FAM_APU = FAM_APU_FT6_NEW
 FAM_APU_GENERIC = FAM_APU_FT6_NEW_GENERIC
 FAM_APU_OLD = FAM_APU_FP6
-FAM_DRAGON_FIRE = dict(FAM_DESKTOP_AM5)
-FAM_DRAGON_FIRE.update({
-    "name": "Dragon/Fire-Range(HX)", "tag": "hx",
-    "co_supported": False, "co_scopes": (), "pm_readback": False,
-})
-FAM_ZEN2_DESKTOP = {  # 桌面/工作站 17h (Summit/Pinnacle/Matisse/CastlePeak, 即 Zen/Zen+/Zen2)
-    # 覆盖: 1800X/2700X/3900X/3950X (AM4), 1950X/2950X/3970X/3990X (TR4/TRX4) 等。
-    # 依据: ZenStates-Core SMU.cs SmuType 枚举 —— Zen2 桌面/服务器 = TYPE_CPU2,
-    #       与 Zen4/5 桌面 (TYPE_CPU4, 即 FAM_DESKTOP_AM5) 的 SMU 固件/邮箱/命令集完全不同;
-    #       且桌面 CPU 的功率限制是 PBO PPT/EDC/TDC, 不存在 APU 的 STAPM/FAST/SLOW 概念。
-    # 历史回归教训: 名称正则 \d{3,4}X3?D? 会匹配 "3970X"/"3900X" → 误判为 Zen4/5 桌面,
-    #       向 TYPE_CPU2 SMU 发 0x4F/0x3E/0x5F 命令 → 无效/no-op, 表现为"调 TDP 没效果"。
-    "name": "Desktop-17h(Zen~Zen2)", "tag": "zen2_desktop", "power_feature": "pbo_ppt_tdc_edc",
-    "transport": "unsupported", "allow_legacy_fallback": False,
-    "verified_transport": False, "tdp_supported": False,
-    "msg": None, "rsp": None, "arg": None,
-    "stapm": None, "fast": None, "slow": None,    # 无 STAPM 概念; PBO PPT/EDC/TDC 路径未实现
-    "coall": None, "coper": None, "co_enc": "u32",
-    "co_supported": False, "co_scopes": (), "pm_readback": False,
-}
-FAM_NO_CO = {         # Raven / Picasso / Dali / Mendocino / VanGogh (命令号未完成真机验证，安全拒绝)
-    "name": "APU-NoCO(Raven/Dali)", "tag": "no_co", "power_feature": "unsupported",
-    "transport": "unsupported", "allow_legacy_fallback": False,
-    "verified_transport": False, "tdp_supported": False,
-    "msg": None, "rsp": None, "arg": None,
-    "stapm": None, "fast": None, "slow": None,
-    "co_supported": False, "co_scopes": (), "pm_readback": False,
-}
-FAM_UNKNOWN = {
-    "name": "Unknown", "tag": "unknown", "power_feature": "unknown",
-    "transport": "unsupported", "allow_legacy_fallback": False,
-    "verified_transport": False, "tdp_supported": False,
-    "msg": None, "rsp": None, "arg": None,
-    "stapm": None, "fast": None, "slow": None,
-    "coall": None, "coper": None, "co_enc": "u20",
-    "co_supported": False, "co_scopes": (), "pm_readback": False,
-}
-
-_AMD_FAMILIES = [FAM_DESKTOP_AM5, FAM_DESKTOP_AM4_V1, FAM_DESKTOP_AM4_V2,
-                   FAM_APU_FT6_NEW, FAM_APU_FT6_NEW_GENERIC, FAM_APU_FT6_OLD,
-                   FAM_APU_FP6, FAM_APU_FT5_FP5, FAM_APU_VANGOGH,
-                   FAM_DRAGON_FIRE, FAM_ZEN2_DESKTOP, FAM_NO_CO, FAM_UNKNOWN]
+_AMD_FAMILIES = [FAM_DESKTOP_AM5, FAM_DESKTOP_AM4_V1, FAM_DESKTOP_AM4_V2, FAM_APU_FT6_NEW, FAM_APU_FT6_NEW_GENERIC, FAM_APU_FT6_OLD, FAM_APU_FP6, FAM_APU_FT5_FP5, FAM_APU_VANGOGH, FAM_DRAGON_FIRE, FAM_ZEN2_DESKTOP, FAM_NO_CO, FAM_HSMP_FP10_AM5, FAM_UNKNOWN]
+# END GENERATED UXTU CAPABILITY DATA
 
 
 def _read_cpu_info():
@@ -375,64 +951,21 @@ def _has_battery_device():
 
 
 def detect_amd_family():
-    """按型号名 + CPUID(Family/Model) 精确选择家族, 不再靠单一名字正则两级猜。
-    顺序: ①解析 CPUID ②桌面 17h ③HX+指定CPUID ④桌面 Zen4/5 ⑤APU表 ⑥未知降级。"""
-    name, ident = _read_cpu_info()
-    name_u = name.upper()
-    fm = _parse_identifier(ident)
-    f = m = None
-    if fm:
-        f, m = fm
-    # Shared desktop/mobile CPUIDs use a platform-class signal.
-    # HX follows UXTU; a Windows battery device covers generic portable systems.
-    # UXTU Family.cs uses CPUName.Contains("HX"); keep the same generic rule
-    # so names with a space such as "HX 370" are covered as well.
-    is_hx_name = "HX" in name_u
-    has_battery = _has_battery_device()
-    # ① 桌面 17h (Zen/Zen+/Zen2): Matisse M71h / CastlePeak M31h / Summit M01h / Pinnacle M08h 等。
-    #    SMU Type=CPU2, 无 STAPM/FAST/SLOW 命令, 功率走 PBO PPT/EDC/TDC。
-    #    必须优先于 X 后缀兜底, 否则 1800X/2700X/3900X/3970X 会被误判为 Zen4/5 桌面
-    #    (向 TYPE_CPU2 SMU 发 0x4F/0x3E/0x5F 命令 → 无效/no-op, 历史回归教训)。
-    #    排除 17h APU 型号 (Renoir/Lucienne/Raven/Picasso/Dali/VanGogh/Mendocino)。
-    if f == 0x17:
-        if m in (0x01, 0x08):
-            return FAM_DESKTOP_AM4_V1
-        if m == 0x71:
-            return FAM_DESKTOP_AM4_V2
-    # ③ 名称只能做否决/辅助，不能单独决定协议族：CPUID 缺失时宁可 Unknown，绝不把任意 X/X3D 发送到 AM5 邮箱。
-    # Threadripper 也只有在 CPUID 已确认 17h 时才允许归入 Zen2 Desktop；名称不是协议事实。
-    if re.search(r"THREADRIPPER", name_u) and f == 0x17:
+    """Resolve fixed UXTU CPU rules only; no battery/DMI/model registration gate."""
+    name, identifier = _read_cpu_info()
+    fm = _parse_identifier(identifier)
+    if not fm:
+        return FAM_UNKNOWN
+    for identity in AMD_CPU_IDENTITIES:
+        if fm[0] != identity["family"] or fm[1] not in identity["models"]:
+            continue
+        names = identity.get("nameContainsAny", ())
+        if names and not any(token in name for token in names):
+            continue
+        return globals()[identity["recipe"]]
+    # Retain explicit unsupported Threadripper diagnostics; no guessed writes.
+    if fm[0] == 0x17 and "THREADRIPPER" in name.upper():
         return FAM_ZEN2_DESKTOP
-    # ③ Dragon/Fire Range follows UXTU's HX rule for the shared CPUID.
-    if is_hx_name and ((f == 0x19 and m == 0x61) or (f == 0x1A and m == 0x44)):
-        return FAM_DRAGON_FIRE
-    # ④ CPUID 表 (ryzenadj lib/cpuid.c 同源 + UXTU 26.2.0 Family.cs 对照)
-    if fm:
-        if f == 0x1A:                 # Zen5
-            if m in (0x20, 0x24, 0x60, 0x68): # Strix Point / Krackan Point / Point 2
-                return FAM_APU_FT6_NEW_GENERIC
-            if m == 0x70:                       # UXTU Strix Halo / FT6 family
-                return FAM_APU_FT6_NEW
-            if m == 0x44:                           # Granite Ridge / Fire Range / portable shared CPUID
-                return FAM_APU_FT6_NEW_GENERIC if has_battery else FAM_DESKTOP_AM5
-        elif f == 0x19:               # Zen3/Zen4
-            if m == 0x21:                           # Vermeer
-                return FAM_DESKTOP_AM4_V2
-            if m in (0x3F, 0x44, 0x74, 0x75, 0x78, 0x7C): # Rembrandt / Phoenix / Hawk Point / Hawk Point 2
-                return FAM_APU_FT6_OLD
-            if m == 0x50:                           # Cezanne (FP6)
-                return FAM_APU_FP6
-            if m == 0x61:                           # Raphael / Dragon Range 共享 CPUID
-                return FAM_DRAGON_FIRE if is_hx_name else FAM_DESKTOP_AM5
-        elif f == 0x17:               # Zen/Zen+/Zen2
-            if m in (0x60, 0x68):                   # Renoir / Lucienne (FP6)
-                return FAM_APU_FP6
-            if m in (0x11, 0x12, 0x18, 0x20, 0x50): # Raven / Picasso / FireFlight / Dali / Pollock
-                return FAM_APU_FT5_FP5
-            if m in (0x90, 0x91):                   # VanGogh
-                return FAM_APU_VANGOGH
-            if m in (0xA0,):                        # Mendocino
-                return FAM_APU_FT6_OLD
     return FAM_UNKNOWN
 
 
@@ -528,17 +1061,27 @@ LOG_FILE = os.path.join(
     "yeman_pawnio_install.log",
 )
 
-def log(*msg):
-    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} " + " ".join(str(m) for m in msg)
+# One file write/stdout flush per daemon operation; no idle flush timer.
+_DAEMON_LOG_BATCH = None
+
+def _write_log_lines(lines):
+    text = "\n".join(lines) + "\n"
     try:
         with open(LOG_FILE, "a", encoding="utf-8", errors="ignore") as f:
-            f.write(line + "\n")
+            f.write(text)
     except Exception:
         pass
     try:
-        print(line, flush=True)
+        print(text, end="", flush=True)
     except Exception:
         pass
+
+def log(*msg):
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} " + " ".join(str(m) for m in msg)
+    if _DAEMON_LOG_BATCH is not None:
+        _DAEMON_LOG_BATCH.append(line)
+    else:
+        _write_log_lines([line])
 
 def _run_logged(cmd, timeout=120, shell=False):
     log(f"RUN: {' '.join(str(c) for c in cmd)}")
@@ -685,6 +1228,8 @@ def _resolve_mailbox_addr(cfg, transport):
                'rsmu' → rsmu_msg/rsmu_rsp/rsmu_arg。
     返回 (msg_addr, rsp_addr, arg_addr) 或 (None, None, None)。
     """
+    if transport == "hsmp":
+        return cfg.get("hsmp_msg"), cfg.get("hsmp_rsp"), cfg.get("hsmp_arg")
     if transport == "mp1":
         return cfg.get("msg"), cfg.get("rsp"), cfg.get("arg")
     elif transport in ("psmu", "rsmu"):
@@ -696,21 +1241,36 @@ def _resolve_mailbox_addr(cfg, transport):
     return None, None, None
 
 
-def _send_mailbox(p, cmd, arg0, cfg, transport="mp1", tries=300):
+def _amd_uv_failure(diagnostics, origin, stage, helper_exit_code=6, mailbox_status=None):
+    """Record only this request's failure; helper rc and firmware status are separate."""
+    if diagnostics is not None:
+        diagnostics["failure"] = {
+            "origin": origin,
+            "stage": stage,
+            "helperExitCode": int(helper_exit_code),
+            "mailboxStatus": mailbox_status,
+        }
+
+
+def _send_mailbox(p, cmd, arg0, cfg, transport="mp1", tries=300, diagnostics=None):
     """泛化 SMU 邮箱写入: 支持 MP1/PSMU/RSMU transport。
     根据 transport 选取正确的 msg/rsp/arg 地址对, 执行标准 SMU mailbox 协议。
-    状态非 1 或 transport 不可用 → 返回 0xFE (上层转 rc=6), 不抛异常。
+    保留原整型状态；diagnostics 区分固件响应与本地 I/O/等待失败。
     """
+    if diagnostics is not None:
+        diagnostics.pop("failure", None)
     msg_addr, rsp_addr, arg_addr = _resolve_mailbox_addr(cfg, transport)
     if not msg_addr or not rsp_addr or not arg_addr:
         log("  [family] %s transport=%s 缺邮箱地址 (msg=%s rsp=%s arg=%s) → 跳过本命令"
             % (cfg.get("name", "unknown"), transport, msg_addr, rsp_addr, arg_addr))
+        _amd_uv_failure(diagnostics, "capability", "mailbox_addresses")
         return 0xFE
     MP1_MSG, MP1_RSP, MP1_ARG = msg_addr, rsp_addr, arg_addr
     ready = False
     for _ in range(tries):
         rsp = _smu_rd(p, MP1_RSP)
         if rsp is None:
+            _amd_uv_failure(diagnostics, "transport", "ready_read")
             return 0xFE
         if rsp != 0:
             ready = True
@@ -718,21 +1278,27 @@ def _send_mailbox(p, cmd, arg0, cfg, transport="mp1", tries=300):
         time.sleep(0.001)
     if not ready:
         log("  [SMU] %s mailbox ready 等待超时 rsp持续为0, 拒绝覆盖在途事务" % transport)
+        _amd_uv_failure(diagnostics, "ready_wait", "mailbox_ready")
         return 0xFC
     if not _smu_wr(p, MP1_RSP, 0):
+        _amd_uv_failure(diagnostics, "transport", "clear_response")
         return 0xFE
     if not _smu_wr(p, MP1_ARG, arg0 & 0xFFFFFFFF):
+        _amd_uv_failure(diagnostics, "transport", "argument_write")
         return 0xFE
     for i in range(1, 6):
         if not _smu_wr(p, MP1_ARG + i * 4, 0):
+            _amd_uv_failure(diagnostics, "transport", "argument_write")
             return 0xFE
     if not _smu_wr(p, MP1_MSG, cmd & 0xFFFFFFFF):
+        _amd_uv_failure(diagnostics, "transport", "command_write")
         return 0xFE
     r = 0
     completed = False
     for _ in range(tries):
         r = _smu_rd(p, MP1_RSP)
         if r is None:
+            _amd_uv_failure(diagnostics, "transport", "response_read")
             return 0xFE
         if r != 0:
             completed = True
@@ -740,11 +1306,15 @@ def _send_mailbox(p, cmd, arg0, cfg, transport="mp1", tries=300):
         time.sleep(0.001)
     if not completed:
         log("  [SMU] %s mailbox 命令响应超时 cmd=0x%X" % (transport, cmd))
+        _amd_uv_failure(diagnostics, "response_wait", "mailbox_response")
         return 0xFC
     if r > 0xFF:
         log("  [SMU] %s mailbox 异常响应超出状态字节 cmd=0x%X rsp=0x%X → 拒绝" %
             (transport, cmd, r))
+        _amd_uv_failure(diagnostics, "transport", "invalid_response")
         return 0xFE
+    if r != 1:
+        _amd_uv_failure(diagnostics, "firmware_response", "response", mailbox_status=int(r))
     return int(r)
 
 
@@ -806,10 +1376,16 @@ def amd_set_ppt_with(p, cfg, ppt_mw):
 
 def amd_set_with(p, cfg, stapm_mw, fast_mw, slow_mw):
     """用已打开的 Pawn 句柄按已识别家族写普通单值功耗（daemon 复用句柄时用）。"""
-    # 1) verified_transport: 没经过本机实机验证的平台, 拒绝写入
+    # 1) verified_transport binds a reviewed fixed-source mailbox recipe; it is not hardware acceptance.
     if not cfg.get("verified_transport", False) or not cfg.get("tdp_supported", False):
         log("  [family] %s TDP capability 未验证 -> 拒绝写入" % cfg["name"])
         return 6
+    if cfg.get("transport") == "hsmp":
+        # New socket uses exactly its HSMP triplet; never fall back to MP1/RSMU.
+        for key, value in (("stapm", stapm_mw), ("fast", fast_mw), ("slow", slow_mw)):
+            if cfg.get(key) is None or _send_mailbox(p, cfg[key], int(value), cfg, "hsmp") != 1:
+                return 6
+        return 0
     if cfg.get("tdp_mode") == "ppt":
         return amd_set_ppt_with(p, cfg, stapm_mw)
     if cfg.get("tdp_mode") != "stapm":
@@ -991,16 +1567,20 @@ def amd_get():
 # CPU 降压 (Undervolt) — AMD Curve Optimizer + Intel MSR 0x150
 # ==========================================================================
 
-UV_AMD_MIN, UV_AMD_MAX = -60, 60
-UV_INTEL_MIN, UV_INTEL_MAX = -150, 0
+UV_AMD_MIN, UV_AMD_MAX = UV_POLICY["amd"]["minimum"], UV_POLICY["amd"]["maximum"]
+UV_INTEL_MIN, UV_INTEL_MAX = UV_POLICY["intel"]["minimum"], UV_POLICY["intel"]["maximum"]
+UV_INTEL_PROTOCOL = UV_POLICY["intel"]["protocol"]
 
-MSR_VOLTAGE_CTL = 0x150
+MSR_VOLTAGE_CTL = UV_INTEL_PROTOCOL["msr"]
 # Intel OC mailbox: high dword = RUN_BUSY(bit31) | param2/VF point[23:16] |
 # domain[15:8] | command[7:0]；low dword为 payload/返回数据。
 INTEL_OC_RUN_BUSY = 1 << 31
 INTEL_OC_CMD_GET_VF = 0x10
-INTEL_OC_CMD_SET_VF = 0x11
-INTEL_OC_OFFSET_MASK = 0xFFE00000   # payload bits[31:21], signed 11-bit / 1.024
+INTEL_OC_CMD_SET_VF = UV_INTEL_PROTOCOL["setCommand"]
+INTEL_OC_OFFSET_BITS = UV_INTEL_PROTOCOL["offsetBits"]
+INTEL_OC_OFFSET_SHIFT = UV_INTEL_PROTOCOL["offsetShift"]
+INTEL_OC_OFFSET_SCALE = UV_INTEL_PROTOCOL["offsetScale"]
+INTEL_OC_OFFSET_MASK = (((1 << INTEL_OC_OFFSET_BITS) - 1) << INTEL_OC_OFFSET_SHIFT) & 0xFFFFFFFF
 INTEL_OC_TIMEOUT_S = 0.050
 INTEL_OC_COMPLETION_REASONS = {
     0x01: "invalid_command",
@@ -1008,36 +1588,31 @@ INTEL_OC_COMPLETION_REASONS = {
     0x03: "invalid_data",
     0x13: "request_rejected_by_firmware",
 }
-# UXTU 26.2.0 的 plane/domain：Core=0, iGPU=1, Cache/Ring=2, SystemAgent=4。
-# iGPU/SA 未经本机实测 → capability matrix 默认只允许 core/cache。
-UV_PLANE_DOMAINS = {
-    "core": 0,
-    "igpu": 1,
-    "cache": 2,
-    "sa": 4,
-}
+# Consume only the CPU/cache domains declared by the fixed UXTU library.
+# GPU/SA are outside the YMCC CPU-voltage consumer and have no route here.
+UV_PLANE_DOMAINS = dict(UV_INTEL_PROTOCOL["planeDomains"])
 # 保留旧常量语义供诊断/兼容：这些是 SET 命令高双字。
 UV_PLANES = {
     name: INTEL_OC_RUN_BUSY | (domain << 8) | INTEL_OC_CMD_SET_VF
     for name, domain in UV_PLANE_DOMAINS.items()
 }
-UV_PLANES_SAFE = ("core", "cache")
+UV_PLANES_SAFE = tuple(UV_POLICY["intel"]["planes"])
 
 
 def _uv_mv_to_data32(mv):
     """把 mV 编码到 OC mailbox payload bits[31:21]（signed 11-bit, 1/1.024mV）。"""
-    raw11 = int(round(mv * 1.024)) & 0x7FF
-    return (raw11 << 21) & INTEL_OC_OFFSET_MASK
+    raw11 = int(round(mv * INTEL_OC_OFFSET_SCALE)) & ((1 << INTEL_OC_OFFSET_BITS) - 1)
+    return (raw11 << INTEL_OC_OFFSET_SHIFT) & INTEL_OC_OFFSET_MASK
 
 
 def _msr_data_to_mv(v64):
     """从 OC mailbox 64位返回值的 payload bits[31:21] 解析 offset(mV)。"""
     if v64 is None:
         return None
-    raw11 = (int(v64) >> 21) & 0x7FF
-    if raw11 & 0x400:
-        raw11 -= 0x800
-    return int(round(raw11 / 1.024))
+    raw11 = (int(v64) >> INTEL_OC_OFFSET_SHIFT) & ((1 << INTEL_OC_OFFSET_BITS) - 1)
+    if raw11 & (1 << (INTEL_OC_OFFSET_BITS - 1)):
+        raw11 -= 1 << INTEL_OC_OFFSET_BITS
+    return int(round(raw11 / INTEL_OC_OFFSET_SCALE))
 
 
 def _intel_oc_command_word(domain, command):
@@ -1121,7 +1696,7 @@ def _intel_oc_direct_write_raw(backend, domain, payload):
     # Match UXTU's post-write settling interval. Do not read 0x150 here:
     # reading the mailbox response is not part of UXTU's write contract and
     # can turn a valid direct write into a false failure on some firmware.
-    time.sleep(0.100)
+    time.sleep(UV_INTEL_PROTOCOL["settleMs"] / 1000.0)
     return {
         "ok": True,
         "reason": "uxtu_direct_write",
@@ -1144,44 +1719,128 @@ def _parse_msr_data(stdout):
 # ----- AMD -----
 def _co_arg_encode(offset, cfg):
     """CO 参数编码(按家族表 co_enc):
-    - u32: 32 位有符号偏移的无符号表示 (桌面 AM5): -20 -> 0xFFFFFFEC,
+    - u32: 保留原32位容器兼容工具；已声明的全核CO配方不使用该编码: -20 -> 0xFFFFFFEC,
       0 -> 0x00000000, +20 -> 0x00000014。
-    - u20: 20 位有符号偏移的无符号表示 (APU/Strix Halo 等): -20 -> 0xFFFEC,
+    - u20: 固定UXTU手动全核CO命令生产者的20位表示: -20 -> 0xFFFEC,
       0 -> 0x00000, +20 -> 0x00014。
 
     这与 UXTU/RyzenAdj 的 uint32 参数契约一致：上层语义仍是有符号
     CO offset，负值表示降压、正值表示加压；本层只按目标 SMU 通道宽度截断。
     """
+    if cfg.get("co_enc") == "u16":
+        return offset & 0xFFFF
     if cfg.get("co_enc") == "u20":
         return offset & 0xFFFFF
     return offset & 0xFFFFFFFF
 
-def amd_uv_set_with(p, cfg, offset):
-    """用已保持的 AMD PawnIO 句柄写入全核 CO；daemon 与 CLI 共用同一底层路径。"""
+def _amd_uv_co_commands(cfg):
+    """Read declared all-core candidates in one place; retain the legacy primary."""
+    primary = {"transport": cfg.get("co_transport", "mp1"), "command": cfg.get("coall")}
+    if primary["command"] is None:
+        return []
+    commands = cfg.get("co_commands", [primary])
+    if not isinstance(commands, list) or not commands or len(commands) > 8:
+        return []
+    routes = []
+    for command in commands:
+        if (not isinstance(command, dict)
+                or command.get("transport") not in ("mp1", "rsmu", "psmu", "hsmp")
+                or type(command.get("command")) is not int
+                or not (0 < command["command"] <= 0xFF)):
+            return []
+        route = {"transport": command["transport"], "command": command["command"]}
+        if route in routes:
+            return []
+        routes.append(route)
+    return routes if routes[0] == primary else []
+
+
+def _amd_uv_continue_candidate(status, failure):
+    """Consume the generated static-offset rule, with actual-response provenance.
+
+    A local transport failure may use the same integer as a firmware rejection.
+    Only this attempt's matching terminal firmware response can advance the
+    finite list; missing policy or uncertain completion never authorizes replay.
+    """
+    selection = UV_POLICY.get("amd", {}).get("candidateSelection", {})
+    rule = selection.get("retryOnly", {})
+    statuses = rule.get("mailboxStatuses")
+    if statuses is None:
+        # Read older generated scalar declarations without inventing a rule.
+        statuses = [rule.get("mailboxStatus")]
+    if (not isinstance(statuses, list) or not statuses or len(statuses) > 8
+            or any(type(value) is not int or not (1 < value <= 0xFF) for value in statuses)):
+        return False
+    return (type(status) is int and isinstance(failure, dict)
+            and rule.get("origin") == "firmware_response"
+            and failure.get("origin") == "firmware_response"
+            and failure.get("stage") == "response"
+            and type(failure.get("mailboxStatus")) is int
+            and status == failure["mailboxStatus"] and status in statuses)
+
+
+def amd_uv_set_with(p, cfg, offset, diagnostics=None):
+    """Write static all-core CO through source-declared, bounded candidates."""
+    if diagnostics is not None:
+        for key in ("failure", "attempts", "route"):
+            diagnostics.pop(key, None)
     if not (UV_AMD_MIN <= offset <= UV_AMD_MAX):
         log("  CO 超范围(%d~%d): %s" % (UV_AMD_MIN, UV_AMD_MAX, offset))
+        _amd_uv_failure(diagnostics, "validation", "offset", 2)
         return 2
     if not cfg.get("verified_transport", False) or not cfg.get("co_supported") or "all_core" not in cfg.get("co_scopes", ()):
         log("  AMD(%s) CO capability 未验证 -> 拒绝写入" % cfg.get("name", "unknown"))
+        _amd_uv_failure(diagnostics, "capability", "family")
         return 6
-    if cfg.get("coall") is None:
+    commands = _amd_uv_co_commands(cfg)
+    if not commands:
         log("  AMD(%s) 缺少 CO all-core 命令 -> 拒绝写入" % cfg.get("name", "unknown"))
+        _amd_uv_failure(diagnostics, "capability", "all_core_command")
         return 6
     arg = _co_arg_encode(offset, cfg)
-    st = _send_mp1(p, cfg["coall"], arg, cfg)
-    log("  AMD(%s) set-coall(0x%02X) %d -> arg=0x%05X %s" %
-        (cfg["name"], cfg["coall"], offset, arg, "OK" if st == 1 else "FAIL(status=%s)" % st))
-    return 0 if st == 1 else 6
+    attempts = []
+    for route in commands:
+        # Always collect this call's typed cause, including callers without receipts.
+        attempt_diagnostics = {}
+        st = _send_mailbox(p, route["command"], arg, cfg, route["transport"],
+                           diagnostics=attempt_diagnostics)
+        failure = attempt_diagnostics.get("failure") or {}
+        accepted = st == 1
+        attempts.append({
+            "transport": route["transport"], "command": route["command"],
+            "origin": "firmware_response" if accepted else failure.get("origin"),
+            "mailboxStatus": 1 if accepted else failure.get("mailboxStatus"),
+            "accepted": accepted,
+        })
+        if diagnostics is not None:
+            diagnostics["attempts"] = attempts
+            diagnostics["route"] = dict(route)
+            diagnostics.pop("failure", None)
+            if not accepted and failure:
+                diagnostics["failure"] = dict(failure)
+        log("  AMD(%s) set-coall(%s:0x%02X) %d -> arg=0x%05X %s" %
+            (cfg["name"], route["transport"], route["command"], offset, arg,
+             "OK" if accepted else "FAIL(status=%s)" % st))
+        if accepted:
+            return 0
+        if not _amd_uv_continue_candidate(st, failure):
+            return 6
+    return 6
 
 
-def amd_uv_set(offset, dry=False):
+def amd_uv_set(offset, dry=False, diagnostics=None):
     """全核 Curve Optimizer。offset: -60~+60；负值降压，0 还原，正值加压。"""
+    if diagnostics is not None:
+        for key in ("failure", "attempts", "route"):
+            diagnostics.pop(key, None)
     if not (UV_AMD_MIN <= offset <= UV_AMD_MAX):
         log("  CO 超范围(%d~%d):" % (UV_AMD_MIN, UV_AMD_MAX), offset)
+        _amd_uv_failure(diagnostics, "validation", "offset", 2)
         return 2
     cfg = detect_amd_family()
     if not cfg.get("co_supported") or "all_core" not in cfg.get("co_scopes", ()):
         log("  AMD(%s) set-coall 不支持: capability 未验证" % cfg["name"])
+        _amd_uv_failure(diagnostics, "capability", "family")
         return 6
     if dry:
         arg = _co_arg_encode(offset, cfg)
@@ -1190,15 +1849,23 @@ def amd_uv_set(offset, dry=False):
     gate = _SmuGate()
     if not gate.acquired:
         log("  [gate] 未获取 SMU 互斥体, 拒绝 CO 写入")
+        _amd_uv_failure(diagnostics, "gate", "acquire")
         return 6
     with gate:
         p, rc = _amd_open()
         if rc != 0:
+            if rc == 3:
+                _amd_uv_failure(diagnostics, "driver", "open", rc)
+            elif rc == 4:
+                _amd_uv_failure(diagnostics, "module", "load", rc)
+            else:
+                _amd_uv_failure(diagnostics, "transport", "backend_open", rc)
             return rc
         try:
-            return amd_uv_set_with(p, cfg, offset)
+            return amd_uv_set_with(p, cfg, offset, diagnostics=diagnostics)
         finally:
             p.close()
+
 
 def amd_uv_probe():
     """无破坏探测 AMD CO capability。
@@ -1221,6 +1888,13 @@ def amd_uv_probe():
                 return {"vendor": "amd", "supported": False,
                         "reason": "family_no_verified_curve_optimizer", "current": 0,
                         "readback": False, "current_semantics": "unavailable"}
+            if cfg.get("transport") == "hsmp":
+                response = _smu_rd(p, cfg["hsmp_rsp"])
+                ready = response is not None and response != 0
+                return {"vendor": "amd", "supported": ready, "family": cfg["name"],
+                        "current": 0, "readback": False, "current_semantics": "not_readable",
+                        "probe_mode": "source_recipe_plus_readonly_hsmp_channel",
+                        **({} if ready else {"reason": "hsmp_channel_unavailable_or_busy"})}
             hr, out = _smu_exec(p, "ioctl_get_smu_version", [], 1)
             if (hr & 0xFFFFFFFF) == 0 and out:
                 return {"vendor": "amd", "supported": True, "family": cfg["name"], "current": 0,
@@ -1230,6 +1904,181 @@ def amd_uv_probe():
                     "readback": False, "current_semantics": "unavailable"}
         finally:
             p.close()
+
+def _uv_cpuid(vendor):
+    fm = _read_intel_cpuid() if vendor == "intel" else _parse_identifier(_read_cpu_info()[1])
+    return {"family": int(fm[0]), "model": int(fm[1])} if fm else None
+
+
+def _uv_describe(vendor, result):
+    """Attach declared units/ranges/scopes/identity to a probe result.
+
+    This only describes the pinned policy; it never adds hardware access or
+    changes the probe evidence already collected.
+    """
+    if vendor == "amd":
+        cfg = detect_amd_family()
+        decl = UV_POLICY["amd"]
+        identity = {"vendor": "amd", "family": cfg.get("name", ""),
+                    "familyTag": cfg.get("tag")}
+        cpuid = _uv_cpuid("amd")
+        if cpuid:
+            identity["cpuid"] = cpuid
+        result.update({
+            "available": bool(result.get("supported")),
+            "operation": UV_POLICY["operation"],
+            "unit": decl["unit"],
+            "offset": {"min": decl["minimum"], "max": decl["maximum"],
+                       "step": decl["step"], "signed": True},
+            "scope": {"kind": "amd_all_core", "planes": []},
+            "encoding": cfg.get("co_enc", ""),
+            "command": ("set-coall-%s-0x%02X" % (cfg.get("co_transport", "mp1"), cfg["coall"])) if cfg.get("coall") else "",
+            "readbackCapability": False,
+            "identity": identity,
+        })
+    elif vendor == "intel":
+        cap = detect_intel_capability()
+        decl = UV_POLICY["intel"]
+        planes = [p for p in decl["planes"] if cap.get("uv_" + p, False)]
+        identity = {"vendor": "intel", "family": cap.get("name", "")}
+        cpuid = _uv_cpuid("intel")
+        if cpuid:
+            identity["cpuid"] = cpuid
+        result.update({
+            "available": bool(result.get("supported")),
+            "operation": UV_POLICY["operation"],
+            "unit": decl["unit"],
+            "offset": {"min": decl["minimum"], "max": decl["maximum"],
+                       "step": decl["step"], "signed": True},
+            "scope": {"kind": "intel_fivr_plane", "planes": planes},
+            "encoding": decl["encoding"],
+            "command": decl["command"],
+            "readbackCapability": bool(result.get("readback")),
+            "identity": identity,
+        })
+    else:
+        result.update({"available": False, "operation": UV_POLICY["operation"],
+                       "unit": "", "readbackCapability": False,
+                       "identity": {"vendor": ""}})
+    return result
+
+
+def _uv_receipt_common(vendor, value, accepted, reason, planes=None):
+    decl = UV_POLICY[vendor]
+    return {
+        "vendor": vendor,
+        "ok": bool(accepted),
+        "accepted": bool(accepted),
+        "operation": UV_POLICY["operation"],
+        "unit": decl["unit"],
+        "requested": {
+            "value": int(value),
+            "scope": "amd_all_core" if vendor == "amd" else "intel_fivr_plane",
+            "planes": list(planes or []),
+        },
+        "applicationState": "unknown" if accepted or reason == "dry_run_no_write" else "failed",
+        "applied": None,
+        "readback": False,
+        "observed": None,
+        "reason": reason,
+        "verification": "no_readback",
+    }
+
+
+def _amd_uv_receipt(value, rc, dry=False, diagnostics=None):
+    cfg = detect_amd_family()
+    accepted = (not dry) and rc == 0
+    reason = "dry_run_no_write" if dry else (
+        "smu_command_accepted_no_readback" if accepted else "smu_write_failed_rc_%d" % rc)
+    failure = None
+    if not dry and not accepted and diagnostics is not None:
+        recorded = diagnostics.get("failure")
+        if recorded:
+            failure = dict(recorded)
+            failure["helperExitCode"] = int(rc)
+            if failure.get("origin") == "firmware_response" and isinstance(failure.get("mailboxStatus"), int):
+                reason = "amd_uv_firmware_response_0x%02X" % failure["mailboxStatus"]
+            elif failure.get("origin") and failure.get("stage"):
+                reason = "amd_uv_%s_%s" % (failure["origin"], failure["stage"])
+    receipt = _uv_receipt_common("amd", value, accepted, reason)
+    receipt["encoding"] = cfg.get("co_enc", "")
+    attempts = diagnostics.get("attempts", []) if diagnostics is not None and not dry else []
+    route = diagnostics.get("route") if diagnostics is not None and not dry else None
+    receipt["attempts"] = [dict(attempt) for attempt in attempts]
+    receipt["route"] = dict(route) if route else None
+    command_route = route or {"transport": cfg.get("co_transport", "mp1"), "command": cfg.get("coall")}
+    receipt["command"] = ("set-coall-%s-0x%02X" % (command_route["transport"], command_route["command"])) if command_route["command"] else ""
+    receipt["planes"] = {}
+    receipt["failure"] = failure
+    if failure and (failure.get("origin") == "response_wait" or (
+            failure.get("origin") == "transport" and failure.get("stage") in
+            ("command_write", "response_read", "invalid_response"))):
+        # A failed command-register write can still have reached the device.
+        # Without a terminal response, neither acceptance nor non-application is known.
+        receipt["applicationState"] = "unknown"
+    return receipt
+
+
+def intel_uv_set_result(mv, dry=False):
+    """Return (detailed result, legacy rc) without discarding per-plane evidence."""
+    if dry:
+        result = intel_uv_set_pawn(None, mv, None, True)
+        return result, int(result.get("rc", 0 if result.get("ok") else 6))
+    backend = IntelPawnBackend()
+    rc = backend.open()
+    if rc != 0:
+        return {"ok": False, "error": "backend_open", "rc": rc, "planes": {}}, rc
+    try:
+        result = intel_uv_set_pawn(backend, mv, None, False)
+        return result, int(result.get("rc", 0 if result.get("ok") else 6))
+    finally:
+        backend.close()
+
+
+def _intel_uv_receipt(value, result, rc, dry=False):
+    accepted = (not dry) and bool(result.get("ok")) and rc == 0
+    planes = {}
+    for name in ("core", "cache"):
+        source = result.get("planes", {}).get(name)
+        if not isinstance(source, dict):
+            continue
+        planes[name] = {
+            "ioctl_written": bool(source.get("ioctl_written")),
+            "firmware_accepted": None,
+            "readback": False,
+            "readback_mv": None,
+            "reason": source.get("reason"),
+        }
+    decl = UV_POLICY["intel"]
+    reason = "dry_run_no_write" if dry else (
+        "uxtu_direct_write" if accepted else result.get("error") or "uxtu_direct_write_failed")
+    receipt = _uv_receipt_common("intel", value, accepted, reason, list(planes))
+    receipt["encoding"] = decl["encoding"]
+    receipt["command"] = decl["command"]
+    receipt["planes"] = planes
+    if not dry and planes and not accepted:
+        # Some domains may already have been written; a partial/failed ioctl
+        # cannot prove that every CPU domain retained its previous offset.
+        receipt["applicationState"] = "unknown"
+    return receipt
+
+
+def uv_set_dispatch(vendor, value, dry=False, receipt=False):
+    if vendor == "amd":
+        diagnostics = {}
+        rc = amd_uv_set(value, dry, diagnostics=diagnostics)
+        if receipt:
+            print(json.dumps(_amd_uv_receipt(value, rc, dry, diagnostics)))
+        return rc
+    if vendor == "intel":
+        if receipt:
+            result, rc = intel_uv_set_result(value, dry)
+            print(json.dumps(_intel_uv_receipt(value, result, rc, dry)))
+            return rc
+        return intel_uv_set(value, dry)
+    log("厂商未识别")
+    return 5
+
 
 def amd_get_with(p, cfg):
     """daemon 使用常驻 AMD PawnIO 句柄读取通道状态，不重新 open/close。"""
@@ -1404,6 +2253,8 @@ class IntelPawnBackend:
         self.msr = None
         self._lock = None
         self._tx_depth = 0          # 事务嵌套计数
+        # CPU identity is static for this owned handle; startup/resume creates a new backend.
+        self.cpu_capability = detect_intel_capability()
 
     def open(self):
         if not INTEL_MSR_BIN or not os.path.exists(INTEL_MSR_BIN):
@@ -1516,24 +2367,11 @@ class IntelPawnBackend:
             self._lock = None
 
 
-# ---------- Intel capability matrix (P1) ----------
-# 按 Family/Model 建立候选能力矩阵, 再叠加运行时探测 (rapl_read/rapl_write/rapl_locked/
-# uv_core/uv_cache/uv_igpu/uv_sa/ratio)。未知型号输出明确 capability 诊断, 未验证功能
-# 不能因厂商为 Intel 就自动放行。
-# 已实测平台: Intel Desktop (RPL), 356H (MTL-H), 358H (LNL-H) → 0x610 路径已验证。
-_INTEL_CAP_MATRIX = {
-    # 字段必须分开声明；igpu/sa 未真机验证时保持 False。
-    (0x06, 0x97):  {"name": "AlderLake-S",  "rapl": True, "uv_core": True, "uv_cache": True},
-    (0x06, 0xB7):  {"name": "RaptorLake-S", "rapl": True, "uv_core": True, "uv_cache": True},
-    (0x06, 0x9A):  {"name": "AlderLake-P",  "rapl": True, "uv_core": True, "uv_cache": True},
-    (0x06, 0xBA):  {"name": "RaptorLake-P", "rapl": True, "uv_core": True, "uv_cache": True},
-    (0x06, 0xAA):  {"name": "MeteorLake-H", "rapl": True, "uv_core": True, "uv_cache": True},
-    (0x06, 0xBD):  {"name": "LunarLake-H",  "rapl": True, "uv_core": True, "uv_cache": True},
-    (0x06, 0xC6):  {"name": "ArrowLake-S",  "rapl": True, "uv_core": False, "uv_cache": False},
-    (0x06, 0xCD):  {"name": "ArrowLake-H",  "rapl": True, "uv_core": False, "uv_cache": False},
-    (0x06, 0xCF):  {"name": "ArrowLake-U",  "rapl": True, "uv_core": False, "uv_cache": False},
-}
-
+# ---------- Intel CPU source candidates and actual runtime readiness ----------
+# Fixed UXTU26.3.1 has a generic Intel MSR path. One shared policy declares
+# CPU RAPL and core/cache offset candidates; historical model labels are
+# diagnostic only. The original MSR unit/lock and OC mailbox failures remain.
+# Ratio scheduling and non-CPU voltage planes stay unavailable.
 
 def _read_intel_cpuid():
     """读注册表 Intel Identifier → (family, model); 失败返回 None。"""
@@ -1545,34 +2383,38 @@ def _read_intel_cpuid():
 
 
 def detect_intel_capability():
-    """返回 Intel CPU 静态候选能力；未知平台默认 fail-closed。
-    Family/Model 表优先；已实测 356H/358H 额外按完整型号名放行 RAPL/core/cache。
-    iGPU/SA 始终保持 False，直到对应 plane 真机验证。"""
+    """Source-declared Intel CPU candidates; firmware/channel readiness is separate.
+
+    Fixed UXTU uses its generic Intel MSR path, not a model whitelist. Keep model
+    labels for diagnostics; actual RAPL unit/lock and OC mailbox probe errors stay
+    authoritative. This adds no probing or writes and reads identity only once.
+    """
     result = {
         "family": None, "model": None, "name": "Unknown-Intel",
         "rapl_supported": False, "rapl_locked": False,
         "uv_core": False, "uv_cache": False, "uv_igpu": False, "uv_sa": False,
-        "ratio": False,
+        "ratio": False, "identityVerified": False, "modelAdmission": False,
+        "capabilitySource": "fixed_uxtu_generic_intel_runtime_channel",
     }
-    cpu_name, _ = _read_cpu_info()
-    fm = _read_intel_cpuid()
-    if fm:
-        f, m = fm
-        result["family"] = f; result["model"] = m
-        cap = _INTEL_CAP_MATRIX.get((f, m), {})
-        result["name"] = cap.get("name", "Intel-F%d-M%02X" % (f, m))
-        result["rapl_supported"] = cap.get("rapl", False)
-        result["uv_core"] = cap.get("uv_core", False)
-        result["uv_cache"] = cap.get("uv_cache", False)
-        result["uv_igpu"] = cap.get("uv_igpu", False)
-        result["uv_sa"] = cap.get("uv_sa", False)
-        result["ratio"] = cap.get("ratio", False)
-    # 用户已实测 356H/358H 的 0x610 路径；以型号名补充，避免 CPUID 表版本差异。
-    if re.search(r"\b(?:356H|358H)\b", cpu_name.upper()):
-        result["name"] = cpu_name.strip() or result["name"]
-        result["rapl_supported"] = True
-        result["uv_core"] = True
-        result["uv_cache"] = True
+    cpu_name, identifier = _read_cpu_info()
+    fm = _parse_identifier(identifier)
+    if not fm:
+        return result
+    f, model = fm
+    result["family"], result["model"] = f, model
+    result["name"] = next((row["name"] for row in INTEL_CPU_POLICY["diagnosticModelLabels"]
+                           if row["family"] == f and row["model"] == model),
+                          "Intel-F%d-M%02X" % (f, model))
+    # The CPU identity is not a board/DMI name. Neither a model label nor a
+    # historical 356H/358H string may grant a missing/mismatched CPU identity.
+    intel_identity = f > 0 and model >= 0 and "INTEL" in (cpu_name + " " + identifier).upper()
+    if not intel_identity:
+        return result
+    result["identityVerified"] = True
+    result["rapl_supported"] = INTEL_CPU_POLICY["tdp"]["candidate"] is True
+    planes = INTEL_CPU_POLICY["voltage"]["planes"]
+    result["uv_core"] = INTEL_CPU_POLICY["voltage"]["candidate"] is True and "core" in planes
+    result["uv_cache"] = INTEL_CPU_POLICY["voltage"]["candidate"] is True and "cache" in planes
     return result
 
 
@@ -1697,8 +2539,9 @@ def _intel_set_pawn_observed_core(backend, pl1_w, pl2_w, dry=False):
     if requested_pl1 is None or requested_pl2 is None:
         log("  Intel TDP 参数无效")
         return 2
-    cap = detect_intel_capability()
-    _tdp_observe_update(cpuName=cap.get("name", "not-observed"), staticRaplCapability=cap.get("rapl_supported"), cpuIdentitySource="existing-capability-probe", stage="backend")
+    # Float/set hot path reuses startup identity: no registry or AC/DC probe.
+    cap = detect_intel_capability() if dry else getattr(backend, "cpu_capability", {})
+    _tdp_observe_update(cpuName=cap.get("name", "not-observed"), staticRaplCapability=cap.get("rapl_supported"), cpuIdentitySource="backend-initialization" if not dry else "dry-run-identity", stage="backend")
     if dry:
         # dry-run 允许跨机预演，不接触硬件；未知平台只警告，不伪装为已支持。
         o, f = requested_pl1, requested_pl2
@@ -1710,6 +2553,9 @@ def _intel_set_pawn_observed_core(backend, pl1_w, pl2_w, dry=False):
     if backend is None or backend.msr is None:
         log("  Intel TDP: backend 无效")
         return 3
+    if cap.get("identityVerified") is not True or cap.get("rapl_supported") is not True:
+        log("  Intel TDP: 初始化 CPU 身份不可用, 拒绝 MSR 访问")
+        return 6
     # 事务级锁: 整个 RMW 持有 Global\Access_MSR
     _tdp_observe_update(stage="mutex")
     if not backend._enter_tx():
@@ -2261,10 +3107,20 @@ def _opti_package_file(rel):
 
 
 def _opti_read_ini(path):
-    if _opti_is_reparse(path) or os.path.getsize(path) > 1 << 20:
-        raise ValueError("INI invalid/too large")
-    with open(path, "r", encoding="utf-8-sig") as f:
-        text = f.read()
+    _opti_plain_path(path)
+    if _opti_is_reparse(path):
+        raise ValueError("INI linked")
+    with open(path, "rb") as f:
+        before = os.fstat(f.fileno())
+        if before.st_nlink != 1 or before.st_mode & 0o170000 != 0o100000 or before.st_size > 1 << 20:
+            raise ValueError("INI invalid/too large")
+        raw = f.read((1 << 20) + 1)
+        after = os.fstat(f.fileno())
+    if (len(raw) > 1 << 20 or len(raw) != before.st_size or
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) !=
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+        raise ValueError("INI incomplete/changed")
+    text = raw.decode("utf-8-sig")
     ini = configparser.ConfigParser(interpolation=None, strict=True)
     ini.read_string(text)
     sections = [x.lower() for x in ini.sections()]
@@ -2840,11 +3696,16 @@ def _optiscaler_configure_backend(game_dir, backend, analysis, cfg):
             fd, temp = tempfile.mkstemp(prefix=".YeManCC-ini-", suffix=".tmp", dir=game_dir)
             try:
                 with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-                    f.write(updated)
+                    if f.write(updated) != len(updated):
+                        raise OSError("INI short write")
                     f.flush()
                     os.fsync(f.fileno())
                 _opti_read_ini(temp)
+                if _opti_read_ini(config_path) != text:
+                    raise ValueError("INI changed before publish")
                 os.replace(temp, _safe_join(game_dir, "OptiScaler.ini"))
+                if _opti_read_ini(config_path) != updated:
+                    raise ValueError("INI publish readback mismatch")
             finally:
                 if os.path.exists(temp):
                     os.remove(temp)
@@ -2917,8 +3778,7 @@ def _ymcc_backup_candidates(game_dir):
             if not os.path.isfile(manifest_path):
                 continue
             try:
-                with open(manifest_path, "r", encoding="utf-8", errors="ignore") as f:
-                    manifest = json.load(f)
+                manifest = _opti_load_json(manifest_path)
                 if _canonical_game_dir(manifest.get("game_dir", "")) == target:
                     candidates.append(entry.path)
             except Exception:
@@ -2936,23 +3796,57 @@ def _ymcc_backup_candidates(game_dir):
 
 
 def _find_ymcc_backup_dir(game_dir):
-    for path in _ymcc_backup_candidates(game_dir):
-        if os.path.isfile(os.path.join(path, "manifest.json")):
-            return path
-    return None
+    matches = [path for path in _ymcc_backup_candidates(game_dir)
+               if os.path.isfile(os.path.join(path, "manifest.json"))]
+    if len(matches) > 1:
+        raise ValueError("multiple YMCC recovery records; original ownership is unconfirmed")
+    return matches[0] if matches else None
 
 def _write_json_file(path, value):
     parent = os.path.dirname(path)
     _opti_plain_path(parent)
     os.makedirs(parent, exist_ok=True)
     destination = _safe_join(parent, os.path.basename(path))
+    previous, before = _opti_json_snapshot(destination) if os.path.lexists(destination) else ({}, None)
+    _opti_manifest_owner(previous)
+    _opti_manifest_owner(value)
+    candidate = dict(value)
+    for key, item in previous.items():
+        candidate.setdefault(key, item)
+    if previous.get("game_dir") and previous.get("game_dir") != candidate.get("game_dir"):
+        raise ValueError("manifest game identity changed")
+    old_items = _opti_manifest_items(parent, previous)
+    new_items = _opti_manifest_items(parent, candidate)
+    if old_items:
+        if set(old_items) - set(new_items):
+            raise ValueError("manifest would drop known return debt")
+        for rel, old in old_items.items():
+            current = new_items[rel]
+            for key in ("had_original", "backup", "original_sha256", "source_sha256"):
+                if old.get(key) != current.get(key):
+                    raise ValueError("manifest original identity changed")
+            for key, item in old.items():
+                current.setdefault(key, item)
+    payload = json.dumps(candidate, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+    if len(payload) > 4 << 20:
+        raise ValueError("manifest output too large")
     fd, temp = tempfile.mkstemp(prefix=".YeManCC-manifest-", suffix=".tmp", dir=parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(value, f, ensure_ascii=False, indent=2)
+        with os.fdopen(fd, "wb") as f:
+            if f.write(payload) != len(payload):
+                raise OSError("manifest short write")
             f.flush()
             os.fsync(f.fileno())
+        if _opti_json_snapshot(temp)[1] != payload:
+            raise ValueError("manifest staging readback mismatch")
+        current = _opti_json_snapshot(destination)[1] if os.path.lexists(destination) else None
+        if current != before:
+            raise ValueError("manifest changed before publish")
         os.replace(temp, destination)
+        if _opti_json_snapshot(destination)[1] != payload:
+            raise ValueError("manifest publish readback mismatch")
+        value.clear()
+        value.update(candidate)
     finally:
         if os.path.exists(temp):
             os.remove(temp)
@@ -3012,14 +3906,128 @@ def _safe_join(base, relative):
     return target
 
 
-def _opti_load_json(path):
-    if _opti_is_reparse(path) or os.path.getsize(path) > 4 << 20:
-        raise ValueError("manifest invalid/too large")
-    with open(path, "r", encoding="utf-8-sig") as f:
-        obj = json.load(f)
+def _opti_json_snapshot(path):
+    _opti_plain_path(path)
+    if _opti_is_reparse(path):
+        raise ValueError("manifest link")
+    with open(path, "rb") as f:
+        before = os.fstat(f.fileno())
+        if before.st_mode & 0o170000 != 0o100000 or before.st_nlink != 1 or before.st_size > 4 << 20:
+            raise ValueError("manifest invalid/too large/linked")
+        raw = f.read((4 << 20) + 1)
+        after = os.fstat(f.fileno())
+    identity = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    if len(raw) > 4 << 20 or len(raw) != before.st_size or identity(before) != identity(after):
+        raise ValueError("manifest incomplete/changed")
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("manifest duplicate key: " + key)
+            result[key] = value
+        return result
+    def number(value):
+        parsed = float(value)
+        if not -float("inf") < parsed < float("inf"):
+            raise ValueError("manifest nonfinite number")
+        return parsed
+    def constant(value):
+        raise ValueError("manifest invalid constant: " + value)
+    try:
+        obj = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=pairs, parse_float=number, parse_constant=constant)
+    except (UnicodeError, RecursionError) as e:
+        raise ValueError("manifest encoding/depth invalid") from e
     if not isinstance(obj, dict):
         raise ValueError("manifest must be an object")
-    return obj
+    stack = [(obj, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if depth > 64:
+            raise ValueError("manifest depth exceeded")
+        if isinstance(item, dict):
+            stack.extend((value, depth + 1) for value in item.values())
+        elif isinstance(item, list):
+            stack.extend((value, depth + 1) for value in item)
+    return obj, raw
+
+
+def _opti_manifest_owner(manifest):
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest must be an object")
+    if any(key.lower().replace("_", "") in ("owner", "ownership", "ownersession") for key in manifest):
+        raise ValueError("manifest ownership extension is unconfirmed")
+    for key in ("schema_version", "ManifestVersion"):
+        if key in manifest and (type(manifest[key]) is not int or manifest[key] not in (1, 2)):
+            raise ValueError("manifest schema is unsupported")
+
+
+def _opti_manifest_items(parent, manifest):
+    if "items" not in manifest:
+        return {}
+    items = manifest["items"]
+    if not isinstance(items, list) or len(items) > 4096:
+        raise ValueError("manifest item list is unconfirmed")
+    result = {}
+    for item in items:
+        if not isinstance(item, dict) or type(item.get("had_original")) is not bool:
+            raise ValueError("manifest item ownership is unconfirmed")
+        rel = item.get("rel")
+        identity = os.path.normcase(_safe_join(parent, rel))
+        if identity in result:
+            raise ValueError("manifest duplicate return debt")
+        for field in ("source_sha256", "original_sha256", "installed_sha256"):
+            digest = item.get(field)
+            if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)):
+                raise ValueError("manifest item hash is unconfirmed")
+        if not item.get("source_sha256"):
+            raise ValueError("manifest source identity missing")
+        if item["had_original"]:
+            _safe_join(os.path.join(parent, "files"), item.get("backup"))
+            if not item.get("original_sha256"):
+                raise ValueError("manifest original identity missing")
+        elif item.get("backup") or item.get("original_sha256"):
+            raise ValueError("manifest original identity conflicts")
+        if "touched" in item and type(item["touched"]) is not bool:
+            raise ValueError("manifest intent is unconfirmed")
+        result[identity] = item
+    return result
+
+
+def _opti_manifest_target(manifest, fields):
+    targets = []
+    for key in fields:
+        if key not in manifest:
+            continue
+        value = manifest[key]
+        if not isinstance(value, str) or not value.strip() or not os.path.isabs(value):
+            raise ValueError("manifest target identity invalid")
+        targets.append(_canonical_game_dir(value))
+    if not targets or len(set(targets)) != 1:
+        raise ValueError("manifest target identities conflict/missing")
+    return targets[0]
+
+
+def _opti_empty_pending(game_dir, pending):
+    # Only an explicit install may discard its known empty preparation. There
+    # are no original files or touched targets in this narrow state.
+    try:
+        path = os.path.join(pending, "manifest.pending.json")
+        m = _opti_load_json(path)
+        _opti_manifest_owner(m)
+        allowed = {"schema_version", "game_dir", "installed_at", "backend", "anti_cheat_risk_acknowledged",
+                   "analysis", "source_version", "source_root", "inject", "state", "items"}
+        if (set(m) - allowed or m.get("schema_version") != 2 or m.get("state") != "pending" or m.get("items") != [] or
+                _opti_manifest_target(m, ("game_dir",)) != _canonical_game_dir(game_dir) or
+                set(os.listdir(pending)) != {"files", "manifest.pending.json"} or os.listdir(os.path.join(pending, "files"))):
+            return False
+        _opti_remove_backup(pending)
+        return not os.path.lexists(pending)
+    except (OSError, ValueError):
+        return False
+
+
+def _opti_load_json(path):
+    return _opti_json_snapshot(path)[0]
 
 
 def _opti_target_check(game_dir, cfg=None):
@@ -3093,6 +4101,7 @@ def _opti_mutation(game_dir, cfg, dry, fn, *args):
 
 
 def _opti_atomic_restore(source, destination, expected):
+    observed = _opti_restore_hash(destination)
     os.makedirs(os.path.dirname(destination), exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=".YeManCC-restore-", suffix=".tmp", dir=os.path.dirname(destination))
     os.close(fd)
@@ -3100,6 +4109,8 @@ def _opti_atomic_restore(source, destination, expected):
         shutil.copy2(source, temp)
         if not expected or _sha256(temp) != expected:
             raise ValueError("还原文件校验失败")
+        if _opti_restore_hash(destination) != observed:
+            raise ValueError("restore target changed during copy")
         os.replace(temp, destination)
         if _sha256(destination) != expected:
             raise ValueError("还原后校验失败")
@@ -3152,11 +4163,11 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
     if any(os.path.isfile(os.path.join(path, "manifest.json"))
            for path in _ymcc_backup_candidates(game_dir)):
         return {"ok": False, "msgs": ["该游戏已有 YeManCC 安装记录，请先卸载后再安装新版本"]}
-    if os.path.exists(bdir):
+    if any(os.path.lexists(path) for path in _ymcc_backup_candidates(game_dir)):
         return {"ok": False, "msgs": ["YeManCC 备份目录存在但清单缺失，已拒绝覆盖以保护原文件"]}
     pending = bdir + ".pending"
     _opti_plain_path(pending)
-    if os.path.exists(pending):
+    if os.path.exists(pending) and (dry or not _opti_empty_pending(game_dir, pending)):
         return {"ok": False, "msgs": ["发现未完成的安装事务，已保留备份并拒绝覆盖: " + pending]}
     if dry:
         return {"ok": True, "dry": True, "count": len(plan),
@@ -3167,6 +4178,7 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
                 "version": "%s/%s" % (cfg.get("opti_version") or "", cfg.get("extra_version") or "")}
 
     pending = bdir + ".pending"
+    pending_confirmed = None
     try:
         parent = os.path.dirname(bdir)
         os.makedirs(parent, exist_ok=True)
@@ -3183,10 +4195,11 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
                     "inject": cfg["inject"], "state": "pending", "items": []}
         os.makedirs(files_dir, exist_ok=True)
         _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
+        pending_confirmed = json.loads(json.dumps(manifest))
     except Exception as e:
         _olog("install transaction preparation failed", e)
         try:
-            _opti_remove_backup(pending)
+            _opti_empty_pending(game_dir, pending)
         except Exception:
             pass
         return {"ok": False, "msgs": ["准备安装事务失败: " + str(e)]}
@@ -3226,9 +4239,11 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
                                        "backup": bak_rel, "original_sha256": original_sha256,
                                        "source_sha256": source_sha256, "touched": False})
         _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
+        pending_confirmed = json.loads(json.dumps(manifest))
 
         manifest["prepared"] = True
         _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
+        pending_confirmed = json.loads(json.dumps(manifest))
         # Copy through a same-directory temporary file, then atomically replace.
         for index, p in enumerate(plan):
             dst = _safe_join(game_dir, p["rel"])
@@ -3239,6 +4254,7 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
             # Persist intent BEFORE replacement so a killed process is recoverable.
             item["touched"] = True
             _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
+            pending_confirmed = json.loads(json.dumps(manifest))
             d = os.path.dirname(dst)
             if d:
                 os.makedirs(d, exist_ok=True)
@@ -3275,6 +4291,8 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
         manifest["state"] = "committed"
         _write_json_file(os.path.join(pending, "manifest.json"), manifest)
         os.replace(pending, bdir)
+        if os.path.lexists(pending) or _opti_load_json(ymanifest) != manifest:
+            raise ValueError("committed directory publication unconfirmed")
     except Exception as e:
         _olog("install transaction failed", e)
         rollback_errors = []
@@ -3288,20 +4306,25 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
                     _opti_atomic_restore(_safe_join(files_dir, item["backup"]), dst, item["original_sha256"])
                 elif os.path.isfile(dst):
                     os.remove(dst)
+                    if os.path.lexists(dst):
+                        raise ValueError("rollback delete acknowledgement mismatch")
             except Exception as rollback_error:
                 rollback_errors.append(item.get("rel", dst) + ": " + str(rollback_error))
         # A partial rollback must retain all original backups for recovery.
         if not rollback_errors:
             try:
-                _opti_remove_backup(pending)
-            except Exception:
+                # Keep any corrupt/future/foreign replacement and its originals.
+                recorded = _opti_load_json(os.path.join(pending, "manifest.pending.json"))
+                if pending_confirmed is not None and recorded == pending_confirmed:
+                    _opti_remove_backup(pending)
+            except (OSError, ValueError):
                 pass
         msg = "OptiScaler 安装事务失败，" + ("回滚未完成: " if rollback_errors else "已回滚: ") + str(e)
         if rollback_errors:
             manifest["state"] = "rollback_incomplete"
             try:
                 _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
-            except OSError:
+            except (OSError, ValueError):
                 pass
             msg += "；回滚异常（原件备份已保留于 " + pending + "）: " + "、".join(rollback_errors)
         return {"ok": False, "msgs": [msg], "written": written}
@@ -3314,7 +4337,7 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_a
             "version": manifest["source_version"]}
 
 def _find_client_backup(game_dir):
-    """Find client records without silently ignoring corrupt matching manifests."""
+    """A named target slot remains debt even if its manifest is missing/invalid."""
     bdir = os.path.join(os.environ.get("APPDATA", ""), "OptiscalerClient", "Backups")
     if not os.path.isdir(bdir):
         return None
@@ -3322,18 +4345,29 @@ def _find_client_backup(game_dir):
     target_hash = hashlib.sha256(target.encode("utf-8")).hexdigest()[:8]
     matches = []
     for entry in os.scandir(bdir):
+        named_target = entry.name.lower().endswith("_" + target_hash)
         if not entry.is_dir(follow_symlinks=False) or _opti_is_reparse(entry.path):
+            if named_target:
+                raise ValueError("目标客户端备份路径无效，已保留归属未知的账本")
             continue
         mfp = os.path.join(entry.path, "manifest.json")
         if not os.path.isfile(mfp):
+            if named_target:
+                raise ValueError("目标客户端备份缺少清单，已保留原件并拒绝覆盖")
             continue
+        m = None
         try:
             m = _opti_load_json(mfp)
+            gd = _opti_manifest_target(m, ("InstalledGameDirectory", "GameDirectory", "game_dir"))
         except (OSError, ValueError) as e:
-            if entry.name.lower().endswith("_" + target_hash):
-                raise ValueError("目标客户端备份清单损坏，请先在客户端恢复") from e
+            aliases_target = isinstance(m, dict) and any(
+                isinstance(m.get(key), str) and os.path.isabs(m[key]) and _canonical_game_dir(m[key]) == target
+                for key in ("InstalledGameDirectory", "GameDirectory", "game_dir"))
+            if named_target or aliases_target:
+                raise ValueError("目标客户端备份清单损坏/身份未知，请先在客户端恢复") from e
             continue
-        gd = _canonical_game_dir(m.get("InstalledGameDirectory") or m.get("GameDirectory") or m.get("game_dir") or "")
+        if named_target and gd != target:
+            raise ValueError("客户端备份槽与目标身份不一致，已保留并拒绝覆盖")
         if gd == target:
             matches.append((m, entry.path))
     if len(matches) > 1:
@@ -3360,13 +4394,17 @@ def _opti_restore_hash(path):
 
 
 def _opti_ymcc_restore_plan(game_dir, bdir, manifest, recovery=False):
-    if _opti_is_reparse(bdir) or _canonical_game_dir(manifest.get("game_dir", "")) != _canonical_game_dir(game_dir):
+    _opti_manifest_owner(manifest)
+    schema = manifest.get("schema_version", 1)
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError("unsupported YMCC schema")
+    if _opti_is_reparse(bdir) or _opti_manifest_target(manifest, ("game_dir",)) != _canonical_game_dir(game_dir):
         raise ValueError("备份目标不一致或为链接")
     items = manifest.get("items")
     if not isinstance(items, list) or not items or len(items) > 4096:
         raise ValueError("备份清单 items 无效/为空")
     if recovery:
-        if manifest.get("schema_version") != 2 or manifest.get("prepared") is not True:
+        if manifest.get("schema_version") != 2 or manifest.get("prepared") is not True or manifest.get("state") not in ("pending", "rollback_incomplete"):
             raise ValueError("中断清单不具备完整恢复标记，请保留备份并人工处理")
     elif manifest.get("state") != "committed":
         raise ValueError("安装未提交，请先恢复中断事务")
@@ -3374,6 +4412,20 @@ def _opti_ymcc_restore_plan(game_dir, bdir, manifest, recovery=False):
     for item in items:
         if not isinstance(item, dict) or type(item.get("had_original")) is not bool:
             raise ValueError("备份条目类型不正确")
+        for key in ("original_sha256", "source_sha256", "installed_sha256"):
+            value = item.get(key)
+            if value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", value)):
+                raise ValueError("manifest hash type/format invalid")
+        if not item.get("source_sha256") or (item["had_original"] and not item.get("original_sha256")):
+            raise ValueError("manifest original/source hash missing")
+        if not item["had_original"] and (item.get("backup") or item.get("original_sha256")):
+            raise ValueError("manifest original identity conflicts")
+        if recovery and type(item.get("touched")) is not bool:
+            raise ValueError("manifest touched is not boolean")
+        if "touched" in item and type(item["touched"]) is not bool:
+            raise ValueError("manifest touched type invalid")
+        if schema == 2 and not recovery and not item.get("installed_sha256"):
+            raise ValueError("committed manifest installed hash missing")
         rel = item.get("rel")
         dst = _safe_join(game_dir, rel)
         key = os.path.normcase(dst)
@@ -3386,7 +4438,7 @@ def _opti_ymcc_restore_plan(game_dir, bdir, manifest, recovery=False):
         if item["had_original"]:
             bak = _safe_join(os.path.join(bdir, "files"), item.get("backup"))
             original = _opti_restore_hash(bak)
-            if not original or (item.get("original_sha256") and original != item["original_sha256"]):
+            if not original or original != item["original_sha256"].lower():
                 raise ValueError("原件备份缺失/校验失败: " + rel)
         if recovery and not item.get("touched"):
             continue
@@ -3400,10 +4452,13 @@ def _opti_ymcc_restore_plan(game_dir, bdir, manifest, recovery=False):
 
 
 def _opti_client_restore_plan(game_dir, cdir, m):
-    status = m.get("OperationStatus", "committed")
-    target = m.get("InstalledGameDirectory") or m.get("GameDirectory") or m.get("game_dir")
+    _opti_manifest_owner(m)
+    if type(m.get("ManifestVersion")) is not int or m["ManifestVersion"] not in (1, 2):
+        raise ValueError("client manifest version unconfirmed")
+    status = m.get("OperationStatus")
+    target = _opti_manifest_target(m, ("InstalledGameDirectory", "GameDirectory", "game_dir"))
     if (not isinstance(status, str) or status.lower() != "committed" or _opti_is_reparse(cdir)
-            or _canonical_game_dir(target) != _canonical_game_dir(game_dir)):
+            or target != _canonical_game_dir(game_dir)):
         raise ValueError("客户端安装记录未提交、目标不一致或路径为链接，请在客户端恢复")
     _opti_plain_path(cdir)
     installed = m.get("InstalledFiles", [])
@@ -3413,6 +4468,10 @@ def _opti_client_restore_plan(game_dir, cdir, m):
     snapshots = m.get("PreInstallKeyFiles", [])
     if any(not isinstance(x, list) or len(x) > 4096 for x in (installed, backed, overwritten, created, snapshots)):
         raise ValueError("客户端清单列表无效")
+    for group in (installed, backed):
+        keys = [os.path.normcase(_safe_join(game_dir, rel)) for rel in group]
+        if len(keys) != len(set(keys)):
+            raise ValueError("client manifest duplicate file identity")
     records, originals, absent, original_hashes, paths = {}, set(), set(), {}, {}
 
     def key(rel):
@@ -3478,7 +4537,7 @@ def _opti_client_restore_plan(game_dir, cdir, m):
             if k in absent:
                 raise ValueError("客户端新建文件出现未知原件备份: " + rel)
             expected = original_hashes.get(k)
-            if expected and original_hash != expected:
+            if not expected or original_hash != expected:
                 raise ValueError("客户端原件校验失败: " + rel)
         elif k in originals or k not in absent:
             raise ValueError("客户端原件缺失/归属不明，停止删除: " + rel)
@@ -3517,6 +4576,8 @@ def _opti_apply_restore(game_dir, prepared, dry, created_dirs=None):
                 actions.append("delete " + rel)
                 if not dry:
                     os.remove(dst)
+                    if os.path.lexists(dst):
+                        raise ValueError("delete acknowledgement mismatch")
                     removed += 1
         except (OSError, ValueError) as e:
             failures.append(rel + ": " + str(e))
@@ -3546,25 +4607,43 @@ def _optiscaler_uninstall_locked(game_dir, cfg, dry):
         manifest_path = os.path.join(pending, "manifest.pending.json")
         if not os.path.isfile(manifest_path):
             raise ValueError("发现中断备份但没有恢复清单，已保留")
+        observed = _sha256(manifest_path)
         m = _opti_load_json(manifest_path)
         prepared = _opti_ymcc_restore_plan(game_dir, pending, m, recovery=True)
+        if not observed or _sha256(manifest_path) != observed:
+            raise ValueError("recovery manifest changed before apply")
         result = _opti_apply_restore(game_dir, prepared, dry, m.get("created_directories", []))
         result.update(via="pending_recovery", backend=m.get("backend"))
         if result["ok"] and not dry:
+            if _sha256(manifest_path) != observed:
+                raise ValueError("recovery manifest changed before clear")
             _opti_remove_backup(pending)
         return result
     if ybdir:
-        m = _opti_load_json(os.path.join(ybdir, "manifest.json"))
+        manifest_path = os.path.join(ybdir, "manifest.json")
+        observed = _sha256(manifest_path)
+        m = _opti_load_json(manifest_path)
         prepared = _opti_ymcc_restore_plan(game_dir, ybdir, m)
+        if not observed or _sha256(manifest_path) != observed:
+            raise ValueError("manifest changed before apply")
         result = _opti_apply_restore(game_dir, prepared, dry, m.get("created_directories", []))
         result.update(via="yemancc", backend=m.get("backend"))
         if result["ok"] and not dry:
+            if _sha256(manifest_path) != observed:
+                raise ValueError("manifest changed before clear")
             _opti_remove_backup(ybdir)
         return result
     found = _find_client_backup(game_dir)
     if found:
         m, cdir = found
-        result = _opti_apply_restore(game_dir, _opti_client_restore_plan(game_dir, cdir, m), dry, m.get("InstalledDirectories", []))
+        manifest_path = os.path.join(cdir, "manifest.json")
+        observed = _sha256(manifest_path)
+        if not observed or _opti_load_json(manifest_path) != m:
+            raise ValueError("client discovery identity changed")
+        prepared = _opti_client_restore_plan(game_dir, cdir, m)
+        if _sha256(manifest_path) != observed:
+            raise ValueError("client manifest changed before apply")
+        result = _opti_apply_restore(game_dir, prepared, dry, m.get("InstalledDirectories", []))
         result["via"] = "optiscalerclient"
         # Keep client's recovery record; deleting its store breaks its own state tracking.
         return result
@@ -3936,13 +5015,31 @@ def _daemon_dispatch_request_observed_core(v, state, req):
     op = req.get("op")
     args = req.get("args") if isinstance(req.get("args"), dict) else {}
     if op == "ping":
-        resp.update({"ok": True, "rc": 0, "error": "", "result": {"vendor": v}})
+        resp.update({"ok": True, "rc": 0, "error": "", "result": {
+            "vendor": v, "reinitialized": state.get("hardware_ready", True),
+            "resumeGeneration": state.get("resume_generation"),
+            "resumeRc": state.get("resume_rc")}})
         return resp, False
     if op == "resume":
-        rc = _daemon_resume_hardware(v, state)
+        generation = args.get("generation")
+        if generation is not None and (type(generation) is not int or generation < 1):
+            resp["error"] = "invalid_resume_generation"
+            return resp, False
+        previous = state.get("resume_generation")
+        if generation is not None and previous is not None and generation < previous:
+            resp["error"] = "stale_resume_generation"
+            return resp, False
+        reused = generation is not None and generation == previous and state.get("resume_rc") == 0
+        if reused:
+            rc = 0
+        else:
+            state["hardware_ready"] = False
+            rc = _daemon_resume_hardware(v, state)
+            state.update(hardware_ready=rc == 0, resume_generation=generation, resume_rc=int(rc))
         resp.update({"ok": rc == 0, "rc": int(rc),
                      "error": "" if rc == 0 else "resume_hardware_failed",
-                     "result": {"vendor": v, "reinitialized": rc == 0}})
+                     "result": {"vendor": v, "reinitialized": rc == 0,
+                                "resumeGeneration": generation, "reusedCompletion": reused}})
         return resp, False
     if op == "quit":
         resp.update({"ok": True, "rc": 0, "error": "", "result": {"stopping": True}})
@@ -3958,6 +5055,9 @@ def _daemon_dispatch_request_observed_core(v, state, req):
     if not (w == w and 2 <= w <= 200):
         resp["error"] = "watts_out_of_range"
         return resp, False
+    if state.get("hardware_ready", True) is not True:
+        resp["error"] = "hardware_resume_not_ready"
+        return resp, False
     if v == "amd":
         mw = int(round(w * 1000))
         rc = _daemon_amd_gate_call(lambda: amd_set_with(state.get("p"), state.get("cfg"), mw, mw, mw))
@@ -3970,6 +5070,49 @@ def _daemon_dispatch_request_observed_core(v, state, req):
                  "error": "" if rc == 0 else "hardware_operation_failed",
                  "result": {"watts": w, "vendor": v}})
     return resp, False
+
+
+def _daemon_serve_connection(v, hardware_state, pipe_h):
+    """Authenticate once, then block on the same local message connection.
+
+    Legacy clients retain one request per connection. A timed-out native reader
+    closes its end; an already running operation may finish, but is never replayed.
+    """
+    global _DAEMON_LOG_BATCH
+    if not _daemon_verify_pipe_client(pipe_h):
+        return False
+    while True:
+        req = _daemon_pipe_read_json(pipe_h)
+        if req is None:
+            return False
+        persistent = type(req.get("sessionVersion")) is int and req["sessionVersion"] == 2
+        previous_batch = _DAEMON_LOG_BATCH
+        _DAEMON_LOG_BATCH = []
+        try:
+            resp, stop = _daemon_dispatch_request(v, hardware_state, req)
+            if persistent:
+                resp["sessionVersion"] = 2
+            log("daemon rpc op=%s id=%s rc=%s" % (req.get("op"), req.get("requestId"), resp.get("rc")))
+        finally:
+            lines = _DAEMON_LOG_BATCH
+            _DAEMON_LOG_BATCH = previous_batch
+            if lines:
+                if previous_batch is not None:
+                    previous_batch.extend(lines)
+                else:
+                    _write_log_lines(lines)
+        sent = _daemon_pipe_write_json(pipe_h, resp)
+        if sent and (stop or not persistent):
+            # Disconnect discards unread pipe data. Drain legacy/quit replies;
+            # persistent requests block on the next read instead.
+            try:
+                _daemon_pipe_kernel32().FlushFileBuffers(pipe_h)
+            except Exception:
+                pass
+        if stop:
+            return True
+        if not sent or not persistent:
+            return False
 
 
 def daemon_run():
@@ -4030,20 +5173,7 @@ def daemon_run():
                 connected = bool(k32.ConnectNamedPipe(pipe_h, None))
                 if not connected and k32.GetLastError() != 535:  # ERROR_PIPE_CONNECTED
                     continue
-                if not _daemon_verify_pipe_client(pipe_h):
-                    continue
-                req = _daemon_pipe_read_json(pipe_h)
-                if req is None:
-                    _daemon_pipe_write_json(pipe_h, {"version": 1, "requestId": None,
-                                                     "ok": False, "rc": 2, "error": "invalid_json"})
-                    continue
-                resp, stop = _daemon_dispatch_request(v, hardware_state, req)
-                _daemon_pipe_write_json(pipe_h, resp)
-                try:
-                    k32.FlushFileBuffers(pipe_h)
-                except Exception:
-                    pass
-                log("daemon rpc op=%s id=%s rc=%s" % (req.get("op"), req.get("requestId"), resp.get("rc")))
+                stop = _daemon_serve_connection(v, hardware_state, pipe_h)
             finally:
                 try:
                     ctypes.windll.kernel32.DisconnectNamedPipe(pipe_h)
@@ -4179,21 +5309,21 @@ def main():
             log("usage: uv set <value> | uv preset <off|safe|balance|risk> | uv probe [--vendor amd|intel] [--dry-run]")
             return 2
         sub = rest[0].lower(); rest2 = rest[1:]
+        receipt = "--receipt" in rest2
+        args2 = [value for value in rest2 if value != "--receipt"]
         v = vendor_ov or detect_vendor()
         if sub == "set":
-            if not rest2:
-                log("usage: uv set <value>"); return 2
+            if not args2:
+                log("usage: uv set <value> [--receipt]"); return 2
             try:
-                val = int(rest2[0])
+                val = int(args2[0])
             except Exception:
                 log("uv set 参数必须是整数"); return 2
-            if v == "amd":   return amd_uv_set(val, dry)
-            if v == "intel": return intel_uv_set(val, dry)
-            log("厂商未识别"); return 5
+            return uv_set_dispatch(v, val, dry, receipt)
         if sub == "preset":
-            if not rest2:
-                log("usage: uv preset <off|safe|balance|risk>"); return 2
-            key = rest2[0].lower()
+            if not args2:
+                log("usage: uv preset <off|safe|balance|risk> [--receipt]"); return 2
+            key = args2[0].lower()
             if v == "amd":
                 presets = {"off": 0, "safe": -8, "balance": -14, "risk": -24}
             elif v == "intel":
@@ -4203,9 +5333,7 @@ def main():
             if key not in presets:
                 log("未知 preset:", key); return 2
             val = presets[key]
-            if v == "amd":   return amd_uv_set(val, dry)
-            if v == "intel": return intel_uv_set(val, dry)
-            log("厂商未识别"); return 5
+            return uv_set_dispatch(v, val, dry, receipt)
         if sub == "probe":
             if dry:
                 if v == "amd":
@@ -4218,11 +5346,15 @@ def main():
                     print(json.dumps({"vendor": "", "supported": False, "reason": "unknown_vendor", "current": 0}))
                 return 0
             if v == "amd":
-                print(json.dumps(amd_uv_probe()))
+                print(json.dumps(_uv_describe("amd", amd_uv_probe())))
             elif v == "intel":
-                print(json.dumps(intel_uv_probe()))
+                print(json.dumps(_uv_describe("intel", intel_uv_probe())))
             else:
-                print(json.dumps({"vendor": "", "supported": False, "reason": "unknown_vendor", "current": 0}))
+                print(json.dumps({"vendor": "", "supported": False, "available": False,
+                                  "reason": "unknown_vendor", "current": 0,
+                                  "operation": UV_POLICY["operation"], "unit": "",
+                                  "readback": False, "readbackCapability": False,
+                                  "identity": {"vendor": ""}}))
             return 0
         log("未知 uv 子命令:", sub); return 2
 

@@ -10,6 +10,8 @@
 #include <iostream>
 using namespace ymcc::deckymirror;
 using Json=nlohmann::json;
+static std::mutex capturedExpressionMutex;
+static std::vector<std::string> capturedExpressions;
 class CdpFixture {
     SOCKET listener_=INVALID_SOCKET,peer_=INVALID_SOCKET;
     std::thread worker_;
@@ -19,9 +21,9 @@ class CdpFixture {
 public:
     unsigned short port=0;
     std::string run=std::string(32,'b');
-    std::atomic<unsigned> enables{0},teardowns{0};
-    std::atomic<bool> boundary{false},bootMissing{true};
-    CdpFixture(){
+    std::atomic<unsigned> enables{0},teardowns{0},healthReads{0};
+    std::atomic<bool> boundary{false},bootMissing{true},mirrorCurrent{true};std::atomic<bool> accountRevoked{false},revokeOnTeardown{false};
+    explicit CdpFixture(bool initialBoundary=false,bool currentMirror=true,bool initialRevoked=false,bool revokeAtMutation=false):boundary(initialBoundary),mirrorCurrent(currentMirror),accountRevoked(initialRevoked),revokeOnTeardown(revokeAtMutation){
         listener_=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);sockaddr_in address{};
         address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
         if(bind(listener_,reinterpret_cast<sockaddr*>(&address),sizeof(address))||listen(listener_,1))throw std::runtime_error("fixture listen");
@@ -49,9 +51,11 @@ public:
                         }else if(method=="Runtime.evaluate"){
                             const int context=request.at("params").at("contextId");
                             const auto expression=request.at("params").value("expression",std::string{});
-                            if(expression.find(".read()")!=std::string::npos){send({{"id",id},{"result",{{"result",{{"type","string"},{"value",boundary.load()?"decky-render-failed":""}}}}}});continue;}
+                            if(expression.find("dismountAll")!=std::string::npos){std::lock_guard lock(capturedExpressionMutex);if(std::find(capturedExpressions.begin(),capturedExpressions.end(),expression)==capturedExpressions.end())capturedExpressions.push_back(expression);}
+                            if(expression=="window.__YMCC_DECKY_HEALTH__?.read() || ''"){++healthReads;send({{"id",id},{"result",{{"result",{{"type","string"},{"value",boundary.load()?"decky-render-failed":""}}}}}});continue;}
+                            if(expression=="window.__YMCC_DECKY_HEALTH__?.accountCurrent() === false"){send({{"id",id},{"result",{{"result",{{"type","boolean"},{"value",accountRevoked.load()}}}}}});continue;}
                             if(expression=="!window.DeckyPluginLoader"){send({{"id",id},{"result",{{"result",{{"type","boolean"},{"value",bootMissing.load()}}}}}});continue;}
-                            if(expression.find("===")!=std::string::npos||expression.find("dismountAll")!=std::string::npos){if(expression.find("dismountAll")!=std::string::npos)++teardowns;send({{"id",id},{"result",{{"result",{{"type","boolean"},{"value",true}}}}}});continue;}
+                            if(expression.find("===")!=std::string::npos||expression.find("dismountAll")!=std::string::npos){const bool teardown=expression.find("dismountAll")!=std::string::npos;if(teardown&&revokeOnTeardown.exchange(false))accountRevoked=true;const bool current=mirrorCurrent.load()&&(expression.find("revoked")==std::string::npos||!accountRevoked.load());const bool accepted=teardown?(expression.find("revoked")==std::string::npos||current):current;if(teardown&&accepted)++teardowns;send({{"id",id},{"result",{{"result",{{"type","boolean"},{"value",accepted}}}}}});continue;}
                             {std::lock_guard lock(state_);evaluated_.push_back(context);changed_.notify_all();}
                             if(context==400)continue; // Silent reply cancellation fixture.
                             if(context==300){send({{"id",id},{"error",{{"code",-32000}}}});continue;}
@@ -74,7 +78,7 @@ public:
 };
 struct WatchFixture {
     CdpFixture cdp;BootstrapWatch watch;std::atomic<bool> owned{true};std::mutex mutex;std::condition_variable changed;std::vector<Json> records;
-    WatchFixture(){
+    explicit WatchFixture(bool initialBoundary=false,bool currentMirror=true,bool initialRevoked=false,bool revokeAtMutation=false):cdp(initialBoundary,currentMirror,initialRevoked,revokeAtMutation){
         auto session=std::make_shared<ymcc::steamlive::HttpHandle>(WinHttpOpen(L"MirrorWatchFixture/1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,WINHTTP_FLAG_ASYNC));
         WinHttpSetTimeouts(session->h,1000,1000,1500,1500);
         auto connection=std::make_shared<ymcc::steamlive::HttpHandle>(WinHttpConnect(session->h,L"127.0.0.1",cdp.port,0));
@@ -139,11 +143,51 @@ int main(){
             f.cdp.bootMissing=false;f.cdp.send(error);check(!f.stage("terminal",100),"optional core error with initialized loader cannot disable Decky");
             f.cdp.bootMissing=true;f.cdp.send(error);check(f.stage("terminal"),"official boot fatal exception stops consumer");check(f.cdp.teardowns==1,"boot fault owns only lifecycle teardown");
         }
+        {
+            WatchFixture f;check(f.cdp.wait(101)&&f.stage("context-attached"),"offline account fixture attaches");
+            const auto signal=[&](int context,const std::string& run){f.cdp.send({{"method","Runtime.bindingCalled"},{"params",{{"name","__YMCC_DECKY_HEALTH_V1"},{"executionContextId",context},{"payload",Json{{"runId",run},{"code","decky-account-changed"}}.dump()}}}});};
+            f.cdp.accountRevoked=true;signal(201,f.cdp.run);signal(101,"stale-run");f.cdp.accountRevoked=false;signal(101,f.cdp.run);
+            check(!f.stage("failed",150),"stale or fabricated account signal cannot revoke a current connection");
+            f.cdp.accountRevoked=true;signal(101,f.cdp.run);check(f.stage("failed"),"actual account guard revokes old transport");
+            std::lock_guard lock(f.mutex);const auto last=f.records.back();
+            check(last.value("reason",std::string{})=="mirror-bootstrap-account-changed","nonfatal account reason preserved");
+            check(ymcc::deckysidebar::recoverableWatchFailure(last.value("reason",std::string{})),"account change revalidates original recovery path");
+            check(f.cdp.teardowns==0,"account switch never tears down official Loader or restarts Steam");
+        }
+        {
+            // Retained same-run health already reported on a transport which
+            // disappeared. No new bindingCalled event is emitted on reattach.
+            WatchFixture f(true);check(f.stage("terminal"),"reattach detects existing fatal boundary without a fresh marker");
+            check(f.cdp.teardowns==1,"existing boundary uses original lifecycle stop exactly once");
+            std::lock_guard lock(f.mutex);check(f.records.back().value("reason",std::string{})=="decky-render-failed","lost marker preserves verified fatal reason");
+        }
+        {
+            WatchFixture f(true,false);check(f.stage("context-attached"),"stale mirror after readback can settle without closing current session");
+            check(!f.stage("terminal",80),"existing boundary with changed run never closes a different binding");check(f.cdp.teardowns==0,"stale existing boundary has zero upstream teardown");
+        }
+        {
+            WatchFixture f;check(f.stage("context-attached"),"healthy reattachment completes its single readback");
+            check(f.cdp.healthReads==1,"one boundary read per verified context attachment");Sleep(120);check(f.cdp.healthReads==1,"healthy attachment adds no health timer or polling");
+        }
+        {
+            // Logout lands after the guarded injection readback, before the
+            // new one-shot boundary read. The runId remains as revoked provenance.
+            WatchFixture f(true,true,true);check(f.stage("context-attached"),"revoked account during attachment is transport-only");
+            check(!f.stage("terminal",80),"revoked provenance cannot authorize fatal close");check(f.cdp.teardowns==0,"revoked attachment has zero upstream teardown");
+            f.cdp.send({{"method","Runtime.bindingCalled"},{"params",{{"name","__YMCC_DECKY_HEALTH_V1"},{"executionContextId",101},{"payload",Json{{"runId",f.cdp.run},{"code","decky-account-changed"}}.dump()}}}});
+            check(f.stage("failed"),"queued account marker still reaches transport recovery");
+            std::lock_guard lock(f.mutex);check(f.records.back().value("reason",std::string{})=="mirror-bootstrap-account-changed","logout race preserves nonfatal recovery reason");
+        }
+        {
+            WatchFixture f(true,true,false,true);check(f.stage("context-attached"),"logout between native read and page mutation refuses teardown");
+            check(!f.stage("terminal",80),"proven mutation refusal cannot enqueue fatal OFF");check(f.cdp.teardowns==0,"late revocation leaves actual lifecycle untouched");
+        }
         check(bootstrapSafeReason(std::runtime_error("secret token untrusted parse text"))=="mirror-bootstrap-invalid-message","untrusted exception contents sanitized");
         check(bootstrapSafeReason(std::runtime_error("mirror-bootstrap-owner-mismatch"))=="mirror-bootstrap-owner-mismatch","known error codes retained");
         const auto log=ymcc::deckydiag::record("bootstrap-watch",{{"bootstrapStage","context-attached"},{"contextPid",1},{"contextGeneration",2},{"token","private"},{"endpoint","private"},{"runId","private"},{"expression","private"}});
         check(log.value("bootstrapStage",std::string{})=="context-attached"&&log.value("contextGeneration",0)==2,"safe lifecycle fields retained");
         check(!log.contains("token")&&!log.contains("endpoint")&&!log.contains("runId")&&!log.contains("expression"),"credentials and injected source never logged");
+        {std::lock_guard lock(capturedExpressionMutex);std::cout<<"DECKY_HEALTH_TEARDOWN_CAPTURE "<<Json(capturedExpressions).dump()<<"\n";}
         std::cout<<"Bootstrap context event-watch tests passed: "<<checks<<"; realSteam=0; loader=0; hardware=0; idlePolling=0\n";
         WSACleanup();return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';WSACleanup();return 1;}

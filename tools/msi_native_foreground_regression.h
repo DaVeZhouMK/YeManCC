@@ -1,11 +1,25 @@
 #pragma once
 // Invoked only by the production-TU offline runner; all device/process I/O is
 // injected. Test the real runtime, not a duplicate implementation of it.
-static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
+// The full field suite and mutation probes consume these same policy assertions.
+// A probe selects prerequisites and assertions; it never supplies replacement behavior.
+template<class Check>
+static void msiNativeForegroundFieldPolicyChecks(Check&& fieldCheck,unsigned fieldProduct,
+    const std::string& familyRoot,const std::string& familyHid,
+    const ymcc::msi::NativeForegroundXusbInterface& endpoint) {
+    using ymcc::nativeForeground::Profile;
+    fieldCheck("field ROG active HID XUSB identity remains recognized",ymcc::nativeForeground::xusbTargetAdmitted(Profile::Rog,familyRoot,endpoint));
+    fieldCheck("field ROG registered physical root has family root-cycle authority",
+        ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Rog,familyRoot));
+    if(fieldProduct==0x1b4c)fieldCheck("field ROGX known unsafe HID leaf policy remains quarantined",
+        !ymcc::nativeForeground::gameNodeRefreshMutationAllowed(Profile::Rog,familyRoot,familyHid));
+}
+static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationProbesOnly=false) {
     unsigned cases=0,failures=0,discoveries=0,inventories=0,xusbInventories=0,reads=0,polls=0,cloakWrites=0;
     bool ui=true,cloak=true,exempt=true,inverseOff=true,readOk=true,hideOk=true,unhideOk=true,cloakOk=true;
     bool mainPresent=true,rootPresent=true,loseFocus=false,stalePower=false,staleEdge=false,cloakReadbackMismatch=false;
     unsigned sourceCount=1;
+    ULONGLONG retryTick=1000;
     unsigned peer1902=0; // 1=physical gaming,2=virtual gaming,3=auxiliary
     bool thirdGamePresent=true,currentInventoryComplete=true;
     unsigned thirdGameUsage=5;
@@ -45,6 +59,7 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
         g_inputReady=true;g_powerGeneration=3;g_powerLifecycle=PowerLifecycle::Ready;
         g_physicalReleaseWindowStage=0;g_physicalReleaseWindowTransition=0;g_physicalReleaseWindowNeutral=false;
         g_msiNativeForegroundLease=MsiNativeForegroundLease{};g_msiNativeForegroundEdge=1;
+        g_msiNativeForegroundRetry={};retryTick=1000;
         g_msiNativeForegroundSourceRetryNeeded=false;g_msiNativeForegroundSourceRetryGeneration=0;
         g_msiNativeForegroundWatchGameSources=false;
         thirdGamePresent=currentInventoryComplete=true;thirdGameUsage=5;gameRefreshResult=0;gameRefreshes.clear();
@@ -113,6 +128,56 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
     };
     auto enter=[&](){msiNativeForegroundUiEvent();msiNativeForegroundHandleWork();};
     auto leave=[&](){ui=false;msiNativeForegroundUiEvent();msiNativeForegroundHandleWork();};
+    g_msiNativeForegroundTestIo.clock=[&](){return retryTick;};
+    g_msiNativeForegroundTestIo.readerExemption=[&](){exempt=true;return true;};
+    g_msiNativeForegroundTestIo.readerInverseOff=[&](){return inverseOff;};
+    if(!mutationProbesOnly){
+    reset();sourceCount=0;enter();
+    const auto missingSourceDiscoveries=discoveries;
+    msiNativeForegroundMaintenance();
+    check("missing source waits for bounded retry without immediate scan",discoveries==missingSourceDiscoveries && g_msiNativeForegroundRetry.due==2000);
+    sourceCount=1;retryTick=2000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+    check("source recovery retries original foreground without toggling switch",g_msiNativeForegroundLease.active && !hidden.empty() && g_msiNativeForegroundRetry.attempts==1);
+    leave();
+    reset();readOk=false;enter();
+    unsigned readerRepairs=0;
+    g_msiNativeForegroundTestIo.readerExemption=[&](){++readerRepairs;readOk=true;exempt=true;return true;};
+    retryTick=2000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+    check("failed configuration access retries only own reader exemption",readerRepairs==1 && g_msiNativeForegroundLease.active && !hidden.empty());
+    leave();g_msiNativeForegroundTestIo.readerExemption=[&](){exempt=true;return true;};
+    {
+        const auto originalSnapshot=g_msiNativeForegroundTestIo.snapshot;
+        const bool originalIsolation=g_controllerFrontendIsolationEnabled.load();
+        for(unsigned boundary=0;boundary<3;++boundary){
+            g_controllerFrontendIsolationEnabled=originalIsolation;
+            reset();readOk=false;enter();readerRepairs=0;
+            g_msiNativeForegroundTestIo.readerExemption=[&](){++readerRepairs;return true;};
+            g_msiNativeForegroundTestIo.snapshot=[&](HidHideVisibilitySnapshot&){
+                if(boundary==0)g_controllerFrontendIsolationEnabled=false;
+                else if(boundary==1)g_powerGeneration.fetch_add(1);
+                else g_msiNativeForegroundEdge.fetch_add(1);
+                return false;
+            };
+            retryTick=2000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+            check("reader retry revalidates OFF power and edge before app registration",readerRepairs==0 && writes.empty() && cycles.empty());
+            g_msiNativeForegroundTestIo.snapshot=originalSnapshot;
+        }
+        g_controllerFrontendIsolationEnabled=originalIsolation;
+        reset();readOk=false;enter();inverseOff=false;readerRepairs=0;
+        retryTick=2000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("inverse ON or unknown grants no reader registration",readerRepairs==0 && writes.empty() && cycles.empty());
+        g_msiNativeForegroundTestIo.readerExemption=[&](){exempt=true;return true;};
+    }
+    reset();enter();readOk=false;leave();
+    check("query failure still unhides exact owned paths but retains unconfirmed duty",hidden.empty() && g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.restorePending && !g_msiNativeForegroundLease.configurationReturned);
+    readOk=true;retryTick=2000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+    check("native return self heals after readback recovers",!g_msiNativeForegroundLease.active && hidden.empty());
+    reset();sourceCount=0;enter();
+    for(unsigned attempt=0;attempt<8;++attempt){retryTick+=10000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();}
+    check("missing source retry stops within original time and attempt budget",g_msiNativeForegroundRetry.attempts<=5 && !g_msiNativeForegroundRetry.due && discoveries<=4 && writes.empty() && cycles.empty());
+    reset();g_msiNativeForegroundTestIo.durableHide=[&](const auto&,const auto&,const auto&){return false;};enter();
+    check("failed durable native claim denies every hide cloak and refresh",writes.empty() && cycles.empty() && cloakWrites==0);
+    g_msiNativeForegroundTestIo.durableHide={};
     reset();enter();
     check("virtual-off foreground hides one root and three capabilities-proven game inputs",hidden.size()==4 && writes.size()==4 && cycles==std::vector<bool>{false});
     check("auxiliary HID, keyboard, mouse, consumer, sensor, foreign and virtual are untouched",std::all_of(hidden.begin(),hidden.end(),[](const auto& p){return p.find(L"VID_0DB0&PID_1901")!=std::wstring::npos;}));
@@ -123,6 +188,23 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
     leave();check("loss of focus returns only own configuration then refreshes exactly once",hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,true}));
     for(unsigned i=0;i<100;++i)msiNativeForegroundHandleWork();
     check("consumed loss-of-focus edge never repeats restore or scan",cycles.size()==2 && discoveries==1);
+    check("summon isolation defaults on for missing, legacy and malformed settings",
+        controllerFrontendIsolationSetting(json::object()) && controllerFrontendIsolationSetting(nullptr) &&
+        controllerFrontendIsolationSetting({{"ownership",{{"frontendIsolationEnabled","false"}}}}));
+    check("summon isolation honors explicit off without changing sibling ownership",
+        !controllerFrontendIsolationSetting({{"ownership",{{"frontendIsolationEnabled",false},{"externalControllerPriority",true}}}}));
+    reset();controllerFrontendIsolationRefreshSettings({{"ownership",{{"frontendIsolationEnabled",false}}}});enter();
+    check("summon isolation off never discovers, hides or refreshes native MSI",
+        !g_msiNativeForegroundLease.active && discoveries==0 && inventories==0 && writes.empty() && cycles.empty());
+    controllerFrontendIsolationRefreshSettings({{"ownership",{{"frontendIsolationEnabled",true}}}});msiNativeForegroundHandleWork();
+    check("enabling summon isolation in the same foreground acquires the existing native lease",
+        g_msiNativeForegroundLease.active && !hidden.empty() && cycles==std::vector<bool>{false});
+    controllerFrontendIsolationRefreshSettings({{"ownership",{{"frontendIsolationEnabled",false}}}});msiNativeForegroundHandleWork();
+    check("disabling summon isolation returns active native MSI through its original owner",
+        hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,true}));
+    controllerFrontendIsolationRefreshSettings(json::object());msiNativeForegroundHandleWork();leave();
+
+
     for(const char* board:{"MS-1T41","MS-1T42","MS-1T52","MS-1T8K","MS-1T91"}){reset();g_machineIdentity.product=board;enter();check(board,hidden.size()==4);leave();}
     for(unsigned scenario=0;scenario<4;++scenario){reset();
         if(scenario==0){g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.manufacturer="ASUSTeK COMPUTER INC.";}
@@ -413,6 +495,12 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
     for(unsigned generation=1;generation<=100;++generation){msiNativeForegroundObserveSource(returnedGameSource(),generation);msiNativeForegroundHandleWork();}
     check("unresolved returning interfaces have a finite per-lease retry budget",g_msiNativeForegroundLease.gameSourceAttempts.size()==16 && discoveries==17 && cycles.size()==1 && gameRefreshes.empty());leave();
 
+    reset();currentInventoryComplete=false;enter();
+    check("MSI existing native entry does not inherit the ROG inventory-complete preflight",
+        g_msiNativeForegroundLease.active && !g_msiNativeForegroundLease.nativeRootPortCycle && hidden.size()==4 && cycles==std::vector<bool>{false});
+    leave();check("MSI original return remains available after partial entry inventory",hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,true}));
+
+    } // Full normal suite remains the default; mutation probes avoid unrelated waits.
     using ymcc::nativeForeground::Profile;
     check("ROG family policy binds known model and ASUS manufacturer",ymcc::nativeForeground::machineProfile("ASUSTEK COMPUTER INC.","RC73XA")==Profile::Rog);
     check("GPD family policy binds Win5 model and GPD manufacturer",ymcc::nativeForeground::machineProfile("GPD","G1618-05")==Profile::Gpd);
@@ -422,14 +510,14 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
         ymcc::nativeForeground::machineProfile("OTHER","G1618-05")==Profile::Unsupported);
     std::string familyRoot,familyHid,familyLateHid,familyXusb;
     unsigned familyVendor=0,familyProduct=0;
-    bool familyLatePresent=false;
+    bool familyLatePresent=false,familySameRootSources=false;
     bool unrelatedMsiSource=false;
     int familyXusbResult=0;
     std::vector<std::string> xusbRefreshes;
     auto familySource=[&](){HidHidePhysicalIdentity value;value.resolved=true;value.baseContainerDeviceInstanceId=familyRoot;
         value.deviceInstanceId=familyHid;value.vendorId=familyVendor;value.productId=familyProduct;value.usagePage=1;value.usage=5;return value;};
     auto configureFamily=[&](bool rog){
-        reset();familyLatePresent=false;unrelatedMsiSource=false;familyXusbResult=0;xusbRefreshes.clear();
+        reset();familyLatePresent=familySameRootSources=false;unrelatedMsiSource=false;familyXusbResult=0;xusbRefreshes.clear();
         familyVendor=rog?0x0b05:0x045e;familyProduct=rog?0x1abe:0x028e;
         familyRoot=rog?"USB\\VID_0B05&PID_1ABE\\6&A61A827&0&4":"USB\\VID_045E&PID_028E\\7&2EA17D0F&0&1";
         familyHid=rog?"HID\\VID_0B05&PID_1ABE&MI_05&IG_00\\8&2BE06C40&0&0000":"HID\\VID_045E&PID_028E&IG_02\\9&12DC4C13&0&0000";
@@ -439,7 +527,10 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
         g_machineIdentity.manufacturer=rog?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=rog?"RC72LA":"G1618-05";
         g_msiForegroundTestIo.locations=[&](const std::string& candidate){return rootPresent && candidate==familyRoot?std::vector<std::wstring>{location}:std::vector<std::wstring>{};};
         g_msiNativeForegroundTestIo.candidates=[&](){++discoveries;std::vector<HidHidePhysicalIdentity> result;
-            for(unsigned index=0;index<sourceCount;++index){auto value=familySource();if(index){value.baseContainerDeviceInstanceId+="-OTHER";value.deviceInstanceId+="-OTHER";}result.push_back(value);}
+            for(unsigned index=0;index<sourceCount;++index){auto value=familySource();if(index){
+                if(familySameRootSources){value.baseContainerDeviceInstanceId=ascii_lower(familyRoot);value.deviceInstanceId=familyLateHid;}
+                else{value.baseContainerDeviceInstanceId+="-OTHER";value.deviceInstanceId+="-OTHER";}
+            }result.push_back(value);}
             if(unrelatedMsiSource){auto peer=familySource();peer.vendorId=0x0db0;peer.productId=0x1902;
                 peer.baseContainerDeviceInstanceId="USB\\VID_0DB0&PID_1902\\OTHER-PORT";
                 peer.deviceInstanceId="HID\\VID_0DB0&PID_1902&MI_00&COL01\\OTHER-PORT";result.push_back(peer);}
@@ -461,63 +552,125 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
             return gameRefreshResult;};
         g_msiNativeForegroundTestIo.xusbRefresh=[&](const HidHidePhysicalIdentity& value,const std::wstring& position){
             xusbRefreshes.push_back(value.deviceInstanceId);if(value.baseContainerDeviceInstanceId!=familyRoot || value.deviceInstanceId!=familyXusb || position!=location){++failures;return 2;}return familyXusbResult;};
+        g_msiNativeForegroundTestIo.cycle=[&](const std::string& candidate,const std::wstring& position,bool restoring){
+            check("family root helper receives exact lease root and physical location",candidate==familyRoot && position==location);
+            if(g_msiNativeForegroundLease.nativeRootPortCycle)check("ROG legal root helper has a concrete current XUSB target",
+                !g_msiNativeForegroundLease.xusbTargets.empty());
+            cycles.push_back(restoring);return cycleResult;
+        };
         auto endpoint=ymcc::msi::NativeForegroundXusbInterface{};endpoint.activeInterface=endpoint.ancestorMatched=true;
         endpoint.instanceId=familyXusb;endpoint.ancestorRoot=familyRoot;xusbInventory.interfaces={endpoint};
     };
-    for(const bool rog:{true,false}){
+    if(!mutationProbesOnly){
+        configureFamily(true);sourceCount=0;readOk=false;enter();
+        retryTick=30000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("paused ROG adaptation receives no new retry repair or refresh",g_msiNativeForegroundRetry.attempts==0 && !g_msiNativeForegroundRetry.due && discoveries==1 && writes.empty() && cycles.empty());
+    }
+    // Keep the existing shared-devnode regression on the legacy GPD node
+    // route. ROG now owns one root refresh, so its successful root path must
+    // not silently retire the original duplicate-node counterexample.
+    {
+        configureFamily(false);familyHid=familyRoot;
+        enter();
+        check("shared devnode refreshes exactly once",g_msiNativeForegroundLease.active &&
+            g_msiNativeForegroundLease.refreshTargets.size()==1 &&
+            g_msiNativeForegroundLease.refreshTargets.front().xusb &&
+            xusbRefreshes==std::vector<std::string>{familyRoot} && gameRefreshes.empty() && cycles.empty());
+        check("shared devnode keeps one owned hidden entry",hidden==std::vector<std::wstring>{U2W(familyRoot)} &&
+            g_msiNativeForegroundLease.owned==std::vector<std::wstring>{U2W(familyRoot)});
+        leave();
+        check("shared devnode return refreshes exactly once",hidden.empty() && !g_msiNativeForegroundLease.active &&
+            xusbRefreshes==std::vector<std::string>({familyRoot,familyRoot}) && gameRefreshes.empty() && cycles.empty());
+    }
+    if(mutationProbesOnly){
+        for(const unsigned product:{0x1abeU,0x1b4cU}){
+            configureFamily(true);familyProduct=product;
+            const std::string pid=product==0x1abe?"1ABE":"1B4C";
+            familyRoot="USB\\VID_0B05&PID_"+pid+"\\6&A61A827&0&4";
+            familyHid="HID\\VID_0B05&PID_"+pid+"&MI_05&IG_00\\8&2BE06C40&0&0000";
+            auto endpoint=xusbInventory.interfaces.front();
+            endpoint.instanceId=familyHid;endpoint.ancestorRoot=familyRoot;
+            auto fieldCheck=[&](const char* name,bool ok){const auto label="PID"+pid+": "+name;check(label.c_str(),ok);};
+            msiNativeForegroundFieldPolicyChecks(fieldCheck,product,familyRoot,familyHid,endpoint);
+        }
+        reset();g_msiNativeForegroundTestIo={};g_msiForegroundTestIo={};
+        std::cout<<"MSI_NATIVE_ONLY cases="<<cases<<" failures="<<failures<<" scope=shield-mutation-probes realHardwareAccess=false\n";
+        return {cases,failures};
+    }
+    // The same global choice returns each family's already-owned native lease;
+    // it does not rewrite their device selection, hide planner or helper protocol.
+    for(const bool rog:{false,true}){
+        configureFamily(rog);hidden={L"HID\\FOREIGN-SUMMON-OWNER"};enter();
+        check("family summon isolation starts on the existing owned lease",g_msiNativeForegroundLease.active && hidden.size()>1);
+        controllerFrontendIsolationRefreshSettings({{"ownership",{{"frontendIsolationEnabled",false}}}});msiNativeForegroundHandleWork();
+        check("family summon isolation off returns only private paths and preserves foreign entries",
+            !g_msiNativeForegroundLease.active && hidden==std::vector<std::wstring>{L"HID\\FOREIGN-SUMMON-OWNER"});
+        const auto oldWrites=writes.size(),oldCycles=cycles.size(),oldGame=gameRefreshes.size(),oldXusb=xusbRefreshes.size();
+        enter();msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("family summon isolation off cannot rehide on duplicate foreground events",
+            !g_msiNativeForegroundLease.active && writes.size()==oldWrites && cycles.size()==oldCycles &&
+            gameRefreshes.size()==oldGame && xusbRefreshes.size()==oldXusb);
+        controllerFrontendIsolationRefreshSettings({{"ownership",{{"frontendIsolationEnabled",true}}}});msiNativeForegroundHandleWork();
+        check("family summon isolation re-enable retains original foreground behavior",g_msiNativeForegroundLease.active && hidden.size()>1);
+        leave();
+    }
+    // GPD keeps the original game-node protocol. ROG boundary equivalents
+    // execute through the shared two-PID root-cycle consumer below.
+    {
+        constexpr bool rog=false;
         configureFamily(rog);enter();
         check(rog?"ROG native lease covers HID game view and active MI_05 XUSB view":"GPD native lease covers HID game view and proven XUSB root",hidden.size()==2 && hidHideContainsPath(hidden,familyHid) && hidHideContainsPath(hidden,familyXusb));
-        check("ROG/GPD use exact game-node refreshes and never USB port CyclePort",gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
+        check("GPD use exact game-node refreshes and never USB port CyclePort",gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
         check("ROG composite root and OEM/keyboard/consumer collections remain outside game targets",(!rog || !hidHideContainsPath(hidden,familyRoot)) && !hidHideContainsPath(hidden,"HID\\VENDOR-CONTROL") && !hidHideContainsPath(hidden,"HID\\KEYBOARD") && !hidHideContainsPath(hidden,"HID\\CONSUMER"));
         const auto stableDiscoveries=discoveries,stableReads=reads;
         for(unsigned packet=0;packet<1000;++packet){msiNativeForegroundObserveSource(familySource(),61);msiNativeForegroundHandleWork();}
-        check("ROG/GPD stable foreground adds no discovery, snapshot or refresh",discoveries==stableDiscoveries && reads==stableReads && gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
+        check("GPD stable foreground adds no discovery, snapshot or refresh",discoveries==stableDiscoveries && reads==stableReads && gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
         familyLatePresent=true;auto returned=familySource();returned.deviceInstanceId=familyLateHid;
         msiNativeForegroundObserveSource(returned,62);msiNativeForegroundHandleWork();
-        check("ROG/GPD returned HID collection joins same lease without touching XUSB again",hidden.size()==3 && gameRefreshes.size()==2 && xusbRefreshes.size()==1 && cycles.empty());
-        leave();check("ROG/GPD foreground return releases all private paths and refreshes both current game views",hidden.empty() && !g_msiNativeForegroundLease.active && gameRefreshes.size()==4 && xusbRefreshes.size()==2 && cycles.empty());
+        check("GPD returned HID collection joins same lease without touching XUSB again",hidden.size()==3 && gameRefreshes.size()==2 && xusbRefreshes.size()==1 && cycles.empty());
+        leave();check("GPD foreground return releases all private paths and refreshes both current game views",hidden.empty() && !g_msiNativeForegroundLease.active && gameRefreshes.size()==4 && xusbRefreshes.size()==2 && cycles.empty());
 
         configureFamily(rog);xusbInventory.interfaces.clear();enter();
-        check("ROG/GPD without current XUSB-class proof cannot hide or refresh guessed nodes",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty() && cycles.empty());
+        check("GPD without current XUSB-class proof cannot hide or refresh guessed nodes",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty() && cycles.empty());
         configureFamily(rog);xusbInventory.interfaces.front().ancestorRoot+="-OTHER";enter();
-        check("ROG/GPD XUSB on another root cannot authorize foreground shielding",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
+        check("GPD XUSB on another root cannot authorize foreground shielding",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
         configureFamily(rog);xusbInventory.interfaces.front().virtualDevice=true;enter();
-        check("ROG/GPD virtual Xbox lookalike never becomes physical shielding authority",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
+        check("GPD virtual Xbox lookalike never becomes physical shielding authority",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
         configureFamily(rog);sourceCount=2;enter();
-        check("ROG/GPD multiple physical roots are deferred without picking a VID/PID match",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
+        check("GPD multiple physical roots are deferred without picking a VID/PID match",writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
         configureFamily(rog);g_machineIdentity.product="UNKNOWN";enter();
-        check("ROG/GPD unknown model has zero new discovery and driver work",discoveries==0 && reads==0 && writes.empty() && cycles.empty());
+        check("GPD unknown model has zero new discovery and driver work",discoveries==0 && reads==0 && writes.empty() && cycles.empty());
         configureFamily(rog);g_realStickTest.virtualTargetPersona="steamdeck";g_realStickTest.virtualTargetEnabled=true;enter();
-        check("ROG/GPD virtual route keeps its existing owner and gains no native-only refresh",discoveries==0 && writes.empty() && cycles.empty());
+        check("GPD virtual route keeps its existing owner and gains no native-only refresh",discoveries==0 && writes.empty() && cycles.empty());
 
         configureFamily(rog);hidden={U2W(familyHid)};enter();
-        check("ROG/GPD preserve preexisting hidden game entry without claiming it",g_msiNativeForegroundLease.owned==std::vector<std::wstring>{U2W(familyXusb)});
-        leave();check("ROG/GPD return never removes inherited game entry",hidden==std::vector<std::wstring>{U2W(familyHid)} && cycles.empty());
+        check("GPD preserve preexisting hidden game entry without claiming it",g_msiNativeForegroundLease.owned==std::vector<std::wstring>{U2W(familyXusb)});
+        leave();check("GPD return never removes inherited game entry",hidden==std::vector<std::wstring>{U2W(familyHid)} && cycles.empty());
         configureFamily(rog);enter();const auto hidBeforeSuspend=gameRefreshes.size(),xusbBeforeSuspend=xusbRefreshes.size();
         msiNativeForegroundPowerEvent(PBT_APMSUSPEND);msiNativeForegroundHandleWork();
-        check("ROG/GPD suspend returns configuration without another game-node refresh",hidden.empty() && !g_msiNativeForegroundLease.active && gameRefreshes.size()==hidBeforeSuspend && xusbRefreshes.size()==xusbBeforeSuspend && cycles.empty());
+        check("GPD suspend returns configuration without another game-node refresh",hidden.empty() && !g_msiNativeForegroundLease.active && gameRefreshes.size()==hidBeforeSuspend && xusbRefreshes.size()==xusbBeforeSuspend && cycles.empty());
 
         configureFamily(rog);familyXusbResult=1;enter();
-        check("ROG/GPD pending XUSB node retains same helper and unfinished refresh series",g_msiNativeForegroundCyclePending && g_msiNativeForegroundLease.refreshSeriesActive && gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
+        check("GPD pending XUSB node retains same helper and unfinished refresh series",g_msiNativeForegroundCyclePending && g_msiNativeForegroundLease.refreshSeriesActive && gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
         for(unsigned repeat=0;repeat<20;++repeat)msiNativeForegroundHandleWork();
-        check("ROG/GPD live refresh is not replaced or repeated",gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
+        check("GPD live refresh is not replaced or repeated",gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
         g_realStickTest.virtualTargetPersona="steamdeck";g_realStickTest.virtualTargetEnabled=true;
-        check("ROG/GPD virtual handoff first returns config then waits for same node helper",!msiNativeForegroundBeforeVirtualWork("persona-transition") && hidden.empty() && g_msiNativeForegroundCyclePending);
+        check("GPD virtual handoff first returns config then waits for same node helper",!msiNativeForegroundBeforeVirtualWork("persona-transition") && hidden.empty() && g_msiNativeForegroundCyclePending);
         familyXusbResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
-        check("ROG/GPD terminal node helper permits original virtual reason without port reset",!g_msiNativeForegroundLease.active && virtualJobs==std::vector<std::string>{"persona-transition"} && cycles.empty());
+        check("GPD terminal node helper permits original virtual reason without port reset",!g_msiNativeForegroundLease.active && virtualJobs==std::vector<std::string>{"persona-transition"} && cycles.empty());
 
         configureFamily(rog);enter();currentInventoryComplete=false;leave();
         const auto failedPlanInventories=inventories;
         for(unsigned repeat=0;repeat<100;++repeat)msiNativeForegroundHandleWork();
-        check("ROG/GPD failed return inventory is bounded on the same foreground edge",hidden.empty() && g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundLease.refreshFailed && inventories==failedPlanInventories && cycles.empty());
+        check("GPD failed return inventory is bounded on the same foreground edge",hidden.empty() && g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundLease.refreshFailed && inventories==failedPlanInventories && cycles.empty());
         g_realStickTest.virtualTargetPersona="steamdeck";g_realStickTest.virtualTargetEnabled=true;
-        check("ROG/GPD unverified return plan can yield only after own config is proven returned",msiNativeForegroundBeforeVirtualWork("persona-transition") && !g_msiNativeForegroundLease.active);
+        check("GPD unverified return plan can yield only after own config is proven returned",msiNativeForegroundBeforeVirtualWork("persona-transition") && !g_msiNativeForegroundLease.active);
 
         configureFamily(rog);gameRefreshResult=1;enter();familyLatePresent=true;
         returned=familySource();returned.deviceInstanceId=familyLateHid;msiNativeForegroundObserveSource(returned,63);msiNativeForegroundHandleWork();
-        check("ROG/GPD interface arrival waits behind existing refresh series",gameRefreshes.size()==1 && xusbRefreshes.empty() && g_msiNativeForegroundLease.pendingGameSources.size()==1);
+        check("GPD interface arrival waits behind existing refresh series",gameRefreshes.size()==1 && xusbRefreshes.empty() && g_msiNativeForegroundLease.pendingGameSources.size()==1);
         gameRefreshResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();msiNativeForegroundHandleWork();
-        check("ROG/GPD completed series consumes queued late interface instead of losing its event",hidden.size()==3 && gameRefreshes.size()==2 && xusbRefreshes.size()==1 && cycles.empty());leave();
+        check("GPD completed series consumes queued late interface instead of losing its event",hidden.size()==3 && gameRefreshes.size()==2 && xusbRefreshes.size()==1 && cycles.empty());leave();
 
         configureFamily(rog);gameRefreshResult=2;
         // Only this GPD positive supplies terminal facts, from the actual IO leaf
@@ -530,38 +683,38 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
                 {"CompensationChecked",false},{"CompensationAttempted",false},{"CompensationEnableResult",nullptr},
                 {"ExceptionType","System.InvalidOperationException"},{"ExceptionHResult",-2146233079}}}};
         enter();
-        check("ROG/GPD failed node refresh returns private config without root-cycle fallback",hidden.empty() && g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundLease.refreshFailed && cycles.empty());
+        check("GPD failed node refresh returns private config without root-cycle fallback",hidden.empty() && g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundLease.refreshFailed && cycles.empty());
         g_realStickTest.virtualTargetPersona="steamdeck";g_realStickTest.virtualTargetEnabled=true;
-        check("ROG/GPD terminal failed refresh can hand back proven config without claiming external reset",msiNativeForegroundBeforeVirtualWork("persona-transition") && !g_msiNativeForegroundLease.active && cycles.empty());
+        check("GPD terminal failed refresh can hand back proven config without claiming external reset",msiNativeForegroundBeforeVirtualWork("persona-transition") && !g_msiNativeForegroundLease.active && cycles.empty());
         if(!rog)check("GPD terminal-failure positive consumes explicit failed Disable facts from every game refresh leaf",
             gameRefreshResult==2&&gameRefreshTerminalDiagnosticWrites>0&&
             gameRefreshTerminalDiagnosticWrites==gameRefreshes.size()&&!gameRefreshTerminalDiagnostic.is_null());
 
         configureFamily(rog);unrelatedMsiSource=true;enter();
-        check("ROG/GPD native entry is independent of an unrelated MSI DInput controller",g_msiNativeForegroundLease.active && hidden.size()==2 && gameRefreshes.size()==1 && xusbRefreshes.size()==1);
-        check("ROG/GPD native shielding never adopts another family's physical path",std::none_of(hidden.begin(),hidden.end(),[](const auto& path){return path.find(L"VID_0DB0")!=std::wstring::npos;}) && cycles.empty());leave();
+        check("GPD native entry is independent of an unrelated MSI DInput controller",g_msiNativeForegroundLease.active && hidden.size()==2 && gameRefreshes.size()==1 && xusbRefreshes.size()==1);
+        check("GPD native shielding never adopts another family's physical path",std::none_of(hidden.begin(),hidden.end(),[](const auto& path){return path.find(L"VID_0DB0")!=std::wstring::npos;}) && cycles.empty());leave();
         configureFamily(rog);enter();familyLatePresent=true;unrelatedMsiSource=true;
         returned=familySource();returned.deviceInstanceId=familyLateHid;msiNativeForegroundObserveSource(returned,64);msiNativeForegroundHandleWork();
-        check("ROG/GPD late-game coverage is independent of unrelated MSI mode",hidden.size()==3 && gameRefreshes.size()==2 && xusbRefreshes.size()==1 && cycles.empty());leave();
+        check("GPD late-game coverage is independent of unrelated MSI mode",hidden.size()==3 && gameRefreshes.size()==2 && xusbRefreshes.size()==1 && cycles.empty());leave();
 
         configureFamily(rog);g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";
         HidHideVisibilitySnapshot virtualBefore;virtualBefore.valid=true;virtualBefore.cloaking=true;virtualBefore.inverseRaw="off";
         const auto virtualTargets=hidHideVirtualPhysicalTargets(familySource(),virtualBefore,1,"offline-regression");
         check(rog?"ROG virtual physical journal plan includes independent MI_05 XUSB node":"GPD virtual physical journal plan retains actual XUSB root",
             std::find(virtualTargets.begin(),virtualTargets.end(),familyXusb)!=virtualTargets.end() && std::find(virtualTargets.begin(),virtualTargets.end(),familyHid)!=virtualTargets.end());
-        check("ROG/GPD virtual target planning performs no visibility write or physical refresh",writes.empty() && cycles.empty() && gameRefreshes.empty() && xusbRefreshes.empty() && !g_msiNativeForegroundLease.active);
+        check("GPD virtual target planning performs no visibility write or physical refresh",writes.empty() && cycles.empty() && gameRefreshes.empty() && xusbRefreshes.empty() && !g_msiNativeForegroundLease.active);
         familyLatePresent=true;const auto expandedVirtual=hidHideVirtualPhysicalTargets(familySource(),virtualBefore,1,"offline-regression");
-        check("ROG/GPD virtual shielding includes other current same-root game collection",std::find(expandedVirtual.begin(),expandedVirtual.end(),familyLateHid)!=expandedVirtual.end() && std::find(expandedVirtual.begin(),expandedVirtual.end(),"HID\\KEYBOARD")==expandedVirtual.end());
+        check("GPD virtual shielding includes other current same-root game collection",std::find(expandedVirtual.begin(),expandedVirtual.end(),familyLateHid)!=expandedVirtual.end() && std::find(expandedVirtual.begin(),expandedVirtual.end(),"HID\\KEYBOARD")==expandedVirtual.end());
         currentInventoryComplete=false;
-        check("ROG/GPD partial inventory cannot expand existing virtual physical target policy",hidHideVirtualPhysicalTargets(familySource(),virtualBefore,1,"offline-regression")==hidHidePhysicalTargets(familySource()));
+        check("GPD partial inventory cannot expand existing virtual physical target policy",hidHideVirtualPhysicalTargets(familySource(),virtualBefore,1,"offline-regression")==hidHidePhysicalTargets(familySource()));
         currentInventoryComplete=true;
-        check("ROG/GPD multiple sources cannot widen virtual physical targets",hidHideVirtualPhysicalTargets(familySource(),virtualBefore,2,"offline-regression")==hidHidePhysicalTargets(familySource()));
+        check("GPD multiple sources cannot widen virtual physical targets",hidHideVirtualPhysicalTargets(familySource(),virtualBefore,2,"offline-regression")==hidHidePhysicalTargets(familySource()));
         virtualBefore.inverseRaw="unknown";
-        check("ROG/GPD unknown inverse policy cannot widen virtual targets",hidHideVirtualPhysicalTargets(familySource(),virtualBefore,1,"offline-regression")==hidHidePhysicalTargets(familySource()));
+        check("GPD unknown inverse policy cannot widen virtual targets",hidHideVirtualPhysicalTargets(familySource(),virtualBefore,1,"offline-regression")==hidHidePhysicalTargets(familySource()));
     }
 
     // GPD async series: launch/poll the real leaf via existing IO seams.
-    // Modeled ROG and MSI keep every original assertion and execution policy.
+    // MSI/GPD keep their original gates; both ROG PIDs use the root route below.
     auto beginPendingGpdSeries=[&](bool restoring,bool lastLeaf){
         configureFamily(false);familyLatePresent=true;
         if(restoring)enter();
@@ -900,11 +1053,10 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
             hidden==beforeHidden&&writes.size()==beforeWrites&&refreshCount()==beforeRefreshes;
         g_hidHideVisibilityJournal=HidHideVisibilityJournal{};
         const bool originalReturn=msiNativeForegroundBeforeVirtualWork("persona-transition");
-        check(rog?"ROG rejects GPD owned-set proof and keeps original game-node return":
+        check(rog?"ROG rejects GPD owned-set proof and keeps the same-root port-cycle return":
             "MSI rejects GPD owned-set proof and keeps original port-cycle return",
             refused&&unchanged&&originalReturn&&!g_msiNativeForegroundLease.active&&hidden.empty()&&noCarried()&&
-            (rog?(gameRefreshes.size()==2&&xusbRefreshes.size()==2&&cycles.empty()):
-                (gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles==std::vector<bool>({false,true}))));
+            gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles==std::vector<bool>({false,true}));
     }
     // End VC-WIN5-NATIVE-OWNED-SET-R3 proof consumer cases.
     for(const bool expired:{false,true}){
@@ -1253,7 +1405,7 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
     check("ROG valid R3 ticket retains original native return protocol",
         !holdHandoff()&&!msiNativeForegroundVirtualHandoffRequired(rogTicket)&&
         msiNativeForegroundBeforeVirtualWork("persona-transition")&&hidden.empty()&&
-        !g_msiNativeForegroundLease.active&&gameRefreshes.size()==2&&xusbRefreshes.size()==2&&cycles.empty());
+        !g_msiNativeForegroundLease.active&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles==std::vector<bool>({false,true}));
     for(const auto family:{YmccFamily::OneXPlayer,YmccFamily::Ayanero}){
         configureFamily(false);g_machineIdentity.family=family;
         g_machineIdentity.manufacturer=family==YmccFamily::OneXPlayer?"ONE-NETBOOK TECHNOLOGY CO., LTD.":"AYANEO";
@@ -1270,45 +1422,319 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression() {
             !g_hidHideVisibilityJournal.active&&noCarried()&&discoveries==0&&inventories==0&&reads==0&&
             writes.empty()&&cloakWrites==0&&refreshCount()==0&&jobs.empty()&&virtualJobs.empty());
     }
-    // Keep shared-node deduplication on an explicitly modeled, unaffected
-    // PID1ABE route. The ROGX field identity below must never authorize stop/start.
-    configureFamily(true);familyXusb=familyHid;xusbInventory.interfaces.front().instanceId=familyXusb;
-    enter();
-    check("modeled ROG PID1ABE shared devnode refreshes exactly once through XUSB",hidden.size()==1&&gameRefreshes.empty()&&xusbRefreshes.size()==1&&cycles.empty());
-    leave();
-    check("modeled ROG PID1ABE shared-node return remains serial",hidden.empty()&&!g_msiNativeForegroundLease.active&&xusbRefreshes.size()==2);
-    auto configureFieldRogX=[&](){
-        configureFamily(true);familyProduct=0x1b4c;
-        familyRoot="USB\\VID_0B05&PID_1B4C\\6&A61A827&0&4";
-        familyHid="HID\\VID_0B05&PID_1B4C&MI_05&IG_00\\8&2BE06C40&0&0000";
-        familyLateHid="HID\\VID_0B05&PID_1B4C&MI_05&IG_03\\RETURNED";
-        familyXusb=familyHid;g_machineIdentity.product="RC73XA";
-        xusbInventory.interfaces.front().instanceId=familyXusb;xusbInventory.interfaces.front().ancestorRoot=familyRoot;
-    };
-    configureFieldRogX();
-    check("field ROGX active HID XUSB identity is recognized without mutation authority",ymcc::nativeForeground::xusbTargetAdmitted(Profile::Rog,familyRoot,xusbInventory.interfaces.front()));
-    check("field ROGX HID mutation policy is quarantined independently of recognition",!ymcc::nativeForeground::gameNodeRefreshMutationAllowed(Profile::Rog,familyRoot,familyHid));
-    enter();
-    check("field ROGX native shielding never hides or refreshes quarantined HID game node",writes.empty()&&hidden.empty()&&!g_msiNativeForegroundLease.active&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
-    const auto blocked=familySource();
-    check("field ROGX direct refresh leaf also refuses known unsafe mutation",msiNativeForegroundCycleLocked(false,&blocked,true)==2&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
-    leave();
-    check("field ROGX deferred return cannot invent success or issue a second refresh",hidden.empty()&&!g_msiNativeForegroundLease.active&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
-    configureFieldRogX();g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";
-    HidHideVisibilitySnapshot fieldVirtualBefore;fieldVirtualBefore.valid=true;fieldVirtualBefore.cloaking=true;fieldVirtualBefore.inverseRaw="off";
-    const auto fieldVirtualTargets=hidHideVirtualPhysicalTargets(familySource(),fieldVirtualBefore,1,"ROGX-quarantine-regression");
-    check("field ROGX virtual HidHide planning retains recognized source without physical stop/start",std::find(fieldVirtualTargets.begin(),fieldVirtualTargets.end(),familyHid)!=fieldVirtualTargets.end()&&writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
-    for(unsigned rejection=0;rejection<6;++rejection){
-        configureFieldRogX();
-        auto& endpoint=xusbInventory.interfaces.front();
-        if(rejection==0)endpoint.activeInterface=false;
-        if(rejection==1)endpoint.ancestorMatched=false;
-        if(rejection==2)endpoint.ancestorRoot+="-OTHER-PORT";
-        if(rejection==3)endpoint.virtualDevice=true;
-        if(rejection==4)endpoint.instanceId="HID\\VID_045E&PID_028E&IG_00\\FOREIGN";
-        if(rejection==5)endpoint.instanceId+="\\EXTRA";
+    configureFamily(false);familySameRootSources=true;sourceCount=2;enter();
+    check("GPD repeated same-root collections retain the original unique-source rejection",
+        discoveries==1 && inventories==0 && reads==0 && writes.empty() && !g_msiNativeForegroundLease.active &&
+        gameRefreshes.empty() && xusbRefreshes.empty() && cycles.empty());
+    configureFamily(false);currentInventoryComplete=false;enter();
+    check("GPD partial inventory retains original hide then refresh-failure return semantics",
+        !g_msiNativeForegroundLease.nativeRootPortCycle && g_msiNativeForegroundLease.active &&
+        g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundLease.refreshFailed &&
+        hidden.empty() && writes.size()==4 && inventories>=3 &&
+        std::count_if(writes.begin(),writes.end(),[](const auto& write){return write.second;})==2 &&
+        gameRefreshes.empty() && xusbRefreshes.empty() && cycles.empty());
+    currentInventoryComplete=true;leave();
+    check("GPD original game-node return can settle on a fresh edge",
+        !g_msiNativeForegroundLease.active && hidden.empty() && gameRefreshes.size()==1 && xusbRefreshes.size()==1 && cycles.empty());
+    // Extend this existing runtime consumer at its I/O seams. These snapshots
+    // are observations of production hide/return, not a second state machine.
+    const auto fieldSnapshot=g_msiNativeForegroundTestIo.snapshot;
+    const auto fieldCycle=g_msiNativeForegroundTestIo.cycle;
+    for(const unsigned fieldProduct:{0x1abeU,0x1b4cU}){
+        const std::string fieldPid=fieldProduct==0x1abe?"1ABE":"1B4C";
+        auto fieldCheck=[&](const char* name,bool ok){const auto label=std::string("PID")+fieldPid+": "+name;check(label.c_str(),ok);};
+        std::vector<HidHideVisibilitySnapshot> fieldReadbacks,fieldCycleReadbacks;
+        std::vector<std::string> fieldCycleRoots;
+        std::vector<std::size_t> fieldCycleWrites;
+        std::vector<bool> fieldCycleVerified;
+        std::size_t fieldReadbackWrites=0;
+        bool fieldMissingReadback=false;
+        const std::wstring fieldForeign=L"HID\\FOREIGN-ROG-OWNER";
+        auto configureFieldRog=[&](){
+            configureFamily(true);familyProduct=fieldProduct;
+            familyRoot="USB\\VID_0B05&PID_"+fieldPid+"\\6&A61A827&0&4";
+            familyHid="HID\\VID_0B05&PID_"+fieldPid+"&MI_05&IG_00\\8&2BE06C40&0&0000";
+            familyLateHid="HID\\VID_0B05&PID_"+fieldPid+"&MI_05&IG_03\\RETURNED";
+            familyXusb=familyHid;g_machineIdentity.product=fieldProduct==0x1abe?"RC72LA":"RC73XA";
+            xusbInventory.interfaces.front().instanceId=familyXusb;xusbInventory.interfaces.front().ancestorRoot=familyRoot;
+            fieldReadbacks.clear();fieldCycleReadbacks.clear();fieldCycleRoots.clear();fieldCycleWrites.clear();fieldCycleVerified.clear();
+            fieldReadbackWrites=0;fieldMissingReadback=false;
+            g_msiNativeForegroundTestIo.snapshot=[&](HidHideVisibilitySnapshot& snapshot){
+                if(!fieldSnapshot(snapshot))return false;
+                if(fieldMissingReadback && hidHideContainsPath(snapshot.hidden,familyHid)){
+                    snapshot.hidden.erase(std::remove(snapshot.hidden.begin(),snapshot.hidden.end(),U2W(familyHid)),snapshot.hidden.end());
+                    fieldMissingReadback=false;
+                }
+                fieldReadbacks.push_back(snapshot);fieldReadbackWrites=writes.size();return true;
+            };
+            g_msiNativeForegroundTestIo.cycle=[&](const std::string& candidate,const std::wstring& position,bool restoring){
+                fieldCheck("field ROG root helper receives exact lease root and physical location",candidate==familyRoot && position==location);
+                fieldCheck("field ROG legal root helper has a concrete current XUSB target",!g_msiNativeForegroundLease.xusbTargets.empty());
+                cycles.push_back(restoring);fieldCycleRoots.push_back(candidate);fieldCycleWrites.push_back(writes.size());
+                const auto& lease=g_msiNativeForegroundLease;
+                const auto& paths=restoring?lease.owned:lease.diagnosticSelectedPaths;
+                const bool verified=!fieldReadbacks.empty() && fieldReadbackWrites==writes.size() &&
+                    std::all_of(paths.begin(),paths.end(),[&](const auto& path){
+                        return hidHideContainsPath(fieldReadbacks.back().hidden,W2U(path))!=restoring;
+                    });
+                fieldCycleVerified.push_back(verified);
+                fieldCycleReadbacks.push_back(fieldReadbacks.empty()?HidHideVisibilitySnapshot{}:fieldReadbacks.back());
+                return cycleResult;
+            };
+        };
+        configureFieldRog();familyLatePresent=familySameRootSources=true;sourceCount=2;hidden={fieldForeign};
+        msiNativeForegroundFieldPolicyChecks(fieldCheck,fieldProduct,familyRoot,familyHid,xusbInventory.interfaces.front());
         enter();
-        check("field ROGX HID syntax cannot bypass class, parent, VID/PID or virtual gates",writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
+        fieldCheck("field ROG same-root game sources enter one native OFF lease with one root helper",
+            !g_realStickTest.virtualTargetEnabled && g_realStickTest.virtualTargetPersona=="disabled" &&
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.nativeRootPortCycle &&
+            g_msiNativeForegroundLease.root==familyRoot && g_msiNativeForegroundLease.xusbTargets==std::vector<std::string>{familyHid} &&
+            g_msiNativeForegroundLease.owned==std::vector<std::wstring>({U2W(familyHid),U2W(familyLateHid)}) &&
+            hidden.size()==3 && cycles==std::vector<bool>{false} && gameRefreshes.empty() && xusbRefreshes.empty());
+        fieldCheck("field ROG successful hide writes and full hidden readback precede the sole root helper",
+            writes==std::vector<std::pair<std::wstring,bool>>({{U2W(familyHid),true},{U2W(familyLateHid),true}}) &&
+            fieldCycleWrites==std::vector<std::size_t>{2} && fieldCycleVerified==std::vector<bool>{true} &&
+            fieldCycleReadbacks.size()==1 && hidHideContainsPath(fieldCycleReadbacks.front().hidden,familyHid) &&
+            hidHideContainsPath(fieldCycleReadbacks.front().hidden,familyLateHid) &&
+            hidHideContainsPath(fieldCycleReadbacks.front().hidden,W2U(fieldForeign)) && !hidHideContainsPath(hidden,familyRoot));
+        const auto blocked=familySource();
+        fieldCheck("field ROG root-cycle owner refuses both HID and XUSB leaf refresh calls",
+            msiNativeForegroundCycleLocked(false,&blocked)==2 && msiNativeForegroundCycleLocked(false,&blocked,true)==2 &&
+            gameRefreshes.empty() && xusbRefreshes.empty() && cycles==std::vector<bool>{false});
+        const auto fieldStableDiscoveries=discoveries,fieldStableReads=reads;
+        for(unsigned stable=0;stable<3;++stable){msiNativeForegroundObserveSource(familySource(),700);msiNativeForegroundHandleWork();}
+        fieldCheck("field ROG stable foreground repeats no discovery, visibility query or root helper",
+            discoveries==fieldStableDiscoveries && reads==fieldStableReads && cycles==std::vector<bool>{false});
+        leave();
+        fieldCheck("field ROG return reads back owned paths absent before cycling the same original root",
+            hidden==std::vector<std::wstring>{fieldForeign} && !g_msiNativeForegroundLease.active &&
+            cycles==std::vector<bool>({false,true}) && fieldCycleRoots==std::vector<std::string>({familyRoot,familyRoot}) &&
+            fieldCycleWrites==std::vector<std::size_t>({2,4}) && fieldCycleVerified==std::vector<bool>({true,true}) &&
+            fieldCycleReadbacks.back().hidden==std::vector<std::wstring>{fieldForeign} &&
+            gameRefreshes.empty() && xusbRefreshes.empty());
+
+        configureFieldRog();familyLatePresent=true;hidden={fieldForeign,U2W(familyHid)};enter();
+        fieldCheck("field ROG inherited game entry is covered without acquiring its ownership",
+            g_msiNativeForegroundLease.owned==std::vector<std::wstring>{U2W(familyLateHid)} && cycles==std::vector<bool>{false});
+        leave();
+        fieldCheck("field ROG return preserves foreign and inherited selected hidden entries",
+            hidden==std::vector<std::wstring>({fieldForeign,U2W(familyHid)}) && !g_msiNativeForegroundLease.active &&
+            cycles==std::vector<bool>({false,true}) && fieldCycleVerified==std::vector<bool>({true,true}) &&
+            std::none_of(writes.begin(),writes.end(),[&](const auto& write){return write.first==fieldForeign || write.first==U2W(familyHid);}));
+
+        configureFieldRog();familyLatePresent=true;sourceCount=2;enter();
+        fieldCheck("field ROG two physical roots cannot be merged by equal VID PID",
+            writes.empty() && hidden.empty() && !g_msiNativeForegroundLease.active && g_msiNativeForegroundSourceRetryNeeded &&
+            gameRefreshes.empty() && xusbRefreshes.empty() && cycles.empty());
+
+        configureFieldRog();
+        g_msiNativeForegroundTestIo.candidates=[&](){
+            ++discoveries;auto first=familySource(),other=first;
+            const std::string otherPid=fieldProduct==0x1abe?"1B4C":"1ABE";
+            other.productId=fieldProduct==0x1abe?0x1b4c:0x1abe;
+            other.baseContainerDeviceInstanceId="USB\\VID_0B05&PID_"+otherPid+"\\OTHER";
+            other.deviceInstanceId="HID\\VID_0B05&PID_"+otherPid+"&MI_05&IG_00\\OTHER";
+            return std::vector<HidHidePhysicalIdentity>{first,other};
+        };
+        enter();fieldCheck("field ROG actual admission rejects mixed registered PIDs on separate roots",
+            writes.empty() && cycles.empty() && !g_msiNativeForegroundLease.active && gameRefreshes.empty() && xusbRefreshes.empty());
+        configureFieldRog();familyProduct=0xffff;
+        familyRoot="USB\\VID_0B05&PID_FFFF\\UNKNOWN";familyHid="HID\\VID_0B05&PID_FFFF&IG_00\\UNKNOWN";
+        enter();fieldCheck("field ROG actual admission rejects an unregistered PID without visibility or helper IO",
+            writes.empty() && cycles.empty() && !g_msiNativeForegroundLease.active && gameRefreshes.empty() && xusbRefreshes.empty());
+        configureFieldRog();g_machineIdentity.manufacturer="OTHER";enter();
+        fieldCheck("field ROG actual admission requires ASUS board identity",discoveries==0 && writes.empty() && cycles.empty());
+        configureFieldRog();enter();familyLatePresent=familySameRootSources=true;sourceCount=2;
+        auto fieldReturned=familySource();fieldReturned.deviceInstanceId=familyLateHid;
+        msiNativeForegroundObserveSource(fieldReturned,701);msiNativeForegroundHandleWork();
+        fieldCheck("field ROG returning same-root collection uses real source admission and another root cycle",
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.root==familyRoot && hidden.size()==2 &&
+            hidHideContainsPath(hidden,familyLateHid) && writes.size()==2 && cycles==std::vector<bool>({false,false}) &&
+            fieldCycleVerified==std::vector<bool>({true,true}) && gameRefreshes.empty() && xusbRefreshes.empty());
+        msiNativeForegroundObserveSource(fieldReturned,701);msiNativeForegroundHandleWork();
+        fieldCheck("field ROG repeated returned-source notification cannot repeat its root cycle",writes.size()==2 && cycles.size()==2);
+        leave();
+        fieldCheck("field ROG returned collection is released by original root return path",
+            hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,false,true}) &&
+            fieldCycleRoots==std::vector<std::string>({familyRoot,familyRoot,familyRoot}) &&
+            fieldCycleVerified==std::vector<bool>({true,true,true}) && gameRefreshes.empty() && xusbRefreshes.empty());
+
+        configureFieldRog();enter();familyLatePresent=true;sourceCount=2;
+        fieldReturned=familySource();fieldReturned.deviceInstanceId=familyLateHid;
+        msiNativeForegroundObserveSource(fieldReturned,702);msiNativeForegroundHandleWork();
+        fieldCheck("field ROG returning collection cannot join while discovery contains another physical root",
+            hidden==std::vector<std::wstring>{U2W(familyHid)} && writes.size()==1 && cycles==std::vector<bool>{false} &&
+            g_msiNativeForegroundLease.owned==std::vector<std::wstring>{U2W(familyHid)} && gameRefreshes.empty() && xusbRefreshes.empty());
+        leave();
+
+        for(unsigned interrupted=0;interrupted<2;++interrupted){
+            configureFieldRog();familyLatePresent=true;hidden={fieldForeign};
+            if(interrupted==0)loseFocus=true;else fieldMissingReadback=true;
+            enter();
+            fieldCheck(interrupted==0?"field ROG focus lost during incomplete hide returns config without an entering root helper":
+                "field ROG missing hidden readback rolls back before any entering root helper",
+                hidden==std::vector<std::wstring>{fieldForeign} && !g_msiNativeForegroundLease.active &&
+                cycles==std::vector<bool>{true} && fieldCycleVerified==std::vector<bool>{true} &&
+                gameRefreshes.empty() && xusbRefreshes.empty());
+        }
+
+        configureFieldRog();familyLatePresent=familySameRootSources=true;sourceCount=2;hidden={fieldForeign};cycleResult=1;enter();
+        fieldCheck("field ROG entering root helper keeps one live lease",
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundCyclePending && g_msiNativeForegroundLease.syntheticCycle &&
+            !g_msiNativeForegroundLease.cycleForRestore && cycles==std::vector<bool>{false});
+        const auto fieldLiveOwned=g_msiNativeForegroundLease.owned;
+        const int fieldHideWait=nativeForegroundRefreshLocked(false),fieldRestoreWait=nativeForegroundRefreshLocked(true);
+        const int fieldDirectWait=msiNativeForegroundCycleLocked(true);
+        fieldCheck("field ROG repeated root requests retain the same pending direction and never create a second helper",
+            fieldHideWait==1 && fieldRestoreWait==1 && fieldDirectWait==1 && cycles==std::vector<bool>{false} &&
+            g_msiNativeForegroundLease.root==familyRoot && g_msiNativeForegroundLease.owned==fieldLiveOwned &&
+            !g_msiNativeForegroundLease.cycleForRestore && g_msiNativeForegroundCyclePending);
+        leave();
+        fieldCheck("field ROG focus return unhides private entries while the original root helper is still pending",
+            g_msiNativeForegroundLease.configurationReturned && hidden==std::vector<std::wstring>{fieldForeign} &&
+            g_msiNativeForegroundCyclePending && cycles==std::vector<bool>{false});
+        for(unsigned pending=0;pending<3;++pending){msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();}
+        fieldCheck("field ROG unknown live polls neither replace the root helper nor repeat visibility writes",
+            polls==3 && cycles==std::vector<bool>{false} && writes.size()==4 && g_msiNativeForegroundCyclePending);
+        const auto fieldReturnDiscoveries=discoveries;
+        familySameRootSources=false;pollResult=0;cycleResult=0;
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        fieldCheck("field ROG original helper terminal permits exactly one same-root return despite changed candidate set",
+            !g_msiNativeForegroundCyclePending && !g_msiNativeForegroundLease.active && discoveries==fieldReturnDiscoveries &&
+            hidden==std::vector<std::wstring>{fieldForeign} && cycles==std::vector<bool>({false,true}) &&
+            fieldCycleRoots==std::vector<std::string>({familyRoot,familyRoot}) && fieldCycleVerified==std::vector<bool>({true,true}) &&
+            gameRefreshes.empty() && xusbRefreshes.empty());
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        fieldCheck("field ROG consumed terminal cannot issue another return helper",cycles.size()==2 && writes.size()==4 && polls==4);
+
+        for(unsigned missing=0;missing<8;++missing){
+            configureFieldRog();
+            if(missing==0)currentInventoryComplete=false;
+            if(missing==1)xusbInventory.complete=false;
+            if(missing==2)xusbInventory.interfaces.clear();
+            if(missing==3)mainPresent=false;
+            if(missing==4)rootPresent=false;
+            if(missing==5)g_machineIdentity.product="UNKNOWN";
+            if(missing==6){g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";}
+            if(missing==7)loseXusbLocation=true;
+            enter();
+            const char* missingLabels[]={"field ROG incomplete HID inventory rejects native entry",
+                "field ROG incomplete XUSB inventory rejects native entry","field ROG absent XUSB proof rejects native entry",
+                "field ROG missing current selected HID rejects native entry","field ROG absent physical location rejects native entry",
+                "field ROG unknown board rejects native entry","field ROG virtual-enabled route gains no native-only lease",
+                "field ROG location lost during XUSB discovery rejects native entry"};
+            fieldCheck(missingLabels[missing],writes.empty() && hidden.empty() && !g_msiNativeForegroundLease.active &&
+                !g_msiNativeForegroundLease.cycleAccepted && !g_msiNativeForegroundLease.configurationReturned &&
+                gameRefreshes.empty() && xusbRefreshes.empty() && cycles.empty());
+            if(missing==2)fieldCheck("field ROG missing XUSB is rejected by production work preflight before snapshot or cycle seam",
+                xusbInventories==1 && reads==0 && writes.empty() && cycles.empty() &&
+                g_msiNativeForegroundLease.xusbTargets.empty() && !g_msiNativeForegroundLease.cycleIssued &&
+                !g_msiNativeForegroundLease.active && g_msiNativeForegroundSourceRetryNeeded);
+        }
+        // USB and HID XUSB candidates use the same existing root I/O seam.
+        // Actual helper parser/argv and device validation remain InputHost tests.
+        configureFieldRog();hidden={fieldForeign};
+        auto fieldUsbEndpoint=xusbInventory.interfaces.front();
+        fieldUsbEndpoint.instanceId="USB\\VID_0B05&PID_"+fieldPid+"&MI_05\\6&PHYSICAL&0&0005";
+        xusbInventory.interfaces.insert(xusbInventory.interfaces.begin(),fieldUsbEndpoint);
+        fieldCheck("field ROG native inventory admits USB placed before the HID XUSB candidate",
+            ymcc::nativeForeground::xusbTargetAdmitted(Profile::Rog,familyRoot,fieldUsbEndpoint));
+        enter();
+        fieldCheck("field ROG USB-first XUSB plan uses one verified root cycle without a game-node refresh",
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.nativeRootPortCycle &&
+            g_msiNativeForegroundLease.xusbTargets==std::vector<std::string>({fieldUsbEndpoint.instanceId,familyHid}) &&
+            g_msiNativeForegroundLease.cycleAccepted && !g_msiNativeForegroundCyclePending && writes.size()==2 &&
+            cycles==std::vector<bool>{false} && fieldCycleVerified==std::vector<bool>{true} &&
+            hidHideContainsPath(fieldCycleReadbacks.front().hidden,fieldUsbEndpoint.instanceId) &&
+            hidHideContainsPath(fieldCycleReadbacks.front().hidden,familyHid) && gameRefreshes.empty() && xusbRefreshes.empty());
+        leave();
+        fieldCheck("field ROG USB-first plan returns all owned paths using the same original root",
+            !g_msiNativeForegroundLease.active && hidden==std::vector<std::wstring>{fieldForeign} && writes.size()==4 &&
+            cycles==std::vector<bool>({false,true}) && fieldCycleVerified==std::vector<bool>({true,true}) &&
+            fieldCycleRoots==std::vector<std::string>({familyRoot,familyRoot}) && gameRefreshes.empty() && xusbRefreshes.empty());
+        configureFieldRog();xusbInventory.interfaces={fieldUsbEndpoint};enter();
+        fieldCheck("field ROG USB-only current XUSB proof can authorize the same root refresh",
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.xusbTargets==std::vector<std::string>{fieldUsbEndpoint.instanceId} &&
+            cycles==std::vector<bool>{false} && fieldCycleVerified==std::vector<bool>{true} && gameRefreshes.empty() && xusbRefreshes.empty());
+        leave();fieldCheck("field ROG USB-only root return settles without a HID-node refresh",
+            !g_msiNativeForegroundLease.active && hidden.empty() && cycles==std::vector<bool>({false,true}) && gameRefreshes.empty() && xusbRefreshes.empty());
+
+        configureFieldRog();hidden={fieldForeign};cycleResult=2;enter();
+        fieldCheck("field ROG rejected root helper returns config but cannot claim physical restoration",
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.configurationReturned &&
+            g_msiNativeForegroundLease.refreshFailed && !g_msiNativeForegroundLease.cycleAccepted &&
+            hidden==std::vector<std::wstring>{fieldForeign} && cycles==std::vector<bool>({false,true}) &&
+            fieldCycleVerified==std::vector<bool>({true,true}) && !g_msiNativeForegroundCyclePending &&
+            gameRefreshes.empty() && xusbRefreshes.empty());
+        for(unsigned failed=0;failed<3;++failed){msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();}
+        fieldCheck("field ROG rejected return retains responsibility without retries or invented success",
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.configurationReturned &&
+            g_msiNativeForegroundLease.refreshFailed && !g_msiNativeForegroundLease.cycleAccepted &&
+            hidden==std::vector<std::wstring>{fieldForeign} && cycles.size()==2 && writes.size()==2 && polls==0);
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+        fieldCheck("field ROG terminal failure can hand proven returned config to the existing virtual owner",
+            msiNativeForegroundBeforeVirtualWork("persona-transition") && !g_msiNativeForegroundLease.active &&
+            cycles.size()==2 && hidden==std::vector<std::wstring>{fieldForeign});
+
+        configureFieldRog();enter();
+        msiNativeForegroundPowerEvent(PBT_APMSUSPEND);msiNativeForegroundHandleWork();
+        fieldCheck("field ROG suspend returns config without another root cycle during power transition",
+            hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>{false} && gameRefreshes.empty() && xusbRefreshes.empty());
+        configureFieldRog();enter();currentInventoryComplete=false;leave();
+        fieldCheck("field ROG return uses original verified root even when a fresh interface inventory is incomplete",
+            hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,true}) &&
+            fieldCycleRoots==std::vector<std::string>({familyRoot,familyRoot}));
+
+        configureFieldRog();cycleResult=1;enter();
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+        const bool fieldVirtualWait=!msiNativeForegroundBeforeVirtualWork("persona-transition");
+        fieldCheck("field ROG virtual switch returns config and waits for its same live root helper",
+            fieldVirtualWait && hidden.empty() && g_msiNativeForegroundCyclePending && cycles==std::vector<bool>{false} && virtualJobs.empty());
+        cycleResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        fieldCheck("field ROG root helper terminal permits original virtual reason after one same-root return",
+            !g_msiNativeForegroundLease.active && virtualJobs==std::vector<std::string>{"persona-transition"} &&
+            cycles==std::vector<bool>({false,true}) && gameRefreshes.empty() && xusbRefreshes.empty());
+
+        configureFieldRog();unrelatedMsiSource=true;enter();
+        fieldCheck("field ROG native entry ignores an unrelated MSI source and never adopts its paths",
+            g_msiNativeForegroundLease.active && hidden.size()==1 && cycles==std::vector<bool>{false} &&
+            std::none_of(hidden.begin(),hidden.end(),[](const auto& path){return path.find(L"VID_0DB0")!=std::wstring::npos;}));
+        familyLatePresent=true;fieldReturned=familySource();fieldReturned.deviceInstanceId=familyLateHid;
+        msiNativeForegroundObserveSource(fieldReturned,703);msiNativeForegroundHandleWork();
+        fieldCheck("field ROG late game coverage ignores unrelated MSI and still uses only its own root",
+            hidden.size()==2 && cycles==std::vector<bool>({false,false}) && gameRefreshes.empty() && xusbRefreshes.empty());
+        leave();
+        configureFieldRog();familyXusb=fieldUsbEndpoint.instanceId;xusbInventory.interfaces.front().instanceId=familyXusb;
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";
+        HidHideVisibilitySnapshot fieldVirtualBefore;fieldVirtualBefore.valid=true;fieldVirtualBefore.cloaking=true;fieldVirtualBefore.inverseRaw="off";
+        const auto fieldVirtualTargets=hidHideVirtualPhysicalTargets(familySource(),fieldVirtualBefore,1,"ROG-root-cycle-regression");
+        fieldCheck("field ROG virtual HidHide planning retains recognized source without physical stop/start",std::find(fieldVirtualTargets.begin(),fieldVirtualTargets.end(),familyHid)!=fieldVirtualTargets.end()&&std::find(fieldVirtualTargets.begin(),fieldVirtualTargets.end(),familyXusb)!=fieldVirtualTargets.end()&&writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
+        familyLatePresent=true;
+        const auto fieldExpandedVirtual=hidHideVirtualPhysicalTargets(familySource(),fieldVirtualBefore,1,"ROG-root-cycle-regression");
+        fieldCheck("field ROG virtual planning includes another current same-root game collection",
+            std::find(fieldExpandedVirtual.begin(),fieldExpandedVirtual.end(),familyLateHid)!=fieldExpandedVirtual.end() && writes.empty() && cycles.empty());
+        currentInventoryComplete=false;
+        fieldCheck("field ROG incomplete virtual inventory keeps the original physical-target fallback",
+            hidHideVirtualPhysicalTargets(familySource(),fieldVirtualBefore,1,"ROG-root-cycle-regression")==hidHidePhysicalTargets(familySource()));
+        currentInventoryComplete=true;
+        fieldCheck("field ROG virtual planning cannot widen targets for multiple sources",
+            hidHideVirtualPhysicalTargets(familySource(),fieldVirtualBefore,2,"ROG-root-cycle-regression")==hidHidePhysicalTargets(familySource()));
+        fieldVirtualBefore.inverseRaw="unknown";
+        fieldCheck("field ROG unknown inverse policy keeps the original virtual fallback",
+            hidHideVirtualPhysicalTargets(familySource(),fieldVirtualBefore,1,"ROG-root-cycle-regression")==hidHidePhysicalTargets(familySource()));
+        for(unsigned rejection=0;rejection<6;++rejection){
+            configureFieldRog();
+            auto& endpoint=xusbInventory.interfaces.front();
+            if(rejection==0)endpoint.activeInterface=false;
+            if(rejection==1)endpoint.ancestorMatched=false;
+            if(rejection==2)endpoint.ancestorRoot+="-OTHER-PORT";
+            if(rejection==3)endpoint.virtualDevice=true;
+            if(rejection==4)endpoint.instanceId="HID\\VID_045E&PID_028E&IG_00\\FOREIGN";
+            if(rejection==5)endpoint.instanceId+="\\EXTRA";
+            enter();
+            fieldCheck("field ROG HID syntax cannot bypass class, parent, VID/PID or virtual gates",writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
+        }
+        g_msiNativeForegroundTestIo.snapshot=fieldSnapshot;g_msiNativeForegroundTestIo.cycle=fieldCycle;
     }
     // Same production step/await/Stop; the already-applied journal is modeled at
     // its existing visibility I/O seam. No full Start, real Host or SDK process.

@@ -1,0 +1,1879 @@
+{
+  "schemaVersion": 1,
+  "kind": "archived-rog-late-non-user-wake",
+  "classification": "异常睡眠类/AMD ROG待机后突发非人工唤醒/插电常见用户场景",
+  "tags": [
+    "AMD",
+    "ROG",
+    "abnormal-sleep",
+    "late-non-user-wake",
+    "AC-power-common-user-report",
+    "ordinary-logs",
+    "regression"
+  ],
+  "userObservation": "AMD ROG有时睡眠约20分钟后突然醒，多发于插电；这是用户场景分类，不构成AMD芯片或驱动根因定责。",
+  "purpose": "Execute current production wake detection through the actual shared triple-FALSE sleep sender; do not merely compare strings or count a mocked high-level request.",
+  "sources": [
+    {
+      "id": "rog-ac-28min",
+      "archive": "日志/ROG-Xbox-2025/YeManCC-logs-20261029-111850.zip",
+      "archiveSha256": "074a7387b45edac86a362d287d6ebb64cb92a32f9a4c81c68f791fc6c2ba1c99",
+      "member": "sleep-facts.log",
+      "memberSha256": "02a9913985e7c927aa0579aadac5de709cc015175bdbed86a106da6f4c2d36ce",
+      "selectedLineNumbers": [
+        72,
+        77,
+        80,
+        82,
+        83,
+        84,
+        85,
+        87,
+        88,
+        89,
+        90,
+        146,
+        147,
+        148,
+        149,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        162,
+        163,
+        164,
+        166,
+        167,
+        168,
+        169,
+        171,
+        172,
+        173,
+        174,
+        175
+      ],
+      "facts": [
+        {
+          "line": 72,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "source": "sleep-trigger"
+            },
+            "event": "non-user-wake-armed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 54993703,
+            "time": "2026-10-29 10:34:01.046",
+            "timestampLocal": "2026-10-29T10:34:01.046+08:00",
+            "timestampUtc": "2026-10-29T02:34:01.046Z",
+            "utcEpochMs": 1793241241046,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 78,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 77,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "eventId": 506,
+              "fileTime": "2026-10-29 10:34:00.957",
+              "reason": 1,
+              "reason1Accepted": true,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 54994031,
+            "time": "2026-10-29 10:34:01.365",
+            "timestampLocal": "2026-10-29T10:34:01.365+08:00",
+            "timestampUtc": "2026-10-29T02:34:01.365Z",
+            "utcEpochMs": 1793241241365,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 83,
+            "writerThreadId": 14324
+          }
+        },
+        {
+          "line": 80,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "evidence": "Kernel-Power EventID=506 Reason=1 or Reason=3",
+              "fileTime": "2026-10-29 10:34:00.957",
+              "label": "主动按键睡眠",
+              "reason": 1
+            },
+            "event": "user-initiated-sleep",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 54994031,
+            "time": "2026-10-29 10:34:01.366",
+            "timestampLocal": "2026-10-29T10:34:01.366+08:00",
+            "timestampUtc": "2026-10-29T02:34:01.366Z",
+            "utcEpochMs": 1793241241366,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 86,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 82,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "automaticHighPowerRepair": false,
+              "automaticRequests": 0,
+              "detailLogsRequired": false,
+              "drips": "drips-observation-only",
+              "highPower": "highPower-deferred",
+              "mandatoryEvidence": true,
+              "originalHumanIntent": "2026-10-29 10:34:00.957",
+              "policy": "conservative-windows-events",
+              "requestFileTime": "2026-10-29 10:34:00.957",
+              "trigger": "power-button-506"
+            },
+            "event": "abnormal-sleep-conservative-policy",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 54994031,
+            "time": "2026-10-29 10:34:01.366",
+            "timestampLocal": "2026-10-29T10:34:01.366+08:00",
+            "timestampUtc": "2026-10-29T02:34:01.366Z",
+            "utcEpochMs": 1793241241366,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 88,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 83,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "ac": true,
+              "generation": 3,
+              "source": "native.acdc"
+            },
+            "event": "acdc-change",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675609,
+            "time": "2026-10-29 11:02:02.949",
+            "timestampLocal": "2026-10-29T11:02:02.949+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.949Z",
+            "utcEpochMs": 1793242922949,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 89,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 84,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "code": 18,
+              "generation": 3,
+              "lifecycle": "suspended",
+              "retryKind": "none",
+              "taskMode": "S0/S3"
+            },
+            "event": "power-broadcast",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675640,
+            "time": "2026-10-29 11:02:02.984",
+            "timestampLocal": "2026-10-29T11:02:02.984+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.984Z",
+            "utcEpochMs": 1793242922984,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 90,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 85,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "intentAgeMs": 1682031,
+              "source": "pbt-resume-automatic"
+            },
+            "event": "non-user-wake-observed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675656,
+            "time": "2026-10-29 11:02:02.988",
+            "timestampLocal": "2026-10-29T11:02:02.988+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.988Z",
+            "utcEpochMs": 1793242922988,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 91,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 87,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "attempt": 1,
+              "delayMs": 2000,
+              "kind": "unexpected-wake",
+              "reason": "external-device-wake"
+            },
+            "event": "sleep-retry-scheduled",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675656,
+            "time": "2026-10-29 11:02:02.989",
+            "timestampLocal": "2026-10-29T11:02:02.990+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.990Z",
+            "utcEpochMs": 1793242922990,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 93,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 88,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "classificationGraceMs": 2000,
+              "intentAgeMs": 1682032,
+              "label": "意外唤醒",
+              "retryDelaysMs": [
+                500,
+                1000,
+                2000
+              ]
+            },
+            "event": "external-device-wake-confirmed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675656,
+            "time": "2026-10-29 11:02:02.991",
+            "timestampLocal": "2026-10-29T11:02:02.991+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.991Z",
+            "utcEpochMs": 1793242922991,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 94,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 89,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "code": 7,
+              "generation": 3,
+              "lifecycle": "suspended",
+              "retryKind": "unexpected-wake",
+              "taskMode": "S0/S3"
+            },
+            "event": "power-broadcast",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675656,
+            "time": "2026-10-29 11:02:02.991",
+            "timestampLocal": "2026-10-29T11:02:02.991+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.991Z",
+            "utcEpochMs": 1793242922991,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 95,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 90,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "intentAgeMs": 1682037,
+              "source": "pbt-resume-suspend"
+            },
+            "event": "non-user-wake-observed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56675656,
+            "time": "2026-10-29 11:02:02.994",
+            "timestampLocal": "2026-10-29T11:02:02.994+08:00",
+            "timestampUtc": "2026-10-29T03:02:02.994Z",
+            "utcEpochMs": 1793242922994,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 96,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 146,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "eventId": 507,
+              "fileTime": "2026-10-29 11:02:03.860",
+              "reason": 5,
+              "reason1Accepted": false,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677531,
+            "time": "2026-10-29 11:02:04.868",
+            "timestampLocal": "2026-10-29T11:02:04.868+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.868Z",
+            "utcEpochMs": 1793242924868,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 152,
+            "writerThreadId": 13960
+          }
+        },
+        {
+          "line": 147,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "assessment": "hardware-residency-recorded",
+              "automaticRepairAuthorized": false,
+              "fileTime": "2026-10-29 11:02:03.860",
+              "generation": 3,
+              "hardwareDripsPercent": 98.63601521777453,
+              "hardwareZeroIsConclusive": false,
+              "invalidFields": [],
+              "minimumObservationUs": 120000000,
+              "policy": "diagnostic-only;120s-is-not-a-Windows-entry-deadline",
+              "qualityHintThresholdPercent": 80,
+              "raw": {
+                "ActiveResidencyInUs": "22361746",
+                "BootId": "1",
+                "DripsResidencyInUs": "1660542147",
+                "DripsTransitions": "1",
+                "DurationInUs": "1682903893",
+                "DwmSyncFlushTime": "0",
+                "EnergyDrain": "273",
+                "FirstDripsEntryInUs": "21160153",
+                "GdiOnTime": "0",
+                "HwDripsResidencyInUs": "1659949340",
+                "IsCsSessionInProgressOnExit": "false",
+                "MonitorPowerOnTime": "905881",
+                "NonActivatedCpuInUs": "292838",
+                "NonAttributedCpuInUs": "2260",
+                "NonDripsTimeActivatedInUs": "15081895690",
+                "NonResiliencyTimeInUs": "18446744058637339519",
+                "PowerStateAc": "false",
+                "ResiliencyDripsTimeInUs": "1660542147",
+                "ResiliencyHwDripsTimeInUs": "1659949340",
+                "ScenarioInstanceId": "11",
+                "ScenarioInstanceIdV2": "9",
+                "ScreenOffDurationInUs": "1081269",
+                "ScreenOffHwDripsResidencyInUs": "0",
+                "ScreenOffSwDripsResidencyInUs": "0",
+                "SleepDurationInUs": "1681821670",
+                "SleepEntered": "true",
+                "SleepHwDripsResidencyInUs": "1659949340",
+                "SleepSwDripsResidencyInUs": "1660542147"
+              },
+              "schemaVersion": 1,
+              "softwareDripsPercent": 98.67124046162034,
+              "source": "Microsoft-Windows-Kernel-Power/507",
+              "timing": "after-standby-exit",
+              "units": "residency-and-duration-InUs-fields:microseconds;other-fields:Windows-schema",
+              "values": {
+                "ActiveResidencyInUs": 22361746,
+                "BootId": 1,
+                "DripsResidencyInUs": 1660542147,
+                "DripsTransitions": 1,
+                "DurationInUs": 1682903893,
+                "DwmSyncFlushTime": 0,
+                "EnergyDrain": 273,
+                "FirstDripsEntryInUs": 21160153,
+                "GdiOnTime": 0,
+                "HwDripsResidencyInUs": 1659949340,
+                "IsCsSessionInProgressOnExit": false,
+                "MonitorPowerOnTime": 905881,
+                "NonActivatedCpuInUs": 292838,
+                "NonAttributedCpuInUs": 2260,
+                "NonDripsTimeActivatedInUs": 15081895690,
+                "NonResiliencyTimeInUs": 18446744058637339519,
+                "PowerStateAc": false,
+                "ResiliencyDripsTimeInUs": 1660542147,
+                "ResiliencyHwDripsTimeInUs": 1659949340,
+                "ScenarioInstanceId": 11,
+                "ScenarioInstanceIdV2": 9,
+                "ScreenOffDurationInUs": 1081269,
+                "ScreenOffHwDripsResidencyInUs": 0,
+                "ScreenOffSwDripsResidencyInUs": 0,
+                "SleepDurationInUs": 1681821670,
+                "SleepEntered": true,
+                "SleepHwDripsResidencyInUs": 1659949340,
+                "SleepSwDripsResidencyInUs": 1660542147
+              },
+              "windowsSleepStage": "entered"
+            },
+            "event": "s0-low-power-residency",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677531,
+            "time": "2026-10-29 11:02:04.869",
+            "timestampLocal": "2026-10-29T11:02:04.869+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.869Z",
+            "utcEpochMs": 1793242924869,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 153,
+            "writerThreadId": 13960
+          }
+        },
+        {
+          "line": 148,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "acceptedUserWake": false,
+              "entryFailure": false,
+              "reason": 5,
+              "reason7EntryFailure": false,
+              "reason8EntryFailure": false
+            },
+            "event": "s0-wake-message",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677531,
+            "time": "2026-10-29 11:02:04.869",
+            "timestampLocal": "2026-10-29T11:02:04.869+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.869Z",
+            "utcEpochMs": 1793242924869,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 154,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 149,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "intentAgeMs": 1682903,
+              "source": "kernel-power-507-reason-5"
+            },
+            "event": "non-user-wake-observed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677531,
+            "time": "2026-10-29 11:02:04.869",
+            "timestampLocal": "2026-10-29T11:02:04.869+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.869Z",
+            "utcEpochMs": 1793242924869,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 155,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 151,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "fileTime": "2026-10-29 11:02:04.992",
+              "generation": 3,
+              "kind": "unexpected-wake"
+            },
+            "event": "internal-sleep-request-armed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677656,
+            "time": "2026-10-29 11:02:04.992",
+            "timestampLocal": "2026-10-29T11:02:04.992+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.992Z",
+            "utcEpochMs": 1793242924992,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 157,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 152,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "aoAc": true,
+              "capabilitiesKnown": true,
+              "generation": 3,
+              "hibernateAvailable": true,
+              "order": [
+                "modern-standby",
+                "sleep",
+                "hibernate"
+              ],
+              "ordinarySleepSupported": false
+            },
+            "event": "sleep-request-route",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677656,
+            "time": "2026-10-29 11:02:04.994",
+            "timestampLocal": "2026-10-29T11:02:04.994+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.994Z",
+            "utcEpochMs": 1793242924994,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 158,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 153,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "api": "SC_MONITORPOWER",
+              "generation": 3,
+              "hibernate": false,
+              "shutdownPrivilegeRequired": false,
+              "target": "modern-standby"
+            },
+            "event": "sleep-request-dispatch",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56677656,
+            "time": "2026-10-29 11:02:04.994",
+            "timestampLocal": "2026-10-29T11:02:04.994+08:00",
+            "timestampUtc": "2026-10-29T03:02:04.994Z",
+            "utcEpochMs": 1793242924994,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 159,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 154,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "api": "SC_MONITORPOWER",
+              "attempts": [
+                {
+                  "error": 0,
+                  "invoked": true,
+                  "outcome": "accepted-pending-confirmation",
+                  "target": "modern-standby"
+                }
+              ],
+              "error": 0,
+              "generation": 3,
+              "outcome": "accepted-pending-confirmation",
+              "target": "modern-standby"
+            },
+            "event": "sleep-request-route-result",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678140,
+            "time": "2026-10-29 11:02:05.475",
+            "timestampLocal": "2026-10-29T11:02:05.475+08:00",
+            "timestampUtc": "2026-10-29T03:02:05.475Z",
+            "utcEpochMs": 1793242925475,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 160,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 155,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "accepted": true,
+              "api": "SC_MONITORPOWER",
+              "attempt": 1,
+              "automaticRequestLimit": 3,
+              "automaticRequests": 1,
+              "environment": {
+                "acLineStatus": 1,
+                "acLineStatusKnown": true,
+                "aoAc": true,
+                "batteryFlag": 9,
+                "batteryPercent": 91,
+                "capabilitiesKnown": true,
+                "fastSystemS4": false,
+                "fullWake": true,
+                "generation": 3,
+                "hibernationFilePresent": true,
+                "lifecycle": "suspending",
+                "retryActive": true,
+                "retryKind": "unexpected-wake",
+                "systemBatteriesPresent": true,
+                "systemS1": false,
+                "systemS2": false,
+                "systemS3": false,
+                "systemS4": true,
+                "systemS5": true,
+                "taskMode": "S0/S3",
+                "thermalControl": true
+              },
+              "kind": "unexpected-wake",
+              "requestError": 0,
+              "requestedTarget": "modern-standby",
+              "shutdownPrivilegeEnabled": false,
+              "shutdownPrivilegeError": 0
+            },
+            "event": "sleep-retry-request",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678140,
+            "time": "2026-10-29 11:02:05.476",
+            "timestampLocal": "2026-10-29T11:02:05.476+08:00",
+            "timestampUtc": "2026-10-29T03:02:05.476Z",
+            "utcEpochMs": 1793242925476,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 161,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 156,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "code": 4,
+              "generation": 3,
+              "lifecycle": "suspending",
+              "retryKind": "unexpected-wake",
+              "taskMode": "S0/S3"
+            },
+            "event": "power-broadcast",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678156,
+            "time": "2026-10-29 11:02:05.486",
+            "timestampLocal": "2026-10-29T11:02:05.486+08:00",
+            "timestampUtc": "2026-10-29T03:02:05.486Z",
+            "utcEpochMs": 1793242925486,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 162,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 157,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "source": "retry-suspend-confirmed"
+            },
+            "event": "non-user-wake-armed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678156,
+            "time": "2026-10-29 11:02:05.487",
+            "timestampLocal": "2026-10-29T11:02:05.487+08:00",
+            "timestampUtc": "2026-10-29T03:02:05.487Z",
+            "utcEpochMs": 1793242925487,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 163,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 158,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "attempt": 1,
+              "kind": "unexpected-wake"
+            },
+            "event": "sleep-retry-suspend-confirmed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678156,
+            "time": "2026-10-29 11:02:05.488",
+            "timestampLocal": "2026-10-29T11:02:05.488+08:00",
+            "timestampUtc": "2026-10-29T03:02:05.488Z",
+            "utcEpochMs": 1793242925488,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 164,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 159,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "fileTime": "2026-10-29 11:02:05.477",
+              "reason": 3,
+              "reason1Accepted": false,
+              "reasonName": "other",
+              "targetState": -1,
+              "userInitiatedSleep": true
+            },
+            "event": "kernel-power-506",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678765,
+            "time": "2026-10-29 11:02:06.099",
+            "timestampLocal": "2026-10-29T11:02:06.099+08:00",
+            "timestampUtc": "2026-10-29T03:02:06.099Z",
+            "utcEpochMs": 1793242926099,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 165,
+            "writerThreadId": 13960
+          }
+        },
+        {
+          "line": 160,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "eventId": 506,
+              "fileTime": "2026-10-29 11:02:05.477",
+              "reason": 3,
+              "reason1Accepted": false,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678765,
+            "time": "2026-10-29 11:02:06.099",
+            "timestampLocal": "2026-10-29T11:02:06.099+08:00",
+            "timestampUtc": "2026-10-29T03:02:06.099Z",
+            "utcEpochMs": 1793242926099,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 166,
+            "writerThreadId": 13960
+          }
+        },
+        {
+          "line": 162,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "fileTime": "2026-10-29 11:02:05.477",
+              "reason": 3,
+              "requestKind": "unexpected-wake",
+              "requestMarkerMatched": true,
+              "retryKind": "none"
+            },
+            "event": "internal-sleep-506",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56678765,
+            "time": "2026-10-29 11:02:06.100",
+            "timestampLocal": "2026-10-29T11:02:06.100+08:00",
+            "timestampUtc": "2026-10-29T03:02:06.100Z",
+            "utcEpochMs": 1793242926100,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 168,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 163,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "code": 18,
+              "generation": 3,
+              "lifecycle": "suspended",
+              "retryKind": "none",
+              "taskMode": "S0/S3"
+            },
+            "event": "power-broadcast",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56702812,
+            "time": "2026-10-29 11:02:30.150",
+            "timestampLocal": "2026-10-29T11:02:30.150+08:00",
+            "timestampUtc": "2026-10-29T03:02:30.150Z",
+            "utcEpochMs": 1793242950150,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 169,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 164,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "intentAgeMs": 1682903,
+              "source": "pbt-resume-automatic"
+            },
+            "event": "non-user-wake-observed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56702812,
+            "time": "2026-10-29 11:02:30.153",
+            "timestampLocal": "2026-10-29T11:02:30.153+08:00",
+            "timestampUtc": "2026-10-29T03:02:30.153Z",
+            "utcEpochMs": 1793242950153,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 170,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 166,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "attempt": 1,
+              "delayMs": 2000,
+              "kind": "unexpected-wake",
+              "reason": "external-device-wake"
+            },
+            "event": "sleep-retry-scheduled",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56702812,
+            "time": "2026-10-29 11:02:30.154",
+            "timestampLocal": "2026-10-29T11:02:30.154+08:00",
+            "timestampUtc": "2026-10-29T03:02:30.154Z",
+            "utcEpochMs": 1793242950154,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 172,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 167,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "classificationGraceMs": 2000,
+              "intentAgeMs": 1682903,
+              "label": "意外唤醒",
+              "retryDelaysMs": [
+                500,
+                1000,
+                2000
+              ]
+            },
+            "event": "external-device-wake-confirmed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56702828,
+            "time": "2026-10-29 11:02:30.156",
+            "timestampLocal": "2026-10-29T11:02:30.156+08:00",
+            "timestampUtc": "2026-10-29T03:02:30.156Z",
+            "utcEpochMs": 1793242950156,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 173,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 168,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "code": 7,
+              "generation": 3,
+              "lifecycle": "suspended",
+              "retryKind": "unexpected-wake",
+              "taskMode": "S0/S3"
+            },
+            "event": "power-broadcast",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56702828,
+            "time": "2026-10-29 11:02:30.156",
+            "timestampLocal": "2026-10-29T11:02:30.156+08:00",
+            "timestampUtc": "2026-10-29T03:02:30.156Z",
+            "utcEpochMs": 1793242950156,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 174,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 169,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "intentAgeMs": 1682903,
+              "source": "pbt-resume-suspend"
+            },
+            "event": "non-user-wake-observed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56702828,
+            "time": "2026-10-29 11:02:30.159",
+            "timestampLocal": "2026-10-29T11:02:30.159+08:00",
+            "timestampUtc": "2026-10-29T03:02:30.159Z",
+            "utcEpochMs": 1793242950159,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 175,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 171,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "fileTime": "2026-10-29 11:02:32.143",
+              "generation": 3,
+              "kind": "unexpected-wake"
+            },
+            "event": "internal-sleep-request-armed",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56704812,
+            "time": "2026-10-29 11:02:32.143",
+            "timestampLocal": "2026-10-29T11:02:32.143+08:00",
+            "timestampUtc": "2026-10-29T03:02:32.143Z",
+            "utcEpochMs": 1793242952143,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 177,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 172,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "aoAc": true,
+              "capabilitiesKnown": true,
+              "generation": 3,
+              "hibernateAvailable": true,
+              "order": [
+                "modern-standby",
+                "sleep",
+                "hibernate"
+              ],
+              "ordinarySleepSupported": false
+            },
+            "event": "sleep-request-route",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56704812,
+            "time": "2026-10-29 11:02:32.143",
+            "timestampLocal": "2026-10-29T11:02:32.143+08:00",
+            "timestampUtc": "2026-10-29T03:02:32.143Z",
+            "utcEpochMs": 1793242952143,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 178,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 173,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "api": "SC_MONITORPOWER",
+              "generation": 3,
+              "hibernate": false,
+              "shutdownPrivilegeRequired": false,
+              "target": "modern-standby"
+            },
+            "event": "sleep-request-dispatch",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56704812,
+            "time": "2026-10-29 11:02:32.144",
+            "timestampLocal": "2026-10-29T11:02:32.144+08:00",
+            "timestampUtc": "2026-10-29T03:02:32.144Z",
+            "utcEpochMs": 1793242952144,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 179,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 174,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "api": "SC_MONITORPOWER",
+              "attempts": [
+                {
+                  "error": 0,
+                  "invoked": true,
+                  "outcome": "accepted-pending-confirmation",
+                  "target": "modern-standby"
+                }
+              ],
+              "error": 0,
+              "generation": 3,
+              "outcome": "accepted-pending-confirmation",
+              "target": "modern-standby"
+            },
+            "event": "sleep-request-route-result",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56704812,
+            "time": "2026-10-29 11:02:32.146",
+            "timestampLocal": "2026-10-29T11:02:32.146+08:00",
+            "timestampUtc": "2026-10-29T03:02:32.146Z",
+            "utcEpochMs": 1793242952146,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 180,
+            "writerThreadId": 16092
+          }
+        },
+        {
+          "line": 175,
+          "record": {
+            "clockScope": "timestampUtc/utcEpochMs=record-creation-wall-clock;observedTickMs=Windows-boot-monotonic;time=legacy-local-label;details-time-is-original-event-evidence",
+            "details": {
+              "accepted": true,
+              "api": "SC_MONITORPOWER",
+              "attempt": 1,
+              "automaticRequestLimit": 3,
+              "automaticRequests": 2,
+              "environment": {
+                "acLineStatus": 1,
+                "acLineStatusKnown": true,
+                "aoAc": true,
+                "batteryFlag": 9,
+                "batteryPercent": 91,
+                "capabilitiesKnown": true,
+                "fastSystemS4": false,
+                "fullWake": true,
+                "generation": 3,
+                "hibernationFilePresent": true,
+                "lifecycle": "suspending",
+                "retryActive": true,
+                "retryKind": "unexpected-wake",
+                "systemBatteriesPresent": true,
+                "systemS1": false,
+                "systemS2": false,
+                "systemS3": false,
+                "systemS4": true,
+                "systemS5": true,
+                "taskMode": "S0/S3",
+                "thermalControl": true
+              },
+              "kind": "unexpected-wake",
+              "requestError": 0,
+              "requestedTarget": "modern-standby",
+              "shutdownPrivilegeEnabled": false,
+              "shutdownPrivilegeError": 0
+            },
+            "event": "sleep-retry-request",
+            "factSchemaVersion": 2,
+            "observationScope": "journal-record-creation;not-kernel-event-time-or-action-completion",
+            "observedTickMs": 56704812,
+            "time": "2026-10-29 11:02:32.147",
+            "timestampLocal": "2026-10-29T11:02:32.147+08:00",
+            "timestampUtc": "2026-10-29T03:02:32.147Z",
+            "utcEpochMs": 1793242952147,
+            "utcOffsetMinutes": 480,
+            "writerIdentityStatus": "pid-and-process-creation-known",
+            "writerInstanceId": "native:16992:134376865668579996",
+            "writerPid": 16992,
+            "writerPowerGeneration": 3,
+            "writerProcessCreation100ns": "134376865668579996",
+            "writerSequence": 181,
+            "writerThreadId": 16092
+          }
+        }
+      ],
+      "factMonitorPreferenceAtExport": false,
+      "highFrequencyLoggingRequired": false,
+      "evidenceLimits": "Original observation and kernel-event times are separate; timestamps displayed to millisecond precision, counters in microseconds. Event reason is not proof of AMD/Steam/driver root cause."
+    },
+    {
+      "id": "rog-dc-88min",
+      "archive": "日志/ROG-Xbox-2025/YeManCC-logs-20261025-152731-AMD标准自动唤醒bug.zip",
+      "archiveSha256": "7e23c60ed3fe29aa6236057ecb4920e8389c541f01c2602f86e08807067c8bf5",
+      "member": "sleep-facts.log",
+      "memberSha256": "118ee8df2b851dca4c98ffbca07917314876b93016ffb671ce7d42fbdf302833",
+      "selectedLineNumbers": [
+        115,
+        125,
+        127,
+        128,
+        130,
+        133,
+        136,
+        140,
+        141,
+        142,
+        143,
+        146,
+        148,
+        151,
+        153,
+        155,
+        156,
+        158,
+        159,
+        160,
+        161,
+        162
+      ],
+      "facts": [
+        {
+          "line": 115,
+          "record": {
+            "details": {
+              "eventId": 506,
+              "fileTime": "2026-10-25 13:58:21.110",
+              "reason": 1,
+              "reason1Accepted": true,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "time": "2026-10-25 13:58:22.113"
+          }
+        },
+        {
+          "line": 125,
+          "record": {
+            "details": {
+              "eventId": 507,
+              "fileTime": "2026-10-25 15:26:29.865",
+              "reason": 55,
+              "reason1Accepted": false,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "time": "2026-10-25 15:26:29.894"
+          }
+        },
+        {
+          "line": 127,
+          "record": {
+            "details": {
+              "assessment": "hardware-residency-recorded",
+              "automaticRepairAuthorized": false,
+              "fileTime": "2026-10-25 15:26:29.865",
+              "generation": 3,
+              "hardwareDripsPercent": 99.1798032286869,
+              "hardwareZeroIsConclusive": false,
+              "invalidFields": [],
+              "minimumObservationUs": 120000000,
+              "policy": "diagnostic-only;120s-is-not-a-Windows-entry-deadline",
+              "qualityHintThresholdPercent": 80,
+              "raw": {
+                "ActiveResidencyInUs": "42079596",
+                "BootId": "1",
+                "DripsResidencyInUs": "5246675678",
+                "DripsTransitions": "2",
+                "DurationInUs": "5288755274",
+                "DwmSyncFlushTime": "0",
+                "EnergyDrain": "131",
+                "FirstDripsEntryInUs": "37034604",
+                "GdiOnTime": "0",
+                "HwDripsResidencyInUs": "5245377074",
+                "IsCsSessionInProgressOnExit": "true",
+                "MonitorPowerOnTime": "0",
+                "NonActivatedCpuInUs": "333168",
+                "NonAttributedCpuInUs": "3672",
+                "NonDripsTimeActivatedInUs": "47571463419",
+                "NonResiliencyTimeInUs": "18446744026174998888",
+                "PowerStateAc": "false",
+                "ResiliencyDripsTimeInUs": "5246675678",
+                "ResiliencyHwDripsTimeInUs": "5245377074",
+                "ScenarioInstanceId": "8",
+                "ScenarioInstanceIdV2": "6",
+                "ScreenOffDurationInUs": "1052615",
+                "ScreenOffHwDripsResidencyInUs": "0",
+                "ScreenOffSwDripsResidencyInUs": "0",
+                "SleepDurationInUs": "5287701942",
+                "SleepEntered": "true",
+                "SleepHwDripsResidencyInUs": "5245377074",
+                "SleepSwDripsResidencyInUs": "5246675678"
+              },
+              "schemaVersion": 1,
+              "softwareDripsPercent": 99.20435728597867,
+              "source": "Microsoft-Windows-Kernel-Power/507",
+              "timing": "after-standby-exit",
+              "units": "residency-and-duration-InUs-fields:microseconds;other-fields:Windows-schema",
+              "values": {
+                "ActiveResidencyInUs": 42079596,
+                "BootId": 1,
+                "DripsResidencyInUs": 5246675678,
+                "DripsTransitions": 2,
+                "DurationInUs": 5288755274,
+                "DwmSyncFlushTime": 0,
+                "EnergyDrain": 131,
+                "FirstDripsEntryInUs": 37034604,
+                "GdiOnTime": 0,
+                "HwDripsResidencyInUs": 5245377074,
+                "IsCsSessionInProgressOnExit": true,
+                "MonitorPowerOnTime": 0,
+                "NonActivatedCpuInUs": 333168,
+                "NonAttributedCpuInUs": 3672,
+                "NonDripsTimeActivatedInUs": 47571463419,
+                "NonResiliencyTimeInUs": 18446744026174998888,
+                "PowerStateAc": false,
+                "ResiliencyDripsTimeInUs": 5246675678,
+                "ResiliencyHwDripsTimeInUs": 5245377074,
+                "ScenarioInstanceId": 8,
+                "ScenarioInstanceIdV2": 6,
+                "ScreenOffDurationInUs": 1052615,
+                "ScreenOffHwDripsResidencyInUs": 0,
+                "ScreenOffSwDripsResidencyInUs": 0,
+                "SleepDurationInUs": 5287701942,
+                "SleepEntered": true,
+                "SleepHwDripsResidencyInUs": 5245377074,
+                "SleepSwDripsResidencyInUs": 5246675678
+              },
+              "windowsSleepStage": "entered"
+            },
+            "event": "s0-low-power-residency",
+            "time": "2026-10-25 15:26:29.903"
+          }
+        },
+        {
+          "line": 128,
+          "record": {
+            "details": {
+              "classificationGraceMs": 2000,
+              "intentAgeMs": 5288777,
+              "label": "意外唤醒",
+              "retryDelaysMs": [
+                500,
+                1000,
+                2000
+              ]
+            },
+            "event": "external-device-wake-confirmed",
+            "time": "2026-10-25 15:26:29.904"
+          }
+        },
+        {
+          "line": 130,
+          "record": {
+            "details": {
+              "eventId": 506,
+              "fileTime": "2026-10-25 15:26:29.866",
+              "reason": 55,
+              "reason1Accepted": false,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "time": "2026-10-25 15:26:29.907"
+          }
+        },
+        {
+          "line": 133,
+          "record": {
+            "details": {
+              "intentAgeMs": 5288754,
+              "source": "pbt-resume-suspend"
+            },
+            "event": "non-user-wake-observed",
+            "time": "2026-10-25 15:26:29.921"
+          }
+        },
+        {
+          "line": 136,
+          "record": {
+            "details": {
+              "intentAgeMs": 5288754,
+              "source": "kernel-power-507-non-power-button"
+            },
+            "event": "non-user-wake-observed",
+            "time": "2026-10-25 15:26:29.982"
+          }
+        },
+        {
+          "line": 140,
+          "record": {
+            "details": {
+              "aoAc": true,
+              "capabilitiesKnown": true,
+              "generation": 3,
+              "hibernateAvailable": true,
+              "order": [
+                "modern-standby",
+                "sleep",
+                "hibernate"
+              ],
+              "ordinarySleepSupported": false
+            },
+            "event": "sleep-request-route",
+            "time": "2026-10-25 15:26:31.903"
+          }
+        },
+        {
+          "line": 141,
+          "record": {
+            "details": {
+              "api": "SC_MONITORPOWER",
+              "generation": 3,
+              "hibernate": false,
+              "shutdownPrivilegeRequired": false,
+              "target": "modern-standby"
+            },
+            "event": "sleep-request-dispatch",
+            "time": "2026-10-25 15:26:31.903"
+          }
+        },
+        {
+          "line": 142,
+          "record": {
+            "details": {
+              "api": "SC_MONITORPOWER",
+              "attempts": [
+                {
+                  "error": 0,
+                  "invoked": true,
+                  "outcome": "accepted-pending-confirmation",
+                  "target": "modern-standby"
+                }
+              ],
+              "error": 0,
+              "generation": 3,
+              "outcome": "accepted-pending-confirmation",
+              "target": "modern-standby"
+            },
+            "event": "sleep-request-route-result",
+            "time": "2026-10-25 15:26:31.904"
+          }
+        },
+        {
+          "line": 143,
+          "record": {
+            "details": {
+              "accepted": true,
+              "api": "SC_MONITORPOWER",
+              "attempt": 1,
+              "automaticRequestLimit": 3,
+              "automaticRequests": 1,
+              "environment": {
+                "acLineStatus": 0,
+                "acLineStatusKnown": true,
+                "aoAc": true,
+                "batteryFlag": 1,
+                "batteryPercent": 97,
+                "capabilitiesKnown": true,
+                "fastSystemS4": false,
+                "fullWake": true,
+                "generation": 3,
+                "hibernationFilePresent": true,
+                "lifecycle": "suspending",
+                "retryActive": true,
+                "retryKind": "unexpected-wake",
+                "systemBatteriesPresent": true,
+                "systemS1": false,
+                "systemS2": false,
+                "systemS3": false,
+                "systemS4": true,
+                "systemS5": true,
+                "taskMode": "S0/S3",
+                "thermalControl": true
+              },
+              "kind": "unexpected-wake",
+              "requestError": 0,
+              "requestedTarget": "modern-standby",
+              "shutdownPrivilegeEnabled": false,
+              "shutdownPrivilegeError": 0
+            },
+            "event": "sleep-retry-request",
+            "time": "2026-10-25 15:26:31.905"
+          }
+        },
+        {
+          "line": 146,
+          "record": {
+            "details": {
+              "attempt": 1,
+              "kind": "unexpected-wake"
+            },
+            "event": "sleep-retry-suspend-confirmed",
+            "time": "2026-10-25 15:26:34.883"
+          }
+        },
+        {
+          "line": 148,
+          "record": {
+            "details": {
+              "intentAgeMs": 5288754,
+              "source": "pbt-resume-automatic"
+            },
+            "event": "non-user-wake-observed",
+            "time": "2026-10-25 15:27:15.970"
+          }
+        },
+        {
+          "line": 151,
+          "record": {
+            "details": {
+              "classificationGraceMs": 2000,
+              "intentAgeMs": 5288754,
+              "label": "意外唤醒",
+              "retryDelaysMs": [
+                500,
+                1000,
+                2000
+              ]
+            },
+            "event": "external-device-wake-confirmed",
+            "time": "2026-10-25 15:27:15.993"
+          }
+        },
+        {
+          "line": 153,
+          "record": {
+            "details": {
+              "intentAgeMs": 5288754,
+              "source": "pbt-resume-suspend"
+            },
+            "event": "non-user-wake-observed",
+            "time": "2026-10-25 15:27:15.998"
+          }
+        },
+        {
+          "line": 155,
+          "record": {
+            "details": {
+              "eventId": 507,
+              "fileTime": "2026-10-25 15:27:16.856",
+              "reason": 1,
+              "reason1Accepted": true,
+              "targetState": -1
+            },
+            "event": "kernel-power",
+            "time": "2026-10-25 15:27:16.959"
+          }
+        },
+        {
+          "line": 156,
+          "record": {
+            "details": {
+              "assessment": "short-session",
+              "automaticRepairAuthorized": false,
+              "fileTime": "2026-10-25 15:27:16.856",
+              "generation": 3,
+              "hardwareDripsPercent": 0.0,
+              "hardwareZeroIsConclusive": false,
+              "invalidFields": [],
+              "minimumObservationUs": 120000000,
+              "policy": "diagnostic-only;120s-is-not-a-Windows-entry-deadline",
+              "qualityHintThresholdPercent": 80,
+              "raw": {
+                "ActiveResidencyInUs": "46991064",
+                "BootId": "1",
+                "DripsResidencyInUs": "0",
+                "DripsTransitions": "0",
+                "DurationInUs": "46991064",
+                "DwmSyncFlushTime": "0",
+                "EnergyDrain": "6128",
+                "FirstDripsEntryInUs": "0",
+                "GdiOnTime": "0",
+                "HwDripsResidencyInUs": "0",
+                "IsCsSessionInProgressOnExit": "false",
+                "MonitorPowerOnTime": "889559",
+                "NonActivatedCpuInUs": "704506",
+                "NonAttributedCpuInUs": "0",
+                "NonDripsTimeActivatedInUs": "278593989",
+                "NonResiliencyTimeInUs": "18446744073449399480",
+                "PowerStateAc": "false",
+                "ResiliencyDripsTimeInUs": "0",
+                "ResiliencyHwDripsTimeInUs": "0",
+                "ScenarioInstanceId": "10",
+                "ScenarioInstanceIdV2": "8",
+                "ScreenOffDurationInUs": "10025240",
+                "ScreenOffHwDripsResidencyInUs": "0",
+                "ScreenOffSwDripsResidencyInUs": "0",
+                "SleepDurationInUs": "36966691",
+                "SleepEntered": "true",
+                "SleepHwDripsResidencyInUs": "0",
+                "SleepSwDripsResidencyInUs": "0"
+              },
+              "schemaVersion": 1,
+              "softwareDripsPercent": 0.0,
+              "source": "Microsoft-Windows-Kernel-Power/507",
+              "timing": "after-standby-exit",
+              "units": "residency-and-duration-InUs-fields:microseconds;other-fields:Windows-schema",
+              "values": {
+                "ActiveResidencyInUs": 46991064,
+                "BootId": 1,
+                "DripsResidencyInUs": 0,
+                "DripsTransitions": 0,
+                "DurationInUs": 46991064,
+                "DwmSyncFlushTime": 0,
+                "EnergyDrain": 6128,
+                "FirstDripsEntryInUs": 0,
+                "GdiOnTime": 0,
+                "HwDripsResidencyInUs": 0,
+                "IsCsSessionInProgressOnExit": false,
+                "MonitorPowerOnTime": 889559,
+                "NonActivatedCpuInUs": 704506,
+                "NonAttributedCpuInUs": 0,
+                "NonDripsTimeActivatedInUs": 278593989,
+                "NonResiliencyTimeInUs": 18446744073449399480,
+                "PowerStateAc": false,
+                "ResiliencyDripsTimeInUs": 0,
+                "ResiliencyHwDripsTimeInUs": 0,
+                "ScenarioInstanceId": 10,
+                "ScenarioInstanceIdV2": 8,
+                "ScreenOffDurationInUs": 10025240,
+                "ScreenOffHwDripsResidencyInUs": 0,
+                "ScreenOffSwDripsResidencyInUs": 0,
+                "SleepDurationInUs": 36966691,
+                "SleepEntered": true,
+                "SleepHwDripsResidencyInUs": 0,
+                "SleepSwDripsResidencyInUs": 0
+              },
+              "windowsSleepStage": "entered"
+            },
+            "event": "s0-low-power-residency",
+            "time": "2026-10-25 15:27:16.960"
+          }
+        },
+        {
+          "line": 158,
+          "record": {
+            "details": {
+              "acceptedUserWake": true,
+              "entryFailure": false,
+              "reason": 1,
+              "reason7EntryFailure": false,
+              "reason8EntryFailure": false
+            },
+            "event": "s0-wake-message",
+            "time": "2026-10-25 15:27:16.961"
+          }
+        },
+        {
+          "line": 159,
+          "record": {
+            "details": {
+              "generation": 3,
+              "kind": "unexpected-wake",
+              "source": "kernel-power-507-reason-1"
+            },
+            "event": "internal-sleep-request-cleared",
+            "time": "2026-10-25 15:27:16.961"
+          }
+        },
+        {
+          "line": 160,
+          "record": {
+            "details": {
+              "clearedUserPowerButtonSleep": true,
+              "source": "kernel-power-507-reason-1"
+            },
+            "event": "unexpected-wake-cleared",
+            "time": "2026-10-25 15:27:16.961"
+          }
+        },
+        {
+          "line": 161,
+          "record": {
+            "details": {
+              "generation": 3
+            },
+            "event": "s0-sleep-retry-canceled-user-wake",
+            "time": "2026-10-25 15:27:16.962"
+          }
+        },
+        {
+          "line": 162,
+          "record": {
+            "details": {
+              "source": "sleep-intent-canceled"
+            },
+            "event": "user-standby-cleared",
+            "time": "2026-10-25 15:27:16.962"
+          }
+        }
+      ],
+      "factMonitorPreferenceAtExport": false,
+      "highFrequencyLoggingRequired": false,
+      "evidenceLimits": "Original observation and kernel-event times are separate; timestamps displayed to millisecond precision, counters in microseconds. Event reason is not proof of AMD/Steam/driver root cause."
+    }
+  ],
+  "cases": [
+    {
+      "id": "rog-ac-28min-reason5",
+      "origin": "archived",
+      "sourceId": "rog-ac-28min",
+      "entryLine": 77,
+      "exitLine": 146,
+      "residencyLine": 147,
+      "entryFileTime": "2026-10-29 10:34:00.957",
+      "exitFileTime": "2026-10-29 11:02:03.860",
+      "durationUs": 1682903893,
+      "elapsedFromFormattedKernelTimesMs": 1682903,
+      "reason": 5,
+      "acAtWake": true,
+      "acAtSourceLine": 83,
+      "acAtDispatch": true,
+      "acDispatchLine": 155,
+      "acDuringWholeSleep": "UNKNOWN",
+      "softwareDripsUs": 1660542147,
+      "hardwareDripsUs": 1659949340,
+      "sleepEntered": true,
+      "oldDispatchLine": 153,
+      "oldApi": "SC_MONITORPOWER",
+      "oldDispatchAccepted": true,
+      "secondResumeLine": 163,
+      "secondDispatchLine": 173,
+      "secondResumeIsIndependent507": false,
+      "expectedCurrentApi": "SetSuspendState",
+      "expectedArguments": [
+        false,
+        false,
+        false
+      ],
+      "sourceLimit": "AC/DC changed near wake. Positive residency supports prior Windows low-power accounting, but neither a unique wake root cause nor successful repair is established."
+    },
+    {
+      "id": "rog-dc-88min-reason55",
+      "origin": "archived",
+      "sourceId": "rog-dc-88min",
+      "entryLine": 115,
+      "exitLine": 125,
+      "residencyLine": 127,
+      "entryFileTime": "2026-10-25 13:58:21.110",
+      "exitFileTime": "2026-10-25 15:26:29.865",
+      "durationUs": 5288755274,
+      "elapsedFromFormattedKernelTimesMs": 5288755,
+      "reason": 55,
+      "acAtWake": false,
+      "acAtDispatch": false,
+      "acDispatchLine": 143,
+      "acDuringWholeSleep": "UNKNOWN",
+      "softwareDripsUs": 5246675678,
+      "hardwareDripsUs": 5245377074,
+      "sleepEntered": true,
+      "oldDispatchLine": 141,
+      "oldApi": "SC_MONITORPOWER",
+      "oldDispatchAccepted": true,
+      "manualWakeLine": 155,
+      "manualWakeFileTime": "2026-10-25 15:27:16.856",
+      "manualCancelLine": 161,
+      "expectedCurrentApi": "SetSuspendState",
+      "expectedArguments": [
+        false,
+        false,
+        false
+      ],
+      "sourceLimit": "DC wake/dispatch control retained; not all AMD ROG late wakes are exclusive to AC power."
+    },
+    {
+      "id": "rog-stable-ac-20min-control",
+      "origin": "synthetic-control",
+      "sourceId": null,
+      "durationUs": 1200000000,
+      "elapsedFromFormattedKernelTimesMs": 1200000,
+      "reason": 5,
+      "acAtWake": true,
+      "acDuringWholeSleep": true,
+      "acChanges": 0,
+      "deviceChanges": 0,
+      "softwareDripsUs": null,
+      "hardwareDripsUs": null,
+      "sleepEntered": null,
+      "expectedCurrentApi": "SetSuspendState",
+      "expectedArguments": [
+        false,
+        false,
+        false
+      ],
+      "sourceLimit": "Explicit user-scenario control, not an archived physical20minute event or power measurement."
+    }
+  ],
+  "requiredAssertions": [
+    "Current source non-user wake route detects beyond20minutes without an upper cutoff",
+    "Windows resume or non-manual507 is required; AC/DC or generic device noise alone cannot wake an already-awake cycle",
+    "General non-manual507 must not depend on fresh supply change, USB enumeration, display state or nonzero DRIPS",
+    "Actual terminal arguments are FALSE,FALSE,FALSE; monitor-off calls must be zero",
+    "Switch OFF, absent/retired manual origin, confirmed human wake and exhausted shared budget refuse",
+    "Two-second manual-classification grace and callback-before-GUI cancellation remain",
+    "Duplicate notifications share one in-flight repair; no unbounded retries"
+  ],
+  "realPowerApiCallsAllowed": false,
+  "physicalSleepAcceptance": false
+}

@@ -28,8 +28,10 @@ static void logLocked(const char* stage, const char* reason,
             {"executionInspectionRemainingMs",view.requestId==request.requestId?json(view.verificationRemainingMs):json(nullptr)},
             {"powerGeneration",request.power},{"hostEpoch",request.hostEpoch},
             {"deadline",request.deadline},{"error",static_cast<unsigned long>(request.error)},
-            {"faultKind",request.tupleFault?"tuple-receipt":"transport"},{"persona",request.persona},
-            {"pending",request.pending},{"queued",request.queued},{"spent",request.spent},
+            {"faultKind",request.localFault==InputHostSwitchLocalFault::DeferredPhysicalHide?"deferred-physical-hide":
+                (request.localFault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing?"owned-hidden-target-missing":
+                    (request.tupleFault?"tuple-receipt":"transport"))},{"persona",request.persona},
+            {"pending",request.pending},{"queued",request.queued},{"spent",request.spent},{"resolved",request.resolved},
             {"awaitingCleanup",request.awaitingCleanup},{"stopInvoked",request.stopInvoked},
             {"executionCleanup",request.executionCleanup},
             {"episodeAttempts",g_inputHostRecoveryEpisodeAttempts.load(std::memory_order_acquire)},
@@ -70,7 +72,7 @@ static const char* staleLocked(InputHostSwitchRecoveryRequest& request, Tick now
     // Ten seconds is the inspection window, not a second retry hard cap.
     // An already diagnosed repair still belongs to the original 30s budget.
     if (view.persona != request.persona || inputHostConfiguredPersona() != request.persona ||
-            (!request.tupleFault && request.persona != "steamdeck") ||
+            (!request.tupleFault && request.localFault==InputHostSwitchLocalFault::None && request.persona != "steamdeck") ||
             !g_realStickTest.enabled || (!g_realStickTest.virtualTargetEnabled &&
                 !g_externalPriorityVirtualSuspended.load(std::memory_order_acquire)))
         return "steamdeck-intent-retired";
@@ -86,13 +88,13 @@ static bool cleanLocked() noexcept {
         !g_inputHostReleaseQuarantined && !g_inputHostStartBlocked;
 }
 // A verification fault may still own its target/journal. Only this exact current
-// SteamDeck tuple may be stopped; identity/permission/asset failures are excluded
-// by the classified Offer producer, never inferred from feed/UI observations.
-static bool recoverableOwnedStateLocked(Tick power,bool tupleFault=false) noexcept {
+// tuple may be stopped; ordinary transport retains its SteamDeck scope. Local
+// visibility/tuple producers supply separate exact ownership, never UI guesses.
+static bool recoverableOwnedStateLocked(Tick power,bool tupleFault=false, bool localFault=false) noexcept {
     return cleanLocked() || (power && currentPowerGeneration() == power &&
         g_inputHostProcess && g_inputHostHello && !g_inputHostRunId.empty() && g_inputHostEpoch &&
-        (tupleFault ? g_inputHostBoundPersona == inputHostConfiguredPersona() : g_inputHostBoundPersona == "steamdeck") &&
-        g_inputHostBoundPowerGeneration == power && (tupleFault || g_inputHostTransportFault) &&
+        ((tupleFault || localFault) ? g_inputHostBoundPersona == inputHostConfiguredPersona() : g_inputHostBoundPersona == "steamdeck") &&
+        g_inputHostBoundPowerGeneration == power && (tupleFault || localFault || g_inputHostTransportFault) &&
         !g_inputHostReleaseQuarantined && !g_inputHostStartBlocked);
 }
 // now is system uptime (GetTickCount64), never the injectable guard clock.
@@ -123,7 +125,8 @@ static bool heldLocked(Tick now, bool requireSource = true, bool checkCooldown =
 // owned transport fault already proves it. Stop may proceed, Start still waits
 // for a fresh current source. A clean failed startup retains its source gate.
 static bool stopHeldLocked(Tick now) {
-    const bool ownedFault=g_inputHostProcess && (g_inputHostTransportFault || g_inputHostSwitchRecovery.tupleFault);
+    const bool ownedFault=g_inputHostProcess && (g_inputHostTransportFault || g_inputHostSwitchRecovery.tupleFault ||
+        g_inputHostSwitchRecovery.localFault!=InputHostSwitchLocalFault::None);
     return heldLocked(now,!ownedFault);
 }
 static bool budgetBlockedLocked(Tick now) {
@@ -156,27 +159,45 @@ static void awaitCleanupLocked(const char* reason) noexcept {
     g_inputHostSwitchRecoveryPending.store(true,std::memory_order_release);
     if (first) logLocked("held",reason,request);
 }
+// Ordinary execution may have repaired this fact while the fallback waited.
+// UNKNOWN/stale reads never mean resolved. A queued duplicate cannot reuse a
+// resolved offer, and a spent attempt is never reset by this observation.
+static bool localFaultReadyLocked(InputHostSwitchRecoveryRequest& request) {
+    if(request.localFault==InputHostSwitchLocalFault::None)return true;
+    if(inputHostSwitchLocalFaultResolvedLocked(request.requestId,request.localFault)) {
+        logLocked("resolved","ordinary-execution-repaired-before-fallback",request);
+        request.pending=false;request.queued=false;request.resolved=true;
+        g_inputHostSwitchRecoveryPending.store(false,std::memory_order_release);
+        return false;
+    }
+    return inputHostSwitchLocalFaultCurrentLocked(request.requestId)==request.localFault;
+}
 } // namespace ymcc::inputHost::switchRecoveryRuntime
 
-// Only classified startup/verification transport faults offer work. UI focus,
-// normal idle and source-pending never establish a transport fault.
+// Classified transport/tuple faults and exact owned visibility obligations use
+// this SAME recovery owner. Source absence/idle/UI focus are not fault evidence.
+// T0 request -> ordinary execution -> Tc+10s inspection -> at most one fallback
+// Stop/return-proof/Start -> verified final, always within T0+30s. Known gaps
+// discovered by normal execution stay execution; this remains the fallback.
 static void inputHostSwitchRecoveryOfferLocked(std::uint64_t ticket,
-        std::uint64_t power, DWORD error,bool tupleFault) {
+        std::uint64_t power, DWORD error,bool tupleFault,InputHostSwitchLocalFault localFault) {
     namespace runtime = ymcc::inputHost::switchRecoveryRuntime;
-    if (!ticket || !power || (!tupleFault && !runtime::retryable(error))) return;
+    const bool local=localFault!=InputHostSwitchLocalFault::None;
+    if (!ticket || !power || (tupleFault && local) || (!tupleFault && !local && !runtime::retryable(error)) ||
+        (local && inputHostSwitchLocalFaultCurrentLocked(ticket)!=localFault)) return;
     auto& request = g_inputHostSwitchRecovery;
     if (request.requestId == ticket) return; // Never rearm/renew this ticket.
     const auto now = inputHostStartProtectionNow();
     const auto view = g_virtualStartProtection.view(now);
     const auto remaining = view.remainingMs;
     if (view.requestId != ticket || view.persona == "disabled" ||
-            (!tupleFault && view.persona != "steamdeck") ||
+            (!tupleFault && !local && view.persona != "steamdeck") ||
             (view.phase != "pending" && view.phase != "verifying") ||
             !view.locked || !remaining ||
             currentPowerGeneration() != power || inputHostConfiguredPersona() != view.persona ||
             !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled ||
             inputHostExitFenceRaised() || g_exitRequested.load(std::memory_order_acquire) ||
-            g_inputCaptureStop.load(std::memory_order_acquire) || !runtime::recoverableOwnedStateLocked(power,tupleFault) ||
+            g_inputCaptureStop.load(std::memory_order_acquire) || !runtime::recoverableOwnedStateLocked(power,tupleFault,local) ||
             remaining > (std::numeric_limits<std::uint64_t>::max)() - now) return;
     // Preserve the original 30s remainder; the 10s inspection is not a retry hard cap.
     // A newer ticket may replace state; an older queued ticket can never borrow it.
@@ -189,13 +210,16 @@ static void inputHostSwitchRecoveryOfferLocked(std::uint64_t ticket,
     request.error = error;
     request.persona = view.persona;
     request.tupleFault = tupleFault;
+    request.localFault = localFault;
     request.pending = true;
     g_inputHostSwitchRecoveryPending.store(true,std::memory_order_release);
     // A real failed execution supplies Tc. Admission elapsed time alone can
     // never finish inspection or manufacture a retry opportunity.
     if (view.phase=="pending")
-        inputHostStartProtectionFinish(ticket,"failure",tupleFault?"execution-classified-tuple-failure":"execution-classified-transport-failure");
-    runtime::logLocked("scheduled",tupleFault?"classified-tuple-receipt-failure":"classified-transport-failure",request);
+        inputHostStartProtectionFinish(ticket,"failure",local?"execution-classified-visibility-failure":
+            (tupleFault?"execution-classified-tuple-failure":"execution-classified-transport-failure"));
+    runtime::logLocked("scheduled",local?"classified-owned-visibility-failure":
+        (tupleFault?"classified-tuple-receipt-failure":"classified-transport-failure"),request);
 }
 
 static void inputHostSwitchRecoveryMaintenanceLocked() {
@@ -225,9 +249,10 @@ static void inputHostSwitchRecoveryMaintenanceLocked() {
         }
     } else {
         if (runtime::stopHeldLocked(GetTickCount64())) return;
-        if (request.spent || (!request.tupleFault && !runtime::retryable(request.error)) ||
+        if(!runtime::localFaultReadyLocked(request))return;
+        if (request.spent || (!request.tupleFault && request.localFault==InputHostSwitchLocalFault::None && !runtime::retryable(request.error)) ||
                 runtime::budgetBlockedLocked(GetTickCount64()) ||
-                !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault)) {
+                !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None)) {
             runtime::retireLocked("blocked","budget-or-cleanup-not-admitted");
             return;
         }
@@ -275,8 +300,9 @@ static void inputHostPerformSwitchRecovery(std::uint64_t ticket) {
             } else {
                 const auto recoveryNow = GetTickCount64();
                 if (runtime::stopHeldLocked(recoveryNow)) return;
-                if ((!request.tupleFault && !runtime::retryable(request.error)) || runtime::budgetBlockedLocked(recoveryNow) ||
-                        !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault)) {
+                if(!runtime::localFaultReadyLocked(request))return;
+                if ((!request.tupleFault && request.localFault==InputHostSwitchLocalFault::None && !runtime::retryable(request.error)) || runtime::budgetBlockedLocked(recoveryNow) ||
+                        !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None)) {
                     runtime::retireLocked("blocked","budget-or-cleanup-not-admitted");
                     return;
                 }

@@ -2,12 +2,40 @@
 param(
     [Parameter(Mandatory=$true)][string]$EvidenceRoot,
     [string]$HostAssembly = '',
-    [string]$NodeExecutable = ''
+    [string]$NodeExecutable = '',
+    [switch]$JournalsOnly
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath($EvidenceRoot)
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $PSScriptRoot 'FanRepeatedSleepIntentSelfTest\FanRepeatedSleepIntentSelfTest.csproj'
+if ($JournalsOnly) {
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $build = Join-Path $root 'build'
+    $feed = Join-Path $root 'empty-nuget-feed'
+    New-Item -ItemType Directory -Path $feed -Force | Out-Null
+    & dotnet build $project -c Release -r win-x64 --artifacts-path $build --disable-build-servers -p:NuGetAudit=false "-p:RestoreSources=$feed" -v quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Original fan journal consumer build failed' }
+    $consumer = Join-Path $build 'bin\FanRepeatedSleepIntentSelfTest\release_win-x64\FanRepeatedSleepIntentSelfTest.dll'
+    if ([string]::IsNullOrWhiteSpace($HostAssembly)) { $HostAssembly = Join-Path (Split-Path -Parent $consumer) 'YeManFanHost.dll' }
+    $hostPath = (Resolve-Path -LiteralPath $HostAssembly).Path
+    $hostSha = (Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $runRoot = Join-Path $root 'journals'
+    & dotnet $consumer $runRoot $hostPath '-' '-' 'journals'
+    $consumerExit = $LASTEXITCODE
+    if (-not (Test-Path -LiteralPath (Join-Path $runRoot 'result.json'))) { throw 'Fan journal result missing' }
+    $result = Get-Content -LiteralPath (Join-Path $runRoot 'result.json') -Raw | ConvertFrom-Json
+    if ($result.hostAssemblySha256 -ne $hostSha) { throw 'Fan journal consumer used another payload' }
+    if ($consumerExit -ne 0 -or -not $result.ok) { throw "Fan journals self-test failed: $($result.failures.Count)" }
+    Write-Output "fan journal original-consumer self-test: PASS ($($result.count); no network/Host Main/device)"
+    $engineRoot = Join-Path $root 'engine-only'
+    & dotnet $consumer $engineRoot $hostPath '-' '-' 'engine-only'
+    if ($LASTEXITCODE -ne 0) { throw 'Original fan engine-only regressions failed' }
+    $engineResult = Get-Content -LiteralPath (Join-Path $engineRoot 'result.json') -Raw | ConvertFrom-Json
+    if (-not $engineResult.ok -or $engineResult.count -lt 72 -or $engineResult.hostAssemblySha256 -ne $hostSha) { throw 'Original engine-only result or payload binding is incomplete' }
+    if ((Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hostSha) { throw 'Host payload changed during journal consumer checks' }
+    return
+}
 if ([string]::IsNullOrWhiteSpace($HostAssembly)) { $HostAssembly = Join-Path $projectRoot 'PowerControl\fan-host\YeManFanHost.dll' }
 $hostPath = (Resolve-Path -LiteralPath $HostAssembly).Path
 $hostSha = (Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -152,6 +152,7 @@ export const sourceInputs = Object.freeze([
   "native/dsu_server.h",
   "tools/fixtures/dsu_lifecycle/native.cpp",
   "tools/fixtures/dsu_lifecycle/run.mjs",
+  "capabilities/upstream/f2e58468/OneXPlayer3.cs",
   "tools/hc_onex_x2_windows_selftest.mjs",
   "native/onex_x2_windows.h",
   "native/onex_x2_session.h",
@@ -657,14 +658,16 @@ export function signalArtifactRows(repo=REPO){
     ...managedArtifactRows(repo),
   ]);
 }
-export function getSignalEvidenceAdapters(repo = REPO) {
+export function getSignalEvidenceAdapters(repo = REPO, {identityOnly=false}={}) {
   let artifacts = [], blockedReason;
-  try { artifacts = signalArtifactRows(repo).map(row=>row.path); }
-  catch (error) { blockedReason = error.message; }
+  if (!identityOnly) {
+    try { artifacts = signalArtifactRows(repo).map(row=>row.path); }
+    catch (error) { blockedReason = error.message; }
+  }
   return [{id: ID, domain: 'controller', title: 'Actual raw receipt, semantic witness, resolved wake generation, callback diagnostics, worker retirement, Stop ownership, typed Stop receipt, startup/exit continuation, Emergency, resource owner and actual sensor Ensure and pipe owned-cleanup composition and actual primary-thread ownership and managed terminal settlement consumers',
     kind: 'node', path: MODULE + '/run.mjs', args: ['{outDir}'],
     profiles: ['desktop', 'full'], timeoutMs: 1800000, scope: 'behavioral-mock',
     evidenceInputs: [...sourceInputs].filter(x => x !== MODULE + '/run.mjs'),
-    artifactInputs: artifacts, ...(blockedReason ? {blockedReason} : {}), resultFiles: ['diagnostic-result.json'], lifecycleContract,
+    artifactInputs: artifacts, ...(blockedReason ? {blockedReason} : {}), ...(identityOnly ? {registrationIdentityOnly:true,blockedReason:'SIGNAL_EXECUTION_IDENTITY_DEFERRED'} : {}), resultFiles: ['diagnostic-result.json'], lifecycleContract,
     boundary: 'Existing native consumers with explicit input/OS leaves; Stop and full Start/worker/Stop startup checks additionally use real private test-owned Windows threads, events, wait and close; the startup unit uses real condition-variable synchronization. DSU uses actual localhost sockets; sensor and Gamebar use private threads/events and explicit fake COM/WinRT. No real RawInput registration, timer, device, Host, Steam, driver, service or sleep is executed. Diagnostic PASS does not prove suppression, game consumption, timer drain or persistent controller recovery; lifecycle acceptance remains incomplete without those measurements.'}];
 }

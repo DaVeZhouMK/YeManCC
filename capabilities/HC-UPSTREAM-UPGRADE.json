@@ -1,0 +1,2019 @@
+{
+  "schemaVersion": 1,
+  "updatedOn": "2026-11-03",
+  "objective": "Upgrade all HC model capabilities by source-only imports into the single YMCC capability library; retain frozen HC source/runtime and existing live ownership guards",
+  "goalStatus": "active",
+  "goalComplete": false,
+  "authority": {
+    "soleEntry": "YMCC能力总库",
+    "runtimeCatalog": "capabilities/hc-device-catalog.json",
+    "existingBindings": "capabilities/AI-INDEX.json",
+    "thisFile": "upgrade provenance and unresolved work only; not a second runtime catalog or allocator",
+    "newHumanInstruction": "2026-10-31: 机型唯一入口仍是YMCC能力总库"
+  },
+  "upstream": {
+    "repository": "Valkirie/HandheldCompanion",
+    "commit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+    "commitTime": "2026-10-30T08:21:37Z",
+    "latestStableReleaseAtCapture": "1.3.3.1",
+    "latestStablePublishedAt": "2026-10-04T09:32:35Z",
+    "sourcePinEvidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\upstream\\SOURCE-PIN.json",
+    "deviceFiles": [
+      {
+        "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA1.cs",
+        "gitBlobSha": "bd10aa92d6465bb3dbf70beb292dca3d9f0eecbf",
+        "sha256": "ef8b01d6912c2cc88370ace767bca5ff340dcb83b2a56be78898122acd4f6d75",
+        "bytes": 8829
+      },
+      {
+        "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA1Pro.cs",
+        "gitBlobSha": "b0c63c0cd55f8ca3f2d207afa2a0dc20c564c9fd",
+        "sha256": "5baf953bffd62fd4a34175bc46302a5106e9649bf2624e5f1fb3de435686caf5",
+        "bytes": 786
+      },
+      {
+        "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA1X.cs",
+        "gitBlobSha": "214abcc5998e44075596e48bc596bf5702b40e72",
+        "sha256": "e8b3dc39e32536e6ddc2125c80f4ac142a9a38394a25fec845a570d6f8e539fb",
+        "bytes": 363
+      },
+      {
+        "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA2.cs",
+        "gitBlobSha": "d507c9b2302dd0af03a614449356b703eff9d8de",
+        "sha256": "edef1b3c6a5d883af6ad14d90872b299546decbe156c72ffbcf1db2bba9b27f1",
+        "bytes": 185
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/ASUS.cs",
+        "gitBlobSha": "e3984a991a894f84203de54e4e3dd1909577ef2e",
+        "sha256": "d551ce453374367f47e17b90e2447e3af4d79594db530d031f7a80e31fccfef9",
+        "bytes": 403
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/AsusACPI.cs",
+        "gitBlobSha": "748c401457fb3b06cbed0f796b50f9ffe19dac1c",
+        "sha256": "4ead4003484097801ab6591e2043465de4d80ffb970f9f0fa03bfe57c0c7b23e",
+        "bytes": 13142
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/ROGAlly.cs",
+        "gitBlobSha": "d5e691d939b797ee2dc114109c0e9bd27d440f7d",
+        "sha256": "6ecc1473757550f49b05de608583fe5a2810fa72ca1e46ce14e56f013356ab93",
+        "bytes": 25702
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/ROGAllyX.cs",
+        "gitBlobSha": "249f3a348b1a73ab62f61a6c76916d978de0b315",
+        "sha256": "491da300ea5fca979100f5123ecea72115ac037adf5b90514c1c0a3f08a9271e",
+        "bytes": 970
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/XGM.cs",
+        "gitBlobSha": "df00d6307f102a5fe36bfc45168f0d7456ed96db",
+        "sha256": "9bc883ad7f66d041f5ae7386eb95b5772adf36ee3408459c1747c4aa76767731",
+        "bytes": 1901
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/XboxROGAlly.cs",
+        "gitBlobSha": "d70bf9b6ec7cb1788ded924942c7396605ba9604",
+        "sha256": "52faa09d9365466d627f990d65d8f81c3fe298049c6233b6eefd92b1624cb309",
+        "bytes": 1238
+      },
+      {
+        "path": "HandheldCompanion/Devices/ASUS/XboxROGAllyX.cs",
+        "gitBlobSha": "6d608ee8001975bd8f8fda496a7e5b7ad9094579",
+        "sha256": "ae9c73c26549f02e064ad5725dde0571bb3090fbdf43c3e105e57909bc76b582",
+        "bytes": 1250
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEO2.cs",
+        "gitBlobSha": "eda197f9a4717801fdf00a86e76ee8bdc234a499",
+        "sha256": "42b446db0f974034377481cc8a9f1f76106d2cb166c5d5a46995f6823d1759ee",
+        "bytes": 503
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEO2021.cs",
+        "gitBlobSha": "c163f8ee7ed7aed4613813fde4a69ba03760ce62",
+        "sha256": "155fa21063b3df979a9af307ac4ed963db4e77d0f1f0ba098f600ca09a84e11b",
+        "bytes": 1803
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEO2021Pro.cs",
+        "gitBlobSha": "9613bc708c31da85a90fdfcfebccbd64375c7d3a",
+        "sha256": "c5dec90aebc8a04f292c79be5e75214f24f69a1778a33adbe921b70e2f3d9b5f",
+        "bytes": 429
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEO2S.cs",
+        "gitBlobSha": "91fa027477dd3c5a8a7b9ceca676a5d65435e102",
+        "sha256": "a9432099e92f8a83e20fc109d9dbde93694a23134a7a849fef8eca98a3c1974b",
+        "bytes": 385
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEO3.cs",
+        "gitBlobSha": "a6eef2394786c39f3fb8e604a3890ce7dd763980",
+        "sha256": "bee53cd4d730013900da5c542c751b018f006ee09b886c55926f0ac7c17ee88b",
+        "bytes": 5770
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIR.cs",
+        "gitBlobSha": "dcfc7a24ef8d688728e4b3ca66027c72d5d73f3a",
+        "sha256": "67d5853ecb799f3b3956a03bd810ddb920ff60b74f30b22e8c448d1d7ac46aea",
+        "bytes": 1570
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIR1S.cs",
+        "gitBlobSha": "15f0ee9507b6d0547263b265dc6d532aab54e340",
+        "sha256": "55178995c5e307d9d89d3df39fac2737e548a4f05a870b4ef59f7499a8ca475f",
+        "bytes": 1378
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIR2.cs",
+        "gitBlobSha": "f06949e5595145ce77fe6dbed04a29e18e247cb7",
+        "sha256": "0bde655963a66375a30d17191a6f08a23d1ec39f7b0732c3aa28cf321a65a67c",
+        "bytes": 702
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRLite.cs",
+        "gitBlobSha": "35c8e6545da5c650fcd6f1dd1e29cf41552a34fc",
+        "sha256": "930149ffd81577930213f8c7707644abc84bc776657937aa9956c042edd09206",
+        "bytes": 357
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlus.cs",
+        "gitBlobSha": "1b614bc840bf6ff4212adfa89c0ea7886da84b58",
+        "sha256": "6c0891e1bf3e3f36a6b3cf3d7a00eafc2d571b1b2349394c7d0b5bd275e21301",
+        "bytes": 309
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusAMD.cs",
+        "gitBlobSha": "7abd21f59a258c362d6d9bdcda77d659ca0942a1",
+        "sha256": "ca94037f9fb03ea42af1afc0ae8823f88edfb0913ea9d16631fb3a490afa362b",
+        "bytes": 369
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusAMDMendocino.cs",
+        "gitBlobSha": "b83816b4d9a92804c1f0acffc90ac369cd01a5bd",
+        "sha256": "a061bcea0dcb7d2641b2ed5e6e0a1f0d3c1ee51d2f6387cc1420d7d2f196d749",
+        "bytes": 434
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusIntel.cs",
+        "gitBlobSha": "0604377d0fb2b6543be54e3f435c23018ae21003",
+        "sha256": "c30020f4a552c6c2e949fd7896f60c21c7586915fba4eb3786c25ac1c1ce67e7",
+        "bytes": 500
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusNxx.cs",
+        "gitBlobSha": "2f26fb9ce01703af29b97104db2fd9443f86a155",
+        "sha256": "5b9f3d00c3d70a7c38ed3c72418dfd47c8b37f9c7ac25a96cfdb5dedf5f6dd07",
+        "bytes": 451
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPro.cs",
+        "gitBlobSha": "b2ce18b4444fa7b294034f51918d321a9d81bc99",
+        "sha256": "d5350e2d1a3fb033c5a66f97cf01d0bc94ea24f27d6c69cf38c41c50060e8b93",
+        "bytes": 357
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPro1S.cs",
+        "gitBlobSha": "396df145d551a2fd511b372d8a7f6a43c709f753",
+        "sha256": "43a7f1ef360a8ff9ce362974e530ea4b61361118cc93d9de6167c51c3574e652",
+        "bytes": 168
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEODevice.cs",
+        "gitBlobSha": "22c88f2f51bfb1d6c6b1f2f5ea2dbf8b629eb2e8",
+        "sha256": "9fd3849d60ac37688d13b1516f741773412796eb5e81e2c8e0fc033f1174e660",
+        "bytes": 5057
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEODeviceCEc.cs",
+        "gitBlobSha": "b9c2ad04a07d042906ece72a23cc47d79e5e989d",
+        "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da",
+        "bytes": 11992
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEODeviceCEii.cs",
+        "gitBlobSha": "6f5390c1cc039036c99f8592346e946b85cbb483",
+        "sha256": "2811934f613caf24157b9ba6ef43f8289ee3180c7619c71070827ea909e4a821",
+        "bytes": 5478
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlip11.cs",
+        "gitBlobSha": "ac5dc61464ea62699a9772e2e03e17e89cae11e5",
+        "sha256": "8ebe1ca0c53c740ccb82bc19beac83aef91636b32e67998fd28309787c104d36",
+        "bytes": 331
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlip1SDS.cs",
+        "gitBlobSha": "82b0a688b43069fd6446b54f4cdd15ae9ff43605",
+        "sha256": "65b0d5b31ed643b3f1537c87e21aaae880033ce6621ce829ee519e2b52841acf",
+        "bytes": 1439
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlip1SKB.cs",
+        "gitBlobSha": "376d0b1e34a5e5522e86c5412aebd1a33415a213",
+        "sha256": "c0a1d4c1eac42635abe424b2d26758985be2acffe4ac00b11087864317e3895a",
+        "bytes": 977
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlipDS.cs",
+        "gitBlobSha": "f5a4ec5fcee060513ccb26ddcc305e7fd16b667a",
+        "sha256": "1e106e6683da4ed2750810aef7d28a69fc83430d22c893a8f52499b810ba6a90",
+        "bytes": 5405
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlipKB.cs",
+        "gitBlobSha": "fa5fed2b96b6e20658f3ebfb101e12a0ae064f19",
+        "sha256": "85ac9f34f6d4dea3e21773f7e344cfe3bf1a128fb5245f5ab1f4ce70c179628c",
+        "bytes": 824
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOKUN.cs",
+        "gitBlobSha": "2ece1242281284280da82146691c3852c02100cd",
+        "sha256": "4db27ef7704866c757d4332589e0833c17d013a451140430139d4d4f10398832",
+        "bytes": 2195
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXT.cs",
+        "gitBlobSha": "ebe24e338d37271873b32d6ea0f5faf2fcc1f1d6",
+        "sha256": "0c5fc5f1463c2ba042a1bffb89d305558c7e28fbb1e1cd8010afb7b7cb62506d",
+        "bytes": 1423
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXT2.cs",
+        "gitBlobSha": "a90ee39423718831d24bb79ae547d58e1d719c9b",
+        "sha256": "b47a90a52912eebd2568e920da7c1d0a264a286bb06657f9e274feb7f5da91c2",
+        "bytes": 6735
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXTLite.cs",
+        "gitBlobSha": "5e44c5c69854a89bdf5c5e4d37fff128de3f6f92",
+        "sha256": "bbdd69bb5376507fb2e8f52e153a071b78e112a737ae7700c8c63f52998dd499",
+        "bytes": 515
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXTLite4500U.cs",
+        "gitBlobSha": "1b3fc1ff197f2533eed0f99a69c232356b3c7845",
+        "sha256": "6995e636613d5550cbd34a6d1a7ef3cd0f6dfacf57b65b53474669bbe83ef02f",
+        "bytes": 352
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOSLIDE.cs",
+        "gitBlobSha": "cfdf48033dd2c65d18473a5061247d7c2e274091",
+        "sha256": "1ee0ec4ea01d6aa5f71fa7c81e5ba176bdd5a88af696eb034ad71b2fc4f15de4",
+        "bytes": 596
+      },
+      {
+        "path": "HandheldCompanion/Devices/AYANEO/AYANEOSuperJoyRgb.cs",
+        "gitBlobSha": "b596c4d76e3005e12cba57d0fe2dce05040ed614",
+        "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12",
+        "bytes": 6031
+      },
+      {
+        "path": "HandheldCompanion/Devices/Ayn/AynLoki.cs",
+        "gitBlobSha": "56bd1fb7f099eb2450484cd269d4cc0ea8cbaa1e",
+        "sha256": "5896bca4c3af1177078969cc37133974e6d30ab59884c78eae82450b69ae0688",
+        "bytes": 5959
+      },
+      {
+        "path": "HandheldCompanion/Devices/Ayn/AynLokiMax6600U.cs",
+        "gitBlobSha": "eea9a37fc9705cbb77def14cdc12c56c11b97070",
+        "sha256": "b552f40777f032a91e738fa04843500a9842accf203fc8f98737e4a859d9377b",
+        "bytes": 338
+      },
+      {
+        "path": "HandheldCompanion/Devices/Ayn/AynLokiMax6800U.cs",
+        "gitBlobSha": "d4f0233ca474672b0e8f6eec373d53da57d505e8",
+        "sha256": "d007e576d92df8834064a8f87a7e41772595fcf8857f24c6ac01d4f81bc89855",
+        "bytes": 338
+      },
+      {
+        "path": "HandheldCompanion/Devices/Ayn/AynLokiMiniPro.cs",
+        "gitBlobSha": "af4c3820b99aae4170f331c4b3ff8c200dad0bd4",
+        "sha256": "51c18499d460cc17e3fe99201d5d5486bb247599d672b7320342f6e80649ad95",
+        "bytes": 336
+      },
+      {
+        "path": "HandheldCompanion/Devices/Ayn/AynLokiZero.cs",
+        "gitBlobSha": "4a9ea29a736b9e0cd483926205d333e18f8ad0f4",
+        "sha256": "ee221d63767103775b0c444f6f22067484bad8c252bc1960469c114cf5485f76",
+        "bytes": 336
+      },
+      {
+        "path": "HandheldCompanion/Devices/DefaultDevice.cs",
+        "gitBlobSha": "4a91be6114839de82d417dd779040d526427a102",
+        "sha256": "18b33ed49e80ae400fd5162971117f4585417d6eb4bdbc8e09050bbac96bcdf1",
+        "bytes": 116
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin2.cs",
+        "gitBlobSha": "dc44f61c17b28de34f5b76caa5107bcfcffba068",
+        "sha256": "e67a3367e1762fa8a94e555daa5d7266fe20b186fbf6de88de64e0e137167399",
+        "bytes": 492
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin3.cs",
+        "gitBlobSha": "43887f9081ded70fbdded058b9f412644fc0a668",
+        "sha256": "d20f4a9afb8b0071c1f0c8be112d788e49be55682fba3844bbf9a89f9cd4bf1b",
+        "bytes": 1275
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin4-2023-7640U.cs",
+        "gitBlobSha": "b0f48d342e6c365d7cc33f544c05d89658eaa297",
+        "sha256": "171a74b852afe43530f114227cd0aa92d6c5ddcc9f925e100b30d36b75bc6bbc",
+        "bytes": 275
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin4-2023.cs",
+        "gitBlobSha": "226738b913eb8163f0c445f06b071e8b24295cda",
+        "sha256": "ae875c53ca2b8c7e0993ec443eca2ca38af014e286ab143661de0d915f3d7cd6",
+        "bytes": 2219
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin4-2024-8640U.cs",
+        "gitBlobSha": "7a94575230d491656eed437857d39534b8f885fc",
+        "sha256": "f519e043c73d681d65c2f65e563df0255cacf17c5bc33b0fe96e727f8ace2c00",
+        "bytes": 334
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin4-2024-HX370.cs",
+        "gitBlobSha": "6d0c011a80b69dcc993a31267e803d72297a719d",
+        "sha256": "9a2d83f20b599664dd21c22028b54d3e0b4fef436d303d314e805867f23d0636",
+        "bytes": 310
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin4-2024.cs",
+        "gitBlobSha": "aaa1bd274762475455542a6c3b75af2ac75b2107",
+        "sha256": "dfc9a4bed43743be66186cce078e846d08f8dd71cf2d7a521cd7f56274bfb53a",
+        "bytes": 2219
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin4.cs",
+        "gitBlobSha": "e83e41e5ace65bf30008fdb1ebe9c70d4ea0154d",
+        "sha256": "62eb9e429dd668132e2b17e5a959515c35dd785103608cad252177430fecc03f",
+        "bytes": 3381
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWin5.cs",
+        "gitBlobSha": "e80719a3ef3885865bd970c997f44ac00a0fd882",
+        "sha256": "095d3fd92d8afcc9925b4ff91710a6b92c89183a6a9c38950ecfb2cc5d9bfed6",
+        "bytes": 11564
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2022-6800U.cs",
+        "gitBlobSha": "7d8c4202c2f6a8e6d47def434186494ab3c3cf60",
+        "sha256": "4a9ae61fa690a4144ed42dd7fc028adde4e4f7468e4808ca3b0fd3e14413296b",
+        "bytes": 359
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2023-7640U.cs",
+        "gitBlobSha": "5bca29e8ce66f9b7f32d2a0b550a49709c13d8c1",
+        "sha256": "05a0bf85cdd8087de3e8c9178c0816a5b3afa1dbca282ab89e73a6d315aade40",
+        "bytes": 396
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2023-7840U.cs",
+        "gitBlobSha": "ad19ecca30eab46c291c6689fe099429bc976968",
+        "sha256": "254f153903857633d8c47918977862c8d8e90b48277c0e697ee79c6fef2763b4",
+        "bytes": 396
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2024-8640U.cs",
+        "gitBlobSha": "f5aa275c10391345245b4173c65d221828180264",
+        "sha256": "9b3c18e011cf71fd36fc19db35ccf9df42f1f1024e06cd46af4e50b266f0cc7d",
+        "bytes": 396
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2024-8840U.cs",
+        "gitBlobSha": "a7b82cbdbf30e3873c1f2d8a8612fe7f69b0ea1e",
+        "sha256": "be5eb4b72c67eec0e6ce7df7bc6a107e3c6c94eafcede728d80b1f475279c391",
+        "bytes": 396
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2024-HX370.cs",
+        "gitBlobSha": "d86cd00266d7cdf1218e52056270d62f7ec3350b",
+        "sha256": "722d080745fa6f0ca405d8e568b9aaaeb9770eac1fcbe4db66261476c29af3a8",
+        "bytes": 460
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2.cs",
+        "gitBlobSha": "4cc9f17eb4387a024042643adef358ccc0ef39ca",
+        "sha256": "9cec36c49cf756a52db4a95c1f956b6bc84306886762ff5ace2e3702120cb594",
+        "bytes": 2144
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMax2Intel.cs",
+        "gitBlobSha": "6f03838ac41b31d1343c6737f2e6e6d604c2eb59",
+        "sha256": "05ef0c8a59589b5306158f5ddf62c9803e03f6b37f32a1aa38082951c023497c",
+        "bytes": 471
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMini-7640U.cs",
+        "gitBlobSha": "752efd83195f298f207e84938067507695d26a63",
+        "sha256": "c5a51a3e9bfb96a4cab843db816c9e720e60bca0ff91fa0870b0744e644e3a87",
+        "bytes": 267
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMini-8840U.cs",
+        "gitBlobSha": "a8fad622b3940cc09637c2ba9e518a14c1c3cab7",
+        "sha256": "538d237fd6f7c6157525996ef350dd285cf3efabfbf478662d546c72ebdd3781",
+        "bytes": 302
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMini-HX370.cs",
+        "gitBlobSha": "7899b3218e4879a8e20380fb5fd7ea6e8c9162e0",
+        "sha256": "5f4d6014167b37209ab18d2568c22b1e8ce10f2dc158109b2e3c10ff113e429a",
+        "bytes": 452
+      },
+      {
+        "path": "HandheldCompanion/Devices/GPD/GPDWinMini.cs",
+        "gitBlobSha": "38146b56d6acbad21ea1835c8ac0043239804766",
+        "sha256": "7d486e56772239c7302ffe187245de8e313451294fba739b3607b301547bf2a5",
+        "bytes": 3521
+      },
+      {
+        "path": "HandheldCompanion/Devices/IDevice.cs",
+        "gitBlobSha": "752c957b9ec0fce5e3958f40d90e5464c099106f",
+        "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47",
+        "bytes": 58784
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/FanTable.cs",
+        "gitBlobSha": "90a39c7571d9733b9a918a0c60c26020667c1ad5",
+        "sha256": "c84b6872b5eec09ccc6ba03ba1a1770df6aab0560d578cfc64235fe8ec1bae53",
+        "bytes": 3211
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/LegionGo.cs",
+        "gitBlobSha": "38a55f35552cf8b7b35ccf778238e5df2b4ae22a",
+        "sha256": "1cec038b150e1eba63497a87482a740503bf77ce709f387dbc7cb562eca73d08",
+        "bytes": 15174
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/LegionGoSZ1.cs",
+        "gitBlobSha": "6211118b163465547ba0e07b51d89c6a19869b85",
+        "sha256": "a23d6c45f8aa499537c611d0493cf47a7ab3f8f58b826e3c9ef4c88641f76872",
+        "bytes": 8762
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/LegionGoSZ2.cs",
+        "gitBlobSha": "f435ff69a905d245d32c0ebf1b022879af12d3e1",
+        "sha256": "387ac22a5a9fd785ed8ed52e3146c4c0725af8533740baa1922523f8a14d608e",
+        "bytes": 146
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/LegionGoTablet.cs",
+        "gitBlobSha": "76b358208f88f63fc5e9fffd384648bde7fcfaec",
+        "sha256": "60baf403012aa5aa3bb5664c56295f860fcfb758d1fe7743190e09fcb1087b97",
+        "bytes": 16497
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/LegionGoTablet2.cs",
+        "gitBlobSha": "4e170ad7e460c9ebbc80a802fbdddf3bdade2096",
+        "sha256": "2dbd25993c579edad58c5821b725275540660908ca6f1b5eafc6402b4c1d995d",
+        "bytes": 5499
+      },
+      {
+        "path": "HandheldCompanion/Devices/Lenovo/SapientiaUsb.cs",
+        "gitBlobSha": "8d200686e47ce143f75f5835093769b84135159b",
+        "sha256": "cd6df6f4d763f5402c149f58759761e006761fc8b1c18d4f6e72d162b40dbdee",
+        "bytes": 53520
+      },
+      {
+        "path": "HandheldCompanion/Devices/MSI/ClawA1M.cs",
+        "gitBlobSha": "ea0fe8ea923b1b6322f5790c0daf78d32ee4bb3f",
+        "sha256": "bf73ff12364d162175b365e15f89c4c55b1c8744b7f845b065ff1645beeaf3f2",
+        "bytes": 38963
+      },
+      {
+        "path": "HandheldCompanion/Devices/MSI/ClawA2VM.cs",
+        "gitBlobSha": "8f159134a5ddc9a76fcc474586c32002ada51eba",
+        "sha256": "baad8361a9ef2d0415c586acee379bce3191ef214570184eae500c340cb34648",
+        "bytes": 1476
+      },
+      {
+        "path": "HandheldCompanion/Devices/MSI/ClawBZ2EM.cs",
+        "gitBlobSha": "39c698c128fe9eb3cedf7afbe431c74b503b7b90",
+        "sha256": "2a0e64cf1fd6e303b39b6dd354a5de3a19ef4ccfa763c15c30606e4ee4286696",
+        "bytes": 1362
+      },
+      {
+        "path": "HandheldCompanion/Devices/MSI/ClawCG3EM.cs",
+        "gitBlobSha": "023bc2cf2a81d418284e44ccf3b5cac675e9fd79",
+        "sha256": "62bf699b3718dd1288a12cea7d205b99f94899f3c1cae18124d386ce81cb66d4",
+        "bytes": 1850
+      },
+      {
+        "path": "HandheldCompanion/Devices/MSI/ClawFirmware.cs",
+        "gitBlobSha": "62a2ecaef52e2271ac624e271fd2cadaf89f9e24",
+        "sha256": "f3e098ac541fd8819485d3221f6b81cea13b7181d42614fe7676f73ef226a708",
+        "bytes": 8825
+      },
+      {
+        "path": "HandheldCompanion/Devices/Minisforum/MinisforumV3.cs",
+        "gitBlobSha": "b91cac1f84e835eb04b06048acd26f4f3419ae48",
+        "sha256": "33e9de9251faf4d2b00374a28816a384419797641b3142837867deeb9e7a4ebd",
+        "bytes": 2492
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXAOKZOE.cs",
+        "gitBlobSha": "ff66acfd30ffa08683500780a3f2c66b4a71f0b7",
+        "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718",
+        "bytes": 8998
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer2.cs",
+        "gitBlobSha": "34921eedeea198125d0822c5048fb4d1115e3cb6",
+        "sha256": "bd8ce3cff11f496be143cb7e5b18e3e6e1892436a2cad7419196aa57b8c3068a",
+        "bytes": 3390
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+        "gitBlobSha": "9361977cce00c11be104316a782a0d5e9de8165b",
+        "sha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+        "bytes": 13126
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerApex.cs",
+        "gitBlobSha": "b6bf770da71a52841a39f5c8d8ca983040e8090a",
+        "sha256": "f16cde1294b01aba99d51542ca9935af25dedf203eafc6638c42338407b74ff8",
+        "bytes": 5234
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "gitBlobSha": "41cb1c855edf1c71b7a31a54371e1b76777bdaf9",
+        "sha256": "f03f6f5e3b750e44df9d59f95f6a2330c5ca2febd93399fcc66ba8dde15e887b",
+        "bytes": 5031
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "gitBlobSha": "4d139ec18c8e9fa68eb08dd725b32672985b3bd3",
+        "sha256": "6dad960267c2a3ae8dc90a68cf20c71c3c5e6e00d0d6b40a95816f08b3c93682",
+        "bytes": 5225
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMiniPro.cs",
+        "gitBlobSha": "3bcc88e84a119450cb1a7c2c5ac131a5faf4d58f",
+        "sha256": "eda4db0c77010713fd93cc3158ea1c697dab72aec49bba28a7973de5678d6cd5",
+        "bytes": 1529
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerOneXFly.cs",
+        "gitBlobSha": "9809958f1d1c93919cad8f9233fc865df47545f7",
+        "sha256": "082f87fa78e7a75e54c9e4ce2369558a18f4bdcec251e4942a17eb65a921d77b",
+        "bytes": 9213
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerWmiEc.cs",
+        "gitBlobSha": "8184bbd9926b7b00f9fb7b2d5ad062219ecd2d00",
+        "sha256": "f84150a6e4714568e4cb14c019bd8e3cda394a32ef0cebe620a86f82c16a3021",
+        "bytes": 2575
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "gitBlobSha": "522363e53c5f5515d825943ecd2653b06d9cb792",
+        "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485",
+        "bytes": 32593
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+        "gitBlobSha": "93ecbbb884feb5a1eef61da3ee3bdf45df7f574c",
+        "sha256": "93feaddb6b0387e110e92265d000d08c9242968939a36f69d1653bab70630121",
+        "bytes": 2744
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Pro.cs",
+        "gitBlobSha": "a474e361f4286d125124fdb234b0d209fbe3639a",
+        "sha256": "7ae1196c28a0187768c62ec722cad4c886af768cd908e434c26f9738f1d81ef7",
+        "bytes": 307
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+        "gitBlobSha": "c2f0a807cb7c0b1dba7570c7224df4c5c2ccf735",
+        "sha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b",
+        "bytes": 13029
+      },
+      {
+        "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs",
+        "gitBlobSha": "0d583a18f0cca3b0d1e78b2a2ca0586311d78aa3",
+        "sha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+        "bytes": 7519
+      },
+      {
+        "path": "HandheldCompanion/Devices/SuiPlay/SuiPlay0X1.cs",
+        "gitBlobSha": "ff77eb53de84b7e5bbe22e2295938352790b64aa",
+        "sha256": "c45be6746dab9b3d7a3f0b1edf17141d373e4fec13aed41da687a91d7ef6dfa7",
+        "bytes": 1305
+      },
+      {
+        "path": "HandheldCompanion/Devices/Valve/DeviceVersion.cs",
+        "gitBlobSha": "8e94a1a74193d0590227e5502074f9f2898a3e9e",
+        "sha256": "c858a9d58f67b4cff64ec895e09835f86b969184eab4979808663404810839d6",
+        "bytes": 716
+      },
+      {
+        "path": "HandheldCompanion/Devices/Valve/RyzenSMU.cs",
+        "gitBlobSha": "7d6d9f878c0a5dd3139e3de284c19eb2368a9658",
+        "sha256": "9247fcb7e89028f885613ed06280ad76fbfbe92ee291e5ab52212e6b78620d4d",
+        "bytes": 5609
+      },
+      {
+        "path": "HandheldCompanion/Devices/Valve/SteamDeck.cs",
+        "gitBlobSha": "d7e7103a2ef9b1fe2914812a64196feb9151c011",
+        "sha256": "d58b3287f576efa338d45e068f804ecd1b3e6f5e0475d22af127d38c9e655c63",
+        "bytes": 11459
+      },
+      {
+        "path": "HandheldCompanion/Devices/Valve/SteamMachine.cs",
+        "gitBlobSha": "17c3fda88f0525395feea6330a4b12a5bf898931",
+        "sha256": "f10599c2a1feec1152f19509c9031a0fec3dd7d009a2e25bf7462aeafcbd5075",
+        "bytes": 1841
+      },
+      {
+        "path": "HandheldCompanion/Devices/Valve/VangoghGPU.cs",
+        "gitBlobSha": "adf80fe05d12101c15bfe60e0fe3efda611dd289",
+        "sha256": "8d57855e87e6a2e667343242d1a382a6cdaabb5194283ab3f6a7db12c8458de4",
+        "bytes": 17639
+      },
+      {
+        "path": "HandheldCompanion/Devices/Zotac/GamingZone.cs",
+        "gitBlobSha": "cb11de0c57a738b1ff6fb49f7430177300c8ea28",
+        "sha256": "1aeac088cc4b544c3797ae56edc60d28e29ddbabefd1dc85f160e62cb9845e8c",
+        "bytes": 27629
+      }
+    ],
+    "allGitBlobsMatched": true,
+    "deviceClasses": 102,
+    "factoryInstantiableSourceClasses": 90,
+    "existingFrozenClasses": 92,
+    "existingReviewedExtensionClasses": 10,
+    "newUnreviewedModelClasses": 0,
+    "scopeMeaning": "102 is source inventory, not all capabilities consumed or hardware passed"
+  },
+  "freeze": {
+    "baseline": "HC-BINARY-BATCH12-20260831",
+    "sourceVersion": "0.32.3.2",
+    "sourceIndexSha256": "9105b05655c280f99ffffdb214c165955ced5ef3463719d681e7abecf7e904d1",
+    "matchedFrozenFiles": 1048,
+    "runtimeAliasDllSha256": "0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49",
+    "runtimeReplaced": false,
+    "sourceModified": false,
+    "newRuntimeDlls": [],
+    "verification": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\FROZEN-HC-VERIFICATION.json"
+  },
+  "sourceDeltaSinceReviewedA250": {
+    "baseCommit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+    "commits": 10,
+    "deviceFilesChanged": [
+      "HandheldCompanion/Devices/IDevice.cs",
+      "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+      "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs"
+    ],
+    "resourceFilesChanged": [
+      "HandheldCompanion/Resources/Devices/OneXPlayer3.json"
+    ],
+    "fullFrozenToCurrentReview": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\upgrade-review-validated\\result.json",
+    "candidateOnly": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\upgrade-review-validated\\candidate-catalog.json",
+    "existingMaintenancePlan": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\maintenance-plan\\result.json"
+  },
+  "changes": [
+    {
+      "id": "oxp3-motion-f2e58468",
+      "model": "HandheldCompanion.Devices.OneXPlayer3",
+      "domain": "motion",
+      "status": "SOFTWARE_CONSUMER_VERIFIED",
+      "upstreamSource": "HandheldCompanion/Resources/Devices/OneXPlayer3.json",
+      "existingTotalLibraryConsumer": "native/hc_model_motion_catalog.h -> capabilities/HcMotionCapabilityCatalog.generated.h -> existing motion consumer",
+      "remaining": [
+        "Physical sensor/target axis verification remains separate"
+      ],
+      "hardwareAcceptance": "UNKNOWN"
+    },
+    {
+      "id": "oxp3-home-gkey-f2e58468",
+      "model": "HandheldCompanion.Devices.OneXPlayer3",
+      "domain": "oem-input",
+      "status": "SOFTWARE_CONSUMER_VERIFIED",
+      "upstreamSource": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "existingTotalLibraryConsumer": "native/onex_x2_protocol.h -> existing Session/WindowsTransport -> total-library OEM binding",
+      "softwareVerification": "0x25 G-Key remap, real held Home/G-Key and canonical bit63 append verified by the original protocol/session/application/windows/model-query consumers; exact receipts in consumerEvidence.oemInput. No new reader, producer ID, thread or queue.",
+      "remaining": [
+        "Physical key direction, firmware press/release on the real device and Steam/game-side effects remain UNKNOWN",
+        "Lighting and battery remain separate pending batches; this status covers OEM input software consumption only"
+      ],
+      "hardwareAcceptance": "UNKNOWN"
+    },
+    {
+      "id": "oxp3-light-zones-f2e58468",
+      "model": "HandheldCompanion.Devices.OneXPlayer3",
+      "domain": "lighting",
+      "status": "PARTIAL_OWNER_SOFTWARE_TESTED_LIVE_UNKNOWN",
+      "upstreamSource": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "existingTotalLibraryConsumer": "capabilities/hc-lighting-policy.json reviewed extension -> HcLightingCapabilityCatalog -> native lighting route -> existing YeManLightSetter",
+      "softwareVerification": "Protocol/action scope verified: four zones, exact ApplyLeds order/waits, second LED set, fixed speed, OXP classic 1000, brightness-0 off and exact preset set through the existing helper. Owner/lifecycle software boundaries are now implemented in the same total-library owner: a generation-specific revocation event plus an authoritative named handoff record; admission and busy decision in one short state transaction without holding the input/stop owner mutex across pending-write waits; write and bind gated for admission, lease and retiring states; the helper matches the current generation token, exact endpoint and fresh owner heartbeat before open/first write and between wait slices; a timeout retains retiring/pending-IO debt until the exact helper process is signaled and the pending write returns; only the matching token may release and a late receipt cannot free a newer owner. When the post-termination wait is still unsignaled, the exact child process handle and its token are retained; helper/application flags remain debt markers and owner-tick, next-admission and stop settlement stay closed until that handle is observed signaled, then exactly one retirement clears the debt. An unrelated or late child cannot retire a newer lease. Each admission also carries a unique admission number in the handoff token and event name, so two sequential leases on the same unchanged device never share a token or event; the old token cannot rejoin or free the newer lease. The effective request deadline and owning-lease revocation are linked into admission, device open, the write sequence and its in-flight IO; the production ExecuteOxp3LightingWith path is exercised with a held pending write, and both owner revocation and request expiry cancel it. The complete production ymccLightSetterApply parent is executed with real admission, command construction, anonymous-pipe spawn, production wait, exact-child debt/lease transition, bounded reads, JSON identity/catalog/operation checks and the receipt gate: an owned inert software helper yields the accepted receipt, spawn failure, timeout with observed signaled return, output truncation, read error, read timeout, no-JSON, nonzero exit, child-not-ok and wrong identity/catalog/operation branches. A normal full-rights timeout shows the observed signaled return; a second complete-parent timeout hands the parent a controlled process handle without PROCESS_TERMINATE at the harness spawn terminal, so TerminateProcess fails access-denied and the production parent retains the actual unsignaled child/token/handle; with input writePending=false, tick, admission, write and rebind stay closed, one settlement follows the actual return, re-admission succeeds and the old token is rejected. The actual Oxp3WindowsHidTransport Write path reaches an explicit issued barrier; direct owned CancelIoEx cancels the pending OS write and returns true, while Program owner and deadline cancellation complete the pending write with the terminal CancelIoEx outcome recorded (ERROR_NOT_FOUND after the runtime already canceled), handle cleanup and zero later ordinary writes. Recorded CancelIoEx outcomes are [0] for the direct owned cancel and [1168] for each Program path; the managed transport also records the same IO as incomplete at issue, token-uncancelled at issue and cancelled-while-incomplete for both Program paths; the request deadline is 1500 ms, before the 2000 ms transport and owner-heartbeat boundaries, and the per-generation event is created in the controlled scenario. The complete parent test references the existing fixed device-core runtime read-only (HandheldCompanion.dll 08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583) and records its runtime.json identity; no synthetic DLL or copied runtime is created. Overall software remains PARTIAL only for a real HID endpoint; physical LED/firmware UNKNOWN. No live OXP3 device or physical LED output was exercised. Evidence in consumerEvidence.lighting and the HC-CN-002-RESULT-013 evidence root, including immutable tested-source copies.",
+      "remaining": [
+        "Software coverage gap: no real HID endpoint open/pending IO. Physical LED/firmware UNKNOWN is separate and does not require hardware to close this software phase",
+        "Live OXP3 end-to-end run with a real helper and real 1A86:FE00 FF00:0001 collection remains UNKNOWN; this batch executed the complete parent function with inert software children, a controlled spawn handle-rights terminal and a controlled named-pipe transport, not a physical device",
+        "Physical LED output, zone direction and firmware timing on OXP3 hardware remain UNKNOWN",
+        "Preset second-set breathing still depends on the HC LEDSecondSetBreathing setting and fixed speed cannot be changed by the request; recorded as explicit request limits"
+      ],
+      "hardwareAcceptance": "UNKNOWN"
+    },
+    {
+      "id": "oxp3-charge-f2e58468",
+      "model": "HandheldCompanion.Devices.OneXPlayer3",
+      "domain": "battery",
+      "status": "PARTIAL_WMI_SOFTWARE_TESTED_LIVE_UNKNOWN",
+      "upstreamSource": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "existingTotalLibraryConsumer": "capabilities/hc-battery-policy.json -> native/BatteryHost existing consumers",
+      "softwareVerification": "The pinned OXP3 source inherits the OneXPlayerX2 WMI EC transport. Bound immutable fixed-upgrade identities: capabilities/upstream/f2e58468/OneXPlayer3.cs e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc, capabilities/upstream/f2e58468/OneXPlayer3.json 5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a, upstream source OneXPlayerX2.cs 41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b and OneXPlayerWmiEc.cs f84150a6e4714568e4cb14c019bd8e3cda394a32ef0cebe620a86f82c16a3021 at commit f2e58468d9917189d4be7ccfc242385ce2c3035b. The parent source uses root\\WMI class SuRwECRegInterface, methods ReadECReg/WriteECReg, address packed as bank | offset<<8 (0x4A3 -> 0xA304) and write value additionally in bits 16..23; a hex status,value response must report status 0. The exact identity rule admits only SystemProduct ONEXPLAYER 3 / ONEXPLAYER-3 with manufacturer ONE-NETBOOK through the sole battery catalog; unknown, X1 direct-I/O and X2 models never fall back to this route. The existing BatteryHost Controller/Policy/provider workflow consumes Oxp3WmiProvider for the 0x4A3 charge limit with an independent ReadECReg readback, pre-write conflict check, journal/recovery and conservative failure return; the production Oxp3WmiEc adapter's exact method names, packed address/value arguments, hex response decoding, non-zero status, missing result, malformed byte and method-failure paths are executed through a controlled external in-memory method terminal, while the WMI enumeration/ManagementObject query itself and live WMI/EC remain unexecuted. Source range 0..100 is accepted on readback while the existing product choices remain 50..100 by 5 and are not widened. The 0x4A4 bypass source mapping (off/0x00, sleep 0x01, always 0x0B) is implemented at the provider contract but not exposed by the product UI, so it remains an explicit gap. Original battery tests now run 62 controller groups; battery.charge-workflow passes with 62 controller groups, 36 UI cases and 6 live-controller cases using the production adapter at the controlled method terminal and memory EC transports for provider/controller coverage. No live WMI/EC, host service, native pipe or hardware was executed. Physical battery/EC behaviour remains UNKNOWN. Evidence in consumerEvidence.battery and the HC-CN-003-RESULT-002 evidence root; the immutable HC-CN-003-RESULT-001 root remains.",
+      "remaining": [
+        "Real OXP3 WMI/EC hardware readback, charge cutoff and firmware/sleep semantics remain UNKNOWN; no live WMI/EC or hardware operation was performed",
+        "The 0x4A4 bypass mode is source-mapped but not expressible by the current product UI; it stays an explicit gap and no new UI or default bypass is enabled",
+        "The production BatteryHost service, native pipe and installed payload were not started; software evidence uses the existing Controller/provider and the production Oxp3WmiEc adapter at a controlled in-memory method terminal, not WMI enumeration or live EC"
+      ],
+      "evidence": {
+        "controllerTests": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-003-RESULT-002\\tests\\battery-host-tests.log",
+          "sha256": "ee22251a47e2f5402b8bfcf03499a4e913ff7d151da7c69431d24eb25230ff82",
+          "groups": 62
+        },
+        "batteryWorkflow": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-003-RESULT-002\\tests\\battery-signals-short\\run\\cases\\battery.charge-workflow\\battery\\result.json",
+          "sha256": "a27ef9c19a7f676b81cb533ca4b9bac19a750d96aeeb38f23e22e281f9c8e277",
+          "verdict": "PASS_SELECTED_SCOPE",
+          "controllerGroups": 62,
+          "uiCases": 36,
+          "liveControllerCases": 6,
+          "stagedShortEvidencePath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HCB-003\\2026-10-31T13-07-02-440Z-4d8b3981"
+        },
+        "capabilitySelftest": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-003-RESULT-002\\tests\\battery-capability-selftest.log",
+          "sha256": "9596f3f0849a8c3ac76551d5261fa8c10024fff2b95b217dace3ca321ecade8d"
+        },
+        "contractSelftest": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-003-RESULT-002\\tests\\battery-contract-selftest.log",
+          "sha256": "37073ce704be03126a8e393c9d3e897b50a1f56dfc616f32a109713abfed2786"
+        },
+        "generationCheck": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-003-RESULT-002\\tests\\generation-check.log",
+          "sha256": "80a74220cb8b6b2ef7a6421dde99212b4e1129f0a230d83fa7de8144c683da5f"
+        },
+        "maintenance": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-003-RESULT-002\\tests\\maintenance\\result.json",
+          "sha256": "4c5af53124d99e3beb41c1aed76647d26d800a0c739b29b22628a83f7ea0260d",
+          "status": "PASS",
+          "routeIssues": 19
+        }
+      },
+      "hardwareAcceptance": "UNKNOWN"
+    },
+    {
+      "id": "pinned-source-fan-nine-f2e58468",
+      "domain": "fan",
+      "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R19_EXPORT",
+      "sourceModelCount": 9,
+      "entry": "capabilities/PinnedFanSourceCatalog.cs (partial FanCapabilityCatalog)",
+      "consumers": [
+        "FanLab/real-host/PinnedSourceFanConsumer.cs",
+        "FanLab/real-host/PinnedSourceFanEngine.cs",
+        "src/bridge/fanApi.ts",
+        "src/bridge/fanHost.ts",
+        "native/fan_response_contract.h",
+        "native/main.cpp"
+      ],
+      "evidence": {
+        "executionId": "HC-CODEX-042",
+        "recordedAtUtc": "2026-11-02T18:16:58.831578+00:00",
+        "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R19_EXPORT",
+        "normalExport": {
+          "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+          "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+          "bytes": 111371083
+        },
+        "exportReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+          "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+          "bytes": 2110
+        },
+        "actualArchiveEntriesChecked": 621,
+        "wholeGoalComplete": false,
+        "physicalAcceptance": false,
+        "installationScope": "Publisher terminal reported installed; capability-library owner accepted package/source identity only",
+        "originalFailuresPreserved": true,
+        "countsAreSeparateScopesNotAdditive": true,
+        "evidenceManifest": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-042-CONSUMER-KEYED-CALIBRATION-AND-FAN-RECOVERY\\REFERENCE-MANIFEST-042.json",
+          "sha256": "dbd1cf4357f75b288424d5097b6de63d2190475152d6791f6366adcee867e8fc",
+          "bytes": 89155
+        },
+        "review": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-FAN-6840e59d0432.json",
+          "sha256": "c26b488be9ac1336f9539b9b30de522afdfe26e0a177b7b04894ce74b792caeb",
+          "bytes": 2667
+        },
+        "componentId": "candidate-source-recovery-20261103-r2",
+        "identities": {
+          "hostDllSha256": "4aea8d9849810b59acaf6803306010c2d0370d0ad47019890b808fcb69dbc697",
+          "backendDllSha256": "9079348b26e916dbbee865745064cde137aec488379889ad657ffa50485040c7",
+          "apphostSha256": "f1163d7aafacaa376e32d6ab14f10dd1b3c51380ff9be7b392573f9aeba77c0e",
+          "payloadManifestSha256": "ec030c85e2bd00df3b77cd83c85f78ed45a04aef98fff936b77c2db79d003d45",
+          "sourceBundleManifestSha256": "de40793fa39706fec367d097372feb18c3bd524a05a80220b83e348f546bba15"
+        },
+        "sourceDescriptorCount": 9,
+        "registrationAuthority": "Existing FanCapabilityCatalog partial facade; existing source selection/consumer/engine/session and transports",
+        "consumerEntry": [
+          "FanLab/real-host/PinnedSourceFanConsumer.cs",
+          "FanLab/real-host/PinnedSourceFanEngine.cs",
+          "src/bridge/fanHost.ts"
+        ],
+        "softwareEvidence": {
+          "bridgeOriginalCases": 45,
+          "sourceRetirementBoundaries": 27,
+          "bridgeSemanticNegativesCaught": 7,
+          "hostSourceOnlyChecks": 1954,
+          "hostSemanticNegativesCaughtInThisTask": 2,
+          "contractUnitTests": 15,
+          "metadataVariants": 2,
+          "metadataModules": 4,
+          "pdbDocumentRows": 98
+        },
+        "ordinaryFaultRecovery": "Same-source generation safe return and exact terminalClosed precede actual native admission and Open/OpenEvents/Acquire/Enable; process/session/epoch/source identities are checked across awaits.",
+        "parentStopSettlement": "Consume the already completed matching retirement cycle without reopening its time budget.",
+        "unknownModeOrFailedRetirement": "Do not retake foreign or unknown mode; retain unresolved source owner/generation and restoration obligations.",
+        "oldFieldModeAndChangingActor": "UNKNOWN",
+        "frozenRuntimeReplaced": false,
+        "oldRuntimeFactoryConstructedForSource": false,
+        "defaultWriteAuthorizationUnchanged": true,
+        "newReaderWriterOrProviderAddedByThisDocumentationSync": false,
+        "normalExportHistory": [
+          {
+            "replacedAtUtc": "2026-11-02T19:59:25.822248+00:00",
+            "previous": {
+              "normalExport": {
+                "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+                "sha256": "87c1577ad7ec436bcf136dbb19a359ef541a0c031e57bc8c6d1f778c84b6ae4c",
+                "bytes": 111370831
+              },
+              "exportReview": {
+                "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-R18-87c1577ad7ec.json",
+                "sha256": "3e14d31f78620b2b90cd0ef62ee6381a2ddf731fc73c52e7f6d3cb27acc0e67d",
+                "bytes": 1450
+              },
+              "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R18_EXPORT"
+            }
+          }
+        ],
+        "normalExportObservedAtUtc": "2026-11-02T19:59:25.822248+00:00"
+      },
+      "remaining": [
+        "Physical/firmware effects and performance UNKNOWN; no live test implied",
+        "Complete102-class/485-method enabled-domain reconciliation and original lighting TIMEOUT/NOT_RUN remain OPEN"
+      ],
+      "evidenceHistory": [
+        {
+          "executionId": "HC-CODEX-018",
+          "status": "SOFTWARE_CONSUMER_VERIFIED_LIVE_UNKNOWN",
+          "sourceDescriptorCount": 9,
+          "registrationAuthority": "Existing FanCapabilityCatalog partial facade; source facts and owner shared with existing fan consumers",
+          "sourceHostOuterLifecycleIntegrated": true,
+          "oldRuntimeFactoryConstructedForSource": false,
+          "sourceModelAndRuntimeFactoryIdentitySeparated": true,
+          "defaultWriteAuthorizationUnchanged": true,
+          "sourceOnly": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-mainline-source-001\\RESULT.json",
+            "sha256": "18693c1492e4c385e880014f7ed8467d5ed5f378633e11e11bbbba63eaae71af",
+            "bytes": 88752
+          },
+          "originalLockedBinary": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-mainline-binary-001\\RESULT.json",
+            "sha256": "a8d4555b6fe156617eb24652e0b857c5bb1f832c17c935c4166ccd2c4cb3a46c",
+            "bytes": 94354
+          },
+          "actualBridge": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-source-bridge-001.stdout.log",
+            "sha256": "fd647c5dd331e90d06bb1d57e9ef3e67ca34db73f66de7f48a56f5ea605fbdbc",
+            "bytes": 218
+          },
+          "actualNative": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-native-001.stdout.log",
+            "sha256": "c347bffb97a37d08ab78f233c507378dfd79f8966b81fa0e2d45471594b265e7",
+            "bytes": 1316
+          },
+          "actualHostBuild": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\activation-actual-host-build.stdout.log",
+            "sha256": "8df4c55e9c96d016d16abddd98de7d3db9930c91d98860d904b2c6afb64e1d43",
+            "bytes": 84
+          },
+          "scope": "Pure software controls/returns/generations and approved runtime metadata; no product Main, device/port constructors, live WMI/EC, deployment, hardware effects or performance evidence",
+          "wholeGoalComplete": false,
+          "loadedPortBytes": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+          "sourceScopes": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-source-proof\\SOURCE-PROOF-SCOPES.json",
+            "sha256": "cd976daabd9980b9e0de605662488e41a9b6805404445ecd7e73eece38a36312",
+            "bytes": 833
+          }
+        }
+      ]
+    }
+  ],
+  "consumerEvidence": {
+    "motion": {
+      "originalFixture": "tools/hc_model_motion_consumer_selftest.mjs",
+      "result": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\motion-after-versioned-preimages\\source-bindings.json",
+      "sha256": "026fd2cffd7fd61248ff53af6c9ab6bdd9dced581ea65cdd76b39980828744f5",
+      "configurations": [
+        {
+          "name": "Release",
+          "checks": 340224,
+          "failedAssertions": 0,
+          "accepted": true
+        },
+        {
+          "name": "Checked",
+          "checks": 340224,
+          "failedAssertions": 0,
+          "accepted": true
+        }
+      ],
+      "beforeEvidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\motion-before-source-current\\source-bindings.json",
+      "beforeFailureCount": 76,
+      "fixtureMigration": "Independently pinned new resource oracle; historical a250 resolver must reject new recipe with old identity, same assertion count retained. Earlier receipts retain their original runner hashes."
+    },
+    "oemInput": {
+      "originalConsumers": [
+        "tools/hc_onex_x2_protocol_selftest.mjs",
+        "tools/hc_onex_x2_session_selftest.mjs",
+        "tools/hc_onex_x2_application_selftest.mjs",
+        "tools/hc_onex_x2_windows_selftest.mjs"
+      ],
+      "results": [
+        {
+          "kind": "protocol",
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\onex-input\\protocol-installed-sdk\\source-bindings.json",
+          "sha256": "53f20738d39b617d500f06e10e32a4b6d236efd19f088f756a8e32c62a960c58",
+          "checksPerConfiguration": 1139196,
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "failedAssertions": 0,
+          "semanticFaultsDetected": 4,
+          "semanticFaultsRequired": 4
+        },
+        {
+          "kind": "session",
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\onex-input\\session\\source-bindings.json",
+          "sha256": "5d7a1b6f906d99ca549d411eecf00a595bd336d49631110c022e15da6b1d9eaf",
+          "checksPerConfiguration": 302297,
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "failedAssertions": 0,
+          "semanticFaultsDetected": 10,
+          "semanticFaultsRequired": 10
+        },
+        {
+          "kind": "application",
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\onex-input\\application-held-with-faults\\source-bindings.json",
+          "sha256": "7c60c35ca9418bbccfb138173e03c53d09e8fdcc43839d5c82fe80b0d4c06f5c",
+          "checksPerConfiguration": 255766,
+          "scenarios": 41,
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "failedAssertions": 0,
+          "semanticFaultsDetected": 18,
+          "semanticFaultsRequired": 18,
+          "faultBreakdown": "16 original + 2 new OXP3 faults"
+        },
+        {
+          "kind": "windows",
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\onex-input\\windows-held-final\\source-bindings.json",
+          "sha256": "416f9ade2ad1233dbb9e45c2222f3d16b7b2ff13d446b73daa0d85d0832c4ddc",
+          "checksPerConfiguration": 111000,
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "failedAssertions": 0,
+          "semanticFaultsDetected": 24,
+          "semanticFaultsRequired": 24
+        }
+      ],
+      "modelQuery": {
+        "originalConsumer": "tools/hc_remaining_model_capabilities_selftest.mjs",
+        "result": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\onex-input\\remaining-models-final\\source-bindings.json",
+        "sha256": "0a79dcce13894de879ce01fe72d701814921e74a06a76a78197c3837bd22bfa2",
+        "checksPerConfiguration": 10960,
+        "configurations": [
+          "Release",
+          "Checked"
+        ],
+        "failedAssertions": 0,
+        "semanticFaultsDetected": 12,
+        "semanticFaultsRequired": 12,
+        "historicalModels": 80,
+        "historicalAliases": 181,
+        "historicalInputs": 162,
+        "canonicalAppendProof": ", {\"gkey\", 1ull << 63}"
+      },
+      "independentValidation": {
+        "script": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-001\\model-report\\validate-current-report.mjs",
+        "log": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-001\\model-report\\validation.log",
+        "sha256": "6e016bcb2ba25a5ce1cf3b3354e3fe3e1f7d3d9f8799db25656e1dcb125c3599",
+        "wrapperUnitLog": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-001\\model-report\\model-report-wrapper-units.log",
+        "wrapperUnitLogSha256": "901d0a205db8c0b9eabc9de7695c552891c2c08d90262ba7a84ac008a2dffe1e",
+        "wrapperUnitChecks": 28,
+        "status": "PASS"
+      },
+      "sourceClosureLog": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-001\\closure\\closure.log",
+      "sourceClosureLogSha256": "dc1a9057d3b7dfbcb10a9abb7fb88161f57fd2c9bc75b8901b6e0f7af1e6e2f9",
+      "softwareScope": "OXP3 identity, 0x25 G-Key capture/remap, Home/G-Key real held press/release, canonical bit63 and existing key catalog; original X2/Mini click semantics and producer identities retained",
+      "hardwareAcceptance": "UNKNOWN",
+      "steamAndGameAcceptance": "UNKNOWN"
+    },
+    "lighting": {
+      "policyInput": "capabilities/hc-lighting-policy.json#reviewedExtensionModels",
+      "runtimeSource": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+      "runtimeSourceSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+      "originalFixtures": [
+        "tools/HcLightingCapabilitySelfTest/Program.cs",
+        "tools/LightSetterSelfTest/Program.cs",
+        "tools/hc_lighting_native_consumer_selftest.mjs",
+        "tools/hc_lighting_native_parity_selftest.mjs",
+        "tools/hc_lighting_native_feedback_selftest.mjs",
+        "tools/ymcc_sim/global/lighting-catalog/Run-LightingCatalog.ps1"
+      ],
+      "results": {
+        "unifiedRunnerLog": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\lighting-catalog.log",
+          "sha256": "8e99110dbbb75a6a2683921cfe545e1b9564860898b6357a6d615a970eaa6d49",
+          "executedThisDelivery": true,
+          "testedMainCppSha256": "766aeec48550c1b6ef34636d552299625b24278b3bb2db940e3bd7c8fac7025b"
+        },
+        "catalogConsumer": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\lighting-catalog\\result.json",
+          "sha256": "90b88b7c63ebd4beccf3d50ae67e0ea649c94330ef0c55f2ebc66e662a7155d8",
+          "checks": 567,
+          "models": 47
+        },
+        "catalogArtifact": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\hc-lighting-artifact-result-007.json",
+          "sha256": "db6c9257b31110f335e2bf03088996ad757570b1f339e2973793728989e8bcd0",
+          "checks": 567,
+          "models": 47,
+          "helperAssemblySha256": "42fdc662fd85f88ee7ac3b5976263b78c87223803d1355ed83e6d121e347a1d5"
+        },
+        "nativeParity": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\lighting-catalog\\native\\result.json",
+          "sha256": "c2debb3a7e47f0afce53c87567003f4243898e9877ee61dd9047286563f7578f",
+          "checks": 3840,
+          "models": 92
+        },
+        "nativeConsumer": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-013\\tests\\native-consumers\\result.json",
+          "sha256": "a1a0635a001c7fb3107785232541a77bf4a967d2848b2120bb09c7460b54f0f7",
+          "checks": 356,
+          "models": 48,
+          "parentWaitChecks": 2,
+          "parentFullChecks": 30,
+          "receiptGateChecks": 5,
+          "parentWaitStatus": "PASS",
+          "parentFullStatus": "PASS",
+          "testedMainCppSha256": "0274965dc3ac148504b1fa774147c1ea10ee7519d5e7c7f5557d1f6b60355080",
+          "testedHarnessSha256": "9bafd0f99fa6e63d22a05eac41c46e8a07a20202f45171668ba99639a55b5a20",
+          "executedThisDelivery": true
+        },
+        "nativeFeedback": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\lighting-catalog\\native-feedback\\result.json",
+          "sha256": "5766f3508d44e79f1d745805c2e11bef6234458c00337e20ad7982cda3934bdc",
+          "checks": 5722
+        },
+        "lightSetterSelfTest": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-013\\build\\lightsetter-selftest.log",
+          "sha256": "ee25615cfc1383e592c5566de97f1e85f5b543e2b73a4ae885b62ed00dd714bf",
+          "checks": 148,
+          "testedFixtureSha256": "366e7b7a197d2a7a067745862e6a8a792046462d97b61438a19e69a95e5eb877",
+          "executedThisDelivery": true
+        },
+        "helperBuild": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-013\\build\\lightsetter-build.log",
+          "sha256": "61d88ff9c994fd6277859a25b0986479e5ca517cb11182508ff33e8236fda608",
+          "helperAssemblySha256": "cc2b0be035685b9e08a65915fa26398f15c8500e32275e1ce2eebc9ceb8890f1"
+        },
+        "nativeBuild": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-011\\tests\\native-build.log",
+          "sha256": "f7d97faa2a26685d7be9dbb6885c5d66cf25bf71cd700cc8dffee28d37110994",
+          "status": "BUILD_OK",
+          "executableSha256": "ca27e969a06f8cf097541a6c1f61840be175723fc62aa08eaf06f94d2585ffc2",
+          "executedThisDelivery": false,
+          "note": "Preserved RESULT-011 build; native/main.cpp is unchanged since that build"
+        },
+        "lightingSignals": {
+          "status": "NOT_RUN",
+          "log": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002\\tests\\lighting-signals.log",
+          "logSha256": "7b87d6a954c6608edbdd7c37c59285f33bc45237abbd3ffc4c1b99dc786ee0a7",
+          "reason": "LIGHTING_TOOL_INPUT_CHANGED: installed Edge 155.0.4283.62 manifest no longer matches the pinned tool input; no product rerun, deployment or hardware action"
+        },
+        "netDiff": {
+          "status": "RECORDED",
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-013\\NET-DIFF.patch",
+          "meaning": "R4 handoff snapshot -> current after-image true net diff for every changed lighting owner/helper/doc file, including deleted and context lines; parallel hc-device-catalog.json/main.cpp CCD drift is disclosed separately and never claimed as this batch's edit"
+        },
+        "maintenance": {
+          "log": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\maintenance.log",
+          "logSha256": "7a3caae396e87745715d40659ac155fdecdebb7f53e262b3847b74e92bbc5f42",
+          "result": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\maintenance\\result.json",
+          "resultSha256": "7b05b59833fe13ab70882c23320e41401cc0decc84854e6cfb1f64a16cd2bb28"
+        },
+        "generation": {
+          "log": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\TraeCode-CN\\HC-CN-002-RESULT-007\\tests\\generation-check.log",
+          "logSha256": "80a74220cb8b6b2ef7a6421dde99212b4e1129f0a230d83fa7de8144c683da5f",
+          "status": "CURRENT"
+        }
+      },
+      "softwareScope": "OXP3 four zones 0x01/0x02/0x05/0x06, G-Key->logo->logo brightness->G-Key color then stick color/effect then stick brightness; exact ZoneDelay 150ms/SafeDelay 300ms/StickDelay 600ms; second set solid/pure breathing; sticks never pure breathing; OXP classic preset 1000 uses RGB(183,48,0); brightness 0 only sends the off sequence; exact 10 preset ids; helper HID v1 report ID 0 + 64-byte payload",
+      "requestLimits": [
+        "Preset second-set breathing comes from HC LEDSecondSetBreathing; the one-shot request cannot express it",
+        "Preset / brightness colors come from the explicit request colors forwarded by native; no hidden settings re-read",
+        "Fixed speed cannot be changed by request and speed is recorded as ignored"
+      ],
+      "hardwareAcceptance": "UNKNOWN",
+      "physicalEffectVerified": false
+    },
+    "fanQueuedRogSource": {
+      "status": "SOFTWARE_SOURCE_CONSUMER_VERIFIED",
+      "result": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\attempt-005\\source-only-roundtrip-results.json",
+      "sha256": "054554e61476559ff1fd6abbed0fcefc41d1e029e12c044f70ff14a69c41ccf8",
+      "processRecord": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\attempt-005\\PROCESS.result.json",
+      "checks": 149,
+      "sourceInputs": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\attempt-005\\INPUTS.before.json",
+      "sourceProgramSha256": "2b5d868f9a31f940b9eb9fe0da399e09970ee348d88746e8c5bed4fd8106f718",
+      "scope": "Synchronous and actual asynchronous guarded consumer, callback, Host ledger, queue Complete, terminal Close and independent successor; duplicate/unsupported/no-boundary/old-owner/old-generation/return controls with injected terminals",
+      "hcBinary": "NOT_RUN_SOURCE_ONLY",
+      "asyncWatchdog": "SOFTWARE_REAL_TIMER_CONSUMER_VERIFIED",
+      "outerRuntimeLifecycle": "NOT_RUN",
+      "hardwareAcceptance": "UNKNOWN",
+      "priorFailurePreserved": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\attempt-001\\PROCESS.result.json",
+      "pinnedHcCallbackComparison": {
+        "result": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\pinned-hc-roundtrip-001\\actual-roundtrip-results.json",
+        "sha256": "85801e0ae364c7c345eb4093c6d535700437540eeb6e3ee1be8d0c45db3886c4",
+        "checks": 171,
+        "binaryStatus": "passed-actual-locked-dll",
+        "scope": "Existing pinned HC callback and A1 setter/negative Host guard at memory terminals; real constructor/outer lifecycle and hardware are not approved"
+      },
+      "fullRegisteredGlobalParent": "NOT_RUN",
+      "priorFailuresPreserved": [
+        "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\attempt-001\\PROCESS.result.json",
+        "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-001-ROG-SOURCE-CONSUMER\\attempt-003\\PROCESS.result.json"
+      ]
+    },
+    "methodReconciliation": {
+      "executionId": "HC-CODEX-002",
+      "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-004-UPSTREAM-METHOD-RECONCILIATION",
+      "methodSelftest": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-004-UPSTREAM-METHOD-RECONCILIATION\\method-selftest-sealed-003\\result.json",
+        "sha256": "db91a9be10be1b0f0956479f32fab4f8ffb286a0bc82af2c3c2f4c2d39716ace",
+        "cases": 47
+      },
+      "maintenanceSelftest": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-004-UPSTREAM-METHOD-RECONCILIATION\\original-maintenance-selftest-sealed-002\\result.json",
+        "sha256": "e90f99f495f7c88540f3ff4ff5f51228fdda6d16868e5c5f09aff4f648889a16",
+        "cases": 34
+      },
+      "inactiveScopeRepair": "Secondary display classification corrected; original failing assertion retained; candidate provider stays inactive",
+      "physicalAcceptance": false,
+      "wholeGoalComplete": false
+    },
+    "fanCurrentCatalogAndReleaseBuild": {
+      "executionId": "HC-CODEX-003",
+      "actualHostBuild": "Release, warnings-as-errors retained; zero warnings/errors",
+      "fix": "Two pre-existing self-test-only fields explicitly initialized to original null/false defaults",
+      "source": {
+        "file": "FanLab/real-host/Section18CandidateLifecycle.cs",
+        "sha256": "10d8841234bebe348d5b3d4c7d98a50ea2c869b51828077d9cc287fad7a556ca"
+      },
+      "catalog": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-005-FAN-CATALOG-CONSUMERS\\current-002\\catalog-result.json",
+        "sha256": "1459579736ad69251332d0cd17eb1eca3d1301f49f07493a924b13b5c5df5b51",
+        "checks": 601,
+        "routes": 70,
+        "scope": "Route/identity dispatch only"
+      },
+      "hotpath": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-005-FAN-CATALOG-CONSUMERS\\current-002\\hotpath-result.json",
+        "sha256": "c405bcef1f3b0a6e27964af254ff79e2bfb3e907afbf4a10f8117d21f4794466",
+        "checks": 12,
+        "scope": "Constructor-skipped route cache, local allocation and rebind only; no whole-process performance acceptance"
+      },
+      "lockedHcRoundtrip": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-005-FAN-CATALOG-CONSUMERS\\pinned-hc-roundtrip-002\\actual-roundtrip-results.json",
+        "sha256": "85801e0ae364c7c345eb4093c6d535700437540eeb6e3ee1be8d0c45db3886c4",
+        "checks": 171,
+        "scope": "Original pinned HC with injected memory terminals; not physical or real outer Host lifecycle acceptance"
+      },
+      "fullDispatchParentPass": false,
+      "hardwareAccepted": false
+    },
+    "ayaneoSuperJoyDependency": {
+      "executionId": "HC-CODEX-004",
+      "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-006-SUPERJOY-DEPENDENCY",
+      "process": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-006-SUPERJOY-DEPENDENCY\\attempt-003\\PROCESS.json",
+      "processSha256": "73f3959d4e928431e210b7ee5e792f3948658bf655ac4c7e319af4d7fba7acbe",
+      "pinnedSourceSha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12",
+      "originalLightSetterChecks": 148,
+      "dependencyChecks": 326,
+      "actualHelperCatalogChecks": 567,
+      "countsNotAdditive": true,
+      "artifactSha256": "50e803975e041005adf903df66ab86d74ca879490f04b577fdae78130d5089fc",
+      "productBuild": "Release; zero warnings/errors",
+      "fixtureWarning": "Unchanged frozen AYANEODeviceCEc.cs line303 nullable warning CS8629 retained; frozen source not modified or warning suppressed",
+      "implemented": "Exact packet dependency and serialized software owner/session boundaries; helper refusal before legacy loading",
+      "unconnected": [
+        "actual native SuperJoy endpoint owner/transport",
+        "CEc non-stick zones",
+        "end-to-end helper/native stop and handback"
+      ],
+      "runtimeRouteAdmitted": false,
+      "physicalAcceptance": false,
+      "wholeGoalComplete": false,
+      "compiledSourceProof": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-006-SUPERJOY-DEPENDENCY\\source-proof\\result.json",
+        "sha256": "1252f68ae8e7e41ee87212e5aebfbed40332a46d0239390632dd8bc9967bd988",
+        "pairVerified": true,
+        "exactCompileSources": 15,
+        "runtimeAssemblyLoadedByProof": false
+      }
+    },
+    "ayaneoSuperJoyWindowsTerminal": {
+      "executionId": "HC-CODEX-005",
+      "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-007-SUPERJOY-WINDOWS-TERMINAL",
+      "implementation": "Windows FileStream terminal with exact report-ID normalization, descriptor check at explicit owned-path Open, exclusive no-fallback open and cancellation",
+      "process": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-007-SUPERJOY-WINDOWS-TERMINAL\\attempt-001\\PROCESS.json",
+        "sha256": "95778ac079a9ca86ca5a762784657ad8ef4a66a12c4bcf58c6970c5970e02d3d"
+      },
+      "sourceProof": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-007-SUPERJOY-WINDOWS-TERMINAL\\source-proof\\result.json",
+        "sha256": "942203c0b0f1c35e959777ad0b8366e6ca7afbfce5c18d9473d16d85c0658480",
+        "exactCompileSources": 16
+      },
+      "softwareChecks": {
+        "originalLightSetter": 148,
+        "sourceProtocolDependency": 326,
+        "actualWindowsPipeTerminal": 16,
+        "singleFixtureTotal": 490,
+        "actualHelperExistingCatalog": 567,
+        "countsAcrossScopesNotAdditive": true
+      },
+      "artifactSha256": "b59ef8b79d3fa26bcfc2091ad0cf9115700ed484d47019c459c77fb8196a92b2",
+      "sourceInputsStable": 45,
+      "nativeOpenDescriptorPathExecuted": false,
+      "osTestEndpoint": "Owned asynchronous named pipes, not HID",
+      "nativeOwnerAdmitted": false,
+      "runtimeRouteAdmitted": false,
+      "hardwareAccepted": false,
+      "wholeGoalComplete": false
+    },
+    "ayaneoSuperJoyNativeOwner": {
+      "executionId": "HC-CODEX-006",
+      "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER",
+      "status": "CROSS_PROCESS_OWNER_CONTRACT_VERIFIED_PRODUCT_ROUTE_OPEN",
+      "wireVersion": 2,
+      "wireBytes": 1344,
+      "actualOwnerScenarios": 14,
+      "intendedChildBindingNegative": {
+        "abi1Failure": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER\\foreign-abi1-negative\\OBSERVATION.json",
+        "abi1FailureSha256": "a082524590a22205dd99700ad27c6b178300202cf8b06931b940681368704247",
+        "abi2ForeignHelperRefusedBeforeIo": true
+      },
+      "ownerResults": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER\\attempt-004\\owner-results\\result.json",
+        "sha256": "c53bf7803ebc67bc71111c60aa946d84a51ef8224d954ec497c768f43d828529"
+      },
+      "nativeInputsStable": 376,
+      "nativeCompilerUndeclaredInputs": [],
+      "managedSourceProofs": {
+        "helper": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER\\helper-source-proof-abi2\\result.json",
+          "sha256": "c060c7fbf2230ab3519889c1bb16cb31d184bcaab23a1104f85041bee2737a03",
+          "sources": 17
+        },
+        "ownerFixture": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER\\owner-fixture-source-proof-abi2\\result.json",
+          "sha256": "81998bbbcd3c3d01098eb34d18f57f0f8d96fd25981fc14170c39095aad4692c",
+          "sources": 32
+        }
+      },
+      "currentSoftwareChecks": {
+        "originalLightSetter": 148,
+        "sourceProtocol": 326,
+        "osPipeTerminal": 16,
+        "nativeAndManagedOwnerScenarios": 14,
+        "actualHelperCatalog": 567,
+        "nativeExistingConsumer": 358,
+        "nativeParentWithin358": 32,
+        "crossScopesNotAdditive": true
+      },
+      "nativeEntryRefusal": "Source model requests are rejected before legacy file checks or child creation; native product positive dispatcher/endpoint selector not wired yet",
+      "remainingGap": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-008-SUPERJOY-NATIVE-OWNER\\REMAINING-CONSUMER-GAP.json",
+        "sha256": "a921152cf653f10592a872537975d04d9563530307542dfb1a410bd82bdb2547"
+      },
+      "normalProductMainExecuted": false,
+      "nativeHidOpenExecuted": false,
+      "runtimeRouteAdmitted": false,
+      "hardwareAccepted": false,
+      "wholeGoalComplete": false
+    },
+    "ayaneoSuperJoyCombinedConsumer": {
+      "executionId": "HC-CODEX-007",
+      "historicalStage": true,
+      "status": "COMBINED_SOURCE_CONSUMER_VERIFIED_NATIVE_ADMISSION_NOT_GRANTED",
+      "verification": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-009-SUPERJOY-CEC-CONSUMER\\VERIFICATION.json",
+        "sha256": "e1e71e014f15411e33f22582a2688e9d1b5d79b962a80b0c38d1c443f521472f",
+        "bytes": 7795
+      },
+      "checks": {
+        "original": 148,
+        "protocol": 326,
+        "osPipe": 16,
+        "combinedAndWrapper": 641,
+        "sameFixtureTotal": 1131,
+        "separateHelperCatalog": 567
+      },
+      "notRerunThisNativeBatch": true,
+      "hardwareIo": false,
+      "runtimeRouteAdmitted": false
+    },
+    "ayaneoSuperJoyNativeDispatch": {
+      "executionId": "HC-CODEX-008",
+      "recordedClockUtc": "2026-11-01T19:07:19.582466+00:00",
+      "status": "NATIVE_SOURCE_WIRED_JOINT_SOFTWARE_VERIFIED_TYPED_CATALOG_ADMISSION_PENDING",
+      "nativeConsumers": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-010-SUPERJOY-NATIVE-DISPATCH\\actual-002\\result.json",
+        "sha256": "21b9b762d44d038335a8a961f40894ec3643ff28c40d457f329b3d2a6b620b01",
+        "bytes": 15947
+      },
+      "nativeCompilerInputs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-010-SUPERJOY-NATIVE-DISPATCH\\actual-002\\native-compiler-inputs.json",
+        "sha256": "78ad6f8722b0d17c9af5b84e3e50f9eace8ebf9d15d470a0a30765973ddae63b",
+        "bytes": 81934
+      },
+      "managedSourceProof": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-010-SUPERJOY-NATIVE-DISPATCH\\managed-source-proof.json",
+        "sha256": "718e27ad58ef2d6f3e8f468d37d468605df847e6ebeb7ac8038f7fc5b81af017",
+        "bytes": 24674
+      },
+      "ownerRegression": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-010-SUPERJOY-NATIVE-DISPATCH\\owner-contract-regression\\results\\result.json",
+        "sha256": "ed1d7b6a3e6d85feac0d93a22115eff8396e148ee0487eb2e325969ecc22d2b7",
+        "bytes": 41048
+      },
+      "identityFailureNegativeAndFix": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-010-SUPERJOY-NATIVE-DISPATCH\\identity-cleanup-probe\\PROCESS.json",
+        "sha256": "710eaf30852c1113c02952909c3b06d3e68de153f499dd1857abbe5819cbec7f",
+        "bytes": 1455
+      },
+      "checks": {
+        "nativeWholeFixture": 404,
+        "nativeFullParentWithin404": 78,
+        "originalParentAssertionsRetained": 32,
+        "newJointAssertionsWithin78": 46,
+        "separateOriginalOwnerScenarios": 14
+      },
+      "countsAcrossScopesNotAdditive": true,
+      "sourceClosure": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-010-SUPERJOY-NATIVE-DISPATCH\\adapter-full-source-closure-check-002.json",
+        "sha256": "76d7351f0ea2f872769c1df5dfaf1decf92b42bfe86203fd01f6453a8f533ea0",
+        "bytes": 15811
+      },
+      "compiledNativeInputs": 346,
+      "managedUserSources": 36,
+      "sdkGeneratedManagedSources": 3,
+      "normalProductMainExecuted": false,
+      "physicalHidDiscoveryOrEcInvoked": false,
+      "positiveNativeJointTestPolicyPort": true,
+      "singleCatalogCurrentlyAdmitsTheseModels": false,
+      "actualMachineClassSelectionSourceAlreadyPresent": true,
+      "wholeApplicationBuildClaimed": false,
+      "wholeGoalComplete": false,
+      "remaining": [
+        "Typed source-adapter extension validation and generated native/C# admission in the sole catalog",
+        "Replace the temporary native route-shape predicate with explicit typed provider authority",
+        "Stop idle owner heartbeat context work before admission",
+        "Current real-catalog full consumer verification and original whole-domain/method completion audit"
+      ]
+    },
+    "ayaneoSuperJoyTypedCatalog": {
+      "executionId": "HC-CODEX-009",
+      "verification": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-011-SUPERJOY-TYPED-CATALOG\\VERIFICATION.json",
+        "sha256": "88c211850a5d7d74420fb8e6b9a98d9e934112d75a57d5897969010e70028292",
+        "bytes": 9052
+      },
+      "counts": {
+        "nativeFixture": 420,
+        "nativeFullParentWithinFixture": 84,
+        "sourcePolicyAssertions": 42,
+        "scopeCountsNotAdditive": true,
+        "frozenClasses": 92,
+        "frozenLightingBindings": 47,
+        "typedLightingExtensions": 3,
+        "totalLightingRoutes": 50
+      },
+      "runtimeRouteAdmittedInSource": true,
+      "shippingSourceCatalogUsedInNativeFixture": true,
+      "softwarePhaseComplete": false,
+      "wholeGoalComplete": false,
+      "hardwareAcceptance": "UNKNOWN",
+      "remaining": [
+        {
+          "id": "managed-complete-fixture",
+          "state": "TIMEOUT",
+          "operation": "fixture-run-001",
+          "exitCode": 124,
+          "availableSeconds": 20.96125100000063,
+          "requirements": "Retain original OXP, protocol, Windows-terminal and exact fixed-CEc oracle assertions. No count or complete PASS is available from this invocation."
+        },
+        {
+          "id": "shipping-helper-catalog-fixture",
+          "state": "NOT_RUN_BUDGET_EXHAUSTED",
+          "operations": [
+            "catalog-build-001",
+            "catalog-run-001"
+          ],
+          "requirements": "Current full original catalog assertions against the current helper DLL. Historical567 must not be transferred; expected583 is unproven."
+        },
+        {
+          "id": "generator-check",
+          "state": "NOT_RUN_BUDGET_EXHAUSTED",
+          "operations": [
+            "generation-check-001"
+          ],
+          "requirements": "Lighting-scoped generator check remains unexecuted. Five generated artifacts are byte-identical and three native generated functions match staged candidate; do not claim full-integrity acceptance."
+        },
+        {
+          "id": "ui-native-coverage",
+          "state": "SOURCE_EQUIVALENCE_ONLY",
+          "requirements": "Second-color and effect UI helper functions are outside the scratch compiled native fixture. No complete native application build is claimed."
+        },
+        {
+          "id": "whole-library-enabled-methods",
+          "state": "OPEN",
+          "requirements": "Continue original102-class/485-method actual enabled-consumer reconciliation, preserving other TDP owner and inactive exclusions."
+        },
+        {
+          "id": "hardware-performance-installed",
+          "state": "UNKNOWN_NOT_EXECUTED",
+          "requirements": "No deployment, physical I/O, real sleep or product performance measurements authorized/performed."
+        }
+      ]
+    },
+    "pinnedSourceFanCurrent": {
+      "executionId": "HC-CODEX-042",
+      "recordedAtUtc": "2026-11-02T18:16:58.831578+00:00",
+      "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R19_EXPORT",
+      "normalExport": {
+        "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+        "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+        "bytes": 111371083
+      },
+      "exportReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+        "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+        "bytes": 2110
+      },
+      "actualArchiveEntriesChecked": 621,
+      "wholeGoalComplete": false,
+      "physicalAcceptance": false,
+      "installationScope": "Publisher terminal reported installed; capability-library owner accepted package/source identity only",
+      "originalFailuresPreserved": true,
+      "countsAreSeparateScopesNotAdditive": true,
+      "evidenceManifest": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-042-CONSUMER-KEYED-CALIBRATION-AND-FAN-RECOVERY\\REFERENCE-MANIFEST-042.json",
+        "sha256": "dbd1cf4357f75b288424d5097b6de63d2190475152d6791f6366adcee867e8fc",
+        "bytes": 89155
+      },
+      "review": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-FAN-6840e59d0432.json",
+        "sha256": "c26b488be9ac1336f9539b9b30de522afdfe26e0a177b7b04894ce74b792caeb",
+        "bytes": 2667
+      },
+      "componentId": "candidate-source-recovery-20261103-r2",
+      "identities": {
+        "hostDllSha256": "4aea8d9849810b59acaf6803306010c2d0370d0ad47019890b808fcb69dbc697",
+        "backendDllSha256": "9079348b26e916dbbee865745064cde137aec488379889ad657ffa50485040c7",
+        "apphostSha256": "f1163d7aafacaa376e32d6ab14f10dd1b3c51380ff9be7b392573f9aeba77c0e",
+        "payloadManifestSha256": "ec030c85e2bd00df3b77cd83c85f78ed45a04aef98fff936b77c2db79d003d45",
+        "sourceBundleManifestSha256": "de40793fa39706fec367d097372feb18c3bd524a05a80220b83e348f546bba15"
+      },
+      "sourceDescriptorCount": 9,
+      "registrationAuthority": "Existing FanCapabilityCatalog partial facade; existing source selection/consumer/engine/session and transports",
+      "consumerEntry": [
+        "FanLab/real-host/PinnedSourceFanConsumer.cs",
+        "FanLab/real-host/PinnedSourceFanEngine.cs",
+        "src/bridge/fanHost.ts"
+      ],
+      "softwareEvidence": {
+        "bridgeOriginalCases": 45,
+        "sourceRetirementBoundaries": 27,
+        "bridgeSemanticNegativesCaught": 7,
+        "hostSourceOnlyChecks": 1954,
+        "hostSemanticNegativesCaughtInThisTask": 2,
+        "contractUnitTests": 15,
+        "metadataVariants": 2,
+        "metadataModules": 4,
+        "pdbDocumentRows": 98
+      },
+      "ordinaryFaultRecovery": "Same-source generation safe return and exact terminalClosed precede actual native admission and Open/OpenEvents/Acquire/Enable; process/session/epoch/source identities are checked across awaits.",
+      "parentStopSettlement": "Consume the already completed matching retirement cycle without reopening its time budget.",
+      "unknownModeOrFailedRetirement": "Do not retake foreign or unknown mode; retain unresolved source owner/generation and restoration obligations.",
+      "oldFieldModeAndChangingActor": "UNKNOWN",
+      "frozenRuntimeReplaced": false,
+      "oldRuntimeFactoryConstructedForSource": false,
+      "defaultWriteAuthorizationUnchanged": true,
+      "newReaderWriterOrProviderAddedByThisDocumentationSync": false,
+      "normalExportHistory": [
+        {
+          "replacedAtUtc": "2026-11-02T19:59:25.822248+00:00",
+          "previous": {
+            "normalExport": {
+              "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+              "sha256": "87c1577ad7ec436bcf136dbb19a359ef541a0c031e57bc8c6d1f778c84b6ae4c",
+              "bytes": 111370831
+            },
+            "exportReview": {
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-R18-87c1577ad7ec.json",
+              "sha256": "3e14d31f78620b2b90cd0ef62ee6381a2ddf731fc73c52e7f6d3cb27acc0e67d",
+              "bytes": 1450
+            },
+            "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R18_EXPORT"
+          }
+        }
+      ],
+      "normalExportObservedAtUtc": "2026-11-02T19:59:25.822248+00:00"
+    },
+    "pinnedSourceFanHistory": [
+      {
+        "executionId": "HC-CODEX-018",
+        "status": "SOFTWARE_CONSUMER_VERIFIED_LIVE_UNKNOWN",
+        "sourceDescriptorCount": 9,
+        "registrationAuthority": "Existing FanCapabilityCatalog partial facade; source facts and owner shared with existing fan consumers",
+        "sourceHostOuterLifecycleIntegrated": true,
+        "oldRuntimeFactoryConstructedForSource": false,
+        "sourceModelAndRuntimeFactoryIdentitySeparated": true,
+        "defaultWriteAuthorizationUnchanged": true,
+        "sourceOnly": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-mainline-source-001\\RESULT.json",
+          "sha256": "18693c1492e4c385e880014f7ed8467d5ed5f378633e11e11bbbba63eaae71af",
+          "bytes": 88752
+        },
+        "originalLockedBinary": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-mainline-binary-001\\RESULT.json",
+          "sha256": "a8d4555b6fe156617eb24652e0b857c5bb1f832c17c935c4166ccd2c4cb3a46c",
+          "bytes": 94354
+        },
+        "actualBridge": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-source-bridge-001.stdout.log",
+          "sha256": "fd647c5dd331e90d06bb1d57e9ef3e67ca34db73f66de7f48a56f5ea605fbdbc",
+          "bytes": 218
+        },
+        "actualNative": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-native-001.stdout.log",
+          "sha256": "c347bffb97a37d08ab78f233c507378dfd79f8966b81fa0e2d45471594b265e7",
+          "bytes": 1316
+        },
+        "actualHostBuild": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\activation-actual-host-build.stdout.log",
+          "sha256": "8df4c55e9c96d016d16abddd98de7d3db9930c91d98860d904b2c6afb64e1d43",
+          "bytes": 84
+        },
+        "scope": "Pure software controls/returns/generations and approved runtime metadata; no product Main, device/port constructors, live WMI/EC, deployment, hardware effects or performance evidence",
+        "wholeGoalComplete": false,
+        "loadedPortBytes": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+        "sourceScopes": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-018-FAN-SOURCE-POWER\\final-source-proof\\SOURCE-PROOF-SCOPES.json",
+          "sha256": "cd976daabd9980b9e0de605662488e41a9b6805404445ecd7e73eece38a36312",
+          "bytes": 833
+        }
+      }
+    ],
+    "lenovoControllerMotionCurrent": {
+      "executionId": "HC-CODEX-042",
+      "recordedAtUtc": "2026-11-02T18:16:58.831578+00:00",
+      "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R19_EXPORT",
+      "normalExport": {
+        "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+        "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+        "bytes": 111371083
+      },
+      "exportReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+        "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+        "bytes": 2110
+      },
+      "actualArchiveEntriesChecked": 621,
+      "wholeGoalComplete": false,
+      "physicalAcceptance": false,
+      "installationScope": "Publisher terminal reported installed; capability-library owner accepted package/source identity only",
+      "originalFailuresPreserved": true,
+      "countsAreSeparateScopesNotAdditive": true,
+      "evidenceManifest": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-042-CONSUMER-KEYED-CALIBRATION-AND-FAN-RECOVERY\\REFERENCE-MANIFEST-042.json",
+        "sha256": "dbd1cf4357f75b288424d5097b6de63d2190475152d6791f6366adcee867e8fc",
+        "bytes": 89155
+      },
+      "review": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-LEGION-CONSUMER-a2a542cc00ef.json",
+        "sha256": "a7bf766d8d4b66e09ddcae62c866b3c7f62280717cab26dedb1ddad3cf0b79cf",
+        "bytes": 1776
+      },
+      "consumerResultSha256": "a2a542cc00ef107c9998abeb4548f1d66cdd9803afd8b82976ca222d25c2877f",
+      "sourceReady": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-042-CONSUMER-KEYED-CALIBRATION-AND-FAN-RECOVERY\\legion-source-ready\\SOURCE-READY.json",
+        "sha256": "7e4960992272a0bee5e12d17ac3f135403d73e6eccdabe68b73ecf67b2d92e6f",
+        "bytes": 28074
+      },
+      "scope": "Existing Lenovo GO controller motion consumer/keyed initialization/cold calibration and original input pipe",
+      "coldCalibration": "Actual selected Ready source key/id; wait up to3500ms for first same-source fresh report, then start a new5000ms training budget; existing confidence>0.99 may complete early.",
+      "coldCalibrationNotDrivenByIsolatedFlag": true,
+      "originalPipe": "Exact inputCaptureBindStandardInput and actual ReadProgress/state lifetime, same-case repeated-read state preserved",
+      "softwareEvidence": {
+        "motion": {
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "casesEach": 38,
+          "checksEach": 6498,
+          "coldWaitOmissionFailuresEach": 88
+        },
+        "pipe": {
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "casesEach": 27,
+          "assertionsEach": 39
+        },
+        "keyedActivation": {
+          "configurations": [
+            "Release",
+            "Checked"
+          ],
+          "checksEach": 5885,
+          "initializationOmissionFailuresEach": 64,
+          "wrongGoSReportIdFailuresEach": 48
+        }
+      },
+      "resolvedInSoftwareScope": [
+        "HC-CODEX-040-C02",
+        "HC-CODEX-041-C03"
+      ],
+      "originalParent": "Original38-vs39 count guard failure retained; reviewed two-line guard correction is not a fabricated new whole-parent PASS.",
+      "go2ControllerAxes": "Pinned HC TODO only; no primary physical/controller coordinate proof, no speculative axis flip and no new package blocker",
+      "remainingConsumerCorrection": "HC-CODEX-040-C01 source/hide identity requires virtual consumer-owner closure",
+      "currentNormalNativeExeSha256": "a4c56dd45724b7bbf7170aa0dfabf1e57c8ea2465ebbe8528191dd7887ce5d11",
+      "normalExportHistory": [
+        {
+          "replacedAtUtc": "2026-11-02T19:59:25.822248+00:00",
+          "previous": {
+            "normalExport": {
+              "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+              "sha256": "87c1577ad7ec436bcf136dbb19a359ef541a0c031e57bc8c6d1f778c84b6ae4c",
+              "bytes": 111370831
+            },
+            "exportReview": {
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-R18-87c1577ad7ec.json",
+              "sha256": "3e14d31f78620b2b90cd0ef62ee6381a2ddf731fc73c52e7f6d3cb27acc0e67d",
+              "bytes": 1450
+            },
+            "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R18_EXPORT"
+          }
+        }
+      ],
+      "normalExportObservedAtUtc": "2026-11-02T19:59:25.822248+00:00"
+    },
+    "exportedManagedIdentityCurrent": {
+      "executionId": "HC-CODEX-045",
+      "recordedAtUtc": "2026-11-02T19:59:25.822248+00:00",
+      "evidenceLevel": "ACTUAL_NORMAL_PACKAGE_PE_PDB_SOURCE_RESOURCE_AND_SELECTED_IL_IDENTITY",
+      "package": {
+        "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+        "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+        "bytes": 111371083
+      },
+      "review": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+        "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+        "bytes": 2110
+      },
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-045-EXPORTED-HELPER-AND-INPROCESS-IDENTITY\\EXPORTED-MANAGED-COMPONENT-IDENTITY-ADOPTION.json",
+        "sha256": "b1179b5a6ea7240a6bb6a22008fa44f654fca94e5a7b5541737a0a00a1546420",
+        "bytes": 73832
+      },
+      "lightingHelperSha256": "582cfb4c7093ec1cd8d8a7f2f3c47817df08e42bd285dbbc10114630acb932a1",
+      "batteryComponentSha256": "9fd52cdff2364a85203a95547145be819d7818318bf9ee0695fcc37de36a6e8c",
+      "sharedHcCoreSha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+      "portablePdbSourceDocuments": {
+        "lighting": 22,
+        "battery": 22
+      },
+      "batteryEmbeddedRulesMatchCurrentSourceAndGeneratedHash": true,
+      "actualHcFactorySevenSkuBranchesVerifiedWithoutInvocation": true,
+      "actualTabletLedWriteResultDiscardAndConstantTrueReturnVerified": true,
+      "helperReadyResultStoredForReportNotOpenAdmissionGate": true,
+      "productMethodsInvoked": false,
+      "consumerExecutionOrHardwareAcceptance": false,
+      "035PrivateAnd038OriginalFixtureEvidenceGapsPreserved": true,
+      "wholeGoalComplete": false
+    }
+  },
+  "remainingFullScope": {
+    "allModels": 102,
+    "allSourceDomainsReviewedAndConsumed": false,
+    "frozenToUpstreamMethodAndFlagReview": "485 pinned methods classified; actual enabled consumers, method equivalence and joint lifecycle reconciliation remain OPEN",
+    "allExistingEnabledCapabilitiesMustBeConnected": true,
+    "newModelNameRegistrationIsNotCompletion": true,
+    "inactiveCapabilities": "Record declaration and gap, do not silently activate excluded/inactive UI or providers",
+    "userExcluded": [
+      "settings.wake-password-ui"
+    ],
+    "cpuGpu": "metadata only, independent TDP consumer unchanged",
+    "newDeviceRestartPermissions": false,
+    "externalAcceptance": "UNKNOWN",
+    "wholeProcessCpuImprovementMeasured": false,
+    "currentPinnedMethodAudit": {
+      "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-003-PINNED-METHOD-AUDIT\\UPSTREAM-METHOD-CONSUMPTION-AUDIT.json",
+      "sha256": "1f289f6fa8a18b77c35963542525035745726189f385597d8b9c89a676552417",
+      "sourceClasses": 102,
+      "sourceMethods": 485,
+      "changedClassRows": 38,
+      "methodChanges": 239,
+      "declarationsOutsideFrozenPolicy": 52,
+      "status": "FULL_RECONCILIATION_OPEN; classification is not method execution",
+      "historicalAuditPreserved": true
+    },
+    "currentPinnedMethodClassification": {
+      "executionId": "HC-CODEX-002",
+      "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-004-UPSTREAM-METHOD-RECONCILIATION\\upstream-review-sealed-004\\method-consumption-review.json",
+      "sha256": "b79aee0fe3e43be356462e0522f766579e92797170e3b9cdc65db2fc49aa794e",
+      "sourceClasses": 102,
+      "sourceMethods": 485,
+      "newPolicyNames": 32,
+      "previousUnclassifiedDeclarations": 52,
+      "unclassifiedDeclarations": 0,
+      "methodSpecificExecution": "not-inferred-from-domain-link",
+      "runtimeAvailabilityAuthority": false,
+      "consumerReconciliationComplete": false,
+      "freshParserProcess": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-004-UPSTREAM-METHOD-RECONCILIATION\\witnessed-upstream-parser-001\\process.json",
+      "freshParserProcessSha256": "3a983036f4a2aa9fe4566d4a563c411c520871b0167ea4174deda18410869d62"
+    },
+    "latestLightingPhase": "Typed sole-catalog admission native420/source42 verified; complete managed fixture TIMEOUT at240s cumulative cap; helper catalog and generation check NOT_RUN. Full enabled-domain/method reconciliation OPEN.",
+    "latestFanPhase": "018 nine source descriptors retain their qualified source scope.020 fixes the no-prior-software callback and return-debt consumer for nine existing OneXAcpi aliases; current combined Host original variants1276/1299 pass, counts separate. Other fixed methods/flags and full-library acceptance remain OPEN.",
+    "currentFanMethodSourceComparison": {
+      "executionId": "HC-CODEX-019",
+      "status": "SOURCE_COMPARISON_COMPLETE_CONSUMPTION_OPEN",
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-019-METHOD-CONSUMPTION\\FAN-METHOD-RECONCILIATION.json",
+        "sha256": "516f1ab0bfb94424c19fb2e99d5f9402dae1f0bb7a89c07fb5edef6d5f2944ad",
+        "bytes": 98156
+      },
+      "fanDeclarations": 59,
+      "unchangedDeclarations": 31,
+      "changedDeclarations": 16,
+      "noExactFrozenSignature": 12,
+      "profileFlagReturnRows": 13,
+      "methodExecutionRecertifiedThisBatch": false,
+      "wholeGoalComplete": false
+    },
+    "currentLegacyOneXFanConsumption": {
+      "executionId": "HC-CODEX-020",
+      "status": "SOFTWARE_ONE_X_APPLIED_PROFILE_GUARD_VERIFIED_FULL_LIBRARY_OPEN",
+      "verification": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-020-ONEX-APPLIED-FLAG\\SOFTWARE-VERIFICATION.json",
+        "sha256": "1415fddef8f629ac88bf9135b618fc548eafba6f078d65dcff0893cea1d6eeb4",
+        "bytes": 13276
+      },
+      "methodUpdate": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-020-ONEX-APPLIED-FLAG\\METHOD-CONSUMPTION-UPDATE.json",
+        "sha256": "c0df64c224587c20a0adcf77a4781cb1a2bf4be9f38e3e285164493783be098b",
+        "bytes": 1383
+      },
+      "legacyAliasesWithinExisting70": 9,
+      "sourceOnlyChecks": 1276,
+      "lockedBinaryVariantChecks": 1299,
+      "newConsumerChecksWithinEachVariant": 78,
+      "countsAreNotAdditive": true,
+      "newLegacyRoutesOrSourceDescriptors": 0,
+      "scope": "Existing OneXAcpiFanMode callback/return owner; no initial Hardware/default callback without software or debt; failed/unknown/foreign/cleanup-pending debt retained",
+      "exactPinnedA1PositiveEcMethodsExecuted": false,
+      "frozenVirtualCloseRetained": true,
+      "completeLibrary": false
+    },
+    "latestConsumedConsumerExport": {
+      "executionId": "HC-CODEX-045",
+      "fan": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-FAN-6840e59d0432.json",
+        "sha256": "c26b488be9ac1336f9539b9b30de522afdfe26e0a177b7b04894ce74b792caeb",
+        "bytes": 2667
+      },
+      "lenovo": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-LEGION-CONSUMER-a2a542cc00ef.json",
+        "sha256": "a7bf766d8d4b66e09ddcae62c866b3c7f62280717cab26dedb1ddad3cf0b79cf",
+        "bytes": 1776
+      },
+      "normalExport": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+        "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+        "bytes": 2110
+      },
+      "openConsumerCorrectionIds": [
+        "HC-CODEX-040-C01"
+      ],
+      "wholeGoalComplete": false,
+      "zip": {
+        "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+        "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+        "bytes": 111371083
+      },
+      "managedComponentIdentity": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-045-EXPORTED-HELPER-AND-INPROCESS-IDENTITY\\EXPORTED-MANAGED-COMPONENT-IDENTITY-ADOPTION.json",
+        "sha256": "b1179b5a6ea7240a6bb6a22008fa44f654fca94e5a7b5541737a0a00a1546420",
+        "bytes": 73832
+      }
+    },
+    "consumedConsumerExportHistory": [
+      {
+        "executionId": "HC-CODEX-042",
+        "fan": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-FAN-6840e59d0432.json",
+          "sha256": "c26b488be9ac1336f9539b9b30de522afdfe26e0a177b7b04894ce74b792caeb",
+          "bytes": 2667
+        },
+        "lenovo": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-LEGION-CONSUMER-a2a542cc00ef.json",
+          "sha256": "a7bf766d8d4b66e09ddcae62c866b3c7f62280717cab26dedb1ddad3cf0b79cf",
+          "bytes": 1776
+        },
+        "normalExport": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-R18-87c1577ad7ec.json",
+          "sha256": "3e14d31f78620b2b90cd0ef62ee6381a2ddf731fc73c52e7f6d3cb27acc0e67d",
+          "bytes": 1450
+        },
+        "openConsumerCorrectionIds": [
+          "HC-CODEX-040-C01"
+        ],
+        "wholeGoalComplete": false
+      }
+    ]
+  },
+  "maintenance": {
+    "sourceUpgradeTool": "tools/hc_upstream_capability_upgrade.mjs",
+    "extractor": "tools/PcCapabilityAudit",
+    "existingDeltaPlanner": "tools/hc_capability_maintenance.mjs",
+    "existingRegressionContract": "tools/ymcc_sim/HC-UPGRADE-REGRESSION.md",
+    "sourceOnlyCandidateNeverGrantsRuntimeAuthority": true,
+    "noNewPermanentFixtureId": true,
+    "sourceScopeDecision": "capabilities/ACTIVE-INTEGRATION-SCOPE.json#sourceOnlyModelUpgrade"
+  },
+  "executionControl": {
+    "changedOn": "2026-11-01",
+    "authority": "direct-human-user",
+    "userInstruction": "修改任务职责，执行AI似乎无法完成任务，你看开始执行直到完成",
+    "localGoal": "active",
+    "executor": "Codex",
+    "codexRole": "capability-library-source-contracts-and-consumer-evidence",
+    "codexAutonomousProductChanges": false,
+    "communicationRoot": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN",
+    "controlFile": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/CONTROL.json",
+    "executionPlan": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/EXECUTION.md",
+    "priorTraeRequestRevision": 12,
+    "priorTraeBatchId": "HC-CN-010",
+    "traeCodeExecutionAllowed": false,
+    "adjudicationAutomation": "traecode-cn-hc",
+    "adjudicationAutomationStatus": "DELETED_SUPERSEDED",
+    "state": "CURRENT_R19_EXPORTED_COMPONENT_SOURCE_IDENTITIES_VERIFIED_ORIGINAL_CONSUMER_GATES_OPEN",
+    "updatedAtUtc": "2026-11-02T19:59:25.822248+00:00",
+    "noDeploymentOrHardwareOperations": true,
+    "noFrozenRuntimeReplacement": true,
+    "otherTdpOwnerPreserved": true,
+    "wholeGoalComplete": false,
+    "latestExecutionId": "HC-CODEX-045",
+    "codexAutonomousLibraryDocumentationChanges": true,
+    "consumerImplementationOwners": "Existing Fan/Lenovo gyro/ONEX gyro/virtual-controller owners",
+    "soleCanonicalPublisher": "Existing CPU1"
+  },
+  "executionControlHistory": [
+    {
+      "changedOn": "2026-10-31",
+      "authority": "direct-human-user",
+      "localGoal": "paused",
+      "executor": "TraeCode CN",
+      "codexRole": "adjudicator",
+      "codexAutonomousProductChanges": false,
+      "communicationRoot": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN",
+      "requestFile": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\REQUEST.json",
+      "requestId": "ymcc-hc-capability-traecode-cn-20261031",
+      "requestRevision": 3,
+      "batchId": "HC-CN-002",
+      "state": "PARTIAL_RESULT_PUBLISHED_PENDING_REVIEW",
+      "ackObserved": true,
+      "ackPath": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\TraeCode-CN\\ACK.json",
+      "resultObserved": true,
+      "resultPath": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\TraeCode-CN\\RESULT.json",
+      "lastExecutorResultId": "HC-CN-002-RESULT-002",
+      "updatedAtUtc": "2026-10-31T05:30:54.464Z",
+      "currentInputEvidenceSnapshot": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\inputs\\HC-CN-002\\EVIDENCE-SNAPSHOT.json",
+      "sourceSnapshot": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\inputs\\HC-CN-002\\SOURCE-SNAPSHOT.json",
+      "priorSoftwareWorkIsNotWholeGoalCompletion": true,
+      "executorModelLabel": "DS 4.1",
+      "transport": "local-files-only"
+    },
+    {
+      "changedOn": "2026-11-01",
+      "authority": "direct-human-user",
+      "userInstruction": "修改任务职责，执行AI似乎无法完成任务，你看开始执行直到完成",
+      "localGoal": "active",
+      "executor": "Codex",
+      "codexRole": "execution-and-verification",
+      "codexAutonomousProductChanges": true,
+      "communicationRoot": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN",
+      "controlFile": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/CONTROL.json",
+      "executionPlan": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/EXECUTION.md",
+      "priorTraeRequestRevision": 12,
+      "priorTraeBatchId": "HC-CN-010",
+      "traeCodeExecutionAllowed": false,
+      "adjudicationAutomation": "traecode-cn-hc",
+      "adjudicationAutomationStatus": "DELETED_SUPERSEDED",
+      "state": "PARTIAL_SOFTWARE_SCOPE_BUDGET_EXHAUSTED",
+      "updatedAtUtc": "2026-11-01T20:18:24.796835+00:00",
+      "noDeploymentOrHardwareOperations": true,
+      "noFrozenRuntimeReplacement": true,
+      "otherTdpOwnerPreserved": true,
+      "wholeGoalComplete": false,
+      "latestExecutionId": "HC-CODEX-009",
+      "archivedByExecution": "HC-CODEX-018"
+    },
+    {
+      "changedOn": "2026-11-01",
+      "authority": "direct-human-user",
+      "userInstruction": "修改任务职责，执行AI似乎无法完成任务，你看开始执行直到完成",
+      "localGoal": "active",
+      "executor": "Codex",
+      "codexRole": "execution-and-verification",
+      "codexAutonomousProductChanges": true,
+      "communicationRoot": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN",
+      "controlFile": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/CONTROL.json",
+      "executionPlan": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/EXECUTION.md",
+      "priorTraeRequestRevision": 12,
+      "priorTraeBatchId": "HC-CN-010",
+      "traeCodeExecutionAllowed": false,
+      "adjudicationAutomation": "traecode-cn-hc",
+      "adjudicationAutomationStatus": "DELETED_SUPERSEDED",
+      "state": "NINE_SOURCE_FAN_SOFTWARE_CONSUMERS_CONNECTED_FULL_LIBRARY_OPEN",
+      "updatedAtUtc": "2026-11-02T01:59:41.654Z",
+      "noDeploymentOrHardwareOperations": true,
+      "noFrozenRuntimeReplacement": true,
+      "otherTdpOwnerPreserved": true,
+      "wholeGoalComplete": false,
+      "latestExecutionId": "HC-CODEX-018"
+    },
+    {
+      "changedOn": "2026-11-01",
+      "authority": "direct-human-user",
+      "userInstruction": "修改任务职责，执行AI似乎无法完成任务，你看开始执行直到完成",
+      "localGoal": "active",
+      "executor": "Codex",
+      "codexRole": "capability-library-source-contracts-and-consumer-evidence",
+      "codexAutonomousProductChanges": false,
+      "communicationRoot": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN",
+      "controlFile": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/CONTROL.json",
+      "executionPlan": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/EXECUTION.md",
+      "priorTraeRequestRevision": 12,
+      "priorTraeBatchId": "HC-CN-010",
+      "traeCodeExecutionAllowed": false,
+      "adjudicationAutomation": "traecode-cn-hc",
+      "adjudicationAutomationStatus": "DELETED_SUPERSEDED",
+      "state": "LENOVO_AND_FAN_CONSUMER_SOFTWARE_ACCEPTED_ACTUAL_NORMAL_R18_EXPORT_VERIFIED_WHOLE_LIBRARY_OPEN",
+      "updatedAtUtc": "2026-11-02T18:16:58.831578+00:00",
+      "noDeploymentOrHardwareOperations": true,
+      "noFrozenRuntimeReplacement": true,
+      "otherTdpOwnerPreserved": true,
+      "wholeGoalComplete": false,
+      "latestExecutionId": "HC-CODEX-043",
+      "codexAutonomousLibraryDocumentationChanges": true,
+      "consumerImplementationOwners": "Existing Fan/Lenovo gyro/ONEX gyro/virtual-controller owners",
+      "soleCanonicalPublisher": "Existing CPU1"
+    }
+  ]
+}

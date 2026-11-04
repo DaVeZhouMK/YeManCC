@@ -182,4 +182,63 @@ for(const boundary of ['explicit-pause','pause-during-attach','visible','unknown
  assert.equal(f.observerStats().watchers,0);assert.equal(f.observerStats().game,0);assert.equal(f.fxTimerCount(),0);assert.equal(f.controllerTimerCount(),0);
 });
 
-const report={status:'passed',cases,demandStormMeasurements,attachDemandMeasurements,productionHostExecutedInVm:true,actualHardwareWrites:0,oldTierCommandsRejected:true,continuousOwnerWired:true};console.log(JSON.stringify(report,null,2));
+// The renderer can receive an authenticated native peer event while an older
+// mirrorAttach observation is still in flight; registration and ready also race.
+const lateAttachMeasurements=[];
+for(const boundary of ['new-peer-event','disconnect-event','newer-attach'])await check('late native attach cannot replace '+boundary,async()=>{
+ let resolveOld;const oldReply=new Promise(resolve=>resolveOld=resolve);let attaches=0;
+ const current={connection:'2',runId:'b'.repeat(32),connected:true},observed=[];
+ const f=await fixture(seed(),{invoke:async command=>{
+  if(command!=='deckySidebar.mirrorAttach')return true;
+  const request=++attaches;
+  if(request===(boundary==='newer-attach'?1:2)){await oldReply;return {...peer,owner:'YMCC-native',pid:8612};}
+  return {...(boundary==='newer-attach'?current:peer),owner:'YMCC-native',pid:8612};
+ }});
+ const off=f.registerExtension({prefix:'attach-fixture.',connected:value=>observed.push(structuredClone(value)),request(){}});
+ try{
+  await flush();f.ready();await flush();
+  if(boundary==='new-peer-event')f.emit('deckySidebar.mirrorPeer',current);
+  if(boundary==='disconnect-event')f.emit('deckySidebar.mirrorPeer',{...peer,connected:false});
+  if(boundary!=='disconnect-event'){
+   f.emit('deckySidebar.mirrorRequest',{...current,request:{command:'snapshot',runId:current.runId}});await flush();
+   assert.equal(f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot.runId,current.runId);
+  }
+  const before={power:f.counts.power,peers:observed.length,replies:f.replies.length};
+  resolveOld();await flush();
+  assert.equal(observed.length,before.peers,'a retired attach receipt cannot dispatch a peer or reconnect an extension');
+  assert.equal(f.counts.power,before.power,'a retired attach receipt cannot start another business read');
+  if(boundary==='disconnect-event')assert.equal(observed.at(-1).connected,false,'disconnected current peer stays disconnected');
+  else{
+   f.emit('deckySidebar.mirrorRequest',{...current,request:{command:'snapshot',runId:current.runId}});await flush();
+   const snapshots=f.replies.slice(before.replies).filter(x=>x.message.type==='snapshot');
+   assert(snapshots.length>0,'current authenticated peer remains usable after late attach');
+   assert(snapshots.every(x=>x.message.snapshot.runId===current.runId),'late attach cannot publish an old run snapshot');
+  }
+  assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);
+  lateAttachMeasurements.push({boundary,retiredPeerIgnored:true,oldReads:0,businessWrites:0});
+ }finally{resolveOld();off();f.stop();await flush();}
+ assert.equal(f.observerStats().ipc,0);assert.equal(f.observerStats().watchers,0);assert.equal(f.fxTimerCount(),0);assert.equal(f.controllerTimerCount(),0);assert.equal(f.memory.stats().pendingDeadlineTimers,0);
+});
+
+await check('late bridge owner confirmation establishes current native health without adopting the old peer',async()=>{
+ const releases=[],observed=[],current={connection:'2',runId:'b'.repeat(32),connected:true};
+ const f=await fixture(seed(),{invoke:async command=>{
+  if(command!=='deckySidebar.mirrorAttach')return true;
+  return new Promise(resolve=>releases.push(()=>resolve({...peer,owner:'YMCC-native',pid:8612})));
+ }});
+ const off=f.registerExtension({prefix:'late-owner-fixture.',connected:value=>observed.push(structuredClone(value)),request(){}});
+ try{
+  f.ready();f.emit('deckySidebar.mirrorPeer',current);f.emit('deckySidebar.mirrorRequest',{...current,request:{command:'snapshot',runId:current.runId}});await flush();
+  assert.equal(f.replies.filter(x=>x.message.type==='snapshot').at(-1).message.snapshot.provenance.kind,'unconfirmed');
+  const peers=observed.length;releases[0]();await flush();
+  const actual=f.replies.filter(x=>x.message.type==='snapshot').at(-1).message.snapshot;
+  assert.equal(actual.ready,true);assert.equal(actual.runId,current.runId);assert.equal(actual.provenance.kind,'ymcc-native');assert.equal(actual.provenance.pid,8612);
+  assert.equal(observed.length,peers,'owner metadata must not adopt the retired transport');
+  const reads=f.counts.power;for(const release of releases)release();await flush();
+  assert.equal(f.counts.power,reads,'same confirmed owner is not an extra read demand');
+  assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);
+ }finally{for(const release of releases)release();off();f.stop();await flush();}
+ assert.equal(f.observerStats().ipc,0);assert.equal(f.memory.stats().pendingDeadlineTimers,0);
+});
+
+const report={status:'passed',cases,lateAttachMeasurements,demandStormMeasurements,attachDemandMeasurements,productionHostExecutedInVm:true,actualHardwareWrites:0,oldTierCommandsRejected:true,continuousOwnerWired:true};console.log(JSON.stringify(report,null,2));

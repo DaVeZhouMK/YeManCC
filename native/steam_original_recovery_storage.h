@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <cwctype>
+#include <set>
+#include "json.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -85,26 +87,96 @@ inline std::vector<fs::path> scan(const fs::path& base,bool target){
         else fail("storage-unknown-entry");
     }return files;
 }
+
+// Parse at the byte boundary: never collapse duplicate identity/authority keys.
+inline nlohmann::json parseStateBytes(const std::string& bytes){
+    need(bytes.size()<=fileLimit,"storage-file-limit");
+    using J=nlohmann::json;std::vector<std::set<std::string>> objects;
+    const auto callback=[&](int depth,J::parse_event_t event,J& value){
+        need(depth<=64,"storage-json-depth");
+        if(event==J::parse_event_t::object_start)objects.emplace_back();
+        else if(event==J::parse_event_t::key)need(!objects.empty()&&objects.back().insert(value.get<std::string>()).second,"storage-json-duplicate");
+        else if(event==J::parse_event_t::object_end){need(!objects.empty(),"storage-json-object");objects.pop_back();}
+        return true;
+    };
+    return J::parse(bytes,callback);
+}
+inline void inspectEnabled(const fs::path& runtime){
+    const auto file=runtime/"enabled.json";if(!present(file))return;
+    const auto bytes=read(file); // IO denial is not absence. Runtime must remain OFF/blocked.
+    try{(void)parseStateBytes(bytes);}catch(const nlohmann::json::exception&){
+        // Ordinary malformed overrides already fall back OFF in the runtime reader.
+        // Keep their original bytes; duplicate/depth failures above must not reach that reader.
+    }
+}
+inline std::vector<std::string> inventory(const std::vector<fs::path>& files){
+    std::vector<std::string> result;for(const auto& file:files)result.push_back(file.generic_string());
+    std::sort(result.begin(),result.end());return result;
+}
+inline std::string rootIdentity(const fs::path& p){const auto utf8=fs::path(key(p)).generic_u8string();return {utf8.begin(),utf8.end()};}
+inline nlohmann::json migrationMarker(const fs::path& legacy,const fs::path& runtime,const std::vector<fs::path>& files){
+    return {{"schema","ymcc.steam-original-storage.v2"},{"committed",true},
+        {"migration",{{"sourceRoot",rootIdentity(legacy)},{"targetRoot",rootIdentity(runtime)},{"files",inventory(files)}}}};
+}
+inline nlohmann::json checkMarker(const std::string& bytes,const fs::path& runtime,const char* reason){
+    try{
+        const auto j=parseStateBytes(bytes);
+        need(j.is_object()&&j.at("schema")=="ymcc.steam-original-storage.v2"&&j.at("committed").is_boolean()&&j.at("committed")==true,reason);
+        const auto& m=j.at("migration");need(m.is_object()&&m.at("sourceRoot").is_string()&&m.at("targetRoot")==rootIdentity(runtime)&&m.at("files").is_array()&&m.at("files").size()<=countLimit,reason);
+        std::vector<std::string> names;
+        for(const auto& entry:m.at("files")){
+            need(entry.is_string(),reason);const auto text=entry.get<std::string>();const fs::path path(text);
+            need(!text.empty()&&!path.is_absolute()&&text.find_first_of("\\:")==std::string::npos,reason);
+            const auto parent=path.parent_path();
+            need((parent.empty()&&controls(path))||(parent.parent_path().empty()&&ledger(parent)&&path.extension()==".json"&&path.filename()!=".."),reason);
+            names.push_back(text);
+        }
+        need(std::is_sorted(names.begin(),names.end())&&std::adjacent_find(names.begin(),names.end())==names.end(),reason);
+        return j;
+    }catch(...){fail(reason);}
+}
+
 inline Receipt run(const fs::path& legacyInput,const fs::path& runtimeInput){
     const auto legacy=root(legacyInput),runtime=root(runtimeInput);const auto l=key(legacy),r=key(runtime);need(!within(l,r)&&!within(r,l),"storage-root-overlap");ancestry(runtime);
     const auto marker=runtime/"storage-layout-v2.json",pending=runtime/"storage-layout-v2.pending";
-    need(!present(pending),"storage-marker-interrupted");
-    if(present(marker)){need(read(marker)==markerBytes,"storage-marker-invalid");scan(runtime,true);return {};}
+    if(present(marker)){
+        need(!present(pending),"storage-marker-interrupted");const auto bytes=read(marker);
+        if(bytes!=markerBytes)(void)checkMarker(bytes,runtime,"storage-marker-invalid");
+        scan(runtime,true);inspectEnabled(runtime);return {};
+    }
+    if(present(pending))(void)checkMarker(read(pending),runtime,"storage-marker-interrupted");
     const auto source=scan(legacy,false);const auto existing=scan(runtime,true);
-    // A target-only ledger without a commit cannot safely be attributed to this migration.
+    // Target-only debt or conflicting bytes never become an empty/default ledger.
     for(const auto& p:existing)need(std::find(source.begin(),source.end(),p)!=source.end(),"storage-target-uncommitted");
     for(const auto& p:source)if(present(runtime/p))need(read(legacy/p)==read(runtime/p),"storage-copy-conflict");
+    const auto intent=migrationMarker(legacy,runtime,source);const auto intentBytes=intent.dump()+"\n";
+    need(intentBytes.size()<=fileLimit,"storage-file-limit");const bool retry=present(pending);
+    if(retry){
+        // Only a root-bound, complete inventory can finish an interrupted final rename.
+        // Old/empty/unattributed sentinels remain UNKNOWN and require explicit repair.
+        const auto prior=checkMarker(read(pending),runtime,"storage-marker-interrupted");
+        need(prior==intent&&inventory(existing)==inventory(source),"storage-marker-interrupted");
+    }
     directory(runtime);Budget copiedBudget;Receipt receipt;receipt.legacyImported=present(legacy);
     for(const auto& p:source){const auto bytes=read(legacy/p);need(bytes.size()<=totalLimit-copiedBudget.bytes,"storage-total-limit");copiedBudget.bytes+=bytes.size();directory((runtime/p).parent_path());if(present(runtime/p)){need(read(runtime/p)==bytes,"storage-copy-conflict");++receipt.filesAlreadyPresent;}else{create(runtime/p,bytes);++receipt.filesCopied;}}
-    // Pending is a durable refusal sentinel until the final no-replace commit.
-    create(pending,markerBytes);
+    inspectEnabled(runtime);
+    if(!retry)create(pending,intentBytes);
+    // Recheck all copied bytes and names before activation; this does not refund or rewrite debt.
+    need(inventory(scan(legacy,false))==inventory(source)&&inventory(scan(runtime,true))==inventory(source),"storage-copy-conflict");
+    for(const auto& p:source)need(read(legacy/p)==read(runtime/p),"storage-copy-conflict");
+    const auto committedBytes=read(pending);need(checkMarker(committedBytes,runtime,"storage-marker-interrupted")==intent,"storage-marker-interrupted");
 #ifdef _WIN32
     need(MoveFileExW(pending.c_str(),marker.c_str(),MOVEFILE_WRITE_THROUGH)!=0,"storage-marker-commit-failed");
 #else
     need(::link(pending.c_str(),marker.c_str())==0,"storage-marker-commit-failed");need(::unlink(pending.c_str())==0,"storage-marker-commit-failed");int fd=::open(runtime.c_str(),O_RDONLY|O_DIRECTORY);need(fd>=0,"storage-marker-commit-failed");bool ok=::fsync(fd)==0;::close(fd);need(ok,"storage-marker-commit-failed");
 #endif
+    need(read(marker)==committedBytes,"storage-marker-commit-failed");
     return receipt;
 }
+}
+// Identity/state readers are bounded and no-follow, shared with the production engine.
+inline nlohmann::json readState(const std::filesystem::path& file){
+    auto value=detail::parseStateBytes(detail::read(file));detail::need(value.is_object(),"storage-json-object");return value;
 }
 // Reasons are fixed identifiers; filesystem paths and account bytes never escape.
 inline Receipt prepare(const std::filesystem::path& legacyEvidenceRoot,const std::filesystem::path& persistentRuntimeRoot){

@@ -51,6 +51,8 @@ int main(int argc,char**argv){if(argc!=3)return 2;const fs::path root=argv[1];fs
  {auto f=fixture(false);auto r=run(*f);save("missing original config may be created through the managed plan",*f,r,r.code==0&&f->writes==1&&contents(*f)==desired&&!f->planBase);}
  {auto f=fixture(false);f->onPlan=[](Fixture&x){hwinfo::writeAtomic(x.destination,foreign);};auto r=run(*f);save("new external config is not overwritten or deleted",*f,r,r.code==8&&r.conflict&&f->writes==0&&contents(*f)==foreign);}
  {auto f=fixture();f->postCommitVerifyLock=true;auto r=run(*f);save("verified planned bytes after temporary verification lock do not require another commit",*f,r,r.code==0&&f->writes==1&&f->waits==1&&contents(*f)==desired);}
+
+ for(const auto* suffix:{L".ymcc-original.bak",L".ymcc-last.bak"}){auto f=fixture();const auto broken=f->destination+suffix;hwinfo::writeAtomic(broken,"broken-without-ini-section");auto r=run(*f);save("corrupt existing INI backup blocks commit and preserves source and original bytes",*f,r,r.code==8&&f->writes==0&&contents(*f)==original&&*hwinfo::readBytes(broken,262144)=="broken-without-ini-section");}
  bool leftover=false;for(const auto&e:fs::recursive_directory_iterator(root))if(e.path().filename().wstring().find(L".ymcc-tmp-")!=std::wstring::npos)leftover=true;cases.push_back({{"name","successful and failed attempts leave no staged files"},{"ok",!leftover}});all=all&&!leftover;
  std::ofstream(argv[2])<<Json({{"ok",all},{"cases",cases},{"scope","Actual production configure body, actual atomic IO, real Windows file locks and inert producer/wait hooks in an isolated task directory. No real HWiNFO process, registry or settings changes; no CPU timing benchmark."}}).dump(2);return all?0:1;
 }

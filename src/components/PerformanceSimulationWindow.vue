@@ -1,246 +1,123 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
-import { createPerformanceSimulationSession, simulationPanelCommands } from '@/bridge/performanceSimulation';
+import '@/styles/tsSimulation.css';
+import {computed,nextTick,onMounted,onBeforeUnmount,ref,watch} from 'vue';
 import ContinuousPerformancePanel from './ContinuousPerformancePanel.vue';
-import { automaticCpuControls, defaultContinuousBank, stepContinuousFloat } from '@/bridge/performanceControls';
-import type { PerformancePanelSource } from '@/bridge/performancePanelSource';
-import { spatialNavigationTarget, nearestSpatialTarget } from '@/gamepad/spatial';
-import { performancePanelTarget } from '@/gamepad/performanceNavigation';
-import { stopPerformanceScheduleAndUseWindowsBalanced, onGameCustomConfigChanged, onPerformanceScheduleChanged } from '@/bridge/performanceSchedule';
-import { onFrameRatesChanged } from '@/bridge/frameRateLimits';
-import { powerSourceMode } from '@/bridge/powerSource';
-import { watch } from 'vue';
-import { windowApi } from '@/bridge/api';
-import { isNativeRuntime } from '@/bridge/ipc';
-import { subscribePolicyGameStatus } from '@/bridge/gamePolicyTarget';
-const emit = defineEmits<{ (e:'close'):void }>();
-const frame = ref<HTMLIFrameElement | null>(null), error = ref('');
-const editor = ref<HTMLElement | null>(null), editorReady = ref(false), modalOpen = ref(false), tdpAdvisory = ref('');
-const wide = ref(window.innerWidth >= 980);
-// Preserve the right editor proportions and derive its width from the available full height.
-const editorScale = ref(Math.max(.1,(window.innerHeight-92)/628));
-let editorRange: HTMLInputElement | null = null;
-const session = createPerformanceSimulationSession(), stops: (()=>void)[] = [];
-const opener = document.activeElement as HTMLElement | null;
-let ready = false, alive = true, saving = false, publishTicket = 0;
-const origin = location.origin;
-const widthOwner = `performance-simulation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-let widthOwned = false;
-// Reuse the production component against the existing isolated draft, never the live writer.
-function demo() { return frame.value?.contentWindow as (Window & { YmccScheduleLink: any; ymccEnergyDemo: any; YmccSimulationNavigation: any }) | null; }
-const panelSource: PerformancePanelSource = {
-  sideLocked: true,
-  async read() {
-    const link = demo()?.YmccScheduleLink;
-    if (!link?.snapshot()) throw new Error('正在载入临时参数');
-    return session.panel(link.baseSnapshot(), link.snapshot());
-  },
-  async commit(identity, patch) {
-    const link = demo()?.YmccScheduleLink;
-    const current = await this.read();
-    if (!link || current.side !== identity.side) throw new Error('供电配置已变化，请恢复当前设置');
-    for (const command of simulationPanelCommands(patch,current)) {
-      if (command.key === 'manualSmt') {
-        const game = link.snapshot().gameThreadPolicy;
-        if (game?.target) Object.assign(command,{gameTarget:{exe:game.exe,...game.target}});
-      }
-      await link.edit(command);
-    }
-    await link.flush();
-    if (patch.mode) demo()?.ymccEnergyDemo.selectPreview(patch.mode);
-    return this.read();
-  },
-  subscribe(refresh) {
-    const link=demo()?.YmccScheduleLink;
-    if(!link)return () => undefined;
-    const stop=link.subscribe(refresh),status=link.subscribeStatus((value:any) => { if(!value.loading&&link.baseSnapshot())refresh(); });
-    return () => { stop();status(); };
-  },
+import AppIcon from './AppIcon.vue';
+import Dropdown from './Dropdown.vue';
+import {createPerformanceSimulationSession} from '@/bridge/performanceSimulation';
+import type {PerformancePanelSource} from '@/bridge/performancePanelSource';
+import type {ContinuousSideControls,ContinuousPerformanceSnapshot} from '@/bridge/performanceControls';
+import {calibration,estimate,baselineValue,changePercent,sweep,checkpoints} from '@/performance/ts/model';
+import {coreModel} from '@/performance/ts/calibration';
+import {windowApi} from '@/bridge/api';
+import {isNativeRuntime} from '@/bridge/ipc';
+import {isUiVisible,onUiVisibilityChange} from '@/bridge/uiLifecycle';
+import {focusGamepadElement} from '@/gamepad/focus';
+import {powerSourceMode} from '@/bridge/powerSource';
+import {subscribePolicyGameStatus} from '@/bridge/gamePolicyTarget';
+import {onPerformanceScheduleChanged,onGameCustomConfigChanged} from '@/bridge/performanceSchedule';
+import {onFrameRatesChanged} from '@/bridge/frameRateLimits';
+const emit=defineEmits<{(e:'close'):void}>();
+const session=createPerformanceSimulationSession(),source=ref<ContinuousPerformanceSnapshot|null>(null),draftBank=ref<ContinuousSideControls|null>(null),profile=ref('z2e'),viewWatts=ref(20),playing=ref(false),busy=ref(false),error=ref(''),saved=ref(false),confirmation=ref<'save'|'reset'|null>(null),details=ref(false),root=ref<HTMLElement|null>(null),editor=ref<HTMLElement|null>(null),cancelButton=ref<HTMLButtonElement|null>(null);
+const copy=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
+const profiles=calibration.profileOptions(),entry=computed(()=>calibration.GPU_CAPABILITIES.entry(profile.value));
+const fallback=()=>({mode:'auto',tdp:30,tdpCeiling:45,auto:{bias:50,saving:'none',coreSplit:15,coreLow:'littleOnly',coreHigh:'bigFirst'},manual:{frequencyMHz:3000,unlimited:false,aggressiveness:60,turbo:true,coreMode:'bigFirst'}});
+const bank=computed(()=>draftBank.value||source.value?.bank||fallback()),smt=computed(()=>source.value?.hyperThreadMode!=='off');
+const baseline=ref<any>({profile:'z2e',watts:20,label:'原版基准',kind:'stock',bank:null,smt:true}),pinned=computed(()=>baseline.value.kind==='captured');
+const a=computed(()=>baselineValue(profile.value,baseline.value,viewWatts.value)),b=computed(()=>estimate(profile.value,bank.value,smt.value,viewWatts.value));
+const curves=computed(()=>sweep(profile.value,bank.value,smt.value,baseline.value)),rows=computed(()=>checkpoints(profile.value,bank.value,smt.value,baseline.value,viewWatts.value));
+const maxWatts=computed(()=>entry.value.maxWatts),fmt=(n:number)=>Math.round(n).toLocaleString('en-US');
+const pct=(before:number,after:number)=>{const n=changePercent(before,after);return `${n>=0?'+':''}${n.toFixed(1)}%`;};
+const deltaClass=(before:number,after:number)=>Math.abs(after-before)<.5?'equal':after>before?'up':'down';
+const plot={w:280,h:138,l:43,r:13,t:12,b:26};
+function maxScore(part:'gpu'|'cpu'){return Math.max(1,...curves.value.flatMap(r=>[r.a[part],r.b[part]]))*1.1;}
+function x(w:number){return plot.l+(w-entry.value.minWatts)/Math.max(1,maxWatts.value-entry.value.minWatts)*(plot.w-plot.l-plot.r);}
+function y(score:number,part:'gpu'|'cpu'){return plot.h-plot.b-score/maxScore(part)*(plot.h-plot.t-plot.b);}
+function path(part:'gpu'|'cpu',policy:'a'|'b'){return curves.value.map((r,i)=>`${i?'L':'M'}${x(r.watts).toFixed(2)},${y(r[policy][part],part).toFixed(2)}`).join(' ');}
+function ticks(part:'gpu'|'cpu'){return [0,.5,1].map(r=>({y:y(maxScore(part)*r,part),value:fmt(maxScore(part)*r)}));}
+const xTicks=computed(()=>[entry.value.minWatts,Math.round((entry.value.minWatts+maxWatts.value)/2),maxWatts.value]);
+const wattTicks=computed(()=>[...new Set([entry.value.minWatts,...(maxWatts.value<=20?[5,10,15]:maxWatts.value>45?[20,40,60]:[10,20,30]),maxWatts.value])].filter(w=>w>=entry.value.minWatts&&w<=maxWatts.value));
+const wattPosition=(w:number)=>(w-entry.value.minWatts)/Math.max(1,maxWatts.value-entry.value.minWatts)*100;
+let timer:ReturnType<typeof setInterval>|undefined,alive=true,widthOwned=false,viewEditStart=20,sourceTicket=0;
+const viewport=ref({width:innerWidth,height:innerHeight,scale:Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))||1});
+const nativeStyle=computed(()=>({width:viewport.value.width/viewport.value.scale+'px',height:viewport.value.height/viewport.value.scale+'px'}));
+function resize(){viewport.value={width:innerWidth,height:innerHeight,scale:Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))||1};}
+const scaleObserver=new MutationObserver(resize);
+const opener=document.activeElement as HTMLElement|null,widthOwner=`ts-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+function stopSweep(){if(timer!==undefined)clearInterval(timer);timer=undefined;playing.value=false;}
+function selectWatts(value:number){stopSweep();if(Number.isFinite(value))viewWatts.value=Math.max(entry.value.minWatts,Math.min(entry.value.maxWatts,Math.round(value)));}
+function toggleSweep(){if(playing.value){stopSweep();return;}if(viewWatts.value>=maxWatts.value)viewWatts.value=entry.value.minWatts;playing.value=true;timer=setInterval(()=>{viewWatts.value=Math.min(maxWatts.value,viewWatts.value+1);if(viewWatts.value>=maxWatts.value)stopSweep();},400);}
+function scrub(event:Event){selectWatts(Number((event.target as HTMLInputElement).value));}
+function beginViewEdit(){stopSweep();viewEditStart=viewWatts.value;}
+function cancelViewEdit(){viewWatts.value=viewEditStart;}
+function commitViewEdit(){viewEditStart=viewWatts.value;}
+function capture(){baseline.value={profile:profile.value,watts:viewWatts.value,label:'固定基准',kind:'captured',bank:copy(bank.value),smt:smt.value};}
+function original(){baseline.value={profile:profile.value,watts:viewWatts.value,label:'原版基准',kind:'stock',bank:null,smt:true};}
+function selectProfile(id:string){profile.value=id;selectWatts(viewWatts.value);original();}
+function acceptSource(value:ContinuousPerformanceSnapshot){source.value=copy(value);draftBank.value=null;}
+const panelSource:PerformancePanelSource={sideLocked:true,nativeLayout:true,sharedNavigation:true,
+ async read(side){const value=await session.read(side);if(alive)acceptSource(value);return value;},
+ async commit(identity,patch){saved.value=false;const value=await session.commit(identity,patch);if(alive)acceptSource(value);return value;},
+ subscribe:session.subscribe,
+ preview(value,identity){if(source.value&&identity.side===source.value.side){draftBank.value=copy(value);if(JSON.stringify(value)!==JSON.stringify(source.value.bank))saved.value=false;}},
 };
-function clearEditorRange() { if (editorRange) delete editorRange.dataset.gpEditing; editorRange = null; }
-function visible(el: HTMLElement) { const r=el.getBoundingClientRect();return !el.matches(':disabled') && r.width>0 && r.height>0; }
-function editorNodes() { return [...(editor.value?.querySelectorAll<HTMLElement>('button,input[type=range]')??[])].filter(visible); }
-function focusEditor(y: number, x = editor.value?.getBoundingClientRect().x ?? 0) {
-  const score=(el:HTMLElement)=>{const r=el.getBoundingClientRect();return Math.abs(r.y+r.height/2-y)*10000+Math.abs(r.x+r.width/2-x);};
-  const nodes=editorNodes(), target=nodes.sort((a,b)=>score(a)-score(b))[0];
-  target?.focus({preventScroll:true});
-}
-function focusPreview(dx: -1 | 0 | 1, dy: -1 | 0 | 1) {
-  const child=demo(), current=document.activeElement as HTMLElement;
-  if (!child || !current) return;
-  const candidates=[...child.document.querySelectorAll<HTMLElement>('.app [data-nav]')].filter(visible);
-  // Crossing documents uses viewport geometry rather than either editor's local scope.
-  const anchor={getBoundingClientRect:()=>current.getBoundingClientRect(),closest:()=>null} as unknown as HTMLElement;
-  const target=nearestSpatialTarget(candidates,anchor,{dx,dy});
-  if (target) { clearEditorRange();frame.value?.focus({ preventScroll: true });target.focus({preventScroll:true}); }
-}
-function editorCommand(action: string) {
-  const current=document.activeElement as HTMLElement | null;
-  if (!current) return;
-  const menu=current.closest('.dd-menu');
-  if (menu) {
-    const key=({a:'Enter',b:'Escape',up:'ArrowUp',down:'ArrowDown'} as Record<string,string>)[action];
-    if(key) current.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
-    return;
-  }
-  if (action==='b') { if(editorRange)clearEditorRange();else forward('b');return; }
-  if (action==='a') {
-    if(current.matches('input[type=range]')) { if(editorRange===current)clearEditorRange();else{clearEditorRange();editorRange=current as HTMLInputElement;editorRange.dataset.gpEditing='true';} }
-    else if(current.matches('[data-gp-dropdown]'))current.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
-    else current.click();
-    return;
-  }
-  const dx=['right','slider-right'].includes(action)?1:['left','slider-left'].includes(action)?-1:0,dy=action==='up'?-1:action==='down'?1:0;
-  if (editorRange && dx) {
-    const el=editorRange,step=Number(el.step)||1;
-    el.value=String(Math.max(Number(el.min),Math.min(Number(el.max),Number(el.value)+dx*step)));
-    el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return;
-  }
-  if(action.startsWith('slider-'))return;
-  if (dy)clearEditorRange();
-  const nodes=editorNodes(),panelTarget=performancePanelTarget(nodes,current,{dx,dy});
-  const target=panelTarget===undefined?spatialNavigationTarget(nodes,current,{dx,dy}):panelTarget;
-  if(target)target.focus({preventScroll:true});else focusPreview(dx,dy);
-}
-// The production editor is the layout authority. The renderer fills only the remaining left region.
-let editorLayoutObserver: ResizeObserver | null = null;
-function publishEditorLayout() {
-  const box=editor.value?.getBoundingClientRect(), viewport=frame.value?.getBoundingClientRect();
-  if(!box||!viewport||box.width<=0||box.height<=0)return;
-  post({type:'ymcc-simulation-editor-layout',layout:{width:box.width,height:box.height,left:box.left-viewport.left,top:box.top-viewport.top,right:viewport.right-box.right,gap:12}});
-}
-watch(editor,element=>{editorLayoutObserver?.disconnect();if(element){editorLayoutObserver=new ResizeObserver(publishEditorLayout);editorLayoutObserver.observe(element);publishEditorLayout();}},{flush:'post'});
-function resize() { wide.value=window.innerWidth>=980;editorScale.value=Math.max(.1,(window.innerHeight-92)/628);void nextTick(publishEditorLayout); }
-function editorKey(event: KeyboardEvent) {
-  if(!event.isTrusted||event.ctrlKey||event.metaKey||event.altKey)return;
-  if(!(editor.value?.contains(document.activeElement)||document.activeElement?.closest('.dd-menu')))return;
-  const action=({Enter:'a',' ':'a',Escape:'b',ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down'} as Record<string,string>)[event.key];
-  if(action){event.preventDefault();event.stopImmediatePropagation();if(!event.repeat||!['a','b'].includes(action))editorCommand(action);}
-}
-async function widenWindow() {
-  if (!isNativeRuntime || /[?&]__ymccChild=\d+/.test(location.hash)) return;
-  try {
-    const result = await windowApi.controllerEditorWidth(widthOwner, true, 2);
-    if (!alive) { if (result.ok) await windowApi.controllerEditorWidth(widthOwner, false); return; }
-    widthOwned = result.ok;
-  } catch { /* A width lease failure does not disable the local simulator. */ }
-}
-function post(value: unknown) { frame.value?.contentWindow?.postMessage(value, origin); }
-async function publish(type = 'ymcc-simulation-source', requestId?: string) {
-  const ticket = ++publishTicket;
-  try {
-    const snapshot = await session.read();
-    if (!alive || ticket !== publishTicket) return;
-    error.value = ''; post({type,snapshot,requestId});
-    if (type === 'ymcc-simulation-session-start') { post({type:'ymcc-simulation-host',action:'resume'}); frame.value?.focus({ preventScroll: true }); }
-  } catch (reason) { if (alive) error.value = (reason as Error).message; }
-}
-function forward(command: string) { if (ready) post({type:'ymcc-simulation-host',action:'command',command}); else if(command==='b') emit('close'); }
-async function message(event: MessageEvent) {
-  if (!alive || event.origin !== origin || event.source !== frame.value?.contentWindow) return;
-  const data = event.data;
-  if (data?.type === 'ymcc-simulation-ready') { ready = true;
-    const child=demo();
-    if (child) Object.assign(child,{YmccProductionControls:Object.freeze({automaticCpuControls,defaultContinuousBank,stepContinuousFloat})});
-    if(child?.YmccScheduleLink) {
-      stops.push(child.YmccScheduleLink.subscribeStatus((value:any) => { if(!value.loading&&child.YmccScheduleLink.baseSnapshot())editorReady.value=true; }));
-      const observer=new MutationObserver(() => { modalOpen.value=!!child.document.querySelector('dialog[open]');if(modalOpen.value){clearEditorRange();frame.value?.focus({ preventScroll: true });} });
-      observer.observe(child.document.body,{subtree:true,attributes:true,attributeFilter:['open']});stops.push(() => observer.disconnect());
-    }
-    await publish('ymcc-simulation-session-start'); }
-  else if (data?.type === 'ymcc-simulation-source-request') await publish('ymcc-simulation-source', data.requestId);
-  else if (data?.type === 'ymcc-simulation-focus-editor' && wide.value) focusEditor(Number(data.y)||90, Number.isFinite(data.x)?data.x:undefined);
-  else if (data?.type === 'ymcc-simulation-tdp-advisory') tdpAdvisory.value=data.show?String(data.message||''):'';
-  else if (data?.type === 'ymcc-simulation-return') emit('close');
-  else if (data?.type === 'ymcc-simulation-stop-schedule') {
-    if (saving) { post({type:'ymcc-simulation-stop-result',requestId:data.requestId,ok:false,reason:'已有设置操作正在进行，请稍后重试'}); return; }
-    saving = true;
-    try {
-      if (!isNativeRuntime) throw new Error('此操作仅在 YMCC 内可用');
-      await stopPerformanceScheduleAndUseWindowsBalanced();
-      if (alive) post({type:'ymcc-simulation-stop-result',requestId:data.requestId,ok:true});
-    } catch (reason) {
-      if (alive) post({type:'ymcc-simulation-stop-result',requestId:data.requestId,ok:false,reason:(reason as Error).message});
-    } finally { saving = false; }
-  }
-  else if (data?.type === 'ymcc-simulation-source-save' && !saving) {
-    saving = true;
-    try { const result = await session.save(data.base, data.draft); if (alive) post({type:'ymcc-simulation-save-result',requestId:data.requestId,...result}); }
-    catch (reason) { if (alive) post({type:'ymcc-simulation-save-result',requestId:data.requestId,ok:false,reason:(reason as Error).message}); }
-    finally { saving = false; }
-  }
-}
-function command(event: Event) {
-  const action = (event as CustomEvent<{action:string}>).detail?.action;
-  const mapped: Record<string,string> = {confirm:'a',back:'b','nav-left':'left','nav-right':'right','nav-up':'up','nav-down':'down','slider-decrease':'slider-left','slider-increase':'slider-right'};
-  if (mapped[action]) { event.preventDefault();
-    if(editor.value?.contains(document.activeElement)||document.activeElement?.closest('.dd-menu')) editorCommand(mapped[action]);
-    else forward(mapped[action]);
-  }
-  else if (action === 'page-prev' || action === 'page-next') event.preventDefault();
-}
-function back(event: Event) { if(event.defaultPrevented)return;event.preventDefault();if(editor.value?.contains(document.activeElement)||document.activeElement?.closest('.dd-menu'))editorCommand('b');else forward('b'); }
-function key(event: KeyboardEvent) { if (!event.defaultPrevented && event.key === 'Escape') { event.preventDefault(); forward('b'); } }
-onMounted(async () => {
-  void widenWindow();
-  window.addEventListener('resize',resize);window.addEventListener('keydown',editorKey,true);
-  window.addEventListener('message',message); window.addEventListener('gp:page-command',command);
-  window.addEventListener('ipc:gamepad-back',back); window.addEventListener('keydown',key);
-  const refresh = () => { if (ready && !saving) void publish(); };
-  stops.push(watch(powerSourceMode,refresh),subscribePolicyGameStatus(refresh),onFrameRatesChanged(refresh),
-    onGameCustomConfigChanged(refresh),onPerformanceScheduleChanged(refresh));
-  await nextTick(); frame.value?.focus({ preventScroll: true });
+async function restore(){if(busy.value)return;busy.value=true;error.value='';try{acceptSource(await session.restore());saved.value=false;}catch(e){if(alive)error.value=(e as Error).message;}finally{busy.value=false;}}
+async function confirmAction(){if(busy.value)return;busy.value=true;error.value='';try{if(confirmation.value==='save'){acceptSource(await session.save());saved.value=true;}else{acceptSource(await session.reset());saved.value=false;}confirmation.value=null;await nextTick();focusEditor();}catch(e){if(alive)error.value=(e as Error).message;}finally{busy.value=false;}}
+function ask(action:'save'|'reset'){stopSweep();confirmation.value=action;void nextTick(()=>focusGamepadElement(cancelButton.value));}
+function focusEditor(){return focusGamepadElement(editor.value?.querySelector<HTMLElement>('[data-gp-initial-focus="true"]')||null);}
+function closeConfirmation(){if(busy.value)return;confirmation.value=null;void nextTick(focusEditor);}
+function back(event:Event){if(event.defaultPrevented)return;event.preventDefault();if(busy.value)return;if(details.value){details.value=false;void nextTick(focusEditor);}else if(confirmation.value)closeConfirmation();else emit('close');}
+function visibility(){if(document.hidden||!isUiVisible())stopSweep();}
+function key(event:KeyboardEvent){if(event.key==='Escape'&&!event.defaultPrevented){back(event);}}
+onMounted(async()=>{
+ window.addEventListener('resize',resize);scaleObserver.observe(document.documentElement,{attributes:true,attributeFilter:['style']});resize();window.addEventListener('ipc:gamepad-back',back);window.addEventListener('keydown',key);document.addEventListener('visibilitychange',visibility);
+ if(isNativeRuntime&&!/[?&]__ymccChild=\d+/.test(location.hash))try{const result=await windowApi.controllerEditorWidth(widthOwner,true,2);if(!alive){if(result.ok)void windowApi.controllerEditorWidth(widthOwner,false);}else widthOwned=result.ok;}catch{}
+ try{const ticket=++sourceTicket,value=await session.read();if(alive&&ticket===sourceTicket){acceptSource(value);await nextTick();focusEditor();}}catch(e){if(alive)error.value=(e as Error).message;}
 });
-onBeforeUnmount(() => {
-  editorLayoutObserver?.disconnect();clearEditorRange();window.removeEventListener('resize',resize);window.removeEventListener('keydown',editorKey,true);
-  post({type:'ymcc-simulation-host',action:'suspend'}); alive=false;
-  if (widthOwned) void windowApi.controllerEditorWidth(widthOwner, false).catch(() => undefined); publishTicket++;
-  for(const stop of stops)stop(); window.removeEventListener('message',message); window.removeEventListener('gp:page-command',command);
-  window.removeEventListener('ipc:gamepad-back',back); window.removeEventListener('keydown',key); opener?.focus({preventScroll:true});
-});
+const focusObserver=new MutationObserver(()=>{if(editor.value?.querySelector('[data-gp-initial-focus="true"]')){focusEditor();focusObserver.disconnect();}});
+watch(editor,value=>{if(value){if(value.querySelector('[data-gp-initial-focus="true"]'))focusEditor();else focusObserver.observe(value,{childList:true,subtree:true});}},{flush:'post'});
+function sourceChanged(){if(alive&&!busy.value&&source.value){saved.value=false;error.value='正式供电、游戏或设置已变化，请恢复当前设置后再保存';}}
+const contextStops=[watch(powerSourceMode,sourceChanged),subscribePolicyGameStatus(sourceChanged),onPerformanceScheduleChanged(sourceChanged),onGameCustomConfigChanged(sourceChanged),onFrameRatesChanged(sourceChanged)];
+const stopVisibility=onUiVisibilityChange(visibility);
+onBeforeUnmount(()=>{focusObserver.disconnect();scaleObserver.disconnect();window.removeEventListener('resize',resize);alive=false;sourceTicket++;stopSweep();session.dispose();stopVisibility();for(const stop of contextStops)stop();window.removeEventListener('ipc:gamepad-back',back);window.removeEventListener('keydown',key);document.removeEventListener('visibilitychange',visibility);if(widthOwned)void windowApi.controllerEditorWidth(widthOwner,false).catch(()=>undefined);opener?.focus({preventScroll:true});});
 </script>
 <template>
-  <Teleport to="body"><div class="performance-simulation-window" data-gp-modal="performance-simulation" data-gp-page-lock role="dialog" aria-modal="true" aria-label="模拟测试/重置">
-    <iframe ref="frame" title="模拟测试" src="/performance-simulation/index.html?embedded=1&amp;nativeHost=1&amp;nativeEditor=1" allow="gamepad" tabindex="0" />
-    <aside v-if="editorReady && wide" ref="editor" v-show="!modalOpen" :inert="modalOpen" :style="{width: `${432*editorScale}px`, '--simulation-editor-scale': String(editorScale)}" :data-performance-editor-scale="editorScale" class="simulation-editor" aria-label="性能调节 · 模拟临时配置" @focusout="event => { if(event.target===editorRange)clearEditorRange(); }">
-      <div class="simulation-editor-content"><ContinuousPerformancePanel scope="effective" :panel-source="panelSource" />
-      <p class="simulation-tdp-advisory" role="status" :title="tdpAdvisory">{{tdpAdvisory}}</p></div>
-    </aside>
-    <div v-if="error" class="simulation-error" role="alert"><p>{{error}}</p><button @click="publish('ymcc-simulation-session-start')">重新连接</button><button @click="emit('close')"><strong>B</strong>关闭页面</button></div>
-  </div></Teleport>
-</template>
-<style scoped>
-.performance-simulation-window{position:fixed;inset:0;z-index:700;background:var(--bg,#101722)}iframe{display:block;width:100%;height:100%;border:0}.simulation-error{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg,#101722);font-size:15px}.simulation-error button{min-height:48px;min-width:180px;font:inherit}.simulation-error strong{color:#ef7979;margin-right:8px}
+<Teleport to="body"><div class="performance-simulation-window app-root" ref="root" role="dialog" aria-modal="true" aria-label="模拟测试/重置" data-gp-modal="performance-simulation" data-gp-page-lock>
+ <main class="ts-native-window" :style="nativeStyle" data-gp-performance-workbench data-gp-scope="ts-workbench" data-gp-spatial="nearest">
+  <header class="workbench-header"><div class="page-title"><h1>模拟测试 / 重置</h1><span>TS 能力估算 · 非实跑</span></div><div class="header-actions"><button :disabled="busy" @click="restore">恢复当前</button><button :disabled="busy" @click="ask('reset')">重置预设</button><button :disabled="busy" class="save-current" @click="ask('save')">{{saved?'配置已保存':'保存当前设置'}}</button><button @click="details=true" aria-label="查看估算依据">i</button><button :disabled="busy" @click="emit('close')"><span class="controller-key" data-controller-key="B">B</span> 关闭页面</button></div></header>
+  <div class="workbench-body">
+   <section class="results-pane" data-gp-vertical-lane="ts-results" aria-label="TS 数据与曲线">
+    <div class="machine-bar"><label class="machine-picker"><span>参考机型</span><Dropdown :model-value="profile" :options="profiles.map(p=>({value:p.id,label:p.label}))" @update:model-value="selectProfile(String($event))" aria-label="参考机型" :gp-row="0" :gp-col="0"/></label><span class="range-badge">{{entry.minWatts}}–{{entry.maxWatts}} W<span v-if="profile==='g3e'"> · 35 W 以上待标定</span></span></div>
+    <div class="comparison-label"><h2>同瓦数提升 <span>相对基准 A</span></h2><div class="ab-legend"><span class="legend-a"><i/>A 基准</span><span class="legend-b"><i/>B 当前</span></div></div>
+    <div class="watt-timeline" aria-label="独立瓦数轴">
+     <div class="watt-timeline-heading"><label for="view-watts">查看瓦数 <strong data-view-watts>{{viewWatts}}<small> W</small></strong></label><span>独立查看 · 不随 TDP 设定</span><button @click="toggleSweep" :aria-pressed="playing" class="sweep-button" aria-label="逐瓦播放" data-gp-row="1" data-gp-col="0"><span aria-hidden="true">{{playing?'Ⅱ':'▷'}}</span>{{playing?'暂停查看':'逐瓦播放'}}</button></div>
+     <div class="watt-scrubber" data-gp-slider-draft @gp:slider-edit-start="beginViewEdit" @gp:slider-edit-cancel="cancelViewEdit"><input id="view-watts" type="range" aria-label="查看瓦数" data-gp-row="2" data-gp-col="0" @change="commitViewEdit" :min="entry.minWatts" :max="maxWatts" step="1" :value="viewWatts" @input="scrub" @focus="stopSweep" @pointerdown="stopSweep" @gp:slider-edit-start="stopSweep" :style="{'--watt-position':wattPosition(viewWatts)+'%'}"/><div class="watt-ticks" aria-hidden="true"><span v-for="(tick,index) in wattTicks" :key="tick" :style="{left:wattPosition(tick)+'%'}" :class="{'tick-first':index===0,'tick-last':index===wattTicks.length-1}">{{tick}} W</span></div></div>
+    </div>
+    <div class="score-charts">
+     <article v-for="part in (['gpu','cpu'] as const)" :key="part" class="chart" :class="part" :aria-label="part.toUpperCase()+' 同瓦数分数曲线'">
+      <div class="chart-header"><strong>{{part.toUpperCase()}}<small>{{part==='gpu'?'同瓦数提升':'同瓦数变化'}}</small></strong><b class="chart-gain" :class="deltaClass(a[part],b[part])" :data-delta="part">{{pct(a[part],b[part])}}</b></div>
+      <div class="chart-scores"><span>A <b>{{fmt(a[part])}}</b></span><span class="score-arrow">→</span><span>B <b :data-value="part">{{fmt(b[part])}}</b></span><span class="chart-watts">{{viewWatts}} W</span></div>
+      <svg :viewBox="`0 0 ${plot.w} ${plot.h}`" role="img" :aria-label="part.toUpperCase()+' 分数曲线，基准和当前设置'">
+       <g v-for="tick in ticks(part)" :key="tick.value" class="chart-axis"><line :x1="plot.l" :x2="plot.w-plot.r" :y1="tick.y" :y2="tick.y"/><text :x="plot.l-7" :y="tick.y+4" text-anchor="end">{{tick.value}}</text></g>
+       <path :d="path(part,'a')" class="curve-a"/><path :d="path(part,'b')" class="curve-b"/>
+       <line class="current-guide" :x1="x(viewWatts)" :x2="x(viewWatts)" :y1="plot.t" :y2="plot.h-plot.b"/>
+       <circle class="current-dot" :cx="x(viewWatts)" :cy="y(b[part],part)" r="4.5"/>
+       <g class="chart-axis"><text v-for="(tick,index) in xTicks" :key="tick" :x="x(tick)" :y="plot.h-10" :text-anchor="index===0?'start':index===2?'end':'middle'">{{tick}} W</text></g>
+      </svg>
+     </article>
+    </div>
+    <div v-if="b.smt.graphicsEfficiency==='possible-small-saving'&&!b.coreGpuGain" class="smt-impact-note" data-smt-efficiency>关超线程单项：CPU {{pct(1,b.smt.cpuFactor)}} · GPU TS 不加分 · 轻载可能略省电<span>（未标定）</span></div>
+    <div v-if="b.coreGpuGain" class="core-gain-note" data-core-gpu-note>{{b.coreGpuGain.disabledGroup==='little'?'关小核':'关大核'}}单项：GPU <b :class="deltaClass(b.coreGpuGain.allCoreGpu,b.gpu)">{{pct(b.coreGpuGain.allCoreGpu,b.gpu)}}</b> · {{b.coreGpuGain.positiveGain>0?(profile==='z2e'?'AMD 簇调度校准':'正收益保留 20%'):'无额外正收益'}}<span v-if="b.smt.graphicsEfficiency==='possible-small-saving'"> · 关 SMT CPU {{pct(1,b.smt.cpuFactor)}}</span><span v-else>（同频全核对照）</span></div>
+    <div class="table-heading"><h2>同瓦数对照</h2><div><button class="baseline-button" data-gp-row="3" data-gp-col="0" @click="capture">固定当前为 A</button><button v-if="pinned" class="baseline-button original-button" data-gp-row="3" data-gp-col="1" @click="original">原版 A</button></div></div>
+    <div class="score-table-wrap"><table class="score-table"><colgroup><col style="width:15%"/><col style="width:28%"/><col style="width:28%"/><col style="width:29%"/></colgroup><thead><tr><th>瓦数</th><th>GPU <span>A → B</span></th><th>CPU <span>A → B</span></th><th>GPU 分 / W</th></tr></thead><tbody><tr v-for="(r,rowIndex) in rows" :key="r.watts" :class="{current:r.watts===viewWatts}"><th><button class="row-watt" :data-gp-row="4+rowIndex" data-gp-col="0" @click="selectWatts(r.watts)" :aria-label="'查看 '+r.watts+' W 对照'" :aria-pressed="r.watts===viewWatts">{{r.watts}}<small> W</small><i v-if="r.watts===viewWatts"/></button></th><td><span class="reference-number">{{fmt(r.a.gpu)}}</span><span class="table-arrow">→</span><b>{{fmt(r.b.gpu)}}</b><span class="table-percent" :class="deltaClass(r.a.gpu,r.b.gpu)" data-percent="gpu">{{pct(r.a.gpu,r.b.gpu)}}</span></td><td><span class="reference-number">{{fmt(r.a.cpu)}}</span><span class="table-arrow">→</span><b>{{fmt(r.b.cpu)}}</b><span class="table-percent" :class="deltaClass(r.a.cpu,r.b.cpu)" data-percent="cpu">{{pct(r.a.cpu,r.b.cpu)}}</span></td><td><b>{{(r.b.gpu/r.watts).toFixed(1)}}</b><span :class="deltaClass(r.a.gpu,r.b.gpu)">{{pct(r.a.gpu,r.b.gpu)}}</span></td></tr></tbody></table></div>
 
-.simulation-editor{position:absolute;top:58px;right:12px;bottom:34px;min-width:0;background:var(--bg-solid,#101722);border-radius:12px}
-.simulation-editor-content{display:flex;flex-direction:column;gap:4px;width:432px;height:628px;zoom:var(--simulation-editor-scale,1)}
-.simulation-editor :deep(.continuous-performance){flex:1;min-height:0;grid-template-rows:repeat(4,auto) minmax(0,1fr);gap:6px;--performance-control-h:35px;--performance-track-h:30px}
-.simulation-editor :deep(.supply-status){zoom:calc(1 / var(--simulation-editor-scale,1));position:fixed;top:17px;left:302px;min-height:24px;font-size:13px}
-.simulation-editor :deep(.control-modes),.simulation-editor :deep(.power-modes){padding:4px;gap:6px}
-.simulation-editor :deep(.parameter-summary){padding:6px 10px;gap:8px}
-.simulation-editor :deep(.parameter-summary span){font-size:12px}
-.simulation-editor :deep(.tdp-summary b){font-size:23px}
-.simulation-editor :deep(.limits-bubble){padding:4px 10px}
-.simulation-editor :deep(.slider-dropdown-row){grid-template-columns:56px minmax(0,1fr) 100px;gap:8px;padding:2px 0 6px}
-.simulation-editor :deep(.slider-dropdown-row+.slider-dropdown-row){padding-top:8px;padding-bottom:1px}
-.simulation-editor :deep(.metric-label){gap:3px}
-.simulation-editor :deep(.metric-label strong){font-size:22px;line-height:25px}
-.simulation-editor :deep(.auto-bubble){flex:1;display:flex;flex-direction:column;padding:7px 10px}
-.simulation-editor :deep(.saving-section){padding-bottom:6px}
-.simulation-editor :deep(.bias-section){flex:1;display:flex;flex-direction:column;justify-content:center;padding:6px 0 9px}
-.simulation-editor :deep(.bias-labels){margin-bottom:2px}
-.simulation-editor :deep(.bias-ticks){height:16px;margin-top:0}
-.simulation-editor :deep(.bias-ticks small){top:9px}
-.simulation-editor :deep(.core-section){padding-top:6px}
-.simulation-editor :deep(.core-heading b){font-size:19px}
-.simulation-editor :deep(.core-topology){margin:4px 0 0;font-size:11px}
-.simulation-editor :deep(.auto-core-row){gap:6px;margin-top:3px}
-.simulation-editor :deep(.core-choice){gap:3px}
-.simulation-editor :deep(.core-choice>small){font-size:10px;line-height:12px}
-.simulation-editor :deep(.slider-head){margin-bottom:4px}
-.simulation-editor :deep(.tdp-summary>div){gap:3px}
-.simulation-editor :deep(.manual-bubble){flex:1;display:flex;flex-direction:column;justify-content:space-between;padding:10px}
-.simulation-editor :deep(input[data-gp-editing=true]){outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
-.simulation-tdp-advisory:empty{visibility:hidden}
-.simulation-tdp-advisory{flex:0 0 auto;height:16px;line-height:16px;margin:0;padding:0 8px;font-size:11px;color:#f5c77a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-</style>
+   </section>
+
+   <aside class="editor-pane" aria-label="当前参数调节"><div class="editor-heading"><h2>调节面板 <span>B</span></h2><span>{{source?.identity.scope==='dedicated'?'编辑游戏专属':'编辑公用设置'}} · {{source?.side==='dc'?'电池':'插电'}}</span></div><p v-if="source?.identity.scope==='dedicated'" class="ts-game-name">{{source.gameName||source.identity.exe}}</p><div ref="editor" class="editor-scroll integrated-page-body"><ContinuousPerformancePanel v-if="source" scope="effective" :panel-source="panelSource" :readonly-preview="busy"/></div></aside>
+  </div>
+  <footer class="workbench-footer"><span>{{error||'左侧查看瓦数独立于 TDP · 调节暂存，确认保存后应用'}}</span><span>{{saved?'配置已保存':'临时草稿'}}</span></footer>
+ </main>
+ <div v-if="confirmation" class="ts-dialog-shade"><section role="dialog" aria-modal="true" :aria-label="confirmation==='save'?'保存当前设置':'重置预设'" data-gp-modal data-gp-page-lock class="ts-confirm-dialog"><h2>{{confirmation==='save'?'保存当前设置':'重置当前供电侧预设'}}</h2><p>{{confirmation==='save'?'将临时调节保存到当前公用或游戏专属配置，并由原性能调度接口应用。':'只重置本窗口草稿，确认保存后才会写入正式设置。'}}</p><p v-if="source?.identity.scope==='dedicated'" class="ts-game-name">{{source.gameName||source.identity.exe}}</p><p v-if="error" role="alert">{{error}}</p><div><button ref="cancelButton" :disabled="busy" @click="closeConfirmation"><span class="controller-key" data-controller-key="B">B</span> 取消</button><button :disabled="busy" @click="confirmAction">{{busy?'正在处理…':'确认'}}</button></div></section></div>
+ <div v-if="details" class="ts-dialog-shade"><section role="dialog" aria-modal="true" aria-label="TS 估算依据" data-gp-modal data-gp-page-lock class="ts-confirm-dialog"><h2>TS 估算依据</h2><p>GPU 沿用机型 TS 瓦数曲线，CPU 为独立子测试估算。不是硬件实跑，不执行小游戏、FPS 场景或第二套浮动 TDP 调度。</p><p>5–10W 共享曲线已按两端平缓衔接。258V/G3E 关核额外 GPU 正收益保留 20%；Z2E 按 Zen 5/Zen 5c 核心簇模型保留 GPU 优化幅度，CPU 调度恢复不超过 10%。这些系数属于模拟校准，关核仍损失多线程吞吐。</p><p>超线程仅修正支持 SMT 的核心容量，不直接提高 GPU 分数；无功耗配对标定时不填写实际节能百分比。395 从 13W 起，Deck 到 16W，G3E 35W 以上待标定。</p><button @click="details=false;focusEditor()"><span class="controller-key" data-controller-key="B">B</span> 返回</button></section></div>
+</div></Teleport>
+</template>

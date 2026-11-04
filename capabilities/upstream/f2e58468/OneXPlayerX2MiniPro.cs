@@ -1,0 +1,212 @@
+using HandheldCompanion.Inputs;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using WindowsInput.Events;
+using static HandheldCompanion.Utils.DeviceUtils;
+
+namespace HandheldCompanion.Devices;
+
+public class OneXPlayerX2MiniPro : OneXPlayerX2
+{
+    private const ushort CPUTemperatureRegister = 0x0470;
+
+    protected override bool UseWmiEc => false;
+
+    public OneXPlayerX2MiniPro()
+    {
+        // todo: ProductIllustration
+        ProductIllustration = "device_onexplayer_x2minipro";
+        ProductModel = "ONEXPLAYER X2Mini PRO";
+
+        nTDP = new double[] { 35, 35, 35 };
+        cTDP = new double[] { 6, 80 };
+
+        // IMU matrices are now loaded from OneXPlayerX2MiniPro.json via IDevice.ApplyDeviceConfiguration()
+
+        ECDetails = new ECDetails
+        {
+            AddressFanControl = 0x44A,
+            AddressFanDuty = 0x44B,
+            AddressStatusCommandPort = 0x4E,
+            AddressDataPort = 0x4F,
+            FanValueMin = 0,
+            FanValueMax = 255
+        };
+
+        // The X2 does not have a wmiEc
+        EnableSerialPort = true;
+
+        DynamicLightingCapabilities |= LEDLevel.Breathing;
+
+        // MobiusBlack was here
+        // Override the default TDP values for each power profile to match the X2's presets.
+        foreach (var profile in DevicePowerProfiles)
+        {
+            if (profile.Guid == BetterBatteryGuid)
+                profile.TDPOverrideValues = new[] { 15.0d, 15.0d, 15.0d };
+            else if (profile.Guid == BetterPerformanceGuid)
+                profile.TDPOverrideValues = new[] { 35.0d, 35.0d, 35.0d };
+            else if (profile.Guid == BestPerformanceGuid)
+                profile.TDPOverrideValues = new[] { 55.0d, 55.0d, 55.0d };
+        }
+
+        OEMChords.Add(new KeyboardChord("M1", [KeyCode.F15], [KeyCode.F15], false, ButtonFlags.L4));
+        OEMChords.Add(new KeyboardChord("M2", [KeyCode.F16], [KeyCode.F16], false, ButtonFlags.R4));
+    }
+
+    protected override async Task ConfigureController()
+    {
+        // Equivalent to hid_v1.INITIALIZE_X2[0].
+        WriteVendorHidCommand(0xB4, BuildRemapPage1(0x01));
+        await Task.Delay(50);
+
+        // Equivalent to hid_v1.INITIALIZE_X2[1], including M1/M2 -> F15/F16.
+        WriteVendorHidCommand(0xB4, BuildRemapPage2(0x01, 0x68, 0x69));
+        await Task.Delay(50);
+
+        // Equivalent to hid_v1.INITIALIZE_X2[2], the required third partial page.
+        WriteVendorHidCommand(0xB4, BuildRemapPage3(0x01));
+        await Task.Delay(50);
+
+        // Equivalent to hid_v1.gen_intercept(False), releasing vendor interception.
+        WriteVendorHidCommand(0xB2, BuildIntercept(false));
+    }
+
+    protected override byte[] BuildRemapPage1(byte preset) =>
+    [
+        0x02, 0x38, 0x02, 0x01, preset,
+        0x01, 0x01, 0x01, 0x00, 0x00, 0x00,
+        0x02, 0x01, 0x02, 0x00, 0x00, 0x00,
+        0x03, 0x01, 0x03, 0x00, 0x00, 0x00,
+        0x04, 0x01, 0x04, 0x00, 0x00, 0x00,
+        0x05, 0x01, 0x05, 0x00, 0x00, 0x00,
+        0x06, 0x01, 0x06, 0x00, 0x00, 0x00,
+        0x07, 0x01, 0x07, 0x00, 0x00, 0x00,
+        0x08, 0x01, 0x08, 0x00, 0x00, 0x00,
+        0x09, 0x01, 0x09, 0x00, 0x00, 0x00,
+    ];
+
+    protected override byte[] BuildRemapPage2(byte preset, byte m1KeyCode, byte m2KeyCode) =>
+    [
+        0x02, 0x38, 0x02, 0x02, preset,
+        0x0A, 0x01, 0x0A, 0x00, 0x00, 0x00,
+        0x0B, 0x01, 0x0B, 0x00, 0x00, 0x00,
+        0x0C, 0x01, 0x0C, 0x00, 0x00, 0x00,
+        0x0D, 0x01, 0x0D, 0x00, 0x00, 0x00,
+        0x0E, 0x01, 0x0E, 0x00, 0x00, 0x00,
+        0x0F, 0x01, 0x0F, 0x00, 0x00, 0x00,
+        0x10, 0x01, 0x10, 0x00, 0x00, 0x00,
+        0x22, 0x02, 0x01, m1KeyCode, 0x00, 0x00,
+        0x23, 0x02, 0x01, m2KeyCode, 0x00, 0x00,
+    ];
+
+    protected override byte[] BuildRemapPage3(byte preset) =>
+    [
+        0x02, 0x38, 0x02, 0x03, preset,
+        0x24, 0x02, 0x02, 0x05, 0x00, 0x00,
+        0x25, 0x01, 0x21, 0x00, 0x00, 0x00,
+    ];
+
+    protected override void SetTurboButtonTakeover(bool enabled)
+    {
+        SetDefaultTurboButtonTakeover(enabled);
+    }
+
+    public override bool SetLedBrightness(int brightness)
+    {
+        // HHD's x2 rgb_sides = (0x01, 0x02, 0x07) and secondary_sides = (0x05, 0x06).
+        hidDevices.TryGetValue(VendorHidId, out HidLibrary.HidDevice? device);
+        if (device is null)
+            return false;
+
+        bool result = true;
+        foreach (byte side in new byte[] { 0x01, 0x02, 0x07, 0x05, 0x06 })
+        {
+            result &= SendV1Brightness(device, brightness, side);
+            Thread.Sleep(200);
+        }
+        return result;
+    }
+
+    public override bool SetLedColor(System.Windows.Media.Color mainColor, System.Windows.Media.Color secondaryColor, LEDLevel level, int speed = 100)
+    {
+        if (level is not (LEDLevel.SolidColor or LEDLevel.Breathing))
+            return false;
+
+        hidDevices.TryGetValue(VendorHidId, out HidLibrary.HidDevice? device);
+        if (device is null)
+            return false;
+
+        bool breathing = level == LEDLevel.Breathing;
+        bool result = true;
+        // HHD sends the primary color to the two joystick zones and center zone.
+        foreach (byte side in new byte[] { 0x01, 0x02, 0x07 })
+        {
+            result &= SendV1SolidColor(device, mainColor, side, breathing);
+            Thread.Sleep(200);
+        }
+        // There is intentionally no side 0 aggregate zone on the X2 Mini Pro.
+        foreach (byte side in new byte[] { 0x05, 0x06 })
+        {
+            result &= SendV1SolidColor(device, secondaryColor, side, breathing);
+            Thread.Sleep(200);
+        }
+        return result;
+    }
+
+    public override void SetFanControl(bool enable, int mode = 0)
+    {
+        if (ECDetails.AddressFanControl == 0)
+            return;
+
+        if (!UseOpenLib || !IsOpen)
+            return;
+
+        byte data = Convert.ToByte(enable);
+        if (ECRamDirectWriteByte(ECDetails.AddressFanControl, ECDetails, data))
+            hasAppliedSoftwareFanProfile = enable;
+    }
+
+    public override void SetFanDuty(double percent)
+    {
+        if (ECDetails.AddressFanDuty == 0)
+            return;
+
+        if (!UseOpenLib || !IsOpen)
+            return;
+
+        double clampedPercent = Math.Clamp(percent, 0.0d, 100.0d);
+        double scaled = clampedPercent * (ECDetails.FanValueMax - ECDetails.FanValueMin) / 100.0d + ECDetails.FanValueMin;
+        byte data = (byte)Math.Round(scaled);
+
+        ECRamDirectWriteByte(ECDetails.AddressFanDuty, ECDetails, data);
+    }
+
+    public override float ReadFanDuty()
+    {
+        return ECRamDirectReadByte(ECDetails.AddressFanDuty, ECDetails);
+    }
+
+    public override float? ReadCPUTemperature()
+    {
+        byte value = ECRamDirectReadByte(CPUTemperatureRegister, ECDetails);
+        if (value == 0 || value > 110)
+            return null;
+
+        return value;
+    }
+
+    protected override ButtonFlags MapVendorButton(byte buttonId)
+    {
+        return buttonId switch
+        {
+            0x20 => ButtonFlags.OEM1,
+            0x21 => ButtonFlags.OEM2, // KEYBOARD
+            0x22 => ButtonFlags.L4,   // M1 (left back paddle)
+            0x23 => ButtonFlags.R4,   // M2 (right back paddle)
+            0x24 => ButtonFlags.OEM3, // HOME
+            _ => base.MapVendorButton(buttonId),
+        };
+    }
+}

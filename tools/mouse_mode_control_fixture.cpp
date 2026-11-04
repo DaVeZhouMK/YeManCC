@@ -11,6 +11,8 @@
 #include <string>
 #include <unordered_set>
 #include "json.hpp"
+#include "mouse_mode_foreground.h"
+#include "mouse_mode_application_rules.h"
 using json=nlohmann::json;
 static std::mutex g_gamepadSettingsMx,g_inputHostPersonaMx,g_mouseModeMx;
 static std::string g_mouseBackend="joyxoff",g_inputHostBuildPersona,g_inputHostBoundPersona="xbox",requestedPersona="xbox";
@@ -20,13 +22,14 @@ static HRESULT gamebarHr=S_OK;
 static int g_asyncMode=0;
 static std::atomic<int> g_mousePolicyMode{2};
 static unsigned reads=0,writes=0,joyStarts=0,joyStops=0,gamebarStarts=0,gamebarStops=0,saves=0,cases=0;
+static unsigned readbackAdmissions=0,joyReadCount=0,joyUnknownAt=0;
 static json lastEvent,lastFeedback;
 static const std::wstring JOYXOFF_EXE=L"isolated-fixture/Joyxoff.exe";
 namespace fspath {static bool exists(const std::wstring&){++reads;return joyAvailable;}}
 namespace ymcc::processEfficiency {static void createProcess(){}}
 namespace ymcc::mouseProcess {
 struct Result {bool ok=false,running=false,known=false;DWORD error=0;const char* reason="fixture";};
-static Result observe(const std::wstring&){++reads;return {joyKnown,joyRunning,joyKnown,0,"process-observed"};}
+static Result observe(const std::wstring&){++reads;++joyReadCount;const bool known=joyKnown&&joyReadCount!=joyUnknownAt;return {known,joyRunning,known,0,"process-observed"};}
 template<class Creator>static Result set(const std::wstring&,bool enabled,Creator){
  ++writes;if(enabled)++joyStarts;else ++joyStops;
  if((enabled&&joyStartFails)||(!enabled&&joyStopFails))return {false,joyRunning,true,5,"fixture-process-failure"};
@@ -58,7 +61,11 @@ static json mouseModeApplyState(std::optional<bool>,const std::string&,const std
 static json mousePolicyGet();
 static json mousePolicySet(const std::string& mode){return mouseModeApplyState(mode=="on",std::string{},{});}
 static json mousePolicyCycle(){return mouseModeApplyState(std::nullopt,std::string{},{});}
-struct PolicyScheduleBoundary {json receipt=json::object();int current(){return 0;}json set(int){return mouseModeGetState();}json state(){return receipt;}};
+struct PolicyScheduleBoundary {json receipt=json::object();int current(){return 0;}json set(int){return mouseModeGetState();}json refresh(){return mouseModeGetState();}json state(){return receipt;}
+json acceptBackendReadback(json observed){++readbackAdmissions;
+ for(const auto* key:{"mode","scene","policyReason","requestedOn","pending","sequence","observedAt","foregroundPid","foregroundCreated","foregroundWindow"})if(receipt.contains(key))observed[key]=receipt[key];
+ if(receipt.contains("ok")&&!receipt.value("ok",true)){observed["ok"]=false;for(const auto* key:{"error","reason"})if(receipt.contains(key))observed[key]=receipt[key];}return observed;
+}};
 static PolicyScheduleBoundary g_mousePolicy;
 // PRODUCTION_FUNCTIONS
 static void need(bool condition,const char* reason){if(!condition)throw std::runtime_error(reason);++cases;}
@@ -68,7 +75,7 @@ static void reset(){
  g_mouseBackend="joyxoff";g_inputHostBuildPersona.clear();g_inputHostBoundPersona="xbox";requestedPersona="xbox";
  requestedEnabled=true;joyRunning=false;joyKnown=true;joyAvailable=true;gamebarOn=false;
  joyStartFails=joyStopFails=gamebarSetFails=switchToSdOnStart=false;gamebarHr=S_OK;
- reads=writes=joyStarts=joyStops=gamebarStarts=gamebarStops=saves=0;lastEvent=lastFeedback=json::object();
+ readbackAdmissions=joyReadCount=joyUnknownAt=0; reads=writes=joyStarts=joyStops=gamebarStarts=gamebarStops=saves=0;lastEvent=lastFeedback=json::object();
 }
 int main(){try{
  registerMouseHandlers();
@@ -92,6 +99,7 @@ int main(){try{
  state=handlers.at("mouseMode.set")(json{{"on",false}});need(state.value("ok",false)&&!state.value("on",true)&&!joyRunning,"explicit-off-confirmed");
  reset();joyStartFails=true;state=mouseModeToggleState();need(!state.value("ok",true)&&!state.value("on",true),"start-failure-must-not-report-on");
  reset();joyKnown=false;state=mouseModeToggleState();need(!state.value("ok",true)&&writes==0,"unknown-process-no-write");
+ reset();joyUnknownAt=2;state=mouseModeApplyState(false);need(!state.value("ok",true)&&!state.value("stateKnown",true)&&state.value("reason",std::string{})=="mouse_state_not_confirmed","final-unknown-is-returned-without-a-recovering-reread");need(joyReadCount==2&&writes==0,"final-confirmation-failure-does-not-repeat-provider-io");
  reset();gamebarOn=true;gamebarSetFails=true;state=mouseModeApplyState(true);need(!state.value("ok",true)&&joyStarts==0&&gamebarOn,"failed-gamebar-stop-prevents-joy-start");
  reset();g_mouseBackend="gamebar";joyRunning=true;joyStopFails=true;state=mouseModeApplyState(true);need(!state.value("ok",true)&&gamebarStarts==0,"failed-joy-stop-prevents-gamebar-start");
  reset();g_mouseBackend="gamebar";joyRunning=true;state=mouseModeApplyState(true);need(state.value("ok",false)&&!joyRunning&&gamebarOn&&joyStops==1,"confirmed-provider-handoff");
@@ -118,5 +126,7 @@ int main(){try{
   reset();savedGamepad={{"mouseBackend",backend},{"mouseMode","auto"},{"enabled",true},{"bDoubleMinimize",true},{"startDoubleF7",false},{"tdpShortcut",true},{"fpsShortcut",true},{"killGame",true},{"openKeyboard",true},{"returnDesktop",true},{"mouseToggle",true}};
   summonLoad();need(g_mouseBackend==backend&&g_mousePolicyMode.load()==1&&saves==0&&writes==0,"valid-ordinary-provider-preference-remains-unchanged");
  }
+ reset();joyRunning=true;state=handlers.at("mouseMode.get")(json::object());need(readbackAdmissions==1&&state.value("on",false)&&writes==0,"real-get-wires-fresh-on-through-policy-admission-without-control");
+ reset();joyKnown=false;state=handlers.at("mouseMode.get")(json::object());need(readbackAdmissions==1&&!state.value("stateKnown",true)&&writes==0,"real-get-wires-unknown-through-policy-admission");
  std::cout<<json{{"status","PASS"},{"cases",cases},{"consumer","extracted-production-provider-consumers;policy-scheduling-explicit-boundary"}}.dump();return 0;
 }catch(const std::exception& error){std::cout<<json{{"status","FAIL"},{"error",error.what()}}.dump();return 1;}}

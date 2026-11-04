@@ -63,8 +63,12 @@ export type GameStatusListener = (game: DetectedGame | null) => void;
 export type GameTargetIdentity = Pick<DetectedGame, 'pid' | 'processCreated'> &
   Partial<Pick<DetectedGame, 'path' | 'identityGeneration'>>;
 
-type NativeGameSnapshot = Partial<DetectedGame> & { valid?: boolean };
-interface Observation { game: DetectedGame | null; generation: number; identityGeneration: number }
+type NativeGameSnapshot = Partial<DetectedGame> & {
+  valid?: boolean;
+  observationState?: 'complete' | 'pending' | 'unavailable';
+  requestedPidRejected?: number;
+};
+interface Observation { game: DetectedGame | null; generation: number; identityGeneration: number; requestMiss?: boolean }
 const listeners = new Set<GameStatusListener>();
 const readinessListeners = new Set<(current: boolean) => void>();
 const readinessNotifications: boolean[] = [];
@@ -203,7 +207,15 @@ function publish(observation: Observation): void {
     try { cb(getCurrentGame()); } catch { /* A consumer cannot prevent another consumer receiving a committed target. */ }
   }
 }
-function decodeSnapshot(raw: NativeGameSnapshot | null): Observation {
+function decodeSnapshot(raw: NativeGameSnapshot | null, requestedPid = 0): Observation {
+  const requestMiss = requestedPid > 0 && raw?.requestedPidRejected === requestedPid &&
+    raw.valid === false && Number(raw.pid) === 0 && raw.observationState === 'unavailable' &&
+    raw.generation !== undefined && raw.identityGeneration !== undefined;
+  // Keep the last display while readiness is unknown. A yielded background
+  // scan must not commit a successful null selection or enable game policies.
+  if (raw?.observationState !== undefined && raw.observationState !== 'complete' && !requestMiss) {
+    throw new Error(`Game target observation ${raw.observationState}`);
+  }
   // A matched native shell versions valid and no-game observations alike.
   // Legacy unversioned shells remain readable, but cannot roll back a versioned session.
   const generation = Number(raw?.generation ?? 0);
@@ -217,7 +229,7 @@ function decodeSnapshot(raw: NativeGameSnapshot | null): Observation {
   if (!raw) return { game: null, generation: 0, identityGeneration: 0 };
   if (raw.valid === false) {
     if (Number(raw.pid) !== 0) throw new Error('Invalid empty game target');
-    return { game: null, generation, identityGeneration };
+    return { game: null, generation, identityGeneration, requestMiss };
   }
   const pid = Number(raw.pid);
   const processCreated = raw.processCreated !== undefined ? String(raw.processCreated) : '';
@@ -248,7 +260,13 @@ async function observeNative(preferredPid: number, epoch: number, owner: ReadOwn
     cancelBackgroundRead();
     lastNativeReadAt = performance.now();
     const invalidationAtStart = invalidationEpoch;
-    const raw = await invoke<NativeGameSnapshot | null>('game.detect', preferredPid > 0 && attempt === 0 ? { pid: preferredPid } : {}, { timeoutMs: DETECTION_TIMEOUT_MS });
+    const automatic = !owner.foreground;
+    const raw = await invoke<NativeGameSnapshot | null>('game.detect', {
+      ...(preferredPid > 0 ? { pid: preferredPid } : {}), automatic,
+    }, { timeoutMs: DETECTION_TIMEOUT_MS });
+    // A manual reader may retain an automatic request after it was sent.
+    // Its response cannot satisfy force-discovery: issue one explicit read.
+    if (automatic && owner.foreground) { attempt -= 1; continue; }
     if (!owner.foreground && !listeners.size) throw new Error('Game target background observation stopped');
     if (epoch !== selectionEpoch) {
       return followNewSelection(epoch);
@@ -257,7 +275,7 @@ async function observeNative(preferredPid: number, epoch: number, owner: ReadOwn
       if (attempt < 2) continue;
       throw new Error('Game rules changed while reading');
     }
-    const observation = decodeSnapshot(raw);
+    const observation = decodeSnapshot(raw, preferredPid);
     const floor = Math.max(currentGeneration, notifiedGeneration);
     if (observation.generation < floor) {
       if (currentGeneration >= notifiedGeneration && initialized && !cacheDirty) return getCurrentGame();
@@ -275,6 +293,14 @@ async function observeNative(preferredPid: number, epoch: number, owner: ReadOwn
     if (versioned && observation.generation === currentGeneration &&
         (!sameGame(observation.game, currentGame) || observation.identityGeneration !== currentIdentityGeneration)) {
       throw new Error('Conflicting game target generation');
+    }
+    if (observation.requestMiss) {
+      // Resolve the strict request without turning its local miss into global
+      // readiness. The old display stays untrusted until normal discovery.
+      cacheDirty = true;
+      recoverAfterFailure();
+      notifyReadiness();
+      return null;
     }
     if (observation.generation) versioned = true;
     publish(observation);

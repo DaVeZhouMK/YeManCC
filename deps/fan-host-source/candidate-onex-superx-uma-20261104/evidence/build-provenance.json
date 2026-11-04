@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Build\\Exports\\20261104-164134-hc064-source-bound-components-3e97978f\\product-build\\bin\\YeManFanHost\\release_win-x64",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Build\\Exports\\20261104-164134-hc064-source-bound-components-3e97978f\\product-build",
+  "metadataToolSha256": "164328f26f99d474c7359a9e6026a23c063f3bc5b2707c39d07a8526d23f8cea",
+  "preparationToolSha256": "9812cfa34a1485f46ae837cd3b223d92506c2d0526dd613a6d48cbb706f7cef5",
+  "isolatedBuildTargetsSha256": "798b661d0f9af067d09fc498bfe1ccec0f3ff7511870a8f9fa5b471d0850c4ac",
+  "projectSourceRebuildReproducibilityProven": false
+}

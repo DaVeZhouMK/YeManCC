@@ -7,6 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { configureCandidateAdapters } from './candidate-options.mjs';
 import { sha256File, runAdapters, validateAdapters, verdictFor, compareRuns, makeRunDirectory, defaultEvidenceRoot, makeCoverageWorkItems } from './runner.mjs';
 
+export function missingCatalogTools(resolve=specifier=>import.meta.resolve(specifier)){
+  const missing=[];
+  for(const specifier of ['typescript','vue/compiler-sfc']){
+    try{resolve(specifier);}catch(error){if(error.code==='ERR_MODULE_NOT_FOUND'||error.code==='MODULE_NOT_FOUND')missing.push(specifier);else throw error;}
+  }
+  return missing;
+}
+
 export function parseArgs(args) {
   const options = { mode: 'inventory', profile: 'desktop', domains: [], tests: [], receipts: [], requireAll: false };
   const allowed = new Set(['mode','profile','domain','test','capability','out-dir','payload-root','powershell','log-path','baseline','candidate','log-root','archive','python','receipt','complete-host-contract','runtime-root','shared-runtime-root','lighting-payload-root','expected-helper-sha256','hc-profile','hc-version','legacy-host-root','fan-tool-load-plan','fan-tool-load-plan-sha256','monitor-field-log-input']);
@@ -156,16 +164,25 @@ export async function main(args = process.argv.slice(2), { repoRoot = path.resol
     console.log(`SIGNAL_CONSUMPTION ${evidence.status}\nRESULT ${path.join(runDir,'signal-result.json')}`);
     return evidence.status==='PASS' ? 0 : evidence.status==='FAIL' || plan.status==='FAIL' ? 2 : 10;
   }
-  const [{ buildCatalog }, { getAdapters }, sleep, ownership] = await Promise.all([import('./catalog.mjs'), import('./adapters.mjs'), import('./sleep.mjs'), import('./capability-lifecycle/ownership-catalog.mjs')]);
   if (options.mode === 'replay') {
+    const sleep=await import('./sleep.mjs');
     if (!options.logPath) throw new Error('REPLAY_REQUIRES_LOG_PATH');
     const replay = await sleep.replaySleepLog(path.resolve(options.logPath));
     fs.writeFileSync(path.join(runDir, 'sleep-replay.json'), JSON.stringify(replay, null, 2));
     console.log(`SLEEP_REPLAY ${replay.status ?? replay.verdict ?? 'RECORDED'} (observation only; no OS sleep)`);
     return replay.status === 'FAIL' || replay.ok === false ? 2 : replay.status === 'INCOMPLETE' || replay.status === 'NOT_COVERED' ? 10 : 0;
   }
+  const missingCatalogDependencies=missingCatalogTools();
+  if(missingCatalogDependencies.length){
+    const environment={schemaVersion:1,status:'BLOCKED',reason:'CATALOG_ENVIRONMENT_DEPENDENCIES_MISSING',missingDependencies:missingCatalogDependencies,noTestsExecuted:true,requestedTests:options.tests,fullProductAcceptance:false};
+    fs.writeFileSync(path.join(runDir,'environment-blocked.json'),JSON.stringify(environment,null,2));
+    console.log('YMCC_SIM_ENVIRONMENT_BLOCKED '+JSON.stringify(environment));return 10;
+  }
+  const [{ buildCatalog }, { getAdapters }, sleep, ownership] = await Promise.all([import('./catalog.mjs'), import('./adapters.mjs'), import('./sleep.mjs'), import('./capability-lifecycle/ownership-catalog.mjs')]);
   const {getExtraAdapters}=await import('./extra-adapters.mjs');
-  const adapters = validateAdapters(configureCandidateAdapters([...getAdapters(repoRoot), ...sleep.getSleepAdapters(repoRoot), ...getExtraAdapters(repoRoot,{selectedIds:!options.capabilities&&options.tests.length&&['run','plan','audit'].includes(options.mode)?options.tests:undefined})], options), repoRoot);
+  const selectedIds=!options.capabilities&&options.tests.length&&['run','plan','audit'].includes(options.mode)?options.tests:undefined;
+  const identityOnly=['plan','inventory'].includes(options.mode);
+  const adapters = validateAdapters(configureCandidateAdapters([...getAdapters(repoRoot,{identityOnly,selectedIds}), ...sleep.getSleepAdapters(repoRoot,{identityOnly,selectedIds}), ...getExtraAdapters(repoRoot,{selectedIds})], options), repoRoot);
   let logPlan = null;
   if (options.mode === 'log-check') {
     if (!options.archive) throw new Error('LOG_CHECK_REQUIRES_ARCHIVE');

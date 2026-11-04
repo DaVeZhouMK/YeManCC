@@ -27,6 +27,8 @@ export interface CalibrationEditorState {
   applying: boolean;
   sampling: boolean;
   centerSide: StickSide | null;
+  /** Latest validated measurement in this UI session; zero is a successful center too. */
+  centerReceipt: Extract<CenterReceipt, { ok: true }> | null;
   feedback: string;
 }
 const copy = <T>(value: T): T => structuredClone(value);
@@ -229,7 +231,7 @@ const traceError = (error: unknown) => traceText(error instanceof Error ? error.
 /** UI session only: one explicit Apply, no storage, output writer, polling or automatic retry. */
 export class CalibrationEditor {
   private state: CalibrationEditorState = { snapshot: null, draft: defaultAxisCalibration(), dirty: false,
-    loading: false, available: false, applying: false, sampling: false, centerSide: null, feedback: '正在读取校对状态' };
+    loading: false, available: false, applying: false, sampling: false, centerSide: null, centerReceipt: null, feedback: '正在读取校对状态' };
   private mounted = false;
   private life = 0;
   private observed = 0;
@@ -300,7 +302,7 @@ export class CalibrationEditor {
     const sourceChanged = !!previous && !sameNullableSource(previous.source, snapshot.source);
     this.evidence.snapshot(snapshot);
     this.state.snapshot = snapshot; this.state.available = true;
-    if (sourceChanged) this.cancelCenter();
+    if (sourceChanged) { this.state.centerReceipt = null; this.cancelCenter(); }
     if (!this.state.dirty || sourceChanged) {
       this.baseline = copy(snapshot.config); this.state.draft = copy(snapshot.config);
       this.baseRevision = snapshot.inputRevision; this.state.dirty = false;
@@ -332,7 +334,7 @@ export class CalibrationEditor {
     this.state.feedback = this.state.dirty ? '有未应用的调整' : '参数未修改'; this.publish();
   }
   restoreDraft(draft: AxisCalibrationConfig): void { this.update(config => Object.assign(config, copy(draft))); }
-  reset(): void { this.restoreDraft(defaultAxisCalibration()); }
+  reset(): void { this.state.centerReceipt = null; this.restoreDraft(defaultAxisCalibration()); }
   async apply(): Promise<void> {
     const source = this.state.snapshot?.source || null;
     if (!this.mounted || this.state.applying || this.state.sampling || !this.state.dirty || !this.state.available ||
@@ -348,8 +350,15 @@ export class CalibrationEditor {
       if (!this.mounted || life !== this.life || version !== this.draftVersion || !sameNullableSource(binding, this.state.snapshot?.source || null)) { this.evidence.emit('apply', 'retired-reply', () => ({ requestId, editorLife: life, source: traceSource(binding) })); return; }
       if (result.requestId !== requestId) throw new Error('应用回执不属于本次操作');
       if (!result.ok || !result.saved) {
-        if (result.snapshot) this.state.snapshot = parseCalibrationSnapshot(result.snapshot);
-        this.feedback('应用未完成，草稿已保留；请重新进入读取最新状态'); return;
+        let sourceChanged = false;
+        if (result.snapshot) {
+          const rejectedSnapshot = parseCalibrationSnapshot(result.snapshot);
+          sourceChanged = !sameNullableSource(this.state.snapshot?.source || null, rejectedSnapshot.source);
+          // Failed commits carry real source/revision changes too. Reuse the
+          // observation path so another device never inherits this draft.
+          this.receiveSnapshot(rejectedSnapshot);
+        }
+        this.feedback(sourceChanged ? '手柄来源已变化，未应用的调整已丢弃' : '应用未完成，草稿已保留；请重新进入读取最新状态'); return;
       }
       const snapshot = parseCalibrationSnapshot(result.snapshot);
       if (!sameNullableSource(binding, snapshot.source) || snapshot.inputRevision !== this.baseRevision + 1 || !equalConfig(snapshot.config, config)) throw new Error('应用回执与提交内容不一致');
@@ -377,6 +386,7 @@ export class CalibrationEditor {
     };
     this.centerRequestedSession = requestedSession; this.stopCenter = () => stop(activeSession);
     this.centerRequest = { source: copy(snapshot.source), side, revision: snapshot.inputRevision };
+    this.state.centerReceipt = null;
     this.state.sampling = true; this.state.centerSide = side; this.feedback('请松开摇杆，正在采样');
     try {
       // Optional native extension; older ports may ACK their own exact server session ID.
@@ -409,7 +419,10 @@ export class CalibrationEditor {
     this.evidence.emit('center', 'draft-only', () => ({ sessionId: receipt.sessionId, source: traceSource(request.source), expectedInputRevision: request.revision, side: request.side, sampleCount: receipt.sampleCount, noiseP99: receipt.noiseP99, centerX: receipt.centerX, centerY: receipt.centerY, requiresExplicitApply: true }));
     this.clearCenter();
     this.update(config => { config.sticks[request.side].centerX = receipt.centerX; config.sticks[request.side].centerY = receipt.centerY; });
-    this.feedback('轴心采样完成，点击应用后保存');
+    this.state.centerReceipt = { ok: true, sessionId: receipt.sessionId, source: copy(request.source),
+      expectedInputRevision: request.revision, side: request.side, sampleCount: receipt.sampleCount,
+      centerX: receipt.centerX, centerY: receipt.centerY, noiseP99: receipt.noiseP99 };
+    this.feedback(this.state.dirty ? '轴心采样完成，点击应用后保存' : '轴心采样完成，当前参数无需修改');
   }
   private clearCenter(): void { ++this.centerToken; this.centerSession = null; this.centerRequestedSession = null; this.stopCenter = null; this.centerRequest = null; this.earlyCenter.clear(); this.state.sampling = false; this.state.centerSide = null; }
   cancelCenter(): void {
@@ -423,7 +436,7 @@ export class CalibrationEditor {
     this.tracePage(reason);
     this.cancelCenter(); this.mounted = false; ++this.life;
     this.unsubscribe?.(); this.unsubscribe = null;
-    this.state = { snapshot: null, draft: defaultAxisCalibration(), dirty: false, loading: false, available: false, applying: false, sampling: false, centerSide: null, feedback: '正在读取校对状态' };
+    this.state = { snapshot: null, draft: defaultAxisCalibration(), dirty: false, loading: false, available: false, applying: false, sampling: false, centerSide: null, centerReceipt: null, feedback: '正在读取校对状态' };
     this.baseline = defaultAxisCalibration(); ++this.draftVersion;
   }
 }

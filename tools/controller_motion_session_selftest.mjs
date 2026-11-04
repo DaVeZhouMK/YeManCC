@@ -179,6 +179,9 @@ try {
   }
 
   const controls = [
+    { name: 'delay-axis-rejection-after-delta', case: 'invalid-rejection-before-fp-delta', expected: 'invalid sample changed FP exception flags before rejection',
+      change: s => replaceOnce(replaceOnce(s, 'if (!handle || !axes.valid() || !reads_.complete() ||', 'if (!handle || !reads_.complete() ||'),
+        '        const float dt = static_cast<float>(result.deltaSeconds);', '        const float dt = static_cast<float>(result.deltaSeconds);\n        if (!axes.valid()) return std::nullopt;') },
     { name: 'restore-zero-gradient-division', case: 'exact-aligned-stationary', expected: 'aligned stationary gravity must keep finite orientation',
       change: s => replaceOnce(s, 'if (gradientSquaredNorm == 0.0f)', 'if (gradientSquaredNorm < 0.0f)') },
     { name: 'skip-gyro-integration-on-zero-gradient', case: 'exact-aligned-gyro-integration', expected: 'aligned nonzero gyro must integrate instead of freeze',

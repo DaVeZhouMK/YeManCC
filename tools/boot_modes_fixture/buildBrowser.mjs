@@ -13,6 +13,14 @@ export async function buildBrowser(out,seed,options={}){
  build.onLoad({filter:/.*/,namespace:'boot-inert-component'},()=>({contents:`import {h} from 'vue';export default {setup:()=>()=>h('div')};`,loader:'ts',resolveDir:repo}));
  build.onLoad({filter:/.*/,namespace:'boot-seed'},()=>({contents:'export default '+JSON.stringify(seed),loader:'ts'}));
  build.onLoad({filter:/.*/,namespace:'boot-router'},()=>({contents:routerFixture,loader:'ts'}));
+ if(options.gpuScheduleBridgeSource!==undefined)build.onLoad({filter:/[\\/]boot_modes_fixture[\\/]browserNative\.ts$/},args=>{
+  if(typeof options.gpuScheduleBridgeSource!=='string'||!options.gpuScheduleBridgeSource.trim())throw Error('gpuScheduleBridgeSource must contain the explicit GPU bridge and memory port');
+  let source=fs.readFileSync(args.path,'utf8');const ast=ts.createSourceFile(args.path,source,ts.ScriptTarget.Latest,true);
+  const names=new Set(['readHardwareGpuSchedule','writeHardwareGpuSchedule']);const functions=ast.statements.filter(node=>ts.isFunctionDeclaration(node)&&names.has(node.name?.text));
+  if(functions.length!==2)throw Error('Expected exactly two browser GPU fake functions');
+  for(const node of functions.reverse())source=source.slice(0,node.getStart(ast))+source.slice(node.end);
+  return {contents:source+'\n'+options.gpuScheduleBridgeSource,loader:'ts',resolveDir:path.dirname(args.path)};
+ });
  build.onLoad({filter:/[\\/]gamepad[\\/]engine\.ts$/},args=>({contents:fs.readFileSync(args.path,'utf8')+`\n(window as any).__bootGamepad={move:moveFocus,focus:focusGamepadElement,focusables,editing:()=>sliderEditMode,command:(action:NativeUiAction)=>dispatchNativeUiAction({router:{currentRoute:{value:{path:'/boot'}},push:()=>{}}} as any,action)};`,loader:'ts',resolveDir:path.dirname(args.path)}));
  build.onLoad({filter:/\.vue$/},args=>{const source=fs.readFileSync(args.path,'utf8').replace(/^\ufeff/,'');const {descriptor,errors}=parse(source,{filename:args.path});if(errors.length)throw Error(errors.join('\n'));const id='data-v-boot-'+require('node:crypto').createHash('sha256').update(args.path).digest('hex').slice(0,8);const script=compileScript(descriptor,{id,inlineTemplate:true});for(const style of descriptor.styles){const result=compileStyle({source:style.content,filename:args.path,id,scoped:style.scoped});if(result.errors.length)throw Error(result.errors.join('\n'));styles.push(result.code);}return {contents:script.content.replace('export default','const _component=')+'\n_component.__scopeId='+JSON.stringify(id)+';export default _component;',loader:'ts',resolveDir:path.dirname(args.path)};});
  }}]});

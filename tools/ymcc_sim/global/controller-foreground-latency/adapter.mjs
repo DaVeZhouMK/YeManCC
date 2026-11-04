@@ -14,7 +14,7 @@ export function getControllerForegroundLatencyAdapters(){
             'tools/ymcc_sim/global/controller-foreground-latency/README.md',
         ],artifactInputs:[fileURLToPath(new URL('../../../../deps/json/json.hpp',import.meta.url))],
         boundary:'Source-exact production consumers in Release/Checked plus the original split-query and blocking-wait failures. CLI, process launch, wait, PnP and device IO are inert. No product Main, driver, registry, Steam or sleep operation; physical continuity remains unverified.'},
-        {id:'controller.foreground-shield-field',domain:'controller',title:'ROGX recognized HID identity with zero destructive native refresh, modeled shared-node dedup and bounded MSI journal continuation',
+        {id:'controller.foreground-shield-field',domain:'controller',title:'ROG family native-OFF root isolation, preserved HID-leaf quarantine, shared-node dedup and MSI journal continuation',
         kind:'node',path:'tools/shield_foreground_field_selftest.mjs',args:['--output','{outDir}/foreground-field'],
         timeoutMs:720000,profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['foreground-field/result.json'],
         lifecycleComponent:{featureId:'controller.virtual-input',parentAdapterId:'controller.signal-evidence',

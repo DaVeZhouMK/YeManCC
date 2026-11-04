@@ -1,6 +1,30 @@
 import {selectedNativeTools,selectedOwnedTools,HOST_ENVIRONMENT_SOURCE_INPUTS} from './ymcc_sim/global/release-host-environment.mjs';
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+// Reviewed original14 plus the six current offline-identity boundaries.
+// Both leaf and lifecycle parent require exact names; counts alone are insufficient.
+export const STEAM_LEASE_CASES=Object.freeze([
+  "exact registered Steam identity is admitted",
+  "missing registered PID preserves verified observer lease",
+  "stale absent registered PID preserves verified observer lease",
+  "PID reused by verified unrelated image cannot block current Steam",
+  "unreadable registered process never grants stale PID recovery",
+  "different live registered Steam remains a session conflict",
+  "stale PID cannot bypass changed Steam account",
+  "registry zero alone never authorizes an anonymous account",
+  "typed UI provenance permits only process observation before independent bootstrap guard",
+  "UI provenance cannot override another explicit registry account",
+  "offline to online same account retains the verified process lease",
+  "offline account resolves only a verified same-process current UI proof",
+  "missing raced malformed or foreign offline proofs never authorize",
+  "stale PID cannot bypass changed Steam root",
+  "stale PID cannot bypass process birth mismatch",
+  "stale PID cannot bypass Windows session mismatch",
+  "stale PID cannot bypass request image mismatch",
+  "held lease rejects a later real registered session switch",
+  "rejected identities return their process handles",
+  "terminated target cannot regain admission from stale registry"
+]);
 export async function bindingSteamLeaseTests(root,out,{mutations=true,livePid=null}={}){
  root=path.resolve(root);out=path.resolve(out);assert(!fs.existsSync(out),'Fresh Steam lease evidence required');fs.mkdirSync(out,{recursive:true});const frozen=path.join(out,'source'),pins=[],seen=new Set();
  function freeze(file){file=path.resolve(file);if(seen.has(file))return;seen.add(file);const rel=path.relative(root,file);assert(!rel.startsWith('..')&&!path.isAbsolute(rel));const bytes=fs.readFileSync(file),target=path.join(frozen,rel);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);pins.push({path:rel.replaceAll('\\','/'),sha256:sha(bytes)});for(const m of bytes.toString('utf8').matchAll(/^\s*#\s*include\s*"([^"\r\n]+)"/gm)){const child=[path.resolve(path.dirname(file),m[1]),path.join(root,'native',m[1]),path.join(root,'deps/json',m[1])].find(f=>fs.existsSync(f)&&fs.statSync(f).isFile());if(child)freeze(child);}}
@@ -10,7 +34,7 @@ export async function bindingSteamLeaseTests(root,out,{mutations=true,livePid=nu
  function execute(name,sourceRoot){const buildPins=new Map(pins.map(r=>[r.path,sha(fs.readFileSync(path.join(sourceRoot,r.path)))]));const dir=path.join(out,name);fs.mkdirSync(dir);const exe=path.join(dir,'lease-test.exe'),graph=path.join(dir,'deps.json');const args=['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE','/I'+path.join(sourceRoot,'native'),'/I'+path.join(sourceRoot,'deps/json'),path.join(sourceRoot,'tools/decky_binding_steam_lease_selftest.cpp'),'/sourceDependencies',graph,'/Fo'+path.join(dir,'lease.obj'),'/Fe'+exe,'/link','advapi32.lib','user32.lib','ws2_32.lib','bcrypt.lib','winhttp.lib','shell32.lib','userenv.lib'];const began=Date.now();const build=spawnSync(tools.native.compiler,args,{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:4000000});fs.writeFileSync(path.join(dir,'build.log'),(build.stdout||'')+(build.stderr||''));assert.equal(build.status,0,'Steam lease fixture compile failed: '+build.stdout+build.stderr);const deps=JSON.parse(fs.readFileSync(graph));assert.equal(deps.Version,'1.2');for(const file of [deps.Data.Source,...deps.Data.Includes]){const rel=path.relative(sourceRoot,file).replaceAll('\\','/'),source=pins.find(r=>r.path===rel),tool=toolMap.get(path.resolve(file).toLowerCase());assert(source||tool,'Undeclared compiler input '+file);if(tool)assert.equal(sha(fs.readFileSync(file)),tool.sha256);else {assert(file.toLowerCase().startsWith(sourceRoot.toLowerCase()+path.sep));assert.equal(sha(fs.readFileSync(file)),buildPins.get(rel),'Compiled source changed '+file);}}
   const resultFile=path.join(dir,'native.json'),run=spawnSync(exe,[path.join(dir,'fixture'),resultFile],{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:15000,maxBuffer:4000000});fs.writeFileSync(path.join(dir,'run.log'),(run.stdout||'')+(run.stderr||''));for(const [relative,digest]of buildPins)assert.equal(sha(fs.readFileSync(path.join(sourceRoot,relative))),digest,'Frozen build input changed '+relative);const receipt={name,exe,exeSha256:sha(fs.readFileSync(exe)),status:run.status,error:run.error?.message??null,signal:run.signal,elapsedMs:Date.now()-began,native:fs.existsSync(resultFile)?JSON.parse(fs.readFileSync(resultFile,'utf8')):null};fs.writeFileSync(path.join(dir,'process.json'),JSON.stringify(receipt,null,2));assert.equal(run.signal,null);assert(!run.error,run.error?.message);return receipt;
  }
- fs.writeFileSync(path.join(out,'SOURCE-PINS.json'),JSON.stringify(pins,null,2));const positive=execute('positive',frozen);assert.equal(positive.status,0,JSON.stringify(positive.native));assert.equal(positive.native.privateRegistryRemoved,true);const negatives=[];
+ fs.writeFileSync(path.join(out,'SOURCE-PINS.json'),JSON.stringify(pins,null,2));const positive=execute('positive',frozen);assert.equal(positive.status,0,JSON.stringify(positive.native));assert.equal(positive.native.privateRegistryRemoved,true);assert.deepEqual(positive.native.cases.map(row=>row.name),STEAM_LEASE_CASES,'STEAM_LEASE_REQUIRED_CASE_MEMBERSHIP');const negatives=[];
  if(mutations)for(const [name,from,to,failure] of [
   ['original-strict-pid','registeredPidCompatible(registered,request_.steam.pid,request_.steam.root)','(!registered||registered==request_.steam.pid)','stale absent registered PID preserves verified observer lease'],
   ['blind-pid-bypass','registeredPidCompatible(registered,request_.steam.pid,request_.steam.root)','true','different live registered Steam remains a session conflict']

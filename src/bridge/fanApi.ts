@@ -39,7 +39,10 @@ export interface FanHandshake {
   hardwareWritesObserved?: boolean;
   ok: boolean;
   supported: boolean;
-  deviceClass?: string;
+  deviceClass?: string | null;
+  /** Fixed source identity is separate from the runtime factory class. */
+  sourceModelClass?: string | null;
+  sourceCommit?: string | null;
   /** HC Batch-03 route family; present even when writes are not authorized. */
   fanRoute?: string;
   fanRouteCount?: number;
@@ -74,6 +77,15 @@ export interface FanState {
   fanCapabilitySupported?: boolean | null;
   fanControlCapabilityDeclared?: boolean | null;
   fanCapabilityEvidence?: string;
+  /** Source owner evidence is separate from HC Close and physical ownership. */
+  sourceFanMode?: boolean;
+  sourceFanOwnerEntered?: boolean;
+  sourceFanClosePending?: boolean;
+  sourceFanClosed?: boolean;
+  sourceFanAutomaticReturned?: boolean;
+  sourceFanGeneration?: number | null;
+  sourceModelClass?: string | null;
+  sourceCommit?: string | null;
   state: string;
   powerState?: string;
   /** Protocol-2 Hosts attest the full HC lifecycle in each state snapshot. */
@@ -177,6 +189,7 @@ const FAN_DIAGNOSTIC_STATE_KEYS = [
     'recoveryReadbackRequired', 'profilePowerLineOnline', 'profileSelectionSource',
     'profileTemplateFingerprint', 'lastUpdateSource', 'externalProfileEventsSubscribed',
     'lastExternalProfileSource', 'reason',
+    'sourceFanMode', 'sourceFanOwnerEntered', 'sourceFanClosePending', 'sourceFanClosed', 'sourceFanAutomaticReturned', 'sourceFanGeneration',
     'resumeAccepted', 'resumeNoop', 'controlIntentCancelled',
   ] as const;
 
@@ -267,6 +280,7 @@ const STATE_BOOLEAN_FIELDS = [
   'hardwareWrites', 'hardwareWritesEnabled', 'hardwareWritesObserved', 'unknownState', 'openCalled', 'openEventsCalled',
   'oemRestoreConfirmed', 'hcVirtualCloseReturned', 'hcDeviceManagerStopCompleted',
   'oemPhysicalOwnershipConfirmed', 'hcCloseCleanupPending', 'controlAccepting',
+  'sourceFanMode', 'sourceFanOwnerEntered', 'sourceFanClosePending', 'sourceFanClosed', 'sourceFanAutomaticReturned',
 ] as const;
 
 function isFanResponseObject(value: unknown): value is FanResponseObject {
@@ -290,6 +304,24 @@ function validFanResponseLease(value: unknown): value is FanLease {
   return value.owner === undefined || typeof value.owner === 'string';
 }
 
+/** Validate each source receipt afresh. No cached owner, model list or hardware inference. */
+export function validSourceFanState(value: Record<string, unknown>): boolean {
+  const fields = ['sourceFanOwnerEntered', 'sourceFanClosePending', 'sourceFanClosed', 'sourceFanAutomaticReturned'] as const;
+  if (value.sourceFanMode !== true) {
+    if (value.sourceFanMode !== undefined && value.sourceFanMode !== false) return false;
+    return fields.every(key => value[key] === undefined || value[key] === false)
+      && (value.sourceFanGeneration === undefined || value.sourceFanGeneration === null);
+  }
+  if (!fields.every(key => typeof value[key] === 'boolean') || typeof value.hardwareWritesObserved !== 'boolean') return false;
+  const entered = value.sourceFanOwnerEntered === true;
+  if (entered ? !Number.isSafeInteger(value.sourceFanGeneration) || Number(value.sourceFanGeneration) <= 0
+      : value.sourceFanGeneration !== null || value.hardwareWritesObserved !== false
+        || value.sourceFanAutomaticReturned !== false || value.sourceFanClosePending !== false) return false;
+  if (value.sourceFanClosed === true && value.sourceFanClosePending === true) return false;
+  const claim = value.recoveryClaimEvidence;
+  return isFanResponseObject(claim) && claim.sourceFanGeneration === value.sourceFanGeneration;
+}
+
 function validFanResponseState(value: unknown): value is FanState {
   if (!isFanResponseObject(value) || typeof value.state !== 'string' || !value.state.trim()) return false;
   // Optional fields remain optional; when supplied, they must retain their wire types.
@@ -297,6 +329,7 @@ function validFanResponseState(value: unknown): value is FanState {
     const field = value[STATE_BOOLEAN_FIELDS[i]];
     if (field !== undefined && typeof field !== 'boolean') return false;
   }
+  if (!validSourceFanState(value)) return false;
   if (value.lease !== undefined && value.lease !== null && !validFanResponseLease(value.lease)) return false;
   return value.leaseGeneration === undefined || value.leaseGeneration === null ||
     (Number.isSafeInteger(value.leaseGeneration) && (value.leaseGeneration as number) > 0);
@@ -309,10 +342,28 @@ function fanResponseState(path: string, response: FanResponseObject): unknown {
   return response.state ?? (LEGACY_ROOT_STATE_PATHS.has(path) ? response : undefined);
 }
 
+/** Host remains the only model/alias authority. These are receipt identity equalities, not a client model table. */
+function validSourceFanHandshake(value: FanResponseObject): boolean {
+  const identity = value.deviceIdentity;
+  const source = value.sourceModelClass != null || value.sourceCommit != null
+    || (isFanResponseObject(identity) && identity.identityKind === 'fixed-source-dmi');
+  if (!source) return true;
+  if (typeof value.sourceModelClass !== 'string' || !value.sourceModelClass.trim()
+      || typeof value.sourceCommit !== 'string' || !/^[0-9a-f]{40}$/i.test(value.sourceCommit)
+      || (value.deviceClass !== undefined && value.deviceClass !== null)
+      || !isFanResponseObject(identity)) return false;
+  if (identity.identityKind !== 'fixed-source-dmi' || identity.runtimeFactory !== 'not-constructed'
+      || identity.capabilityModelClass !== value.sourceModelClass || identity.capabilitySourceCommit !== value.sourceCommit
+      || typeof identity.capabilityDeviceId !== 'string' || !identity.capabilityDeviceId.trim()
+      || typeof identity.capabilitySourceSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(identity.capabilitySourceSha256)) return false;
+  return typeof identity.manufacturer === 'string' && !!identity.manufacturer.trim()
+    && typeof identity.product === 'string' && !!identity.product.trim();
+}
+
 function validFanResponseReceipt(path: string, response: FanResponseObject, requestBody: unknown): boolean {
   if (response.ok !== undefined && typeof response.ok !== 'boolean') return false;
   if (path === '/api/handshake') {
-    if (typeof response.ok !== 'boolean' || typeof response.supported !== 'boolean') return false;
+    if (typeof response.ok !== 'boolean' || typeof response.supported !== 'boolean' || !validSourceFanHandshake(response)) return false;
     // Capability observations retain their wire types. A truthy string or a
     // contradictory receipt must never reach the route's write admission.
     for (const key of ['mockZeroHardwareEvidence', 'hardwareCapable', 'hardwareWritesEnabled', 'hardwareWritesObserved', 'fanRouteWriteReady']) {

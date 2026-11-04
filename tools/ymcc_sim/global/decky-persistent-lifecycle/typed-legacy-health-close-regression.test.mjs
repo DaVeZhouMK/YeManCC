@@ -55,3 +55,15 @@ rejects('queued fatal retains its actual broker run',r=>r.retainedFrontendHealth
 rejects('queued fatal cannot add a binding plan',r=>r.retainedFrontendHealth.cases[3].detail.held.plansAfter++);
 rejects('terminal owned binding must exit before owner dispatch',r=>r.retainedFrontendHealth.cases[3].detail.held.oldWorkerExitedBeforeOwner=false);
 rejects('new actual session must invalidate queued fatal',r=>r.retainedFrontendHealth.cases[8].passed=false);
+
+// Original actual receipt also binds each indirect watch-failure recovery proof.
+rejects('normal rebind must rotate the actual broker run',r=>r.actualWorkerStress.rows[3].brokerRunRotated=false);
+rejects('normal rebind must rotate the actual broker credential',r=>r.actualWorkerStress.rows[4].brokerTokenRotated=false);
+rejects('all four actual context-event storms are required',r=>r.actualWorkerStress.rows[0].storm={});
+rejects('a moved event storm cannot replace the reviewed ordering',r=>{r.actualWorkerStress.rows[1].storm=r.actualWorkerStress.rows[0].storm;r.actualWorkerStress.rows[0].storm={};});
+test('each of four real watch storms needs every recovery observation',()=>{
+ for(const iteration of [0,5,10,15])for(const field of ['passed','eventLimitObserved','actualHealthyBootstrap','failedOwnedWorkerExited','brokerRunRotated','brokerTokenRotated','noSafetyOffOrSettingsWrite','originalLoaderAndCefRetained']){
+  const copy=structuredClone(raw);copy.actualWorkerStress.rows[iteration].storm[field]=false;assert.throws(()=>validate(copy,expected));
+ }
+});
+rejects('same owned worker cannot stand in for a recovered storm',r=>r.actualWorkerStress.rows[5].storm.afterWorker=r.actualWorkerStress.rows[5].storm.beforeWorker);

@@ -7,11 +7,12 @@ export const HISTORICAL_CONTRACT = Object.freeze({epoch:'2026-10-19-four-line-or
   currentSha:'f1946ffc02c6cc6930378b8f0f1b8051b366a100254c12d0c0fc41370428707f',
   beforeSha:'b3c5c29961115196dee570d86dd05077aaaca95943df4e051ad65d03bfbdaa9c',removedLines:4});
 export const PRIOR_LIFECYCLE_CONTRACT = Object.freeze({epoch:'2026-10-20-lifecycle-aware-two-guard-ordering',currentSha:'173b40da1a0fc3c1301af26c1c1b8174c6963526ba5722583bb47e75c49b30b8',beforeSha:'d2cf176e8110cb3dd1b3035913d8285c1c23ab11bf261f47232a6a737c5a0acd',removedLines:2});
-export const ORDERING_CONTRACT_EPOCH = '2026-10-20-lifecycle-two-guard-ordering-with-user-comments';
-export const BEFORE_SHA = '03f8b64e5d943cf0589971ffb03c9ce94d9ed78b9ee159e5e13d63c18305fad1';
-export const CURRENT_SHA = '6bb7b043776460a6720ae1b2f1ec8388a768d366d627e2734665c74fba1c5085';
+export const PRIOR_USER_COMMENT_CONTRACT = Object.freeze({"epoch":"2026-10-20-lifecycle-two-guard-ordering-with-user-comments","currentSha":"6bb7b043776460a6720ae1b2f1ec8388a768d366d627e2734665c74fba1c5085","beforeSha":"03f8b64e5d943cf0589971ffb03c9ce94d9ed78b9ee159e5e13d63c18305fad1","baselineSha":"d74af5ef651cc3a611ad6294d8fc1b803081b7c29b0c011ff7ce54d0c2180721"});
+export const ORDERING_CONTRACT_EPOCH = '2026-11-01-catalog-effect-controls-two-guard-ordering';
+export const BEFORE_SHA = '54c48a2c1518d0fbf4e4c4dd5ccf3c1b0b9f70f6a0669e4c1905bd827f3c8d2f';
+export const CURRENT_SHA = '9b5c8e9126cf7e7aa940c3114c40d1825e76eb09bd08379fe16e054f9239a362';
 export const HELPER_SHA = '879a1a0feb9a3660b9803d83048b198fa16e2112f2bbd6e792d68a4c5e88bed7';
-export const BASELINE_SHA = 'd74af5ef651cc3a611ad6294d8fc1b803081b7c29b0c011ff7ce54d0c2180721';
+export const BASELINE_SHA = '8ad6eeec9c54204886e630cca167e47cb368f08e854197d66653169ab3438f55';
 export const ORDER_ASSERTION = 'latest issued lighting request must retain its own receipt after older replies';
 export const RECEIPTS = [
   ['backend-refusal', {ok:false, reason:'light-device-core-missing'}, '灯光应用失败：light-device-core-missing'],

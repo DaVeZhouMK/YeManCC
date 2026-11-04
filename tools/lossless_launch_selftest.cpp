@@ -1,3 +1,165 @@
+#if defined(YMCC_LOSSLESS_LAUNCH_SESSION_ONLY)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <tlhelp32.h>
+#include <winternl.h>
+#include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <cwctype>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+// Optional leaf of controller.lossless-toggle-owner. Only WinAPI ports are fake;
+// the inventory owner, NativePorts and ensureRunning below are production code.
+namespace ymcc::losslessLaunchSessionFixture {
+constexpr DWORD selfPid=17, targetPid=71, ownSession=7, otherSession=9;
+constexpr wchar_t image[]=L"C:\\Fixture\\LosslessScaling.exe";
+enum class Kind { Free, Snapshot, Process, Mutex };
+struct Held { Kind kind=Kind::Free; DWORD session=ownSession; ULONGLONG birth=100; unsigned waits=0; };
+struct State {
+    Held handles[32]{}; DWORD session=ownSession; ULONGLONG birth=100;
+    bool replaceAfterFilter=false;
+    bool denyHeld=false, changed=false;
+    unsigned opens=0, heldSessions=0, acquired=0, closed=0, starts=0, invalid=0, snapshots=0;
+};
+inline State state;
+inline HANDLE acquire(Kind kind) {
+    for(auto& h:state.handles)if(h.kind==Kind::Free){h={kind,state.session,state.birth,0};++state.acquired;return &h;}
+    throw std::runtime_error("fake-handle-table-exhausted");
+}
+inline Held* held(HANDLE value,Kind kind) {
+    for(auto& h:state.handles)if(&h==value&&h.kind==kind)return &h;
+    ++state.invalid;SetLastError(ERROR_INVALID_HANDLE);return nullptr;
+}
+inline BOOL WINAPI close(HANDLE value) {
+    for(auto& h:state.handles)if(&h==value&&h.kind!=Kind::Free){h.kind=Kind::Free;++state.closed;return TRUE;}
+    ++state.invalid;SetLastError(ERROR_INVALID_HANDLE);return FALSE;
+}
+inline DWORD WINAPI self(){return selfPid;}
+inline BOOL WINAPI session(DWORD pid,DWORD* result) {
+    if(pid==selfPid){*result=ownSession;return TRUE;}
+    if(pid!=targetPid){SetLastError(ERROR_INVALID_PARAMETER);return FALSE;}
+    if(!state.opens){
+        *result=state.session;
+        // Return the old hint, then replace the PID before the caller opens it.
+        if(state.replaceAfterFilter&&!state.changed){state.changed=true;state.birth=200;state.session=otherSession;}
+        return TRUE;
+    }
+    ++state.heldSessions;
+    bool liveHandle=false;for(const auto& h:state.handles)if(h.kind==Kind::Process)liveHandle=true;
+    if(!liveHandle){++state.invalid;SetLastError(ERROR_INVALID_HANDLE);return FALSE;}
+    if(state.denyHeld){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+    *result=state.session;return TRUE;
+}
+inline HANDLE WINAPI open(DWORD rights,BOOL inherit,DWORD pid) {
+    if(pid!=targetPid||inherit||rights!=(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE))throw std::runtime_error("unexpected-open-rights-or-pid");
+    ++state.opens;
+    return acquire(Kind::Process);
+}
+inline DWORD WINAPI processId(HANDLE value){return held(value,Kind::Process)?targetPid:0;}
+inline DWORD WINAPI wait(HANDLE value,DWORD delay) {
+    for(const auto& h:state.handles)if(&h==value&&h.kind==Kind::Mutex)return WAIT_OBJECT_0;
+    auto* h=held(value,Kind::Process);if(!h)return WAIT_FAILED;
+    if(delay)throw std::runtime_error("unexpected-process-wait");
+    SetLastError(ERROR_ALREADY_EXISTS);return WAIT_TIMEOUT;
+}
+inline BOOL WINAPI path(HANDLE value,DWORD flags,LPWSTR output,PDWORD size) {
+    if(!held(value,Kind::Process)||flags)return FALSE;
+    const DWORD count=static_cast<DWORD>(std::size(image)-1);if(*size<=count){SetLastError(ERROR_INSUFFICIENT_BUFFER);return FALSE;}
+    std::copy_n(image,count+1,output);*size=count;SetLastError(ERROR_ALREADY_EXISTS);return TRUE;
+}
+inline BOOL WINAPI times(HANDLE value,LPFILETIME birth,LPFILETIME ended,LPFILETIME kernel,LPFILETIME user) {
+    auto* h=held(value,Kind::Process);if(!h)return FALSE;
+    *birth={DWORD(h->birth),DWORD(h->birth>>32)};*ended={};*kernel={};*user={};SetLastError(ERROR_ALREADY_EXISTS);return TRUE;
+}
+inline HMODULE WINAPI module(LPCWSTR){return reinterpret_cast<HMODULE>(std::uintptr_t{1});}
+inline FARPROC WINAPI proc(HMODULE,LPCSTR){SetLastError(ERROR_PROC_NOT_FOUND);return nullptr;}
+inline HANDLE WINAPI snapshot(DWORD flags,DWORD pid){if(flags!=TH32CS_SNAPPROCESS||pid)throw std::runtime_error("unexpected-snapshot");++state.snapshots;return acquire(Kind::Snapshot);}
+inline BOOL WINAPI first(HANDLE value,LPPROCESSENTRY32W row){if(!held(value,Kind::Snapshot))return FALSE;row->th32ProcessID=targetPid;row->th32ParentProcessID=selfPid;wcscpy_s(row->szExeFile,L"LosslessScaling.exe");return TRUE;}
+inline BOOL WINAPI next(HANDLE value,LPPROCESSENTRY32W){if(!held(value,Kind::Snapshot))return FALSE;SetLastError(ERROR_NO_MORE_FILES);return FALSE;}
+inline DWORD WINAPI absolute(LPCWSTR input,DWORD size,LPWSTR output,LPWSTR*){const auto n=wcslen(input);if(size<=n)return DWORD(n+1);std::copy_n(input,n+1,output);return DWORD(n);}
+inline DWORD WINAPI attributes(LPCWSTR){return FILE_ATTRIBUTE_NORMAL;}
+inline HANDLE WINAPI mutex(LPSECURITY_ATTRIBUTES,BOOL,LPCWSTR){return acquire(Kind::Mutex);}
+inline BOOL WINAPI unlock(HANDLE value){return held(value,Kind::Mutex)!=nullptr;}
+inline BOOL WINAPI create(LPCWSTR,LPWSTR,LPSECURITY_ATTRIBUTES,LPSECURITY_ATTRIBUTES,BOOL,DWORD,LPVOID,LPCWSTR,LPSTARTUPINFOW,LPPROCESS_INFORMATION){++state.starts;SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+}
+#define GetCurrentProcessId ymcc::losslessLaunchSessionFixture::self
+#define ProcessIdToSessionId ymcc::losslessLaunchSessionFixture::session
+#define OpenProcess ymcc::losslessLaunchSessionFixture::open
+#define GetProcessId ymcc::losslessLaunchSessionFixture::processId
+#define WaitForSingleObject ymcc::losslessLaunchSessionFixture::wait
+#define QueryFullProcessImageNameW ymcc::losslessLaunchSessionFixture::path
+#define GetProcessTimes ymcc::losslessLaunchSessionFixture::times
+#define CloseHandle ymcc::losslessLaunchSessionFixture::close
+#define GetModuleHandleW ymcc::losslessLaunchSessionFixture::module
+#define GetProcAddress ymcc::losslessLaunchSessionFixture::proc
+#define CreateToolhelp32Snapshot ymcc::losslessLaunchSessionFixture::snapshot
+#define Process32FirstW ymcc::losslessLaunchSessionFixture::first
+#define Process32NextW ymcc::losslessLaunchSessionFixture::next
+#define GetFullPathNameW ymcc::losslessLaunchSessionFixture::absolute
+#define GetFileAttributesW ymcc::losslessLaunchSessionFixture::attributes
+#define CreateMutexW ymcc::losslessLaunchSessionFixture::mutex
+#define ReleaseMutex ymcc::losslessLaunchSessionFixture::unlock
+#include "lossless_launch.h"
+namespace ymcc::losslessLaunchSessionFixture {
+inline unsigned checks=0,failures=0;
+inline std::vector<std::string> failedAssertions;
+inline void expect(bool ok,const char* label){++checks;if(!ok){++failures;failedAssertions.emplace_back(label);}}
+inline ymcc::lossless::NativePorts ports(){return {image,[]{return true;},create};}
+struct Case {
+    std::string name,reason; unsigned checks=0,failures=0,opens=0,sessions=0;
+    bool ok=false,reused=false,started=false; DWORD error=0,pid=0; ULONGLONG birth=0;
+};
+inline std::vector<Case> cases;
+template<class Configure> void run(const char* name,Configure configure,bool unknown,DWORD error){
+    state=State{};ymcc::processInventory::invalidate();configure();SetLastError(ERROR_ALREADY_EXISTS);
+    const auto oldChecks=checks,oldFailures=failures;Case c;c.name=name;
+    try{
+        auto p=ports();const auto r=ymcc::lossless::ensureRunning(p);
+        c.ok=r.ok;c.reused=r.reused;c.started=r.started;c.pid=r.identity.pid;c.birth=r.identity.created;c.reason=r.reason;c.error=r.error;
+        if(unknown){
+            expect(!r.ok&&!r.reused&&!r.started,"ensure-not-success-or-start");
+            expect(r.reason=="process-identity-unknown","ensure-unknown-reason");
+            expect(r.error==error,"ensure-error-is-current");
+        }else{
+            expect(r.ok&&r.reused&&!r.started,"same-session-reused");
+            expect(r.identity.pid==targetPid&&r.identity.created==100&&r.identity.path==image,"same-session-exact-identity");
+        }
+    }catch(const std::exception&){expect(false,"unexpected-cpp-exception");}
+    expect(state.starts==0,"no-start-dispatched");expect(state.acquired==state.closed,"all-owned-handles-closed");expect(state.invalid==0,"no-invalid-handle-use");
+    c.checks=checks-oldChecks;c.failures=failures-oldFailures;c.opens=state.opens;c.sessions=state.heldSessions;cases.push_back(std::move(c));
+}
+inline int main(){
+    run("prefilter-session-reuse",[]{state.replaceAfterFilter=true;},true,ERROR_INVALID_DATA);
+    run("same-session-control",[]{},false,ERROR_SUCCESS);
+    run("held-session-denied",[]{state.denyHeld=true;},true,ERROR_ACCESS_DENIED);
+    std::cout<<"{\"checks\":"<<checks<<",\"failures\":"<<failures<<",\"cases\":[";
+    for(std::size_t i=0;i<cases.size();++i){const auto& c=cases[i];if(i)std::cout<<',';
+        std::cout<<"{\"name\":\""<<c.name<<"\",\"checks\":"<<c.checks<<",\"failures\":"<<c.failures<<",\"opens\":"<<c.opens<<",\"heldSessionQueries\":"<<c.sessions
+            <<",\"ok\":"<<(c.ok?"true":"false")<<",\"reused\":"<<(c.reused?"true":"false")<<",\"started\":"<<(c.started?"true":"false")<<",\"pid\":"<<c.pid<<",\"birth\":"<<c.birth<<",\"error\":"<<c.error<<",\"reason\":\""<<c.reason<<"\"}";}
+    std::cout<<"],\"failedAssertions\":[";for(std::size_t i=0;i<failedAssertions.size();++i){if(i)std::cout<<',';std::cout<<'"'<<failedAssertions[i]<<'"';}
+    std::cout<<"],\"realApplicationsStarted\":0}"<<std::endl;return failures?1:0;
+}
+}
+int wmain(){return ymcc::losslessLaunchSessionFixture::main();}
+#else
+#if defined(YMCC_LOSSLESS_DISCOVERY_ONLY)
+#include "lossless_discovery_fixture.h"
+int wmain(int argc, wchar_t** argv) { return ymcc::losslessDiscoveryFixture::main(argc, argv); }
+#else
 #include <iostream>
 #include <vector>
 #include <stdexcept>
@@ -327,3 +489,7 @@ int wmain(int argc, wchar_t** argv) {
         return 0;
     } catch(const std::exception& e) { std::cerr<<e.what()<<std::endl;return 1; }
 }
+
+#endif // YMCC_LOSSLESS_DISCOVERY_ONLY
+
+#endif // YMCC_LOSSLESS_LAUNCH_SESSION_ONLY

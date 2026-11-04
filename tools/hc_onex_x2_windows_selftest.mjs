@@ -1,17 +1,18 @@
 // Windows boundary test: actual production Session/WindowsTransport, only memory
 // Win32 mocks. Does not launch YMCC/Host, enumerate hardware or execute real IO.
-// node tools/hc_onex_x2_windows_selftest.mjs [--out <WindowsTests or Testing/YMCC/Evidence child>] [--vcvars <batch>] [--no-mutations]
+// node tools/hc_onex_x2_windows_selftest.mjs [--out <WindowsTests or Testing/YMCC/Evidence child>] [--vcvars <batch>] [--cases <case,case>] [--no-mutations]
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const runner=fileURLToPath(import.meta.url), repo=path.resolve(path.dirname(runner),'..');
 const fixtures=path.join(repo,'tools/fixtures/hc_onex_x2_windows');
 let workspace=repo;
 while(!fs.existsSync(path.join(workspace,'Docs/Research/PcCapabilities-HC-CTW-20261014/upstream/source-manifest.json'))){const next=path.dirname(workspace);if(next===workspace)throw Error('Workspace marker missing');workspace=next;}
 const options={},args=process.argv.slice(2);
-for(let i=0;i<args.length;++i){if(['--out','--vcvars'].includes(args[i])&&args[i+1])options[args[i].slice(2)]=args[++i];else if(args[i]==='--no-mutations')options.noMutations=true;else throw Error(`Unknown/incomplete argument: ${args[i]}`);}
+for(let i=0;i<args.length;++i){if(['--out','--vcvars','--cases'].includes(args[i])&&args[i+1]){const key=args[i].slice(2);if(Object.hasOwn(options,key))throw Error('Duplicate argument '+args[i]);options[key]=args[++i];}else if(args[i]==='--no-mutations')options.noMutations=true;else throw Error(`Unknown/incomplete argument: ${args[i]}`);}
 const legacyRoot=path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXRuntime/WindowsTests');
 const evidenceRoot=path.join(workspace,'Testing/YMCC/Evidence');
 const out=path.resolve(options.out||path.join(legacyRoot,new Date().toISOString().replace(/[:.]/g,'-')));
@@ -30,7 +31,10 @@ async function compile(argv,log,cwd,env){const r=await new Promise((resolve,reje
 try{
   const headers=['onex_x2_windows.h','onex_x2_session.h','onex_x2_protocol.h'];
   const fixtureNames=['mock_win32.h','harness.cpp','layout.generated.h','README.md'];
-  receipt.inputs=[runner,...headers.map(x=>path.join(repo,'native',x)),...fixtureNames.map(x=>path.join(fixtures,x))].map(p=>({path:p,sha256:sha(fs.readFileSync(p))}));
+  const upgradePath=path.join(repo,'capabilities/upstream/f2e58468/OneXPlayer3.cs');
+  if(sha(fs.readFileSync(upgradePath))!=='e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc')throw Error('Independent OXP3 input source identity changed');
+  receipt.inputUpgrade={commit:'f2e58468d9917189d4be7ccfc242385ce2c3035b',path:upgradePath,sha256:sha(fs.readFileSync(upgradePath)),scope:'OXP3 third init page and real Home/G-Key held events only; all old model checks retained'};
+  receipt.inputs=[runner,path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'),upgradePath,...headers.map(x=>path.join(repo,'native',x)),...fixtureNames.map(x=>path.join(fixtures,x))].map(p=>({path:p,sha256:sha(fs.readFileSync(p))}));
   for(const name of headers)fs.copyFileSync(path.join(repo,'native',name),path.join(out,name));
   for(const name of fixtureNames)fs.copyFileSync(path.join(fixtures,name),path.join(out,name));
   const source=fs.readFileSync(path.join(out,'onex_x2_windows.h'),'utf8');
@@ -42,17 +46,22 @@ try{
   const inventory=fs.readFileSync(path.join(out,'harness.cpp'),'utf8').match(/static const Case cases\[\]=\{([\s\S]*?)\n\};/);
   if(!inventory)throw Error('Scenario table missing');
   const tuple=/\{\s*"([^"]+)"\s*,\s*\w+\s*\}/g;
-  const cases=[...inventory[1].matchAll(tuple)].map(m=>m[1]);
-  if(cases.length<19||new Set(cases).size!==cases.length||cases.some(c=>!/^[-a-z0-9]+$/.test(c))||inventory[1].replace(tuple,'').replace(/[,\s]/g,''))throw Error('Scenario inventory incomplete/duplicated');receipt.scenarios=cases;
+  const inventoryCases=[...inventory[1].matchAll(tuple)].map(m=>m[1]);
+  if(inventoryCases.length<19||new Set(inventoryCases).size!==inventoryCases.length||inventoryCases.some(c=>!/^[-a-z0-9]+$/.test(c))||inventory[1].replace(tuple,'').replace(/[,\s]/g,''))throw Error('Scenario inventory incomplete/duplicated');
+  const directed=Object.hasOwn(options,'cases');
+  const cases=directed?options.cases.split(',').map(value=>value.trim()):inventoryCases;
+  if(!cases.length||cases.some(value=>!value||!inventoryCases.includes(value))||new Set(cases).size!==cases.length)throw Error('Empty, unknown or duplicate --cases selection');
+  receipt.selection={mode:directed?'directed':'default',requested:directed?[...cases]:null,expected:[...cases]};receipt.scenarios=cases;
+  receipt.mutationScope=options.noMutations?'not-run':directed?'selected-original-scenarios':'all-original-scenarios';
   let vcvars=options.vcvars;
   if(!vcvars){const vswhere=path.join(process.env['ProgramFiles(x86)']||'C:/Program Files (x86)','Microsoft Visual Studio/Installer/vswhere.exe');const install=run(vswhere,['-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],'toolchain-discovery.log').trim();vcvars=path.join(install,'VC/Auxiliary/Build/vcvars64.bat');}
   if(!fs.existsSync(vcvars)||/[\r\n"%]/.test(vcvars))throw Error('MSVC environment batch unavailable/unsupported');
   const envCmd=path.join(out,'compiler-environment.cmd');if(/[&|<>^%\r\n"]/.test(envCmd))throw Error('Unsupported batch path');
-  fs.writeFileSync(envCmd,`@echo off\r\ncall "${vcvars}" >nul\r\nif errorlevel 1 exit /b %errorlevel%\r\nset\r\n`);
+  fs.writeFileSync(envCmd,calibrationToolchainPreamble(vcvars)+'set\r\n');
   const er=spawnSync(process.env.ComSpec||'cmd.exe',['/d','/c',envCmd],{windowsHide:true,encoding:'utf8',timeout:30000});if(er.error||er.status!==0)throw Error('MSVC setup failed');
   const env={...process.env};for(const line of er.stdout.split(/\r?\n/)){const at=line.indexOf('=');if(at<=0)continue;const key=line.slice(0,at),old=Object.keys(env).find(k=>k.toLowerCase()===key.toLowerCase());env[old||key]=line.slice(at+1);}
   const temp=path.join(out,'compiler-temp');fs.mkdirSync(temp);for(const key of ['TEMP','TMP']){const old=Object.keys(env).find(k=>k.toLowerCase()===key.toLowerCase());env[old||key]=temp;}
-  receipt.compiler={vcvars,vcToolsVersion:env.VCToolsVersion,windowsSdkVersion:env.WindowsSDKVersion};save();
+  receipt.compiler={vcvars,vcToolsVersion:env.VCToolsVersion,windowsSdkVersion:env.WindowsSDKVersion,environmentRecipeSha256:sha(fs.readFileSync(envCmd)),tools:['cl.exe','link.exe','dumpbin.exe'].map(name=>{const file=path.join(env.VCToolsInstallDir,'bin/Hostx64/x64',name);return {file,sha256:sha(fs.readFileSync(file))};})};save();
   const common=['/nologo','/std:c++17','/EHsc','/utf-8','/W4','/WX','/permissive-'];
   const configurations=[['Release',['/O2','/DNDEBUG','/MD']],['Checked',['/Od','/RTC1','/Zi','/D_DEBUG','/D_ITERATOR_DEBUG_LEVEL=2','/MDd']]];
   const forbidden=new RegExp(`UNDEF[^\\r\\n]*(?:__imp_)?(?:${mockedApis.join('|')}|DeviceIoControl|LoadLibrary[AW]?|GetProcAddress)(?:$|[\\s@])`,'m');
@@ -65,13 +74,17 @@ try{
     const hazardous=['SetupDiGetClassDevsW','SetupDiEnumDeviceInterfaces','SetupDiGetDeviceInterfaceDetailW','HidD_GetHidGuid','HidD_GetAttributes','HidP_GetCaps','CreateFileW','ReadFile','WriteFile','CancelIoEx','GetOverlappedResult','CloseHandle','CreateEventW','ResetEvent','WaitForSingleObject'];
     for(const api of hazardous)if(new RegExp(`\\b${api}\\b`).test(imports))throw Error(`${name}: real device API import ${api}`);
     const config={name,status:'running',compileArguments:argv,executableSha256:sha(fs.readFileSync(exe)),objectSha256:sha(fs.readFileSync(obj)),deviceApiUndefinedSymbols:0,deviceApiImports:0,checks:0,cases:[]};receipt.configurations.push(config);save();
-    for(const scenario of cases){const result=record(`${name}/${scenario}.log`,spawnSync(exe,[scenario],{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:15000}));let report;try{report=JSON.parse(result.stdout.trim());}catch{report={status:'invalid-report',stdout:result.stdout,stderr:result.stderr};}config.cases.push({...report,exitCode:result.status});config.checks+=report.checks||0;save();console.log(`${name} ${scenario}: ${report.status} (${report.checks||0})`);}
-    config.status=config.cases.every(c=>c.status==='pass'&&c.exitCode===0)?'pass':'fail';save();
+    for(const scenario of cases){const result=record(`${name}/${scenario}.log`,spawnSync(exe,[scenario],{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:15000}));let report;try{report=JSON.parse(result.stdout.trim());}catch{report={status:'invalid-report',stdout:result.stdout,stderr:result.stderr};}config.cases.push({...report,requestedScenario:scenario,status:report.status==='pass'&&result.status===0&&report.scenario===scenario?'pass':'fail',rawStatus:report.status,exitCode:result.status});config.checks+=report.checks||0;save();console.log(`${name} ${scenario}: ${report.status} (${report.checks||0})`);}
+    config.exactSelectionMatch=JSON.stringify(config.cases.map(c=>c.scenario))===JSON.stringify(cases);
+    config.status=config.exactSelectionMatch&&config.cases.every(c=>c.status==='pass'&&c.exitCode===0)?'pass':'fail';save();
   }
   const failures=receipt.configurations.flatMap(c=>c.cases.filter(x=>x.status!=='pass').map(x=>({configuration:c.name,...x})));
   if(failures.length){receipt.failures=failures;throw Error(`${failures.length} compiled semantic case failures; see per-case logs (production headers untouched)`);}
   if(!options.noMutations){
     const controls=[
+      {name:'first-matching-collection-wins',header:'onex_x2_windows.h',from:'for (DWORD index = 0; ; ++index) {',to:'for (DWORD index = 0; selected.empty(); ++index) {',scenario:'multi-collection',section:'filtering'},
+      {name:'reopen-allowed-pid-drift',header:'onex_x2_windows.h',from:'reopenedPid != selectedPid ||',to:'/* fault: allowed PID may drift */',scenario:'reopened-identity',section:'reopen-identity'},
+      {name:'selected-contract-view-overwritten',header:'onex_x2_windows.h',from:'selected = detail->DevicePath; contract = candidate; selectedPid = candidatePid;',to:'selected = detail->DevicePath; contract = {layout_, 64, 64}; selectedPid = candidatePid;',scenario:'multi-collection',section:'filtering'},
       {name:'completion-phase-only',header:'onex_x2_windows.h',from:'return session_.snapshot().phase == Phase::Detached && !read_ && !write_ &&\n            device_ == INVALID_HANDLE_VALUE && !readEvent_ && !writeEvent_;',to:'return session_.snapshot().phase == Phase::Detached;',scenario:'completion-close-device',section:'completion-close'},
       {name:'completion-misses-read-event',header:'onex_x2_windows.h',from:'device_ == INVALID_HANDLE_VALUE && !readEvent_ && !writeEvent_;',to:'device_ == INVALID_HANDLE_VALUE && !writeEvent_;',scenario:'completion-close-read-event',section:'completion-close'},
       {name:'completion-misses-write-event',header:'onex_x2_windows.h',from:'device_ == INVALID_HANDLE_VALUE && !readEvent_ && !writeEvent_;',to:'device_ == INVALID_HANDLE_VALUE && !readEvent_;',scenario:'completion-close-write-event',section:'completion-close'},
@@ -100,7 +113,9 @@ try{
       {name:'status-runs-watchdog-before-write-terminal',header:'onex_x2_session.h',from:'settleInitialization(now); // A status read may precede advance on the exact final-page due tick.',to:'advance(now); // fault: full watchdog before transport write service',scenario:'status-write-watchdog-order',section:'status-watchdog-order'},
       {name:'blocking-wait',header:'onex_x2_windows.h',from:'WaitForSingleObject(event, 0)',to:'WaitForSingleObject(event, 1)',scenario:'initialization',section:'initialization'},
     ];
-    for(const c of controls){const dir=path.join(out,'mutations',c.name);fs.mkdirSync(dir,{recursive:true});for(const name of [...headers,...fixtureNames])fs.copyFileSync(path.join(out,name),path.join(dir,name));
+    const selectedControls=controls.filter(control=>cases.includes(control.scenario));
+    receipt.selectedMutationNames=selectedControls.map(control=>control.name);save();
+    for(const c of selectedControls){const dir=path.join(out,'mutations',c.name);fs.mkdirSync(dir,{recursive:true});for(const name of [...headers,...fixtureNames])fs.copyFileSync(path.join(out,name),path.join(dir,name));
       const original=fs.readFileSync(path.join(dir,c.header),'utf8');let mutated;
       if(c.occurrence){const chunks=original.split(c.from);if(chunks.length!==c.occurrence+1)throw Error(`${c.name}: mutation anchor drift`);mutated=chunks.slice(0,-1).join(c.from)+c.to+chunks.at(-1);}
       else{if(original.split(c.from).length!==2)throw Error(`${c.name}: mutation anchor drift`);mutated=original.replace(c.from,c.to);}

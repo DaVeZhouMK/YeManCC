@@ -23,7 +23,7 @@ export function createFrameMirrorActions(deps:{
   allowed:()=>boolean;game:()=>DetectedGame|null;side:()=> 'ac'|'dc'|null;power:()=>Promise<PowerLifecycleState>;
   acquire:(owner:string)=>(()=>void)|null;read:()=>Promise<FrameMirrorRead>;key:(game:DetectedGame)=>string;
   label:(game:DetectedGame)=>string;gyro:()=>Promise<GameMirrorGyroDefaults>;
-  save:(config:GameCustomConfig)=>Promise<void>;saveGlobal:(side:'ac'|'dc',value:FrameRateSetting)=>Promise<unknown>;
+  save:(config:GameCustomConfig,verify?:()=>void)=>Promise<void>;saveGlobal:(side:'ac'|'dc',value:FrameRateSetting)=>Promise<unknown>;
   apply:(current:()=>boolean)=>Promise<boolean>;
 }) { return { async execute(args:Record<string,unknown>,context:RelayMutationContext) {
   if(Object.keys(args).length!==2 || typeof args.field!=='string' || !/^(ac|dc)(Fps|Ceiling)$/.test(args.field) || typeof args.value!=='string')throw Error('FRAME_MIRROR_INVALID_REQUEST');
@@ -54,7 +54,7 @@ export function createFrameMirrorActions(deps:{
     // Re-read the original sources immediately before their original save boundary.
     const final=await deps.read();checkpoint();if(final.source!==source)throw Error('FRAME_MIRROR_SOURCE_CHANGED');
     await requirePower();
-    if(nextConfig)await deps.save(nextConfig);else await deps.saveGlobal(side,next);
+    if(nextConfig)await deps.save(nextConfig,checkpoint);else await deps.saveGlobal(side,next);
     const current=()=>deps.allowed() && deps.side()===side && gameMirrorIdentity(deps.game())===identity;
     let applied=false;
     // The durable setting survives a later lifecycle change, but this old

@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-024-ONEX-FAMILY-FAN\\EXPORT\\product-component-build\\bin\\YeManFanHost\\release_win-x64",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-024-ONEX-FAMILY-FAN\\EXPORT\\product-component-build",
+  "metadataToolSha256": "96a3c3f82f4017856dc73ffe37d273794da57fd991cb1a0dc1866d73ac2a639a",
+  "preparationToolSha256": "7c221307162baaeca0eb0d09ba7893121c39fb4d31d4f58775b335cffa9e0b60",
+  "isolatedBuildTargetsSha256": "14a709d1fc8dfa9bfb45043a860cc76bda2d5d111668c862bc024d96d0e1feb5",
+  "projectSourceRebuildReproducibilityProven": false
+}

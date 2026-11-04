@@ -23,6 +23,31 @@ interface Session extends Identity {settings:RadialSettings;generation:number;po
 export function startRadialHost(router:Router){
   if (!isRadialTestingEnabled()) return { stop() {} };
   let ended=false,epoch=0,opening=false,session:Session|null=null;
+  // The host can remain admitted while the wheel is closed. Only an actual
+  // session owns the existing two-second keep-alive and its pending read.
+  let heartbeat:ReturnType<typeof setInterval>|null=null;
+  let heartbeatRequest:{session:Session;controller:AbortController}|null=null;
+  function stopHeartbeat(){
+    if(heartbeat!==null)clearInterval(heartbeat);
+    heartbeat=null;
+    const request=heartbeatRequest;heartbeatRequest=null;
+    request?.controller.abort();
+  }
+  function startHeartbeat(s:Session){
+    stopHeartbeat();
+    heartbeat=setInterval(()=>{
+      if(ended||session!==s||heartbeatRequest)return;
+      const request={session:s,controller:new AbortController()};heartbeatRequest=request;
+      void invoke<boolean>('radial.keepAlive',identity(s),{timeoutMs:2000,signal:request.controller.signal}).then(ok=>{
+        if(ended||session!==s)return;
+        if(!ok){void close();return;}
+        void refreshFan(s);void refreshInput(s);void refreshUtility(s,'monitor.templates');void refreshUtility(s,'steam.controls');
+      }).catch(()=>{if(!ended&&session===s)void close();}).finally(()=>{
+        if(heartbeatRequest===request)heartbeatRequest=null;
+      });
+    },2000);
+  }
+
   const fanActions=createLocalRadialFanActions(()=>!ended);
   const inputActions=createLocalRadialInputActions(()=>!ended);
   const utilityActions=createLocalRadialUtilityActions(()=>!ended);
@@ -41,7 +66,7 @@ export function startRadialHost(router:Router){
   const frame=(s:Session)=>({settings:s.settings,tdp:s.tdp,performance:s.performance,fan:s.fan,input:s.input,utilities:s.utilities,feedback:s.settings.feedback});
   const matches=(data:Identity)=>!!session&&session.wheelId===data.wheelId&&session.nonce===data.nonce;
   const identity=(s:Identity)=>({wheelId:s.wheelId,nonce:s.nonce});
-  async function close(){++epoch;const s=session;session=null;if(s)await invoke('radial.close',identity(s),{timeoutMs:2500}).catch(()=>undefined);}
+  async function close(){++epoch;const s=session;session=null;stopHeartbeat();if(s)await invoke('radial.close',identity(s),{timeoutMs:2500}).catch(()=>undefined);}
   async function configure(){if(!isNativeRuntime||ended)return;const value=await loadRadialSettings();if(ended)return;await invoke('radial.configure',{enabled:value.enabled,monitorHold:value.monitorHold,holdMs:value.holdMs,fullScreenHold:value.fullScreenHold},{timeoutMs:2500});if(session)await close();}
   async function loadTdp(s:Session){
     try{const capability=await getTdpExecutionCapability(true),snapshot=await getContinuousPerformanceSnapshot('effective');if(ended||session!==s)return;
@@ -57,7 +82,7 @@ export function startRadialHost(router:Router){
       const source=data.source==='monitor'?'monitor':data.source==='fullscreen'?'fullscreen':data.source==='fullscreen-raw'?'fullscreen-raw':'shortcut';
       const receipt=await invoke<{id:number;nonce:string}>('radial.create',{nonce,source,x:Number.isFinite(data.x)?Math.round(data.x!):0,y:Number.isFinite(data.y)?Math.round(data.y!):0,frame:frame(s)},{timeoutMs:7000});
       if(!Number.isSafeInteger(receipt.id)||receipt.id<1||receipt.nonce!==nonce)throw new Error('轮盘窗口回执无效');s.wheelId=receipt.id;
-      if(ended||ticket!==epoch){await invoke('radial.close',identity(s));return;}session=s;void loadTdp(s);void refreshFan(s);void refreshInput(s);utilityActions.resetSession();void refreshUtility(s,'monitor.templates');void refreshUtility(s,'steam.controls',true);
+      if(ended||ticket!==epoch){await invoke('radial.close',identity(s));return;}session=s;startHeartbeat(s);void loadTdp(s);void refreshFan(s);void refreshInput(s);utilityActions.resetSession();void refreshUtility(s,'monitor.templates');void refreshUtility(s,'steam.controls',true);
     }catch(e){console.warn('[radial] summon',e);}finally{opening=false;}
   }
   async function checkpoint(s:Session){if(ended||session!==s||s.generation!==getSettingsGeneration())throw new Error('会话或设置已变化，请重新呼出。');
@@ -128,11 +153,10 @@ export function startRadialHost(router:Router){
   const offFanDisplay=onFanMirrorDisplay(refreshFanDisplay),offFanGate=onFanMirrorUiGate(refreshFanDisplay);
   const offSummon=on<{source?:string;x?:number;y?:number;issuedAt?:number;expiresAt?:number;powerGeneration?:number}>('radial.summon-request',data=>{void summon(data);});
   const offIntent=on<Identity&{intent:unknown}>('radial.intent',data=>{void execute(data);});
-  const offClosed=on<Identity>('radial.closed',data=>{if(matches(data)){session=null;++epoch;}});
+  const offClosed=on<Identity>('radial.closed',data=>{if(matches(data)){session=null;++epoch;stopHeartbeat();}});
   const offPower=[on('power.suspending',()=>{void close();}),on('power.resuming',()=>{void close();}),on('power.sourceChanged',()=>{void close();})];
   const offPad=on<{connected?:boolean}>('gamepad.state',data=>{if(data.connected===false&&session)void close();});
   const settingsChanged=()=>{void configure().catch(e=>console.warn('[radial]',e));};window.addEventListener('ymcc:radial-settings-changed',settingsChanged);
-  const heartbeat=setInterval(()=>{const s=session;if(s)void invoke<boolean>('radial.keepAlive',identity(s),{timeoutMs:2000}).then(ok=>{if(!ok&&session===s)void close();else if(ok&&session===s){void refreshFan(s);void refreshInput(s);void refreshUtility(s,'monitor.templates');void refreshUtility(s,'steam.controls');}}).catch(()=>close());},2000);
   if(isNativeRuntime)void configure().catch(e=>console.warn('[radial]',e));
-  return {stop(){if(ended)return;ended=true;utilityActions.stop();offUtility();inputActions.stop();offInput();fanActions.stop();offFanDisplay();offFanGate();offSummon();offIntent();offClosed();offPower.forEach(off=>off());offPad();clearInterval(heartbeat);window.removeEventListener('ymcc:radial-settings-changed',settingsChanged);void close();}};
+  return {stop(){if(ended)return;ended=true;utilityActions.stop();offUtility();inputActions.stop();offInput();fanActions.stop();offFanDisplay();offFanGate();offSummon();offIntent();offClosed();offPower.forEach(off=>off());offPad();stopHeartbeat();window.removeEventListener('ymcc:radial-settings-changed',settingsChanged);void close();}};
 }

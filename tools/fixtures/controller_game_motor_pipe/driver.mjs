@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {pathToFileURL} from 'node:url';
 import {runProcess} from '../../ymcc_sim/global/runner.mjs';
 import {requireOwnedStep} from './native-stage-evidence.mjs';
-import {CASE_ID,FIXTURE,REPO,WORKSPACE,TOOL_LIMIT,sourceFiles,artifactFiles,row,read,write,hash,inside,need,verifyRows,verifyManaged} from './contract.mjs';
+import {CASE_ID,FIXTURE,REPO,WORKSPACE,TOOL_LIMIT,sourceFiles,artifactFiles,row,read,write,hash,inside,caseRootAllowed,need,verifyRows,verifyManaged} from './contract.mjs';
 import {NATIVE_REVISION_FAULT} from './faults.mjs';
 const EXPECTED_CASES=['nonzero-fast','nonzero-dom','stale-ticket','stale-host-tuple','revision-replay','unsupported-profile','zero-then-unbind','copied-callback-after-unbind','neutral-capture','no-capture'];
 function walk(root){return fs.readdirSync(root,{withFileTypes:true}).flatMap(e=>{need(!e.isSymbolicLink(),'CASE_OUTPUT_LINK');const p=path.join(root,e.name);return e.isDirectory()?walk(p):[p];});}
@@ -45,7 +45,7 @@ function revisionCausality(item,stale){
  return{newAcceptedRequestSequences:frames.map(f=>f.sequenceAfter),sdkSequence:events[0].sdkSequence,secondFastReceiptPresent:true,received:frames.map(f=>f.gameReceipt.received),rejected:frames.map(f=>f.gameReceipt.rejected),actualInboxRevisionRejection:stale};
 }
 export async function execute(root){
- root=path.resolve(root);need(inside(path.join(WORKSPACE,'Build'),root)&&!fs.existsSync(root),'FRESH_CASE_OWNED_BUILD_ROOT_REQUIRED');fs.mkdirSync(root,{recursive:true});
+ root=path.resolve(root);need(caseRootAllowed(root)&&!fs.existsSync(root),'FRESH_CASE_OWNED_BUILD_OR_EVIDENCE_ROOT_REQUIRED');fs.mkdirSync(root,{recursive:true});
  const steps=[];let sources=[],tools=[];
  async function processStep(name,exe,args,cwd,timeoutMs=240000){
   const p=await runProcess(exe,args,{cwd,env:{...process.env,YMCC_SIM_GAME_MOTOR_CASE:root},timeoutMs,outputLimit:4*1024*1024});
@@ -55,7 +55,7 @@ export async function execute(root){
  }
  try{
   sources=sourceRows(root);const paths=artifactFiles();need(paths.length<=TOOL_LIMIT,'DECLARED_TOOL_BOUND_EXCEEDED');tools=paths.map(row);
-  write(path.join(root,'inputs-before.json'),{sources,tools,declaredToolLimit:TOOL_LIMIT,managedSourcesNormal:22,managedSourcesStaleRevision:23});
+  write(path.join(root,'inputs-before.json'),{sources,tools,declaredToolLimit:TOOL_LIMIT,managedSourcesNormal:26,managedSourcesStaleRevision:27});
   const contracts={};
   for(const variant of ['normal','stale-revision']){
    const out=path.join(root,'managed',variant);

@@ -86,19 +86,26 @@ function executionDescription(adapter) {
 function definition(adapter) {
   return Object.fromEntries(Object.entries(adapter).filter(([key]) => key !== 'cacheIdentity'));
 }
-function shaFile(file) {
-  const hash = crypto.createHash('sha256');
+const fileVersion = stat => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+function shaFile(file, byteCache) {
   const fd = fs.openSync(file, 'r');
   try {
-    if (!fs.fstatSync(fd).isFile()) throw new Error('NOT_A_FILE');
-    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    // Reopen every declared role: permissions, replacement and file type remain current.
+    const before = fs.fstatSync(fd, { bigint: true });
+    if (!before.isFile()) throw new Error('NOT_A_FILE');
+    const version = fileVersion(before), cached = byteCache?.get(file);
+    if (cached?.version === version) return cached.sha256;
+    byteCache?.delete(file);
+    const hash = crypto.createHash('sha256'), buffer = Buffer.allocUnsafe(1024 * 1024);
     let bytes;
     while ((bytes = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, bytes));
-    return hash.digest('hex');
+    const sha256 = hash.digest('hex');
+    if (byteCache && fileVersion(fs.fstatSync(fd, { bigint: true })) === version) byteCache.set(file, { version, sha256 });
+    return sha256;
   } finally { fs.closeSync(fd); }
 }
 
-function snapshot(entry, { role, root, relativeOnly = false } = {}) {
+function snapshot(entry, { role, root, relativeOnly = false, byteCache } = {}) {
   const pin = typeof entry === 'string' ? { path: entry } : entry;
   if (!pin || typeof pin.path !== 'string' || !pin.path || /[\0\r\n]/.test(pin.path)) throw new Error('INVALID_INPUT_PATH');
   if (pin.status !== undefined && pin.status !== 'OK') throw new Error('INPUT_NOT_RESOLVED');
@@ -110,14 +117,15 @@ function snapshot(entry, { role, root, relativeOnly = false } = {}) {
   if (!inside(boundary, absolute)) throw new Error('INPUT_OUTSIDE_ROOT');
   const actual = fs.realpathSync(absolute);
   if (!inside(boundary, actual)) throw new Error('SYMLINK_OUTSIDE_ROOT');
-  const sha256 = shaFile(actual);
+  const sha256 = shaFile(actual, byteCache);
   if (pin.sha256 !== undefined && sha256 !== pin.sha256.toLowerCase()) throw new Error('INPUT_SHA256_MISMATCH');
   return { role, path: absolute, realPath: actual, sha256 };
 }
 
 /** See README above: complete declarations are mandatory, not automatically inferred. */
 export function fingerprintCase({ repoRoot, adapter, toolIdentities = [], options = {} } = {}) {
-  const reasons = [], inputs = [], tools = [];
+  // Byte reuse ends at this call; plan/lock/execution freshness checks get new reads.
+  const reasons = [], inputs = [], tools = [], byteCache = new Map();
   let root = null, description = null, normalizedOptions = null;
   try { root = fs.realpathSync(repoRoot); if (!fs.statSync(root).isDirectory()) throw new Error(); }
   catch { reasons.push(problem('REPOSITORY_UNAVAILABLE', 'repoRoot')); }
@@ -143,7 +151,7 @@ export function fingerprintCase({ repoRoot, adapter, toolIdentities = [], option
   else if (adapter?.kind !== 'node' && toolIdentities.length === 0) reasons.push(problem('EXPLICIT_TOOL_REQUIRED', 'toolIdentities'));
   const add = (entry, field, role, external = false, relativeOnly = false) => {
     if (!external && !root) return;
-    try { (external ? tools : inputs).push(snapshot(entry, { role, ...(external ? {} : { root }), relativeOnly })); }
+    try { (external ? tools : inputs).push(snapshot(entry, { role, ...(external ? {} : { root }), relativeOnly, byteCache })); }
     catch (error) { reasons.push(problem(error.code ?? error.message, field, typeof entry === 'string' ? entry : entry?.path)); }
   };
   if (adapter) {
@@ -156,7 +164,7 @@ export function fingerprintCase({ repoRoot, adapter, toolIdentities = [], option
     if (adapter.artifactInputs !== undefined) {
       if (!Array.isArray(adapter.artifactInputs)) reasons.push(problem('INVALID_INPUT_LIST', 'adapter.artifactInputs'));
       else for (const entry of adapter.artifactInputs) {
-        try { inputs.push(snapshot(entry, { role: 'artifact' })); }
+        try { inputs.push(snapshot(entry, { role: 'artifact', byteCache })); }
         catch (error) { reasons.push(problem(error.code ?? error.message, 'adapter.artifactInputs', typeof entry === 'string' ? entry : entry?.path)); }
       }
     }

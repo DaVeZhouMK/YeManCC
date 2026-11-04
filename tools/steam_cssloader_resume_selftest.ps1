@@ -36,3 +36,27 @@ finally{$ErrorActionPreference=$taskPreviousPreference}
 if($taskNegativeExit -ne 1 -or [IO.File]::ReadAllText((Join-Path $Out 'negative.log')) -notmatch 'actual committed Ready admits one CSS-only event'){throw 'Disabled recovery was not detected at the actual Ready behavior'}
 [pscustomobject]@{detected=$true;exitCode=$taskNegativeExit;compiled=$true;expectedAssertion='actual committed Ready admits one CSS-only event';mutation='suppress exact production recovery dispatch';realCssOperations=0;realSteamOperations=0}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Out 'negative-result.json') -Encoding UTF8
 Write-Output 'PASS: disabled resume dispatch is rejected by the real worker scenario'
+
+# Root-cause negative: restore process-only observation deduplication. The
+# actual callback/worker must refuse the stale-account shared-mode request.
+$accountGuard=Join-Path $Out 'steam_cssloader_guard-account-stale.h'
+$accountGuardText=[IO.File]::ReadAllText((Join-Path $repo 'native\steam_cssloader_guard.h'))
+$accountOperand='if (desired_ == session) return;'
+if(($accountGuardText.Split(@($accountOperand),[StringSplitOptions]::None)).Count -ne 2){throw 'Account observation operand must be unique'}
+[IO.File]::WriteAllText($accountGuard,$accountGuardText.Replace($accountOperand,'if (sameSession(desired_, session)) return;'),(New-Object Text.UTF8Encoding($false)))
+$accountSource=Join-Path $Out 'account-stale.cpp'
+[IO.File]::WriteAllText($accountSource,([IO.File]::ReadAllText((Join-Path $repo 'tools\steam_cssloader_resume_selftest.cpp')).Replace('#include "steam_cssloader_guard.h"','#include "steam_cssloader_guard-account-stale.h"')),(New-Object Text.UTF8Encoding($false)))
+$accountRecipe=$recipe.Replace((Join-Path $repo 'tools\steam_cssloader_resume_selftest.cpp'),$accountSource).Replace((Join-Path $Out 'use.obj'),(Join-Path $Out 'account-stale.obj')).Replace((Join-Path $Out 'use.exe'),(Join-Path $Out 'account-stale.exe'))
+$accountRun='"'+(Join-Path $Out 'account-stale.exe')+'" "'+$Out+'"'
+if(!$accountRecipe.Contains($accountRun)){throw 'Stale-account compile boundary missing'}
+$accountRecipe=$accountRecipe.Replace($accountRun,'REM stale-account negative runs in its own evidence directory')
+$accountCmd=Join-Path $Out 'compile-account-stale.cmd';[IO.File]::WriteAllText($accountCmd,$accountRecipe,[Text.Encoding]::ASCII)
+& $accountCmd 2>&1|Tee-Object -FilePath (Join-Path $Out 'account-stale-build.log')
+if($LASTEXITCODE -ne 0){throw 'Stale-account negative must compile'}
+$accountOut=Join-Path $Out 'account-stale';New-Item -ItemType Directory -Path $accountOut -Force|Out-Null
+$taskAccountPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
+try{& (Join-Path $Out 'account-stale.exe') $accountOut 2>&1|Tee-Object -FilePath (Join-Path $Out 'account-stale.log');$taskAccountExit=$LASTEXITCODE}
+finally{$ErrorActionPreference=$taskAccountPreference}
+if($taskAccountExit -ne 1 -or [IO.File]::ReadAllText((Join-Path $Out 'account-stale.log')) -notmatch 'resume invalidates old shared mode before any CSS ensure can apply'){throw 'Stale-account root cause was not rejected by actual resume behavior'}
+[pscustomobject]@{detected=$true;exitCode=$taskAccountExit;compiled=$true;mutation='restore process-only observeSteam deduplication';expectedAssertion='resume invalidates old shared mode before any CSS ensure can apply';realCssOperations=0;realSteamOperations=0}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Out 'account-stale-result.json') -Encoding UTF8
+Write-Output 'PASS: stale account reproduces the real wake refresh failure'

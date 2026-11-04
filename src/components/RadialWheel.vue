@@ -229,8 +229,8 @@ defineExpose({pointer,gamepad,back,footer});
     </svg>
     <template v-if="edit"><button v-for="s in sectors" :key="`edit-${s.id}`" class="wheel-edit-hit" data-gp-ignore tabindex="-1" :style="{left:(s.x/496*100)+'%',top:(s.y/560*100)+'%'}" :aria-label="`编辑 ${s.item.label}`" :aria-pressed="s.id===selectedId" :data-radial-item="s.id" @click="setSelected(s)">{{s.item.label}}</button></template>
     <div v-if="!edit" class="wheel-actions" @touchstart.prevent @pointerdown="footerPointer($event,'down')" @pointerup="footerPointer($event,'up')" @pointercancel="footerPointer($event,'cancel')">
-      <button data-radial-footer="0" :aria-label="backLabel" @click="footer(0)"><b class="key-b">B</b>{{backLabel}}</button>
-      <button data-radial-footer="1" :disabled="pending||(!dial&&!selection.leaf)" @click="footer(1)"><b class="key-a">A</b>{{pending?'提交中…':dial?'应用 '+(dialSpec?.label??'TDP'):'确认'}}</button>
+      <button data-radial-footer="0" :aria-label="backLabel" @click="footer(0)"><span class="controller-key key-b" data-controller-key="B">B</span>{{backLabel}}</button>
+      <button data-radial-footer="1" :disabled="pending||(!dial&&!selection.leaf)" @click="footer(1)"><span class="controller-key key-a" data-controller-key="A">A</span>{{pending?'提交中…':dial?'应用 '+(dialSpec?.label??'TDP'):'确认'}}</button>
       <button data-radial-footer="2" :disabled="pending" @click="footer(2)">{{dial?'+ '+dialSpec?.step+(dialSpec?.suffix??''):'RB 下一页'}}</button>
     </div>
     <p class="wheel-status" role="status">{{status || (dial ? ((activeControl?performance?.label:tdp?.label)+' · LT / RT 微调，A 应用') : edit ? '' : inputSource==='pointer' ? (inSubmenu?'松手执行子项 · 向内滑或点“返回上级”返回':'点选或滑动选择，松手执行 · 返回监控可关闭') : '方向键松开确认 · 回中取消 · 长停留进入二级')}}</p>

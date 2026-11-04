@@ -36,6 +36,9 @@ static void resetRoute(const json& rules, const json& input = baseInput()) {
 #endif
     fixtureOwnActions.clear(); fixtureDeltas.clear();
     fixtureWindowVisible=true;fixtureWindowIconic=fixtureWindowZoomed=fixtureWindowForeground=false;g_fullHeight=false;
+    fixtureFocusAllowed=true;fixtureSummonTimerStarts=fixtureSummonTimerKills=0;
+    fixtureCapturedTarget={true,0};g_pendingSummonTarget={};fixturePreparedTargets.clear();
+    g_realStickTest.enabled=g_realStickTest.virtualTargetEnabled=true;
     g_inputReady=true;fixtureWriterAllowed=true;fixtureFrontendPersona=g_inputHostBoundPersona="disabled";g_inputHostEpochMirror=1;
     g_inputHostPrepared=g_inputHostNeutralized=true;g_inputHostTransportFault=false;g_inputHostFaultHoldsStart=false;
     g_frontendButtonPulse.clear();fixtureSendInputs.clear();fixtureSendCount=UINT_MAX;
@@ -282,6 +285,12 @@ static void startF7RetirementCases() {
 #endif
 int main() {
     try {
+#if defined(YMCC_SHORTCUT_SHIELD_CASE_MODE)
+        // Source mutations arrive through the original YMCC_SHORTCUT_SOURCE input.
+        shortcutSummonActionShieldCases(YMCC_SHORTCUT_SHIELD_CASE_MODE);
+        std::cout << "summon action shield: " << passed << " cases passed\n";
+        return 0;
+#endif
 #if defined(YMCC_SHORTCUT_DEFAULT_OWNER_SOURCE)
         startF7RetirementCases();
 #endif
@@ -1918,6 +1927,7 @@ int main() {
             check(isS ? !extraM1&&!extraM2 : extraM1&&extraM2,"Go S does not advertise absent M1/M2 extras");
         }
         shortcutSummonFrontendCases();
+        shortcutSummonActionShieldCases();
         std::cout << "input shortcut native model/real route: " << passed << " cases passed\n";
     } catch (const std::exception& error) { std::cerr << "FAIL " << error.what() << '\n'; return 1; }
     return 0;

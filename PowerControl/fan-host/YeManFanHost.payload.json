@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "install-fan-host-payload.ps1",
-      "sha256": "7aedc1ab24e3291b1a1a320406e674aaca658bf189394a6d816bbde89c05f94f"
+      "sha256": "ac33bb2ef2d90684fb962a95be0cfa850ddfea207ad85deef1cc844c77819be2"
     },
     {
       "path": "run-emergency-fan-restore.ps1",
@@ -13,11 +13,11 @@
     },
     {
       "path": "YeManFanBackend.dll",
-      "sha256": "fb2f9396d81594bf573d158c5c9e216a1abc5e3820ba088297262da84d845d60"
+      "sha256": "f59113d094e1d5c8d15472ce7bef7b93c37a9bbd2b60db96b0520eaf94df3429"
     },
     {
       "path": "YeManFanHost.authorization.md",
-      "sha256": "b1230fa9df108ab0da110222d7fcd18050fb2023a7a7d8c31044d6955108d3aa"
+      "sha256": "ef8cd6599f28526af1c5b74d20b710d1fd55b52bd8cd2dbc0c239ce56bcec783"
     },
     {
       "path": "YeManFanHost.deps.json",
@@ -25,11 +25,11 @@
     },
     {
       "path": "YeManFanHost.dll",
-      "sha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df"
+      "sha256": "fcf9152b7c6a47b14150a130c31a8e7f1b2420306e9fc079e7435b9db52c8651"
     },
     {
       "path": "YeManFanHost.exe",
-      "sha256": "a3ce266b880f67045d3f895e2fc68b1fe81f641d5f1a08a01f0de19d2458f733"
+      "sha256": "f1163d7aafacaa376e32d6ab14f10dd1b3c51380ff9be7b392573f9aeba77c0e"
     },
     {
       "path": "YeManFanHost.json",

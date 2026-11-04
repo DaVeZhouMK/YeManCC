@@ -32,7 +32,14 @@ export function wireWindowsCalibrationContext(base,source){
  if(tail.split(marker).length!==2)throw Error('Candidate metadata declaration missing');
  const contextNames=['t_windowsProcessingMeta','t_windowsProcessingStamp'];if(source.includes('static thread_local const WindowsSensorView* t_windowsProcessingView='))contextNames.push('t_windowsProcessingView');
  const globals=contextNames.map(name=>{const row=source.split(/\r?\n/).find(l=>l.startsWith('static thread_local ')&&l.includes(name+'='));if(!row)throw Error('Missing actual processing global '+name);return row;});
- for(const name of ['t_windowsProcessingMeta','t_windowsProcessingStamp'])if(tail.includes('static thread_local ')&&new RegExp('static thread_local [^;]*\\b'+name+'\\b').test(tail))throw Error('Calibration fixture context already declared');
+ // Fresh producers already carry the real metadata context. Reuse only the
+ // exact current declaration, then place the complete context once for this
+ // consumer; a conflicting or duplicate declaration remains an error.
+ for(const name of contextNames){
+  const existing=tail.split(/\r?\n/).filter(row=>row.startsWith('static thread_local ')&&row.includes(name+'='));
+  if(existing.length>1||existing.length===1&&existing[0]!==globals[contextNames.indexOf(name)])throw Error('Calibration fixture context differs '+name);
+  if(existing.length)tail=tail.replace(existing[0],'');
+ }
  tail=tail.replace(marker,marker+'\n'+(contextNames.includes('t_windowsProcessingView')?'using WindowsSensorView=ymcc::sensors::view::Snapshot<InputCaptureSensorMeta>;\n':'')+globals.join('\n'));
  const bindings=[];
  if(source.includes('static bool inputCapturePrivateStandardApiBound(')){

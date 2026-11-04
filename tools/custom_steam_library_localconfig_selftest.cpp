@@ -1,4 +1,22 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <windows.h>
+#include <string>
+#include <cstring>
+
+static std::wstring transactionFixtureSteamRoot;
+static LSTATUS WINAPI transactionFixtureRegistry(HKEY,LPCWSTR,LPCWSTR,DWORD,LPDWORD type,PVOID data,LPDWORD bytes){
+    if(transactionFixtureSteamRoot.empty())return ERROR_FILE_NOT_FOUND;
+    const DWORD size=static_cast<DWORD>((transactionFixtureSteamRoot.size()+1)*sizeof(wchar_t));if(type)*type=REG_SZ;
+    if(!data){*bytes=size;return ERROR_SUCCESS;}if(*bytes<size){*bytes=size;return ERROR_MORE_DATA;}
+    std::memcpy(data,transactionFixtureSteamRoot.c_str(),size);*bytes=size;return ERROR_SUCCESS;
+}
+#define RegGetValueW transactionFixtureRegistry
+
 #include "custom_steam_library_test_runtime.h"
+#undef RegGetValueW
 
 static void expect(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -118,12 +136,15 @@ static json runMustFailCase(const fs::path& root, const std::wstring& name, bool
 
 int wmain(int argc, wchar_t** argv) {
     try {
-        expect(argc == 2, "Pass a new fixture directory inside workspace Build");
+        expect(argc == 2 || (argc==3 && std::wstring(argv[2])==L"--transaction-storm"), "Pass a new fixture directory inside workspace Build");
         const auto root = fs::absolute(argv[1]);
         const auto workspaceBuild = fs::absolute(fs::path(__FILE__).parent_path() / L".." / L".." / L".." / L"Build").lexically_normal();
-        expect(pathWithin(root, workspaceBuild), "Fixture root must be inside workspace Build");
+        const auto evidence=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L".."/L"Testing"/L"YMCC"/L"Evidence").lexically_normal();
+        expect(pathWithin(root, workspaceBuild)||pathWithin(root,evidence), "Fixture root must be inside workspace Build");
         expect(!fs::exists(root), "Fixture directory must be new");
         fs::create_directories(root);
+        transactionFixtureSteamRoot=(root/L"isolated-steam-discovery").wstring();putText(fs::path(transactionFixtureSteamRoot)/L"steam.exe","fixture discovery only");
+        SetEnvironmentVariableW(L"YEMAN_GAME_WHITELIST_PATH",(root/L"isolated-whitelist.txt").c_str());SetEnvironmentVariableW(L"YEMAN_PLAYER_BLACKLIST_PATH",(root/L"isolated-blacklist.txt").c_str());
         const std::string valid = "\"localconfig\"\n{\n\t\"KeepThisSetting\"\t\t\"original\"\n\t\"RecentLocalPlayedGameIDs\"\t\t\"\"\n}\n";
         json cases = json::array();
         cases.push_back(runCommitCase(root, L"missing-first-import", std::nullopt, "localconfig-missing"));
@@ -142,11 +163,18 @@ int wmain(int argc, wchar_t** argv) {
         cases.push_back(runMustFailCase(root, L"steam-close-not-confirmed", false, false, false));
         cases.push_back(runMustFailCase(root, L"shortcuts-changed-after-planning", false, true, true));
         cases.push_back(runMustFailCase(root, L"steam-still-running", false, true, false, true));
-        const json report{{"allPassed", true}, {"caseCount", cases.size()}, {"cases", cases}, {"fixtures", toUtf8(root.wstring())},
+
+        if(argc==3){
+            for(const auto* mode:{L"wrong-account-target",L"old-account-plan"}){
+                const auto p=root/mode;const SteamShortcutTarget target{p/L"Steam"/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf",std::wstring(mode)==L"wrong-account-target"?"99999":"19627"};putText(p/L"Steam"/L"steam.exe","fixture");auto plan=fixturePlan(p,target,true);if(std::wstring(mode)==L"old-account-plan")plan["accountId"]="99999";bool failed=false;try{commitPreparedSteamAddPlan(p/L"data",target,p/L"data"/L"state"/L"plan.json",true,plan);}catch(...){failed=true;}cases.push_back({{"name",toUtf8(mode)},{"passed",failed&&!fs::exists(target.path)}});
+            }
+        }
+        bool all=true;for(const auto& item:cases)if(!item["passed"].get<bool>())all=false;
+        const json report{{"allPassed", all}, {"caseCount", cases.size()}, {"cases", cases}, {"fixtures", toUtf8(root.wstring())},
             {"realSteamFilesModified", false}, {"steamStoppedOrLaunched", false}};
         writeJsonAtomic(root / L"summary.json", report);
         std::cout << report.dump(2) << "\n";
-        return 0;
+        return all?0:1;
     } catch (const std::exception& error) {
         std::cerr << "LOCALCONFIG_SELFTEST_FAILED: " << error.what() << "\n";
         return 1;

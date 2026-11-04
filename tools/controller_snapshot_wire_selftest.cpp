@@ -48,12 +48,17 @@ struct Trace{
  uint64_t owned=0,checks=0,failures=0;
  std::string error;
 };
+static bool controllerCopyElisionOnly=false;
 static size_t checks=0,cases=0;
 static std::vector<std::string> failures;
 static void check(bool yes,const std::string& label){++checks;if(!yes&&failures.size()<200)failures.push_back(label);}
 static Trace emit(bool useCandidate,const std::string& ev,const json& data){
  Trace t;
- try{if(useCandidate){if(ev=="gyro.telemetry")candidate::ipc_emit_owned_gyro_telemetry(ev,data);else candidate::ipc_emit(ev,data);}else{if(ev=="gyro.telemetry")baseline::ipc_emit_owned_gyro_telemetry(ev,data);else baseline::ipc_emit(ev,data);}}
+ try{if(useCandidate){
+#ifdef YMCC_CONTROLLER_OWNED_ENVELOPE
+ if(ev=="gamepad.state")candidate::ipc_emit_owned_gamepad_state(data);else
+#endif
+ if(ev=="gyro.telemetry")candidate::ipc_emit_owned_gyro_telemetry(ev,data);else candidate::ipc_emit(ev,data);}else{if(ev=="gyro.telemetry")baseline::ipc_emit_owned_gyro_telemetry(ev,data);else baseline::ipc_emit(ev,data);}}
  catch(const json::exception& e){t.error=std::to_string(e.id)+":"+e.what();}
  catch(const std::exception& e){t.error=e.what();}
  if(useCandidate){t.posts=candidate::posts;t.resolutions=candidate::resolutions;t.scopes=candidate::scopeEvents;t.feedback=candidate::feedbackEvents;t.diagnostics=candidate::diagnosticEvents;t.gates=candidate::gateCalls;t.conversions=candidate::conversions;t.dumps=candidate::deliveryDumps;t.postCalls=candidate::postCalls;t.owned=candidate::g_c17aOwnedEvents.load();t.checks=candidate::g_c17aParityChecks.load();t.failures=candidate::g_c17aParityFailures.load();}
@@ -82,7 +87,11 @@ static json payload(bool wide){
  return j;
 }
 static double median(std::vector<double> v){std::sort(v.begin(),v.end());return v[v.size()/2];}
-static void directEmit(bool c,const std::string& ev,const json& j){if(c){if(ev=="gyro.telemetry")candidate_measured::ipc_emit_owned_gyro_telemetry(ev,j);else candidate_measured::ipc_emit(ev,j);}else{if(ev=="gyro.telemetry")baseline_measured::ipc_emit_owned_gyro_telemetry(ev,j);else baseline_measured::ipc_emit(ev,j);}}
+static void directEmit(bool c,const std::string& ev,const json& j){if(c){
+#ifdef YMCC_CONTROLLER_OWNED_ENVELOPE
+ if(ev=="gamepad.state"){candidate_measured::ipc_emit_owned_gamepad_state(j);return;}
+#endif
+ if(ev=="gyro.telemetry")candidate_measured::ipc_emit_owned_gyro_telemetry(ev,j);else candidate_measured::ipc_emit(ev,j);}else{if(ev=="gyro.telemetry")baseline_measured::ipc_emit_owned_gyro_telemetry(ev,j);else baseline_measured::ipc_emit(ev,j);}}
 static json measure(const std::string& ev,const json& j,int targets,bool logging){
  baseline_measured::reset(targets,logging);candidate_measured::reset(targets,logging);baseline_measured::observing=candidate_measured::observing=false;
  std::array<uint64_t,2> requests{},bytes{};
@@ -101,13 +110,13 @@ static json measure(const std::string& ev,const json& j,int targets,bool logging
   if(known&&cycles[0])cycleRatios.push_back(static_cast<double>(cycles[1])/static_cast<double>(cycles[0]));
   pairs.push_back({{"baselineNs",times[0]},{"candidateNs",times[1]},{"cyclesKnown",known},{"baselineCycles",cycles[0]},{"candidateCycles",cycles[1]}});
  }
- const double ratio=median(ratios),a=median(oldNs),b=median(newNs);const bool hot=(ev=="gamepad.state"||ev=="gyro.telemetry")&&targets>1;
+ const double ratio=median(ratios),a=median(oldNs),b=median(newNs);const bool hot=(ev=="gamepad.state"||(!controllerCopyElisionOnly&&ev=="gyro.telemetry"))&&targets>1;
  const bool alloc=hot?(requests[1]<requests[0]&&bytes[1]<bytes[0]):(requests[1]<=requests[0]&&bytes[1]<=bytes[0]);
  const bool timing=hot?(ratio<=.95&&faster>=9&&cycleRatios.size()==11&&median(cycleRatios)<=.95):((ratio<=1.05)||(b-a<=100));
  return {{"event",ev},{"targets",targets},{"logging",logging},{"baselineMedianNs",a},{"candidateMedianNs",b},{"pairedMedianRatio",ratio},{"pairedMedianCycleRatio",cycleRatios.empty()?json(nullptr):json(median(cycleRatios))},{"fasterPairs",faster},{"baselineRequests",requests[0]},{"candidateRequests",requests[1]},{"baselineBytes",bytes[0]},{"candidateBytes",bytes[1]},{"hotMultitarget",hot},{"accepted",alloc&&timing},{"pairs",pairs}};
 }
 int main(int argc,char** argv){
- if(argc<2)return 2;bool correctnessOnly=false,negative=false,negativeConversion=false;for(int i=2;i<argc;++i){correctnessOnly|=std::string(argv[i])=="--correctness-only";negative|=std::string(argv[i])=="--expect-negative";negativeConversion|=std::string(argv[i])=="--expect-conversion-negative";}
+ if(argc<2)return 2;bool correctnessOnly=false,negative=false,negativeConversion=false;for(int i=2;i<argc;++i){controllerCopyElisionOnly|=std::string(argv[i])=="--copy-elision-only";correctnessOnly|=std::string(argv[i])=="--correctness-only";negative|=std::string(argv[i])=="--expect-negative";negativeConversion|=std::string(argv[i])=="--expect-conversion-negative";}
  std::vector<json> inputs{payload(false),payload(true),json::object(),nullptr,42,json::array({1,2}),json{{"invalid",std::string("\xC0\x80",2)}},json{{"float",std::numeric_limits<double>::infinity()}}};
  for(const auto& ev:{"gamepad.state","gyro.telemetry","other.snapshot","power.suspending","power.resumed","power.sourceChanged","gamepad.brightness","gamepad.mouse-toggle"})
   for(const auto& j:inputs)for(int targets:{0,1,2,4})for(bool log:{false,true})for(bool dead:{false,true})compare(ev,j,targets,log,dead);

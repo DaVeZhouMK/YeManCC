@@ -1,3 +1,27 @@
+import runtimeFs from 'node:fs';
+import runtimePath from 'node:path';
+import {createRequire as createCpuVoltageRequire} from 'node:module';
+
+// Resolve the actual selected Vue/compiler runtime once for the original CPU
+// consumer. Other case preparation and identity-only inventory do not load it.
+function cpuVoltageRuntimeInputs(repo, identityOnly, selectedIds) {
+  if (identityOnly || selectedIds?.length && !selectedIds.includes('performance.dormant-cpu-capability')) return [];
+  const require = createCpuVoltageRequire(runtimePath.join(repo, 'package.json'));
+  const inputs = new Set();
+  const modulesRoot = runtimeFs.realpathSync(runtimePath.join(repo, 'node_modules')) + runtimePath.sep;
+  const visit = file => {
+    if (inputs.has(file) || !file.startsWith(modulesRoot)) return;
+    inputs.add(file);
+    for (let folder = runtimePath.dirname(file); folder.startsWith(modulesRoot); folder = runtimePath.dirname(folder)) {
+      const metadata = runtimePath.join(folder, 'package.json');
+      if (runtimeFs.existsSync(metadata)) inputs.add(metadata);
+    }
+    for (const child of require.cache[file]?.children ?? []) visit(child.filename);
+  };
+  for (const name of ['vue', '@vue/compiler-sfc']) { require(name); visit(require.resolve(name)); }
+  return [...inputs].sort();
+}
+
 import {getSignalEvidenceAdapters} from './controller-signal-evidence/adapter.mjs';
 
 
@@ -383,6 +407,7 @@ const performanceOwnershipInputs = [
 
 
   'package.json', 'src/App.vue', 'src/bridge/controllerPersona.ts',
+  'src/bridge/settingsSnapshot.ts',
 
 
   'src/bridge/frameRateModel.ts', 'src/bridge/gamePolicyRuntime.ts',
@@ -410,6 +435,7 @@ const performanceEntryParityInputs = [...performanceOwnershipInputs,
 
 
   'src/bridge/deckyPerformanceActions.ts', 'src/bridge/deckyProfileActions.ts',
+  'src/bridge/gameCustomProfileTarget.ts',
 
 
   'src/bridge/gamePolicyHysteresis.ts', 'src/bridge/quickActionLock.ts',
@@ -433,7 +459,7 @@ const performanceSliderDraftInputs = [
   'package.json', 'tools/lib/continuousPerformancePreview.mjs',
 
 
-  'src/components/ContinuousPerformancePanel.vue', 'src/components/Slider.vue',
+  'src/components/ContinuousPerformancePanel.vue', 'src/components/Slider.vue', 'src/components/SwitchControl.vue',
 
 
   'src/components/Dropdown.vue', 'src/components/AppIcon.vue', 'src/components/InlineIcon.vue',
@@ -1168,7 +1194,7 @@ const make = (id, domain, title, kind, path, evidenceInputs, options = {}) => {
 /** repoRoot is runner-owned; inventory is stable even if required files go missing. */
 
 
-export function getAdapters(_repoRoot) {
+export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
 
 
   return [
@@ -1192,7 +1218,7 @@ export function getAdapters(_repoRoot) {
       {args:['{outDir}'],resultFiles:['usbip-upgrade-result.json'],timeoutMs:120000}),
 
 
-    ...getSignalEvidenceAdapters(_repoRoot),
+    ...(!selectedIds?.length || selectedIds.includes('controller.signal-evidence') ? getSignalEvidenceAdapters(_repoRoot,{identityOnly}) : []),
 
 
     make('settings.boot-mode-startup-boundary', 'settings', 'Windows boot identity preserves current input across YMCC restart, retires dead owners and delays next-scene input; actual native JSON consumer and process-replay negative', 'node',
@@ -1991,7 +2017,10 @@ export function getAdapters(_repoRoot) {
       "node", "tools/ymcc_sim/global/sensor-power-consumer/run.mjs",
 
 
-      ["native/main.cpp", "native/sensor_thread_mailbox.h", "deps/json/json.hpp",
+      ["native/main.cpp", "native/sensor_virtual_link_wake.h", "native/input_frame_submission.h",
+       "native/input_host_recovery_health.h", "native/virtual_output_status.h", "native/virtual_switch_verification_runtime.h",
+       "native/sensor_thread_mailbox.h", "native/sensor_device_change.h", "native/sensor_inventory_cache.h",
+       "native/sensor_inventory.h", "native/windows_motion_submission.h", "native/sleep_notification_evidence.h", "deps/json/json.hpp",
 
 
        "tools/ymcc_sim/global/sensor-power-consumer/fixture.cpp.in",
@@ -2009,7 +2038,7 @@ export function getAdapters(_repoRoot) {
     make("controller.mouse-auto", "controller", "Native mouse automatic foreground policy and stale-enable withdrawal", "node",
 
 
-      "tools/mouse_mode_policy_selftest.mjs", ["native/mouse_mode_policy.h", "native/mouse_mode_foreground.h", "native/mouse_mode_foreground_rules.h", "deps/json/json.hpp", "tools/mouse_mode_policy_selftest.cpp", "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"],
+      "tools/mouse_mode_policy_selftest.mjs", ["native/main.cpp", "native/game_application_catalog.h", "native/game_library_blacklist_entries.h", "native/mouse_mode_application_rules.h", "tools/fixtures/legion_motion_consumer/extract_main.mjs", "native/mouse_mode_policy.h", "native/mouse_mode_foreground.h", "native/mouse_mode_foreground_rules.h", "deps/json/json.hpp", "tools/mouse_mode_policy_selftest.cpp", "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"],
 
 
       {args:["{outDir}"],resultFiles:["mouse-policy-result.json"],timeoutMs:60000}),
@@ -2027,7 +2056,7 @@ export function getAdapters(_repoRoot) {
     make("controller.mouse-native", "controller", "Mouse backend direct process control and SteamDeck admission", "node",
 
 
-      "tools/mouse_mode_native_selftest.mjs", ["src/bridge/ipc.ts", "src/bridge/steamDeckMouse.ts", "src/bridge/gameproc.ts", "native/main.cpp", "native/mouse_mode_com_apartment.h", "native/mouse_mode_policy.h", "native/mouse_mode_foreground.h", "native/mouse_mode_foreground_rules.h", "tools/mouse_mode_policy_selftest.cpp", "tools/mouse_mode_policy_selftest.mjs", "native/mouse_backend_process.h", "native/process_efficiency.h", "native/process_efficiency_inventory.h", "native/shortcut_feedback_native.h", "tools/mouse_mode_control_fixture.cpp", "tools/mouse_backend_fixture.cpp", "tools/mouse_backend_process_selftest.cpp", "tools/mouse_backend_settings_show_selftest.cpp", "tools/mouse_backend_settings_show_selftest.mjs", "tools/mouse_mode_bridge_selftest.mjs", "tools/mouse_status_hint_selftest.mjs", "src/bridge/mouseStatusHint.ts", "src/bridge/mouseModeState.ts", "src/bridge/desktopHudProtocol.ts", "src/bridge/mouseModePresentation.ts", "src/bridge/monitorHudModel.ts", "src/bridge/shortcutActionFeedback.ts", "tools/fixtures/legion_motion_consumer/extract_main.mjs", "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"],
+      "tools/mouse_mode_native_selftest.mjs", ["src/bridge/ipc.ts", "src/bridge/uiLifecycle.ts", "native/process_basic_candidates.h", "native/process_inventory.h", "src/bridge/steamDeckMouse.ts", "src/bridge/gameproc.ts", "native/main.cpp", "native/mouse_mode_com_apartment.h", "native/mouse_mode_policy.h", "native/mouse_mode_foreground.h", "native/mouse_mode_foreground_rules.h", "tools/mouse_mode_policy_selftest.cpp", "tools/mouse_mode_policy_selftest.mjs", "native/mouse_backend_process.h", "native/process_efficiency.h", "native/process_efficiency_inventory.h", "native/shortcut_feedback_native.h", "tools/mouse_mode_control_fixture.cpp", "tools/mouse_backend_fixture.cpp", "tools/mouse_backend_process_selftest.cpp", "tools/mouse_backend_settings_show_selftest.cpp", "tools/mouse_backend_settings_show_selftest.mjs", "tools/mouse_mode_bridge_selftest.mjs", "tools/mouse_status_hint_selftest.mjs", "src/bridge/mouseStatusHint.ts", "src/bridge/mouseModeState.ts", "src/bridge/desktopHudProtocol.ts", "src/bridge/mouseModePresentation.ts", "src/bridge/monitorHudModel.ts", "src/bridge/shortcutActionFeedback.ts", "tools/fixtures/legion_motion_consumer/extract_main.mjs", "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"],
 
 
       {args:["{outDir}"],resultFiles:["mouse-mode-native-result.json"],timeoutMs:60000}),
@@ -2105,7 +2134,7 @@ export function getAdapters(_repoRoot) {
     make('controller.lossless-return-focus', 'controller', 'Exact original game return after LS with three attempts inside ten seconds and bounded teardown', 'node',
 
 
-      'tools/lossless_return_focus_selftest.mjs', ['native/main.cpp','native/lossless_return_focus.h','native/resume_focus.h','native/monitor_identity.h','tools/lossless_return_focus_selftest.cpp','tools/lossless_return_focus_selftest.py','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
+      'tools/lossless_return_focus_selftest.mjs', ['native/main.cpp','native/lossless_return_focus.h','native/resume_focus.h','native/monitor_identity.h','native/process_inventory.h','tools/lossless_return_focus_selftest.cpp','tools/lossless_return_focus_selftest.py','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
 
 
       {args:['{outDir}'],resultFiles:['lossless-return-focus-result.json'],timeoutMs:60000}),
@@ -2114,7 +2143,7 @@ export function getAdapters(_repoRoot) {
     make('controller.lossless-toggle-owner', 'controller', 'Shared per-game Lossless configuration switch and exact stop-before-profile-removal under Xbox UIA failure', 'node',
 
 
-      'tools/lossless_toggle_owner_selftest.mjs', ['src/bridge/quickapp.ts','src/bridge/api.ts','src/bridge/ipc.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/decky_sidebar_diagnostics.h','native/lossless_runtime.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','native/main.cpp','tools/lossless_launch_selftest.cpp','tools/lossless_scaling_selftest.mjs','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/fixtures/decky_task_paths.mjs'],
+      'tools/lossless_toggle_owner_selftest.mjs', ['src/bridge/losslessProgramState.ts','src/bridge/quickapp.ts','src/bridge/api.ts','src/bridge/ipc.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/decky_sidebar_diagnostics.h','native/lossless_runtime.h','native/process_basic_candidates.h', 'native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','native/main.cpp','tools/lossless_launch_selftest.cpp','tools/lossless_scaling_selftest.mjs','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/fixtures/decky_task_paths.mjs'],
 
 
       {args:['{outDir}'],resultFiles:['lossless-owner-result.json'],timeoutMs:60000}),
@@ -2222,7 +2251,7 @@ export function getAdapters(_repoRoot) {
 
       {args:['--focus-only','--out','{outDir}'],resultFiles:['boot-focus-result.json'],timeoutMs:90000}),
 
-    make("steam.contact-source", "steam", "Read-only Steam contact UI source contract", "node",
+    make("steam.contact-source", "steam", "Retired repair UI unmounted; retained Steam contact stays read-only", "node",
 
 
       "tools/steam_contact_ui_selftest.mjs", ["src/bridge/steamGameLink.ts", "src/views/SteamView.vue"], {"scope":"source-contract"}),
@@ -2272,6 +2301,21 @@ export function getAdapters(_repoRoot) {
 
       "tools/gyro_motorcycle_selftest.ts", ["package.json", "src/gyroSimulation/motorcycle.ts", "tsconfig.json"]),
 
+
+    make('performance.tdp-catalog-consumer', 'performance', 'Unified TDP generated data, module public ABI and actual native model/provider consumer', 'powershell',
+      'tools/tdp_capability_catalog_selftest.ps1', ['tools/tdp_capability_catalog_selftest.py','tools/log_frequency_selftest.py','tools/tdp_capability_catalog_generate.mjs','tools/lib/tdp_capability_catalog.mjs','tools/tdp_runtime_manifest_selftest.ps1','tools/lib/tdp-runtime-manifest.ps1','tools/package-release.ps1','tools/deploy-installed.ps1','PowerControl/pawnio/tdp-runtime-manifest.json','PowerControl/pawnio/YeManTdpCtl.py','PowerControl/pawnio/YeManTdpCtl.spec','capabilities/upstream/uxtu-26.3.1/Intel_Management.cs','capabilities/upstream/uxtu-26.3.1/MainWindow.xaml.cs','capabilities/upstream/uxtu-26.3.1/CustomPresets.xaml.cs','capabilities/upstream/uxtu-26.3.1/RyzenAdj_To_UXTU.cs','capabilities/upstream/uxtu-26.3.1/modules/RyzenSMU.bin','capabilities/upstream/uxtu-26.3.1/modules/IntelMSR.bin',
+       'capabilities/uxtu-tdp-policy.json','capabilities/TdpCapabilityCatalog.generated.h','capabilities/hc-device-catalog.json','capabilities/hc-device-catalog.generated.h','capabilities/hc-performance-metadata.json','capabilities/upstream/uxtu-26.3.1/RyzenSmu.cs','capabilities/upstream/uxtu-26.3.1/Family.cs',
+       'native/main.cpp','src/bridge/legacyCpuFeaturePolicy.ts','tools/release-assets.lock.json','tools/ymcc_sim/global/tdp-protocol-consumer/toolchain-inputs.json',
+       'PowerControl/pawnio/RyzenSMU.bin','PowerControl/pawnio/IntelMSR.bin','PowerControl/pawnio/AMDFamily17.bin','PowerControl/pawnio/_internal/RyzenSMU.bin','PowerControl/pawnio/_internal/IntelMSR.bin','PowerControl/pawnio/_internal/AMDFamily17.bin',"PowerControl/pawnio/PawnIO_setup.exe","PowerControl/pawnio/YeManTdpCtl.exe","PowerControl/pawnio/_internal/COPYING","PowerControl/pawnio/_internal/VCRUNTIME140.dll","PowerControl/pawnio/_internal/_bz2.pyd","PowerControl/pawnio/_internal/_ctypes.pyd","PowerControl/pawnio/_internal/_decimal.pyd","PowerControl/pawnio/_internal/_hashlib.pyd","PowerControl/pawnio/_internal/_lzma.pyd","PowerControl/pawnio/_internal/_socket.pyd","PowerControl/pawnio/_internal/_ssl.pyd","PowerControl/pawnio/_internal/base_library.zip","PowerControl/pawnio/_internal/libcrypto-3.dll","PowerControl/pawnio/_internal/libffi-8.dll","PowerControl/pawnio/_internal/libssl-3.dll","PowerControl/pawnio/_internal/python313.dll","PowerControl/pawnio/_internal/select.pyd","PowerControl/pawnio/_internal/unicodedata.pyd"],
+      {args:['-EvidenceDir','{outDir}'],timeoutMs:90000,resultFiles:['tdp-catalog-result.json'],
+       artifactInputs:[process.execPath,'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe','C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat','C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe'],
+       boundary:'Actual native capability descriptor and generated shared model alias join with inert identity ports; positive all-alias replay and selected range/model negative mutations. Module bytes/container/public ABI and actual package/deploy sidecar copies in owned fixture roots only, no VM/module load/driver/OS hardware acceptance. Existing scheduler and inactive core/UV retained; cache unproven and explicit run only.'}),
+
+    make('performance.dormant-cpu-capability', 'performance', 'Inactive CCD/UV bridge guards and compiled native pure functions with fake services', 'node',
+      'tools/retired_power_pages_selftest.mjs', ['package.json', 'src/bridge/cpuctl.ts', 'src/components/UndervoltCard.vue', 'src/bridge/legacyCpuFeaturePolicy.ts', 'src/bridge/cpuCapabilityPolicy.generated.ts', 'src/bridge/autostart.ts', 'src/bridge/residentNavigation.ts', 'src/App.vue', 'native/main.cpp'],
+      {args:['--evidence-dir','{outDir}','--scope','bridge'],resultFiles:['retired-power-pages-test.json'],artifactInputs:[process.execPath,'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat','C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe',...['typescript/lib/typescript.js','typescript/package.json','esbuild/lib/main.js','esbuild/package.json','@esbuild/win32-x64/esbuild.exe','@esbuild/win32-x64/package.json'].map(file=>_repoRoot+'/node_modules/'+file),...cpuVoltageRuntimeInputs(_repoRoot,identityOnly,selectedIds)],
+       completionContract:{schemaVersion:1,rules:[{line:'Legacy CPU inactive selftest: PASS'}]},
+       boundary:'Original inactive/test-only-active bridge, compiled actual UndervoltCard setup/template, startup guards and extracted CCD pure/lifecycle functions. Selected Vue/compiler runtime inputs are bound; Slider import is inert. Router runtime, real DOM/viewport/gamepad and OS/header/compiler transitive closure remain unproven in bridge scope. No product affinity/device/config write; original 30000ms limit and minimum unchanged.'}),
 
     make("performance.cpu-state", "performance", "Normalized CPU and HUD render-state equivalence", "typescript",
 
@@ -2348,7 +2392,7 @@ export function getAdapters(_repoRoot) {
       "tools/continuous_float_runtime_selftest.mjs", ["src/bridge/autofloat.ts", "src/bridge/monitorCoreTiles.ts", "src/bridge/monitorFpsHardware.ts", "src/bridge/monitorFrameTime.ts", "src/bridge/monitorSnapshotSignals.ts", "src/bridge/performanceControls.ts"]),
 
 
-    getMusicPlayerToolScopeAdapter(_repoRoot),
+    ...(!selectedIds?.length || selectedIds.includes('audio.music-player') ? [getMusicPlayerToolScopeAdapter(_repoRoot,{identityOnly})] : []),
 
 
     make("steam.ui-mode-service", "steam", "Steam UI service and shipped JS operation in isolated VM", "node",
@@ -2396,7 +2440,7 @@ export function getAdapters(_repoRoot) {
     make('plugins.wallpaper-host','plugins','Production wallpaper host acknowledgement, visible-only scans, metadata recovery and lifecycle fences','typescript',
 
 
-      'tools/steam_wallpaper_host_selftest.ts',[...gameLibraryMediaShortcutsInputs,'src/bridge/deckyMirrorExtensions.ts','src/bridge/background.ts','src/bridge/steamWallpaperHost.ts','src/bridge/steamWallpaperDelivery.ts']),
+      'tools/steam_wallpaper_host_selftest.ts',[...gameLibraryMediaShortcutsInputs,'src/bridge/deckyMirrorExtensions.ts','src/bridge/background.ts','src/bridge/steamWallpaperHost.ts','src/bridge/steamWallpaperDelivery.ts','src/App.vue','PowerControl/settings-baseline.json','src/bridge/bootModeSharedShortcuts.ts','src/bridge/settingsBaseline.ts']),
 
 
     make('plugins.wallpaper-background','plugins','Production wallpaper player background admission, late events and release','typescript',
@@ -2420,7 +2464,7 @@ export function getAdapters(_repoRoot) {
     make("performance.gpu-library", "performance", "Shipped GPU capability curves and model admission", "node",
 
 
-      "tools/gpu_capability_library_selftest.mjs", ["public/performance-simulation/frame-pipeline.js", "public/performance-simulation/frame-work.js", "public/performance-simulation/gpu-capability-library.js", "public/performance-simulation/index.html", "public/performance-simulation/optimization-curve.js", "public/performance-simulation/ts-power-curve.js", "tools/lib/simulationModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["gpu-capability-verification.json"]}),
+      "tools/gpu_capability_library_selftest.mjs", ["src/performance/ts/model.ts","src/performance/ts/calibration.ts","src/performance/ts/gpuCapabilityLibrary.ts","src/performance/ts/optimizationCurve.ts","src/performance/ts/smt.ts","src/bridge/performanceControls.ts","src/bridge/frameRateModel.ts","tools/performance_ts_model_selftest.mjs","tools/lib/tsModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["gpu-capability-verification.json"]}),
 
 
     make("screen.standalone-actions", "display", "Screen standalone Steam menu actions in an isolated receiver VM", "node",
@@ -2447,28 +2491,16 @@ export function getAdapters(_repoRoot) {
       "tools/game_profile_editor_selftest.mjs", performanceGameProfileEditorInputs),
 
 
-    make("performance.simulation-work", "performance", "Production CPU/GPU frame work simulation model", "node",
-
-
-      "tools/performance_simulation_work_selftest.mjs", ["public/performance-simulation/frame-pipeline.js", "public/performance-simulation/frame-work.js", "public/performance-simulation/gpu-capability-library.js", "public/performance-simulation/index.html", "public/performance-simulation/optimization-curve.js", "public/performance-simulation/ts-power-curve.js", "tools/lib/simulationModelHarness.mjs"], {"timeoutMs":60000,"args":["{outDir}"],"resultFiles":["model-verification.json"]}),
-
-
-    make("performance.simulation-pipeline", "performance", "CPU/GPU frame pipeline simulation and boundaries", "node",
-
-
-      "tools/performance_simulation_pipeline_selftest.mjs", ["public/performance-simulation/frame-pipeline.js", "public/performance-simulation/frame-work.js", "public/performance-simulation/gpu-capability-library.js", "public/performance-simulation/index.html", "public/performance-simulation/optimization-curve.js", "public/performance-simulation/ts-power-curve.js", "tools/lib/simulationModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["pipeline-verification.json"]}),
-
-
     make("performance.simulation-optimization", "performance", "Continuous optimization curves in the shipped simulation", "node",
 
 
-      "tools/performance_simulation_optimization_selftest.mjs", ["public/performance-simulation/frame-pipeline.js", "public/performance-simulation/frame-work.js", "public/performance-simulation/gpu-capability-library.js", "public/performance-simulation/index.html", "public/performance-simulation/optimization-curve.js", "public/performance-simulation/ts-power-curve.js", "tools/lib/simulationModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["optimization-curve-verification.json"]}),
+      "tools/performance_simulation_optimization_selftest.mjs", ["src/performance/ts/model.ts","src/performance/ts/calibration.ts","src/performance/ts/gpuCapabilityLibrary.ts","src/performance/ts/optimizationCurve.ts","src/performance/ts/smt.ts","src/bridge/performanceControls.ts","src/bridge/frameRateModel.ts","tools/performance_ts_model_selftest.mjs","tools/lib/tsModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["optimization-curve-verification.json"]}),
 
 
     make("performance.simulation-power", "performance", "Monotone power/latency curves across device models", "node",
 
 
-      "tools/performance_simulation_monotone_power_selftest.mjs", ["public/performance-simulation/frame-pipeline.js", "public/performance-simulation/frame-work.js", "public/performance-simulation/gpu-capability-library.js", "public/performance-simulation/index.html", "public/performance-simulation/optimization-curve.js", "public/performance-simulation/ts-power-curve.js", "tools/lib/simulationModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["monotone-power-verification.json"]}),
+      "tools/performance_simulation_monotone_power_selftest.mjs", ["src/performance/ts/model.ts","src/performance/ts/calibration.ts","src/performance/ts/gpuCapabilityLibrary.ts","src/performance/ts/optimizationCurve.ts","src/performance/ts/smt.ts","src/bridge/performanceControls.ts","src/bridge/frameRateModel.ts","tools/performance_ts_model_selftest.mjs","tools/lib/tsModelHarness.mjs"], {"args":["{outDir}"],"resultFiles":["monotone-power-verification.json"]}),
 
 
     make("performance.snapshot-bounds-source", "performance", "Native monitor snapshot bounds source contract", "node",
@@ -2549,7 +2581,7 @@ export const ADAPTER_EXCLUSIONS = Object.freeze([
   { path: 'tools/steam_installed_menu_keyboard_selftest.mjs', reason: 'Read-only VM test, but requires an installed Valve client outside the repository and absolute Steam/report arguments.' },
 
 
-  { path: 'tools/performance_simulation_2d_demand_selftest.mjs', reason: 'Unconditionally requires a before snapshot inside the evidence directory; a fresh case directory cannot satisfy it.' },
+
 
 
   { path: 'tools/tdp_frontend_static_selftest.ts', reason: 'Bare TS uses runtime require(path/os) and remains excluded from ESM relocation. The unchanged original is executed through the reviewed CommonJS adapter performance.tdp-frontend-consumer in tdp-consumer-signals/.' },

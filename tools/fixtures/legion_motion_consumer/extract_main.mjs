@@ -13,7 +13,7 @@ export const functions = [
   'legionMotionStableIdentity', 'legionMotionSelectedIdentityChanging',
   'legionMotionRegisterRawInput', 'gamepadRegisterRawInput', 'legionMotionDecodeReport',
   'legionMotionBoundSource', 'legionMotionSourceForSelectedLocked', 'legionMotionPublish', 'legionMotionSnapshot',
-  'legionMotionSubmissionCurrent', 'inputCaptureControllerCalibration',
+  'legionMotionSubmissionCurrent', 'inputCaptureControllerCalibrationSelectedKey', 'inputCaptureControllerCalibrationIntentCurrent', 'inputCaptureControllerCalibrationWaitingForSource', 'inputCaptureControllerCalibration',
   'inputCaptureControllerCalibrationOps', 'inputCaptureControllerCalibrationSourceKey', 'inputCaptureControllerCalibrationOutcomeName', 'inputCaptureControllerCalibrationComplete', 'inputCaptureControllerCalibrationRequest', 'inputCaptureControllerCalibrationStatus', 'inputCaptureControllerCalibrationRestoreTrust', 'inputCaptureControllerCalibrationWriteAtomic', 'inputCaptureControllerCalibrationStore', 'inputCaptureControllerCalibrationAbort', 'inputCaptureControllerCalibrationAdvance',
   'inputCaptureLegionSelectionPending', 'inputCaptureLegionMotion',
   'inputHostWindowsMotionSubmissionCurrent', 'inputHostFrameSubmissionMayIssue', 'inputHostFrameSubmissionRequestCurrent',
@@ -47,7 +47,7 @@ function endBody(text, start) {
 }
 export function extract(text, symbol, kind = 'function') {
   const regex = kind === 'function' ? new RegExp(`^static[^\\n;{]*\\b${symbol}\\s*\\(`, 'gm') :
-    new RegExp(`^struct ${symbol}\\s*\\{`, 'gm');
+    new RegExp(`^struct ${symbol}\\s*(?::[^\\n{;]+)?\\{`, 'gm');
   const found = [];
   for (const match of text.matchAll(regex)) {
     const open = text.indexOf('{', match.index), semi = text.indexOf(';', match.index);
@@ -65,6 +65,10 @@ export function extract(text, symbol, kind = 'function') {
   return found[0];
 }
 function extractWmInput(text) {
+  if (/case WM_INPUT:\s*return gamepadDispatchRawInput\(h,\s*w,\s*l\);/.test(text)) {
+    const dispatcher=extract(text,'gamepadDispatchRawInput');
+    return {...dispatcher,symbol:'WM_INPUT',kind:'block'};
+  }
   const matches=[...text.matchAll(/^\s*case WM_INPUT:\s*\{/gm)];assert.equal(matches.length,1,'Expected one WM_INPUT block');
   const start=matches[0].index,open=text.indexOf('{',start),end=endBody(text,open),code=text.slice(start,end);
   return {symbol:'WM_INPUT',kind:'block',code,sha256:sha(code),startLine:text.slice(0,start).split('\n').length,
@@ -103,7 +107,7 @@ export function freeze(repo, out) {
     startUtf8Byte:Buffer.byteLength(text.slice(0,epochDeclaration.index)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,epochDeclaration.index+epochDeclaration[0].length))});
   const anchors = ['physicalHidCaptureRawInput', 'inputCaptureOnGamepad', 'inputHostSubmitPad',
     'hidHideObserveRawInputDevice', 'hidHideGetPhysicalIdentities', 'inputCaptureShutdown',
-    'inputCaptureEmergencyCleanup', 'inputCaptureRefreshRealStickSettings', 'gamepadRecoverAfterResume',
+    'inputCaptureEmergencyCleanup', 'inputCaptureRetireResources', 'inputCaptureRefreshRealStickSettings', 'gamepadRecoverAfterResume',
     'hidHideResolveInterfaceIdentity', 'hidHideResolveRawInputIdentity', 'hidHideInvalidateRawInputIdentityCache',
     'hidHideEvictOldestResolveEntryLocked', 'hidHideResolvePhysicalIdentities'].map(s => extract(text, s));
   anchors.push(extractWmInput(text));
@@ -152,7 +156,9 @@ export function freeze(repo, out) {
       `legionMotionSelectedIdentityChanging(g_hidHidePhysicalIdentity, ${value});`, `g_hidHidePhysicalIdentity = ${value};`]));
   for (const symbol of ['inputCaptureShutdown', 'inputCaptureEmergencyCleanup'])
     require(symbol + '-controller-revoke-before-unload', ordered(get(symbol),
-      ['inputCaptureLegionMotionSessionRevoke();', 'FreeLibrary(g_gmDll)']));
+      ['inputCaptureLegionMotionSessionRevoke();', 'inputCaptureRetireResources(false)']));
+  require('common-retirement-revokes-legion-owners-before-unload',ordered(get('inputCaptureRetireResources'),[
+    'legionMotionActivationStop(g_legionBack);','legionMotionActivationStop(g_legionSBack);','debts|=Debt::OemIo','if(!dependencyDebts)','FreeLibrary(g_gmDll)']));
   require('snapshot-nonlegion-early-return-before-identity-lock', ordered(get('legionMotionSnapshot'),
     ['if (!inputCaptureLegionControllerMotionRoute()) return std::nullopt;', 'selectedLock(g_hidHidePhysicalIdentityMx)']));
   for (const symbol of ['legionMotionPublish', 'legionMotionSnapshot']) {
@@ -165,7 +171,7 @@ export function freeze(repo, out) {
   require('registration-retires-before-vendor-API', ordered(get('legionMotionRegisterRawInput'),
     ['g_legionRawInputSubscribed.store(false', 'legionMotionRevoke()', 'RegisterRawInputDevices(']));
   require('base-error-and-keyboard-channel-before-vendor-registration', ordered(get('gamepadRegisterRawInput'),
-    ['RegisterRawInputDevices(rid, 5', 'rawInputError', 'g_keyboardModifierRawSubscribed.store(', 'legionMotionRegisterRawInput(']));
+    ['RegisterRawInputDevices(gamepadRid, 3', 'gamepadRawInputError', 'RegisterRawInputDevices(keyboardMouseRid, 2', 'keyboardMouseRawInputError', 'g_keyboardModifierRawSubscribed.store(', 'legionMotionRegisterRawInput(']));
   for (const name of ['legionMotionPublish','legionMotionSnapshot','legionMotionSubmissionCurrent'])
     require(name+'-requires-vendor-subscription',get(name).includes('g_legionRawInputSubscribed.load('));
   for (const name of ['hidHideResolveInterfaceIdentity','hidHideResolveRawInputIdentity','hidHideEvictOldestResolveEntryLocked'])

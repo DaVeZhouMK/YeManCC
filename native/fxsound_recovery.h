@@ -1,5 +1,7 @@
 #pragma once
 #include "fxsound_recovery_policy.h"
+#include "process_inventory.h"
+#include <optional>
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>
@@ -40,22 +42,24 @@ inline std::wstring property(IPropertyStore* store, const PROPERTYKEY& key) {
     if (SUCCEEDED(store->GetValue(key, &v)) && v.vt == VT_LPWSTR && v.pwszVal) value = v.pwszVal;
     PropVariantClear(&v); return value;
 }
-inline ProcessState processState() {
+// Only display observation may request a short-lived hint. Every existing
+// action/default-output/configuration caller keeps the fresh (zero age) default.
+inline ProcessState processState(ULONGLONG maxAge = 0) {
     DWORD session = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) return ProcessState::unknown;
-    HANDLE handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (handle == INVALID_HANDLE_VALUE) return ProcessState::unknown;
-    PROCESSENTRY32W entry{}; entry.dwSize = sizeof(entry);
-    bool uncertain = false;
-    if (!Process32FirstW(handle, &entry)) { CloseHandle(handle); return ProcessState::unknown; }
-    do {
-        if (_wcsicmp(entry.szExeFile, L"FxSound.exe") != 0) continue;
-        DWORD owner = 0;
-        if (!ProcessIdToSessionId(entry.th32ProcessID, &owner)) { uncertain = true; continue; }
-        if (owner == session) { CloseHandle(handle); return ProcessState::running; }
-    } while (Process32NextW(handle, &entry));
-    const DWORD error = GetLastError(); CloseHandle(handle);
-    return uncertain || error != ERROR_NO_MORE_FILES ? ProcessState::unknown : ProcessState::stopped;
+    try {
+        const auto snapshot = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+            ymcc::processInventory::currentTime, maxAge);
+        if (snapshot->status != ymcc::processInventory::Status::Complete) return ProcessState::unknown;
+        bool uncertain = false;
+        for (const auto& entry : snapshot->rows) {
+            if (_wcsicmp(entry.name.c_str(), L"FxSound.exe") != 0) continue;
+            DWORD owner = 0;
+            if (!ProcessIdToSessionId(entry.pid, &owner)) { uncertain = true; continue; }
+            if (owner == session) return ProcessState::running;
+        }
+        return uncertain ? ProcessState::unknown : ProcessState::stopped;
+    } catch (...) { return ProcessState::unknown; }
 }
 inline std::vector<std::wstring> savedOutputs() {
     std::vector<std::wstring> ids;
@@ -93,7 +97,7 @@ class WindowsPort {
     const std::atomic<bool>& enabled_;
 public:
     WindowsPort(IMMDeviceEnumerator* enumerator, const std::atomic<bool>& enabled) : enumerator_(enumerator), enabled_(enabled) {}
-    Snapshot read() const {
+    Snapshot read(std::optional<ProcessState> observedProcess = std::nullopt) const {
         Snapshot s;
         ComPtr<IMMDeviceCollection> list;
         if (FAILED(enumerator_->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &list))) return s;
@@ -126,7 +130,7 @@ public:
             s.defaults[role] = id; CoTaskMemFree(id);
         }
         s.preferred = savedOutputs();
-        s.process = s.hasFxDefault() ? processState() : ProcessState::unknown;
+        s.process = s.hasFxDefault() ? (observedProcess ? *observedProcess : processState()) : ProcessState::unknown;
         s.valid = true; return s;
     }
     SetResult setDefault(unsigned role, const std::wstring& source, const std::wstring& target) const {

@@ -103,8 +103,8 @@ export async function saveMonitorHudTemplate(template:HudTemplateId,revision:num
   });
   if(normalized)for(const listener of preferenceListeners){try{listener(normalized);}catch{}}
 }
-export async function readMonitorOutputRuntime(): Promise<{ applied: AppliedMonitorOutput; backend: boolean; ymccAvailable: boolean; rtssScale: number; rtssTemplate: RtssMonitorTemplate | null; steam: SteamMonitorState }> {
-  const prefs=await readMonitorOutputPreferences();
+export async function readMonitorOutputRuntime(preferences?: MonitorOutputPreferences): Promise<{ applied: AppliedMonitorOutput; backend: boolean; ymccAvailable: boolean; rtssScale: number; rtssTemplate: RtssMonitorTemplate | null; steam: SteamMonitorState }> {
+  const prefs=preferences ? normalizeMonitorOutput(preferences) : await readMonitorOutputPreferences();
   const globalScope=prefs.output==='ymcc'&&(adapter?.globalFor?await adapter.globalFor(prefs):adapter?.global===true);
   const [steam, layout, backend, zoom, ymccAvailable] = await Promise.all([
     globalScope?Promise.resolve({ok:false,available:false,pending:false,liveConfirmed:false,reason:'global-desktop-scope',position:0,detail:1,scale:1,saturation:1,opacity:1} as SteamMonitorState):steamSettings.get<SteamMonitorState>('monitor'), readOverlayLayout(), rtssRunning(), readRtssZoom(), adapter?.available(prefs) ?? false,
@@ -122,6 +122,7 @@ export async function readMonitorOutputRuntime(): Promise<{ applied: AppliedMoni
   return { applied: outputs.length === 1 ? outputs[0] : outputs.length ? 'unknown' : 'off', backend, ymccAvailable, rtssScale: zoom * 20, rtssTemplate, steam };
 }
 const outputCoordinator = createMonitorOutputCoordinator({
+  ownsYmcc:()=>adapter!==null,
   async capabilities(prefs) {
     if(prefs.output==='ymcc'&&adapter&&(adapter.globalFor?await adapter.globalFor(prefs):adapter.global===true))return {steam:false,ymccGlobal:true,ymccOwned:true,ymcc:await adapter.available(prefs)};
     const [state,session]=await Promise.all([steamSettings.get<SteamMonitorState>('monitor').catch(()=>null),deckySidebar.get().catch(()=>null)]);
@@ -134,7 +135,7 @@ const outputCoordinator = createMonitorOutputCoordinator({
     return { confirmed: state.ok === true && state.available === true && !state.pending && state.applicationConfirmed === true && state.via === 'live' && state.liveConfirmed === true && state.position === position,
       reason: state.pending ? 'Steam 设置仍排队，需先确认实时应用；未启用另一路。' : 'Steam 未回执实时目标位置。' };
   },
-  async setRtss(show, prefs) { const layout = show ? prefs.rtssTemplate : 'off'; const state = await setOverlayLayout(layout); const target = show ? ({ W: 'YeManOBS-W-1.ovl', L: 'YeManOBS-L-1.ovl', J: 'YeManOBS-JJ-1.ovl' })[prefs.rtssTemplate] : 'Empty.ovl';
+  async setRtss(show, prefs) { const layout = show ? prefs.rtssTemplate : 'off'; const state = await setOverlayLayout(layout, show ? Math.round(prefs.rtssScale / 20) : undefined); const target = show ? ({ W: 'YeManOBS-W-1.ovl', L: 'YeManOBS-L-1.ovl', J: 'YeManOBS-JJ-1.ovl' })[prefs.rtssTemplate] : 'Empty.ovl';
     return { confirmed: state.mode === 'live' && await readOverlayLayout() === target, reason: 'RTSS 模板加载/读回未确认；未继续开启目标。' }; },
   async setYmcc(show, prefs) { return adapter ? adapter.setVisible(show, prefs) : { confirmed: false, reason: 'YMCC 常驻输出适配器不可用' }; },
 });

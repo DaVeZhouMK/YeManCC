@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "scope": "Original2verbatim production functions; negative reference only, no product implementation substitute",
+  "source": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/native/main.cpp",
+  "originalMainSha256": "0e6d81252a944b3d7ae8763cae45501d0cdc374182cd00745dd96fe4777ce529",
+  "hunks": [
+    {
+      "symbol": "focusIsBackgroundMonitorWindow",
+      "before": "static bool focusIsBackgroundMonitorWindow(HWND hwnd) {\r\n    if (!hwnd || !IsWindow(hwnd)) return false;\r\n    DWORD pid = 0;\r\n    GetWindowThreadProcessId(hwnd, &pid);\r\n    if (!pid) return false;\r\n    std::wstring path;\r\n    if (focusQueryProcessIdentity(pid, &path, nullptr) && !path.empty())\r\n        return focusBackgroundMonitorName(sgBaseName(path));\r\n\r\n    // Snapshot names only reject background monitors here; they never admit\r\n    // games/overlays. Successful image queries do not take a process snapshot.\r\n    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);\r\n    if (snapshot == INVALID_HANDLE_VALUE) return false;\r\n    bool monitor = false;\r\n    PROCESSENTRY32W entry{sizeof(entry)};\r\n    if (Process32FirstW(snapshot, &entry)) {\r\n        do {\r\n            if (entry.th32ProcessID != pid) continue;\r\n            monitor = focusBackgroundMonitorName(sgBaseName(entry.szExeFile));\r\n            break;\r\n        } while (Process32NextW(snapshot, &entry));\r\n    }\r\n    CloseHandle(snapshot);\r\n    return monitor;\r\n}",
+      "beforeSha256": "b96545bcf2841ed5c294f1b1388fbca0bd0a5d7a5f67d3869ce483fbec7e4ecd"
+    },
+    {
+      "symbol": "focusFindProcessByPath",
+      "before": "static DWORD focusFindProcessByPath(const std::wstring& wantedPath) {\r\n    if (wantedPath.empty()) return 0;\r\n    DWORD currentSession = 0;\r\n    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession)) return 0;\r\n    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);\r\n    if (snapshot == INVALID_HANDLE_VALUE) return 0;\r\n    DWORD result = 0;\r\n    PROCESSENTRY32W entry{sizeof(entry)};\r\n    if (Process32FirstW(snapshot, &entry)) {\r\n        do {\r\n            if (!entry.th32ProcessID || entry.th32ProcessID == GetCurrentProcessId()) continue;\r\n            DWORD session = 0;\r\n            if (!ProcessIdToSessionId(entry.th32ProcessID, &session) || session != currentSession) continue;\r\n            std::wstring path;\r\n            if (focusQueryProcessIdentity(entry.th32ProcessID, &path, nullptr) &&\r\n                !path.empty() && _wcsicmp(path.c_str(), wantedPath.c_str()) == 0 &&\r\n                focusFindWindowForPid(entry.th32ProcessID)) {\r\n                result = entry.th32ProcessID;\r\n                break;\r\n            }\r\n        } while (Process32NextW(snapshot, &entry));\r\n    }\r\n    CloseHandle(snapshot);\r\n    return result;\r\n}",
+      "beforeSha256": "0b54d6b44c8ea0e546f1632c7758bfda3a5492a55750571e0b4626103c21be91"
+    }
+  ]
+}

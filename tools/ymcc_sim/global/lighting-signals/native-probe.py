@@ -2,8 +2,8 @@
 import argparse,hashlib,json,os,pathlib,subprocess,sys
 p=argparse.ArgumentParser();p.add_argument('--evidence-dir',required=True);p.add_argument('--node',default='node');a=p.parse_args()
 repo=pathlib.Path(__file__).resolve().parents[4];out=pathlib.Path(a.evidence_dir).resolve();out.mkdir(parents=True,exist_ok=True)
-def run(args,log,env=None):
- r=subprocess.run(args,cwd=repo,env=env,capture_output=True,timeout=120)
+def run(args,log,env=None,cwd=None):
+ r=subprocess.run(args,cwd=cwd or repo,env=env,capture_output=True,timeout=120)
  (out/log).write_bytes(r.stdout+r.stderr)
  if r.returncode:raise RuntimeError(str(args[0])+' failed: '+str(out/log))
  return r.stdout.decode('utf-8',errors='replace')
@@ -23,7 +23,7 @@ env=os.environ.copy();binary=msvc/'bin/Hostx64/x64';env['PATH']=str(binary)+os.p
 env['INCLUDE']=';'.join(str(v) for v in [msvc/'include',sdk/'Include'/version/'ucrt',sdk/'Include'/version/'shared',sdk/'Include'/version/'um',repo/'deps/json'])
 env['LIB']=';'.join(str(v) for v in [msvc/'lib/x64',sdk/'Lib'/version/'ucrt/x64',sdk/'Lib'/version/'um/x64'])
 exe=command_out/'command-test.exe'
-run([str(binary/'cl.exe'),'/nologo','/std:c++17','/EHsc','/W4','/WX','/utf-8','/MT','/O2',str(command_out/'actual-lighting-command.cpp'),'/Fo'+str(command_out/'command-test.obj'),'/Fe'+str(exe)],'command-compile.log',env)
+run([str(binary/'cl.exe'),'/nologo','/std:c++17','/EHsc','/W4','/WX','/utf-8','/MT','/O2',str(command_out/'actual-lighting-command.cpp'),'/Focommand-test.obj','/Fecommand-test.exe'],'command-compile.log',env,cwd=command_out)
 text=run([str(exe)],'command-run.log')
 report={'schema':'ymcc.lighting-native.v1','status':'PASS','route':json.loads((out/'native-binding/report.json').read_text()),'commandParser':{'stdout':text.strip(),'sourceBinding':json.loads((command_out/'source-binding.json').read_text()),'actualExtractedFunctions':True,'processApiLinked':False},'hardwareIo':False}
 (out/'result.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps({'status':'PASS','routeCases':report['route']['routeCases'],'commandParser':text.strip(),'hardwareIo':False}))

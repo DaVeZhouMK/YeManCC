@@ -132,7 +132,7 @@ onBeforeUnmount(() => { saveDraft(); mounted = false; unsub?.(); window.removeEv
           </template>
           <p v-if="error" class="value-error" role="alert">{{ error }}</p>
         </div>
-        <footer class="value-buttons" :class="{ single: screen === 'done' }"><button v-if="screen !== 'done'" type="button" data-value-return :disabled="busy" @click="returnToGame">返回游戏</button><button type="button" class="value-close" :disabled="screen === 'writing'" @click="close"><strong>B</strong>关闭页面</button></footer>
+        <footer class="value-buttons" :class="{ single: screen === 'done' }"><button v-if="screen !== 'done'" type="button" data-value-return :disabled="busy" @click="returnToGame">返回游戏</button><button type="button" class="value-close" :disabled="screen === 'writing'" @click="close"><span class="controller-key" data-controller-key="B">B</span>关闭页面</button></footer>
       </section>
     </div>
   </Teleport>

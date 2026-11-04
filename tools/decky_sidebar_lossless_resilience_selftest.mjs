@@ -4,7 +4,7 @@ const root=path.resolve(import.meta.dirname,'..'),require=createRequire(path.joi
 const performanceModel=(()=>{const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'decky-plugin/src/performanceModel.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,console});return module.exports;})();const cases=[];async function check(name,fn){await fn();cases.push(name);}const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
 function deferred(){let resolve,reject;const promise=new Promise((y,n)=>{resolve=y;reject=n});return {promise,resolve,reject};}
 function clock(){let next=0,now=0;const timers=new Map();return {timers,Date:class extends Date{static now(){return now;}},setTimeout(fn,delay){const id=++next;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},fire(delay){const found=[...timers].find(([,t])=>t.delay===delay);assert.ok(found,'missing timer '+delay);timers.delete(found[0]);now+=delay;found[1].fn();}};}
-function load(rel,globals={},modules={}){const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(rel==='src/bridge/losslessScaling.ts'&&process.env.YMCC_DECKY_LOSSLESS_SOURCE_OVERRIDE?process.env.YMCC_DECKY_LOSSLESS_SOURCE_OVERRIDE:path.join(root,rel),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,queueMicrotask,...globals,require:name=>{if(name in modules)return modules[name];if(name==='./performanceModel'||name==='../../decky-plugin/src/performanceModel')return performanceModel;if(name.endsWith('steamRunningContext'))return load('decky-plugin/src/steamRunningContext.ts');throw Error('Unexpected import '+name);}});return module.exports;}
+function load(rel,globals={},modules={}){const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(rel==='src/bridge/losslessScaling.ts'&&process.env.YMCC_DECKY_LOSSLESS_SOURCE_OVERRIDE?process.env.YMCC_DECKY_LOSSLESS_SOURCE_OVERRIDE:path.join(root,rel),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,queueMicrotask,...globals,require:name=>{if(name in modules)return modules[name];if(name==='./performanceModel'||name==='../../decky-plugin/src/performanceModel')return performanceModel;if(name==='./losslessProgramState')return load('src/bridge/losslessProgramState.ts');if(name.endsWith('steamRunningContext'))return load('decky-plugin/src/steamRunningContext.ts');throw Error('Unexpected import '+name);}});return module.exports;}
 function observation(){const c=clock(),api=load('src/bridge/deckyLosslessState.ts',c),events=[];let changes=0;return {c,api,events,cache:new api.DeckyLosslessObservation(()=>changes++,(event,detail)=>events.push({event,...detail})),changes:()=>changes};}
 await check('slow LS read never delays the synchronous sidebar view',async()=>{const f=observation(),d=deferred();const view=f.cache.view('game1',()=>d.promise);assert.equal(view.pending,true);assert.equal(view.document,null);assert.equal(f.changes(),0);d.resolve({enabled:true});await flush();assert.equal(f.cache.view('game1',()=>{throw Error('repeat read')}).document.enabled,true);f.cache.dispose();});
 await check('unrelated snapshots reuse confirmed LS state without new process reads',async()=>{const f=observation();let reads=0;f.cache.view('game1',async()=>{reads++;return {enabled:false}});await flush();for(let i=0;i<100;i++)f.cache.view('game1',async()=>{reads++;return {enabled:true}});await flush();assert.equal(reads,1);assert.equal(f.c.timers.size,0);f.cache.dispose();});
@@ -64,7 +64,7 @@ await check('shared switch distinguishes actual scaling, unknown configured inte
  const {adapter,state}=adapterFixture();assert.equal(adapter.losslessSwitchEnabled(null),false);
  for(const configuredEnabled of [false,true])for(const running of [undefined,false,true])for(const enabled of [null,false,true]){
   const document={...state.document,configuredEnabled,running,enabled};assert.equal(adapter.losslessSwitchEnabled(document),running===true&&(enabled===true||(enabled===null&&configuredEnabled)));
-  const field=adapter.losslessField(document);assert.equal(field.value,running===true?(enabled===null?'unknown':enabled?'on':'off'):'off');assert.equal(field.supported,true);
+  const field=adapter.losslessField(document);assert.equal(field.value,running===true?(enabled===null?'unknown':enabled?'on':'off'):'off');assert.equal(field.supported,true);assert.equal(field.nextValue,adapter.losslessSwitchEnabled(document)?'off':'on');
  }
  assert.equal(adapter.losslessField(null).value,'unknown');assert.equal(adapter.losslessField(null).supported,false);
 });
@@ -133,6 +133,19 @@ await check('mirror client accepts process-only lamp receipts and rejects malfor
  }
 });
 
+await check('mirror accepts only ON/OFF next intents without treating unknown as active scaling',()=>{
+ for(const nextValue of ['on','off']){
+  const f=clientFixture(),snapshot=structuredClone(f.snapshot);snapshot.revision=2;
+  Object.assign(snapshot.game.fields.losslessScaling,{value:'unknown',nextValue});
+  f.socket.emit('message',{type:'snapshot',runId,snapshot});
+  assert.equal(f.client.snapshot().snapshot.game.fields.losslessScaling.nextValue,nextValue);
+  assert.equal(f.client.snapshot().snapshot.game.fields.losslessScaling.value,'unknown');f.client.dispose();
+ }
+ for(const nextValue of ['remove','delete',false,null]){
+  const f=clientFixture(),snapshot=structuredClone(f.snapshot);snapshot.revision=2;snapshot.game.fields.losslessScaling.nextValue=nextValue;
+  f.socket.emit('message',{type:'snapshot',runId,snapshot});assert.equal(f.client.snapshot().snapshot,null);f.client.dispose();
+ }
+});
 await check('unapplied action emits partial and false ok while completed remains distinct',async()=>{
  const c=clock(),api=load('src/bridge/deckyLosslessState.ts',c),events=[];
  const result=await api.waitForDeckyLosslessAction(async()=>({applied:false,pending:true}),()=>{},(event,detail)=>events.push({event,...detail}));await flush();

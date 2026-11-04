@@ -34,6 +34,7 @@ int wmain(int argc,wchar_t** argv){try{
     const std::wstring mode=argv[2];const bool complete=mode==L"complete400";
     const unsigned total=complete?400:40,joined=40;
     g_dataRoot=root/L"data";const auto client=root/L"OptiscalerClient";fs::create_directories(client);
+    fs::create_directories(g_dataRoot);{std::ofstream out(g_dataRoot/L"data-root.json",std::ios::binary);out<<json{{"schemaVersion",2},{"dataLayoutVersion",2},{"dataRoot",toUtf8(g_dataRoot.wstring())}}.dump();check(bool(out),"Cannot seed owned root identity");}
     const auto utf=[](const fs::path& p){return toUtf8(p.wstring());};
     json games=json::array(),items=json::array(),catalog=json::array();
     for(unsigned i=0;i<total;++i){
@@ -62,11 +63,21 @@ int wmain(int argc,wchar_t** argv){try{
     check(receipt.value("status",std::string{})==(complete?"idle":"synced"),"Unexpected real consumer outcome");
     if(complete)check(readText(client/L"games.json")==original,"Unchanged catalog was rewritten");
     uint64_t manifestReads=0;for(const auto& [name,count]:readPaths)if(fs::path(name).filename()==L"manifest.json")manifestReads+=count;
-    if(complete)check(manifestReads==0&&copyCalls==0&&readCalls<=4&&replaceCalls==1,"Unchanged pass performed redundant artwork or catalog IO");
-    else check(manifestReads<=joined&&copyCalls==joined,"Artwork was rescanned per missing cover");
+    uint64_t rootReads=0;json paths=json::array();
+    for(const auto& [name,count]:readPaths){const auto filename=fs::path(name).filename();
+        if(filename==L"data-root.json"||filename==L"data-migration.json")rootReads+=count;
+        paths.push_back({{"path",toUtf8(name)},{"calls",count}});
+    }
+    const auto businessReads=readCalls-rootReads;
+    // Preserve the original business IO bound; separately report the later
+    // mandatory root-admission reads. Diagnostics survive assertion failures.
+    writeJsonWithLocalBackup(root/L"measured-paths.json",{{"readFileCalls",readCalls},{"rootReads",rootReads},{"businessReads",businessReads},{"paths",paths}},false);
+    if(complete)check(manifestReads==0&&copyCalls==0&&businessReads<=4&&replaceCalls==1,"Unchanged pass performed redundant artwork or catalog IO");
+    else {check(manifestReads<=joined&&copyCalls==joined,"Artwork was rescanned per missing cover");
+        check(elapsed>=joined*custom_steam_library::opti_catalog::itemDelayMs,"Serial items bypassed production delay");}
     json result={{"scenario",utf(fs::path(mode))},{"libraryGames",total},{"joinedGames",joined},{"receipt",receipt},
         {"elapsedMs",elapsed},{"cpuMs",cpuUsed},{"readFileCalls",readCalls},{"readFileBytes",readBytes},{"manifestReads",manifestReads},
-        {"copyCalls",copyCalls},{"atomicReplacements",replaceCalls},{"ioReadBytes",after.ReadTransferCount-before.ReadTransferCount},
+        {"businessReads",businessReads},{"rootAdmissionReads",rootReads},{"copyCalls",copyCalls},{"atomicReplacements",replaceCalls},{"ioReadBytes",after.ReadTransferCount-before.ReadTransferCount},
         {"ioWriteBytes",after.WriteTransferCount-before.WriteTransferCount},{"peakProcessWorkingSetBytesIncludesSeeding",memory.PeakWorkingSetSize},
         {"workingSetBytes",memory.WorkingSetSize},{"privateBytes",memory.PrivateUsage},{"network",false},{"installedApplicationChanged",false}};
     writeJsonWithLocalBackup(root/L"summary.json",result,false);std::cout<<result.dump()<<std::endl;return 0;

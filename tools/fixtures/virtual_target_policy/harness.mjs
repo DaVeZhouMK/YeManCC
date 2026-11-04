@@ -20,14 +20,61 @@ export function actualFunctions(env,file,names,scope,exports=names){
   const text=fragments.join('\n')+'\nglobalThis.actual = {'+exports.join(',')+'};';const js=ts.transpileModule(text,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.None}}).outputText;
   const context={...env.globals,...vue,...env.policy,...env.state,...scope};vm.createContext(context);vm.runInContext(js,context,{filename:file+'.extracted.js',timeout:1000});return context.actual;
 }
-export async function suite(repo,overrides={}) {
+export async function suite(repo,overrides={},options={}) {
+  const cases=options.cases?new Set(options.cases):null;
+  const names=[...fs.readFileSync(new URL(import.meta.url),'utf8').matchAll(/await test\('([^']+)'/g)].map(m=>m[1]);
+  if(cases){assert.equal(cases.size,options.cases.length,'Duplicate original case');for(const name of cases)assert(names.includes(name),'Unknown original case '+name);}
+  const repeated=options.expectedRepeatedNotifications??0,observations={};
   let checks=0;const results=[];const eq=(a,b,m)=>{++checks;assert.deepEqual(clean(a),clean(b),m);},ok=(v,m)=>{++checks;assert(v,m);};
   const blocked={steamDeckSelfOutputBlocked:true,reason:'physical-steamdeck-self-output-blocked'},allowed={steamDeckSelfOutputBlocked:false,reason:''};
-  const test=async(name,run)=>{const before=checks;try{await run();results.push({name,checks:checks-before,failures:0});}catch(e){if(e.code!=='ERR_ASSERTION')throw e;results.push({name,checks:checks-before,failures:1,message:e.message});}};
+  const test=async(name,run)=>{if(cases&&!cases.has(name))return;const before=checks;try{await run();results.push({name,checks:checks-before,failures:0});}catch(e){if(e.code!=='ERR_ASSERTION')throw e;results.push({name,checks:checks-before,failures:1,message:e.message});}};
   const make=()=>environment(repo,overrides),snapshot=(persona='steamdeck')=>({revision:4,outputTarget:{persona,buttonMappingEnabled:true,gyroEnabled:true},gyroMotion:{enabled:true,virtualPadLink:true},ownership:{},buttonMapping:{rules:{}}});
   await test('native-policy-only-no-model-inference',async()=>{const e=make();for(const raw of [null,{},[],{machineFamily:'SteamDeck'},{virtualTargetPolicy:null},{virtualTargetPolicy:{steamDeckSelfOutputBlocked:'true'}},{virtualTargetPolicy:{steamDeckSelfOutputBlocked:1}}])eq(e.policy.readVirtualTargetPolicy(raw),null);eq(e.state.currentVirtualTargetPolicy(),null);e.emit({virtualTargetPolicy:blocked});eq(e.state.currentVirtualTargetPolicy(),blocked);e.emit({virtualTargetPolicy:allowed});eq(e.state.currentVirtualTargetPolicy(),allowed);e.emit({});eq(e.state.currentVirtualTargetPolicy(),null);eq(e.posts.length,0);});
   await test('all-personas-and-disabled-escape',async()=>{const e=make();for(const p of [null,allowed,blocked])for(const persona of ['disabled','steamdeck','dualsense','dualsense-edge','xbox360','elite','dualshock4'])for(const enabled of [false,true])eq(!!e.policy.virtualTargetSelectionError(persona,p,enabled),p===blocked&&persona==='steamdeck'&&enabled);const options=['disabled','steamdeck','dualsense-edge','elite'].map(value=>({value,label:value})),before=clean(options);const filtered=e.policy.virtualTargetOptions(options,blocked);eq(options,before);eq(filtered.map(o=>o.disabled===true),[false,true,false,false]);ok(filtered[1].label.includes('不可用'));eq(e.policy.virtualTargetOptions(options,null),options);eq(e.policy.virtualTargetOptions(options,allowed),options);});
-  await test('cached-replay-and-live-subscription',async()=>{const e=make();e.emit({virtualTargetPolicy:blocked});const baseline=e.listenerCount(),scope=vue.effectScope();let state;scope.run(()=>{state=e.state.useVirtualTargetPolicy();});eq(state.value,blocked);e.emit({virtualTargetPolicy:allowed});await Promise.resolve();eq(state.value,allowed);e.emit({});eq(state.value,null);scope.stop();eq(e.listenerCount(),baseline);eq(e.posts.length,0);});
+  await test('cached-replay-and-live-subscription',async()=>{
+    const e=make();e.emit({virtualTargetPolicy:blocked});
+    const baseline=e.listenerCount(),scope=vue.effectScope(),counts={policyWatch:0,computedEvaluations:0,computedWatch:0};let state,options;
+    const sample=()=>({...counts}),delta=before=>Object.fromEntries(Object.keys(counts).map(k=>[k,counts[k]-before[k]]));
+    scope.run(()=>{
+      state=e.state.useVirtualTargetPolicy();
+      vue.watch(state,()=>{++counts.policyWatch;},{flush:'sync'});
+      options=vue.computed(()=>{++counts.computedEvaluations;return e.policy.virtualTargetOptions([{value:'steamdeck',label:'SteamDeck'},{value:'elite',label:'Elite'}],state.value);});
+      vue.watch(options,()=>{++counts.computedWatch;},{flush:'sync'});
+    });
+    try{
+      eq(state.value,blocked);eq(options.value[0].disabled,true);
+      let before=sample();await Promise.resolve();
+      observations.cachedReplay=delta(before);eq(delta(before),{policyWatch:repeated?1:0,computedEvaluations:repeated?1:0,computedWatch:repeated?1:0},'Cached replay only notifies if policy changes');
+      before=sample();
+      for(let packet=0;packet<1000;++packet)e.emit({packet,virtualGamepad:{state:packet%2?'active':'disabled'},virtualTargetPolicy:{...blocked,ignored:packet}});
+      observations.unchangedPackets={packets:1000,...delta(before)};
+      eq(delta(before),{policyWatch:repeated,computedEvaluations:repeated,computedWatch:repeated},'1000 unchanged policies must not notify Vue');eq(state.value,blocked);
+      const change=(raw,expected,label)=>{const before=sample();e.emit(raw);eq(state.value,expected,label);eq(delta(before),{policyWatch:1,computedEvaluations:1,computedWatch:1},label+' notifies synchronously');};
+      const reasonChanged={...blocked,reason:'changed-native-reason'};
+      change({virtualTargetPolicy:reasonChanged},reasonChanged,'Reason-only policy change');
+      const flagChanged={...reasonChanged,steamDeckSelfOutputBlocked:false};
+      change({virtualTargetPolicy:flagChanged},flagChanged,'Block flag-only policy change');eq(options.value[0].disabled===true,false);
+      change({virtualTargetPolicy:blocked},blocked,'Live prohibition');eq(options.value[0].disabled,true);ok(!!e.policy.virtualTargetSelectionError('steamdeck',e.state.currentVirtualTargetPolicy()));
+      change({virtualTargetPolicy:allowed},allowed,'Live allowed policy');await Promise.resolve();eq(state.value,allowed);
+      e.emit({});eq(state.value,null);
+      before=sample();for(const raw of [{},{virtualTargetPolicy:null},{virtualTargetPolicy:{steamDeckSelfOutputBlocked:'true'}},null])e.emit(raw);
+      observations.unchangedMissingPolicy=delta(before);eq(delta(before),{policyWatch:0,computedEvaluations:0,computedWatch:0},'Missing/invalid policies remain null');
+      change({virtualTargetPolicy:{steamDeckSelfOutputBlocked:false}},allowed,'Null to normalized allowed policy');
+      before=sample();e.emit({virtualTargetPolicy:{steamDeckSelfOutputBlocked:false,reason:42}});
+      eq(delta(before),{policyWatch:repeated?1:0,computedEvaluations:repeated?1:0,computedWatch:repeated?1:0},'Equivalent normalized reason');
+      change({virtualTargetPolicy:{steamDeckSelfOutputBlocked:1}},null,'Invalid policy clears known policy');
+      scope.stop();eq(e.listenerCount(),baseline);
+      before=sample();e.emit({virtualTargetPolicy:blocked});await Promise.resolve();
+      eq(state.value,null,'Stopped scope stays stopped');eq(delta(before),{policyWatch:0,computedEvaluations:0,computedWatch:0});eq(e.state.currentVirtualTargetPolicy(),blocked,'Admission read remains fresh after subscription stops');eq(e.posts.length,0);
+    }finally{scope.stop();}
+    const live=make();live.emit({virtualTargetPolicy:blocked});const liveBaseline=live.listenerCount(),liveScope=vue.effectScope();let liveState;
+    liveScope.run(()=>{liveState=live.state.useVirtualTargetPolicy();});
+    try{live.emit({virtualTargetPolicy:allowed});await Promise.resolve();eq(liveState.value,allowed,'Live packet supersedes queued cached replay');}finally{liveScope.stop();}
+    eq(live.listenerCount(),liveBaseline);
+    const stoppedScope=vue.effectScope();let stopped;
+    stoppedScope.run(()=>{stopped=live.state.useVirtualTargetPolicy();});stoppedScope.stop();stoppedScope.stop();
+    live.emit({virtualTargetPolicy:blocked});await Promise.resolve();eq(stopped.value,allowed,'Stop before queued replay prevents revival');eq(live.listenerCount(),liveBaseline);eq(live.posts.length,0);
+  });
   await test('blocked-runtime-never-pending-or-admitted',async()=>{const e=make(),status=e.load('src/bridge/virtualOutputStatus.ts');for(const busy of [true,false])for(const enabled of [true,false])for(const state of ['disabled','active','starting']){const p=status.virtualOutputPresentation({state,reason:blocked.reason,requestedPersona:'steamdeck',switchPending:true,steamRunning:false},enabled,'steamdeck',busy);eq(p.tone,'warning');ok(p.text.includes('不可用'));ok(!p.text.includes('等待'));}eq(status.virtualOutputPresentation(null,true,'steamdeck').tone,'pending');eq(status.virtualOutputPresentation(null,false,'disabled').tone,'off');});
   function button(e,initial='steamdeck',beforeCas=()=>{}){
     const refs={snapshot:vue.ref(snapshot(initial)),gameLocked:vue.ref(false),targetBusy:vue.ref(false),externalPriorityBusy:vue.ref(false),externalControllerPriority:vue.ref(false),targetEnabled:vue.ref(true),gyroEnabled:vue.ref(true),persona:vue.ref(initial),shortcutRuntime:vue.ref(null)};
@@ -48,5 +95,5 @@ export async function suite(repo,overrides={}) {
   await test('decky-global-choices-and-actual-guard',async()=>{for(const p of [null,allowed,blocked]){const e=make();if(p)e.emit({virtualTargetPolicy:p});const f=globalFixture(e);eq(f.reads.fields.padPersona.choices.find(o=>o.data==='steamdeck').disabled===true,p===blocked);const before=clean(f.input);let denied=false;try{await f.actions.execute({field:'padPersona',value:'steamdeck'},f.context);}catch(x){denied=true;ok(x.message.includes('真实 Steam Deck'));}eq(denied,p===blocked);eq(f.closes,p===blocked?0:1);eq(f.saves.length,p===blocked?0:1);eq(f.input,before);}const e=make();e.emit({virtualTargetPolicy:blocked});for(const persona of ['dualsense-edge','elite','disabled']){const f=globalFixture(e);await f.actions.execute({field:'padPersona',value:persona},f.context);eq(f.saves.length,1);}const f=globalFixture(e,'steamdeck');await f.actions.execute({field:'gyroEnabled',value:'off'},f.context);eq(f.saves.length,1);});
   await test('decky-global-queued-policy-change',async()=>{const e=make();e.emit({virtualTargetPolicy:allowed});const f=globalFixture(e,'disabled',async()=>e.emit({virtualTargetPolicy:blocked}));let denied=false;try{await f.actions.execute({field:'padPersona',value:'steamdeck'},f.context);}catch{denied=true;}ok(denied);eq(f.saves.length,0);});
   await test('decky-game-actual-action-policy-and-preservation',async()=>{for(const p of [null,allowed,blocked]){const e=make();if(p)e.emit({virtualTargetPolicy:p});const game=e.load('src/bridge/deckyGameActions.ts'),target={name:'A',path:'C:/Games/a.exe',pid:11,processCreated:'created'},schedule={profiles:{ac:{performance:{}},dc:{performance:{}}}},config={entries:{'a.exe':{enabled:true,padPersona:'disabled',gyroOverride:'off',gyroPreset:'fps'}}},before=clean(config);let saves=[],closes=0;const admission=game.makeGameMirrorAdmission(config.entries['a.exe'],schedule);const context={gameIdentity:game.gameMirrorIdentity(target),generation:1,gameAdmission:admission,checkpoint:()=>{}};const actions=game.createGameMirrorActions({targetPolicy:e.state.currentVirtualTargetPolicy,featureAllowed:()=>true,game:()=>target,label:()=> 'A',power:async()=>({generation:1,phase:'ready',hardwareWritesAllowed:true}),acquire:()=>()=>{},load:async()=>config,current:()=>config,schedule:async()=>schedule,currentSchedule:()=>schedule,save:async v=>saves.push(v),closeJoyxoff:async()=>{++closes;return true;}});let denied=false;try{await actions.execute('game.setField',{field:'padPersona',value:'steamdeck'},context);}catch(x){denied=true;ok(x.message.includes('真实 Steam Deck'));}eq(denied,p===blocked);eq(saves.length,p===blocked?0:1);eq(closes,p===blocked?0:1);eq(config,before);if(p===blocked){await actions.execute('game.setField',{field:'padPersona',value:'elite'},context);eq(saves.length,1);}}});
-  return {scenarios:results.length,checks,failures:results.reduce((n,r)=>n+r.failures,0),results};
+  return {scenarios:results.length,checks,failures:results.reduce((n,r)=>n+r.failures,0),results,observations,selectedCases:cases?[...cases]:null,unselectedScenarios:names.length-results.length};
 }

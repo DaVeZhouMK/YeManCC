@@ -13,33 +13,89 @@ function Assert-YmccRecoveryAcl([string]$Path) {
     }
     if(!$seen['S-1-5-18'] -or !$seen['S-1-5-32-544']){throw 'UPDATE_RECOVERY_MISSING_ACCESS'}
 }
+function Test-YmccRecoveryInteger($Value,[uint64]$Maximum=[int64]::MaxValue){
+    return ($Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]) -and $Value -ge 0 -and $Value -le $Maximum
+}
+function Assert-YmccRecoveryDepth($Value,[int]$Depth=0){
+    if($Depth -gt 32){throw 'UPDATE_RECOVERY_DEPTH_LIMIT'}
+    if($Value -is [pscustomobject]){foreach($property in $Value.PSObject.Properties){Assert-YmccRecoveryDepth $property.Value ($Depth+1)}}
+    elseif($Value -is [Collections.IDictionary]){foreach($key in $Value.Keys){Assert-YmccRecoveryDepth $Value[$key] ($Depth+1)}}
+    elseif($Value -is [array]){foreach($item in $Value){Assert-YmccRecoveryDepth $item ($Depth+1)}}
+}
+function Assert-YmccRecoveryDocument($Journal){
+    Assert-YmccRecoveryDepth $Journal
+    if(!$Journal -or $Journal -isnot [pscustomobject] -or !(Test-YmccRecoveryInteger $Journal.schema 1) -or $Journal.schema -ne 1 -or $Journal.owner -isnot [string] -or $Journal.owner -cne 'YMCC.FullInstall'){throw 'UPDATE_RECOVERY_SCHEMA_INVALID'}
+    if($Journal.PSObject.Properties['schemaVersion'] -and (!(Test-YmccRecoveryInteger $Journal.schemaVersion 1) -or $Journal.schemaVersion -ne 1)){throw 'UPDATE_RECOVERY_SCHEMA_INVALID'}
+    foreach($key in @('operationId','version','sha256','exePath','powerControl','phase')){
+        $value=$Journal.$key;$limit=if($key -eq 'operationId'){128}else{32768}
+        if($value -isnot [string] -or !$value.Length -or $value.Length -gt $limit -or $value.IndexOf([char]0) -ge 0){throw ('UPDATE_RECOVERY_FIELD_INVALID_'+$key)}
+    }
+    if($Journal.version -cnotmatch '^(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})$' -or @($Journal.version.Split('.')|Where-Object{[uint64]$_ -gt [int32]::MaxValue}).Count -or $Journal.sha256 -cnotmatch '^[a-fA-F0-9]{64}$'){throw 'UPDATE_RECOVERY_ID_INVALID'}
+    if($Journal.phase -cnotin @('authorized','preparing','applying','repair-required','committed','rolled-back','failed')){throw 'UPDATE_RECOVERY_PHASE_INVALID'}
+    foreach($key in @('exePath','powerControl','launcherImage','helperImage')){
+        if(!$Journal.PSObject.Properties[$key]){continue};$value=$Journal.$key
+        if($value -isnot [string] -or !$value.Length -or $value.Length -gt 32768 -or $value.IndexOf([char]0) -ge 0 -or ![IO.Path]::IsPathRooted($value)){throw 'UPDATE_RECOVERY_PATH_INVALID'}
+        $null=[IO.Path]::GetFullPath($value)
+    }
+    foreach($key in @('authorizedAt','updatedAt')){if($Journal.PSObject.Properties[$key] -and !(Test-YmccRecoveryInteger $Journal.$key)){throw 'UPDATE_RECOVERY_TIME_INVALID'}}
+    foreach($key in @('launcherPid','helperPid')){if($Journal.PSObject.Properties[$key] -and !(Test-YmccRecoveryInteger $Journal.$key ([uint32]::MaxValue))){throw 'UPDATE_RECOVERY_PID_INVALID'}}
+    foreach($key in @('launcherCreation','helperCreation')){if($Journal.PSObject.Properties[$key] -and ($Journal.$key -isnot [string] -or $Journal.$key -cnotmatch '^[0-9]{1,20}$')){throw 'UPDATE_RECOVERY_CREATION_INVALID'}}
+}
+function Get-YmccRecoverySnapshot([string]$Path){
+    Assert-YmccRecoveryAcl (Split-Path -Parent $Path);Assert-YmccRecoveryAcl $Path
+    if(([IO.File]::GetAttributes($Path) -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0){throw 'UPDATE_RECOVERY_NOT_REGULAR'}
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try{
+        if($stream.Length -lt 1 -or $stream.Length -gt 65536){throw 'UPDATE_RECOVERY_JOURNAL_SIZE_INVALID'}
+        $bytes=[byte[]]::new([int]$stream.Length);$offset=0
+        while($offset -lt $bytes.Length){$count=$stream.Read($bytes,$offset,$bytes.Length-$offset);if(!$count){throw 'UPDATE_RECOVERY_JOURNAL_SHORT_READ'};$offset+=$count}
+        if($stream.ReadByte() -ne -1 -or $stream.Length -ne $bytes.Length){throw 'UPDATE_RECOVERY_JOURNAL_CHANGED'}
+    }finally{$stream.Dispose()}
+    $skip=0;$encoding=[Text.UTF8Encoding]::new($false,$true)
+    if($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254){$skip=2;$encoding=[Text.UnicodeEncoding]::new($false,$true,$true)}
+    elseif($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255){$skip=2;$encoding=[Text.UnicodeEncoding]::new($true,$true,$true)}
+    elseif($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191){$skip=3}
+    $text=$encoding.GetString($bytes,$skip,$bytes.Length-$skip)
+    Initialize-YmccModuleJournalJson;[Ymcc.ModuleJournalJson]::AssertObject($text)
+    $j=$text|ConvertFrom-Json -ErrorAction Stop;Assert-YmccRecoveryDocument $j
+    return [pscustomobject]@{Document=$j;Bytes=$bytes;Text=$text}
+}
 function Get-YmccInstallJournal {
-    Assert-YmccRecoveryAcl (Split-Path -Parent $recoveryJournal)
-    Assert-YmccRecoveryAcl $recoveryJournal
-    if((Get-Item -LiteralPath $recoveryJournal).Length -gt 65536){throw 'UPDATE_RECOVERY_JOURNAL_TOO_LARGE'}
-    $j=Get-Content -LiteralPath $recoveryJournal -Raw -Encoding UTF8 | ConvertFrom-Json
-    if($j.schema -ne 1 -or $j.owner -cne 'YMCC.FullInstall' -or $j.operationId -cne $operationId -or $j.version -cne $version -or $j.sha256 -ine $sha256 -or
+    $j=(Get-YmccRecoverySnapshot $recoveryJournal).Document
+    if($j.operationId -cne $operationId -or $j.version -cne $version -or $j.sha256 -ine $sha256 -or
         [IO.Path]::GetFullPath($j.exePath).TrimEnd('\') -ine [IO.Path]::GetFullPath($exePath).TrimEnd('\') -or
         [IO.Path]::GetFullPath($j.powerControl).TrimEnd('\') -ine [IO.Path]::GetFullPath($pcDir).TrimEnd('\')){throw 'UPDATE_RECOVERY_TRANSACTION_MISMATCH'}
     return $j
 }
+function Test-YmccRecoveryBytes([byte[]]$Left,[byte[]]$Right){
+    if($Left.Length -ne $Right.Length){return $false};for($i=0;$i -lt $Left.Length;$i++){if($Left[$i] -ne $Right[$i]){return $false}};return $true
+}
 function Set-YmccInstallJournal([string]$Phase) {
-    $j=Get-YmccInstallJournal
-    $j.phase=$Phase
-    $self=[Diagnostics.Process]::GetCurrentProcess()
+    $before=Get-YmccRecoverySnapshot $recoveryJournal;$j=Get-YmccInstallJournal
+    $current=Get-YmccRecoverySnapshot $recoveryJournal
+    if($before.Text -cne $current.Text){throw 'UPDATE_RECOVERY_SOURCE_CHANGED'}
+    $allowed=@{authorized=@('preparing','repair-required');preparing=@('preparing','applying','repair-required');applying=@('applying','committed','repair-required');'repair-required'=@('repair-required','preparing')}
+    if(!$allowed.ContainsKey($j.phase) -or $Phase -cnotin $allowed[$j.phase]){throw 'UPDATE_RECOVERY_PHASE_TRANSITION_INVALID'}
+    $j.phase=$Phase;$self=[Diagnostics.Process]::GetCurrentProcess()
     try{
         $j|Add-Member -NotePropertyName helperPid -NotePropertyValue $self.Id -Force
         $j|Add-Member -NotePropertyName helperCreation -NotePropertyValue $self.StartTime.ToUniversalTime().ToFileTimeUtc().ToString() -Force
         $j|Add-Member -NotePropertyName helperImage -NotePropertyValue $self.MainModule.FileName -Force
         $j|Add-Member -NotePropertyName updatedAt -NotePropertyValue ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -Force
     }finally{$self.Dispose()}
-    $temporary=$recoveryJournal+'.tmp-'+[guid]::NewGuid().ToString('N')
-    try{
-        [IO.File]::WriteAllText($temporary,($j|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
-        $acl=[Security.AccessControl.FileSecurity]::new()
-        $acl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)')
-        Set-Acl -LiteralPath $temporary -AclObject $acl -ErrorAction Stop
-        Assert-YmccRecoveryAcl $temporary
-        Move-Item -LiteralPath $temporary -Destination $recoveryJournal -Force -ErrorAction Stop
-    }finally{if(Test-Path -LiteralPath $temporary){Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue}}
+    Assert-YmccRecoveryDocument $j;$text=$j|ConvertTo-Json -Depth 32 -Compress
+    Initialize-YmccModuleJournalJson;[Ymcc.ModuleJournalJson]::AssertObject($text)
+    $bytes=[Text.UTF8Encoding]::new($false,$true).GetBytes($text);if($bytes.Length -gt 65536){throw 'UPDATE_RECOVERY_JOURNAL_SIZE_INVALID'}
+    $temporary=$recoveryJournal+'.tmp-'+[guid]::NewGuid().ToString('N');$backup=$recoveryJournal+'.ymcc-before-'+[guid]::NewGuid().ToString('N')
+    if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_SOURCE_CHANGED'}
+    [IO.File]::Copy($recoveryJournal,$backup,$false);Assert-YmccRecoveryAcl $backup
+    if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $backup).Bytes)){throw 'UPDATE_RECOVERY_PREIMAGE_UNCONFIRMED'}
+    $stream=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+    $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+    Set-Acl -LiteralPath $temporary -AclObject $acl -ErrorAction Stop;Assert-YmccRecoveryAcl $temporary
+    if(!(Test-YmccRecoveryBytes $bytes (Get-YmccRecoverySnapshot $temporary).Bytes)){throw 'UPDATE_RECOVERY_TEMP_UNCONFIRMED'}
+    if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_SOURCE_CHANGED'}
+    Move-Item -LiteralPath $temporary -Destination $recoveryJournal -Force -ErrorAction Stop
+    if(!(Test-YmccRecoveryBytes $bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_READBACK_FAILED'}
 }

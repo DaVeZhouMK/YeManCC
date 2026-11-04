@@ -2,7 +2,7 @@
 import { computed, useAttrs } from 'vue';
 import SwitchControl from './SwitchControl.vue';
 defineOptions({inheritAttrs:false});
-const props=withDefaults(defineProps<{ modelValue:boolean;label?:string;description?:string;color?:'ac'|'dc'|'accent'|'danger';disabled?:boolean;compact?:boolean;gpRow?:number|string;gpCol?:number|string }>(),{color:'accent',disabled:false,compact:false});
+const props=withDefaults(defineProps<{ modelValue:boolean;label?:string;description?:string;color?:'ac'|'dc'|'accent'|'danger';disabled?:boolean;compact?:boolean;mixed?:boolean;gpRow?:number|string;gpCol?:number|string }>(),{color:'accent',disabled:false,compact:false});
 const emit=defineEmits<{(event:'update:modelValue',value:boolean):void}>();
 const attrs=useAttrs();
 const accessibleLabel=computed(()=>String(attrs['aria-label']||props.label||props.description||''));
@@ -12,7 +12,7 @@ function toggle(){if(!props.disabled)emit('update:modelValue',!props.modelValue)
 <template>
   <div v-bind="rootAttrs" class="toggle-row" :class="{disabled,compact,standalone:!label&&!description}" @click="toggle">
     <div v-if="label||description" class="toggle-text"><div v-if="label" class="toggle-label">{{label}}</div><div v-if="description" class="toggle-desc muted">{{description}}</div></div>
-    <SwitchControl :model-value="modelValue" :label="accessibleLabel" :disabled="disabled" :color="color" :gp-row="gpRow" :gp-col="gpCol" :aria-describedby="attrs['aria-describedby']" :title="attrs.title" @update:model-value="value=>emit('update:modelValue',value)" />
+    <SwitchControl :model-value="modelValue" :mixed="mixed" :label="accessibleLabel" :disabled="disabled" :color="color" :gp-row="gpRow" :gp-col="gpCol" :aria-describedby="attrs['aria-describedby']" :title="attrs.title" @update:model-value="value=>emit('update:modelValue',value)" />
   </div>
 </template>
 <style scoped>

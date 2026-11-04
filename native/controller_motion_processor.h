@@ -177,11 +177,19 @@ public:
     bool process(const Key& key, const RawSixAxes& axes, float dt) {
         void* current = handleFor(key);
         if (!current || !axes.valid()) return false;
-        ops_.process(current, axes.gx, axes.gy, axes.gz, axes.ax, axes.ay, axes.az, dt);
+        processValidated(current, axes, dt);
         return true;
     }
 
 private:
+    friend class Session;
+
+    // Only Session may reuse its same-call handle/axis admission. There is no
+    // callback or owner mutation between that admission and this submission.
+    void processValidated(void* current, const RawSixAxes& axes, float dt) {
+        ops_.process(current, axes.gx, axes.gy, axes.gz, axes.ax, axes.ay, axes.az, dt);
+    }
+
     static bool sameLineage(const Key& a,const Key& b) noexcept {
         return a.physicalIdentity==b.physicalIdentity&&a.power==b.power&&a.rawGeneration==b.rawGeneration&&a.sensorIndex==b.sensorIndex;
     }

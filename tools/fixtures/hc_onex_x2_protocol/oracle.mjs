@@ -44,7 +44,7 @@ const arrayValue = (body, params = {}) => {
     return value;
   });
 };
-const roleTags = { None: 0, Turbo: 1, Keyboard: 2, Home: 3, L4: 4, R4: 5 };
+const roleTags = { None: 0, Turbo: 1, Keyboard: 2, Home: 3, L4: 4, R4: 5, GKey: 6 };
 export function deriveOracle(workspace, fixtureDirectory) {
   const upstream = path.join(workspace, 'Docs/Research/PcCapabilities-HC-CTW-20261014/upstream');
   const pinsBytes = fs.readFileSync(path.join(fixtureDirectory, 'source-pins.json'));
@@ -75,6 +75,17 @@ export function deriveOracle(workspace, fixtureDirectory) {
     provenance.push({ ...pin, bytes: bytes.length });
   }
   if (sources.size !== 4) throw Error('Expected exactly four pinned protocol sources');
+  // Independently fixed newer OXP3 source overrides one class only. The four
+  // a250 base pins and their wire/framing provenance above remain unchanged.
+  const upgradePath=path.resolve(fixtureDirectory,'../../../capabilities/upstream/f2e58468/OneXPlayer3.cs');
+  const upgradeBytes=fs.readFileSync(upgradePath);
+  if(sha(upgradeBytes)!=='e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc' || sha(Buffer.concat([Buffer.from(`blob ${upgradeBytes.length}\0`),upgradeBytes]),'sha1')!=='9361977cce00c11be104316a782a0d5e9de8165b') throw Error('OXP3 f2e58468 source pin mismatch');
+  const upgradeCode=clean(upgradeBytes.toString('utf8'));
+  const upgradeClass=unique(upgradeCode,/public\s+class\s+OneXPlayer3\s*:\s*(\w+)/,'upgraded OXP3 class');
+  const upgradeOpen=upgradeCode.indexOf('{',upgradeClass.index+upgradeClass[0].length);
+  sources.set('OneXPlayer3',{parent:upgradeClass[1],namespace:'HandheldCompanion.Devices',code:upgradeCode.slice(upgradeOpen+1,balanced(upgradeCode,upgradeOpen))});
+  const upgrades=[{commit:'f2e58468d9917189d4be7ccfc242385ce2c3035b',path:upgradePath,sha256:sha(upgradeBytes),gitBlob:'9361977cce00c11be104316a782a0d5e9de8165b'}];
+
   function resolve(cls, name) {
     const source = sources.get(cls); if (!source) throw Error(`No declaration of ${name} in fixed inheritance`);
     const own = method(source.code, name);
@@ -149,11 +160,15 @@ export function deriveOracle(workspace, fixtureDirectory) {
       if (!value) throw Error(`Missing inherited assignment ${cls}.${name}`); return value;
     };
     const pids = assignment('productIds').replace(/[\[\]]/g, '').split(',').map(t => t.trim() === 'PID_VENDOR' ? constant('PID_VENDOR') : integer(t));
+    const modelFlagRole={...flagRole,...(cls==='OneXPlayer3'?{OEM4:'GKey'}:{})};
+    const held=cls==='OneXPlayer3'?resolve(cls,'HandleEvent').body:null;
+    if(held && (!/button is ButtonFlags\.OEM3 or ButtonFlags\.OEM4/.test(held)||!/KeyPress\(button\)/.test(held)||!/KeyRelease\(button\)/.test(held))) throw Error('Upgraded OXP3 held-key contract changed');
+    const modelClickRoles=clickFlags.filter(flag=>!held || !['OEM3','OEM4'].includes(flag)).map(flag=>roleTags[modelFlagRole[flag]]);
     const ids = mapping(cls), roles = Array.from({length:256}, (_,id) => {
       const flag = ids.get(id) || 'None';
       // Special exists only in the old base and is fully overridden by X2.
-      if (!Object.hasOwn(flagRole, flag)) throw Error(`Unmapped inherited role ${flag}`);
-      return roleTags[flagRole[flag]];
+      if (!Object.hasOwn(modelFlagRole, flag)) throw Error(`Unmapped inherited role ${flag}`);
+      return roleTags[modelFlagRole[flag]];
     });
     const config = resolve(cls, 'ConfigureController');
     const calls = [...config.body.matchAll(/WriteVendorHidCommand\((0x[\da-f]+),\s*(Build\w+)\(([^)]*)\)\);/gi)];
@@ -170,14 +185,14 @@ export function deriveOracle(workspace, fixtureDirectory) {
     const extra = [...x2.matchAll(/hidFilters\[(0x[\da-f]+)\]\s*=\s*new HidFilter\(unchecked\(\(short\)(0x[\da-f]+)\),\s*unchecked\((0x[\da-f]+)\)\)/gi)];
     if (extra.length !== 1 || extra[0][2] !== filters[0][1] || extra[0][3] !== filters[0][2]) throw Error('Secondary PID filter mismatch');
     return { cls, canonicalClass:`${sources.get(cls).namespace}.${cls}`, model:i+1, lineage:chain, configOwner:config.owner, vid:integer(assignment('vendorId')), pids,
-      usagePage:integer(filters[0][1]), usage:integer(filters[0][2]), roles, init };
+      usagePage:integer(filters[0][1]), usage:integer(filters[0][2]), roles, clickRoles:modelClickRoles, init };
   });
-  return { commit:pins.commit, manifestSha256:sha(manifestBytes), treeSha256:sha(treeBytes), sourcePinsSha256:sha(pinsBytes), provenance, wire,
+  return { commit:pins.commit, upgrades, manifestSha256:sha(manifestBytes), treeSha256:sha(treeBytes), sourcePinsSha256:sha(pinsBytes), provenance, wire,
     clickRoles:clickFlags.map(flag => roleTags[flagRole[flag]]), clickMs, models };
 }
 export function cppOracle(o) {
   const structModels = o.models.map(m => `  {${JSON.stringify(m.cls)},${JSON.stringify(m.canonicalClass)},${m.model},${m.vid},{${m.pids}},${m.usagePage},${m.usage},
-    {${m.roles}},
+    {${m.roles}},{${m.clickRoles}},
     {${m.init.map(s => `{${s.command},{${s.payload}},${s.delayAfterMs}}`).join(',')}}}`).join(',\n');
   return `#pragma once
 #include <array>
@@ -185,7 +200,7 @@ export function cppOracle(o) {
 #include <vector>
 namespace oracle {
 struct Init { unsigned command; std::vector<std::uint8_t> payload; unsigned delay; };
-struct Model { const char* cls; const char* canonicalClass; unsigned tag,vid; std::vector<unsigned> pids; unsigned page,usage; std::array<unsigned,256> roles; std::vector<Init> init; };
+struct Model { const char* cls; const char* canonicalClass; unsigned tag,vid; std::vector<unsigned> pids; unsigned page,usage; std::array<unsigned,256> roles; std::vector<unsigned> clickRoles; std::vector<Init> init; };
 inline const std::vector<Model> models = {\n${structModels}\n};
 ${Object.entries(o.wire).map(([k,v])=>`inline constexpr std::size_t ${k} = ${v};`).join('\n')}
 inline constexpr unsigned clickMs = ${o.clickMs};

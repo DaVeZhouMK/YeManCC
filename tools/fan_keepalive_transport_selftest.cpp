@@ -10,15 +10,30 @@
 #include <utility>
 #include "http_request_deadline.h"
 #include "fan_response_contract.h"
+// Meter only real parent handle setup/retirement; request and callbacks stay real WinHTTP.
+int sessionSetups=0,connectionSetups=0,parentCloses=0;
+HINTERNET MeterSession(LPCWSTR agent,DWORD access,LPCWSTR proxy,LPCWSTR bypass,DWORD flags){++sessionSetups;return ::WinHttpOpen(agent,access,proxy,bypass,flags);}
+HINTERNET MeterConnection(HINTERNET session,LPCWSTR host,INTERNET_PORT port,DWORD reserved){++connectionSetups;return ::WinHttpConnect(session,host,port,reserved);}
+BOOL MeterParentClose(HINTERNET value){++parentCloses;return ::WinHttpCloseHandle(value);}
+#define WinHttpOpen MeterSession
+#define WinHttpConnect MeterConnection
+#define WinHttpCloseHandle MeterParentClose
+#include "fan_keepalive_transport.h"
+#undef WinHttpOpen
+#undef WinHttpConnect
+#undef WinHttpCloseHandle
 #pragma comment(lib,"winhttp.lib")
 using json=nlohmann::json;
 INTERNET_PORT fixturePort=0;
 std::string fixtureCase;
-int authRejected=0,headerFailed=0,displayObserved=0;
+int authRejected=0,headerFailed=0,displayObserved=0,credentialReads=0,identityReads=0;
+std::uint64_t fixtureOwnerRevision=1;
+struct FixtureSelection {std::uint64_t revision()const{return fixtureOwnerRevision;}};
+FixtureSelection& fanKeepaliveProcessSelection(){static FixtureSelection selection;return selection;}
 std::atomic<bool> g_fanLeaseKeepaliveStop{false},g_exitRequested{false};
 struct FixtureMonitor {ULONGLONG epoch(){return 1;}void observe(ULONGLONG,DWORD,const json&,long long){++displayObserved;}} g_monitorFanDisplay;
-std::string fanHostReadSessionToken(){return fixtureCase=="missing-token"?std::string{}:"fixture-token-"+fixtureCase;}
-bool fanHostExactProcessRunning(){return fixtureCase!="wrong-identity";}
+std::string fanHostReadSessionToken(){++credentialReads;return fixtureCase=="missing-token"?std::string{}:"fixture-token-"+fixtureCase;}
+bool fanHostExactProcessRunning(){++identityReads;return fixtureCase!="wrong-identity";}
 bool fanHostExactProcessRunningForKeepalive(){return fanHostExactProcessRunning();}
 void fanHostNoteCredentialUnavailable(const char*){}
 void fanHostIdentityNoteUnverified(const char*){}
@@ -40,10 +55,23 @@ int main(int argc,char** argv){
  }
  std::string lease="must-be-cleared",code="must-be-cleared";DWORD status=999;
  bool ok=fanLeaseKeepalivePostHeartbeat("fixture-lease-0001",&lease,&status,&code);
+ const std::string scenario=fixtureCase;int acceptedCalls=ok?1:0;bool lastCallOk=ok;bool middleRefusalClearedLease=false;
+ if(scenario=="session-reuse"||scenario=="owner-replaced"||scenario=="retry-after-denial"||scenario=="idle-reset"||scenario=="missing-token-after-warm"||scenario=="identity-after-warm"){
+  for(int i=1;i<3;i++){
+   if(scenario=="owner-replaced"&&i==1)++fixtureOwnerRevision;
+   if(scenario=="idle-reset"&&i==1)ymcc::fan_http::currentThreadTransport().reset();
+   if(scenario=="retry-after-denial")fixtureCase=i==1?"denied":"normal";
+   if(scenario=="missing-token-after-warm")fixtureCase=i==1?"missing-token":"normal";
+   if(scenario=="identity-after-warm")fixtureCase=i==1?"wrong-identity":"normal";
+   lastCallOk=fanLeaseKeepalivePostHeartbeat("fixture-lease-0001",&lease,&status,&code);
+   if(i==1)middleRefusalClearedLease=!lastCallOk&&lease.empty();
+   if(lastCallOk)++acceptedCalls;
+  }
+ }
  if(cancel.joinable())cancel.join();
  const auto elapsed=GetTickCount64()-began;
  bool retryOk=false;
  if(fixtureCase=="slow-body"){fixtureCase="normal";retryOk=fanLeaseKeepalivePostHeartbeat("fixture-lease-0001",&lease,&status,&code);}
- std::cout<<json{{"ok",ok},{"elapsed",elapsed},{"lease",lease},{"code",code},{"status",status},{"authRejected",authRejected},{"headerFailed",headerFailed},{"displayObserved",displayObserved},{"retryOk",retryOk}}.dump()<<"\n";
+ std::cout<<json{{"ok",ok},{"elapsed",elapsed},{"lease",lease},{"code",code},{"status",status},{"authRejected",authRejected},{"headerFailed",headerFailed},{"displayObserved",displayObserved},{"retryOk",retryOk},{"acceptedCalls",acceptedCalls},{"lastCallOk",lastCallOk},{"credentialReads",credentialReads},{"identityReads",identityReads},{"sessionSetups",sessionSetups},{"connectionSetups",connectionSetups},{"parentCloses",parentCloses},{"middleRefusalClearedLease",middleRefusalClearedLease}}.dump()<<"\n";
  return 0;
 }

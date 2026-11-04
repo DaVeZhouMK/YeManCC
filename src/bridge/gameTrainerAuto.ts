@@ -1,4 +1,4 @@
-import { detectedGameName, type DetectedGame } from './gamedetect';
+import { detectedGameName, isGameStatusCurrent, isCurrentGameTarget, subscribeGameTargetReadiness, type DetectedGame } from './gamedetect';
 import { subscribePolicyGameStatus } from './gamePolicyTarget';
 import { canAutoPrepareTrainer, cancelAutomaticTrainerPreparations, getGameTrainerState, getReadyGameTrainer, prepareGameTrainer, trainerTaskKey, refreshGameTrainerData, subscribeGameTrainerState } from './gameTrainer';
 import { startGameTrainerRecovery } from './gameTrainerRecovery';
@@ -51,8 +51,10 @@ export function startGameTrainerAutoPrepare(): () => void {
     if (!getUiSetting('trainerAutoPrepare')) { cancelAutomaticTrainerPreparations(); return; }
     const target = game;
     const targetEpoch = gameEpoch;
+    const current = () => !stopped && targetEpoch === gameEpoch && generation === getSettingsGeneration() &&
+      isGameStatusCurrent() && !!target && isCurrentGameTarget(target);
     const name = detectedGameName(target);
-    if (!target || !canAutoPrepareTrainer(name, target.path)) return;
+    if (!target || !isGameStatusCurrent() || !isCurrentGameTarget(target) || !canAutoPrepareTrainer(name, target.path)) return;
     const key = trainerTaskKey(name, target.path);
     const instance = key + '|' + target.pid + '|' + target.processCreated;
     const delay = Math.max(2500, (retryAt.get(instance) || 0) - Date.now());
@@ -60,15 +62,16 @@ export function startGameTrainerAutoPrepare(): () => void {
       timer = null;
       if (stopped || targetEpoch !== gameEpoch) return;
       if (generation !== getSettingsGeneration()) { schedule(); scheduleCatalog(); return; }
+      if (!current()) return;
       if (!getUiSetting('trainerAutoPrepare') || game?.pid !== target.pid || game.processCreated !== target.processCreated || trainerTaskKey(detectedGameName(game), game.path) !== key) return;
       if (retryAt.size >= 128 && !retryAt.has(instance)) { const oldest = retryAt.keys().next().value!; retryAt.delete(oldest); transientFailures.delete(oldest); }
       retryAt.set(instance, Date.now() + 3600000);
       if (getReadyGameTrainer(name, target.path, target)) { retryAt.set(instance, Date.now() + 86400000); schedule(); return; }
       void prepareGameTrainer(name, { automatic: true, processPath: target.path, processTarget: { pid: target.pid, processCreated: target.processCreated } }).then((result) => {
-        if (stopped || targetEpoch !== gameEpoch || generation !== getSettingsGeneration()) return;
+        if (!current()) return;
         if (result.state === 'failed' && result.retryable === true) retryTransient(instance, result.retryAfter);
         else { transientFailures.delete(instance); retryAt.set(instance, result.state === 'ready' ? Date.now() + 86400000 : Math.max(Date.now() + 3600000, result.retryAfter || 0)); }
-      }).catch(() => { if (!stopped && targetEpoch === gameEpoch && generation === getSettingsGeneration()) retryTransient(instance); }).finally(() => { if (!stopped && targetEpoch === gameEpoch && generation === getSettingsGeneration()) schedule(); });
+      }).catch(() => { if (current()) retryTransient(instance); }).finally(() => { if (current()) schedule(); });
     }, delay);
   };
   const stopRecovery = startGameTrainerRecovery();
@@ -76,6 +79,13 @@ export function startGameTrainerAutoPrepare(): () => void {
     const changed = !!game !== !!next || game && next && (game.pid !== next.pid || game.processCreated !== next.processCreated || game.identityGeneration !== next.identityGeneration || trainerTaskKey(detectedGameName(game), game.path) !== trainerTaskKey(detectedGameName(next), next.path));
     if (changed) { gameEpoch++; cancelAutomaticTrainerPreparations(); }
     game = next; schedule();
+  });
+  const stopReadiness = subscribeGameTargetReadiness(() => {
+    ++gameEpoch;
+    // Unknown is not exit: keep the display, catalog and successful receipts.
+    // Cancel only automatic work; its old completion cannot restore authority.
+    if (!isGameStatusCurrent()) cancelAutomaticTrainerPreparations();
+    schedule();
   });
   const onPreferenceChange = () => { schedule(); scheduleCatalog(); };
   const stopTrainerState = subscribeGameTrainerState(() => {
@@ -88,6 +98,7 @@ export function startGameTrainerAutoPrepare(): () => void {
     if (timer !== null) clearTimeout(timer);
     if (catalogTimer !== null) clearTimeout(catalogTimer);
     stopGame();
+    stopReadiness();
     stopRecovery();
     stopTrainerState();
     window.removeEventListener('ui-settings:changed', onPreferenceChange);

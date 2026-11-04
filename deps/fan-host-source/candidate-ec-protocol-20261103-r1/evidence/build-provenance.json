@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-InheritedEc-Protocol-Regression-20261103\\product-build\\bin\\YeManFanHost\\release_win-x64",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-InheritedEc-Protocol-Regression-20261103\\product-build",
+  "metadataToolSha256": "96a3c3f82f4017856dc73ffe37d273794da57fd991cb1a0dc1866d73ac2a639a",
+  "preparationToolSha256": "7c221307162baaeca0eb0d09ba7893121c39fb4d31d4f58775b335cffa9e0b60",
+  "isolatedBuildTargetsSha256": "798b661d0f9af067d09fc498bfe1ccec0f3ff7511870a8f9fa5b471d0850c4ac",
+  "projectSourceRebuildReproducibilityProven": false
+}

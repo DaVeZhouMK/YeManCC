@@ -50,10 +50,39 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
     state = { ...state, ...patch, enabled: policy?.enabled ?? state.enabled };
     for (const listener of listeners) { try { listener({ ...state }); } catch { /* Presentation is not task ownership. */ } }
   }
+  function clearTimer() {
+    if (timer !== null) deps.clearTimer(timer);
+    timer = null;
+  }
   function arm(ms = 30000) {
     if (ended || !started) return;
-    if (timer !== null) deps.clearTimer(timer);
+    clearTimer();
     timer = deps.timer(() => { timer = null; void run(); }, ms);
+  }
+  function scheduleNext() {
+    if (ended || !started) return;
+    if (!policy) { arm(); return; } // An unknown policy still needs recovery.
+    if (deps.canRun?.() === false) { clearTimer(); return; }
+    const now = deps.now();
+    if (now < quietUntil) { arm(quietUntil - now); return; }
+    const { info, progress: current } = deps.current();
+    // Transfer/installer ownership and missed progress are unresolved work.
+    // Keep the existing recovery cadence for these states only.
+    if (busyPhases.includes(current.phase || '')) { arm(); return; }
+    let deadline = Infinity;
+    if (policy.enabled && deps.online()) {
+      deadline = policy.nextCheckAt > now ? policy.nextCheckAt : now + 30000;
+    }
+    if (info && current.phase === 'downloaded') {
+      const cacheDeadline = verified === identity(info) ? verifiedAt + CHECK_INTERVAL : now;
+      deadline = Math.min(deadline, cacheDeadline > now ? cacheDeadline : now + 30000);
+      // A declined notification/failed acknowledgement has not completed this
+      // boot's work; its retry must survive even with downloads disabled.
+      if (policy.bootId && policy.lastNotifiedBoot !== policy.bootId)
+        deadline = Math.min(deadline, now + 30000);
+    }
+    if (Number.isFinite(deadline)) arm(Math.max(1, deadline - now));
+    else clearTimer(); // Disabled/offline with no pending cache: no idle pump.
   }
   async function load() {
     if (policy) return;
@@ -186,7 +215,7 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
         publish({ phase: policy?.enabled === false ? 'paused' : 'failed', message: policy?.enabled === false ? '后台预下载已关闭，下载缓存已保留' : '稍后自动重试：' + message });
         try { if (policy?.enabled) await schedule(true); } catch { /* Keep the in-memory backoff even if the disk is full. */ }
       }
-    } finally { running = false; if (!ended) arm(); }
+    } finally { running = false; scheduleNext(); }
   }
   return {
     async read() { await load(); return { ...state }; },
@@ -197,13 +226,13 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
       revision++;
       policy = saved;
       publish({ phase: enabled ? 'waiting' : 'paused', message: enabled ? '已启用后台预下载' : '后台预下载已关闭，下载缓存已保留' });
-      if (!enabled) await deps.cancel();
+      if (!enabled) { await deps.cancel(); scheduleNext(); }
       else { policy.nextCheckAt = 0; arm(1000); }
       return { ...state };
     },
     subscribe(listener) { listeners.add(listener); listener({ ...state }); return () => { listeners.delete(listener); }; },
     start() { if (started || ended) return; started = true; arm(15000); },
-    stop() { if (ended) return; ended = true; revision++; if (timer !== null) deps.clearTimer(timer); timer = null; listeners.clear(); void deps.cancel().catch(() => {}); },
+    stop() { if (ended) return; ended = true; revision++; clearTimer(); listeners.clear(); void deps.cancel().catch(() => {}); },
     wake(recover = false) {
       if (ended) return;
       if (recover && policy && deps.now() - lastRecovery >= 15000) { policy.nextCheckAt = Math.max(quietUntil, Math.min(policy.nextCheckAt, deps.now())); lastRecovery = deps.now(); }

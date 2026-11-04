@@ -128,7 +128,7 @@ inline nlohmann::json injectBootstrap(const std::wstring& steam, const nlohmann:
         checkpoint();
         auto socket=std::make_shared<AsyncRequest>(WinHttpWebSocketCompleteUpgrade(request.handle(),0),cancellation,deadline,true);
         if(!stillOwned(steam,endpoint,expectedSteamPid) || !sameWindowsUserAndSession(endpoint.pid))throw std::runtime_error("mirror-bootstrap-owner-mismatch");
-        const std::string expression="(() => { if (window !== window.top || location.origin !== 'https://steamloopback.host') return; const value = "+bootstrap.dump()+"; Object.defineProperty(window, '__YMCC_DECKY_MIRROR__', { value: Object.freeze(value), configurable: true, writable: false }); window.dispatchEvent(new Event('ymcc-decky-bootstrap')); ("+std::string(frontendUpdateScript())+")(value); ("+std::string(healthScript())+")({...value,loaderVersion:\""+std::string(ymcc::deckyidentity::version)+"\"}); return value.runId; })()";
+        const std::string expression="(() => { if (window !== window.top || location.origin !== 'https://steamloopback.host') return; const value = "+bootstrap.dump()+"; if(value.accountSource==='verified-steam-ui' && !(window.__YMCC_DECKY_ACCOUNT_WATCH__?.version===1 && window.__YMCC_DECKY_ACCOUNT_WATCH__.read(value.account))) return 'ymcc-decky-account-not-current'; Object.defineProperty(window, '__YMCC_DECKY_MIRROR__', { value: Object.freeze(value), configurable: true, writable: false }); window.dispatchEvent(new Event('ymcc-decky-bootstrap')); ("+std::string(frontendUpdateScript())+")(value); ("+std::string(healthScript())+")({...value,loaderVersion:\""+std::string(ymcc::deckyidentity::version)+"\"}); if(value.accountSource==='verified-steam-ui' && window.__YMCC_DECKY_HEALTH__?.accountCurrent()!==true) return 'ymcc-decky-account-watch-unavailable'; return value.runId; })()";
         const std::string launchExpression = requireFreshContext
             ? "(() => { if (window !== window.top || location.origin !== 'https://steamloopback.host' || window.deckyHasLoaded || window.DeckyPluginLoader) return 'ymcc-decky-context-already-loaded'; return (" + expression + "); })()"
             : expression;
@@ -144,6 +144,9 @@ inline nlohmann::json injectBootstrap(const std::wstring& steam, const nlohmann:
             const auto reply=nlohmann::json::parse(socket->receiveText(65536));
             if(++packets>128)throw std::runtime_error("mirror-bootstrap-reply-limit");
             if(reply.value("id",0)!=8101)continue;
+            const auto readback=reply.value("result",nlohmann::json::object()).value("result",nlohmann::json::object()).value("value",std::string{});
+            if(readback=="ymcc-decky-account-not-current"){sent=false;throw std::runtime_error("mirror-bootstrap-session-changed");} // Exact guard precedes all credential writes.
+            if(readback=="ymcc-decky-account-watch-unavailable")throw std::runtime_error("mirror-bootstrap-account-changed");
             if (reply.contains("result") && reply["result"].value("result",nlohmann::json::object()).value("value",std::string{}) == "ymcc-decky-retained-frontend-mismatch")
                 throw std::runtime_error("mirror-retained-frontend-changed");
             if (reply.contains("result") && reply["result"].value("result",nlohmann::json::object()).value("value",std::string{}) == "ymcc-decky-context-already-loaded")

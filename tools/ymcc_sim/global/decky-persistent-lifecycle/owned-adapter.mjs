@@ -27,12 +27,23 @@ export const OWNED_SOURCES=Object.freeze([
  "native/decky_binding_process_owner.h",
  "native/decky_sidebar_runtime.h",
  "native/decky_sidebar_temp.h",
+    "native/decky_sidebar_session.h",
  "native/decky_sidebar_launch.h",
  "native/process_efficiency.h",
  "native/decky_sidebar_recovery.h",
+ "native/decky_context_cleanup_worker.h",
+ "native/decky_resource_worker.h",
+ "native/decky_bigpicture_recovery.h",
+ "native/decky_sidebar_manual_repair.h",
+ "native/decky_sidebar_resource_cache.h",
+ "native/decky_sidebar_setup.h",
+ "native/decky_update_recovery.h",
+ "native/game_process_inventory.h",
+ "native/process_inventory.h",
+ "native/steam_ui_epoch.h",
  "tools/decky_binding_runtime_selftest.mjs"
 ]);
-export const OWNED_INPUTS=Object.freeze([...new Set([...OWNED_SOURCES,...HOST_ENVIRONMENT_SOURCE_INPUTS,...BUNDLED_AUTHORITY_SOURCES,'tools/ymcc_sim/global/capability-lifecycle/index.mjs',OWNED_MODULE+'/owned-adapter.mjs',OWNED_MODULE+'/owned-run.mjs',OWNED_MODULE+'/owned-tools.json',OWNED_MODULE+'/README.md','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'])]);
+export const OWNED_INPUTS=Object.freeze([...new Set([...OWNED_SOURCES,...HOST_ENVIRONMENT_SOURCE_INPUTS,...BUNDLED_AUTHORITY_SOURCES,'tools/ymcc_sim/global/capability-lifecycle/index.mjs',OWNED_MODULE+'/owned-adapter.mjs',OWNED_MODULE+'/owned-run.mjs',OWNED_MODULE+'/typed-binding-gate.mjs',OWNED_MODULE+'/owned-tools.json',OWNED_MODULE+'/README.md','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'])]);
 export function ownedToolDeclaration(repo){
  const native=getNativeLaunchNoIoToolDeclaration();if(native.blockedReason)return native;
  try{const pins=selectedOwnedTools().files;

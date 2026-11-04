@@ -14,7 +14,7 @@
 
 fxsound.getState 仅观察当前会话进程、FxSound.settings 和 Core Audio 路由，无写入及窗口操作。开启时若已有实例已启用并选中目标预设，则直接复用。其他状态下通过该进程的 JUCEWindow 消息线程投递 WM_QUIT；JUCE 6/7 调度器将其转换为 systemRequestedQuit，FxSound 调用 quit 与 shutdown 正常清理。没有 TerminateProcess/taskkill。
 
-FxSound 1.2.6 的 anotherInstanceStarted 只显示主窗口，不接收新预设参数。因此既有实例需要调整时，先后台正常退出，再变更停止状态的配置并启动。静默配置补丁仅涉及 preset、power、run_minimized、hide_notifications，以及避免版本切换强制显示更新窗口的 version 记账字段。新建空白配置时增加 survey_displayed；不会植入本机扬声器 ID。其他字段逐字节保留，原 .fac 内容不触碰。仅在确认文件不存在时新建配置；现有空文件、损坏、被占用或读取失败均报错，不重置整份配置。提交前复核文件存在性和原字节，其他入口新建空文件或改写内容都会取消提交。
+FxSound 1.2.6 的 anotherInstanceStarted 只显示主窗口，不接收新预设参数。因此既有实例需要调整时，先后台正常退出，再变更停止状态的配置并启动。静默配置补丁仅涉及 preset、power、run_minimized、hide_notifications，以及避免版本切换强制显示更新窗口的 version 记账字段。新建空白配置时增加 survey_displayed；不会植入本机扬声器 ID。其他字段逐字节保留，原 .fac 内容不触碰。确认文件不存在时可新建配置。2026-11-01 配置自愈更新：现有空文件、损坏或超限配置，在确认程序停止并保全、核验完整原件后可重建静默默认字段。占用、拒读、未知格式或编码保持原件并返回具体失败；故障解除后可显式重试。提交前复核文件身份、原字节及程序停止状态；其他入口改写或重新启动会取消提交。发布后须独立读回确认，归档后发布失败按未覆盖外来文件的规则恢复原件。
 
 停机写入前后检查进程状态与原文件内容，再用同目录临时文件原子替换；有冲突时返回具体原因。启动前用系统 shell 的隐藏显示方式，FxSound 读取 run_minimized=1 和 hide_notifications=1。
 
@@ -30,7 +30,7 @@ FxSound 1.2.6 的 anotherInstanceStarted 只显示主窗口，不接收新预设
 
 ## 本轮证据
 
-- 原生恢复与静默配置/临时文件：104 项断言；6 项故障负例均被断言拒绝。
+- 原生恢复与静默配置/临时文件：2026-10-24 历史记录为104项断言、6项故障负例；2026-11-01 当前消费者为105项断言，原6个保护反例保留并通过。
 - Decky 实际客户端、relay、host、owner 与 TSX：29 项，其中 6 项 FxSound 专项。硬件/IPC 口在该组测试中为内存实现。
 - 真实 Windows 认证 WebSocket 桥 → 实际客户端/relay/host/owner → 原生控制消费者 → 本机 FxSound/A100：6 项通过；重复 ON 同 PID，4 个实际开关请求，关闭后有 A100 输出信号，最终 broker 端口/进程/观察计时器均释放。
 - 原生桥漏列音质命令的旧策略反例可复现：请求在到达音频控制前断开，音频写入为 0。当前白名单已添加 audioOptimization.setEnabled，认证和其他准入不变。
@@ -68,3 +68,8 @@ FxSound 1.2.6 的 anotherInstanceStarted 只显示主窗口，不接收新预设
 场景启动通过同一个 FxSoundOwner 请求开启。关闭的场景表示不自动启动，不主动退出玩家手动启动的软件。Decky 开关始终反映实际软件状态；只读观察不会重复强制 ON。编辑或保存场景不启动 FxSound。
 
 普通测试导出部署沿用包内 `mainline-local-test-export` 声明；先核验完整 ZIP、配套主程序/网页/插件，再识别 `formalReleaseAccepted=false`、`fixtureValidation=NOT_RUN`。不将未执行的完整 Decky 发布夹具写作通过；正式包仍要求原 Build/Package 回执。
+## 2026-11-01 配置风暴与自愈
+
+原消费者增加可选 `-ConfigStormOnly`，复用相同源码与文件端口；默认恢复用例及原6个负例不变。当前最终字节下50项配置场景通过，保存的改前实现用同一最终消费者为50项中42项失败。另有4组发布读回、归档回滚、来源检查及未知格式保护的撤销反例被抓住。所有场景使用内存音频/进程及独占文件根，不是新一轮真实FxSound、音频、Decky或全屏验收。
+
+受支持配置的未接管字段保留原文；单引号、属性换序、重复接管项、注释/CDATA及UTF-8/UTF-16均有覆盖。只有显式开启的配置操作会写入；读状态、启动扬声器恢复和关闭逻辑不重放设置。独立FAC仍存在即保留，不解析内容。源码变更后的历史整体验收不得直接复用为当前整机通过。

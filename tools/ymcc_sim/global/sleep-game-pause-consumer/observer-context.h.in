@@ -12,6 +12,10 @@ static bool exitFence=false, knownBoard=false, virtualLog=false;
 static bool inputHostExitFenceRaised(){return gameMsiMemory::exitFence;}
 static bool msiClawKnownBoardAuthority(){return gameMsiMemory::knownBoard;}
 static bool domainLogEnabled(const char* domain){return gameMsiMemory::virtualLog&&domain&&std::strcmp(domain,"virtual")==0;}
+// Decky transport is outside this PID fixture. This counted memory port has no I/O.
+static unsigned gameDeckyResumePortCalls=0;
+static unsigned long long gameDeckyResumePortGeneration=0;
+static bool deckySidebarResumeAfterIntent(unsigned long long generation){++gameDeckyResumePortCalls;gameDeckyResumePortGeneration=generation;return false;}
 @@PRODUCT_ELIGIBILITY@@
 @@PRODUCT_NOTE_RESUME@@
 namespace gameMsiMemory {

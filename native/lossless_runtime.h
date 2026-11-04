@@ -8,6 +8,7 @@
 #include <shlobj.h>
 #include <wrl/implements.h>
 #include "lossless_scale.h"
+#include "process_basic_candidates.h"
 #pragma comment(lib,"shell32.lib")
 #pragma comment(lib,"uuid.lib")
 namespace ymcc::lossless {
@@ -25,23 +26,30 @@ inline RuntimeReceipt selectRuntime(const std::vector<Identity>& candidates,bool
     r.known=true;r.reason.clear();if(candidates.empty())return r;
     r.running=true;r.identity=candidates.front();return r;
 }
+inline void appendRuntimeCandidate(DWORD pid, DWORD session,
+    std::vector<Identity>& candidates, bool& unreadable) {
+    DWORD peer=0;if(!ProcessIdToSessionId(pid,&peer)){unreadable=true;return;}if(peer!=session)return;
+    HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);
+    if(!process){unreadable=true;return;}
+    wchar_t image[32768];DWORD size=32768;FILETIME c{},e{},k{},u{};
+    if(WaitForSingleObject(process,0)==WAIT_TIMEOUT&&QueryFullProcessImageNameW(process,0,image,&size)&&GetProcessTimes(process,&c,&e,&k,&u))
+        { const std::wstring path(image,size); const auto leaf=path.substr(path.find_last_of(L"\\/")+1);
+          DWORD heldSession=0;
+          if(_wcsicmp(leaf.c_str(),L"LosslessScaling.exe")||GetProcessId(process)!=pid||
+             !ProcessIdToSessionId(pid,&heldSession)||heldSession!=session)unreadable=true;
+          else candidates.push_back({pid,(std::uint64_t(c.dwHighDateTime)<<32)|c.dwLowDateTime,path}); }
+    else if(WaitForSingleObject(process,0)==WAIT_TIMEOUT)unreadable=true;
+    CloseHandle(process);
+}
 inline RuntimeReceipt discoverRuntime(){
     DWORD session=0;if(!ProcessIdToSessionId(GetCurrentProcessId(),&session))return {};
-    HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);if(snapshot==INVALID_HANDLE_VALUE)return {};
-    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);std::vector<Identity> candidates;bool unreadable=false;
-    if(Process32FirstW(snapshot,&entry))do{
-        if(_wcsicmp(entry.szExeFile,L"LosslessScaling.exe"))continue;
-        DWORD peer=0;if(!ProcessIdToSessionId(entry.th32ProcessID,&peer)){unreadable=true;continue;}if(peer!=session)continue;
-        HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,entry.th32ProcessID);
-        if(!process){unreadable=true;continue;}
-        wchar_t image[32768];DWORD size=32768;FILETIME c{},e{},k{},u{};
-        if(WaitForSingleObject(process,0)==WAIT_TIMEOUT&&QueryFullProcessImageNameW(process,0,image,&size)&&GetProcessTimes(process,&c,&e,&k,&u))
-            candidates.push_back({entry.th32ProcessID,(std::uint64_t(c.dwHighDateTime)<<32)|c.dwLowDateTime,std::wstring(image,size)});
-        else if(WaitForSingleObject(process,0)==WAIT_TIMEOUT)unreadable=true;
-        CloseHandle(process);
-    }while(Process32NextW(snapshot,&entry));
-    const auto error=GetLastError();CloseHandle(snapshot);
-    return selectRuntime(candidates,unreadable||error!=ERROR_NO_MORE_FILES);
+    std::vector<DWORD> pids;DWORD basicError=ERROR_SUCCESS;
+    const auto status=ymcc::processNames::candidates(L"LosslessScaling.exe",pids,basicError,
+        ymcc::processNames::resolveBasicQuery(),ymcc::processNames::NameMatch::CrtIgnoreCase);
+    if(status!=ymcc::processNames::BasicResult::Complete)return {};
+    std::vector<Identity> candidates;bool unreadable=false;
+    for(const auto pid:pids)appendRuntimeCandidate(pid,session,candidates,unreadable);
+    return selectRuntime(candidates,unreadable);
 }
 inline RuntimeReceipt inspectRuntime(){
     auto r=discoverRuntime();r.observedAt=GetTickCount64();if(!r.known||!r.running)return r;

@@ -17,6 +17,14 @@ export function resetTdpCapabilityState(): void {
   breaker.reset();
 }
 
+export function reconcileTdpPowerReady(): void {
+  breaker.reconcilePowerReady();
+}
+
+export function reconcileTdpCapabilityReady(): void {
+  breaker.reconcileCapabilityReady();
+}
+
 export function runTdpHardwareWrite(task: () => Promise<void>): Promise<TdpWriteResult> {
   return breaker.run(task);
 }

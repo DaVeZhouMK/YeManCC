@@ -91,8 +91,52 @@ await check('Plugin unload cancels capped recovery and never revives its connect
 await check('Changing authenticated bootstrap cancels old recovery and rejects stale old-run HUD packets',()=>{
   const f=fixture(),packets=[];try{f.client.subscribeExtra(value=>packets.push(value));f.client.setPassiveVisible(true);f.open();const old=f.sockets[0];old.close();const callback=[...f.timers.values()][0].action;f.boot.runId='hud-new-run';f.boot.token='NEW-TEST-ONLY';f.client.bootstrapChanged();assert.equal(f.sockets.length,2);f.open();callback();old.emit('message',{type:'hud',runId:'hud-test-run',seq:100});assert.equal(packets.length,0);assert.equal(f.sockets.length,2);assert.equal(f.timers.size,0);assert.equal(f.client.sendHud('hud.status',{}),true);assert.equal(f.sockets.at(-1).sent.at(-1).runId,'hud-new-run');}finally{f.client.dispose();}
 });
-await check('Missing bootstrap starts no discovery; an existing session can recover a temporarily withdrawn binding',()=>{
-  const f=fixture({available:false});try{f.client.setPassiveVisible(true);assert.equal(f.attempts(),0);assert.equal(f.timers.size,0);f.available(true);f.client.bootstrapChanged();f.open();f.available(false);f.client.bootstrapChanged();assert.equal(f.sockets[0].closed,true);assert.equal(f.timers.size,1);assert.equal(f.attempts(),1);f.fire(250);assert.equal(f.attempts(),1);f.available(true);f.fire(1000);f.open();assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+await check('Missing bootstrap starts no discovery; an existing session can recover a temporarily withdrawn binding',async()=>{
+ for(const identity of ['same-run','new-run']){
+  const f=fixture({available:false});
+  try{
+   f.client.setPassiveVisible(true);assert.equal(f.attempts(),0);assert.equal(f.timers.size,1);
+   const cold=[...f.timers.values()][0].action;
+   f.available(true);f.client.bootstrapChanged();f.open();cold();
+   assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);
+   f.client.setVisible(true);f.snap();
+   const old=f.sockets[0],oldSnapshot=f.snapshot(9999);
+   const uncertain=f.client.mutate('fan.setEnabled',{enabled:true}).then(()=>null,error=>error);
+   const retiredIntent=old.sent.at(-1);assert.equal(retiredIntent.command,'fan.setEnabled');
+   f.available(false);f.client.bootstrapChanged();
+   assert.equal(typeof (await uncertain)?.message,'string');f.client.setVisible(false);
+   assert.equal(old.closed,true);assert.equal(f.attempts(),1);assert.equal(f.timers.size,1);
+   // Empty notifications while an existing session is withdrawn carry no new
+   // launch identity. Preserve the same timer and its already-spent backoff.
+   for(const delay of [250,1000,3000,10000,30000,30000]){
+    const before=[...f.timers.keys()][0];assert.equal(f.onlyDelay(),delay);
+    for(let n=0;n<128;n++)f.client.bootstrapChanged();
+    assert.equal(f.timers.size,1);assert(f.timers.has(before));assert.equal(f.onlyDelay(),delay);assert.equal(f.attempts(),1);assert.equal(f.sockets.filter(socket=>!socket.closed).length,0);
+    f.fire(delay);assert.equal(f.attempts(),1);
+   }
+   const retired=[...f.timers.values()][0].action,oldRun=f.boot.runId;
+   if(identity==='new-run'){f.boot.runId='hud-restored-current-run';f.boot.token='RESTORED-TEST-ONLY';}
+   f.available(true);f.fire(30000);f.open(); // No bootstrapChanged notification.
+   retired();old.emit('open');old.emit('message',{type:'hud',runId:oldRun,seq:999});
+   assert.equal(f.attempts(),2);assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+   const current=f.sockets.at(-1);assert.equal(current.sent.length,0);
+   assert.equal(f.client.snapshot().snapshot,null);
+   assert.equal(f.sockets.flatMap(socket=>socket.sent).filter(message=>message.command==='fan.setEnabled').length,1,'The unconfirmed old intent is never replayed');
+   assert.equal(f.client.sendHud('hud.status',{capable:true}),true);
+   assert.equal(current.sent.at(-1).runId,f.boot.runId);
+   f.client.setVisible(true);f.snap(2);
+   const explicit=f.client.mutate('fan.setEnabled',{enabled:false}),fresh=current.sent.at(-1);
+   assert.equal(fresh.command,'fan.setEnabled');assert.notEqual(fresh.id,retiredIntent.id);assert.equal(fresh.runId,f.boot.runId);
+   old.emit('message',{type:'reply',runId:oldRun,id:retiredIntent.id,ok:true});
+   old.emit('message',{type:'snapshot',runId:oldRun,snapshot:oldSnapshot});
+   assert.equal(f.client.snapshot().busy,true);assert.equal(f.client.snapshot().snapshot.revision,2);
+   current.emit('message',{type:'reply',runId:f.boot.runId,id:fresh.id,ok:true});await explicit;
+   assert.equal(f.client.snapshot().busy,false);assert.equal(f.timers.size,0);
+   assert.equal(old.sent.filter(message=>message.command==='fan.setEnabled').length,1);
+   assert.equal(current.sent.filter(message=>message.command==='fan.setEnabled').length,1,'Only the new explicit user intent reaches the recovered peer');
+  }finally{f.client.dispose();}
+  assert.equal(f.timers.size,0);assert(f.sockets.every(socket=>socket.closed));
+ }
 });
 await check('Reconnect never replays a possibly applied business command',async()=>{
   const f=fixture();try{f.client.setPassiveVisible(true);f.client.setVisible(true);f.open();const snapshot=f.snapshot(1);snapshot.fan.supported=true;f.sockets[0].emit('message',{type:'snapshot',runId:f.boot.runId,snapshot});const pending=f.client.mutate('fan.setEnabled',{enabled:true});const rejected=assert.rejects(pending,/中断/);f.sockets[0].close();await rejected;f.fire(250);f.open();assert.equal(f.sockets.flatMap(s=>s.sent).filter(p=>p.command==='fan.setEnabled').length,1);assert.equal(f.sockets[1].sent.some(p=>p.command==='fan.setEnabled'),false);}finally{f.client.dispose();}

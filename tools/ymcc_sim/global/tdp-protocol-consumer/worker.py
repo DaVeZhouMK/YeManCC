@@ -5,7 +5,7 @@ def main():
  root=args.root.resolve();test=args.test.resolve();helper=(root/'PowerControl/pawnio/YeManTdpCtl.py').resolve()
  if sys.flags.optimize or not sys.flags.isolated or not sys.flags.no_site or not sys.dont_write_bytecode or pathlib.Path(sys.pycache_prefix or '').resolve()!=(root/'ignored-cache').resolve() or not test.is_file() or not helper.is_file() or not test.is_relative_to(root):raise RuntimeError('TDP_PROTOCOL_INPUT_OR_ASSERT_MODE_INVALID')
  scratch=root/'scratch';scratch.mkdir();os.environ['TEMP']=str(scratch);os.environ['TMP']=str(scratch)
- expected=['check_families','check_amd_routes','check_intel_encoding','check_intel_single_targets','check_daemon_client_allowlist']
+ expected=['check_families','check_amd_routes','check_intel_encoding','check_intel_single_targets','check_daemon_client_allowlist','check_uv_receipts']
  original=test.read_text(encoding='utf-8-sig');tree=ast.parse(original);assert_lines={node.lineno for node in ast.walk(tree) if isinstance(node,ast.Assert)}
  observation={'forbidden':[],'fileWrites':0,'groups':{},'assertLineVisits':{},'executedHelperFunctions':[]}
  state={'active':True,'helperMainInvoked':False};compiled={};prefix=pathlib.Path(sys.base_prefix).resolve();helper_functions=set();test_name=str(test);helper_name=str(helper)

@@ -25,7 +25,11 @@
     "tools/ymcc_sim/global/cli.mjs",
     "tools/ymcc_sim/global/extra-adapters.mjs",
     "tools/ymcc_sim/global/receipt-audit.mjs",
-    "tools/ymcc_sim/global/runner.mjs"
+    "tools/ymcc_sim/global/runner.mjs",
+    "native/custom-steam-library/custom_steam_library_opti_catalog.h",
+    "native/custom-steam-library/custom_steam_library_ymcc_whitelist.h",
+    "native/opti_catalog_startup.h",
+    "native/shared_game_media_video_request.h"
   ],
   "expectedCases": [
     "native-plan-uses-explicit-owned-target-and-real-worker-plan",

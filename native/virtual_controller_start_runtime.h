@@ -65,6 +65,94 @@ static bool ymStartAdmitSource() {
     return admitted;
 }
 
+// 151907: a native return cycle can drop a pre-target XInput source before
+// RawInput ever supplies its identity. Empty is not a reconnection witness.
+// Once, inside this original HELLO-only Start, resolve a complete unique
+// internal ROG game source and use the existing admission entry afresh. Never
+// replace a known identity or choose a new source after PREPARE/publication.
+static bool ymStartRecoverRogPendingIdentity(std::uint64_t ticket) {
+    if(nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Rog)return false;
+    const auto epoch=g_inputHostEpoch,power=currentPowerGeneration();
+    const auto run=g_inputHostRunId,persona=inputHostBuildPersonaSnapshot();
+    const auto process=g_inputHostProcess;
+    const auto intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+    const auto contextCurrent=[&](){
+        const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
+        return ticket && view.requestId==ticket && view.locked && view.remainingMs && view.persona==persona &&
+            (!g_inputHostSwitchRecoveryStartDeadline || now<g_inputHostSwitchRecoveryStartDeadline) &&
+            g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+            !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
+            intent==g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) &&
+            inputHostConfiguredPersona()==persona && ymcc::controllerPersona::motionTouchOutput(persona) &&
+            g_inputHostProcess==process && process && g_inputHostEpoch==epoch && g_inputHostRunId==run &&
+            g_inputHostHello && !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost &&
+            !g_hidHideVisibilityJournal.active && !g_inputHostReleaseQuarantined &&
+            currentPowerGeneration()==power && g_inputHostBoundPowerGeneration==power &&
+            g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready && g_inputReady &&
+            !g_inputHostPowerAdmissionRevoked && !inputHostExitFenceRaised() && !g_exitRequested &&
+            !g_inputCaptureStop && !physicalReleaseWindowActive();
+    };
+    if(!contextCurrent())return false;
+    DWORD originalSlot=0;unsigned topology=0,identityEpoch=0;std::uint64_t rawGeneration=0;
+    const auto missingIdentity=[&](){
+        const auto pending=g_xinputSourceReconfirmMask.load(std::memory_order_acquire);
+        unsigned slot=0;while(slot<4 && !(pending&(1u<<slot)))++slot;
+        const bool slotCurrent=slot<4 && !(g_xinputSlotReprobeMask.load(std::memory_order_acquire)&pending) &&
+            g_xinputSlotIdentityResolvedEpoch[slot]==g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
+        return slotCurrent && g_xinputPhysicalSourceLocked && !g_xinputPhysicalSourceMask && pending &&
+            !(pending&(pending-1)) && g_xinputPreTargetSlots==pending &&
+            g_xinputReconfirmIdentity.empty() && !g_hidHidePhysicalIdentity.resolved &&
+            g_xinputConnectedMask==pending && !(g_xinputSlotUnknownMask&pending) &&
+            !g_xinputVirtualEndpointMask && g_xinputPreTargetBoundaryScanned.load(std::memory_order_acquire) &&
+            g_xinputBoundaryScanEpoch.load(std::memory_order_acquire)==g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    };
+    {
+        std::unique_lock<std::mutex> sample(g_gamepadReadMx,std::defer_lock),
+            cache(g_hidResolveCacheMx,std::defer_lock),raw(g_hidHidePhysicalIdentityMx,std::defer_lock);
+        if(std::try_lock(sample,cache,raw)>=0 || !missingIdentity())return false;
+        originalSlot=g_xinputSourceReconfirmMask.load(std::memory_order_acquire);
+        topology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+        identityEpoch=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
+        rawGeneration=g_hidResolveCacheGeneration;
+    }
+    const auto receipt=[&](const char* outcome,bool admitted){
+        appendNativeLifecycleLog("input-host-rog-source-before-target",{{"stage","identity-recovery"},
+            {"outcome",outcome},{"admitted",admitted},{"requestId",ticket},{"epoch",epoch},
+            {"originalSourceMask",originalSlot},{"topologyAtQuery",topology},
+            {"targetPrepared",false},{"newCycle",false},{"budgetRenewed",false},
+            {"policy","ROG-empty-initial-identity-before-PREPARE"}});
+        return admitted;
+    };
+    std::vector<HidHidePhysicalIdentity> candidates;bool complete=false;
+    if(!hidHideResolvePhysicalIdentities(candidates,&complete) || !complete || candidates.size()!=1)
+        return receipt("physical-discovery-not-complete-unique",false);
+    const auto& selected=candidates.front();const auto& root=selected.baseContainerDeviceInstanceId;
+    if(!selected.resolved || selected.physicalIdentity.empty() || !nativeForegroundRootCandidate(root) ||
+       !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(selected.deviceInstanceId,root),
+           selected.vendorId,selected.productId,selected.usagePage,selected.usage) ||
+       externalPriorityUsbPortKind(root)!=0)return receipt("internal-ROG-game-source-unproven",false);
+    if(!contextCurrent())return receipt("original-context-retired-after-query",false);
+    std::unique_lock<std::mutex> sample(g_gamepadReadMx,std::defer_lock),
+        cache(g_hidResolveCacheMx,std::defer_lock),raw(g_hidHidePhysicalIdentityMx,std::defer_lock);
+    if(std::try_lock(sample,cache,raw)>=0)return receipt("cached-source-busy",false);
+    if(!contextCurrent() || !missingIdentity() || originalSlot!=g_xinputSourceReconfirmMask.load(std::memory_order_acquire) ||
+       topology!=g_xinputTopologyEpoch.load(std::memory_order_acquire) ||
+       identityEpoch!=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) ||
+       rawGeneration!=g_hidResolveCacheGeneration)return receipt("source-observation-retired",false);
+    g_hidHidePhysicalIdentity=selected;
+    g_xinputPhysicalSourceLocked=false;
+    g_xinputSourceReconfirmMask.store(0,std::memory_order_release);
+    g_xinputReconfirmRejectLogged=false;
+    raw.unlock();cache.unlock();
+    // Keep the original sample lock until the original source-admission entry
+    // consumes this completed fresh scan. No frame or hide is emitted here.
+    const bool admitted=ymStartAdmitSource();
+    const bool stillCurrent=contextCurrent();
+    sample.unlock();
+    if(!stillCurrent)return receipt("original-context-retired-at-readmission",false);
+    return receipt(admitted?"fresh-unique-source-readmitted":"fresh-source-still-pending",admitted);
+}
+
 static bool ymStartExecutablePresent(const std::wstring& exe) {
 #ifdef YMCC_FAULT_INJECT
     if (ymStartSeamActive()) {
@@ -846,6 +934,10 @@ static bool inputHostStart() {
         } catch (...) { /* missing evidence never rejects HELLO or target preparation */ }
     }
 #endif
+    if(hello && physicalSourcePending && !msiSourceRequiredBeforeTarget &&
+       ymStartRecoverRogPendingIdentity(requestTicket)) {
+        physicalSourceAdmittedAtStart=true;physicalSourcePending=false;
+    }
     // MSI source readiness must precede visibility proof and PREPARE. The
     // HELLO-only epoch preserves the original pump/resend ownership while waiting.
     if (hello && msiSourceRequiredBeforeTarget) {
@@ -894,6 +986,15 @@ static bool inputHostStart() {
     const bool nativeHandoffRequired = msiNativeForegroundVirtualHandoffRequired(requestTicket);
     const bool physicalVisibilitySkip =
         !nativeHandoffRequired && !msiSourceRequiredBeforeTarget && physicalSourcePending && inputHostCanCreateTargetWithoutPhysicalSource();
+    const auto deferredHideClock=inputHostStartProtectionNow();
+    const auto deferredHideView=g_virtualStartProtection.view(deferredHideClock);
+    const bool deferredStartHide=physicalVisibilitySkip &&
+        ymcc::controllerPersona::motionTouchOutput(inputHostBuildPersonaSnapshot()) &&
+        nativeForegroundProfile()==ymcc::nativeForeground::Profile::Rog &&
+        deferredHideView.requestId==requestTicket && deferredHideView.locked && deferredHideView.remainingMs;
+    inputHostDeferredPhysicalHideArm(deferredStartHide,g_inputHostRunId,g_inputHostEpoch,
+        g_inputHostBoundPowerGeneration,inputHostBuildPersonaSnapshot(),deferredHideClock+deferredHideView.remainingMs,requestTicket,
+        !g_hidHideVisibilityJournal.active);
     const ULONGLONG hideTxnStartedTick = GetTickCount64();
     bool physicalHidAdmitted = hello &&
         (kVirtualTestKeepPhysicalVisible || physicalVisibilitySkip ||
@@ -906,6 +1007,8 @@ static bool inputHostStart() {
         const bool preRead = hidHideCaptureVisibilitySnapshot(preSnap);
         appendNativeLifecycleLog("hidhide.pre-cloak", {
             {"armed", !(kVirtualTestKeepPhysicalVisible || physicalVisibilitySkip)},
+            {"deferredStartHide",deferredStartHide},
+            {"deferredStartHideOriginalDeadline",deferredStartHide?deferredHideClock+deferredHideView.remainingMs:0},
             {"skipReason", kVirtualTestKeepPhysicalVisible ? "test-keep-physical-visible"
                 : (physicalVisibilitySkip ? "physical-source-pending-hid-only-target" : "")},
             {"blocked", (unsigned long long)g_hidHideVisibilityJournal.hiddenByUs.size()},

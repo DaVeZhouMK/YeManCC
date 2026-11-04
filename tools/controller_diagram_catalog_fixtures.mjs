@@ -3,6 +3,9 @@
 const key = (keyId, label, backIndex, physicalForm = 'hid-button', triggerCapability = 'full') => ({ keyId, label, backIndex, physicalForm, triggerCapability });
 export const diagramCatalogFixtures = {
   none: { familyId: 'unknown', supported: false, keys: [] },
+  rog: { familyId: 'asus-rog-ally', supported: true, keys: [
+    key('cc','CC',null,'hid-button','click-only'), key('ac','AC',null,'hid-button','click-only'), key('lib','LIB',null,'hid-button','click-only'), key('m1','M1',1,'keyboard-vk'), key('m2','M2',2,'keyboard-vk'),
+  ] },
   two: { familyId: 'msi-claw', supported: true, keys: [
     key('claw', 'CLAW', null, 'wmi-event', 'click-only'), key('qs', 'QS', null, 'wmi-event', 'click-only'),
     key('m1', 'M1', 2), key('m2', 'M2', 1),

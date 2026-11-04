@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$RecoveryScript)
+param([string]$RecoveryScript, [switch]$ConfigurationOnly, [string]$CaseFilter="*", [string]$EvidenceDir="", [switch]$KeepEvidence)
 
 $ErrorActionPreference = 'Stop'
 if (-not $RecoveryScript) { $RecoveryScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '..\PowerControl\YeManHWiNFO.ps1' }
@@ -18,7 +18,13 @@ $definitions = @($ast.FindAll({ param($node) $node -is [Management.Automation.La
 # A real file preserves PSCommandPath/PSScriptRoot inside the extracted functions,
 # and its space-containing path exercises the UAC argument quoting at runtime.
 $libraryPath = Join-Path $tempRoot 'Production Recovery Functions.ps1'
-[IO.File]::WriteAllText($libraryPath, ($definitions -join "`r`n"))
+# Only this OS boundary is substituted; production registry read/write logic runs unchanged.
+$registryCall='[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryView]::Registry64)'
+$libraryText=($definitions -join "`r`n").Replace($registryCall,'(Open-HWiNFOTestSensorBaseKey)')
+[IO.File]::WriteAllText($libraryPath, $libraryText)
+if($EvidenceDir){$EvidenceDir=[IO.Path]::GetFullPath($EvidenceDir);[IO.Directory]::CreateDirectory($EvidenceDir)|Out-Null}
+$script:caseResults=New-Object Collections.ArrayList
+$script:failures=0
 . $libraryPath
 $script:ProductionHash = ${function:Get-HWiNFOConfigHash}
 $script:SharedMemorySource = ($ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-HWiNFOSharedMemory' }, $false)).Body.Extent.Text
@@ -56,6 +62,13 @@ function New-TestProcess([int]$id) {
     return $process
 }
 function Reset-Test([bool]$running = $true, [bool]$healthy = $false) {
+    if($EvidenceDir){
+        $script:installRoot=Join-Path $tempRoot ('case-'+[guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory((Join-Path $installRoot 'YeMan'))|Out-Null
+        $script:exePath=Join-Path $installRoot 'HWiNFO64.exe';$script:srcPath=Join-Path $installRoot 'YeMan/HWiNFO64.INI';$script:dstPath=Join-Path $installRoot 'HWiNFO64.INI'
+        [IO.File]::WriteAllText($exePath,'mock executable - never run')
+    }
+    $script:RepairInvalidConfig=$false
     $script:Mode = 'restart'
     $script:Elevated = $false
     $script:SensorIntervalMs = 0
@@ -69,6 +82,7 @@ function Reset-Test([bool]$running = $true, [bool]$healthy = $false) {
         Held = $false; LockAvailable = $true; ExitOnStart = $false
         ElevatedCount = 0; CancelUac = $false; ChildExitCode = $null; SpawnOnCopyFailure = $false
         ExeMissing = $false; ProcessEnumerationsAfterLaunch = 0
+        AfterConfigCopy=$null; SensorImageVerified=$false; SensorValues=@{}; SensorWrites=0; SensorOpens=0; FailAfterSensorDisable=$false; FailSensorRollback=$false
     }
     [IO.File]::WriteAllText($srcPath, "[Settings]`r`nSharedMemorySupport=1`r`n")
     [IO.File]::WriteAllText($dstPath, "[Settings]`r`nSharedMemorySupport=0`r`n")
@@ -134,6 +148,7 @@ function Copy-Item {
         $script:state.CorruptCopies--
         [IO.File]::WriteAllText($Destination, 'mock incomplete copy')
     }
+    if($script:state.AfterConfigCopy){& $script:state.AfterConfigCopy $Destination}
 }
 function New-Object {
     [CmdletBinding()]
@@ -187,7 +202,7 @@ function Start-Process {
         if ($ast.Extent.Text.Contains('function Wait-HWiNFORecoveryChild')) {
             Assert (-not $Wait) 'Recovery must await its exact child, not the long-lived hardware process tree'
         } else { Assert ([bool]$Wait) 'Frozen legacy entry no longer exercises its original tree-wait boundary' }
-        Assert ($ArgumentList -match '-File "[^"]+" -Mode restart -Elevated(?: -SensorIntervalMs \d+)?(?: -ExecutablePath "[^"]+")?$') 'Elevated script path is not quoted/full transaction is not restarted'
+        Assert ($ArgumentList -match '-File "[^"]+" -Mode restart -Elevated(?: -SensorIntervalMs \d+)?(?: -ExecutablePath "[^"]+")?(?: -RepairInvalidConfig)?$') 'Elevated script path is not quoted/full transaction is not restarted'
         $script:state.ElevationArguments = $ArgumentList
         [void]$script:state.Events.Add('elevate')
         $script:state.ElevatedCount++
@@ -215,13 +230,79 @@ function Start-Process {
     return $process
 }
 
+
+# Original consumer fake registry/process/image ports; no HKCU or native HWiNFO access.
+function Test-HWiNFOSensorBudgetImage([string]$Executable){return [bool]$script:state.SensorImageVerified}
+function New-TestSensorKey([string]$Group){
+    $key=[pscustomobject]@{Group=$Group}
+    $key|Add-Member ScriptMethod GetValue {param($name,$missing,$options) if($script:state.SensorValues[$this.Group].Exists){return $script:state.SensorValues[$this.Group].Value};return $missing}
+    $key|Add-Member ScriptMethod GetValueKind {param($name) return [Microsoft.Win32.RegistryValueKind]::DWord}
+    $key|Add-Member ScriptMethod SetValue {param($name,$value,$kind)
+        Assert ($script:state.Running.Count -eq 0) 'sensor write while fake producer is live'
+        $script:state.SensorWrites++
+        if($script:state.FailSensorRollback -and $value -ne 0){throw [IO.IOException]::new('fake rollback unavailable')}
+        $script:state.SensorValues[$this.Group]=[pscustomobject]@{Exists=$true;Value=[int]$value}
+        if($script:state.FailAfterSensorDisable -and $value -eq 0){$script:state.FailAfterSensorDisable=$false;throw [IO.IOException]::new('fake disable acknowledgement lost')}
+    }
+    $key|Add-Member ScriptMethod DeleteValue {param($name,$ignore)
+        Assert ($script:state.Running.Count -eq 0) 'sensor delete while fake producer is live'
+        $script:state.SensorWrites++;$script:state.SensorValues[$this.Group]=[pscustomobject]@{Exists=$false;Value=0}
+    }
+    $key|Add-Member ScriptMethod Dispose {}
+    return $key
+}
+function Open-HWiNFOTestSensorBaseKey {
+    $script:state.SensorOpens++;$base=[pscustomobject]@{}
+    $base|Add-Member ScriptMethod OpenSubKey {param($path,$write)
+        $group=$path.Substring($path.LastIndexOf('\')+1)
+        Assert ($group -cmatch '^(F000(0101|0302)_([0-9]|[12][0-9]|3[01])|F00F5000_0)$') 'unexpected fake registry path'
+        if(!$script:state.SensorValues.ContainsKey($group)){return $null};return (New-TestSensorKey $group)
+    }
+    $base|Add-Member ScriptMethod CreateSubKey {param($path)
+        $group=$path.Substring($path.LastIndexOf('\')+1)
+        Assert ($group -cmatch '^(F000(0101|0302)_([0-9]|[12][0-9]|3[01])|F00F5000_0)$') 'unexpected fake registry create'
+        if(!$script:state.SensorValues.ContainsKey($group)){$script:state.SensorValues[$group]=[pscustomobject]@{Exists=$false;Value=0}}
+        return (New-TestSensorKey $group)
+    }
+    $base|Add-Member ScriptMethod Dispose {}
+    return $base
+}
+function Enable-TestSensorBudget {
+    $script:state.SensorImageVerified=$true;$script:state.Running.Clear()
+    foreach($family in @('F0000101','F0000302')){foreach($n in 0..31){$script:state.SensorValues[$family+'_'+$n]=[pscustomobject]@{Exists=$true;Value=1}}}
+    $script:state.SensorValues['F00F5000_0']=[pscustomobject]@{Exists=$true;Value=1}
+    [IO.File]::WriteAllText($script:dstPath,"[Settings]`r`nRememberPreferences=1`r`n")
+}
+function New-TestSensorReceipt([string]$Family='last',[string]$Phase=''){
+    $values=@{};foreach($name in $script:state.SensorValues.Keys){
+        if($Family -eq 'original' -and $name -cnotlike 'F0000101_*'){continue}
+        if($Family -eq 'cstate-original' -and $name -cnotlike 'F0000302_*'){continue}
+        if($Family -eq 'rtss-original' -and $name -cne 'F00F5000_0'){continue}
+        $values[$name]=[pscustomobject]@{Exists=[bool]$script:state.SensorValues[$name].Exists;Value=$script:state.SensorValues[$name].Value}
+    }
+    $doc=[pscustomobject]@{schema=1;executableSha256='e4ce0c85c4288fa7e8eb12ebeece99efff4d81e0b13de53f091daabc81a3c9d3';values=$values}
+    if($Phase){$doc|Add-Member NoteProperty phase $Phase}
+    return $doc
+}
+
 $script:passed = 0
 function Test-Case([string]$name, [scriptblock]$body) {
+    if($name -notlike $CaseFilter){return}
     Reset-Test
-    & $body
-    Assert (-not $script:state.Held) 'Transaction left its mutex held'
-    $script:passed++
-    Write-Output ('PASS ' + $name)
+    try {
+        & $body
+        Assert (-not $script:state.Held) 'Transaction left its mutex held'
+        $script:passed++
+        [void]$script:caseResults.Add([pscustomobject]@{name=$name;status='PASS';root=$script:installRoot;events=@($script:state.Events);sensorWrites=$script:state.SensorWrites})
+        Write-Output ('PASS ' + $name)
+    } catch {
+        $script:failures++
+        [void]$script:caseResults.Add([pscustomobject]@{name=$name;status='FAIL';error=$_.ToString();root=$script:installRoot;events=@($script:state.Events);sensorWrites=$script:state.SensorWrites})
+        if(!$EvidenceDir){throw}
+        Write-Output ('FAIL ' + $name + ': ' + $_.Exception.Message)
+    } finally {
+        if($EvidenceDir){[pscustomobject]@{cases=@($script:caseResults.ToArray());passed=$script:passed;failed=$script:failures;realProcessChanges=$false;realRegistryWrites=$false;realSharedMemory=$false}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $EvidenceDir 'cases.json') -Encoding UTF8}
+    }
 }
 
 try {
@@ -353,6 +434,7 @@ try {
         Assert (($state.Events | Where-Object { $_ -eq 'exit-confirmed' }).Count -eq 2) 'Did not wait for every instance'
         Assert-Order @('stop', 'stop', 'exit-confirmed', 'exit-confirmed', 'copy', 'verify', 'launch')
     }
+    if(-not $ConfigurationOnly){
     # Validate real SM2 parsing against isolated named mappings. Only names are
     # substituted; production offsets, bounds checks, reads and disposal execute.
     $prefix = 'YMCC_HWINFO_TEST_' + [Guid]::NewGuid().ToString('N')
@@ -381,6 +463,7 @@ try {
             Assert (-not (& $realSharedMemoryProbe)) 'Out-of-bounds readings passed health check'
         }
     } finally { $view.Dispose(); $mapping.Dispose() }
+    }
     Write-Output ("HWINFO_RECOVERY_PASS ({0} cases; actual production functions; no real HWiNFO/process/UAC operations)" -f $script:passed)
 } finally {
     # One shell, literal paths, and an absolute temp-root check before recursion.
@@ -390,5 +473,5 @@ try {
         -not ([IO.Path]::GetFileName($resolvedRoot)).StartsWith('YMCC HWiNFO Recovery Test ')) {
         throw 'Refusing to remove a test directory outside the intended temp workspace'
     }
-    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+    if(-not $KeepEvidence){Microsoft.PowerShell.Management\Remove-Item -LiteralPath $resolvedRoot -Recurse -Force}
 }

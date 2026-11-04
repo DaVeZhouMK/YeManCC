@@ -87,7 +87,7 @@ onBeforeUnmount(() => { mounted = false; unlisten(); });
         </div>
         <p v-if="busy" role="status" aria-live="polite">正在处理，请稍候…</p>
         <div class="diagnostic-log-delete-actions">
-          <button ref="cancelButton" type="button" :disabled="busy" data-gp-row="0" data-gp-col="0" @click="close"><b>B</b> 取消</button>
+          <button ref="cancelButton" type="button" :disabled="busy" data-gp-row="0" data-gp-col="0" @click="close"><span class="controller-key" data-controller-key="B">B</span> 取消</button>
           <button type="button" class="diagnostic-log-delete-confirm" :disabled="disabled || busy"
             data-gp-row="0" data-gp-col="1" @click="confirm">确认删除</button>
         </div>

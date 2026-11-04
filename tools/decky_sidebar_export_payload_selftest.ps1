@@ -82,6 +82,68 @@ $compiledFiles = @($entries | Where-Object { $_.name.StartsWith('PowerControl/de
 })
 $current = Assert-DeckyExportPayload -ReleaseZip $good -SourcePowerControl $source -CurrentSourcePluginFiles $compiledFiles
 if(-not$current.currentSourceChecked-or$current.builtPluginChecked){throw 'Current-source descriptor authority not reflected in receipt'}
+# Exercise the real describe consumer under a non-UTF8 caller, within this case.
+# Node only emits fixture descriptions; it never imports or compiles the plugin.
+$describeProject=Join-Path $fixture ('current-source-'+(-join @([char]0x4E2D,[char]0x6587)))
+$describeTools=Join-Path $describeProject 'tools'
+$describePower=Join-Path $describeProject 'PowerControl'
+New-Item -ItemType Directory -Path $describeTools,$describePower -Force|Out-Null
+foreach($relative in $assets){
+ $target=Join-Path $describePower $relative.Replace('/','\')
+ New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force|Out-Null
+ [IO.File]::WriteAllBytes($target,[IO.File]::ReadAllBytes((Join-Path $source $relative.Replace('/','\'))))
+}
+$describeUtf8=New-Object System.Text.UTF8Encoding($false)
+$describeModule=@"
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+if(process.argv.length!==3 || process.argv[2]!=='--describe')throw new Error('DESCRIPTION_ARGUMENTS');
+const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const fixture=JSON.parse(fs.readFileSync(path.join(project,'description-fixture.json'),'utf8'));
+const description={keyword:String.fromCodePoint(0x91CE,0x86EE,0x7CFB,0x7EDF,0x63A7,0x5236,0x53F0),sourceRoot:project,described:true,files:fixture.files};
+const json=JSON.stringify(description);
+process.stdout.write((fixture.mode==='invalid-json'?json.slice(0,-1):json)+'\n');
+if(fixture.mode==='nonzero')process.exitCode=23;
+if(fixture.mode==='throw')throw new Error('UTF8_DESCRIPTION_FIXTURE_THROW');
+"@
+[IO.File]::WriteAllText((Join-Path $describeTools 'build-decky-sidebar-plugin.mjs'),$describeModule,$describeUtf8)
+$describeDrift=Write-FixtureZip 'utf8-describe-drift' $drift
+$describeCallerConsoleOutput=[Console]::OutputEncoding
+$describeCallerConsoleInput=[Console]::InputEncoding
+$describeCallerOutput=$OutputEncoding
+try{
+ [Console]::OutputEncoding=[Text.Encoding]::GetEncoding(1252)
+ $OutputEncoding=[Text.Encoding]::ASCII
+ $describeExpectedConsoleOutput=[Console]::OutputEncoding
+ foreach($scenario in @(
+   @{mode='success';zip=$good;reason='';exitCode=0},
+   @{mode='nonzero';zip=$good;reason='DECKY_EXPORT_CURRENT_SOURCE_BUILD_FAILED: exit=23';exitCode=23},
+   @{mode='throw';zip=$good;reason='native-throw';exitCode=$null},
+   @{mode='invalid-json';zip=$good;reason='json-throw';exitCode=0},
+   @{mode='success';zip=$describeDrift;reason='DECKY_EXPORT_ZIP_MISMATCH:';exitCode=0}
+ )){
+  $descriptionFixture=[ordered]@{mode=$scenario.mode;files=$compiledFiles}
+  [IO.File]::WriteAllText((Join-Path $describeProject 'description-fixture.json'),($descriptionFixture|ConvertTo-Json -Depth 8),$describeUtf8)
+  $describeFailure=$null;$describeReceipt=$null
+  try{$describeReceipt=Assert-DeckyCurrentSourceExport -ReleaseZip $scenario.zip -ProjectRoot $describeProject;$describeObservedExitCode=$LASTEXITCODE}
+  catch{$describeFailure=$_;$describeObservedExitCode=$LASTEXITCODE}
+  if(-not([Console]::OutputEncoding.Equals($describeExpectedConsoleOutput)) -or -not([Console]::InputEncoding.Equals($describeCallerConsoleInput)) -or -not([object]::ReferenceEquals($OutputEncoding,[Text.Encoding]::ASCII))){throw 'Describe consumer leaked caller encodings'}
+  if($null-ne$scenario.exitCode -and $describeObservedExitCode-ne$scenario.exitCode){throw 'Describe consumer lost the native LASTEXITCODE'}
+  if(-not$scenario.reason){
+   if($describeFailure){throw $describeFailure}
+   if(-not$describeReceipt.currentSourceChecked -or $describeReceipt.builtPluginChecked -or $describeReceipt.files.Count-ne7 -or $describeReceipt.currentSourceRoot-cne$describeProject){throw 'UTF8 describe did not reach the original seven-asset ZIP verifier'}
+  }elseif(-not$describeFailure){throw ('Describe failure was accepted: '+$scenario.reason)
+  }elseif($scenario.reason-eq'native-throw'){
+   if($describeFailure.FullyQualifiedErrorId-notmatch'NativeCommandError|ProgramExitedWithNonZeroCode' -and $describeFailure.Exception.Message-ne'DECKY_EXPORT_CURRENT_SOURCE_BUILD_FAILED: exit=1'){throw $describeFailure}
+  }elseif($scenario.reason-eq'json-throw'){
+   if($describeFailure.FullyQualifiedErrorId-notlike'*ConvertFromJsonCommand*'){throw $describeFailure}
+  }elseif(-not$describeFailure.Exception.Message.StartsWith($scenario.reason,[StringComparison]::Ordinal)){throw $describeFailure}
+ }
+}finally{
+ [Console]::OutputEncoding=$describeCallerConsoleOutput
+ $OutputEncoding=$describeCallerOutput
+}
 $cases.Add('fresh compilation descriptors accept archive while cached source dist is stale')
 function Expect-CompiledReject([string]$Name,[string]$Reason,[string]$Zip,[object[]]$Files=$compiledFiles){
  $errorText=''

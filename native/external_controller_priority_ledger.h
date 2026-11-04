@@ -37,6 +37,10 @@ struct VisibilityDebt {
     std::string builtinRoot;
     bool refreshPending = false;
     std::string locationPath;
+    // A loaded/candidate snapshot, not a fabricated persisted revision or proof
+    // of device return. Legacy caller-owned construction remains explicit IO.
+    mutable std::string sourceRecord;
+    mutable std::wstring sourcePath;
 };
 
 namespace detail {
@@ -400,7 +404,7 @@ inline bool loadDebt(const std::wstring& path, VisibilityDebt& out, std::string&
         const DWORD typeError = type == FILE_TYPE_UNKNOWN ? GetLastError() : ERROR_SUCCESS;
         if (typeError != ERROR_SUCCESS) return ioFailure("inspect ledger type", typeError);
         if (type != FILE_TYPE_DISK ||
-            (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+            (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) || info.nNumberOfLinks != 1)
             return detail::fail(error, "ledger is not a regular file");
         LARGE_INTEGER size{};
         if (!GetFileSizeEx(file.handle, &size)) return ioFailure("size ledger", GetLastError());
@@ -415,10 +419,17 @@ inline bool loadDebt(const std::wstring& path, VisibilityDebt& out, std::string&
             if (!read) return detail::fail(error, "truncated ledger");
             offset += read;
         }
+        char extra=0;DWORD extraRead=0;BY_HANDLE_FILE_INFORMATION after{};
+        if(!ReadFile(file.handle,&extra,1,&extraRead,nullptr)||extraRead||!GetFileInformationByHandle(file.handle,&after)||
+            info.dwVolumeSerialNumber!=after.dwVolumeSerialNumber||info.nFileIndexHigh!=after.nFileIndexHigh||info.nFileIndexLow!=after.nFileIndexLow||
+            info.nFileSizeHigh!=after.nFileSizeHigh||info.nFileSizeLow!=after.nFileSizeLow||info.nNumberOfLinks!=after.nNumberOfLinks||
+            info.ftLastWriteTime.dwHighDateTime!=after.ftLastWriteTime.dwHighDateTime||info.ftLastWriteTime.dwLowDateTime!=after.ftLastWriteTime.dwLowDateTime)
+            return ioFailure("ledger snapshot changed",GetLastError());
         if (!file.close(error)) { failure = DebtLoadFailure::RetryableIo; return false; }
         VisibilityDebt candidate;
         if (!detail::decode(bytes, candidate, error)) return false;
-        out = std::move(candidate);
+        if(!detail::encode(candidate,candidate.sourceRecord,error))return false;
+        candidate.sourcePath=path;out = std::move(candidate);
         failure = DebtLoadFailure::None;
         return true;
     } catch (const std::bad_alloc&) {
@@ -445,6 +456,13 @@ inline bool saveDebt(const std::wstring& path, const VisibilityDebt& debt, std::
         if (!detail::ledgerPath(path, error)) return false;
         std::string bytes;
         if (!detail::encode(debt, bytes, error) || !detail::ordinaryTarget(path, error)) return false;
+        std::string committedSource=bytes;std::wstring committedPath=path;
+        VisibilityDebt previous;DebtLoadFailure loadFailure;
+        if(!loadDebt(path,previous,error,loadFailure))return false;
+        std::string previousBytes;if(!detail::encode(previous,previousBytes,error))return false;
+        const bool existed=GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES;
+        if(!debt.sourceRecord.empty()&&(!detail::samePath(debt.sourcePath,path)||debt.sourceRecord!=previousBytes))
+            return detail::fail(error,"stale or foreign ledger candidate");
         static std::atomic<std::uint64_t> sequence{0};
         detail::TempFile temp;
         for (unsigned attempt = 0; attempt < 16; ++attempt) {
@@ -468,10 +486,15 @@ inline bool saveDebt(const std::wstring& path, const VisibilityDebt& debt, std::
         }
         if (!FlushFileBuffers(temp.file.handle)) return detail::winFail(error, "flush ledger temp", GetLastError());
         if (!temp.file.close(error) || !detail::ordinaryTarget(path, error)) return false;
+        VisibilityDebt latest;std::string latestBytes;
+        if(!loadDebt(path,latest,error,loadFailure)||!detail::encode(latest,latestBytes,error)||latestBytes!=previousBytes||
+            (GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES)!=existed)
+            return detail::fail(error,"ledger changed before publication");
         // Same-directory replacement only: no copy fallback or reboot/registry operation.
         if (!MoveFileExW(temp.path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             return detail::winFail(error, "replace ledger", GetLastError());
         temp.owned = false;
+        debt.sourceRecord.swap(committedSource);debt.sourcePath.swap(committedPath);
         return true;
     } catch (...) { return detail::fail(error, "ledger save failed"); }
 }

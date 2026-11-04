@@ -9,13 +9,14 @@ import assert from 'node:assert/strict';
 import {extract} from '../legion_motion_consumer/extract_main.mjs';
 import {closeBrace} from '../hc_remaining_model_capabilities/expectations.mjs';
 import {calibrationToolchainPreamble} from '../hc_reviewed_calibration/toolchain.mjs';
-import {REPO as repo,WORKSPACE,FIXTURE,NATIVE_HEADERS,NATIVE_SOURCES,inside,verifyManaged,write} from './contract.mjs';
+import {REPO as repo,WORKSPACE,FIXTURE,NATIVE_HEADERS,NATIVE_SOURCES,inside,caseRootAllowed,verifyManaged,write} from './contract.mjs';
 import {noRevisionGuard,NATIVE_REVISION_FAULT} from './faults.mjs';
 import {lifecycleContext} from './lifecycle-context.mjs';
 import {targetReturnContext} from './target-return-context.mjs';
 import {recordNativeCompile} from './native-stage-evidence.mjs';
-const options={};for(let i=2;i<process.argv.length;i++){const key=process.argv[i];assert(['--out','--case-root','--managed-dll','--managed-manifest','--source','--dotnet','--compile-only','--expect-rejection','--revision-guard-fault'].includes(key)&&!Object.hasOwn(options,key),'invalid/duplicate option');options[key]=['--compile-only','--revision-guard-fault'].includes(key)?true:process.argv[++i];}
-assert(options['--out']&&options['--case-root']);const caseRoot=path.resolve(options['--case-root']);assert(inside(path.join(WORKSPACE,'Build'),caseRoot));const root=path.resolve(options['--out']);assert(inside(caseRoot,root)&&root!==caseRoot);assert(!fs.existsSync(root),'Fresh output required');fs.mkdirSync(root,{recursive:true});
+const options={};for(let i=2;i<process.argv.length;i++){const key=process.argv[i];assert(['--out','--case-root','--managed-dll','--managed-manifest','--source','--dotnet','--compile-only','--preflight-only','--expect-rejection','--revision-guard-fault'].includes(key)&&!Object.hasOwn(options,key),'invalid/duplicate option');options[key]=['--compile-only','--preflight-only','--revision-guard-fault'].includes(key)?true:process.argv[++i];}
+assert(!(options['--preflight-only']&&options['--revision-guard-fault']),'Static preflight cannot prepare a mutation');
+assert(options['--out']&&options['--case-root']);const caseRoot=path.resolve(options['--case-root']);assert(caseRootAllowed(caseRoot));const root=path.resolve(options['--out']);assert(inside(caseRoot,root)&&root!==caseRoot);assert(!fs.existsSync(root),'Fresh output required');fs.mkdirSync(root,{recursive:true});
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex'),hash=file=>sha(fs.readFileSync(file));
 const source=path.resolve(options['--source']||path.join(repo,'native/main.cpp'));
 assert(path.resolve(source)===path.resolve(repo,'native/main.cpp')||inside(caseRoot,source),'Source must be current production main or an owned snapshot');
@@ -29,12 +30,86 @@ if(options['--revision-guard-fault']){
  write(path.join(root,'private-source-fault.json'),{...NATIVE_REVISION_FAULT,original,originalSha256:hash(original),privateHeader,privateSha256:hash(privateHeader),productionModified:false});
 }else assert(!options['--expect-rejection'],'Only the declared private guard mutation can expect rejection');
 const headerPath=name=>name==='game_feedback_receipt.h'&&privateHeader?privateHeader:headerOriginal(name);
-const managedContract=options['--compile-only']?null:verifyManaged(options['--managed-manifest'],caseRoot);
+const managedContract=(options['--compile-only']||options['--preflight-only'])?null:verifyManaged(options['--managed-manifest'],caseRoot);
 if(managedContract)assert(path.resolve(options['--managed-dll'])===path.resolve(managedContract.value.fixtureDll));
 const sources=[source,...NATIVE_SOURCES.filter(p=>p!=='native/main.cpp').map(p=>path.join(repo,p)),path.join(repo,FIXTURE,'contract.mjs'),path.join(repo,FIXTURE,'faults.mjs'),...(privateHeader?[privateHeader]:[])].map(p=>({path:p,sha256:hash(p)}));
 const main=fs.readFileSync(source,'utf8'),bindings=[];
 const lifecycle=lifecycleContext({sourceFile:source,resolveInput:r=>path.join(repo,r)});bindings.push(...lifecycle.bindings);
 const targetReturn=targetReturnContext({sourceFile:source,resolveInput:r=>path.join(repo,r)});bindings.push(...targetReturn.bindings);
+// The cold-return projection already owns this exact declaration. Relocate
+// that sole owner before PIPE consumers; never add a second state variable.
+const quarantine=lifecycle.unclosedDefinitions?.find(r=>r.symbol==='g_inputHostReleaseQuarantined');
+if(quarantine){
+ const declarations=[...targetReturn.code.matchAll(/^static bool g_inputHostReleaseQuarantined = false;\r?$/gm)];
+ assert.equal(declarations.length,1,'SOLE_QUARANTINE_OWNER_REQUIRED');
+ assert.equal(declarations[0][0].replace(/\r$/,''),quarantine.code.replace(/\r$/,''),'EXACT_QUARANTINE_DECLARATION_REQUIRED');
+ targetReturn.code=targetReturn.code.replace(declarations[0][0],'');
+ lifecycle.code=quarantine.code+'\n'+lifecycle.code;
+ const owner=lifecycle.bindings.find(r=>r.symbol==='g_inputHostReleaseQuarantined');
+ assert(owner&&owner.emitted===false,'BOUND_QUARANTINE_DECLARATION_REQUIRED');owner.emitted=true;owner.relocatedFrom='targetReturn cold prefix';
+ lifecycle.unclosedDefinitions=lifecycle.unclosedDefinitions.filter(r=>r!==quarantine);
+ lifecycle.boundaries.quarantineOwnerRelocated=true;
+ lifecycle.boundaries.staticDependencyClosureComplete=lifecycle.unclosedDefinitions.length===0;
+}
+
+// Bind the local ROG scope and retained OFF obligation without inventing a
+// cleanup/source receipt. The remaining execution predicate stays unclosed.
+const rogRuntimeFile=path.join(repo,'native/virtual_switch_verification_runtime.h');
+const rogRuntime=fs.readFileSync(rogRuntimeFile,'utf8'),rogBindings=[];
+const rogMember=(text,file,symbol,kind='function')=>{const row=extract(text,symbol,kind);rogBindings.push({...row,file,sourceSha256:sha(text),emitted:true,environmentLeaf:false});return row.code;};
+const rogDeclaration=(text,file,symbol,pattern)=>{
+ const matches=[...text.matchAll(pattern)];assert.equal(matches.length,1,'ACTUAL_ROG_DECLARATION:'+symbol);
+ const m=matches[0],code=m[0];rogBindings.push({symbol,kind:'declaration',file,sourceSha256:sha(text),sha256:sha(code),startLine:text.slice(0,m.index).split('\n').length,endLine:text.slice(0,m.index+code.length).split('\n').length,startUtf8Byte:Buffer.byteLength(text.slice(0,m.index)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,m.index+code.length)),code,emitted:true,environmentLeaf:false});return code;
+};
+const rogIdentity=[
+ rogDeclaration(main,source,'YmccFamily',/^enum class YmccFamily : int \{[\s\S]*?^\};/gm),
+ rogMember(main,source,'MachineIdentity','struct'),
+ rogDeclaration(main,source,'g_machineIdentity',/^static MachineIdentity g_machineIdentity;\r?$/gm)
+].join('\n');
+const powerContext=[
+ rogMember(main,source,'initialPowerGeneration'),
+ rogDeclaration(main,source,'g_powerGeneration',/^static std::atomic<unsigned long long> g_powerGeneration\{initialPowerGeneration\(\)\};\r?$/gm),
+ rogMember(main,source,'currentPowerGeneration')
+].join('\n');
+const protocolPowerContext=[
+ rogDeclaration(main,source,'g_inputHostBoundPowerGeneration',/^static unsigned long long g_inputHostBoundPowerGeneration = 0;\r?$/gm),
+ rogMember(main,source,'inputHostProtocolPowerGenerationLocked')
+].join('\n');
+const rogRetainedState=[
+ rogMember(rogRuntime,rogRuntimeFile,'RogReturnBaseline','struct'),
+ rogDeclaration(rogRuntime,rogRuntimeFile,'rogReturnBaseline',/^static RogReturnBaseline rogReturnBaseline;\r?$/gm),
+ rogMember(rogRuntime,rogRuntimeFile,'RogOffSignal','struct'),
+ rogDeclaration(rogRuntime,rogRuntimeFile,'rogOffSignal',/^static RogOffSignal rogOffSignal;[^\r\n]*/gm)
+].join('\n');
+const rogFunctions=['rogXboxSignalScope','rememberRogOffSignalLocked'].map(symbol=>{
+ const pending=lifecycle.unclosedDefinitions.filter(row=>row.symbol===symbol);assert.equal(pending.length,1,'ORIGINAL_ROG_BOUNDARY:'+symbol);
+ const original=extract(rogRuntime,symbol);assert.equal(original.code,pending[0].code,'EXACT_ROG_PENDING_BODY:'+symbol);
+ const bound=lifecycle.bindings.filter(row=>row.symbol===symbol);assert.equal(bound.length,1,'SOLE_ROG_BINDING:'+symbol);assert.equal(bound[0].emitted,false,'ROG_ALREADY_EMITTED:'+symbol);bound[0].emitted=true;
+ return original.code;
+}).join('\n');
+const forget=extract(rogRuntime,'inputHostSwitchVerificationForgetAcceptedLocked');
+assert.equal(lifecycle.code.split(forget.code).length,2,'SOLE_FORGET_ACCEPTED_CONSUMER');
+// Protection state/clock must precede remember; remember must precede forget.
+lifecycle.code=lifecycle.code.replace(forget.code,'')+'\nnamespace ymcc::inputHost::switchVerificationRuntime {\n'+rogRetainedState+'\n'+rogFunctions+'\n}\n'+forget.code+'\n';
+lifecycle.bindings.push(...rogBindings);bindings.push(...rogBindings);
+lifecycle.unclosedDefinitions=lifecycle.unclosedDefinitions.filter(row=>!['rogXboxSignalScope','rememberRogOffSignalLocked'].includes(row.symbol));
+lifecycle.boundaries.staticDependencyClosureComplete=lifecycle.unclosedDefinitions.length===0;
+lifecycle.boundaries.rogScopeAndRetainedSignalDefinitionsVerbatim=true;
+lifecycle.boundaries.rogPowerGenerationUsesActualAtomicOwner=true;
+lifecycle.boundaries.rogOffExecutionCompletionClosed=!lifecycle.unclosedDefinitions.some(row=>row.symbol==='inputHostRogOffExecutionDefersSuccess');
+if(options['--preflight-only']){
+ const unresolved=lifecycle.unclosedDefinitions.map(({code,...row})=>({...row,sha256:sha(code)}));
+ const changed=sources.filter(row=>hash(row.path)!==row.sha256);assert.equal(changed.length,0,'STATIC_PREFLIGHT_SOURCE_DRIFT');
+ const result={schemaVersion:1,status:unresolved.length?'DEPENDENCY_CLOSURE_REQUIRED_BEFORE_COMPILATION':'STATIC_DEPENDENCY_SOURCE_READY_NO_COMPILATION',staticOnly:true,compilerStarted:false,businessStarted:false,semanticRejection:false,productModified:false,hardwareIo:false,source,sourceSha256:hash(source),sources,unresolved,bindings:lifecycle.bindings.map(({code,...row})=>row),boundaries:lifecycle.boundaries,preparedSource:{rogIdentity,powerContext,protocolPowerContext,lifecycle:lifecycle.code},targetReturnBoundaries:targetReturn.boundary};
+ fs.writeFileSync(path.join(root,'dependency-preflight.json'),JSON.stringify(result,null,2)+'\n');
+ console.log(JSON.stringify({status:result.status,unresolved:unresolved.map(row=>row.symbol),compilerStarted:false,businessStarted:false}));process.exit(unresolved.length?2:0);
+}
+if(lifecycle.boundaries.staticDependencyClosureComplete===false){
+ const unresolved=lifecycle.unclosedDefinitions.map(({code,...row})=>({...row,sha256:sha(code)}));
+ fs.writeFileSync(path.join(root,'lifecycle-closure-required.json'),JSON.stringify({schemaVersion:1,status:'DEPENDENCY_CLOSURE_REQUIRED_BEFORE_COMPILATION',source,sourceSha256:hash(source),unresolved,bindings:lifecycle.bindings.map(({code,...row})=>row),compilerStarted:false,businessStarted:false,semanticRejection:false,productModified:false,hardwareIo:false},null,2)+'\n');
+ throw Error('CURRENT_LIFECYCLE_DEPENDENCY_CLOSURE_REQUIRED:'+unresolved.map(r=>r.symbol).join(','));
+}
+
 const fn=name=>{const b=extract(main,name);bindings.push(b);return b.code;};
 const struct=name=>{const b=extract(main,name,'struct');bindings.push(b);return b.code;};
 function section(marker,label){const start=main.indexOf(marker);assert(start>=0&&main.indexOf(marker,start+marker.length)<0,'source anchor '+label);const brace=main.indexOf('{',start),end=closeBrace(main,brace);const code=main.slice(start,end+1);bindings.push({name:label,sha256:sha(code),code});return code;}
@@ -49,7 +124,11 @@ const actualPersona=[
  fn('inputHostRefreshPersonaMatchLocked'),fn('inputHostSetBoundPersona'),fn('inputHostClearBoundPersona'),fn('inputHostConfiguredPersona'),
  'static void fixtureSetMatchingPersona(const std::string& persona){{std::lock_guard<std::mutex> lock(g_inputHostPersonaMx);g_realStickTest.virtualTargetPersona=persona;inputHostRefreshPersonaMatchLocked();}inputHostSetBoundPersona(persona);}'
 ].join('\n');
-const replacements={GAME_REVOKE:fn('gamepadSerialRevokeGameFeedback'),CAPTURE_TYPE:struct('InputFrameSubmission'),FRAME_ADMISSION:['inputHostFrameSubmissionCurrent','inputHostFrameSubmissionMayIssue','inputHostFrameSubmissionTransportRejected','inputHostFrameSubmissionRequestCurrent'].map(fn).join(String.fromCharCode(10)),GAME_MOTOR:[struct('InputHostGameMotorDomKeys'),fn('inputHostGameMotorFromDom'),fn('inputHostConsumeGameMotorReplyLocked'),fn('inputHostObserveGameMotorBindingLocked')].join('\n'),FRAME_SCOPE:struct('InputFrameTransportScope'),CONSTANTS:constants,UNICODE:unicode,NEW_ID:fn('inputHostNewId'),HASH:['inputHostCryptoProvider','inputHostSha256','inputHostCanonicalFrameHash'].map(fn).join('\n'),ENVELOPE:fn('inputHostEnvelopeLocked'),PIPE:['inputHostPipeCloseOwned','inputHostCreateServerPipeLocked','inputHostPipeIo','inputHostWaitClientLocked'].map(fn).join('\n'),FAST_RECEIPT:struct('InputHostFastReceipt'),SCANNER:section('namespace c7aReceiptFast {','c7aReceiptFast'),AFTER_FRAME:fn('inputHostAfterSubmitFrameAccepted'),RELEASE_TIMING_LOG:fn('inputHostReleaseTimingReceiptLog'),COMMAND_RESULT_LOG:fn('inputHostCommandResultLog'),REQUEST:fn('inputHostRequestPreparedLocked')};
+const compactBindingDeclarations=[...main.matchAll(/^static std::string g_inputHostFrameReplyBinding;\r?$/gm)];
+if(compactBindingDeclarations.length!==1)throw Error('Actual compact reply binding declaration missing/nonunique');
+bindings.push({name:'g_inputHostFrameReplyBinding',code:compactBindingDeclarations[0][0],sha256:sha(compactBindingDeclarations[0][0])});
+const compactReplySupport='#include "input_host_compact_frame_reply.h"\n'+compactBindingDeclarations[0][0]+'\n';
+const replacements={ROG_IDENTITY:rogIdentity,POWER_CONTEXT:powerContext,PROTOCOL_POWER_CONTEXT:protocolPowerContext,GAME_REVOKE:fn('gamepadSerialRevokeGameFeedback'),CAPTURE_TYPE:struct('InputFrameSubmission'),FRAME_ADMISSION:['inputHostFrameSubmissionCurrent','inputHostFrameSubmissionMayIssue','inputHostFrameSubmissionTransportRejected','inputHostFrameSubmissionRequestCurrent'].map(fn).join(String.fromCharCode(10)),GAME_MOTOR:[compactReplySupport,struct('InputHostGameMotorDomKeys'),fn('inputHostExpandCompactFrameReplyLocked'),fn('inputHostGameMotorFromDom'),fn('inputHostConsumeGameMotorReplyLocked'),fn('inputHostObserveGameMotorBindingLocked')].join('\n'),FRAME_SCOPE:struct('InputFrameTransportScope'),CONSTANTS:constants,UNICODE:unicode,NEW_ID:fn('inputHostNewId'),HASH:['inputHostCryptoProvider','inputHostSha256','inputHostCanonicalFrameHash'].map(fn).join('\n'),ENVELOPE:fn('inputHostEnvelopeLocked'),PIPE:['inputHostPipeCloseOwned','inputHostCreateServerPipeLocked','inputHostPipeIo','inputHostWaitClientLocked'].map(fn).join('\n'),FAST_RECEIPT:struct('InputHostFastReceipt'),SCANNER:section('namespace c7aReceiptFast {','c7aReceiptFast'),AFTER_FRAME:fn('inputHostAfterSubmitFrameAccepted'),RELEASE_TIMING_LOG:fn('inputHostReleaseTimingReceiptLog'),COMMAND_RESULT_LOG:fn('inputHostCommandResultLog'),REQUEST:fn('inputHostRequestPreparedLocked')};
 const inc=path.join(root,'source');fs.mkdirSync(inc);for(const name of headerNames)fs.copyFileSync(headerPath(name),path.join(inc,name));fs.copyFileSync(path.join(repo,'deps/json/json.hpp'),path.join(inc,'json.hpp'));const rawMotorTests=fs.readFileSync(path.join(repo,FIXTURE,'NativeMotorPipeTests.cpp'),'utf8');
 const oldBindingExpectation='const bool supported=persona=="dualsense-edge";';
 const currentBindingExpectation='const auto* expectedProfile=ymcc::capabilities::controller::gameMotorReceiptForProfile(ymcc::controllerPersona::profileIdentity(persona));const bool supported=expectedProfile&&expectedProfile->token>=1&&expectedProfile->token<=3;';

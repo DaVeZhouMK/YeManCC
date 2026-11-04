@@ -64,7 +64,9 @@ function identityMatches(
   if (!saved) return true;
   const keys = Object.keys(saved);
   if (keys.length === 0) return true;
-  return keys.every((key) => actual[key] === saved[key]);
+  // Current HC factory/route owns version-specific capability. Historical
+  // Version/EC metadata may change without changing this device's identity.
+  return keys.every((key) => key === 'bios' || key === 'ecRevision' || actual[key] === saved[key]);
 }
 
 

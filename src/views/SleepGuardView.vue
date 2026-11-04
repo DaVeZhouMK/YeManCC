@@ -51,11 +51,12 @@ const cfg = reactive<SleepGuardStatus>({
   suspended: 0,
   pauseGameOnSleep: true,
   retryOnEntryFailure: true,
+  retryOnSleepTimeout: true,
   retryOnNonUserWake: false,
   joyXoffAutoClose: true,
 });
 
-// 电源按钮：0=S3睡眠, 1=S4休眠, 2=不操作
+// 电源按钮：0=睡眠, 1=休眠, 2=不操作, 3=关闭屏幕
 const acBtnIdx = ref<PowerBtnIdx>(2);
 const dcBtnIdx = ref<PowerBtnIdx>(2);
 const sleepPowerPlanOptimizationEnabled = ref(true);
@@ -75,7 +76,7 @@ const staticWakeNeedsRestore = computed(() => !staticWakeAutoScanEnabled.value &
   (staticWakeStatus.value?.enabled || (staticWakeStatus.value?.restorePending ?? 0) > 0 ||
     staticWakeStatus.value?.phase === 'restore-pending' || staticWakeError.value !== ''));
 const staticWakeSummary = computed(() => {
-  if (staticWakeAction.value) return staticWakeAction.value === 'scan' ? '正在扫描并屏蔽 Windows 支持项…' : '正在恢复本功能修改项…';
+  if (staticWakeAction.value) return staticWakeAction.value === 'scan' ? '正在扫描并屏蔽支持项…' : '正在恢复本功能修改项…';
   if (staticWakeError.value) return staticWakeError.value;
   if (staticWakeLoading.value) return '正在读取屏蔽状态…';
   const s = staticWakeStatus.value;
@@ -84,11 +85,11 @@ const staticWakeSummary = computed(() => {
     return staticWakeAutoScanEnabled.value ? '已开启自动扫描 · 等待单次扫描' :
       s.lastScanEpoch > 0 ? '本功能修改项已恢复' : '自动扫描已关闭';
   const phase = s.phase === 'restore-pending' || s.restorePending > 0 ? '恢复待完成' :
-    s.phase === 'partial' || s.failed > 0 ? '部分完成' : s.phase === 'applied' ? '已应用支持项' : '尚未应用';
+    s.phase === 'partial' || s.failed > 0 || s.lastError ? '部分完成' : s.phase === 'applied' ? '已应用支持项' : '尚未应用';
   // Diagnostic source health belongs to retry repair; it does not decide static coverage.
   const warnings = [s.failed ? '失败 ' + s.failed : '', s.restorePending ? '待恢复 ' + s.restorePending : ''].filter(Boolean);
   return [phase, ...warnings, '设备 ' + s.devices, '软件 ' + s.software, '定时器 ' + s.timers,
-    s.protectedDevices ? '保护 ' + s.protectedDevices : '', s.lastError].filter(Boolean).join(' · ');
+    s.protectedDevices ? '保护 ' + s.protectedDevices : ''].filter(Boolean).join(' · ');
 });
 // Default off, but do not read/apply Windows indices until a user toggles it.
 // Reuse the existing sleepGuard snapshot for the remembered UI choice only.
@@ -352,6 +353,7 @@ async function refresh() {
     cfg.suspended = s.suspended;
     cfg.pauseGameOnSleep = s.pauseGameOnSleep;
     cfg.retryOnEntryFailure = s.retryOnEntryFailure;
+    cfg.retryOnSleepTimeout = s.retryOnSleepTimeout;
     cfg.retryOnNonUserWake = s.retryOnNonUserWake;
     cfg.joyXoffAutoClose = true;
     if (wakeRevision === wakePasswordRevision && !busy.value) wakePasswordOn.value = s.wakePasswordEnabled === true;
@@ -383,8 +385,8 @@ async function refresh() {
 }
 
 async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boolean, value: string | number) {
+  if (busy.value || timeoutLoading.value) return;
   const key = `${ac ? 'ac' : 'dc'}${field[0].toUpperCase()}${field.slice(1)}` as keyof SleepTimeoutSettings;
-  const previous = sleepTimeouts[key];
   const next = Number(value);
   if (!Number.isFinite(next)) return;
   sleepTimeouts[key] = next;
@@ -393,8 +395,10 @@ async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boole
     await setSleepTimeout(field, ac, next);
     msg.value = '';
   } catch (e) {
-    sleepTimeouts[key] = previous;
-    msg.value = '屏幕、睡眠和休眠超时设置失败：' + (e as Error).message;
+    // A refresh can fail after the value was saved. Show the real stored
+    // indexes instead of rolling the selector back to a value no longer true.
+    await refreshSleepTimeouts();
+    msg.value = '屏幕、睡眠和休眠超时设置未完成：' + (e as Error).message;
   } finally {
     busy.value = false;
   }
@@ -405,7 +409,7 @@ async function onPauseGame(v: boolean) {
   cfg.pauseGameOnSleep = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: v, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnNonUserWake: cfg.retryOnNonUserWake });
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: v, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnSleepTimeout: cfg.retryOnSleepTimeout, retryOnNonUserWake: cfg.retryOnNonUserWake });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -419,7 +423,21 @@ async function onEntryFailure(v: boolean) {
   cfg.retryOnEntryFailure = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: v, retryOnNonUserWake: cfg.retryOnNonUserWake });
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: v, retryOnSleepTimeout: cfg.retryOnSleepTimeout, retryOnNonUserWake: cfg.retryOnNonUserWake });
+    await syncGuardEnabled();
+  } catch {
+    msg.value = '设置保存失败';
+    await refresh();
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function onRetrySleepTimeout(v: boolean) {
+  cfg.retryOnSleepTimeout = v;
+  busy.value = true;
+  try {
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnSleepTimeout: v, retryOnNonUserWake: cfg.retryOnNonUserWake });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -433,7 +451,7 @@ async function onNonUserWake(v: boolean) {
   cfg.retryOnNonUserWake = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnNonUserWake: v });
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnSleepTimeout: cfg.retryOnSleepTimeout, retryOnNonUserWake: v });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -446,8 +464,7 @@ async function onNonUserWake(v: boolean) {
 function staticWakeFailure(action: 'scan' | 'restore', status: StaticWakeStatus): string {
   return (action === 'scan' ? '屏蔽未完成' : '恢复未完成') +
     ' · 失败 ' + status.failed + ' · 待恢复 ' + status.restorePending +
-    ' · 设备 ' + status.devices + ' · 软件 ' + status.software + ' · 定时器 ' + status.timers +
-    (status.lastError ? ' · ' + status.lastError : '');
+    ' · 设备 ' + status.devices + ' · 软件 ' + status.software + ' · 定时器 ' + status.timers;
 }
 
 async function applyStaticWake(action: 'scan' | 'restore') {
@@ -538,7 +555,7 @@ async function onSleepPowerPlanOptimization(v: boolean) {
 
 // 总闸（Enable.txt）：任一子功能生效即开启，全部关闭即关闭
 async function syncGuardEnabled() {
-  const active = cfg.pauseGameOnSleep || cfg.retryOnEntryFailure || cfg.retryOnNonUserWake;
+  const active = cfg.pauseGameOnSleep || cfg.retryOnEntryFailure || cfg.retryOnSleepTimeout || cfg.retryOnNonUserWake;
   if (active === cfg.enabled) return;
   const previous = cfg.enabled;
   try {
@@ -682,6 +699,7 @@ refresh();
        <p id="sleep-static-wake-status" role="status" aria-label="静态唤醒屏蔽状态" :title="staticWakeSummary">{{staticWakeSummary}}</p>
       </div>
       <Toggle :model-value="cfg.retryOnEntryFailure" label="入睡失败重试" description="明确入睡失败时重试，电源键唤醒优先" :disabled="busy" @update:model-value="onEntryFailure" />
+      <Toggle :model-value="cfg.retryOnSleepTimeout" label="睡眠超时" description="电源键睡眠满240秒仍在运行时重试，唤醒优先" :disabled="busy" @update:model-value="onRetrySleepTimeout" />
       <Toggle :model-value="cfg.retryOnNonUserWake" label="供电变动唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="onNonUserWake" />
      </div>
     </template>

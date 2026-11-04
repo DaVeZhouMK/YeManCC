@@ -3,16 +3,25 @@ import {currentRoles,currentExpected,verifyCurrentSemantics,verifyCurrentChildre
 import {requireCurrentPreparedContext,verifyCurrentPreparedExecution,validateCurrentProfileShape,currentPreparedProfileActive,openCurrentPreparedContext} from './r3-current-prepared.mjs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
+import {LEGACY_MANAGED_CONTRACT,TERMINAL_MANAGED_CONTRACT,managedCompileContract} from './r3-managed-input-contract.mjs';
 const verifyAdmittedCurrentExecution=(context,report)=>verifyCurrentPreparedExecution(context,report,{});
 const root=import.meta.dirname,read=f=>JSON.parse(fs.readFileSync(f,'utf8').replace(/^\uFEFF/,''));
-assert(process.env.VC_R3_CURRENT_MAINTENANCE_HISTORY,'Explicit current maintenance history required; no skipped historical tests');
-const history=read(process.env.VC_R3_CURRENT_MAINTENANCE_HISTORY);assert.equal(history.schemaVersion,1);
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-for(const role of currentRoles()){assert(history.roles[role]);for(const pin of [history.roles[role].raw,history.roles[role].managedManifest,history.roles[role].runtimeReceipt])assert.equal(hash(pin.path),pin.sha256,'Actual history input changed');}
-const contract={artifacts:Object.fromEntries(currentRoles().map(role=>[role,{raw:history.roles[role].raw,managed:{manifest:history.roles[role].managedManifest.path},referenceProcess:{pid:history.roles[role].nativePid}}]))},raw=Object.fromEntries(currentRoles().map(role=>[role,read(contract.artifacts[role].raw.path)]));
-const copy=role=>structuredClone(raw[role]);
+// Selecting pure schema cases must not read unrelated historical execution files.
+// Every real history consumer still requires all four original role pins once.
+let loadedHistory;
+function historyInputs(){
+ if(loadedHistory)return loadedHistory;
+ assert(process.env.VC_R3_CURRENT_MAINTENANCE_HISTORY,'Explicit current maintenance history required; no skipped historical tests');
+ const history=read(process.env.VC_R3_CURRENT_MAINTENANCE_HISTORY);assert.equal(history.schemaVersion,1);
+ for(const role of currentRoles()){assert(history.roles[role]);for(const pin of [history.roles[role].raw,history.roles[role].managedManifest,history.roles[role].runtimeReceipt])assert.equal(hash(pin.path),pin.sha256,'Actual history input changed');}
+ const contract={artifacts:Object.fromEntries(currentRoles().map(role=>[role,{raw:history.roles[role].raw,managed:{manifest:history.roles[role].managedManifest.path},referenceProcess:{pid:history.roles[role].nativePid}}]))},raw=Object.fromEntries(currentRoles().map(role=>[role,read(contract.artifacts[role].raw.path)]));
+ const managed=read(contract.artifacts.positive.managed.manifest),nativePid=contract.artifacts.positive.referenceProcess.pid;
+ loadedHistory={history,contract,raw,managed,nativePid};return loadedHistory;
+}
+const copy=role=>structuredClone(historyInputs().raw[role]);
 function failures(report){report.failures=report.assertionTrace.filter(row=>!row.passed).map(({case:c,assertion,sourceOrdinal,nameOccurrence,checkIndex})=>({case:c,assertion,sourceOrdinal,nameOccurrence,checkIndex}));report.status=report.failures.length?'FAIL':'PASS';return report;}
-for(const role of currentRoles())test('actual current '+role+' exact instance mask validates without borrowing historical counts',()=>{const result=verifyCurrentSemantics(role,raw[role]);assert.equal(result.exactFailedInstances,role==='positive'?0:role==='cancellation'?15:role==='psOwnership'?20:2);assert.equal(result.observed.cases,101);assert.equal(result.allTracePassAndFailStatesChecked,true);assert.equal(result.nativeExecutionProvenanceVerified,false);assert.equal(result.fullPublicConsumerAccepted,false);assert.equal(result.publicSingle60Accepted,false);});
+for(const role of currentRoles())test('actual current '+role+' exact instance mask validates without borrowing historical counts',()=>{const result=verifyCurrentSemantics(role,historyInputs().raw[role]);assert.equal(result.exactFailedInstances,role==='positive'?0:role==='cancellation'?15:role==='psOwnership'?20:2);assert.equal(result.observed.cases,101);assert.equal(result.allTracePassAndFailStatesChecked,true);assert.equal(result.nativeExecutionProvenanceVerified,false);assert.equal(result.fullPublicConsumerAccepted,false);assert.equal(result.publicSingle60Accepted,false);});
 test('all original cancellation29 instances remain15 failure plus14 actual executed-pass',()=>{const e=currentExpected('cancellation');assert.equal(e.exactFailures.length+e.requiredOriginalPassingInstances.length,29);assert.equal(new Set([...e.exactFailures,...e.requiredOriginalPassingInstances].map(r=>r.id)).size,29);assert.equal(e.requiredOriginalPassingInstances.filter(r=>r.origin.includes('exit-fence')).length,3);});
 test('expectation clones cannot mutate the pinned failure mask',()=>{const e=currentExpected('cancellation');e.exactFailures.length=0;assert.equal(currentExpected('cancellation').exactFailures.length,15);});
 test('old95 receipt cannot borrow current101 oracle',()=>{const r=copy('positive');r.cases.length=95;assert.throws(()=>verifyCurrentSemantics('positive',r));});
@@ -29,37 +38,60 @@ test('trace assertion text changed without count change is rejected',()=>{const 
 test('body MSI debt witness cannot be cleared by the tail',()=>{const r=copy('positive');r.orderedReturn.preTargetReturnBody.resources.msiModeDebt=false;assert.throws(()=>verifyCurrentSemantics('positive',r),/MSI_DEBT_WITNESS/);});
 test('original request6 ten-second dispose waits and final remain mandatory',()=>{const r=copy('positive'),branch=r.cases.find(c=>c.playerLockWaits?.length===6);branch.playerLockWaits[5].after.elapsedMs=9999;assert.throws(()=>verifyCurrentSemantics('positive',r),/REVIEWED_SIX_WAITS|ACTUAL10S/);});
 test('unproven physical IO cannot count as exact software semantic acceptance',()=>{const r=copy('positive');r.forbiddenIo=1;assert.throws(()=>verifyCurrentSemantics('positive',r),/OFFLINE_COMPLETED/);});
-test('serialized, old-build or fake context cannot confer actual execution provenance',()=>{for(const context of [{},{kind:'CURRENT_R48_REFERENCE_EXECUTION_EXACT_ORACLE',role:'positive'},{kind:'B49_COMPILE_ONLY_IN_PROCESS_CAPABILITY'}])assert.throws(()=>verifyAdmittedCurrentExecution(context,raw.positive),/LIVE_BRANDED_CONTEXT/);});
-const managed=read(contract.artifacts.positive.managed.manifest),nativePid=contract.artifacts.positive.referenceProcess.pid;
+test('serialized, old-build or fake context cannot confer actual execution provenance',()=>{for(const context of [{},{kind:'CURRENT_R48_REFERENCE_EXECUTION_EXACT_ORACLE',role:'positive'},{kind:'B49_COMPILE_ONLY_IN_PROCESS_CAPABILITY'}])assert.throws(()=>verifyAdmittedCurrentExecution(context,historyInputs().raw.positive),/LIVE_BRANDED_CONTEXT/);});
+function verifyHistoricalChildren(report){const {managed,nativePid}=historyInputs();return verifyCurrentChildren('positive',report,managed,nativePid);}
 function childMutation(change){const r=copy('positive');const c=r.cases[0].managedReceipt;assert(c);change(c);return r;}
-test('every owned child requires its actual exact native parent',()=>{const r=childMutation(c=>c.parentPid++);assert.throws(()=>verifyCurrentChildren('positive',r,managed,nativePid),/ACTUAL_PARENT|DUPLICATE_CHILD/);});
-test('missing startup source original cannot hide behind a valid DLL',()=>{const r=childMutation(c=>c.startupBindings.sourceOriginals.pop());assert.throws(()=>verifyCurrentChildren('positive',r,managed,nativePid),/BINDING_MEMBERSHIP|DUPLICATE_CHILD/);});
-test('missing final source snapshot cannot hide behind startup bindings',()=>{const r=childMutation(c=>c.finalBindings.sourceSnapshots.pop());assert.throws(()=>verifyCurrentChildren('positive',r,managed,nativePid),/BINDING_MEMBERSHIP|DUPLICATE_CHILD/);});
-test('changed final generated source identity is rejected',()=>{const r=childMutation(c=>c.finalBindings.generated[0].sha256='0'.repeat(64));assert.throws(()=>verifyCurrentChildren('positive',r,managed,nativePid),/EXACT_BINDING_ROW|DUPLICATE_CHILD/);});
-test('a claimed loaded HC assembly is rejected even when file hashes otherwise match',()=>{const r=childMutation(c=>c.startupBindings.loadedAssemblies.find(x=>!x.ownAssembly).assembly='HandheldCompanion');assert.throws(()=>verifyCurrentChildren('positive',r,managed,nativePid),/NON_BCL|DUPLICATE_CHILD/);});
-test('real SDK flag or missing actual natural native exit is rejected',()=>{for(const change of [c=>c.realSdkLoaded=true,c=>c.nativeObservedProcessExit=false]){const r=childMutation(change);assert.throws(()=>verifyCurrentChildren('positive',r,managed,nativePid),/SDK_FREE|ACTUAL_OWNED_EXIT|DUPLICATE_CHILD/);}});
+test('every owned child requires its actual exact native parent',()=>{const r=childMutation(c=>c.parentPid++);assert.throws(()=>verifyHistoricalChildren(r),/ACTUAL_PARENT|DUPLICATE_CHILD/);});
+test('missing startup source original cannot hide behind a valid DLL',()=>{const r=childMutation(c=>c.startupBindings.sourceOriginals.pop());assert.throws(()=>verifyHistoricalChildren(r),/BINDING_MEMBERSHIP|DUPLICATE_CHILD/);});
+test('missing final source snapshot cannot hide behind startup bindings',()=>{const r=childMutation(c=>c.finalBindings.sourceSnapshots.pop());assert.throws(()=>verifyHistoricalChildren(r),/BINDING_MEMBERSHIP|DUPLICATE_CHILD/);});
+test('changed final generated source identity is rejected',()=>{const r=childMutation(c=>c.finalBindings.generated[0].sha256='0'.repeat(64));assert.throws(()=>verifyHistoricalChildren(r),/EXACT_BINDING_ROW|DUPLICATE_CHILD/);});
+test('a claimed loaded HC assembly is rejected even when file hashes otherwise match',()=>{const r=childMutation(c=>c.startupBindings.loadedAssemblies.find(x=>!x.ownAssembly).assembly='HandheldCompanion');assert.throws(()=>verifyHistoricalChildren(r),/NON_BCL|DUPLICATE_CHILD/);});
+test('real SDK flag or missing actual natural native exit is rejected',()=>{for(const change of [c=>c.realSdkLoaded=true,c=>c.nativeObservedProcessExit=false]){const r=childMutation(change);assert.throws(()=>verifyHistoricalChildren(r),/SDK_FREE|ACTUAL_OWNED_EXIT|DUPLICATE_CHILD/);}});
 
 const currentProfile=read(root+'/r3-current-prerequisites.json');
 test('unbound current declaration confers no source or runtime authority',()=>{const unbound={schemaVersion:1,kind:'VC-CURRENT-101-6300-880D6734-20261021',status:'UNBOUND'};assert.equal(validateCurrentProfileShape(unbound).active,false);assert.throws(()=>requireCurrentPreparedContext(unbound),/LIVE_BRANDED_CONTEXT_REQUIRED/);});
 test('unknown current native role rejects before filesystem admission',()=>{assert.throws(()=>openCurrentPreparedContext('positive-old95',root),/KNOWN_NATIVE_ROLE_REQUIRED/);});
-test('serialized profile cannot become an opaque execution capability',()=>{for(const fake of [currentProfile,{kind:'CURRENT_SOURCE_QUALIFIED_NATIVE_RUNTIME_CONTEXT',role:'positive'},structuredClone(history.roles.positive)])assert.throws(()=>requireCurrentPreparedContext(fake),/LIVE_BRANDED_CONTEXT_REQUIRED/);});
+test('serialized profile cannot become an opaque execution capability',()=>{for(const fake of [currentProfile,{kind:'CURRENT_SOURCE_QUALIFIED_NATIVE_RUNTIME_CONTEXT',role:'positive'},structuredClone(historyInputs().history.roles.positive)])assert.throws(()=>requireCurrentPreparedContext(fake),/LIVE_BRANDED_CONTEXT_REQUIRED/);});
 test('new exact contract retains every original detailed group verifier byte for byte',()=>{const original=fs.readFileSync(root+'/run.mjs','utf8'),current=fs.readFileSync(root+'/r3-current-original-groups.mjs','utf8');const start=original.indexOf('export function verifySwitchVerification('),end=original.indexOf('function verifyCancellationNegative(',start);assert(start>0&&end>start);const copied=current.slice(current.indexOf('export function verifySwitchVerification(')).replace('export function verifyCurrentOriginalGroups(','function verifyGroups(');assert.equal(copied,original.slice(start,end));assert(current.includes("const PS_CASE='ROG/full-coordinator-real-managed-pipe/';"));});
 test('portable current modules have no task-specific executable or source dependency',()=>{for(const name of ['r3-current-oracle.mjs','r3-current-ordered-observation.mjs','r3-current-original-groups.mjs','r3-current-prepared.mjs','r3-current-ownership.mjs']){const source=fs.readFileSync(root+'/'+name,'utf8');assert(!source.includes('file:///'));assert(!/Build\/Tasks|D:\/Codex|hc-scheduled-r48/.test(source));}});
-const referenceProfile=()=>({schemaVersion:1,kind:'VC-CURRENT-101-6300-880D6734-20261021',status:'BOUND',sourceVersion:'maintenance-only-shape-not-authority',sourceRoot:'D:/shape/source',workspaceRoot:'D:/shape/workspace',authorizedBuildRoot:'D:/shape/workspace/Build/Validation/current',sourceMainSha256:'a'.repeat(64),sourceManifest:{path:'D:/shape/source/manifest.json',sha256:'a'.repeat(64)},nodeToolsBinding:{path:'D:/shape/source/node.json',sha256:'a'.repeat(64)},authorityBefore:{path:'D:/shape/workspace/Build/Validation/current/before.json',sha256:'a'.repeat(64)},authorityAfter:{path:'D:/shape/workspace/Build/Validation/current/after.json',sha256:'a'.repeat(64)},expectations:{path:'D:/shape/source/expectations.json',sha256:'a'.repeat(64)},expectedManagedSources:Array.from({length:20},(_,i)=>({relative:'InputHost/Member'+i+'.cs',sha256:'a'.repeat(64)})),roles:Object.fromEntries(['positive','cancellation','psOwnership','psBinding','bypassAdmission','recoveryInheritance','switchReturn','switchOwner'].map(role=>[role,{path:'D:/shape/workspace/Build/Validation/current/'+role+'.json',sha256:'a'.repeat(64)}]))});
+// Digest strings below are schema samples, never claimed source/qualification receipts.
+const managedSchemaRows=id=>managedCompileContract(id).names.map(relative=>({relative,sha256:'a'.repeat(64)}));
+const referenceProfile=(managedInputContract=LEGACY_MANAGED_CONTRACT)=>({schemaVersion:1,kind:'VC-CURRENT-101-6300-880D6734-20261021',status:'BOUND',sourceVersion:'maintenance-only-shape-not-authority',sourceRoot:'D:/shape/source',workspaceRoot:'D:/shape/workspace',authorizedBuildRoot:'D:/shape/workspace/Build/Validation/current',sourceMainSha256:'a'.repeat(64),sourceManifest:{path:'D:/shape/source/manifest.json',sha256:'a'.repeat(64)},nodeToolsBinding:{path:'D:/shape/source/node.json',sha256:'a'.repeat(64)},authorityBefore:{path:'D:/shape/workspace/Build/Validation/current/before.json',sha256:'a'.repeat(64)},authorityAfter:{path:'D:/shape/workspace/Build/Validation/current/after.json',sha256:'a'.repeat(64)},expectations:{path:'D:/shape/source/expectations.json',sha256:'a'.repeat(64)},managedInputContract,expectedManagedSources:managedSchemaRows(managedInputContract),roles:Object.fromEntries(['positive','cancellation','psOwnership','psBinding','bypassAdmission','recoveryInheritance','switchReturn','switchOwner'].map(role=>[role,{path:'D:/shape/workspace/Build/Validation/current/'+role+'.json',sha256:'a'.repeat(64)}]))});
 test('pure declaration validation itself does not grant execution authority',()=>{const p=referenceProfile();assert.equal(validateCurrentProfileShape(p).active,true);assert.throws(()=>requireCurrentPreparedContext(p),/LIVE_BRANDED_CONTEXT_REQUIRED/);});
-for(const [name,mutate] of [
- ['unknown status',p=>p.status='PASS'],
- ['legacy profile',p=>p.kind='B46'],
- ['relative source',p=>p.sourceRoot='relative'],
- ['build outside owned workspace',p=>p.authorizedBuildRoot='D:/foreign/output'],
- ['workspace validation root itself',p=>p.authorizedBuildRoot='D:/shape/workspace/Build/Validation'],
- ['missing actual mode',p=>delete p.roles.switchReturn],
- ['unknown ninth mode',p=>p.roles.newMode={path:'D:/new.json',sha256:'a'.repeat(64)}],
- ['missing managed member',p=>p.expectedManagedSources.pop()],
- ['duplicate managed member',p=>p.expectedManagedSources[1]=p.expectedManagedSources[0]],
- ['managed traversal',p=>p.expectedManagedSources[0].relative='../Program.cs'],
- ['bad artifact digest',p=>p.roles.positive.sha256='PASS'],
- ['relative artifact path',p=>p.roles.positive.path='positive.json']
-])test('current declaration rejects '+name,()=>{const p=referenceProfile();mutate(p);assert.throws(()=>validateCurrentProfileShape(p));});
+for(const [name,mutate,reason] of [
+ ['unknown status',p=>p.status='PASS','PROFILE_STATUS_REQUIRED'],
+ ['legacy profile',p=>p.kind='B46','EXPLICIT_PROFILE_KIND_REQUIRED'],
+ ['relative source',p=>p.sourceRoot='relative','ABSOLUTE_sourceRoot'],
+ ['build outside owned workspace',p=>p.authorizedBuildRoot='D:/foreign/output','OWNED_BUILD_SCOPE_REQUIRED'],
+ ['workspace validation root itself',p=>p.authorizedBuildRoot='D:/shape/workspace/Build/Validation','OWNED_BUILD_SCOPE_REQUIRED'],
+ ['missing actual mode',p=>delete p.roles.switchReturn,'ALL_ORIGINAL_EIGHT_NATIVE_POLARITIES_REQUIRED'],
+ ['unknown ninth mode',p=>p.roles.newMode={path:'D:/new.json',sha256:'a'.repeat(64)},'ALL_ORIGINAL_EIGHT_NATIVE_POLARITIES_REQUIRED'],
+ ['missing managed member',p=>p.expectedManagedSources.pop(),'EXACT21_MANAGED_PROFILE_REQUIRED'],
+ ['duplicate managed member',p=>p.expectedManagedSources[1]=p.expectedManagedSources[0],'EXACT21_MANAGED_PROFILE_REQUIRED'],
+ ['managed traversal',p=>p.expectedManagedSources[0].relative='../Program.cs','STRICT_MANAGED_MEMBER_REQUIRED'],
+ ['bad artifact digest',p=>p.roles.positive.sha256='PASS','ALL_ORIGINAL_EIGHT_NATIVE_POLARITIES_REQUIRED'],
+ ['relative artifact path',p=>p.roles.positive.path='positive.json','ALL_ORIGINAL_EIGHT_NATIVE_POLARITIES_REQUIRED']
+])test('current declaration rejects '+name,()=>{const p=referenceProfile();assert.equal(validateCurrentProfileShape(p).active,true,'Unmutated current21 schema must be valid before the designated fault');mutate(p);assert.throws(()=>validateCurrentProfileShape(p),{message:'R3_CURRENT_PREPARED_'+reason});});
 
 test('explicit external declaration is bounded to an owned derived profile path',()=>{const p={schemaVersion:1,kind:'VC-CURRENT-101-6300-880D6734-20261021',status:'EXTERNAL',workspaceRoot:'D:/shape/workspace',authorizedBuildRoot:'D:/shape/workspace/Build/Validation/current',profilePath:'D:/shape/workspace/Build/Validation/current/prepared-profile.json'};assert.deepEqual(validateCurrentProfileShape(p),{active:true,external:true});assert.throws(()=>requireCurrentPreparedContext(p),/LIVE_BRANDED_CONTEXT_REQUIRED/);for(const path of ['../profile.json','D:/foreign/profile.json','D:/shape/workspace/Build/Validation/current'])assert.throws(()=>validateCurrentProfileShape({...p,profilePath:path}));});
+
+// These in-memory declarations test syntax only; no BOUND profile or qualification is written.
+test('current declaration explicitly rejects the original20 managed member shape',()=>{
+ const p=referenceProfile();assert.equal(validateCurrentProfileShape(p).active,true);p.expectedManagedSources=p.expectedManagedSources.filter(row=>row.relative!=='InputHost/HostVirtualSignalEvidence.cs');assert.equal(p.expectedManagedSources.length,20);
+ assert.throws(()=>validateCurrentProfileShape(p),{message:'R3_CURRENT_PREPARED_EXACT21_MANAGED_PROFILE_REQUIRED'});
+});
+function terminalReferenceProfile(){
+ return {...referenceProfile(TERMINAL_MANAGED_CONTRACT),sourceVersion:'maintenance-only-terminal22-schema-not-authority',managedContractCodeSha256:hash(path.join(root,'r3-managed-input-contract.mjs'))};
+}
+test('terminal22 declaration validates exact schema without runtime authority',()=>{
+ const p=terminalReferenceProfile(),contract=managedCompileContract(TERMINAL_MANAGED_CONTRACT);assert.equal(p.expectedManagedSources.length,22);assert.deepEqual(p.expectedManagedSources.map(row=>row.relative),contract.names);assert.equal(p.managedContractCodeSha256,hash(path.join(root,'r3-managed-input-contract.mjs')));
+ assert.deepEqual(validateCurrentProfileShape(p),{active:true,sourceVersion:p.sourceVersion});assert.throws(()=>requireCurrentPreparedContext(p),{message:'R3_CURRENT_PREPARED_LIVE_BRANDED_CONTEXT_REQUIRED'});
+});
+for(const [name,mutate,reason]of[
+ ['wrong contract code pin',p=>p.managedContractCodeSha256='0'.repeat(64),'R3_CURRENT_PREPARED_EXPLICIT_TERMINAL22_CONTRACT_PIN_REQUIRED'],
+ ['wrong member count',p=>p.expectedManagedSources.pop(),'CURRENT_MANAGED_EXACT22_MEMBERS_REQUIRED'],
+ ['duplicate member',p=>p.expectedManagedSources[1]=p.expectedManagedSources[0],'CURRENT_MANAGED_EXACT22_MEMBERS_REQUIRED'],
+ ['unknown member',p=>p.expectedManagedSources[0].relative='InputHost/UnknownSchemaMember.cs','CURRENT_MANAGED_MEMBER_NOT_IN_current105-terminal22-v1'],
+])test('terminal22 declaration rejects '+name,()=>{
+ const p=terminalReferenceProfile();assert.equal(validateCurrentProfileShape(p).active,true,'Unmutated current22 schema must be valid before the designated fault');mutate(p);assert.throws(()=>validateCurrentProfileShape(p),{message:reason});
+});

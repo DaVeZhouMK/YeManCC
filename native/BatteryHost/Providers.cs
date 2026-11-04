@@ -239,6 +239,6 @@ internal static class Providers
     public static IChargeProvider Open(Route route,string powerRoot)=>route.RouteId switch
     {
         "asus-ally-acpi"=>new AsusProvider(),"lenovo-go-conservation"=>new LenovoProvider(),"msi-claw-wmi"=>new MsiProvider(),"msi-claw-cg3em-ap"=>new MsiApProvider(),
-        "valve-deck-firmware"=>new DeckProvider(powerRoot),_=>new EcProvider(route)
+        "valve-deck-firmware"=>new DeckProvider(powerRoot),"oxp3-wmi-ec"=>new Oxp3WmiProvider(),_=>new EcProvider(route)
     };
 }

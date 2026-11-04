@@ -228,6 +228,9 @@ for(const name of ['inputCaptureLegacySensorFieldsSnapshot','inputCaptureMotionS
  if(sourceTextEqual(archived,current.code)){check.controlledRefactorVerified=true;check.refactorScope='frozen-generic-continuation-source-with-CRLF-only-normalization';check.continuationSource=expected.genericFallbackPolicy.continuationSource;check.continuationRawBodySha256=sha(archived);check.continuationNormalizedBodySha256=sha(archived.replaceAll('\r\n','\n'));}
 }
 fixtureInputs.push(...expected.genericFallbackPolicy.inputs);
+// The shared expectation builder now reads the pinned OXP3 C# input source as
+// well as its independently pinned JSON. Preserve these actual dependencies.
+for(const file of ['tools/fixtures/hc_remaining_model_capabilities/expectations.mjs','capabilities/upstream/f2e58468/OneXPlayer3.cs','capabilities/upstream/f2e58468/OneXPlayer3.json'])fixtureInputs.push({path:path.join(repo,file),sha256:sha(fs.readFileSync(path.join(repo,file)))});
 // These three intended route/view changes have an exact, immutable phase preimage;
 // they remain audited rather than pretending they are unchanged since the old capability phase.
 if(sourceBytes.includes(Buffer.from('static WindowsSensorView inputCaptureWindowsSensorViewSnapshot()'))){
@@ -262,6 +265,20 @@ if(sourceBytes.includes(Buffer.from('const bool windowsFrameProcessed=inputCaptu
  const check=capabilityControlChecks.find(x=>x.name==='BUS:GamepadMotion-condition-and-call-prefix');if(!check)throw Error('Processor effect preservation check missing');
  check.controlledRefactorVerified=actual.entries.find(x=>x.name===check.name)?.code.replace(/\r\n/g,'\n')===expected;check.preimagePath=prePath;check.preimageSha256=sha(bytes);check.expectedRefactorSha256=sha(expected);
  const legacyCheck=legacySourceChecks.find(x=>x.name===check.name);if(legacyCheck){legacyCheck.controlledRefactorVerified=check.controlledRefactorVerified;legacyCheck.preimagePath=prePath;legacyCheck.preimageSha256=sha(bytes);legacyCheck.expectedRefactorSha256=sha(expected);}
+}
+// The 2026-11-01 allocation-free parser was independently compared with the
+// immutable original by the existing --axis-parser-only lane (6,219 IDs in
+// Release/Checked). Admit that exact body only; unknown edits still fail the
+// original source controls and all original executable matrix assertions remain.
+{
+ const name='ymccApplyNamedImuMatrix',beforeSha='6ec35a253da070abcc474e733f7e6bf5d0e3fc04b5a966a7aaad5bc279833aa9',afterSha='002f62358825f90094ba760c58290224696febe403cd74b6765a8ceab7419fef';
+ const legacyFile=path.join(repo,'tools/fixtures/hc_legacy_motion_catalog/axis-parser-legacy-reference.cpp'),legacyBytes=fs.readFileSync(legacyFile);
+ if(sha(legacyBytes)!=='cdef906232005b1456c91490ea23511231563e594da0d0de46181d51dabce035')throw Error('Immutable axis parser comparison drift');
+ fixtureInputs.push({path:legacyFile,sha256:sha(legacyBytes)});
+ const current=actual.entries.find(row=>row.name===name);
+ if(current&&sha(current.code)===afterSha)for(const check of [...capabilityControlChecks,...legacySourceChecks])if(check.name===name&&check.beforeSha256===beforeSha){
+  check.controlledRefactorVerified=true;check.refactorScope='allocation-free-axis-parser-contract';check.expectedAfterSha256=afterSha;check.immutableComparisonSha256=sha(legacyBytes);
+ }
 }
 // Only the exact reviewed binding changes are admitted; arbitrary selector changes still fail.
 const unifiedContract=JSON.parse(fs.readFileSync(path.join(fixture,'unified-binding-contract.json'),'utf8'));

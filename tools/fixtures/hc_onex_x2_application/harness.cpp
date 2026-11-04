@@ -21,9 +21,9 @@ static void prepare(const std::string& cls,YmccFamily family=YmccFamily::OneXPla
     g_machineIdentity={};g_machineIdentity.family=family;g_machineIdentity.deviceClass=cls;g_machineIdentity.resolved=true;
     g_inputCaptureReady=true;g_exitRequested=false;g_shortcutRecordingActive=false;g_powerLifecycle=PowerLifecycle::Ready;
     g_oemKeyMask=0;g_oemKeyMaskMsiDinput=0;g_oemKeyMaskMsi=0;g_oemKeyMaskRog=0;g_oemBackState=0;g_oemKbDown=0;g_oemKbDownRaw=0;
-    g_oemBackProfileId=static_cast<int>(cls=="OneXPlayerX2MiniPro"?OemChordProfileId::OneXX2MiniPro:OemChordProfileId::OneXX1);
+    g_oemBackProfileId=static_cast<int>(cls.find("OneXPlayerX2MiniPro")!=std::string::npos?OemChordProfileId::OneXX2MiniPro:cls.find("OneXPlayer3")!=std::string::npos?OemChordProfileId::OneXX3:OemChordProfileId::OneXX1);
     g_gpdChordPubGen=0;g_gpdBackIfaceGen=0;g_gpdBackIfaceReady=false;
-    g_nativeKeyboardShortcuts.clear();g_nativeOemEdgeEpochSeen=0;g_nativeWmiAuthoritySeen=false;g_nativeShortcutLegacyOverrideMask=0;g_oemShortcutEdgePostFailures=0;evaluations.clear();rogReceipts.clear();appmock::jobs.clear();appmock::actions.clear();appmock::logs.clear();appmock::posts=appmock::refreshes=0;
+    fixtureRadialOwner=false;g_inputReleaseRequired=false;recordedClicks.clear();recordedChords.clear();g_nativeKeyboardShortcuts.clear();g_nativeOemEdgeEpochSeen=0;g_nativeWmiAuthoritySeen=false;g_nativeShortcutLegacyOverrideMask=0;g_oemShortcutEdgePostFailures=0;evaluations.clear();rogReceipts.clear();appmock::jobs.clear();appmock::actions.clear();appmock::logs.clear();appmock::posts=appmock::refreshes=0;
     appmock::diagnostic=false;appmock::postAccepted=appmock::serialAccepted=true;appmock::beforeCompletion={};appmock::afterSourceRevoke={};appmock::beforeEnumeration={};appmock::afterEnumeration={};appmock::afterOwnerOpen={};appmock::afterRead={};appmock::writePermissionOverride={};appmock::hardwareAllowed=true;appmock::permissionChecks=0;appmock::notificationAccepted=true;appmock::registrations=appmock::unregistrations=0;appmock::notifications.clear();
     if(present){auto d=mock::device();d.input=input;d.output=output;mock::w.devices.push_back(d);}
 }
@@ -36,7 +36,7 @@ static json ownerLog(){for(auto it=appmock::logs.rbegin();it!=appmock::logs.rend
 static void admission(){test::section="owner-admission";
     for(const std::string cls:{"OneXPlayerX2","OneXPlayerX2MiniPro","OneXPlayer3","HandheldCompanion.Devices.OneXPlayerX2","HandheldCompanion.Devices.OneXPlayerX2MiniPro","HandheldCompanion.Devices.OneXPlayer3"}){
         prepare(cls);boot();eq(g_onexX2RearGeneration,uint64_t{0},"bind without read creates no rear producer");eq(g_onexX2HomeGeneration,uint64_t{0},"bind without read creates no home producer");
-        const unsigned id=cls.find("Mini")!=std::string::npos?0x24:0x21;deliver(id);check(g_onexX2HomeGeneration!=0,"complete validated Home read starts real new producer");check(oemProducerCurrent(OemProducerId::OneXX2Home,g_onexX2HomeGeneration),"new Home source is current");finish();}
+        const unsigned id=cls.find("Mini")!=std::string::npos?0x24:0x21;deliver(id);if(cls.find("OneXPlayer3")!=std::string::npos){check(g_onexX2RearGeneration!=0,"OXP3 held Home starts existing held producer");eq(g_onexX2HomeGeneration,uint64_t{0},"OXP3 held Home has no click-only producer");check(oemProducerCurrent(OemProducerId::OneXX2Rear,g_onexX2RearGeneration),"OXP3 held source is current");}else{check(g_onexX2HomeGeneration!=0,"complete validated Home read starts real new producer");check(oemProducerCurrent(OemProducerId::OneXX2Home,g_onexX2HomeGeneration),"new Home source is current");}finish();}
 }
 static void excludedModels(){test::section="model-boundary";
     const std::vector<std::pair<YmccFamily,std::string>> excluded={{YmccFamily::AsusRogAllyX,"ROGAllyX"},{YmccFamily::MsiClaw,"ClawA1M"},{YmccFamily::Gpd,"GPDWin5"},{YmccFamily::Unknown,"OneXPlayerX2"},{YmccFamily::OneXPlayer,"OneXPlayerX1"},{YmccFamily::OneXPlayer,"OneXPlayerX1AMD"},{YmccFamily::OneXPlayer,"OneXPlayerX1Intel"},{YmccFamily::OneXPlayer,"OneXPlayerX1Mini"},{YmccFamily::OneXPlayer,"OneXPlayerX1Pro"},{YmccFamily::OneXPlayer,"OneXPlayerApex"},{YmccFamily::OneXPlayer,"prefix-OneXPlayerX2"},{YmccFamily::OneXPlayer,"onexplayerx2"}};
@@ -63,16 +63,16 @@ static void miniKeyboard(){test::section="mini-rear";prepare("OneXPlayerX2MiniPr
 static void rearUi(){test::section="rear-ui";
     for(const std::string cls:{"OneXPlayerX2","OneXPlayer3"}){prepare(cls);boot();const std::vector<unsigned> ids={0x22,0x23,0x22,0x23};const std::vector<uint64_t> masks={kOemBitL4,kOemBitL4|kOemBitR4,kOemBitR4,0};
         std::vector<ULONGLONG> times;for(std::size_t i=0;i<ids.size();++i){deliver(ids[i],i<2);times.push_back(appmock::now);eq(oemProducerActionMask(),masks[i],"real rear ledger holds exact action state");eq(oemProducerPhysicalMask(),masks[i],"real rear ledger holds exact physical state");eq(oemProducerPhysicalBackState(),static_cast<int>(i==0?1:i==1?3:i==2?2:0),"rear consumer uses semantic state");}
-        appmock::now+=1000;nativeOemProducerDrain();eq(evaluations.size(),std::size_t{4},"all real rear transitions survive delayed UI drain");for(std::size_t i=0;i<4;++i){eq(evaluations[i].mask,masks[i],"UI rear snapshot matches captured edge");eq(evaluations[i].capturedAt,times[i],"UI rear uses capture time");eq(evaluations[i].scope,kOemBitL4|kOemBitR4,"new rear scope excludes keyboard signals");check(oemProducerTokensCurrent(evaluations[i].tokens),"rear UI token belongs to live source");}finish();}
+        appmock::now+=1000;nativeOemProducerDrain();eq(evaluations.size(),std::size_t{4},"all real rear transitions survive delayed UI drain");for(std::size_t i=0;i<4;++i){eq(evaluations[i].mask,masks[i],"UI rear snapshot matches captured edge");eq(evaluations[i].capturedAt,times[i],"UI rear uses capture time");eq(evaluations[i].scope,kOemBitL4|kOemBitR4|kOemBitHome|kOemBitGKey,"held producer scope is limited to four declared vendor keys");check(oemProducerTokensCurrent(evaluations[i].tokens),"rear UI token belongs to live source");}finish();}
 }
 static void homeDelayed(){test::section="home-ui";
-    for(const std::string cls:{"OneXPlayerX2","OneXPlayerX2MiniPro","OneXPlayer3"})for(unsigned id:{0x21u,0x24u}){if((cls=="OneXPlayerX2"&&id!=0x21)||(cls=="OneXPlayerX2MiniPro"&&id!=0x24))continue;
+    for(const std::string cls:{"OneXPlayerX2","OneXPlayerX2MiniPro"})for(unsigned id:{0x21u,0x24u}){if((cls=="OneXPlayerX2"&&id!=0x21)||(cls=="OneXPlayerX2MiniPro"&&id!=0x24))continue;
         prepare(cls);boot();rule();deliver(id);const auto at=appmock::now;check(onexX2HomeDisplayMask()==kOemBitHome,"Home has transient display pulse");eq(g_oemProducerEdgeCount,std::size_t{1},"complete click has durable UI receipt");
         const auto r=g_oemProducerEdges[g_oemProducerEdgeHead];eq(r.clickCode,static_cast<BYTE>(id),"original Home vendor ID retained in real receipt");eq(r.capturedAt,at,"capture time retained");check(r.terminalClick,"Home is complete click");
         appmock::now+=1000;eq(onexX2HomeDisplayMask(),uint64_t{0},"display pulse expired before UI consumes");nativeOemProducerDrain();eq(rogReceipts.size(),std::size_t{0},"new Home never enters ROG dispatcher");eq(appmock::jobs.size(),std::size_t{1},"expired display does not lose Home action");jobs();eq(appmock::actions.size(),std::size_t{1},"actual guarded serial job reaches observation sink");
         bool evidence=false;for(const auto& l:appmock::logs)if(l.event=="oem-producer-edge"&&l.fields.value("source","")=="onex-x2-home-click"&&l.fields.contains("code")&&l.fields["code"]==id)evidence=true;check(evidence,"Home log preserves original vendor ID");finish();}
 }
-static void noHomeRule(){test::section="home-default";prepare("OneXPlayer3");boot();deliver(0x21);deliver(0x24);nativeOemProducerDrain();jobs();check(appmock::actions.empty(),"unconfigured Home cannot trigger default window action");check(rogReceipts.empty(),"unconfigured Home cannot route through legacy ROG defaults");finish();}
+static void noHomeRule(){test::section="home-default";prepare("OneXPlayer3");boot();deliver(0x21);deliver(0x24);deliver(0x25);deliver(0x24,false);deliver(0x25,false);nativeOemProducerDrain();jobs();check(appmock::actions.empty(),"unconfigured Home cannot trigger default window action");check(rogReceipts.empty(),"unconfigured Home cannot route through legacy ROG defaults");finish();}
 static void unsupportedHomeRules(){test::section="home-trigger-boundary";prepare("OneXPlayerX2");boot();for(const auto trigger:{"hold","release","repeat"})rule(trigger);rule("press",kOemBitHome|kOemBitL4);rule();g_nativeKeyboardShortcuts.back().desktopKeys={VK_LWIN};deliver(0x21);nativeOemProducerDrain();jobs();check(appmock::actions.empty()&&appmock::jobs.empty(),"click-only Home cannot fabricate hold release repeat composite desktop action");check(rogReceipts.empty(),"unsupported Home cannot trigger ROG fallback");finish();}
 static void homeDouble(){test::section="home-double";prepare("OneXPlayerX2");boot();rule("double");deliver(0x21);const auto first=appmock::now;appmock::now+=299;deliver(0x21);const auto second=appmock::now;eq(second-first,ULONGLONG{300},"capture interval inside double window");appmock::now+=2000;nativeOemProducerDrain();eq(appmock::jobs.size(),std::size_t{1},"double uses capture interval despite delayed UI processing");jobs();eq(appmock::actions.size(),std::size_t{1},"double emits once");deliver(0x21);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"third click starts new double pair");finish();}
 static void homeRuleEpoch(){test::section="home-epoch";prepare("OneXPlayerX2");boot();rule("double");deliver(0x21);nativeOemProducerDrain();check(appmock::jobs.empty(),"first double click waits");++g_oemShortcutEdgeEpoch;deliver(0x21);nativeOemProducerDrain();check(appmock::jobs.empty(),"new rule epoch cannot inherit first click");deliver(0x21);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"new rule epoch double starts fresh");finish();}
@@ -177,16 +177,18 @@ static void contextRebind(bool evaluateGap=false){
     if(evaluateGap)evaluateLive();ownerAt(g_onexX2Transport.snapshot().retryAt);
 }
 static void realFirstRear(){test::section="real-first-rear";
-    for(const std::string cls:{"OneXPlayerX2","OneXPlayer3"})for(unsigned id:{0x22u,0x23u})for(bool gap:{false,true}){
-        prepare(cls);boot();rearRule(id==0x22?kOemBitL4:kOemBitR4);evaluateLive();check(!g_nativeKeyboardShortcuts[0].needsNeutral,"actual idle evaluator establishes neutral before first vendor source");
+    for(const std::string cls:{"OneXPlayerX2","OneXPlayer3"})for(unsigned id:{0x22u,0x23u,0x24u,0x25u})for(bool gap:{false,true}){
+        if(cls!="OneXPlayer3"&&id>=0x24)continue;
+        prepare(cls);boot();rearRule(id==0x22?kOemBitL4:id==0x23?kOemBitR4:id==0x24?kOemBitHome:kOemBitGKey);evaluateLive();check(!g_nativeKeyboardShortcuts[0].needsNeutral,"actual idle evaluator establishes neutral before first vendor source");
         deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"first fresh L4/R4 source edge dispatches through real evaluator");
         deliver(id,false);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"physical release does not duplicate press action");contextRebind(gap);
         deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{2},"first new press after released rebind can dispatch without an extra artificial UP");finish();
     }
 }
 static void realHeldRear(){test::section="real-held-rear";
-    for(const std::string cls:{"OneXPlayerX2","OneXPlayer3"})for(unsigned id:{0x22u,0x23u})for(bool releaseFirst:{false,true}){
-        prepare(cls);boot();rearRule(id==0x22?kOemBitL4:kOemBitR4);evaluateLive();deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"initial press acted before held rebind");contextRebind(true);
+    for(const std::string cls:{"OneXPlayerX2","OneXPlayer3"})for(unsigned id:{0x22u,0x23u,0x24u,0x25u})for(bool releaseFirst:{false,true}){
+        if(cls!="OneXPlayer3"&&id>=0x24)continue;
+        prepare(cls);boot();rearRule(id==0x22?kOemBitL4:id==0x23?kOemBitR4:id==0x24?kOemBitHome:kOemBitGKey);evaluateLive();deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"initial press acted before held rebind");contextRebind(true);
         if(!releaseFirst){deliver(id);nativeOemProducerDrain();evaluateLive();jobs();eq(appmock::actions.size(),std::size_t{1},"held-across-rebind DOWN cannot create another action in actual evaluator");}
         deliver(id,false);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"actual UP/redundant first UP re-arms without fabricating press");
         deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{2},"only actual UP then new DOWN can act after held rebind");finish();
@@ -285,8 +287,35 @@ static void posttickSourceRevokeRace(){test::section="posttick-source-race";prep
     check(!g_onexX2PublishedReady&&g_onexX2HomeGeneration==0&&g_onexX2RearGeneration==0,"posttick removal cannot publish stale source");finish();
 }
 
+
+static void oxp3HeldKeys(){test::section="oxp3-held";
+    for(const std::string cls:{"OneXPlayer3","HandheldCompanion.Devices.OneXPlayer3"})for(unsigned id:{0x21u,0x24u,0x25u}){
+        const uint64_t bit=id==0x25?kOemBitGKey:kOemBitHome;
+        prepare(cls);boot();rearRule(bit);evaluateLive();deliver(id);
+        eq(g_onexX2HomeGeneration,uint64_t{0},"OXP3 held key never creates click producer");check(g_onexX2RearGeneration!=0,"OXP3 held key reuses existing held producer");
+        eq(oemProducerPhysicalMask(),bit,"OXP3 physical held bit is exact");eq(oemProducerActionMask(),bit,"OXP3 action bit is exact");
+        eq(onexX2HomeDisplayMask(),uint64_t{0},"OXP3 held Home is not a transient click pulse");
+        check(!g_oemProducerEdges[g_oemProducerEdgeHead].terminalClick,"OXP3 receipt preserves held semantics");
+        nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"OXP3 physical press reaches actual configured evaluator");
+        deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"redundant DOWN cannot repeat configured press");
+        ownerAt(appmock::now+1000);evaluateLive();jobs();eq(oemProducerPhysicalMask(),bit,"OXP3 hold survives old 100ms tap duration");eq(appmock::actions.size(),std::size_t{1},"elapsed time cannot fabricate a second press");
+        deliver(id==0x21?0x24:id,false);nativeOemProducerDrain();jobs();eq(oemProducerPhysicalMask(),uint64_t{0},"only physical UP (including alternate Home ID) clears OXP3 held bit");eq(appmock::actions.size(),std::size_t{1},"release cannot fabricate a press action");
+        deliver(id);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{2},"real UP then DOWN admits next OXP3 press");check(rogReceipts.empty(),"OXP3 held keys never reach ROG defaults");finish();
+    }
+    prepare("OneXPlayer3");boot();rearRule(kOemBitHome|kOemBitGKey);evaluateLive();deliver(0x24);nativeOemProducerDrain();jobs();check(appmock::actions.empty(),"one held key cannot complete two-key rule");
+    deliver(0x25);nativeOemProducerDrain();jobs();eq(appmock::actions.size(),std::size_t{1},"independent held keys form one configured composite");eq(oemProducerPhysicalMask(),kOemBitHome|kOemBitGKey,"Home and G-Key remain independently held");
+    deliver(0x24,false);nativeOemProducerDrain();jobs();eq(oemProducerPhysicalMask(),kOemBitGKey,"Home UP does not release G-Key");deliver(0x25,false);nativeOemProducerDrain();jobs();eq(oemProducerPhysicalMask(),uint64_t{0},"both actual releases clear composite");finish();
+    for(const std::string cls:{"OneXPlayerX2","OneXPlayerX2MiniPro"}){prepare(cls);boot();deliver(0x25);deliver(0x25,false);eq(oemProducerPhysicalMask()&kOemBitGKey,uint64_t{0},"older OneX model cannot acquire OXP3 G-Key");eq(g_oemProducerEdgeCount,std::size_t{0},"older OneX unknown key cannot produce action receipt");finish();}
+    for(unsigned id:{0x24u,0x25u})for(unsigned changed=0;changed<6;++changed)for(bool queued:{false,true}){
+        const auto bit=id==0x24?kOemBitHome:kOemBitGKey;prepare("OneXPlayer3");boot();rearRule(bit);evaluateLive();deliver(id);if(queued)nativeOemProducerDrain();
+        if(changed==0)++g_powerGeneration;if(changed==1)++g_onexX2DeviceEpoch;if(changed==2)g_powerLifecycle=PowerLifecycle::Resuming;if(changed==3)g_shortcutRecordingActive=true;if(changed==4)g_exitRequested=true;if(changed==5)fixtureRadialOwner=true;
+        nativeOemProducerDrain();jobs();check(appmock::actions.empty(),"changed context/recording/exit rejects queued OXP3 action");if(changed==3&&!queued){check(!recordedChords.empty()&&(recordedChords.back()&bit)==bit,"recording sink receives actual held key including uint64 G-Key bit");check(recordedClicks.empty(),"OXP3 held recording never becomes a click-only receipt");}finish();
+    }
+}
+
 struct Case{const char* name;void(*run)();};
 static const Case cases[]={
+    {"oxp3-held-keys",oxp3HeldKeys},
     {"posttick-source-revoke-race",posttickSourceRevokeRace},
     {"symmetric-real-up",symmetricRealUp},{"bind-races",bindRaces},{"binding-journal",bindingJournal},{"live-unrelated-journal",liveUnrelatedJournal},{"observation-exception",observationException},
     {"exact-arrival",exactArrival},

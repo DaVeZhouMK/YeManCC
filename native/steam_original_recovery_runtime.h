@@ -44,10 +44,16 @@ static std::shared_ptr<Control> control;
 static ymcc::steamOriginal::RecoveryWorker worker;
 static std::wstring root(){return yemancc_data_dir()+L"\\SteamOriginalRecovery";} // clearable receipts only
 static std::wstring runtimeRoot(){return yemancc_data_dir()+L"\\Runtime\\SteamOriginalRecovery";}
-static json readJson(const std::wstring& path){
-    try{std::ifstream f(fspath::path(path),std::ios::binary);if(!f)return {};
-        f.seekg(0,std::ios::end);const auto n=f.tellg();if(n<0||n>2*1024*1024)return {};
-        f.seekg(0);return json::parse(f,nullptr,false);}catch(...){return {};}
+struct ConfigRead {json value=nullptr;bool exists=false,lookupError=false;};
+static ConfigRead readJson(const std::wstring& path){
+    ConfigRead result;
+    try{
+        const fspath::path file(path);
+        ymcc::steamOriginalStorage::detail::ancestry(file);
+        result.exists=ymcc::steamOriginalStorage::detail::present(file);
+        if(result.exists)result.value=ymcc::steamOriginalStorage::readState(file);
+    }catch(...){result.lookupError=true;result.value=nullptr;}
+    return result;
 }
 static void saveJson(const std::wstring& path,const json& value){
     std::error_code ec;fspath::create_directories(fspath::path(path).parent_path(),ec);
@@ -411,22 +417,26 @@ static void runOne(const std::shared_ptr<Control>& c,Pending pending,const json&
     }
 }
 static void run(const std::shared_ptr<Control>& c){
+    c->enabled=false;c->ownsRunning=false;c->active=false;json config;
     try{
         const auto storage=ymcc::steamOriginalStorage::prepare(fspath::path(root()),fspath::path(runtimeRoot()));
         log(c,"storage-ready",{{"layout",2},{"legacyImported",storage.legacyImported},
             {"filesCopied",storage.filesCopied},{"filesAlreadyPresent",storage.filesAlreadyPresent},
             {"evidenceRoot",W2U(root())},{"runtimeRoot",W2U(runtimeRoot())}});
+        const auto local=readJson(runtimeRoot()+L"\\enabled.json");
+        config=ymcc::steamOriginal::configuration(local.value,local.exists,local.lookupError);
+        c->enabled=config.at("enabled").get<bool>();
     }catch(const std::exception& error){
-        c->enabled=false;c->ownsRunning=false;
+        c->enabled=false;c->ownsRunning=false;c->active=false;
         try{publish(c,{{"phase","blocked"},{"reason",std::string(error.what()).substr(0,160)},
             {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});}catch(...){}
-        return; // No recovery or ledger writes after an incomplete/ambiguous migration.
+        return; // No recovery or ledger writes after an ambiguous configuration/storage read.
+    }catch(...){
+        c->enabled=false;c->ownsRunning=false;c->active=false;
+        try{publish(c,{{"phase","blocked"},{"reason","configuration-storage-exception"},
+            {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});}catch(...){}
+        return;
     }
-    const auto configPath=runtimeRoot()+L"\\enabled.json";
-    auto localConfig=readJson(configPath);
-    std::error_code configError;const bool configExists=fspath::exists(configPath,configError);
-    const auto config=ymcc::steamOriginal::configuration(std::move(localConfig),configExists,!!configError);
-    c->enabled=config["enabled"].get<bool>();
     try{publish(c,{{"phase","waiting-events"},{"reason","ymcc-event-owner-started"},
         {"configurationSource",config.value("source",std::string("local-override"))},
         {"targetMode",config.value("targetMode",std::string("generic"))}});}catch(...){}
@@ -451,7 +461,7 @@ static void steamOriginalRecoveryStart(){
         c->observationEvent=std::shared_ptr<void>(CreateEventW(nullptr,FALSE,FALSE,nullptr),[](void* event){if(event)CloseHandle(event);});
         SteamOriginalRecovery::worker.start([c]{
             try{SteamOriginalRecovery::run(c);}
-            catch(...){c->active=false;c->ownsRunning=false;
+            catch(...){c->active=false;c->ownsRunning=false;c->enabled=false;
                 try{SteamOriginalRecovery::publish(c,{{"phase","stopped"},{"reason","worker-exception"}});}catch(...){} }
         });}
     SteamOriginalRecovery::enqueue(c,ymcc::steamOriginal::Trigger::Startup);
@@ -466,6 +476,9 @@ static void steamOriginalRecoveryTargetChanged(DWORD pid,ULONGLONG birth,const s
         if(c->targetObserved&&c->observedTarget==next){c->observedRules=rules;return;}
         c->targetObserved=true;c->observedTarget=next;c->observedRules=rules;
         c->ownsRunning=false;}
+    // Discovery can finish after the admitted wake first found no target.
+    // Resume only that deferred event, before the ordinary observation.
+    if(next.valid())steamOriginalRecoveryPowerReady(currentPowerGeneration());
     SteamOriginalRecovery::enqueue(c,ymcc::steamOriginal::Trigger::TargetChanged);
 }
 static void steamOriginalRecoverySteamChanged(){

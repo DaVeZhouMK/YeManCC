@@ -5,10 +5,11 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+if(process.argv.includes('--in-process')){const {runInProcess}=await import('./fixtures/battery_native_host_roundtrip/in-process.mjs');await runInProcess(process.argv.slice(2));process.exit(process.exitCode||0);}
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'ymcc-battery-contract-'));
 for(const dir of ['tools','native/BatteryHost','capabilities'])fs.mkdirSync(path.join(fixture,dir),{recursive:true});
 for(const name of fs.readdirSync(path.join(root,'native/BatteryHost')).filter(n=>/\.(cs|csproj|json)$/.test(n)))fs.copyFileSync(path.join(root,'native/BatteryHost',name),path.join(fixture,'native/BatteryHost',name));
-for(const name of ['native/battery_charge_client.h','native/secondary_display_client.h','native/battery_host_contract.h','tools/battery-charge-contract.mjs',"capabilities/HcDeviceCapabilityCatalog.cs","capabilities/HcDeviceCapabilityCatalog.generated.cs","capabilities/HcBatteryCapabilityCatalog.cs","capabilities/HcBatteryCapabilityCatalog.generated.cs","native/ProcessEfficiency.cs"])fs.copyFileSync(path.join(root,name),path.join(fixture,name));
+for(const name of ['native/battery_charge_client.h','native/battery_managed_runtime.h','native/secondary_display_client.h','native/battery_host_contract.h','tools/battery-charge-contract.mjs',"capabilities/HcDeviceCapabilityCatalog.cs","capabilities/HcDeviceCapabilityCatalog.generated.cs","capabilities/HcBatteryCapabilityCatalog.cs","capabilities/HcBatteryCapabilityCatalog.generated.cs","native/ProcessEfficiency.cs"])fs.copyFileSync(path.join(root,name),path.join(fixture,name));
 const project=fs.readFileSync(path.join(root,'native/BatteryHost/YeManBatteryHost.csproj'),'utf8');
 for(const match of project.matchAll(/<Compile\s+Include="([^"]+)"/g)){
  const relative=path.relative(root,path.resolve(root,'native/BatteryHost',match[1].replaceAll('\\','/')));

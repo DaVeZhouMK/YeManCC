@@ -75,6 +75,13 @@ foreach (var path in files)
                 entry.operations.Add(new Operation(field, assignment.OperatorToken.Text, values, constructor && !inCallback, conditions.Length > 0 || ternary, conditions, Line(assignment), Text(assignment.Right)));
                 if (constructor && values.Length == 0) issues.Add($"unparsed constructor capability expression: {relative}:{Line(assignment)}");
             }
+            // Record partial constructor assignments separately. They are source facts,
+            // not a successful probe, an effective inherited value or runtime permission.
+            if (constructor && !inCallback && assignment.Left is MemberAccessExpressionSyntax member &&
+                Text(member.Expression) is "ECDetails" or "this.ECDetails" or "base.ECDetails")
+                entry.propertyMembers.Add(new { target = "ECDetails", member = member.Name.Identifier.Text,
+                    op = assignment.OperatorToken.Text, value = Text(assignment.Right), line = Line(assignment),
+                    conditional = conditions.Length > 0 || ternary, conditions });
             if (constructor && !inCallback && new[] { "nTDP", "cTDP", "GfxClock", "gfxClock", "cpuClock", "CpuClock", "Tjmax", "tjmax", "GyroMatrix", "AcceleroMatrix", "UseOpenLib", "ECDetails", "vendorId", "productIds", "BatteryBypassPresets" }.Contains(field))
                 entry.properties.Add(new { field, value = Text(assignment.Right), line = Line(assignment), conditional = conditions.Length > 0 });
         }
@@ -152,6 +159,7 @@ sealed class Entry
     public Dictionary<string, object> declared { get; } = new();
     public List<Operation> operations { get; } = [];
     public List<object> properties { get; } = [];
+    public List<object> propertyMembers { get; } = [];
     public List<object> methods { get; } = [];
     public List<object> oemChords { get; } = [];
     [System.Text.Json.Serialization.JsonIgnore] public HashSet<string> createdClasses { get; } = [];

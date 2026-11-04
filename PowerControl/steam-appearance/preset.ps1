@@ -414,7 +414,7 @@ function Invoke-CefStyleCleanup($Tab) {
     }finally{$socket.Abort();$socket.Dispose();$cancel.Dispose();$stream.Dispose()}
 }
 function Clear-OldLoaderStyles {
-    $required=@(Get-Process -Name steam -ErrorAction SilentlyContinue|Where-Object {Test-CurrentUserProcess $_}).Count -gt 0
+    $required=$null -ne (Get-AppearanceSteamSession)
     $summary=[pscustomobject]@{required=$required;mainConfirmed=$false;attempted=0;cleaned=0;failed=0}
     $listeners=@(Get-NetTCPConnection -State Listen -LocalPort 8080 -ErrorAction SilentlyContinue);$verified=$false
     foreach($listener in $listeners){if($listener.LocalAddress -eq '127.0.0.1'){try{$owner=Get-Process -Id $listener.OwningProcess -ErrorAction Stop;if(Test-CurrentUserProcess $owner){$image=Get-AppearanceProcessPath $owner;if([IO.Path]::GetFileName($image) -ieq 'steamwebhelper.exe'){$verified=$true}}}catch{}}}

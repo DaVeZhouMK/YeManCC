@@ -13,6 +13,7 @@ struct Result {
     int code=0;bool needsElevation=false;DWORD win32=0;
     std::string detail="ready",sensorPolicy;
     bool elevationAttempted=false;
+    bool dataReady=false;
 };
 struct Proof {
     std::uint64_t poll=0;
@@ -33,8 +34,10 @@ template<class Ops> Result transaction(Ops& ops,const Request& request){
         checkpoint();
         if((!request.restart||request.recoverOnly)&&ops.healthy()){
             checkpoint();
+            result.dataReady=true; // Health was proven even if an explicit period change is deferred.
             if(request.period){result.code=12;result.detail="period-deferred-until-restart";return result;}
-            ops.applyAffinity();result.detail="already-healthy";return result;
+            if constexpr(requires{ops.healthySensorPolicy(request);})result.sensorPolicy=ops.healthySensorPolicy(request);
+            checkpoint();ops.applyAffinity();result.dataReady=true;result.code=result.sensorPolicy.rfind("unconfirmed",0)==0?16:0;result.detail=result.code==16?"producer-ready-configuration-unconfirmed":"already-healthy";return result;
         }
         const auto path=ops.resolve(request.executable);
         if(path.empty())throw Error(2,"HWiNFO64.exe was not found");
@@ -50,7 +53,7 @@ template<class Ops> Result transaction(Ops& ops,const Request& request){
             if(ops.exited())throw Error(6,"HWiNFO64.exe exited before continuing production was confirmed");
             const auto proof=ops.proof(request.period);
             checkpoint();
-            if(proof){sawProof=true;if(previous&&proof->continues(*previous)){result.detail="continuing-producer-confirmed";return result;}previous=proof;}
+            if(proof){sawProof=true;if(previous&&proof->continues(*previous)){result.dataReady=true;result.code=result.sensorPolicy.rfind("unconfirmed",0)==0?16:0;result.detail=result.code==16?"producer-ready-configuration-unconfirmed":"continuing-producer-confirmed";return result;}previous=proof;}
             else previous.reset();
             if(!ops.wait(1000))throw Error(15,"Recovery observation interrupted; producer was not terminated");
         }

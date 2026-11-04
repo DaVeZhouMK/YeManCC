@@ -41,10 +41,14 @@
 
 #include "json.hpp"
 #include "custom_steam_library_paths.h"
+#include "custom_steam_library_config.h"
 #include "custom_steam_library_inventory.h"
 #include "custom_steam_library_identity_cache.h"
 #include "custom_steam_library_video_catalog.h"
+#include "custom_steam_library_network_policy.h"
 #include "custom_steam_library_ymcc_whitelist.h"
+#include "../game_application_catalog.h"
+#include "../game_rule_file_guard.h"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -55,27 +59,27 @@ static bool pathWithin(const fs::path& child, const fs::path& parent);
 // A worker reuses its WinHTTP session so sequential Steam CDN candidates can
 // share DNS/TCP/TLS state. A transport failure still discards that session
 // before the next retry, preventing a poisoned connection from being reused.
-static constexpr DWORD HTTP_RESOLVE_TIMEOUT_MS = 15000;
-static constexpr DWORD HTTP_CONNECT_TIMEOUT_MS = 25000;
-static constexpr DWORD HTTP_TIMEOUT_MS = 45000;
+static constexpr DWORD HTTP_RESOLVE_TIMEOUT_MS = custom_steam_library::network_policy::resolveMs;
+static constexpr DWORD HTTP_CONNECT_TIMEOUT_MS = custom_steam_library::network_policy::connectMs;
+static constexpr DWORD HTTP_TIMEOUT_MS = custom_steam_library::network_policy::ioMs;
 static constexpr ULONGLONG HTTP_METADATA_BUDGET_MS = 180000;
 static constexpr ULONGLONG HTTP_IMAGE_BUDGET_MS = 300000;
 // The local Steamcommunity 302 forwarder is normally very fast, but a
 // half-open listener must not consume the same five-minute budget as a real
 // CDN download.  When an enabled Steam alias is available, probe it briefly
 // and then fall back to the original URL.
-static constexpr DWORD HTTP_ACCELERATOR_RESOLVE_TIMEOUT_MS = 3000;
-static constexpr DWORD HTTP_ACCELERATOR_CONNECT_TIMEOUT_MS = 5000;
-static constexpr DWORD HTTP_ACCELERATOR_TIMEOUT_MS = 15000;
+static constexpr DWORD HTTP_ACCELERATOR_RESOLVE_TIMEOUT_MS = custom_steam_library::network_policy::localResolveMs;
+static constexpr DWORD HTTP_ACCELERATOR_CONNECT_TIMEOUT_MS = custom_steam_library::network_policy::localConnectMs;
+static constexpr DWORD HTTP_ACCELERATOR_TIMEOUT_MS = custom_steam_library::network_policy::localIoMs;
 static constexpr ULONGLONG HTTP_ACCELERATOR_METADATA_BUDGET_MS = 30000;
 static constexpr ULONGLONG HTTP_ACCELERATOR_IMAGE_BUDGET_MS = 90000;
 static constexpr DWORD DNS_DIRECT_FALLBACK_TIMEOUT_MS = 1200;
-static constexpr DWORD HTTP_MAX_RETRY_AFTER_MS = 30000;
+static constexpr DWORD HTTP_MAX_RETRY_AFTER_MS = custom_steam_library::network_policy::maxRetryAfterMs;
 static constexpr size_t MAX_METADATA_BYTES = 8u << 20;
 static constexpr size_t MAX_IMAGE_BYTES = 25u << 20;
 // Scheme C: one initial request plus three bounded immediate retries.
 // Persistent network failures are still handed to the event-driven retry queue.
-static constexpr int HTTP_MAX_ATTEMPTS = 4;
+static constexpr int HTTP_MAX_ATTEMPTS = custom_steam_library::network_policy::maxAttempts;
 static constexpr const char* STEAM_RESOLVER_VERSION = "steam-official-fuzzy-global-v4";
 static constexpr const char* CUSTOM_STEAM_LIBRARY_FEATURE_NAME = "Custom Steam Library";
 
@@ -945,30 +949,7 @@ static std::string steamAcceleratedRequestUrl(const std::string& url) {
     if (preferDirectSteamStoreAssetRoute(url)) return url;
     if (isLocalSteamRoute(steamRouteForUrl(url))) return url;
 
-    if (g_steamAcceleratorStatus.storeAliasLocal) {
-        if (const auto rewritten = replaceHttpsHost(url, "store.steampowered.com",
-                "steamstore-a.akamaihd.net"); !rewritten.empty()) return rewritten;
-    }
-
-    if (!g_steamAcceleratorStatus.cdnAliasLocal) return url;
-    const std::array<std::string, 4> cdnHosts = {
-        "shared.steamstatic.com",
-        "shared.cloudflare.steamstatic.com",
-        "shared.akamai.steamstatic.com",
-        "cdn.cloudflare.steamstatic.com"
-    };
-    for (const auto& host : cdnHosts) {
-        const auto rewritten = replaceHttpsHost(url, host, "steamcdn-a.akamaihd.net");
-        if (rewritten.empty()) continue;
-        const std::string sourcePrefix = "/store_item_assets/steam/apps/";
-        const std::string oldPrefix = "https://steamcdn-a.akamaihd.net" + sourcePrefix;
-        if (rewritten.rfind(oldPrefix, 0) == 0) {
-            return "https://steamcdn-a.akamaihd.net/steam/apps/" +
-                rewritten.substr(oldPrefix.size());
-        }
-        return rewritten;
-    }
-    return url;
+    return custom_steam_library::network_policy::acceleratedUrl(url,[](const std::string& host){return hostResolvesToLoopback(host);});
 }
 
 static void markSteamRouteResult(const std::string& route, bool success) {
@@ -5268,72 +5249,60 @@ static fs::path nextConfigBackupPath(const fs::path& directory, const std::strin
 static json loadUserConfigDocument(
     const fs::path& path, size_t maximum, const std::string& prefix,
     const json& defaults, const std::function<json(json)>& normalize) {
-    bool damaged = false;
-    const auto parse = [&](const std::vector<unsigned char>& bytes) -> std::optional<json> {
-        // The only runtime_error caught here is schema validation from normalize;
-        // all filesystem reads, archives and writes occur outside this catch.
-        try { return normalize(json::parse(bytes.begin(), bytes.end())); }
-        catch (const json::exception&) { damaged = true; return std::nullopt; }
-        catch (const std::runtime_error&) { damaged = true; return std::nullopt; }
-    };
-    const auto dataRoot = path.parent_path().parent_path();
-    std::optional<fs::path> corrupt;
-    if (configRegularFile(path)) {
-        const auto bytes = readBinaryFile(path, maximum);
-        if (auto value = parse(bytes)) return std::move(*value);
-        corrupt = nextConfigBackupPath(dataRoot / L"backups" / L"corrupt", prefix);
-        writeAtomic(*corrupt, bytes);
+    namespace policy=custom_steam_library::config;
+    auto source=policy::readRuntime(path,maximum);
+    const auto isLibrary=prefix=="library-config";
+    if(source.unreadable)return policy::remember(path,std::move(source),defaults);
+    if(source.document && policy::incompatible(*source.document))
+        return policy::remember(path,std::move(source),defaults);
+    if(source.document && policy::structurallyValid(*source.document,isLibrary)) {
+        auto view=normalize(*source.document);
+        return policy::remember(path,std::move(source),std::move(view));
     }
-    for (const auto& candidate : configRecoveryCandidates(path, prefix)) {
-        const auto bytes = readBinaryFile(candidate, maximum);
-        auto value = parse(bytes);
-        if (!value) continue;
-        (*value)["recoveredAt"] = unixTimeMs();
-        (*value)["recoveredFromBackup"] = toUtf8(candidate.wstring());
-        writeJsonAtomic(path, *value);
-        const auto receipt = prefix == "library-config" ? L"last-config-recovery.json" : L"last-manual-overrides-recovery.json";
-        writeJsonAtomic(dataRoot / L"state" / receipt, {
-            {"recoveredAt", unixTimeMs()}, {"config", toUtf8(path.wstring())},
-            {"corruptBackup", corrupt ? json(toUtf8(corrupt->wstring())) : json(nullptr)},
-            {"recoveredFrom", toUtf8(candidate.wstring())}, {"usedDefaults", false}, {"usedEmptyDefaults", false}
-        });
-        return std::move(*value);
+    std::vector<fs::path> candidates;
+    try{candidates=configRecoveryCandidates(path,prefix);}catch(const std::runtime_error&){/* Recovery storage is optional for runtime defaults, never for writes. */}
+    for(const auto& candidate:candidates) {
+        const auto backup=policy::readRuntime(candidate,maximum);
+        if(backup.unreadable)break;
+        if(!backup.document || !policy::structurallyValid(*backup.document,isLibrary))continue;
+        auto value=source.document?policy::recover(*source.document,*backup.document,isLibrary):normalize(*backup.document);
+        try {
+        std::optional<fs::path> corrupt;
+        if(source.exists) {
+            corrupt=nextConfigBackupPath(path.parent_path().parent_path()/L"backups"/L"corrupt",prefix);
+            if(source.oversized)policy::archive(path,*corrupt);
+            else writeAtomic(*corrupt,std::vector<unsigned char>(source.bytes.begin(),source.bytes.end()));
+        }
+        value["recoveredAt"]=unixTimeMs();
+        value["recoveredFromBackup"]=toUtf8(candidate.wstring());
+        writeJsonAtomic(path,value);
+        const auto receipt=prefix=="library-config"?L"last-config-recovery.json":L"last-manual-overrides-recovery.json";
+        writeJsonAtomic(path.parent_path().parent_path()/L"state"/receipt,{
+            {"recoveredAt",unixTimeMs()},{"config",toUtf8(path.wstring())},
+            {"corruptBackup",corrupt?json(toUtf8(corrupt->wstring())):json(nullptr)},
+            {"recoveredFrom",toUtf8(candidate.wstring())},{"usedDefaults",false},{"usedEmptyDefaults",false}});
+        return policy::remember(path,policy::read(path),std::move(value));
+        } catch(const std::runtime_error&) {
+            // Failed archive/activation/receipt is not a successful recovery.
+            // Keep defaults usable; every later edit must pass a fresh strict
+            // read and the normal checked archive/write path again.
+            return policy::remember(path,policy::readRuntime(path,maximum),defaults);
+        }
     }
-    if (damaged) throw std::runtime_error("User configuration and available backups are corrupt; defaults were not written");
-    // A genuine first-run absence is the only reason to manufacture defaults.
-    return normalize(defaults);
+    // Damage is recoverable runtime state. Preserve the main and every backup;
+    // the next explicit user edit archives the original before activation.
+    auto view=source.document?normalize(*source.document):normalize(defaults);
+    return policy::remember(path,std::move(source),std::move(view));
 }
 
 static json applyConfigDelta(const json& current, const json& baseline, const json& submitted) {
-    if (baseline == submitted) return current;
-    if (baseline.is_object() && submitted.is_object() && current.is_object()) {
-        auto result = current;
-        for (const auto& [key, value] : baseline.items()) if (!submitted.contains(key)) result.erase(key);
-        for (const auto& [key, value] : submitted.items()) {
-            if (!baseline.contains(key)) result[key] = value;
-            else if (baseline[key] != value) {
-                result[key] = applyConfigDelta(result.contains(key) ? result[key] : json(nullptr), baseline[key], value);
-            }
-        }
-        return result;
-    }
-    // Collection edits cannot safely infer item ownership. Fail/retry rather
-    // than discard another process's concurrently submitted root/game list.
-    if (baseline.is_array() && submitted.is_array() && current != baseline && current != submitted)
-        throw std::runtime_error("Configuration collection changed during submission; retry without overwriting newer entries");
-    return submitted;
+    return custom_steam_library::config::delta(current,baseline,submitted);
 }
 
 static json loadManualOverrides(const fs::path& path) {
     DataTransactionMutex transaction;
-    auto normalize = [](json value) {
-        if (!value.is_object()) throw std::runtime_error("Manual override root is not an object");
-        if (!value.contains("items")) value["items"] = json::object();
-        else if (!value["items"].is_object()) throw std::runtime_error("Manual override items is not an object");
-        value["schemaVersion"] = 1;
-        return value;
-    };
-    return loadUserConfigDocument(path, 1u << 20, "manual-overrides", json{{"schemaVersion", 1}, {"items", json::object()}}, normalize);
+    return loadUserConfigDocument(path,1u<<20,"manual-overrides",custom_steam_library::config::defaults(false),
+        [](json value){return custom_steam_library::config::normalize(std::move(value),false);});
 }
 
 static uint64_t unixTimeMs() {
@@ -5359,15 +5328,8 @@ static int32_t simulatedImportUnixTime() noexcept {
 }
 
 static bool configDocumentValid(const std::string& prefix, const json& value) {
-    if (prefix != "library-config" && prefix != "manual-overrides") return true;
-    if (!value.is_object()) return false;
-    if (prefix == "manual-overrides") return !value.contains("items") || value["items"].is_object();
-    for (const auto* key : {"roots", "trainerRoots", "manualGameDirectories", "excludedGameDirectories"})
-        if (value.contains(key) && !value[key].is_array()) return false;
-    for (const auto* key : {"manualPrimary", "manualBuckets", "firstRunDefaultScan"})
-        if (value.contains(key) && !value[key].is_object()) return false;
-    if (value.contains("scanRootsExplicitlyCleared") && !value["scanRootsExplicitlyCleared"].is_boolean()) return false;
-    return true;
+    if(prefix!="library-config" && prefix!="manual-overrides")return true;
+    return custom_steam_library::config::structurallyValid(value,prefix=="library-config");
 }
 
 static json writeJsonWithBackup(
@@ -5381,6 +5343,34 @@ static json writeJsonWithBackup(
         backupPrefix == "manual-overrides" ? 1u << 20 : 64u << 20;
     if (submittedText.size() > maximum) throw std::runtime_error("Configuration exceeds its read size limit");
     DataTransactionMutex transaction;
+    if(backupPrefix=="library-config" || backupPrefix=="manual-overrides") {
+        namespace policy=custom_steam_library::config;
+        auto source=policy::read(target,maximum);
+        const auto committed=policy::prepare(target,source,value,baseline);
+        const auto text=committed.dump(2)+'\n';
+        if(source.document && source.document->is_object() && backupPrefix=="library-config") {
+            bool repaired=false;policy::normalize(*source.document,true,&repaired);
+            auto previous=*source.document,next=committed;
+            previous.erase("updatedAt");next.erase("updatedAt");
+            if(!repaired && previous==next) {auto unchanged=*source.document;return policy::remember(target,std::move(source),std::move(unchanged));}
+        }
+        if(source.exists) {
+            bool repaired=false;
+            if(source.document)policy::normalize(*source.document,backupPrefix=="library-config",&repaired);
+            if(source.document && source.document->is_object() && !repaired) {
+                const std::vector<unsigned char> bytes(source.bytes.begin(),source.bytes.end());
+                writeAtomic(target.parent_path()/(target.filename().wstring()+L".bak"),bytes);
+                writeAtomic(nextConfigBackupPath(backupDirectory,backupPrefix),bytes);
+            } else {
+                const auto archive=nextConfigBackupPath(target.parent_path().parent_path()/L"backups"/L"corrupt",backupPrefix);
+                if(source.oversized)policy::archive(target,archive);
+                else writeAtomic(archive,std::vector<unsigned char>(source.bytes.begin(),source.bytes.end()));
+            }
+        }
+        writeAtomic(target,std::vector<unsigned char>(text.begin(),text.end()));
+        policy::remember(target,policy::read(target),committed);
+        return committed;
+    }
     const bool exists = configRegularFile(target);
     std::vector<unsigned char> bytes;
     std::optional<json> before;
@@ -5429,8 +5419,7 @@ static json updateManualOverridesAtomically(
     DataTransactionMutex transaction;
     auto latest = loadManualOverrides(path);
     update(latest);
-    writeJsonWithBackup(path, backupDirectory, "manual-overrides", latest);
-    return latest;
+    return writeJsonWithBackup(path, backupDirectory, "manual-overrides", latest);
 }
 
 static std::vector<fs::path> stateBackupCandidates(
@@ -6051,47 +6040,8 @@ static std::string unquote(std::string value) {
     return value;
 }
 
-struct EmulatorProfile {
-    std::string id;
-    std::string name;
-    std::string playnitePlatform;
-    std::string platformHint;
-    std::string platformLabel;
-    int igdbPlatformId = 0;
-    int steamArtworkAppId = 0;
-    uint32_t colorA = 0;
-    uint32_t colorB = 0;
-    std::vector<std::string> executableNames;
-    std::vector<std::string> imageExtensions;
-    std::string playniteStartupArguments;
-    bool executablePrefix = false;
-    bool directoryTarget = false;
-    bool scriptGameImport = false;
-};
-
-static const std::vector<EmulatorProfile>& emulatorProfiles() {
-    static const std::vector<EmulatorProfile> profiles = {
-        {"yuzu", "yuzu", "nintendo_switch", "switch", "Nintendo Switch", 130, 0, 0x2B8BD6, 0x151B2B,
-         {"yuzu.exe"}, {"nso", "nro", "nca", "xci", "nsp"}, "\"{ImagePath}\""},
-        {"eden", "Eden", "nintendo_switch", "switch", "Nintendo Switch", 130, 0, 0x75C66B, 0x17251E,
-         {"eden.exe"}, {"nso", "nro", "nca", "xci", "nsp"}, "-f -g \"{ImagePath}\""},
-        {"ryujinx", "Ryujinx", "nintendo_switch", "switch", "Nintendo Switch", 130, 0, 0xE64A4A, 0x27171B,
-         {"ryujinx.exe", "ryujinx.ava.exe"}, {"xci", "nsp"}, "--fullscreen \"{ImagePath}\""},
-        {"pcsx2", "PCSX2", "sony_playstation2", "ps2", "PlayStation 2", 8, 0, 0x376EB5, 0x151C31,
-         {"pcsx2.exe", "pcsx2x64.exe", "pcsx2-qt.exe", "pcsx2x64-avx2.exe", "pcsx2-qtx64-avx2.exe", "pcsx2-qtx64.exe"},
-         {"iso", "bin", "mdf", "nrg", "img", "gz", "cso", "chd", "m3u"},
-         "\"{ImagePath}\" --nogui --fullboot --fullscreen"},
-        {"ppsspp", "PPSSPP", "sony_psp", "psp", "PlayStation Portable", 38, 0, 0x28A8E0, 0x172331,
-         {"ppssppwindows64.exe", "ppssppwindows.exe"}, {"iso", "cso", "pbp", "chd"},
-         "\"{ImagePath}\" --pause-menu-exit --fullscreen"},
-        {"rpcs3", "RPCS3", "sony_playstation3", "ps3", "PlayStation 3", 9, 0, 0xEFC24C, 0x231C16,
-         {"rpcs3"}, {"iso"}, "\"{ImagePath}\"", true, true, true},
-        {"retroarch", "RetroArch", "", "any", "Multi-system emulator", 0, 1118310, 0x4A4A4A, 0x111111,
-         {"retroarch.exe"}, {"zip", "7z", "iso", "bin", "cue", "chd", "nes", "sfc", "smc", "gba", "gbc", "gb", "n64", "z64"},
-         "-L \"{EmulatorDir}\\cores\\{Core}.dll\" \"{ImagePath}\""}
-    };
-    return profiles;
-}
+using ymcc::gameApplications::EmulatorProfile;
+using ymcc::gameApplications::emulatorProfiles;
 
 static const EmulatorProfile* findEmulatorProfile(const fs::path& executable) {
     const auto fileName = asciiLower(toUtf8(executable.filename().wstring()));
@@ -8277,76 +8227,19 @@ static std::vector<fs::path> firstRunDefaultLibraryRoots() {
 }
 
 static json defaultLibraryConfig() {
-    return {
-        {"schemaVersion", 1},
-        {"enabled", false},
-        // Maintenance discovers directory changes.  Scraping is a separate
-        // consent because it can use the network and download artwork.
-        {"automaticScrapingEnabled", true},
-        {"scanMode", "event-driven-no-polling"},
-        {"automaticTriggers", {"app-start", "steam-launch", "library-page-open", "directory-change-while-app-running"}},
-        {"roots", json::array()},
-        {"trainerRoots", json::array()},
-        {"manualGameDirectories", json::array()},
-        {"excludedGameDirectories", json::array()},
-        {"scanRootsExplicitlyCleared", false},
-        {"manualPrimary", json::object()},
-        // Presentation bucket is intentionally separate from identity and
-        // Steam eligibility.  Moving an item between pages must never make a
-        // tool eligible for import by itself.
-        {"manualBuckets", json::object()},
-        {"firstRunDefaultScan", {
-            {"status", "pending"},
-            {"candidateSearchDepth", 2},
-            {"drivePolicy", "fixed-only"},
-            {"autoAddToSteam", false}
-        }}
-    };
+    return custom_steam_library::config::defaults(true);
 }
 
 static json loadLibraryConfig(const fs::path& path) {
     DataTransactionMutex transaction;
-    auto normalize = [](json value) {
-        if (!value.is_object()) throw std::runtime_error("root is not an object");
-        const auto defaults = defaultLibraryConfig();
-        for (const auto& key : {"roots", "trainerRoots", "manualGameDirectories", "excludedGameDirectories"}) {
-            if (!value.contains(key)) value[key] = defaults[key];
-            else if (!value[key].is_array()) throw std::runtime_error(std::string("library config field is not an array: ") + key);
-        }
-        for (const auto& key : {"manualPrimary", "manualBuckets"}) {
-            if (!value.contains(key)) value[key] = defaults[key];
-            else if (!value[key].is_object()) throw std::runtime_error(std::string("library config field is not an object: ") + key);
-        }
-        if (!value.contains("scanRootsExplicitlyCleared")) value["scanRootsExplicitlyCleared"] = false;
-        else if (!value["scanRootsExplicitlyCleared"].is_boolean()) throw std::runtime_error("library config scanRootsExplicitlyCleared is not a boolean");
-        if (!value.contains("firstRunDefaultScan")) value["firstRunDefaultScan"] = defaults["firstRunDefaultScan"];
-        else if (!value["firstRunDefaultScan"].is_object()) throw std::runtime_error("library config firstRunDefaultScan is not an object");
-        const auto statusIt = value["firstRunDefaultScan"].find("status");
-        const auto firstRunStatus = statusIt != value["firstRunDefaultScan"].end() && statusIt->is_string()
-            ? statusIt->get<std::string>() : std::string{};
-        if (firstRunStatus != "pending" && firstRunStatus != "running" &&
-            firstRunStatus != "completed" && firstRunStatus != "skipped-existing-roots") {
-            value["firstRunDefaultScan"] = defaults["firstRunDefaultScan"];
-        }
-        // Secondary launch entries belonged to an abandoned Steam shortcut
-        // experiment.  Drop them during migration instead of retaining dead
-        // configuration that could be revived by an old build.
-        value.erase("secondaryItems");
-        if (!value.contains("enabled") || !value["enabled"].is_boolean()) value["enabled"] = false;
-        if (!value.contains("automaticScrapingEnabled") || !value["automaticScrapingEnabled"].is_boolean()) {
-            value["automaticScrapingEnabled"] = true;
-        }
-        value["schemaVersion"] = 1;
-        value["scanMode"] = "event-driven-no-polling";
-        value["automaticTriggers"] = defaults["automaticTriggers"];
-        return value;
-    };
-    return loadUserConfigDocument(path, 4u << 20, "library-config", defaultLibraryConfig(), normalize);
+    return loadUserConfigDocument(path,4u<<20,"library-config",defaultLibraryConfig(),
+        [](json value){return custom_steam_library::config::normalize(std::move(value),true);});
 }
 
 static bool pathWithin(const fs::path& child, const fs::path& parent);
 
 struct LegacyDataCopyStats {
+    uint64_t nodesVisited = 0;
     uint64_t filesCopied = 0;
     uint64_t filesSkippedBecauseTargetWins = 0;
     uint64_t bytesCopied = 0;
@@ -8384,9 +8277,12 @@ static void rewriteLegacyPathStrings(
     }
 }
 
+static bool dataRootPathInspectable(const fs::path& path);
+
 static void normalizeMigratedJsonPaths(
     const fs::path& dataRoot,
-    const std::vector<fs::path>& legacyRoots) {
+    const std::vector<fs::path>& legacyRoots, bool requireComplete=false) {
+    DataTransactionMutex transaction;
     std::vector<std::pair<std::string, std::string>> mappings;
     for (const auto& legacyRoot : legacyRoots) {
         const auto oldPath = toUtf8(legacyRoot.lexically_normal().wstring());
@@ -8411,15 +8307,25 @@ static void normalizeMigratedJsonPaths(
         "https://steam-library-data.local/artwork/overrides/"
     });
 
+    uint64_t visited=0, bytesRead=0;
     for (const auto& section : {L"config", L"state", L"games", L"artwork"}) {
         const auto root = dataRoot / section;
         std::error_code error;
-        if (!fs::is_directory(root, error)) continue;
-        for (fs::recursive_directory_iterator iterator(
-                 root, fs::directory_options::skip_permission_denied, error), end;
-             iterator != end; iterator.increment(error)) {
-            if (error) { error.clear(); continue; }
-            if (!iterator->is_regular_file(error) || iterator->path().extension() != L".json") {
+        if(requireComplete&&!dataRootPathInspectable(root))throw std::runtime_error("Migration normalization root unavailable; debt retained");
+        if (!fs::is_directory(root, error)) {
+            if(requireComplete&&error&&error!=std::errc::no_such_file_or_directory)throw std::runtime_error("Cannot inspect migration normalization tree; debt retained");
+            continue;
+        }
+        const auto options=requireComplete?fs::directory_options::none:fs::directory_options::skip_permission_denied;
+        fs::recursive_directory_iterator iterator(root,options,error),end;
+        if(requireComplete&&error)throw std::runtime_error("Cannot enumerate migration normalization tree; debt retained");
+        for (;iterator != end; iterator.increment(error)) {
+            if (error) { if(requireComplete)throw std::runtime_error("Incomplete migration normalization tree; debt retained");error.clear(); continue; }
+            if(requireComplete && (++visited>100000 || iterator.depth()>64 || !dataRootPathInspectable(iterator->path())))
+                throw std::runtime_error("Migration normalization budget/path unavailable; debt retained");
+            const bool regular=iterator->is_regular_file(error);
+            if(requireComplete&&error)throw std::runtime_error("Cannot inspect migration normalization file; debt retained");
+            if (!regular || iterator->path().extension() != L".json") {
                 error.clear();
                 continue;
             }
@@ -8429,180 +8335,358 @@ static void normalizeMigratedJsonPaths(
             }
             try {
                 const auto bytes = readBinaryFile(iterator->path(), 128u << 20);
-                auto document = json::parse(bytes.begin(), bytes.end());
+                bytesRead+=bytes.size();
+                if(requireComplete&&bytesRead>(512ull<<20))throw std::runtime_error("Migration normalization byte budget exceeded; debt retained");
+                auto document = json::parse(bytes.begin(), bytes.end(),[&](int depth,json::parse_event_t,json&){
+                    if(requireComplete&&depth>64)throw std::runtime_error("Migration normalization JSON depth exceeded; debt retained");return true;
+                });
                 const auto original = document;
+                const bool userConfig=section==std::wstring(L"config") &&
+                    (iterator->path().filename()==L"library-config.json" || iterator->path().filename()==L"manual-overrides.json");
+                if(userConfig && custom_steam_library::config::incompatible(document))continue;
                 rewriteLegacyPathStrings(document, mappings);
-                if (document != original) writeJsonAtomic(iterator->path(), document);
+                if(document!=original) {
+                    if(userConfig)writeJsonWithBackup(iterator->path(),dataRoot/L"backups"/L"config",
+                        iterator->path().filename()==L"library-config.json"?"library-config":"manual-overrides",document);
+                    else writeJsonAtomic(iterator->path(),document);
+                }
             } catch (...) {
-                // Historical logs and optional manifests are not allowed to
-                // prevent the application from opening after migration.
+                // The migration caller retains pending debt on incomplete normalization.
+                if(requireComplete)throw;
+                // Other historical callers retain optional-log behavior.
             }
             error.clear();
         }
+        if(requireComplete&&error)throw std::runtime_error("Incomplete migration normalization enumeration; debt retained");
     }
 }
 
-static void copyMissingLegacyTree(
-    const fs::path& source,
-    const fs::path& target,
-    LegacyDataCopyStats& stats) {
+// Data-root records are evidence about a root selected by runtime policy. They
+// never supply a new root or an arbitrary migration source on malformed input.
+struct DataRootJournal {
+    bool exists=false, readable=true;
+    BY_HANDLE_FILE_INFORMATION identity{};
+    std::string bytes;
+    std::optional<json> document;
+};
+static bool dataRootPathInspectable(const fs::path& path) {
+    if(!path.is_absolute())return false;
+    for(auto part=path;!part.empty();) {
+        const auto attributes=GetFileAttributesW(custom_steam_library::ioPath(part).c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES) {
+            const auto error=GetLastError();
+            if(error!=ERROR_FILE_NOT_FOUND && error!=ERROR_PATH_NOT_FOUND)return false;
+        } else if(attributes&FILE_ATTRIBUTE_REPARSE_POINT)return false;
+        const auto parent=part.parent_path();if(parent==part)break;part=parent;
+    }
+    return true;
+}
+static DataRootJournal readDataRootJournal(const fs::path& path,size_t maximum) {
+    DataRootJournal result;
+    if(!dataRootPathInspectable(path)){result.readable=false;return result;}
+    custom_steam_library::config::Handle file{CreateFileW(custom_steam_library::ioPath(path).c_str(),GENERIC_READ,
+        FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_SEQUENTIAL_SCAN,nullptr)};
+    if(file.value==INVALID_HANDLE_VALUE) {
+        const auto error=GetLastError();result.readable=error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND;
+        return result;
+    }
+    result.exists=true;
+    if(!GetFileInformationByHandle(file.value,&result.identity) ||
+        (result.identity.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))){result.readable=false;return result;}
+    const auto size=(uint64_t(result.identity.nFileSizeHigh)<<32)|result.identity.nFileSizeLow;
+    if(size>maximum)return result;
+    result.bytes.resize(static_cast<size_t>(size));size_t offset=0;
+    while(offset<result.bytes.size()) {
+        DWORD count=0;
+        if(!ReadFile(file.value,result.bytes.data()+offset,static_cast<DWORD>(result.bytes.size()-offset),&count,nullptr)||!count){result.readable=false;return result;}
+        offset+=count;
+    }
+    struct InvalidRecord{};
+    std::vector<std::set<std::string>> keys;
+    try {
+        result.document=json::parse(result.bytes,[&](int depth,json::parse_event_t event,json& value){
+            if(depth>64)throw InvalidRecord{};
+            if(event==json::parse_event_t::object_start)keys.emplace_back();
+            if(event==json::parse_event_t::key && !keys.back().insert(value.get<std::string>()).second)throw InvalidRecord{};
+            if(event==json::parse_event_t::object_end)keys.pop_back();
+            return true;
+        });
+    } catch(const json::exception&) {} catch(const InvalidRecord&) {}
+    return result;
+}
+static bool sameDataRootJournal(const DataRootJournal& a,const DataRootJournal& b) {
+    if(!a.readable||!b.readable||a.exists!=b.exists)return false;
+    if(!a.exists)return true;
+    return a.bytes==b.bytes && a.identity.dwVolumeSerialNumber==b.identity.dwVolumeSerialNumber &&
+        a.identity.nFileIndexHigh==b.identity.nFileIndexHigh && a.identity.nFileIndexLow==b.identity.nFileIndexLow &&
+        a.identity.nFileSizeHigh==b.identity.nFileSizeHigh && a.identity.nFileSizeLow==b.identity.nFileSizeLow &&
+        a.identity.ftLastWriteTime.dwHighDateTime==b.identity.ftLastWriteTime.dwHighDateTime &&
+        a.identity.ftLastWriteTime.dwLowDateTime==b.identity.ftLastWriteTime.dwLowDateTime;
+}
+static bool dataRootUnsigned(const json& value) {
+    return value.is_number_integer() && (value.is_number_unsigned() || value.get<int64_t>()>=0);
+}
+static bool dataRootBoundPath(const json& value,const fs::path& expected) {
+    if(!value.is_string())return false;
+    const auto text=value.get<std::string>();if(text.empty()||text.size()>131040||text.find('\0')!=std::string::npos)return false;
+    const fs::path path(toWide(text));
+    return path.is_absolute() && canonicalPathKey(path)==canonicalPathKey(expected);
+}
+static bool validDataRootManifest(const DataRootJournal& source,const fs::path& dataRoot) {
+    if(!source.readable || !source.exists || !source.document || !source.document->is_object())return false;
+    const auto& value=*source.document;
+    if(!value.contains("schemaVersion") || !value["schemaVersion"].is_number_integer() ||
+        (value["schemaVersion"]!=1 && value["schemaVersion"]!=2) || !value.contains("dataRoot") || !dataRootBoundPath(value["dataRoot"],dataRoot))return false;
+    if(value.contains("dataLayoutVersion") && (!value["dataLayoutVersion"].is_number_integer() ||
+        (value["dataLayoutVersion"]!=1 && value["dataLayoutVersion"]!=2)))return false;
+    for(const auto* field:{"featureName","productName","encoding","dataRootRole"})if(value.contains(field)&&!value[field].is_string())return false;
+    if(value.contains("portableReinstallData")&&!value["portableReinstallData"].is_boolean())return false;
+    return !value.contains("createdAt")||dataRootUnsigned(value["createdAt"]);
+}
+static bool validDataRootMigration(const DataRootJournal& source,const fs::path& dataRoot,const fs::path& labRoot) {
+    if(!source.readable || !source.exists || !source.document || !source.document->is_object())return false;
+    const auto& value=*source.document;
+    if(!value.contains("schemaVersion") || !value["schemaVersion"].is_number_integer() ||
+        (value["schemaVersion"]!=1 && value["schemaVersion"]!=2) || !value.contains("targetDataRoot") ||
+        !dataRootBoundPath(value["targetDataRoot"],dataRoot) || !value.contains("sources") || !value["sources"].is_array() || value["sources"].size()>64)return false;
+    auto allowed=custom_steam_library::legacyDataRoots(labRoot);
+    allowed.push_back(labRoot/L"library-config.json");allowed.push_back(labRoot/L"manual-overrides.json");
+    std::set<std::string> unique;
+    for(const auto& item:value["sources"]) {
+        if(!item.is_string())return false;
+        bool known=false;
+        for(const auto& path:allowed)if(dataRootBoundPath(item,path) && canonicalPathKey(path)!=canonicalPathKey(dataRoot)){known=true;break;}
+        if(!known || !unique.insert(canonicalPathKey(fs::path(toWide(item.get<std::string>())))).second)return false;
+    }
+    if(!value.contains("strategy")||value["strategy"]!="copy-missing-files-target-wins")return false;
+    for(const auto* field:{"filesCopied","filesSkippedBecauseTargetWins","bytesCopied","symlinksSkipped"})
+        if((value["schemaVersion"]==2 && !value.contains(field)) || (value.contains(field)&&!dataRootUnsigned(value[field])))return false;
+    if(value.contains("backupDirectory")&&!value["backupDirectory"].is_null()) {
+        if(!value["backupDirectory"].is_string())return false;
+        const auto text=value["backupDirectory"].get<std::string>();
+        if(text.empty()||text.find('\0')!=std::string::npos)return false;
+        const fs::path backup(toWide(text));
+        if(!backup.is_absolute()||!pathWithin(backup,dataRoot/L"backups"/L"migration"))return false;
+    }
+    for(const auto* field:{"startedAt","normalizedAt","legacyCompletedAt"})if(value.contains(field)&&!dataRootUnsigned(value[field]))return false;
+    const auto phase=value.find("phase");
+    if(phase!=value.end()) {
+        if(!phase->is_string() || (*phase!="copying" && *phase!="normalizing" && *phase!="committed"))return false;
+        if(*phase!="committed")return !value.contains("completedAt")&&value.contains("startedAt")&&dataRootUnsigned(value["startedAt"]);
+    }
+    if(value.contains("pathNormalization") && value["pathNormalization"]!="legacy-data-root-and-artwork-overrides-rewritten")return false;
+    if(value["schemaVersion"]==2&&!value.contains("pathNormalization"))return false;
+    return value.contains("completedAt")&&dataRootUnsigned(value["completedAt"])&&value["completedAt"]!=0;
+}
+static fs::path dataRootStagePath(const fs::path& path,const wchar_t* label) {
+    GUID id{};wchar_t token[40]{};
+    if(FAILED(CoCreateGuid(&id))||!StringFromGUID2(id,token,40))throw std::runtime_error("Cannot allocate data-root staging identity");
+    return fs::path(path.wstring()+label+token);
+}
+// Check again for every bounded activation attempt. A sharing violation must
+// never turn a newer user's record into permission to replace it on retry.
+static DataRootJournal publishDataRootJournal(const fs::path& path,const json& value,const DataRootJournal& expected,size_t maximum) {
+    const auto text=value.dump(2);
+    if(text.size()>maximum)throw std::runtime_error("Library data-root record exceeds limit");
+    if(!sameDataRootJournal(expected,readDataRootJournal(path,maximum)))throw std::runtime_error("Library data-root record changed; retry");
+    const auto stage=dataRootStagePath(path,L".yeman-root-stage-");
+    fs::create_directories(custom_steam_library::ioPath(path.parent_path()));
+    ScopedStagedFiles cleanup;
+    {
+        custom_steam_library::config::Handle output{CreateFileW(custom_steam_library::ioPath(stage).c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr)};
+        if(output.value==INVALID_HANDLE_VALUE)throw std::runtime_error("Cannot create data-root stage; existing originals retained");
+        cleanup.add(stage);size_t offset=0;
+        while(offset<text.size()){DWORD written=0;if(!WriteFile(output.value,text.data()+offset,static_cast<DWORD>(text.size()-offset),&written,nullptr)||!written)throw std::runtime_error("Data-root staged write failed");offset+=written;}
+        if(!FlushFileBuffers(output.value))throw std::runtime_error("Data-root staged flush failed");
+    }
+    const auto candidate=readDataRootJournal(stage,maximum);
+    if(!candidate.readable||!candidate.document||candidate.bytes!=text)throw std::runtime_error("Library data-root staged readback failed");
+    for(int attempt=1;attempt<=20;++attempt) {
+        if(!sameDataRootJournal(expected,readDataRootJournal(path,maximum)))throw std::runtime_error("Library data-root record changed; retry");
+        const DWORD flags=MOVEFILE_WRITE_THROUGH|(expected.exists?MOVEFILE_REPLACE_EXISTING:0);
+        if(MoveFileExW(custom_steam_library::ioPath(stage).c_str(),custom_steam_library::ioPath(path).c_str(),flags)) {
+            auto actual=readDataRootJournal(path,maximum);
+            if(!actual.readable||!actual.document||actual.bytes!=text)throw std::runtime_error("Library data-root publication unconfirmed; retry");
+            return actual;
+        }
+        const auto error=GetLastError();
+        if(error!=ERROR_SHARING_VIOLATION&&error!=ERROR_LOCK_VIOLATION&&error!=ERROR_ACCESS_DENIED)break;
+        if(attempt<20)Sleep(static_cast<DWORD>((std::min)(attempt*25,250)));
+    }
+    throw std::runtime_error("Library data-root publication failed; original/debt retained");
+}
+
+static void copyMissingLegacyTree(const fs::path& source,const fs::path& target,LegacyDataCopyStats& stats,size_t depth=0) {
+    if(depth>64 || ++stats.nodesVisited>100000)
+        throw std::runtime_error("Legacy migration traversal budget exceeded; debt retained");
+    const auto attributes=GetFileAttributesW(custom_steam_library::ioPath(source).c_str());
+    if(attributes==INVALID_FILE_ATTRIBUTES) {
+        const auto error=GetLastError();
+        if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)return;
+        throw std::runtime_error("Cannot inspect legacy migration source; debt retained");
+    }
+    if(attributes&FILE_ATTRIBUTE_REPARSE_POINT){++stats.symlinksSkipped;return;}
+    if(!dataRootPathInspectable(source)||!dataRootPathInspectable(target))throw std::runtime_error("Unsafe migration path; debt retained");
     std::error_code error;
-    if (!fs::exists(source, error)) return;
-    if (fs::is_symlink(source, error)) {
-        ++stats.symlinksSkipped;
-        return;
-    }
-    if (fs::is_regular_file(source, error)) {
-        if (fs::exists(target, error)) {
-            ++stats.filesSkippedBecauseTargetWins;
-            return;
+    const bool present=fs::exists(custom_steam_library::ioPath(target),error);
+    if(error)throw std::runtime_error("Cannot inspect migration destination; debt retained");
+    if(!(attributes&FILE_ATTRIBUTE_DIRECTORY)) {
+        if(present) {
+            if(!fs::is_regular_file(custom_steam_library::ioPath(target)))throw std::runtime_error("Migration file/directory conflict; debt retained");
+            ++stats.filesSkippedBecauseTargetWins;return;
         }
-        fs::create_directories(target.parent_path(), error);
-        if (error) throw std::runtime_error("Cannot create migrated data directory: " + toUtf8(target.parent_path().wstring()));
-        fs::copy_file(source, target, fs::copy_options::none, error);
-        if (error) throw std::runtime_error("Cannot migrate data file: " + toUtf8(source.wstring()));
-        ++stats.filesCopied;
-        stats.bytesCopied += fs::file_size(source, error);
-        return;
+        fs::create_directories(custom_steam_library::ioPath(target.parent_path()));
+        const auto stage=dataRootStagePath(target,L".yeman-migration-stage-");
+        ScopedStagedFiles cleanup;
+        custom_steam_library::config::Handle input{CreateFileW(custom_steam_library::ioPath(source).c_str(),GENERIC_READ,FILE_SHARE_READ,
+            nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_SEQUENTIAL_SCAN,nullptr)};
+        custom_steam_library::config::Handle output{CreateFileW(custom_steam_library::ioPath(stage).c_str(),GENERIC_READ|GENERIC_WRITE,0,
+            nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr)};
+        if(output.value!=INVALID_HANDLE_VALUE)cleanup.add(stage);
+        BY_HANDLE_FILE_INFORMATION info{};
+        if(input.value==INVALID_HANDLE_VALUE||output.value==INVALID_HANDLE_VALUE||!GetFileInformationByHandle(input.value,&info)||
+            (info.dwFileAttributes&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY)))throw std::runtime_error("Cannot stage legacy migration file; debt retained");
+        std::array<unsigned char,65536> buffer{},verification{};uint64_t size=0;
+        while(true) {
+            DWORD count=0;if(!ReadFile(input.value,buffer.data(),static_cast<DWORD>(buffer.size()),&count,nullptr))throw std::runtime_error("Migration source read failed; debt retained");
+            if(!count)break;
+            size+=count;DWORD offset=0;
+            while(offset<count){DWORD written=0;if(!WriteFile(output.value,buffer.data()+offset,count-offset,&written,nullptr)||!written)throw std::runtime_error("Migration staged write failed; debt retained");offset+=written;}
+        }
+        const auto expectedSize=(uint64_t(info.nFileSizeHigh)<<32)|info.nFileSizeLow;
+        if(size!=expectedSize||!FlushFileBuffers(output.value))throw std::runtime_error("Migration flush/size unconfirmed; debt retained");
+        LARGE_INTEGER start{};
+        if(!SetFilePointerEx(input.value,start,nullptr,FILE_BEGIN)||!SetFilePointerEx(output.value,start,nullptr,FILE_BEGIN))throw std::runtime_error("Migration readback unavailable; debt retained");
+        while(true) {
+            DWORD count=0,copied=0;
+            if(!ReadFile(input.value,buffer.data(),static_cast<DWORD>(buffer.size()),&count,nullptr)||
+                !ReadFile(output.value,verification.data(),static_cast<DWORD>(verification.size()),&copied,nullptr)||
+                count!=copied||!std::equal(buffer.begin(),buffer.begin()+count,verification.begin()))throw std::runtime_error("Migration staged readback mismatch; debt retained");
+            if(!count)break;
+        }
+        CloseHandle(output.value);output.value=INVALID_HANDLE_VALUE;
+        if(!dataRootPathInspectable(target))throw std::runtime_error("Migration destination changed; debt retained");
+        if(!MoveFileExW(custom_steam_library::ioPath(stage).c_str(),custom_steam_library::ioPath(target).c_str(),MOVEFILE_WRITE_THROUGH))
+            throw std::runtime_error("Migration atomic publication failed; debt retained");
+        if(size>(std::numeric_limits<uint64_t>::max)()-stats.bytesCopied)throw std::runtime_error("Migration accounting overflow; debt retained");
+        ++stats.filesCopied;stats.bytesCopied+=size;return;
     }
-    if (!fs::is_directory(source, error)) return;
+    if(present&&!fs::is_directory(custom_steam_library::ioPath(target)))throw std::runtime_error("Migration directory/file conflict; debt retained");
+    fs::create_directories(custom_steam_library::ioPath(target));
+    fs::directory_iterator iterator(custom_steam_library::ioPath(source),error),end;
+    if(error)throw std::runtime_error("Cannot enumerate legacy migration directory; debt retained");
+    for(;iterator!=end;iterator.increment(error)) {
+        if(error)throw std::runtime_error("Incomplete legacy migration directory; debt retained");
+        if(iterator->path().filename()==L"data-migration.json")continue;
+        copyMissingLegacyTree(iterator->path(),target/iterator->path().filename(),stats,depth+1);
+    }
+    if(error)throw std::runtime_error("Incomplete legacy migration directory; debt retained");
+}
 
-    fs::create_directories(target, error);
-    if (error) throw std::runtime_error("Cannot create migrated data directory: " + toUtf8(target.wstring()));
-    for (const auto& entry : fs::directory_iterator(source, error)) {
-        if (error) throw std::runtime_error("Cannot enumerate legacy data directory: " + toUtf8(source.wstring()));
-        copyMissingLegacyTree(entry.path(), target / entry.path().filename(), stats);
+static void backupMigrationSettings(const fs::path& dataRoot,const std::vector<fs::path>& legacyRoots,const fs::path& backupRoot) {
+    // A retry must keep the first preimage; it must not overwrite it with files
+    // copied by an interrupted earlier pass. Each legacy root has its own slot.
+    auto backup=[&](const fs::path& source,const fs::path& destination) {
+        if(!dataRootPathInspectable(source))throw std::runtime_error("Migration backup source unavailable; debt retained");
+        std::error_code error;const bool present=fs::is_regular_file(custom_steam_library::ioPath(source),error);
+        if(error&&error!=std::errc::no_such_file_or_directory)throw std::runtime_error("Cannot inspect migration backup source");
+        if(present){LegacyDataCopyStats stats;copyMissingLegacyTree(source,destination,stats);}
+    };
+    for(const auto& name:{L"library-config.json",L"manual-overrides.json",L"data-root.json"})
+        backup(name==std::wstring(L"data-root.json")?dataRoot/name:dataRoot/L"config"/name,backupRoot/L"target-config"/name);
+    for(const auto& legacyRoot:legacyRoots) {
+        const auto key=canonicalPathKey(legacyRoot);
+        const auto slot=toWide(sha256(std::vector<unsigned char>(key.begin(),key.end())));
+        for(const auto& name:{L"library-config.json",L"manual-overrides.json",L"data-root.json"})
+            backup(name==std::wstring(L"data-root.json")?legacyRoot/name:legacyRoot/L"config"/name,backupRoot/L"legacy-config"/slot/name);
     }
 }
 
-static void backupMigrationSettings(
-    const fs::path& dataRoot,
-    const std::vector<fs::path>& legacyRoots,
-    const fs::path& backupRoot) {
-    std::error_code error;
-    bool copied = false;
-    for (const auto& name : {L"library-config.json", L"manual-overrides.json", L"data-root.json"}) {
-        const auto target = dataRoot / L"config" / name;
-        if (fs::is_regular_file(target, error)) {
-            fs::create_directories(backupRoot / L"target-config", error);
-            fs::copy_file(target, backupRoot / L"target-config" / name,
-                fs::copy_options::overwrite_existing, error);
-            if (error) throw std::runtime_error("Cannot back up migration settings: " + toUtf8(target.wstring()));
-            copied = true;
-        }
-    }
-    for (const auto& legacyRoot : legacyRoots) {
-        const auto sourceConfig = legacyRoot / L"config";
-        if (!fs::is_directory(sourceConfig, error)) continue;
-        for (const auto& name : {L"library-config.json", L"manual-overrides.json", L"data-root.json"}) {
-            const auto source = sourceConfig / name;
-            if (!fs::is_regular_file(source, error)) continue;
-            fs::create_directories(backupRoot / L"legacy-config", error);
-            fs::copy_file(source, backupRoot / L"legacy-config" / name,
-                fs::copy_options::overwrite_existing, error);
-            if (error) throw std::runtime_error("Cannot back up legacy settings: " + toUtf8(source.wstring()));
-            copied = true;
-        }
-    }
-    if (!copied) {
-        std::error_code ignored;
-        fs::remove(backupRoot, ignored);
-    }
-}
-
-static fs::path migrateLegacyData(
-    const fs::path& dataRoot,
-    const fs::path& labRoot) {
-    const auto markerPath = dataRoot / L"state" / L"data-migration.json";
-    json previousMarker = json::object();
-    if (fs::is_regular_file(markerPath)) {
-        try {
-            const auto bytes = readBinaryFile(markerPath, 4u << 20);
-            previousMarker = json::parse(bytes.begin(), bytes.end());
-        } catch (...) {
-            previousMarker = json::object();
-        }
-        if (previousMarker.is_object() && previousMarker.value("schemaVersion", 0) >= 2) return {};
-    }
-
+static fs::path migrateLegacyData(const fs::path& dataRoot,const fs::path& labRoot) {
+    DataTransactionMutex transaction;
+    const auto markerPath=dataRoot/L"state"/L"data-migration.json";
+    auto observed=readDataRootJournal(markerPath,4u<<20);
+    if(!observed.readable || (observed.exists&&!validDataRootMigration(observed,dataRoot,labRoot)))return {};
+    json record=observed.document.value_or(json::object());
+    const bool legacy=observed.exists&&record["schemaVersion"]==1;
+    if(observed.exists&&!legacy&&(!record.contains("phase")||record["phase"]=="committed"))return {};
     std::vector<fs::path> legacyRoots;
-    const auto configuredSources = previousMarker.value("sources", json::array());
-    if (configuredSources.is_array()) {
-        for (const auto& source : configuredSources) {
-            if (source.is_string()) legacyRoots.emplace_back(toWide(source.get<std::string>()));
+    if(observed.exists) {
+        for(const auto& source:record["sources"]) {
+            const fs::path path(toWide(source.get<std::string>()));
+            // Loose files are handled below; only catalogued directories are traversed.
+            for(const auto& candidate:custom_steam_library::legacyDataRoots(labRoot))
+                if(canonicalPathKey(path)==canonicalPathKey(candidate))legacyRoots.push_back(candidate);
         }
+    } else for(const auto& candidate:custom_steam_library::legacyDataRoots(labRoot)) {
+        if(canonicalPathKey(candidate)==canonicalPathKey(dataRoot))continue;
+        if(!dataRootPathInspectable(candidate))throw std::runtime_error("Legacy root is unreadable or a reparse point");
+        std::error_code error;const bool present=fs::is_directory(candidate,error);
+        if(error&&error!=std::errc::no_such_file_or_directory)throw std::runtime_error("Cannot inspect legacy data root");
+        if(present)legacyRoots.push_back(candidate);
     }
-    if (legacyRoots.empty()) for (const auto& candidate : custom_steam_library::legacyDataRoots(labRoot)) {
-        if (canonicalPathKey(candidate) == canonicalPathKey(dataRoot)) continue;
-        std::error_code error;
-        if (fs::is_directory(candidate, error)) legacyRoots.push_back(candidate);
+    const auto looseConfig=labRoot/L"library-config.json",looseOverrides=labRoot/L"manual-overrides.json";
+    auto looseExists=[](const fs::path& path) {
+        if(!dataRootPathInspectable(path))throw std::runtime_error("Cannot inspect loose legacy configuration");
+        std::error_code error;const bool present=fs::is_regular_file(path,error);
+        if(error&&error!=std::errc::no_such_file_or_directory)throw std::runtime_error("Cannot inspect loose legacy configuration");
+        return present;
+    };
+    const bool hasLooseLegacy=looseExists(looseConfig)|looseExists(looseOverrides);
+    if(!observed.exists&&legacyRoots.empty()&&!hasLooseLegacy)return {};
+    if(!observed.exists) {
+        json sources=json::array();for(const auto& source:legacyRoots)sources.push_back(toUtf8(source.wstring()));
+        for(const auto& source:{looseConfig,looseOverrides})if(looseExists(source))sources.push_back(toUtf8(source.wstring()));
+        record={{"schemaVersion",2},{"strategy","copy-missing-files-target-wins"},{"targetDataRoot",toUtf8(dataRoot.wstring())},
+            {"sources",sources},{"backupDirectory",nullptr},{"filesCopied",uint64_t{0}},{"filesSkippedBecauseTargetWins",uint64_t{0}},
+            {"bytesCopied",uint64_t{0}},{"symlinksSkipped",uint64_t{0}},{"startedAt",unixTimeMs()},{"phase","copying"}};
+        observed=publishDataRootJournal(markerPath,record,observed,4u<<20);
+    } else if(legacy) {
+        record["legacyCompletedAt"]=record["completedAt"];record.erase("completedAt");
+        record["schemaVersion"]=2;record["phase"]="normalizing";record["startedAt"]=unixTimeMs();
+        for(const auto* field:{"filesCopied","filesSkippedBecauseTargetWins","bytesCopied","symlinksSkipped"})if(!record.contains(field))record[field]=uint64_t{0};
+        observed=publishDataRootJournal(markerPath,record,observed,4u<<20);
     }
-
-    if (fs::is_regular_file(markerPath) && previousMarker.is_object() &&
-        previousMarker.value("schemaVersion", 0) < 2) {
-        std::vector<fs::path> existingRoots;
-        for (const auto& root : legacyRoots) {
-            if (fs::is_directory(root)) existingRoots.push_back(root);
+    if(record["phase"]=="copying") {
+        // A previously enumerated source is debt, even when temporarily absent.
+        // Do not replace it with newly discovered loose files on a retry.
+        for(const auto& item:record["sources"]) {
+            const fs::path source(toWide(item.get<std::string>()));
+            if(!dataRootPathInspectable(source))throw std::runtime_error("Recorded migration source is unavailable; debt retained");
+            std::error_code error;
+            const bool present=fs::exists(custom_steam_library::ioPath(source),error);
+            if(error||!present)throw std::runtime_error("Recorded migration source is missing; debt retained");
         }
-        normalizeMigratedJsonPaths(dataRoot, existingRoots);
-        previousMarker["schemaVersion"] = 2;
-        previousMarker["pathNormalization"] = "legacy-data-root-and-artwork-overrides-rewritten";
-        previousMarker["normalizedAt"] = unixTimeMs();
-        writeJsonAtomic(markerPath, previousMarker);
-        return markerPath;
-    }
-
-    const auto looseConfig = labRoot / L"library-config.json";
-    const auto looseOverrides = labRoot / L"manual-overrides.json";
-    bool hasLooseLegacy = fs::is_regular_file(looseConfig) || fs::is_regular_file(looseOverrides);
-    if (legacyRoots.empty() && !hasLooseLegacy) return {};
-
-    const auto token = std::to_wstring(unixTimeMs());
-    const auto backupRoot = dataRoot / L"backups" / L"migration" / token;
-    backupMigrationSettings(dataRoot, legacyRoots, backupRoot);
-
-    LegacyDataCopyStats stats;
-    json sourceList = json::array();
-    for (const auto& legacyRoot : legacyRoots) {
-        sourceList.push_back(toUtf8(legacyRoot.wstring()));
-        // The old manual-image directory was outside the artwork tree. Keep
-        // the new layout strict while preserving every file.
-        copyMissingLegacyTree(
-            legacyRoot / L"artwork-overrides",
-            dataRoot / L"artwork" / L"overrides",
-            stats);
-        std::error_code error;
-        for (const auto& entry : fs::directory_iterator(legacyRoot, error)) {
-            if (error) throw std::runtime_error("Cannot enumerate legacy data directory: " + toUtf8(legacyRoot.wstring()));
-            if (entry.path().filename() == L"artwork-overrides") continue;
-            copyMissingLegacyTree(entry.path(), dataRoot / entry.path().filename(), stats);
+        const auto backupRoot=dataRoot/L"backups"/L"migration"/std::to_wstring(record["startedAt"].get<uint64_t>());
+        backupMigrationSettings(dataRoot,legacyRoots,backupRoot);
+        LegacyDataCopyStats stats;
+        for(const auto& legacyRoot:legacyRoots) {
+            if(!dataRootPathInspectable(legacyRoot))throw std::runtime_error("Legacy root changed or unreadable; debt retained");
+            copyMissingLegacyTree(legacyRoot/L"artwork-overrides",dataRoot/L"artwork"/L"overrides",stats);
+            std::error_code error;
+            fs::directory_iterator iterator(legacyRoot,error),end;
+            if(error)throw std::runtime_error("Cannot enumerate legacy data root; debt retained");
+            for(;iterator!=end;iterator.increment(error)) {
+                if(error)throw std::runtime_error("Cannot enumerate legacy data root; debt retained");
+                if(iterator->path().filename()==L"artwork-overrides"||iterator->path().filename()==L"data-root.json")continue;
+                copyMissingLegacyTree(iterator->path(),dataRoot/iterator->path().filename(),stats);
+            }
+            if(error)throw std::runtime_error("Incomplete legacy enumeration; debt retained");
         }
+        for(const auto& [source,target]:std::array<std::pair<fs::path,fs::path>,2>{{
+            {looseConfig,dataRoot/L"config"/L"library-config.json"},{looseOverrides,dataRoot/L"config"/L"manual-overrides.json"}}})
+            if(std::any_of(record["sources"].begin(),record["sources"].end(),[&](const json& item){return dataRootBoundPath(item,source);}))
+                copyMissingLegacyTree(source,target,stats);
+        record["filesCopied"]=stats.filesCopied;record["filesSkippedBecauseTargetWins"]=stats.filesSkippedBecauseTargetWins;
+        record["bytesCopied"]=stats.bytesCopied;record["symlinksSkipped"]=stats.symlinksSkipped;
+        record["backupDirectory"]=fs::is_directory(backupRoot)?json(toUtf8(backupRoot.wstring())):json(nullptr);
+        record["phase"]="normalizing";
+        observed=publishDataRootJournal(markerPath,record,observed,4u<<20);
     }
-
-    for (const auto& [source, target] : std::array<std::pair<fs::path, fs::path>, 2>{{
-        {looseConfig, dataRoot / L"config" / L"library-config.json"},
-        {looseOverrides, dataRoot / L"config" / L"manual-overrides.json"}
-    }}) {
-        if (fs::is_regular_file(source) && !fs::is_regular_file(target)) {
-            copyMissingLegacyTree(source, target, stats);
-            sourceList.push_back(toUtf8(source.wstring()));
-        }
-    }
-
-    writeJsonAtomic(markerPath, {
-        {"schemaVersion", 2},
-        {"strategy", "copy-missing-files-target-wins"},
-        {"targetDataRoot", toUtf8(dataRoot.wstring())},
-        {"sources", sourceList},
-        {"backupDirectory", fs::is_directory(backupRoot) ? json(toUtf8(backupRoot.wstring())) : json(nullptr)},
-        {"filesCopied", stats.filesCopied},
-        {"filesSkippedBecauseTargetWins", stats.filesSkippedBecauseTargetWins},
-        {"bytesCopied", stats.bytesCopied},
-        {"symlinksSkipped", stats.symlinksSkipped},
-        {"pathNormalization", "legacy-data-root-and-artwork-overrides-rewritten"},
-        {"completedAt", unixTimeMs()}
-    });
-    normalizeMigratedJsonPaths(dataRoot, legacyRoots);
+    normalizeMigratedJsonPaths(dataRoot,legacyRoots,true);
+    record["pathNormalization"]="legacy-data-root-and-artwork-overrides-rewritten";
+    record["phase"]="committed";record["completedAt"]=unixTimeMs();
+    publishDataRootJournal(markerPath,record,observed,4u<<20);
     return markerPath;
 }
 
@@ -8610,44 +8694,41 @@ static fs::path steamBigPictureDataRoot(const fs::path& labRoot) {
     return custom_steam_library::defaultDataRoot(labRoot);
 }
 
-static void initializeSteamBigPictureDataRoot(const fs::path& dataRoot, const fs::path& labRoot) {
+// False means usable read-only defaults, with the original unknown record
+// retained. An attempted publication failure throws and must never ACK success.
+static bool initializeSteamBigPictureDataRoot(const fs::path& dataRoot,const fs::path& labRoot) {
     DataTransactionMutex transaction;
-    for (const auto& directory : {
-        dataRoot / L"config", dataRoot / L"backups", dataRoot / L"state",
-        dataRoot / L"games", dataRoot / L"artwork", dataRoot / L"artwork" / L"overrides",
-        dataRoot / L"cache", dataRoot / L"cache" / L"jobs", dataRoot / L"cache" / L"webview"}) {
-        fs::create_directories(directory);
+    const auto manifestPath=dataRoot/L"data-root.json",markerPath=dataRoot/L"state"/L"data-migration.json";
+    auto observed=readDataRootJournal(manifestPath,1u<<20);
+    auto migration=readDataRootJournal(markerPath,4u<<20);
+    if(!observed.readable || (observed.exists&&!validDataRootManifest(observed,dataRoot)) || !migration.readable ||
+        (migration.exists&&!validDataRootMigration(migration,dataRoot,labRoot)))return false;
+    if(migration.exists&&migration.document->contains("phase")&&(*migration.document)["phase"]!="committed"&&
+        !custom_steam_library::configuredDataRoot().empty())return false;
+    if(custom_steam_library::configuredDataRoot().empty()) {
+        migrateLegacyData(dataRoot,labRoot);
+        migration=readDataRootJournal(markerPath,4u<<20);
+        if(!migration.readable || (migration.exists&&(!validDataRootMigration(migration,dataRoot,labRoot)||
+            (migration.document->contains("phase")&&(*migration.document)["phase"]!="committed"))))return false;
     }
-    // An explicitly selected data root is an isolation boundary.  Do not
-    // silently import the development tree or an old installation into a
-    // caller-provided/test directory; the default install path still runs
-    // the normal copy-only migration below.
-    if (custom_steam_library::configuredDataRoot().empty()) {
-        migrateLegacyData(dataRoot, labRoot);
+    for(const auto& directory:{dataRoot/L"config",dataRoot/L"backups",dataRoot/L"state",dataRoot/L"games",
+        dataRoot/L"artwork",dataRoot/L"artwork"/L"overrides",dataRoot/L"cache",dataRoot/L"cache"/L"jobs",dataRoot/L"cache"/L"webview"}) {
+        if(!dataRootPathInspectable(directory))throw std::runtime_error("Library root directory is unreadable or reparse");
+        fs::create_directories(custom_steam_library::ioPath(directory));
     }
-    const auto manifestPath = dataRoot / L"data-root.json";
-    json manifest = json::object();
-    if (fs::is_regular_file(manifestPath)) {
-        try {
-            const auto bytes = readBinaryFile(manifestPath, 1u << 20);
-            manifest = json::parse(bytes.begin(), bytes.end());
-        } catch (...) {
-            manifest = json::object();
-        }
-    }
-    if (!manifest.is_object()) manifest = json::object();
-    manifest["schemaVersion"] = 2;
-    manifest["featureName"] = "Custom Steam Library";
-    manifest["productName"] = "Steam自定义游戏库";
-    manifest["encoding"] = "UTF-8";
-    manifest["portableReinstallData"] = true;
-    manifest["dataLayoutVersion"] = 2;
-    manifest["dataRootRole"] = "portable-config-cache-artwork-and-game-metadata";
-    manifest["dataRoot"] = toUtf8(dataRoot.wstring());
-    if (!manifest.contains("createdAt")) manifest["createdAt"] = unixTimeMs();
-    writeJsonAtomic(manifestPath, manifest);
-    const auto libraryConfig = dataRoot / L"config" / L"library-config.json";
-    if (!fs::is_regular_file(libraryConfig)) writeJsonAtomic(libraryConfig, loadLibraryConfig(libraryConfig));
+    json manifest=observed.document.value_or(json::object());
+    if(!observed.exists || manifest["schemaVersion"]==1) {
+        manifest["schemaVersion"]=2;manifest["featureName"]="Custom Steam Library";manifest["productName"]="Steam自定义游戏库";
+        manifest["encoding"]="UTF-8";manifest["portableReinstallData"]=true;manifest["dataLayoutVersion"]=2;
+        manifest["dataRootRole"]="portable-config-cache-artwork-and-game-metadata";manifest["dataRoot"]=toUtf8(dataRoot.wstring());
+        if(!manifest.contains("createdAt"))manifest["createdAt"]=unixTimeMs();
+        observed=publishDataRootJournal(manifestPath,manifest,observed,1u<<20);
+        if(!validDataRootManifest(observed,dataRoot))throw std::runtime_error("Library data-root identity publication unconfirmed");
+    } else if(!sameDataRootJournal(observed,readDataRootJournal(manifestPath,1u<<20)))throw std::runtime_error("Library root changed during initialization; retry");
+    if(!sameDataRootJournal(migration,readDataRootJournal(markerPath,4u<<20)))throw std::runtime_error("Library migration record changed during initialization; retry");
+    const auto libraryConfig=dataRoot/L"config"/L"library-config.json";
+    if(!fs::is_regular_file(libraryConfig))writeJsonAtomic(libraryConfig,loadLibraryConfig(libraryConfig));
+    return true;
 }
 
 static std::string gameDataId(const fs::path& gameDirectory) {
@@ -8658,18 +8739,23 @@ static std::string gameDataId(const fs::path& gameDirectory) {
 static fs::path refineLibraryGameBoundary(const fs::path&, const fs::path&, const fs::path&);
 static fs::path nativeSteamGameBoundaryForExecutable(const fs::path&);
 
+static json libraryScanStateForMapping(const fs::path&, std::function<bool()>&);
+
 static fs::path persistentGameDirectoryForExecutable(
     const fs::path& dataRoot,
     const fs::path& executable,
     bool* fromLibraryState = nullptr) {
     if (fromLibraryState) *fromLibraryState = false;
+    DataTransactionMutex mappingTransaction;
     const auto wanted = canonicalPathKey(executable);
     const auto statePath = dataRoot / L"state" / L"library-scan.json";
     if (fs::is_regular_file(statePath)) {
         try {
-            const auto bytes = readBinaryFile(statePath, 64u << 20);
-            const auto state = json::parse(bytes.begin(), bytes.end());
+            std::function<bool()> observationCurrent;
+            const auto state = libraryScanStateForMapping(statePath, observationCurrent);
             for (const auto& game : state.value("games", json::array())) {
+                if (game.value("status", std::string{}) == "data-invalid-review-required" ||
+                    (game.contains("dataValidationWarning") && game["dataValidationWarning"].is_boolean() && game["dataValidationWarning"].get<bool>())) continue;
                 const auto directory = fs::path(toWide(game.value("gameDirectory", std::string{})));
                 bool matches = canonicalPathKey(fs::path(toWide(
                     game.value("primaryExecutable", std::string{})))) == wanted;
@@ -8692,8 +8778,10 @@ static fs::path persistentGameDirectoryForExecutable(
                 }
                 if (matches) {
                     if (!directory.empty()) {
+                        const auto refined = refineLibraryGameBoundary(directory, executable, dataRoot);
+                        if (!observationCurrent || !observationCurrent()) break;
                         if (fromLibraryState) *fromLibraryState = true;
-                        return refineLibraryGameBoundary(directory, executable, dataRoot);
+                        return refined;
                     }
                 }
             }
@@ -8866,6 +8954,19 @@ static void assertNoReparsePoints(const fs::path& root) {
     if (ec) throw std::runtime_error("Cannot enumerate portable backup source");
 }
 
+static json parseLibraryTransactionBytes(const std::vector<unsigned char>& bytes) {
+    std::array<std::set<std::string>,65> keys;
+    return json::parse(bytes.begin(),bytes.end(),[&](int depth,json::parse_event_t event,json& value){
+        if(depth<0||depth>64)throw std::runtime_error("Library recovery JSON exceeds its nesting limit");
+        if(event==json::parse_event_t::object_start)keys[depth].clear();
+        if(event==json::parse_event_t::key&&(depth==0||!keys[depth-1].insert(value.get<std::string>()).second))
+            throw std::runtime_error("Duplicate library recovery JSON key; original data retained");
+        return true;
+    });
+}
+static json readLibraryTransactionDocument(const fs::path& path,size_t maximum=8u<<20) {
+    return parseLibraryTransactionBytes(readBinaryFile(path,maximum));
+}
 static json snapshotInventory(const fs::path& snapshot) {
     json files = json::array();
     uint64_t totalBytes = 0;
@@ -8945,8 +9046,8 @@ static json verifyPortableBackupSnapshot(const fs::path& snapshot) {
     const auto manifestPath = snapshot / L"snapshot-manifest.json";
     if (!fs::is_regular_file(manifestPath)) throw std::runtime_error("Snapshot manifest is missing");
     const auto bytes = readBinaryFile(manifestPath, 16u << 20);
-    const auto manifest = json::parse(bytes.begin(), bytes.end());
-    if (!manifest.is_object() || !isCustomSteamLibraryFeatureName(manifest.value("featureName", std::string{})) ||
+    const auto manifest = parseLibraryTransactionBytes(bytes);
+    if (!manifest.is_object() || !manifest.contains("schemaVersion") || !manifest["schemaVersion"].is_number_integer() || manifest["schemaVersion"]!=2 || !isCustomSteamLibraryFeatureName(manifest.value("featureName", std::string{})) ||
         !manifest.contains("files") || !manifest["files"].is_array()) {
         throw std::runtime_error("Snapshot manifest is invalid or predates integrity hashes");
     }
@@ -9005,7 +9106,30 @@ static fs::path latestPortableSnapshot(const fs::path& dataRoot) {
 static json restorePortableBackupSnapshot(const fs::path& dataRoot, const fs::path& snapshot) {
     SteamShortcutWriterMutex writer;
     DataTransactionMutex transaction;
+    const auto debt=dataRoot/L"backups"/L"steam-shortcuts";
+    if(fs::is_directory(debt))for(const auto& entry:fs::recursive_directory_iterator(debt))
+        if(isReparsePoint(entry.path()) || entry.path().filename()==L"transaction.pending.json")throw std::runtime_error("Resolve Steam transaction debt before restoring portable state");
     const auto verified = verifyPortableBackupSnapshot(snapshot);
+    for(const auto* name:{L"library-config.json",L"manual-overrides.json"}) {
+        namespace policy=custom_steam_library::config;
+        const auto current=policy::read(dataRoot/L"config"/name);
+        if(current.document && policy::incompatible(*current.document))
+            throw std::runtime_error("Cannot restore over a newer configuration schema; original preserved");
+        const auto restored=policy::read(snapshot/L"config"/name);
+        if(restored.exists && (!restored.document || !policy::structurallyValid(*restored.document,std::wstring(name)==L"library-config.json")))
+            throw std::runtime_error("Snapshot contains a corrupt or incompatible user configuration");
+    }
+    // Portable data restoration cannot roll back external Steam membership or
+    // historical success receipts. Preserve those debts at their current epoch.
+    const auto snapshotState=snapshot/L"state";
+    if(fs::is_directory(snapshotState))for(const auto& entry:fs::directory_iterator(snapshotState)) {
+        const auto name=entry.path().filename().wstring();
+        const bool authority=name==L"ymcc-game-whitelist-membership.json"||name.starts_with(L"last-steam-")||name==L"steam-accounts.json"||name.find(L"steam-add-plan")!=std::wstring::npos||name.find(L"steam-delete-plan")!=std::wstring::npos;
+        if(authority) {
+            const auto current=dataRoot/L"state"/entry.path().filename();
+            if(!configRegularFile(current)||readBinaryFile(current)!=readBinaryFile(entry.path()))throw std::runtime_error("Snapshot carries historical Steam authority; refresh the account explicitly, original preserved");
+        }
+    }
     const auto preRestore = createPortableBackupSnapshot(dataRoot, L"pre-restore", "automatic-pre-restore-safety-copy");
     const auto token = std::to_wstring(unixTimeMs());
     const auto staging = dataRoot / L"backups" / (L"restore-staging-" + token);
@@ -9023,7 +9147,7 @@ static json restorePortableBackupSnapshot(const fs::path& dataRoot, const fs::pa
         }
         const auto stagedInventory = snapshotInventory(staging);
         const auto sourceManifestBytes = readBinaryFile(snapshot / L"snapshot-manifest.json", 16u << 20);
-        const auto sourceManifest = json::parse(sourceManifestBytes.begin(), sourceManifestBytes.end());
+        const auto sourceManifest = parseLibraryTransactionBytes(sourceManifestBytes);
         if (stagedInventory["fileCount"] != sourceManifest["fileCount"] ||
             stagedInventory["totalBytes"] != sourceManifest["totalBytes"] ||
             stagedInventory["files"] != sourceManifest["files"]) {
@@ -9108,71 +9232,160 @@ static fs::path networkRetryQueuePath(const fs::path& dataRoot) {
     return dataRoot / L"state" / L"network-retry-queue.json";
 }
 
-static json loadNetworkRetryQueue(const fs::path& dataRoot) {
-    const auto path = networkRetryQueuePath(dataRoot);
-    auto normalize = [](json queue) {
-        if (!queue.is_object()) throw std::runtime_error("root is not an object");
-        if (!queue.contains("jobs")) queue["jobs"] = json::object();
-        else if (!queue["jobs"].is_object()) throw std::runtime_error("jobs is not an object");
-        if (!queue.contains("history")) queue["history"] = json::array();
-        else if (!queue["history"].is_array()) throw std::runtime_error("history is not an array");
-        json quarantined = json::object();
-        for (auto it = queue["jobs"].begin(); it != queue["jobs"].end();) {
-            const auto& job = it.value();
-            bool valid = job.is_object();
-            if (valid) {
-                for (const auto* field : {"status", "executable", "id"}) if (job.contains(field) && !job[field].is_string()) valid = false;
-                for (const auto* field : {"nextAttemptAt", "createdAt", "updatedAt", "consecutiveFailures"}) {
-                    if (!job.contains(field)) continue;
-                    if (!job[field].is_number_integer() || (job[field].is_number_integer() && !job[field].is_number_unsigned() && job[field].get<int64_t>() < 0)) valid = false;
-                }
-                if (job.contains("consecutiveFailures") && job["consecutiveFailures"].is_number_integer() && job["consecutiveFailures"] > 1000000) valid = false;
-                if (job.contains("executableIdentity") && !job["executableIdentity"].is_object()) valid = false;
-                if (job.contains("commandArgs")) {
-                    if (!job["commandArgs"].is_array()) valid = false;
-                    else for (const auto& argument : job["commandArgs"]) if (!argument.is_string()) valid = false;
-                }
-            }
-            if (!valid) { quarantined[it.key()] = {{"reason", "invalid-job-shape-or-fields"}, {"value", job}}; it = queue["jobs"].erase(it); }
-            else ++it;
-        }
-        if (!quarantined.empty()) queue["quarantinedJobs"] = std::move(quarantined);
-        queue["schemaVersion"] = 1;
-        queue["mode"] = "event-wakeup-no-polling";
-        return queue;
-    };
-    std::vector<fs::path> candidates;
-    if (fs::is_regular_file(path)) candidates.push_back(path);
-    const auto backups = stateBackupCandidates(dataRoot, path, "network-retry-queue");
-    candidates.insert(candidates.end(), backups.begin(), backups.end());
-    std::optional<fs::path> corruptTarget;
-    for (const auto& candidate : candidates) {
-        try {
-            const auto bytes = readBinaryFile(candidate, 8u << 20);
-            auto queue = normalize(json::parse(bytes.begin(), bytes.end()));
-            if (candidate != path) {
+struct NetworkRetryQueueObservation {
+    custom_steam_library::config::Read source;
+    json queue=defaultNetworkRetryQueue();
+    bool mayWrite=false;
+    bool corrupt=false;
+    const char* state="unavailable";
+};
+static bool networkRetryQueueText(const json& value) {
+    return value.is_string()&&value.get_ref<const std::string&>().size()<=32768&&value.get_ref<const std::string&>().find('\0')==std::string::npos;
+}
+static bool networkRetryQueueUnsigned(const json& value) {
+    return value.is_number_integer()&&(value.is_number_unsigned()||value.get<int64_t>()>=0);
+}
+static bool networkRetryQueueJobValid(const std::string& id,const json& job) {
+    try {
+        if(id.size()!=64||id.find_first_not_of("0123456789abcdef")!=std::string::npos||!job.is_object())return false;
+        for(const auto* key:{"id","status","executable"})if(!job.contains(key)||!networkRetryQueueText(job[key]))return false;
+        if(job["id"]!=id)return false;
+        const auto status=job["status"].get<std::string>();
+        if(status!="waiting-network"&&status!="running-event-wakeup"&&status!="running"&&status!="needs-manual-review-executable-changed"&&status!="needs-manual-review-interrupted-retry")return false;
+        const fs::path executable(toWide(job["executable"].get<std::string>()));
+        if(!executable.is_absolute()||asciiLower(toUtf8(executable.extension().wstring()))!=".exe")return false;
+        if(!job.contains("executableIdentity")||!job["executableIdentity"].is_object())return false;
+        const auto& identity=job["executableIdentity"];
+        if(!identity.contains("canonicalPath")||!networkRetryQueueText(identity["canonicalPath"])||identity["canonicalPath"]!=canonicalPathKey(executable)||
+            !identity.contains("size")||!networkRetryQueueUnsigned(identity["size"])||!identity.contains("lastWriteTicks")||!identity["lastWriteTicks"].is_number_integer()||identity["lastWriteTicks"]>(std::numeric_limits<int64_t>::max)())return false;
+        const auto now=unixTimeMs();
+        for(const auto* key:{"createdAt","updatedAt","nextAttemptAt","consecutiveFailures"})if(!job.contains(key)||!networkRetryQueueUnsigned(job[key]))return false;
+        for(const auto* key:{"createdAt","updatedAt","lastFailureAt","lastWakeAt"})if(job.contains(key)&&(!networkRetryQueueUnsigned(job[key])||job[key].get<uint64_t>()>now+300000))return false;
+        if(job["consecutiveFailures"]>1000000||job["nextAttemptAt"].get<uint64_t>()>now+86400000)return false;
+        if(!job.contains("commandArgs")||!job["commandArgs"].is_array()||job["commandArgs"].empty()||job["commandArgs"].size()>256)return false;
+        std::size_t total=0;
+        for(const auto& argument:job["commandArgs"]){if(!networkRetryQueueText(argument))return false;const auto& text=argument.get_ref<const std::string&>();total+=text.size();if(total>32768||text=="--apply-real"||text=="--simulate-apply"||text=="--only-missing"||text.starts_with("--fault-"))return false;}
+        const fs::path first(toWide(job["commandArgs"][0].get<std::string>()));
+        return first.is_absolute()&&canonicalPathKey(first)==canonicalPathKey(executable);
+    } catch(...) {return false;}
+}
+static json normalizeNetworkRetryQueue(json queue) {
+    if(!queue.is_object())throw std::runtime_error("Network retry queue root is not an object");
+    if(queue.contains("schemaVersion")&&(!queue["schemaVersion"].is_number_integer()||queue["schemaVersion"]!=1))throw std::runtime_error("Unsupported network retry queue schema");
+    if(!queue.contains("jobs"))throw std::runtime_error("Network retry queue has no jobs contract");
+    if(!queue["jobs"].is_object()||queue["jobs"].size()>4096)throw std::runtime_error("Invalid network retry jobs");
+    if(!queue.contains("history"))queue["history"]=json::array();
+    if(!queue["history"].is_array())throw std::runtime_error("Invalid network retry history");
+    if(queue.contains("quarantinedJobs")&&!queue["quarantinedJobs"].is_object())throw std::runtime_error("Invalid network retry quarantine");
+    for(auto it=queue["jobs"].begin();it!=queue["jobs"].end();) {
+        if(!networkRetryQueueJobValid(it.key(),it.value())){queue["quarantinedJobs"][it.key()]={{"reason","invalid-job-identity-or-replay-contract"},{"value",it.value()}};it=queue["jobs"].erase(it);}else ++it;
+    }
+    if(queue["history"].size()>200)queue["history"].erase(queue["history"].begin(),queue["history"].end()-200);
+    queue["schemaVersion"]=1;queue["mode"]="event-wakeup-no-polling";return queue;
+}
+// Preserve a recognized unsupported root version even when the rest is torn.
+// Normal reads use the existing strict decoded-key/depth parser only once.
+static bool networkRetryQueueUnsupportedPrefix(const std::string& bytes) {
+    bool incompatible=false;std::string key;
+    try{json::parse(bytes,[&](int depth,json::parse_event_t event,json& value){
+        if(depth>64)throw std::runtime_error("depth");
+        if(depth==1&&event==json::parse_event_t::key)key=value.get<std::string>();
+        if(depth==1&&event==json::parse_event_t::value&&key=="schemaVersion"&&(!value.is_number_integer()||value!=1)){incompatible=true;throw std::runtime_error("unsupported");}
+        return true;
+    });}catch(...){}return incompatible;
+}
+static std::vector<fs::path> networkRetryQueueBackupCandidates(const fs::path& dataRoot) {
+    std::vector<fs::path> result;
+    const auto path=networkRetryQueuePath(dataRoot),adjacent=fs::path(path.wstring()+L".bak");
+    if(configRegularFile(adjacent))result.push_back(adjacent);
+    // A corrupt optional queue must not read/parse its entire backup history.
+    // Prefer the immediate last-good copy; then at most7 of128 inspected
+    // historical entries. Unknown older copies remain intact for explicit repair.
+    const auto directory=dataRoot/L"backups"/L"state";std::error_code ec;
+    std::vector<std::pair<fs::file_time_type,fs::path>> history;
+    fs::directory_iterator it(directory,ec),end;
+    for(std::size_t inspected=0;!ec&&it!=end&&inspected<128;++inspected,it.increment(ec)){
+        const auto file=it->path();const auto name=file.filename().wstring();
+        if(!name.starts_with(L"network-retry-queue-")||file.extension()!=L".json")continue;
+        std::error_code status;const auto regular=it->is_regular_file(status);if(status||!regular)continue;
+        const auto time=it->last_write_time(status);if(!status)history.push_back({time,file});
+    }
+    std::sort(history.begin(),history.end(),[](const auto& left,const auto& right){if(left.first!=right.first)return left.first>right.first;return left.second.native()>right.second.native();});
+    for(const auto& entry:history){if(result.size()>=8)break;result.push_back(entry.second);}return result;
+}
+static json loadNetworkRetryQueue(const fs::path& dataRoot,NetworkRetryQueueObservation* observation=nullptr) {
+    namespace policy=custom_steam_library::config;
+    NetworkRetryQueueObservation result;
+    try {
+        result.source=policy::readRuntime(networkRetryQueuePath(dataRoot),8u<<20);
+        if(result.source.unreadable){result.state="read-unavailable";}
+        else if(result.source.oversized){result.state="over-limit";}
+        else {
+            result.mayWrite=true;result.state=result.source.exists?"corrupt":"missing";result.corrupt=result.source.exists;
+            if(result.source.exists){
                 try {
-                    writeJsonWithBackup(
-                        path, dataRoot / L"backups" / L"state", "network-retry-queue", queue);
-                } catch (...) {
-                    // Keep this event usable even if repair cannot be written.
+                    const auto& raw=result.source.bytes;auto document=parseLibraryTransactionBytes(std::vector<unsigned char>(raw.begin(),raw.end()));
+                    if(document.is_object()&&document.contains("schemaVersion")&&(!document["schemaVersion"].is_number_integer()||document["schemaVersion"]!=1)){
+                        result.mayWrite=false;result.state="unsupported-version";
+                    }else{result.queue=normalizeNetworkRetryQueue(std::move(document));result.corrupt=false;result.state="current";}
+                }catch(...){if(networkRetryQueueUnsupportedPrefix(result.source.bytes)){result.mayWrite=false;result.state="unsupported-version";}}
+            }
+            if(result.mayWrite&&std::string(result.state)!="current"){
+                for(const auto& candidate:networkRetryQueueBackupCandidates(dataRoot)){
+                    try{const auto bytes=readBinaryFile(candidate,8u<<20);result.queue=normalizeNetworkRetryQueue(parseLibraryTransactionBytes(bytes));result.state="backup";break;}catch(...){}
                 }
             }
-            return queue;
-        } catch (...) {
-            if (candidate == path && !corruptTarget) {
-                corruptTarget = preserveCorruptStateFile(dataRoot, path, "network-retry-queue");
+        }
+    }catch(...){result.queue=defaultNetworkRetryQueue();result.mayWrite=false;result.state="read-unavailable";}
+    if(observation)*observation=result;
+    return result.queue;
+}
+static fs::path preserveNetworkRetryQueueBytes(const fs::path& dataRoot,const std::string& bytes,const std::string& prefix) {
+    const auto hash=sha256(std::vector<unsigned char>(bytes.begin(),bytes.end()));
+    const auto archive=dataRoot/L"backups"/L"corrupt"/toWide(prefix+"-"+hash+".json");
+    if(configRegularFile(archive)){
+        const auto existing=readBinaryFile(archive,8u<<20);
+        if(std::string(existing.begin(),existing.end())!=bytes)throw std::runtime_error("Original queue archive differs; retained files");
+    }else writeAtomic(archive,std::vector<unsigned char>(bytes.begin(),bytes.end()));
+    const auto saved=readBinaryFile(archive,8u<<20);
+    if(std::string(saved.begin(),saved.end())!=bytes)throw std::runtime_error("Original queue archive verification failed");
+    return archive;
+}
+static void commitNetworkRetryQueue(const fs::path& dataRoot,const NetworkRetryQueueObservation& observation,const json& queue) {
+    namespace policy=custom_steam_library::config;
+    if(!observation.mayWrite)throw std::runtime_error("Network retry queue is unavailable or incompatible; original retained");
+    const auto checked=normalizeNetworkRetryQueue(queue);if(checked["jobs"]!=queue["jobs"])throw std::runtime_error("Invalid new network retry job");
+    const auto text=queue.dump(2);if(text.size()>(8u<<20))throw std::runtime_error("Network retry queue exceeds its read limit");
+    DataTransactionMutex transaction(2000);const auto path=networkRetryQueuePath(dataRoot);
+    if(!policy::same(observation.source,policy::readRuntime(path,8u<<20)))throw std::runtime_error("Network retry queue changed during update; retry");
+    if(observation.source.exists){
+        if(observation.corrupt)preserveNetworkRetryQueueBytes(dataRoot,observation.source.bytes,"network-retry-queue");
+        else {
+            const auto adjacent=fs::path(path.wstring()+L".bak");const auto previous=policy::readRuntime(adjacent,8u<<20);
+            if(previous.unreadable||previous.oversized)throw std::runtime_error("Cannot preserve existing queue backup");
+            if(previous.exists){
+                try{normalizeNetworkRetryQueue(parseLibraryTransactionBytes(std::vector<unsigned char>(previous.bytes.begin(),previous.bytes.end())));}
+                catch(...){preserveNetworkRetryQueueBytes(dataRoot,previous.bytes,"network-retry-backup");}
             }
-            continue;
+            const auto bytes=std::vector<unsigned char>(observation.source.bytes.begin(),observation.source.bytes.end());
+            if(!policy::same(previous,policy::readRuntime(adjacent,8u<<20)))throw std::runtime_error("Queue backup changed during update");
+            writeAtomic(adjacent,bytes);
+            const auto backup=policy::readRuntime(adjacent,8u<<20);
+            if(backup.unreadable||!backup.exists||backup.oversized||backup.bytes!=observation.source.bytes)throw std::runtime_error("Queue backup did not verify");
+            const auto archive=nextConfigBackupPath(dataRoot/L"backups"/L"state","network-retry-queue");writeAtomic(archive,bytes);
+            const auto archived=readBinaryFile(archive,8u<<20);
+            if(std::string(archived.begin(),archived.end())!=observation.source.bytes)throw std::runtime_error("Queue recovery copy did not verify");
         }
     }
-    if (fs::is_regular_file(path)) {
-        auto queue = defaultNetworkRetryQueue();
-        if (corruptTarget) queue["recoveredFromCorruptQueue"] = toUtf8(corruptTarget->wstring());
-        writeJsonWithBackup(path, dataRoot / L"backups" / L"state", "network-retry-queue", queue);
-        return queue;
-    }
-    return defaultNetworkRetryQueue();
+    // Recheck after preservation, immediately before activation. A cooperative
+    // transaction lock cannot authorize overwriting a newer external edit.
+    if(!policy::same(observation.source,policy::readRuntime(path,8u<<20)))throw std::runtime_error("Network retry queue changed during preservation; retry");
+    writeAtomic(path,std::vector<unsigned char>(text.begin(),text.end()));
+    const auto written=policy::readRuntime(path,8u<<20);
+    if(written.unreadable||!written.exists||written.oversized||written.bytes!=text)throw std::runtime_error("Network retry queue write did not verify");
+}
+static bool networkRetryJobDue(const json& job,uint64_t now,bool force) {
+    return job.is_object()&&job.value("status",std::string{})=="waiting-network"&&(force||job.value("nextAttemptAt",uint64_t{0})<=now);
 }
 
 static json executableIdentity(const fs::path& executable) {
@@ -9207,14 +9420,17 @@ static json enqueueNetworkRetry(
     // detached workers can finish different games at the same time; an
     // atomic file replace alone would still let the later writer erase the
     // earlier job.
-    DataTransactionMutex transaction;
-    auto queue = loadNetworkRetryQueue(dataRoot);
+    try {
+    DataTransactionMutex transaction(2000);
+    NetworkRetryQueueObservation observed;
+    auto queue = loadNetworkRetryQueue(dataRoot,&observed);
+    if(!observed.mayWrite)throw std::runtime_error("Network retry queue unavailable or incompatible");
     auto& job = queue["jobs"][jobId];
     const auto now = unixTimeMs();
     const int failures = job.is_object() ? (std::min)(1000000, job.value("consecutiveFailures", 0) + 1) : 1;
     const uint64_t delayMs = static_cast<uint64_t>((std::min)(15 * 60, 15 * (1 << (std::min)(failures - 1, 6)))) * 1000ull;
     const auto createdAt = job.is_object() ? job.value("createdAt", now) : now;
-    job = {
+    const json update = {
         {"id", jobId}, {"status", "waiting-network"},
         {"wakeMode", "event-driven-no-polling"},
         {"executable", toUtf8(executable.wstring())},
@@ -9226,9 +9442,12 @@ static json enqueueNetworkRetry(
         {"lastFailure", failure},
         {"automaticWakeReasons", {"app-start", "steam-launch", "library-page-open", "network-restored"}}
     };
-    writeJsonWithBackup(
-        networkRetryQueuePath(dataRoot), dataRoot / L"backups" / L"state", "network-retry-queue", queue);
+    for(const auto& [key,value]:update.items())job[key]=value;
+    job.erase("currentExecutableIdentity");
+    commitNetworkRetryQueue(dataRoot,observed,queue);
+    job["queued"]=true;
     return job;
+    }catch(const std::exception& error){return {{"id",jobId},{"queued",false},{"status","queue-unavailable"},{"error",error.what()}};}
 }
 
 static void appendLifecycleEvent(const fs::path& dataRoot, json event) {
@@ -9292,12 +9511,9 @@ static json inventoryRecoveryFiles(const fs::path& recoveryRoot) {
         const auto root = recoveryRoot / section;
         if (!fs::is_directory(root)) continue;
         std::error_code ec;
-        for (fs::recursive_directory_iterator iterator(root, fs::directory_options::skip_permission_denied, ec), end;
+        for (fs::recursive_directory_iterator iterator(root, fs::directory_options::none, ec), end;
              iterator != end; iterator.increment(ec)) {
-            if (ec) {
-                ec.clear();
-                continue;
-            }
+            if(ec)throw std::runtime_error("Cannot enumerate recovery inventory");
             if (!iterator->is_regular_file(ec) || ec) {
                 ec.clear();
                 continue;
@@ -9321,23 +9537,30 @@ static json inventoryRecoveryFiles(const fs::path& recoveryRoot) {
     return {{"files", files}, {"fileCount", files.size()}, {"totalBytes", totalBytes}};
 }
 
-static void verifyRecoveryFiles(const fs::path& recoveryRoot, const json& manifest) {
-    if (!manifest.contains("files") || !manifest["files"].is_array()) {
-        throw std::runtime_error("Deleted-game recovery manifest has no integrity inventory");
+static void verifyRecoveryFiles(const fs::path& recoveryRoot,const json& manifest,const fs::path& requested={}) {
+    if(!manifest.is_object()||!manifest.contains("schemaVersion")||!manifest["schemaVersion"].is_number_integer()||manifest["schemaVersion"]!=1||
+        !isCustomSteamLibraryFeatureName(jsonStringOr(manifest,"featureName"))||!manifest.contains("files")||!manifest["files"].is_array())throw std::runtime_error("Unknown deleted-game recovery schema; preserved");
+    const auto game=fs::path(toWide(jsonStringOr(manifest,"gameDirectory")));
+    if(game.empty()||!game.is_absolute()||jsonStringOr(manifest,"gameDataId")!=gameDataId(game)||(!requested.empty()&&canonicalPathKey(game)!=canonicalPathKey(requested)))throw std::runtime_error("Deleted-game recovery identity mismatch");
+    if(manifest.contains("manualGameDirectory")&&!manifest["manualGameDirectory"].is_null()) {
+        const auto directory=fs::path(toWide(jsonStringOr(manifest["manualGameDirectory"],"path")));
+        if(directory.empty()||canonicalPathKey(directory)!=canonicalPathKey(game))throw std::runtime_error("Recovery manual directory identity mismatch");
     }
-    for (const auto& item : manifest["files"]) {
-        const auto relative = fs::path(toWide(item.value("path", std::string{})));
-        if (!safeSnapshotRelativePath(relative)) throw std::runtime_error("Unsafe deleted-game recovery path");
-        const auto file = recoveryRoot / relative;
-        if (!pathWithin(file, recoveryRoot) || !fs::is_regular_file(file)) {
-            throw std::runtime_error("Deleted-game recovery file is missing");
-        }
-        const auto bytes = readBinaryFile(file, 128u << 20);
-        if (bytes.size() != item.value("bytes", static_cast<size_t>(0)) ||
-            sha256(bytes) != item.value("sha256", std::string{})) {
-            throw std::runtime_error("Deleted-game recovery integrity mismatch");
-        }
+    if(manifest.contains("manualPrimary")&&!manifest["manualPrimary"].is_null()) {
+        const auto exe=fs::path(toWide(jsonStringOr(manifest["manualPrimary"],"exe")));
+        if(exe.empty()||!pathWithin(exe,game))throw std::runtime_error("Recovery primary escaped game identity");
     }
+    if(!manifest.contains("manualOverrides")||!manifest["manualOverrides"].is_object())throw std::runtime_error("Invalid recovery override inventory");
+    for(const auto& [key,value]:manifest["manualOverrides"].items())if(!value.is_object()||!pathWithin(fs::path(toWide(key)),game))throw std::runtime_error("Recovery override escaped game identity");
+    assertNoReparsePoints(recoveryRoot);
+    for(const auto& row:manifest["files"]) {
+        if(!row.is_object()||!row.contains("path")||!row["path"].is_string()||!row.contains("bytes")||!row["bytes"].is_number_unsigned()||!row.contains("sha256")||!row["sha256"].is_string())throw std::runtime_error("Invalid recovery file evidence");
+        const auto relative=fs::path(toWide(row["path"].get<std::string>()));
+        if(!safeSnapshotRelativePath(relative))throw std::runtime_error("Unsafe deleted-game recovery path");
+    }
+    const auto actual=inventoryRecoveryFiles(recoveryRoot);
+    if(!manifest.contains("fileCount")||!manifest["fileCount"].is_number_unsigned()||!manifest.contains("totalBytes")||!manifest["totalBytes"].is_number_unsigned()||
+        actual["files"]!=manifest["files"]||actual["fileCount"]!=manifest["fileCount"]||actual["totalBytes"]!=manifest["totalBytes"])throw std::runtime_error("Recovery inventory differs from the exact manifest");
 }
 
 static fs::path createDeletedGameRecoveryPackage(
@@ -9357,6 +9580,7 @@ static fs::path createDeletedGameRecoveryPackage(
     for (const auto& section : {L"games", L"artwork", L"cache"}) {
         const auto source = dataRoot / section / toWide(id);
         if (!fs::is_directory(source)) continue;
+        assertNoReparsePoints(source);
         fs::create_directories(recovery);
         std::error_code ec;
         fs::copy(source, recovery / section,
@@ -9403,18 +9627,28 @@ static fs::path createDeletedGameRecoveryPackage(
     return recovery;
 }
 
+static bool deletedRecoveryConsumed(const fs::path& package,const json& manifest) {
+    const auto state=package/L"recovery-state.json";
+    if(!configRegularFile(state))return false;
+    try {
+        const auto bytes=readBinaryFile(state,1u<<20);const auto record=parseLibraryTransactionBytes(bytes);
+        return record.is_object()&&record.contains("schemaVersion")&&record["schemaVersion"]==1&&record.contains("restoredFiles")&&record["restoredFiles"].is_number_unsigned()&&record.contains("mergeDidNotOverwriteNewerFiles")&&record["mergeDidNotOverwriteNewerFiles"].is_boolean()&&record["mergeDidNotOverwriteNewerFiles"]==true&&record.contains("restoredAt")&&record["restoredAt"].is_number_unsigned()&&record["restoredAt"]!=0&&jsonStringOr(record,"gameDataId")==jsonStringOr(manifest,"gameDataId")&&jsonStringOr(record,"manifestSha256")==sha256(readBinaryFile(package/L"recovery-manifest.json",16u<<20));
+    }catch(...){return false;}
+}
 static fs::path latestDeletedGameRecoveryPackage(const fs::path& dataRoot, const fs::path& gameDirectory) {
     const auto root = dataRoot / L"backups" / L"deleted-games";
     std::vector<fs::path> candidates;
     std::error_code ec;
     if (!fs::is_directory(root, ec)) throw std::runtime_error("No deleted-game recovery package exists");
     for (const auto& entry : fs::directory_iterator(root, ec)) {
-        if (!entry.is_directory(ec) || fs::is_regular_file(entry.path() / L"recovery-state.json")) continue;
+        if (!entry.is_directory(ec) || isReparsePoint(entry.path())) continue;
         const auto manifestPath = entry.path() / L"recovery-manifest.json";
         if (!fs::is_regular_file(manifestPath)) continue;
         try {
             const auto bytes = readBinaryFile(manifestPath, 16u << 20);
-            const auto manifest = json::parse(bytes.begin(), bytes.end());
+            const auto manifest = parseLibraryTransactionBytes(bytes);
+            verifyRecoveryFiles(entry.path(),manifest);
+            if(deletedRecoveryConsumed(entry.path(),manifest))continue;
             if (canonicalPathKey(fs::path(toWide(manifest.value("gameDirectory", std::string{})))) ==
                 canonicalPathKey(gameDirectory)) candidates.push_back(entry.path());
         } catch (...) {
@@ -9430,19 +9664,20 @@ static fs::path latestDeletedGameRecoveryPackage(const fs::path& dataRoot, const
 
 static uintmax_t mergeRecoveryDirectory(const fs::path& source, const fs::path& target, const fs::path& dataRoot) {
     if (!fs::is_directory(source)) return 0;
+    assertNoReparsePoints(source);
+    if(fs::is_directory(target))assertNoReparsePoints(target);
     if (!pathWithin(target, dataRoot)) throw std::runtime_error("Recovery target escaped Custom Steam Library data root");
     fs::create_directories(target);
     uintmax_t copied = 0;
     std::error_code ec;
-    for (fs::recursive_directory_iterator iterator(source, fs::directory_options::skip_permission_denied, ec), end;
+    for (fs::recursive_directory_iterator iterator(source, fs::directory_options::none, ec), end;
          iterator != end; iterator.increment(ec)) {
-        if (ec) {
-            ec.clear();
-            continue;
-        }
+        if(ec)throw std::runtime_error("Recovery directory is not fully readable");
         const auto relative = fs::relative(iterator->path(), source, ec);
         if (ec || !safeSnapshotRelativePath(relative)) throw std::runtime_error("Unsafe recovery merge path");
         const auto destination = target / relative;
+        if(!pathWithin(destination,dataRoot)||isReparsePoint(destination))throw std::runtime_error("Recovery destination escaped ownership root");
+        if(fs::exists(destination)&&iterator->is_regular_file()&&!fs::is_regular_file(destination))throw std::runtime_error("Recovery file conflicts with destination directory");
         if (iterator->is_directory(ec)) {
             fs::create_directories(destination, ec);
         } else if (iterator->is_regular_file(ec) && !fs::exists(destination)) {
@@ -9572,26 +9807,171 @@ static bool definitePidBlacklistRole(const std::string& role) {
         role == "helper" || role == "updater";
 }
 
-static std::vector<std::string> readGameRuleFile(const fs::path& path) {
-    std::vector<std::string> rules;
-    if (!fs::is_regular_file(path)) return rules;
-    const auto bytes = readBinaryFile(path, 1u << 20);
+// Rule text is optional only when genuinely absent. Invalid/unreadable bytes
+// and nonordinary objects never become an empty ownership/default snapshot.
+static constexpr size_t gameRuleTextLimit = 1u << 20;
+struct GameRuleTextSnapshot {
+    bool existed = false;
+    std::vector<unsigned char> bytes;
+    BY_HANDLE_FILE_INFORMATION info{};
+};
+struct GameRuleTextHandle {
+    HANDLE value = INVALID_HANDLE_VALUE;
+    explicit GameRuleTextHandle(HANDLE input) : value(input) {}
+    GameRuleTextHandle(const GameRuleTextHandle&) = delete;
+    ~GameRuleTextHandle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+};
+static bool sameGameRuleFileInfo(const BY_HANDLE_FILE_INFORMATION& a, const BY_HANDLE_FILE_INFORMATION& b) {
+    return a.dwVolumeSerialNumber == b.dwVolumeSerialNumber && a.nFileIndexHigh == b.nFileIndexHigh &&
+        a.nFileIndexLow == b.nFileIndexLow && a.nFileSizeHigh == b.nFileSizeHigh && a.nFileSizeLow == b.nFileSizeLow &&
+        a.ftLastWriteTime.dwHighDateTime == b.ftLastWriteTime.dwHighDateTime &&
+        a.ftLastWriteTime.dwLowDateTime == b.ftLastWriteTime.dwLowDateTime &&
+        a.dwFileAttributes == b.dwFileAttributes && a.nNumberOfLinks == b.nNumberOfLinks;
+}
+static void validateGameRuleText(const std::string& content) {
+    if (content.size() > gameRuleTextLimit) throw std::runtime_error("Game-rule text exceeds its 1 MiB limit; original retained");
+    for (unsigned char c : content)
+        if (c < 32 && c != '\r' && c != '\n' && c != '\t') throw std::runtime_error("Game-rule text contains a control character; original retained");
+    const size_t skip = content.starts_with(std::string("\xef\xbb\xbf", 3)) ? 3 : 0;
+    if (content.size() > skip && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+        content.data() + skip, static_cast<int>(content.size() - skip), nullptr, 0) <= 0)
+        throw std::runtime_error("Game-rule text must be valid UTF-8; original retained");
+}
+static GameRuleTextSnapshot readGameRuleTextSnapshot(const fs::path& path) {
+    constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    constexpr DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_SEQUENTIAL_SCAN;
+    GameRuleTextHandle input(CreateFileW(custom_steam_library::ioPath(path).c_str(), GENERIC_READ, sharing,
+        nullptr, OPEN_EXISTING, flags, nullptr));
+    if (input.value == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+            throw std::runtime_error("Cannot read game-rule text: " + std::to_string(error));
+        // ERROR_PATH_NOT_FOUND can also mean that an ancestor is a file.
+        for (auto parent = fs::absolute(path).parent_path(); !parent.empty();) {
+            const auto attributes = GetFileAttributesW(custom_steam_library::ioPath(parent).c_str());
+            if (attributes != INVALID_FILE_ATTRIBUTES) {
+                if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                    throw std::runtime_error("Game-rule parent is not an ordinary directory");
+                break;
+            }
+            const auto parentError = GetLastError();
+            if (parentError != ERROR_FILE_NOT_FOUND && parentError != ERROR_PATH_NOT_FOUND)
+                throw std::runtime_error("Cannot inspect missing game-rule parent");
+            const auto next = parent.parent_path(); if (next == parent) break; parent = next;
+        }
+        return {};
+    }
+    GameRuleTextSnapshot result;
+    result.existed = true;
+    if (GetFileType(input.value) != FILE_TYPE_DISK || !GetFileInformationByHandle(input.value, &result.info) ||
+        (result.info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) || result.info.nNumberOfLinks != 1)
+        throw std::runtime_error("Game-rule source is not an ordinary single file; original retained");
+    const auto size = (uint64_t(result.info.nFileSizeHigh) << 32) | result.info.nFileSizeLow;
+    if (size > gameRuleTextLimit) throw std::runtime_error("Game-rule text exceeds its 1 MiB limit; original retained");
+    result.bytes.resize(static_cast<size_t>(size));
+    size_t offset = 0;
+    while (offset < result.bytes.size()) {
+        const auto wanted = static_cast<DWORD>((std::min)(size_t(65536), result.bytes.size() - offset));
+        DWORD received = 0;
+        if (!ReadFile(input.value, result.bytes.data() + offset, wanted, &received, nullptr) || received == 0 || received > wanted)
+            throw std::runtime_error("Game-rule text read failed; original retained");
+        offset += received;
+    }
+    BY_HANDLE_FILE_INFORMATION after{};
+    if (!GetFileInformationByHandle(input.value, &after) || !sameGameRuleFileInfo(result.info, after))
+        throw std::runtime_error("Game-rule text changed while being read");
+    validateGameRuleText(std::string(result.bytes.begin(), result.bytes.end()));
+    GameRuleTextHandle current(CreateFileW(custom_steam_library::ioPath(path).c_str(), GENERIC_READ, sharing,
+        nullptr, OPEN_EXISTING, flags, nullptr));
+    BY_HANDLE_FILE_INFORMATION identity{};
+    if (current.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(current.value, &identity) ||
+        !sameGameRuleFileInfo(result.info, identity)) throw std::runtime_error("Game-rule path changed while being read");
+    return result;
+}
+static bool sameGameRuleTextSnapshot(const GameRuleTextSnapshot& a, const GameRuleTextSnapshot& b) {
+    return a.existed == b.existed && (!a.existed || (sameGameRuleFileInfo(a.info, b.info) && a.bytes == b.bytes));
+}
+static std::vector<std::string> gameRuleTextRules(const std::vector<unsigned char>& bytes) {
     std::string content(bytes.begin(), bytes.end());
-    if (content.starts_with("\xEF\xBB\xBF")) content.erase(0, 3);
+    if (content.starts_with(std::string("\xef\xbb\xbf", 3))) content.erase(0, 3);
+    std::vector<std::string> rules;
+    std::set<std::string> seen;
     std::istringstream input(content);
     std::string line;
     while (std::getline(input, line)) {
         const auto comment = line.find('#');
         if (comment != std::string::npos) line.resize(comment);
         const auto rule = normalizeGameRule(line);
-        if (!rule.empty() && std::find(rules.begin(), rules.end(), rule) == rules.end()) rules.push_back(rule);
+        if (!rule.empty() && seen.insert(rule).second) rules.push_back(rule);
     }
     return rules;
 }
+static std::vector<std::string> readGameRuleFile(const fs::path& path) {
+    return gameRuleTextRules(readGameRuleTextSnapshot(path).bytes);
+}
 
-static std::vector<unsigned char> gameRuleFileBytes(const std::vector<std::string>& rules) {
+static std::vector<unsigned char> gameRuleFileBytes(const std::vector<std::string>& rules,
+    const std::vector<unsigned char>* originalWhitelist = nullptr) {
+    if (originalWhitelist) {
+        const std::string begin = custom_steam_library::ymcc_whitelist::beginMarker;
+        const std::string end = custom_steam_library::ymcc_whitelist::endMarker;
+        std::string raw(originalWhitelist->begin(), originalWhitelist->end());
+        validateGameRuleText(raw);
+        if (raw.starts_with(std::string("\xef\xbb\xbf", 3))) raw.erase(0, 3);
+        bool opened = false, closed = false;
+        std::set<std::string> managed, manual;
+        std::istringstream input(raw);
+        std::string line;
+        while (std::getline(input, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line == begin) {
+                if (opened || closed) throw std::runtime_error("Ambiguous managed game-rule block; original retained");
+                opened = true; continue;
+            }
+            if (line == end) {
+                if (!opened || closed) throw std::runtime_error("Unpaired managed game-rule block; original retained");
+                closed = true; continue;
+            }
+            const auto trimmed = toUtf8(trimWide(toWide(line)));
+            const auto hint = trimmed.starts_with("#") ? asciiLower(toUtf8(trimWide(toWide(trimmed.substr(1))))) : std::string{};
+            if ((hint.starts_with("begin") || hint.starts_with("end")) && hint.find("ymcc") != std::string::npos)
+                throw std::runtime_error("Unknown managed game-rule marker; original retained");
+            const auto comment = line.find('#'); if (comment != std::string::npos) line.resize(comment);
+            const auto rule = normalizeGameRule(line);
+            if (!rule.empty()) (opened && !closed ? managed : manual).insert(rule);
+        }
+        if (opened != closed) throw std::runtime_error("Incomplete managed game-rule block; original retained");
+        if (!opened) return gameRuleFileBytes(rules);
+        std::vector<std::string> manualRules, managedRules;
+        for (const auto& rule : rules) {
+            // An explicit manual line outside the block remains manual even
+            // when the same visible name is independently library-managed.
+            if (!managed.count(rule) || manual.count(rule)) manualRules.push_back(rule);
+            if (managed.count(rule)) managedRules.push_back(rule);
+        }
+        auto content = gameRuleFileBytes(manualRules);
+        if (!managedRules.empty()) {
+            auto owned = gameRuleFileBytes(managedRules);
+            if (managedRules.front().starts_with(std::string("\xef\xbb\xbf", 3))) owned.erase(owned.begin(), owned.begin() + 3);
+            const auto header = begin + "\n", footer = end + "\n";
+            content.insert(content.end(), header.begin(), header.end());
+            content.insert(content.end(), owned.begin(), owned.end());
+            content.insert(content.end(), footer.begin(), footer.end());
+        }
+        validateGameRuleText(std::string(content.begin(), content.end()));
+        return content;
+    }
     std::string content;
-    for (const auto& rule : rules) content += rule + "\n";
+    for (const auto& rule : rules) {
+        if (rule.empty()) throw std::runtime_error("Game rule cannot be empty");
+        validateGameRuleText(rule);
+        if (rule.find_first_of("\r\n\t#") != std::string::npos)
+            throw std::runtime_error("Game rule contains a reserved line or comment separator");
+        // Keep a literal leading U+FEFF distinct from an optional file BOM.
+        if (content.empty() && rule.starts_with(std::string("\xef\xbb\xbf", 3))) content = std::string("\xef\xbb\xbf", 3);
+        if (content.size() + rule.size() + 1 > gameRuleTextLimit) throw std::runtime_error("Game-rule output exceeds its 1 MiB limit");
+        content += rule; content += '\n';
+    }
     return std::vector<unsigned char>(content.begin(), content.end());
 }
 
@@ -11301,15 +11681,16 @@ static json scanLibraryRoots(
                 // Migrate only an exact old selected EXE from this specific
                 // collapsed container. This preserves existing shortcut
                 // ownership without granting sibling games the same owner.
-                json previousGames = json::array();
-                try { const auto bytes=readBinaryFile(g_workerDataRoot/L"state"/L"library-scan.json",64u<<20);
-                    const auto state=json::parse(bytes.begin(),bytes.end());previousGames=state.value("games",json::array()); }
-                catch (...) { /* No usable legacy state: no ownership alias. */ }
+                DataTransactionMutex aliasTransaction;
+                std::function<bool()> previousCurrent;
+                const auto previousState = libraryScanStateForMapping(g_workerDataRoot / L"state" / L"library-scan.json", previousCurrent);
+                const auto previousGames = previousState.value("games", json::array());
                 for(auto game:*children) {
                     for(const auto& old:previousGames) {
                         if(canonicalPathKey(fs::path(toWide(jsonStringOr(old,"gameDirectory"))))==canonicalPathKey(directory) &&
                            canonicalPathKey(fs::path(toWide(jsonStringOr(old,"primaryExecutable"))))==
-                           canonicalPathKey(fs::path(toWide(jsonStringOr(game,"primaryExecutable"))))) {
+                           canonicalPathKey(fs::path(toWide(jsonStringOr(game,"primaryExecutable")))) &&
+                           previousCurrent && previousCurrent()) {
                             game["alternateGameDirectories"]=json::array({toUtf8(directory.wstring())});
                             break;
                         }
@@ -11539,7 +11920,32 @@ struct PidRuleSyncPlan {
     json skipped = json::array();
 };
 
-static json validateLibraryScanState(json state) {
+struct LibraryScanFutureFormat : std::runtime_error { using std::runtime_error::runtime_error; };
+static void validateLibraryScanSchema(const json& state) {
+    // Missing schema is the original legacy inventory, not a future version.
+    if (state.is_object() && state.contains("schemaVersion") &&
+        (!state["schemaVersion"].is_number_integer() || state["schemaVersion"] != 1))
+        throw LibraryScanFutureFormat("Unknown library scan schema; original retained");
+}
+static bool libraryScanPathText(const std::string& text) {
+    return !text.empty() && std::none_of(text.begin(), text.end(), [](unsigned char c) { return c < 32; });
+}
+
+static json validateLibraryScanState(json state, bool* completeInventory = nullptr) {
+    if (completeInventory) *completeInventory = true;
+    validateLibraryScanSchema(state);
+    if (state.contains("libraryScanRecovery")) {
+        const auto& recovery = state["libraryScanRecovery"];
+        if (!recovery.is_object() || !recovery.contains("schemaVersion") || !recovery["schemaVersion"].is_number_integer() || recovery["schemaVersion"] != 1 ||
+            !recovery.contains("requiresFreshScan") || !recovery["requiresFreshScan"].is_boolean() || !recovery["requiresFreshScan"].get<bool>())
+            throw LibraryScanFutureFormat("Unknown scan recovery provenance; original retained");
+        // Repair restores a readable view, not evidence of a complete current inventory.
+        if (completeInventory) *completeInventory = false; // Recovered inventory cannot remove live membership.
+    }
+    for (const auto* name : {"roots", "skippedDirectories", "lifecycleTransitions"})
+        if (state.contains(name) && !state[name].is_array()) throw std::runtime_error("Invalid scan discovery container");
+    for (const auto* name : {"summary", "pidCoordination"})
+        if (state.contains(name) && !state[name].is_object()) throw std::runtime_error("Invalid scan discovery object");
     if (!state.is_object() || !state.contains("games") || !state["games"].is_array())
         throw std::runtime_error("Library scan state has an invalid format");
     std::set<std::string> inventoryExecutables;
@@ -11549,9 +11955,13 @@ static json validateLibraryScanState(json state) {
         json valid = json::array();
         std::set<std::string> seen;
         for (const auto& row : state[section]) {
-            if (!row.is_object() || custom_steam_library::builtinExcludedSteamTool(row) || jsonStringOr(row, "gameDirectory").empty()) continue;
+            if (!row.is_object() || !libraryScanPathText(jsonStringOr(row, "gameDirectory"))) {
+                if (completeInventory) *completeInventory = false;
+                continue;
+            }
+            if (custom_steam_library::builtinExcludedSteamTool(row)) continue;
             const auto key = canonicalPathKey(fs::path(toWide(jsonStringOr(row, "gameDirectory"))));
-            if (key.empty() || !seen.insert(key).second) continue;
+            if (key.empty() || !seen.insert(key).second) { if (completeInventory) *completeInventory = false; continue; }
             auto game = row;
             bool malformed = false;
             for (const auto* field : {"primaryExecutable", "status", "directoryName", "contentType", "classification", "selectionSource",
@@ -11563,20 +11973,44 @@ static json validateLibraryScanState(json state) {
                 if (game.contains(field) && !game[field].is_boolean()) { malformed = true; game.erase(field); }
             }
             const fs::path gamePath(toWide(jsonStringOr(row, "gameDirectory")));
-            if (!gamePath.is_absolute()) continue;
+            if (!gamePath.is_absolute()) { if (completeInventory) *completeInventory = false; continue; }
+            if (game.contains("nativeSteamAppId") && (!game["nativeSteamAppId"].is_number_integer() ||
+                game["nativeSteamAppId"].get<int64_t>() < 0 || game["nativeSteamAppId"].get<uint64_t>() > INT_MAX)) {
+                malformed = true; game.erase("nativeSteamAppId");
+            }
+            for (const auto* field : {"primaryPathEvidence"})
+                if (game.contains(field) && !game[field].is_object() && !game[field].is_null()) { malformed = true; game.erase(field); }
+            if (game.contains("primaryIdentityConfidence") && !game["primaryIdentityConfidence"].is_null() &&
+                (!game["primaryIdentityConfidence"].is_number() || !std::isfinite(game["primaryIdentityConfidence"].get<double>()) ||
+                 game["primaryIdentityConfidence"].get<double>() < 0 || game["primaryIdentityConfidence"].get<double>() > 1)) {
+                malformed = true; game.erase("primaryIdentityConfidence");
+            }
+            if (game.contains("candidates")) {
+                bool validCandidates = game["candidates"].is_array();
+                if (validCandidates) for (const auto& candidate : game["candidates"])
+                    if (!candidate.is_object() || !candidate.contains("path") || !candidate["path"].is_string() ||
+                        !libraryScanPathText(candidate["path"].get<std::string>()) || !fs::path(toWide(candidate["path"].get<std::string>())).is_absolute()) { validCandidates = false; break; }
+                if (!validCandidates) { malformed = true; game.erase("candidates"); }
+            }
+            if (game.contains("alternateGameDirectories")) {
+                bool validAliases = game["alternateGameDirectories"].is_array();
+                if (validAliases) for (const auto& alias : game["alternateGameDirectories"])
+                    if (!alias.is_string() || !libraryScanPathText(alias.get<std::string>()) || !fs::path(toWide(alias.get<std::string>())).is_absolute()) { validAliases = false; break; }
+                if (!validAliases) { malformed = true; game.erase("alternateGameDirectories"); }
+            }
             if (!game.contains("primaryExecutable")) game["primaryExecutable"] = "";
             if (!game.contains("status")) game["status"] = "unknown";
             if (!game["primaryExecutable"].get<std::string>().empty()) {
                 const fs::path primary(toWide(game["primaryExecutable"].get<std::string>()));
                 const auto extension = asciiLower(toUtf8(primary.extension().wstring()));
-                if (!primary.is_absolute() || !pathWithin(primary, gamePath) || extension != ".exe") {
+                if (!libraryScanPathText(game["primaryExecutable"].get<std::string>()) || !primary.is_absolute() || !pathWithin(primary, gamePath) || extension != ".exe") {
                     game["primaryExecutable"] = "";
                     malformed = true;
                 }
             }
             if (!game.value("scanComplete", true) && game.value("status", std::string{}) == "ready" &&
                 jsonStringOr(game, "selectionSource") != "manual") game["status"] = "scan-incomplete-needs-review";
-            if (malformed) { game["status"] = "data-invalid-review-required"; game["dataValidationWarning"] = true; }
+            if (malformed) { game["status"] = "data-invalid-review-required"; game["primaryExecutable"] = ""; game["dataValidationWarning"] = true; if (completeInventory) *completeInventory = false; }
             const auto exe = jsonStringOr(game, "primaryExecutable");
             if (!exe.empty() && inventoryExecutables.contains(canonicalPathKey(fs::path(toWide(exe))))) continue;
             valid.push_back(std::move(game));
@@ -11608,34 +12042,304 @@ static bool libraryScanCoversGame(const json& report, const json& config, const 
     return covered;
 }
 
-static json loadLibraryScanState(const fs::path& path) {
-    const auto dataRoot = path.parent_path().parent_path();
-    std::vector<fs::path> candidates{path};
-    const auto backups = stateBackupCandidates(dataRoot, path, "library-scan");
-    candidates.insert(candidates.end(), backups.begin(), backups.end());
-    std::optional<fs::path> corrupt;
-    for (const auto& candidate : candidates) {
-        try {
-            const auto bytes = readBinaryFile(candidate, 64u << 20);
-            auto state = json::parse(bytes.begin(), bytes.end());
-            state = validateLibraryScanState(std::move(state));
-            if (candidate != path) {
-                try { writeJsonWithBackup(path, dataRoot / L"backups" / L"state", "library-scan", state); } catch (...) {}
-            }
-            return state;
-        } catch (...) {
-            if (candidate == path && !corrupt) corrupt = preserveCorruptStateFile(dataRoot, path, "library-scan");
-        }
+struct LibraryScanReadError : std::runtime_error { using std::runtime_error::runtime_error; };
+struct LibraryScanSnapshot {
+    bool exists = false;
+    std::vector<unsigned char> bytes;
+    BY_HANDLE_FILE_INFORMATION info{};
+};
+struct LibraryScanObservation { bool active = false, complete = false; std::string source = "unknown"; LibraryScanSnapshot proof; bool mayRebuild = false; };
+static LibraryScanSnapshot readLibraryScanSnapshot(const fs::path& path) {
+    LibraryScanSnapshot result;
+    constexpr DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    constexpr DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_SEQUENTIAL_SCAN;
+    GameRuleTextHandle input(CreateFileW(custom_steam_library::ioPath(path).c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING, flags, nullptr));
+    if (input.value == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return result;
+        throw LibraryScanReadError("Library discovery source unreadable: " + std::to_string(error));
     }
-    throw std::runtime_error(corrupt
-        ? "Library scan state is corrupt and no valid backup exists: " + toUtf8(corrupt->wstring())
-        : "Library scan state is invalid; run --scan-library first");
+    result.exists = true;
+    if (GetFileType(input.value) != FILE_TYPE_DISK || !GetFileInformationByHandle(input.value, &result.info) ||
+        (result.info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) || result.info.nNumberOfLinks != 1)
+        throw LibraryScanReadError("Library discovery source is not an ordinary single file");
+    const auto length = (uint64_t(result.info.nFileSizeHigh) << 32) | result.info.nFileSizeLow;
+    if (length > (64u << 20)) throw LibraryScanReadError("Library discovery source exceeds its 64 MiB budget");
+    result.bytes.resize(static_cast<size_t>(length));
+    for (size_t offset = 0; offset < result.bytes.size();) {
+        DWORD got = 0;
+        const auto count = static_cast<DWORD>((std::min)(size_t(65536), result.bytes.size() - offset));
+        if (!ReadFile(input.value, result.bytes.data() + offset, count, &got, nullptr) || !got || got > count)
+            throw LibraryScanReadError("Incomplete library discovery read");
+        offset += got;
+    }
+    BY_HANDLE_FILE_INFORMATION after{}, currentInfo{};
+    GameRuleTextHandle current(CreateFileW(custom_steam_library::ioPath(path).c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING, flags, nullptr));
+    if (!GetFileInformationByHandle(input.value, &after) || !sameGameRuleFileInfo(result.info, after) ||
+        current.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(current.value, &currentInfo) || !sameGameRuleFileInfo(result.info, currentInfo))
+        throw LibraryScanReadError("Library discovery source changed while reading");
+    return result;
+}
+static bool sameLibraryScanSnapshot(const LibraryScanSnapshot& left, const LibraryScanSnapshot& right) {
+    return left.exists == right.exists && (!left.exists || (sameGameRuleFileInfo(left.info, right.info) && left.bytes == right.bytes));
+}
+static bool libraryScanObservationCurrent(const LibraryScanObservation& observation, const fs::path& path) {
+    try { return observation.active && sameLibraryScanSnapshot(observation.proof, readLibraryScanSnapshot(path)); }
+    catch (...) { return false; }
+}
+static json parseLibraryScanSnapshot(const LibraryScanSnapshot& source) {
+    if (std::find(source.bytes.begin(), source.bytes.end(), 0) != source.bytes.end())
+        throw std::runtime_error("NUL byte in library discovery JSON");
+    return parseLibraryTransactionBytes(source.bytes);
+}
+static void archiveLibraryDiscoveryOriginal(const fs::path& dataRoot, const LibraryScanSnapshot& source) {
+    if (!source.exists) return;
+    const auto root = dataRoot / L"backups" / L"discovery-originals";
+    fs::create_directories(custom_steam_library::ioPath(root));
+    static std::atomic<uint64_t> sequence{0};
+    for (unsigned attempt = 0; attempt < 32; ++attempt) {
+        const auto directory = root / (std::to_wstring(unixTimeMs()) + L"-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(++sequence));
+        std::error_code error;
+        if (!fs::create_directory(custom_steam_library::ioPath(directory), error)) {
+            if (error && error != std::errc::file_exists) throw LibraryScanReadError("Cannot preserve library discovery original");
+            continue;
+        }
+        const auto path = directory / L"original.json";
+        writeAtomic(path, source.bytes);
+        const auto saved = readLibraryScanSnapshot(path);
+        if (!saved.exists || saved.bytes != source.bytes) throw LibraryScanReadError("Library discovery original archive unconfirmed");
+        return;
+    }
+    throw LibraryScanReadError("Library discovery original archive is busy");
+}
+static std::vector<fs::path> libraryScanBackupCandidates(const fs::path& dataRoot, const fs::path& path) {
+    std::vector<fs::path> result{fs::path(path.wstring() + L".bak")};
+    std::vector<std::pair<fs::file_time_type, fs::path>> history;
+    std::error_code error;
+    fs::directory_iterator it(dataRoot / L"backups" / L"state", error), end;
+    for (size_t inspected = 0; !error && it != end && inspected < 128; ++inspected, it.increment(error)) {
+        const auto file = it->path();
+        if (!file.filename().wstring().starts_with(L"library-scan-") || file.extension() != L".json") continue;
+        std::error_code status;
+        if (!it->is_regular_file(status) || status) continue;
+        const auto time = it->last_write_time(status);
+        if (!status) history.push_back({time, file});
+    }
+    std::sort(history.begin(), history.end(), [](const auto& left, const auto& right) { return left.first != right.first ? left.first > right.first : left.second.native() > right.second.native(); });
+    for (const auto& row : history) { if (result.size() == 8) break; result.push_back(row.second); }
+    return result;
+}
+static json unavailableLibraryScanState(const fs::path& path, const std::string& reason) {
+    return {{"schemaVersion", 1}, {"games", json::array()}, {"missingGames", json::array()}, {"unscannedGames", json::array()},
+        {"discoveryState", {{"active", false}, {"complete", false}, {"status", "unknown"}, {"path", toUtf8(path.wstring())}, {"reason", reason}, {"originalRetained", true}}}};
+}
+static json loadLibraryScanState(const fs::path& path, LibraryScanObservation* observation = nullptr) {
+    if (observation) *observation = {};
+    auto active = [&](json state, bool complete, const char* source, const LibraryScanSnapshot& proof) {
+        if (observation) *observation = {true, complete, source, proof, true};
+        state["discoveryState"] = {{"active", true}, {"complete", complete}, {"status", complete ? "current" : "review-required"}, {"source", source}};
+        return state;
+    };
+    try {
+        DataTransactionMutex transaction;
+        const auto original = readLibraryScanSnapshot(path);
+        if (original.exists) try {
+            bool complete = false;
+            auto state = validateLibraryScanState(parseLibraryScanSnapshot(original), &complete);
+            return active(std::move(state), complete, "current", original);
+        } catch (const LibraryScanFutureFormat&) { throw; }
+          catch (const std::exception&) { /* Proven format damage; a verified repair may be attempted. */ }
+        for (const auto& candidate : libraryScanBackupCandidates(path.parent_path().parent_path(), path)) {
+            LibraryScanSnapshot backup;
+            json state;
+            bool complete = false;
+            try {
+                backup = readLibraryScanSnapshot(candidate);
+                if (!backup.exists) continue;
+                state = validateLibraryScanState(parseLibraryScanSnapshot(backup), &complete);
+            } catch (...) { continue; }
+            // Retain this debt across subsequent reads. Only a fresh explicit
+            // scan produces an inventory without this conservative marker.
+            auto recoveredDocument = parseLibraryScanSnapshot(backup);
+            auto& provenance = recoveredDocument["libraryScanRecovery"];
+            if (!provenance.is_object()) provenance = json::object();
+            provenance["schemaVersion"] = 1;
+            provenance["requiresFreshScan"] = true;
+            const auto recoveredText = recoveredDocument.dump(2);
+            if (recoveredText.size() > (64u << 20)) throw LibraryScanReadError("Recovered discovery document exceeds its reader budget");
+            const std::vector<unsigned char> recoveredBytes(recoveredText.begin(), recoveredText.end());
+            state = validateLibraryScanState(std::move(recoveredDocument), &complete);
+            // No stale backup becomes authority merely because a repair write
+            // failed. Keep both original images until canonical readback agrees.
+            if (!sameLibraryScanSnapshot(original, readLibraryScanSnapshot(path))) throw LibraryScanReadError("Scan source changed before recovery");
+            archiveLibraryDiscoveryOriginal(path.parent_path().parent_path(), original);
+            if (!sameLibraryScanSnapshot(original, readLibraryScanSnapshot(path)) || !sameLibraryScanSnapshot(backup, readLibraryScanSnapshot(candidate)))
+                throw LibraryScanReadError("Scan recovery source changed; original retained");
+            writeAtomic(path, recoveredBytes);
+            const auto committed = readLibraryScanSnapshot(path);
+            if (!committed.exists || committed.bytes != recoveredBytes) throw LibraryScanReadError("Scan recovery commit readback changed");
+            validateLibraryScanState(parseLibraryScanSnapshot(committed));
+            return active(std::move(state), complete, "verified-restored-backup", committed);
+        }
+        if (observation) *observation = {false, false, original.exists ? "damaged" : "missing", original, true};
+        return unavailableLibraryScanState(path, original.exists ? "invalid-without-verified-recovery" : "missing");
+    } catch (const std::exception& error) { return unavailableLibraryScanState(path, error.what()); }
+      catch (...) { return unavailableLibraryScanState(path, "Library discovery source unavailable"); }
 }
 
 struct SteamShortcutTarget {
     fs::path path;
     std::string accountId;
 };
+
+static json libraryScanStateForMapping(const fs::path& path, std::function<bool()>& stillCurrent) {
+    LibraryScanObservation observation;
+    auto state = loadLibraryScanState(path, &observation);
+    stillCurrent = [path, observation] { return libraryScanObservationCurrent(observation, path); };
+    return observation.active ? state : json{{"games", json::array()}};
+}
+static bool libraryAccountsReportShape(const json& value) {
+    if (!value.is_object() || !value.contains("accounts") || !value["accounts"].is_array()) return false;
+    for (const auto* key : {"mode", "steamStatus", "steamPath", "steamDownloadUrl"})
+        if (value.contains(key) && !value[key].is_string()) return false;
+    for (const auto* key : {"steamInstalled", "multipleAccounts", "requiresExplicitSelection"})
+        if (value.contains(key) && !value[key].is_boolean()) return false;
+    for (const auto& row : value["accounts"]) {
+        if (!row.is_object() || !row.contains("accountId") || !row["accountId"].is_string() ||
+            !custom_steam_library::ymcc_whitelist::accountKey(row["accountId"].get<std::string>()) ||
+            !row.contains("shortcutsVdf") || !row["shortcutsVdf"].is_string() ||
+            !custom_steam_library::ymcc_whitelist::bindingPath(row["shortcutsVdf"].get<std::string>(), row["accountId"].get<std::string>())) return false;
+        for (const auto* key : {"steamRoot"}) if (row.contains(key) && !row[key].is_string()) return false;
+        for (const auto* key : {"shortcutsVdfExists", "realSteamTarget"}) if (row.contains(key) && !row[key].is_boolean()) return false;
+        for (const auto* key : {"shortcutCount", "gridFiles", "gridBytes"}) if (row.contains(key) &&
+            (!row[key].is_number_integer() || (!row[key].is_number_unsigned() && row[key].get<int64_t>() < 0))) return false;
+        if (row.contains("readError") && !row["readError"].is_null() && !row["readError"].is_string()) return false;
+    }
+    return true;
+}
+
+static json unavailableLibraryDiscoveryPlan(const char* mode, const fs::path& statePath,
+    const SteamShortcutTarget& target, const std::string& reason) {
+    return {{"schemaVersion", 1}, {"mode", mode}, {"libraryState", toUtf8(statePath.wstring())},
+        {"shortcutsVdf", toUtf8(target.path.wstring())}, {"accountId", target.accountId}, {"realSteamTarget", false},
+        {"committed", false}, {"planWriteConfirmed", false}, {"items", json::array()}, {"unmatchedSelections", json::array()},
+        {"summary", {{"readyToAdd", 0}, {"readyToDelete", 0}, {"shortcutIdConflicts", 0}, {"scannedGames", 0}}},
+        {"discoveryState", {{"active", false}, {"complete", false}, {"status", "unknown"}, {"reason", reason}, {"originalRetained", true}}}};
+}
+static bool writeLibraryDiscoveryPlan(const fs::path& dataRoot, const fs::path& path, const json& plan, std::string& reason,
+    const LibraryScanSnapshot* expectedSource = nullptr, bool accountReport = false) {
+    try {
+        const auto text = plan.dump(2);
+        if (text.size() > (64u << 20)) throw LibraryScanReadError("Discovery plan exceeds its 64 MiB read budget");
+        const auto original = readLibraryScanSnapshot(path);
+        if (expectedSource && !sameLibraryScanSnapshot(*expectedSource, original)) throw LibraryScanReadError("Discovery output changed since observation; original retained");
+        if (original.exists) {
+            bool readableAccountBase = false;
+            try { const auto previous = parseLibraryScanSnapshot(original); validateLibraryScanSchema(previous); readableAccountBase = libraryAccountsReportShape(previous); }
+            catch (const LibraryScanFutureFormat&) { throw; }
+            catch (const std::exception&) { /* Preserve damaged generated output before explicit rebuild. */ }
+            if (accountReport && !readableAccountBase) {
+                const bool verifiedLiveAccount = plan.contains("accounts") && plan["accounts"].is_array() &&
+                    std::any_of(plan["accounts"].begin(), plan["accounts"].end(), [](const json& row) {
+                        return row.is_object() && jsonBoolSafe(row, "shortcutsVdfExists", false) && row.contains("readError") && row["readError"].is_null();
+                    });
+                if (!verifiedLiveAccount) throw LibraryScanReadError("Unknown previous accounts cannot be repaired with an empty or unverified default");
+            }
+            archiveLibraryDiscoveryOriginal(dataRoot, original);
+        }
+        if (!sameLibraryScanSnapshot(original, readLibraryScanSnapshot(path))) throw LibraryScanReadError("Discovery plan source changed before submission");
+        const std::vector<unsigned char> bytes(text.begin(), text.end());
+        writeAtomic(path, bytes);
+        const auto committed = readLibraryScanSnapshot(path);
+        if (!committed.exists || committed.bytes != bytes || parseLibraryScanSnapshot(committed) != plan)
+            throw LibraryScanReadError("Discovery plan commit readback changed");
+        return true;
+    } catch (const std::exception& error) { reason = error.what(); return false; }
+      catch (...) { reason = "Discovery plan publication failed"; return false; }
+}
+
+static bool discoveryOutputWritable(const fs::path& path, LibraryScanSnapshot& proof, std::string& reason) {
+    try {
+        proof = readLibraryScanSnapshot(path);
+        if (proof.exists) try { validateLibraryScanSchema(parseLibraryScanSnapshot(proof)); }
+            catch (const LibraryScanFutureFormat&) { throw; }
+            catch (const std::exception&) { /* A new observed document may replace damage after archiving. */ }
+        return true;
+    } catch (const std::exception& error) { reason = error.what(); return false; }
+      catch (...) { reason = "Discovery output unavailable"; return false; }
+}
+static bool publishFreshLibraryScan(const fs::path& dataRoot, const fs::path& persistent, const fs::path& output,
+    const LibraryScanObservation& previous, const json& report, bool& stateCommitted, std::string& reason,
+    const json* expectedManualPrimary = nullptr) {
+    stateCommitted = false;
+    try {
+        DataTransactionMutex transaction;
+        if(expectedManualPrimary&&loadLibraryConfig(dataRoot/L"config"/L"library-config.json").value("manualPrimary",json::object())!=*expectedManualPrimary)
+            throw LibraryScanReadError("Primary choices changed while scanning; previous inventory retained");
+        if (!previous.mayRebuild) throw LibraryScanReadError("Previous inventory is protected or unreadable");
+        validateLibraryScanState(report);
+        if (canonicalPathKey(output) == canonicalPathKey(persistent)) {
+            stateCommitted = writeLibraryDiscoveryPlan(dataRoot, persistent, report, reason, &previous.proof);
+            return stateCommitted;
+        }
+        LibraryScanSnapshot outputProof;
+        if (!discoveryOutputWritable(output, outputProof, reason)) return false;
+        if (!writeLibraryDiscoveryPlan(dataRoot, persistent, report, reason, &previous.proof)) return false;
+        stateCommitted = true;
+        return writeLibraryDiscoveryPlan(dataRoot, output, report, reason, &outputProof);
+    } catch (const std::exception& error) { reason = error.what(); return false; }
+      catch (...) { reason = "Fresh inventory publication failed"; return false; }
+}
+// Persist an editor's explicit primary choice and publish its exact current
+// game before dependent identity/artwork writes. No whole-library discovery.
+static void saveEditorPrimary(const fs::path& dataRoot,const fs::path& directory,const fs::path& executable,const std::string& expected){
+    DataTransactionMutex transaction;
+    const auto statePath=dataRoot/L"state"/L"library-scan.json",configPath=dataRoot/L"config"/L"library-config.json";
+    LibraryScanObservation observation;auto state=loadLibraryScanState(statePath,&observation);
+    if(!observation.active||!observation.complete)throw std::runtime_error("Current inventory is protected, incomplete or unreadable; primary selection was not saved");
+    size_t selected=SIZE_MAX;
+    for(size_t i=0;i<state["games"].size();++i)if(canonicalPathKey(fs::path(toWide(jsonStringOr(state["games"][i],"gameDirectory"))))==canonicalPathKey(directory)){
+        if(selected!=SIZE_MAX)throw std::runtime_error("Duplicate game directory; refresh before selecting its primary");selected=i;
+    }
+    if(selected==SIZE_MAX)throw std::runtime_error("The selected game is no longer in the current inventory");
+    const auto original=state["games"][selected];
+    if(jsonBoolSafe(original,"steamNative",false)||jsonStringOr(original,"contentType")=="steam-native"||jsonIntCaseInsensitive(original,"nativeSteamAppId").value_or(0)>0)
+        throw std::runtime_error("Native Steam primary selection is managed by its installation manifest");
+    const auto previous=jsonStringOr(original,"primaryExecutable");
+    if((previous.empty()!=expected.empty())||(!previous.empty()&&canonicalPathKey(fs::path(toWide(previous)))!=canonicalPathKey(fs::path(toWide(expected)))))
+        throw std::runtime_error("Primary changed after the editor opened; refresh before saving");
+    auto config=loadLibraryConfig(configPath);const auto baseline=config;
+    const auto choice=config["manualPrimary"].find(canonicalPathKey(directory));
+    const auto configured=choice!=config["manualPrimary"].end()&&choice->is_object()?jsonStringOr(*choice,"exe"):std::string{};
+    if(!configured.empty()&&canonicalPathKey(fs::path(toWide(configured)))!=canonicalPathKey(executable)&&
+        (expected.empty()||canonicalPathKey(fs::path(toWide(configured)))!=canonicalPathKey(fs::path(toWide(expected)))))
+        throw std::runtime_error("A newer primary choice is already saved; refresh before replacing it");
+    config["manualPrimary"][canonicalPathKey(directory)]={{"gameDirectory",toUtf8(directory.wstring())},{"exe",toUtf8(executable.wstring())},{"source","user"},{"locked",true},{"protectedFromAutomaticOverwrite",true},{"tags",{"manual-primary","locked"}},{"updatedAt",unixTimeMs()}};
+    const auto scanned=scanOneGameDirectory(directory,5,config,{});
+    if(jsonStringOr(scanned,"status")!="ready"||canonicalPathKey(fs::path(toWide(jsonStringOr(scanned,"primaryExecutable"))))!=canonicalPathKey(executable)||custom_steam_library::builtinExcludedSteamTool(scanned))
+        throw std::runtime_error("The selected EXE is excluded or unavailable; primary selection was not saved");
+    auto updated=original;for(auto it=scanned.begin();it!=scanned.end();++it)updated[it.key()]=it.value();
+    state["games"][selected]=updated;state["updatedAt"]=unixTimeMs();
+    if(state.contains("summary")&&state["summary"].is_object()){
+        state["summary"]["games"]=state["games"].size();state["summary"]["ready"]=std::count_if(state["games"].begin(),state["games"].end(),[](const json& row){return jsonStringOr(row,"status")=="ready";});
+        state["summary"]["manualPrimaryMissing"]=std::count_if(state["games"].begin(),state["games"].end(),[](const json& row){return jsonStringOr(row,"status")=="manual-primary-missing";});
+        state["summary"]["needsPrimaryExeConfirmation"]=std::count_if(state["games"].begin(),state["games"].end(),[](const json& row){const auto status=jsonStringOr(row,"status");return status!="ready"&&status!="manual-primary-missing"&&status!="unrecognized-tool";});
+        state["summary"]["nonGames"]=std::count_if(state["games"].begin(),state["games"].end(),[](const json& row){return jsonStringOr(row,"status")=="unrecognized-tool";});
+    }
+    const auto validated=validateLibraryScanState(state);
+    if(validated["games"].size()!=state["games"].size())throw std::runtime_error("Primary choice conflicts with another game or excluded inventory; original retained");
+    if(!sameLibraryScanSnapshot(observation.proof,readLibraryScanSnapshot(statePath)))throw std::runtime_error("Inventory changed during primary selection; original retained");
+    config["updatedAt"]=unixTimeMs();
+    writeJsonWithBackup(configPath,dataRoot/L"backups"/L"config","library-config",config,&baseline);
+    std::string reason;
+    if(!writeLibraryDiscoveryPlan(dataRoot,statePath,validated,reason,&observation.proof))throw std::runtime_error("Primary choice is saved, but current inventory publication must be retried: "+reason);
+    appendLifecycleEvent(dataRoot,{{"type","manual-primary-selected"},{"gameDirectory",toUtf8(directory.wstring())},{"executable",toUtf8(executable.wstring())},{"locked",true},{"targetedStatePublished",true}});
+}
+
+static void printLibraryScanUnavailable(const std::string& reason, bool stateCommitted = false) {
+    std::cout << "LIBRARY_SCAN_STATE: unknown\nLIBRARY_SCAN_COMMITTED: false\nLIBRARY_STATE_COMMITTED: " << (stateCommitted ? "true" : "false") << "\n";
+    std::cerr << "WARNING_LIBRARY_SCAN_PUBLICATION: " << reason << "\n";
+}
 
 static SteamShortcutTarget selectSteamShortcutTarget(
     const std::optional<fs::path>& explicitFile,
@@ -11726,9 +12430,48 @@ static json listSteamAccountTargets(const std::vector<fs::path>& steamRoots) {
     };
 }
 
+static json readLiveLibraryAccountReport(const std::vector<fs::path>& requestedRoots) {
+    auto roots = requestedRoots;
+    if (roots.empty()) if (const auto detected = steamInstallPath()) roots.push_back(*detected);
+    for (const auto& root : roots) {
+        std::error_code error;
+        if (!fs::is_directory(root, error) || error) throw LibraryScanReadError("Steam discovery root is unavailable");
+        const auto userdata = _wcsicmp(root.filename().c_str(), L"userdata") == 0 ? root : root / L"userdata";
+        const auto status = fs::status(userdata, error);
+        if (error == std::errc::no_such_file_or_directory || status.type() == fs::file_type::not_found) continue;
+        if (error || !fs::is_directory(status)) throw LibraryScanReadError("Steam account inventory is not a readable directory");
+        fs::directory_iterator probe(userdata, error);
+        if (error) throw LibraryScanReadError("Steam account inventory is unreadable");
+    }
+    auto report = listSteamAccountTargets(requestedRoots);
+    if (!libraryAccountsReportShape(report)) throw LibraryScanReadError("Invalid freshly observed account report");
+    for (const auto& row : report["accounts"])
+        if (row.contains("readError") && !row["readError"].is_null()) throw LibraryScanReadError("Actual account VDF is unreadable; cached observation retained");
+    return report;
+}
+
 static json loadJsonDocument(const fs::path& path, size_t maximumBytes = 64u << 20) {
     const auto bytes = readBinaryFile(path, maximumBytes);
     return json::parse(bytes.begin(), bytes.end());
+}
+
+// Validate with the same TXT contract as the legacy consumer, then replace
+// only the known managed byte range. Manual bytes and an optional file BOM
+// remain distinct from library ownership.
+static std::vector<unsigned char> publishedGameWhitelistBytes(
+    const GameRuleTextSnapshot& source, const std::set<std::string>& managedRules) {
+    (void)gameRuleFileBytes({}, &source.bytes);
+    (void)gameRuleFileBytes(std::vector<std::string>(managedRules.begin(), managedRules.end()));
+    std::string original(source.bytes.begin(), source.bytes.end());
+    const std::string bom("\xef\xbb\xbf", 3);
+    const bool hadBom = original.starts_with(bom);
+    if (hadBom) original.erase(0, bom.size());
+    auto desired = custom_steam_library::ymcc_whitelist::renderManagedBlock(original, managedRules);
+    if (hadBom) desired.insert(0, bom);
+    // Includes the retained manual bytes, markers and generated managed rules.
+    const std::vector<unsigned char> bytes(desired.begin(), desired.end());
+    (void)gameRuleFileBytes({}, &bytes);
+    return bytes;
 }
 
 // Auxiliary publication is outside Steam rollback. This existing transaction
@@ -11739,33 +12482,82 @@ static void publishYmccGameWhitelist(json& event, const fs::path& dataRoot, bool
     try {
         if (!membership::authoritativeEvent(event)) return;
         DataTransactionMutex transaction;
+        ymcc::gamerules::FilesGuard coordinated(destination.parent_path().wstring());
+        ymcc::gamerules::requireNativeRecoveryComplete(destination.parent_path().wstring());
         const auto statePath = dataRoot / L"state" / L"ymcc-game-whitelist-membership.json";
-        const auto previous = fs::exists(statePath) ? loadJsonDocument(statePath, 1u << 20) : membership::emptyMembership();
-        membership::prepareLiveEvent(event, previous, completeAccount);
-        const auto update = membership::applyPrepared(previous, event, normalizeGameRule);
+        const auto previous = fs::exists(statePath) ? readLibraryTransactionDocument(statePath, 1u << 20) : membership::emptyMembership();
+        if(!event.contains("schemaVersion")||!event["schemaVersion"].is_number_integer()||event["schemaVersion"]!=1)throw std::runtime_error("Unknown whitelist event schema; inactive");
+        const auto account=jsonStringOr(event,"accountId");const auto target=fs::path(toWide(jsonStringOr(event,"shortcutsVdf")));
+        if(target.empty()||target.filename()!=L"shortcuts.vdf"||target.parent_path().filename()!=L"config"||target.parent_path().parent_path().parent_path().filename()!=L"userdata"||toUtf8(target.parent_path().parent_path().filename().wstring())!=account||!realSteamShortcutsPath(target))throw std::runtime_error("Whitelist live account/path mismatch");
+        const auto liveBytes=configRegularFile(target)?readBinaryFile(target,16u<<20):std::vector<unsigned char>{};
+        const auto mode=jsonStringOr(event,"mode");const auto expected=jsonStringOr(event,mode=="steam-library-add-plan"?"shortcutsBeforeSha256":"shortcutsAfterSha256");
+        if(expected.empty()||sha256(liveBytes)!=expected)throw std::runtime_error("Whitelist event is not bound to current Steam bytes");
+        auto liveExecutables=[&](const fs::path& file,const std::string& owner){std::set<std::string> keys;if(configRegularFile(file))for(const auto& shortcut:readShortcuts(file,owner)){const auto exe=expandEnvironmentPath(unquote(shortcut.exe));if(!exe.empty())keys.insert(canonicalPathKey(exe));}return keys;};
+        const auto live=liveExecutables(target,account);
+        for(const auto& row:event["items"]) {
+            const auto status=jsonStringOr(row,"status");const auto exe=fs::path(toWide(jsonStringOr(row,"primaryExecutable")));
+            if(status=="already-in-steam"||status=="added-to-steam") {if(exe.empty()||!live.count(canonicalPathKey(exe)))throw std::runtime_error("Whitelist row does not match actual account membership");}
+            if(mode=="steam-library-delete-commit"&&status=="ready-to-delete"&&!exe.empty()&&live.count(canonicalPathKey(exe)))throw std::runtime_error("Deleted whitelist row is still owned by this Steam account");
+        }
+        if(previous.contains("bindings")&&(!previous["bindings"].is_object()))throw std::runtime_error("Invalid membership installation bindings");
+        if(previous.contains("bindings")&&previous["bindings"].contains(account)&&jsonStringOr(previous["bindings"][account],"shortcutsVdf")!=toUtf8(target.wstring()))throw std::runtime_error("Same account membership belongs to another Steam installation");
+        if(event.contains("ymccMembershipAuthority")) {
+            const auto& authority=event["ymccMembershipAuthority"];
+            if(!authority.is_object()||!authority.contains("baseRevision")||!authority["baseRevision"].is_number_unsigned()||authority["baseRevision"].get<uint64_t>()!=membership::revision(previous,account))throw std::runtime_error("Stale membership event cannot be resigned as live");
+        } else membership::prepareLiveEvent(event,previous,completeAccount);
+        auto update = membership::applyPrepared(previous, event, normalizeGameRule);
         if (!update.accepted) {
             event["ymccWhitelistPublication"] = {{"status", "skipped"}, {"reason", update.reason}};
             return;
         }
-        const auto originalBytes = fs::exists(destination) ? readBinaryFile(destination, 1u << 20) : std::vector<unsigned char>{};
-        const std::string original(originalBytes.begin(), originalBytes.end());
-        const auto desired = membership::renderManagedBlock(original, membership::unionRules(update.membership));
+        for(const auto& [owner,row]:previous["accounts"].items())if(update.membership["accounts"].contains(owner))
+            for(const auto& [key,value]:row.items())if(key!="revision"&&key!="entries")update.membership["accounts"][owner][key]=value;
+        update.membership["bindings"][account]["shortcutsVdf"]=toUtf8(target.wstring());
+        const auto original = readGameRuleTextSnapshot(destination);
+        // Bind every peer to its actual installation and verify its ownership
+        // before publishing a cross-account union. Unknown debt never removes
+        // or manufactures rules; later explicit account refreshes can bind it.
+        const bool ownershipChanged=update.membership!=previous;
+        if (ownershipChanged) {
+            // Use the existing membership reader budget before replacing its
+            // valid base, including retained unknown fields and new bindings.
+            if (update.membership.dump(2).size() > (1u << 20))
+                throw std::runtime_error("YMCC whitelist ownership exceeds its 1 MiB reader budget; original retained");
+            writeJsonAtomic(statePath, update.membership);
+            if (readLibraryTransactionDocument(statePath, 1u << 20) != update.membership)
+                throw std::runtime_error("YMCC whitelist ownership commit readback changed; confirmed observations retained for explicit retry");
+        }
+        for(const auto& [owner,row]:update.membership["accounts"].items()) {
+            if(!update.membership["bindings"].contains(owner))throw std::runtime_error("Unbound legacy peer membership remains unknown; refresh that account explicitly");
+            const auto peer=fs::path(toWide(jsonStringOr(update.membership["bindings"][owner],"shortcutsVdf")));
+            if(peer.empty()||peer.filename()!=L"shortcuts.vdf"||toUtf8(peer.parent_path().parent_path().filename().wstring())!=owner||!realSteamShortcutsPath(peer))throw std::runtime_error("Invalid peer Steam installation binding");
+            const auto actual=owner==account?live:liveExecutables(peer,owner);
+            for(const auto& [key,rule]:row["entries"].items()) {
+                if(rule.get<std::string>()!=normalizeGameRule(key))throw std::runtime_error("Membership rule differs from bound executable identity");
+                if(!actual.count(canonicalPathKey(fs::path(toWide(key))))&&!steamNativeGameInfoForDirectory(fs::path(toWide(key)).parent_path()))throw std::runtime_error("Peer membership cannot be confirmed; existing rules preserved");
+            }
+        }
+        const auto desired = publishedGameWhitelistBytes(original, membership::unionRules(update.membership));
         const bool membershipChanged = update.membership != previous;
-        const bool rulesChanged = desired != original;
+        const bool rulesChanged = desired != original.bytes;
         // Persist account ownership first. A subsequent rules-file write failure
         // is retried by the next normal library refresh, without losing peers.
-        if (membershipChanged) writeJsonAtomic(statePath, update.membership);
+        // Membership publication above remains durable if rules publication fails.
+        // Compare identity as well as bytes, including no-op publications and
+        // absent versus newly created empty files. Other writers may not share
+        // our data mutex. A changed source stays untouched for explicit retry.
+        if (!sameGameRuleTextSnapshot(original, readGameRuleTextSnapshot(destination)))
+            throw std::runtime_error("YMCC manual whitelist changed during publication; preserved newer original, retry next library event");
         if (rulesChanged) {
-            // YMCC's manual editor does not share our library mutex. Preserve
-            // a rewrite observed since the initial read and retry next event.
-            const auto latest = fs::exists(destination) ? readBinaryFile(destination, 1u << 20) : std::vector<unsigned char>{};
-            if (latest != originalBytes) throw std::runtime_error("YMCC manual whitelist changed during publication; preserved newer manual file, retry next library event");
-            writeAtomic(destination, std::vector<unsigned char>(desired.begin(), desired.end()));
+            writeAtomic(destination, desired);
+            const auto committed = readGameRuleTextSnapshot(destination);
+            if (!committed.existed || committed.bytes != desired)
+                throw std::runtime_error("YMCC whitelist commit readback changed; newer original preserved for explicit retry");
         }
         event["ymccWhitelistPublication"] = {{"status", membershipChanged || rulesChanged ? "updated" : "unchanged"},
             {"membershipChanged", membershipChanged}, {"rulesFileChanged", rulesChanged},
             {"ruleCount", membership::unionRules(update.membership).size()},
-            {"manualRulesPreserved", true}, {"markerlessLinesPreserved", original.find(membership::beginMarker) == std::string::npos}};
+            {"manualRulesPreserved", true}, {"markerlessLinesPreserved", std::string(original.bytes.begin(), original.bytes.end()).find(membership::beginMarker) == std::string::npos}};
     } catch (const std::exception& error) {
         try {
             event["ymccWhitelistPublication"] = {{"status", "warning"}, {"error", error.what()}, {"steamResultPreserved", true}};
@@ -11917,35 +12709,46 @@ static json artworkReadiness(const json& manifest, const json& manualOverride = 
 }
 
 static std::optional<json> cachedVerifiedSteamIdentity(const fs::path& dataRoot, const fs::path& executable) {
-    const auto root = dataRoot / L"cache" / L"identity";
-    std::error_code error;
-    if (!fs::is_directory(root, error)) return std::nullopt;
-    std::optional<json> best;
-    int64_t bestUpdated = -1;
-    for (const auto& entry : fs::directory_iterator(root, error)) {
-        if (error) break;
-        if (entry.path().extension() != L".json" || !entry.is_regular_file(error)) { error.clear(); continue; }
-        try {
-            auto record = loadJsonDocument(entry.path());
-            const auto exe = jsonStringOr(record, "executable", jsonStringOr(record, "exe"));
-            if (exe.empty() || canonicalPathKey(fs::path(toWide(exe))) != canonicalPathKey(executable)) continue;
-            json match = record.contains("match") && record["match"].is_object() ? record["match"] : json::object();
-            if (match.empty()) {
-                const auto path = jsonStringOr(record, "manifestPath");
-                if (path.empty()) continue;
-                const auto manifest = loadJsonDocument(fs::path(toWide(path)));
-                const auto sourceExe = jsonStringOr(manifest, "exe");
-                if (sourceExe.empty() || canonicalPathKey(fs::path(toWide(sourceExe))) != canonicalPathKey(executable)) continue;
-                match = manifest.value("match", json::object());
-                record["metadata"] = manifest.value("metadata", json::object());
+    namespace cache = custom_steam_library::identity_cache;
+    try {
+        const auto target = cache::executableKey(toUtf8(executable.wstring()));
+        const auto path = cache::cachePath(dataRoot, toUtf8(executable.wstring()));
+        const auto snapshot = cache::readSnapshot(path);
+        if (!cache::recordValid(snapshot, target, static_cast<int64_t>(unixTimeMs()))) return std::nullopt;
+        // Only a complete, current exact-file record can carry an optional
+        // provenance pointer. An unknown cache never borrows manifest authority.
+        const auto& record = snapshot.value;
+        std::optional<cache::Snapshot> manifestSnapshot;
+        fs::path manifestPath;
+        if (record.contains("manifestPath")) {
+            const auto pointer = record["manifestPath"].get<std::string>();
+            const auto key = cache::executableKey(pointer);
+            const auto owned = cache::executableKey(toUtf8(dataRoot.wstring())) + "\\";
+            if (!key.starts_with(owned)) return std::nullopt;
+            const auto relative = key.substr(owned.size());
+            if (!relative.starts_with("artwork\\") && !relative.starts_with("cache\\jobs\\")) return std::nullopt;
+            manifestPath = fs::path(cache::wide(pointer));
+            // Filename is checked without resolving any untrusted filesystem path.
+            if (asciiLower(toUtf8(manifestPath.filename().wstring())) != "manifest.json") return std::nullopt;
+            manifestSnapshot = cache::readSnapshot(manifestPath);
+            if (manifestSnapshot->exists) {
+                const auto& manifest = manifestSnapshot->value;
+                if (!manifestSnapshot->parsed || !cache::knownSchema(manifest) ||
+                    !manifest.contains("exe") || !manifest["exe"].is_string() ||
+                    cache::executableKey(manifest["exe"].get<std::string>()) != target ||
+                    !manifest.contains("match") || !custom_steam_library::verifiedSteamIdentityMatch(manifest["match"]) ||
+                    manifest["match"] != record["match"] ||
+                    (manifest.contains("metadata") && !manifest["metadata"].is_object())) return std::nullopt;
             }
-            if (!custom_steam_library::verifiedSteamIdentityMatch(match)) continue;
-            const auto updated = record.contains("updatedAt") && record["updatedAt"].is_number_integer() ? record["updatedAt"].get<int64_t>() : 0;
-            if (best && updated <= bestUpdated) continue;
-            record["match"] = match; bestUpdated = updated; best = std::move(record);
-        } catch (...) { /* Optional identity cache is not authority if malformed. */ }
+            // A cleaned historical job does not revoke a complete trusted cache.
+            // Missing job data supplies no default identity or replacement match.
+        }
+        if (!cache::sameSnapshot(snapshot, cache::readSnapshot(path))) return std::nullopt;
+        if (manifestSnapshot && !cache::sameSnapshot(*manifestSnapshot, cache::readSnapshot(manifestPath))) return std::nullopt;
+        return record;
+    } catch (...) {
+        return std::nullopt; // Cache/optional provenance faults are unknown, never authority.
     }
-    return best;
 }
 
 static json buildSteamLibraryAddPlan(
@@ -11958,7 +12761,9 @@ static json buildSteamLibraryAddPlan(
     // Keep the authoritative read and membership publication ordered with
     // add/delete commits, so a pre-delete plan cannot publish after deletion.
     DataTransactionMutex membershipTransaction;
-    const auto state = loadLibraryScanState(statePath);
+    LibraryScanObservation scanObservation;
+    const auto state = loadLibraryScanState(statePath, &scanObservation);
+    if (!scanObservation.active) return unavailableLibraryDiscoveryPlan("steam-library-add-plan", statePath, target, "Library scan is inactive; original inventories retained");
     const auto manualOverrides = loadManualOverrides(dataRoot / L"config" / L"manual-overrides.json");
     const bool shortcutsVdfExists = fs::is_regular_file(target.path);
     const auto originalVdf = shortcutsVdfExists
@@ -12365,8 +13170,15 @@ static json buildSteamLibraryAddPlan(
         }},
         {"items", items}
     };
-    publishYmccGameWhitelist(plan, dataRoot, custom_steam_library::ymcc_whitelist::completeInventory(state, items));
-    writeJsonAtomic(outputPath, plan);
+    if (!libraryScanObservationCurrent(scanObservation, statePath))
+        return unavailableLibraryDiscoveryPlan("steam-library-add-plan", statePath, target, "Observed scan source changed before plan publication");
+    publishYmccGameWhitelist(plan, dataRoot, scanObservation.complete && custom_steam_library::ymcc_whitelist::completeInventory(state, items));
+    if (!libraryScanObservationCurrent(scanObservation, statePath))
+        return unavailableLibraryDiscoveryPlan("steam-library-add-plan", statePath, target, "Observed scan source changed before plan publication");
+    std::string publicationError;
+    if (!writeLibraryDiscoveryPlan(dataRoot, outputPath, plan, publicationError))
+        return unavailableLibraryDiscoveryPlan("steam-library-add-plan", statePath, target, publicationError);
+    plan["planWriteConfirmed"] = true;
     return plan;
 }
 
@@ -12444,6 +13256,129 @@ static json steamTransactionPathList(const std::vector<fs::path>& paths) {
     return result;
 }
 
+static std::string transactionText(const json& value,const char* key) {
+    if(!value.is_object() || !value.contains(key) || !value[key].is_string())throw std::runtime_error("Invalid Steam transaction text field");
+    const auto text=value[key].get<std::string>();if(text.empty() || text.find('\0')!=std::string::npos)throw std::runtime_error("Empty Steam transaction identity");return text;
+}
+static bool transactionFlag(const json& value,const char* key) {
+    if(!value.is_object() || !value.contains(key) || !value[key].is_boolean())throw std::runtime_error("Missing Steam transaction existence evidence");return value[key].get<bool>();
+}
+static void requireSteamAccountBinding(const SteamShortcutTarget& target,const json* plan=nullptr) {
+    if(target.path.empty() || target.accountId.empty())throw std::runtime_error("Missing Steam account identity");
+    if(target.path.parent_path().filename()==L"config" && target.path.parent_path().parent_path().parent_path().filename()==L"userdata" &&
+        toUtf8(target.path.parent_path().parent_path().filename().wstring())!=target.accountId)throw std::runtime_error("Steam account does not match target directory");
+    if(plan && plan->contains("accountId") && transactionText(*plan,"accountId")!=target.accountId)throw std::runtime_error("Steam plan belongs to another account");
+    if(plan && plan->contains("shortcutsVdf") && canonicalPathKey(fs::path(toWide(transactionText(*plan,"shortcutsVdf"))))!=canonicalPathKey(target.path))throw std::runtime_error("Steam plan belongs to another target");
+}
+static json transactionFileState(const fs::path& path,size_t maximum=64u<<20) {
+    if(!configRegularFile(path))return nullptr;
+    if(isReparsePoint(path))throw std::runtime_error("Steam transaction target is a reparse point");
+    return sha256(readBinaryFile(path,maximum));
+}
+static void writeSteamPending(const fs::path& path,json value) {
+    const auto target=fs::path(toWide(transactionText(value,"targetPath")));
+    const auto account=toUtf8(path.parent_path().parent_path().filename().wstring());
+    requireSteamAccountBinding({target,account});
+    value["schemaVersion"]=2;value["accountId"]=account;value["targetIdentity"]=canonicalPathKey(target);
+    value["transactionId"]=toUtf8(path.parent_path().filename().wstring());
+    value["targetBeforeSha256"]=sha256(readBinaryFile(fs::path(toWide(transactionText(value,"targetBackup")))));
+    value["shortcutsModified"]=value.contains("shortcutsModified")?transactionFlag(value,"shortcutsModified"):true;
+    if(!value.contains("localConfigPath"))value["localConfigPath"]=nullptr;
+    if(!value.contains("localConfigBackup"))value["localConfigBackup"]=nullptr;
+    if(!value.contains("localConfigExisted"))value["localConfigExisted"]=false;
+    if(!value.contains("artworkBackups"))value["artworkBackups"]=json::array();
+    value["targetAfterSha256"]=value["targetBeforeSha256"];
+    value["localBeforeSha256"]=nullptr;value["localAfterSha256"]=nullptr;
+    if(!value["localConfigPath"].is_null()) {
+        value["localBeforeSha256"]=sha256(readBinaryFile(fs::path(toWide(transactionText(value,"localConfigBackup")))));
+        value["localAfterSha256"]=value["localBeforeSha256"];
+    }
+    json artwork=json::object();
+    for(const auto& row:value["artworkBackups"])artwork[transactionText(row,"target")]={{"before",transactionText(row,"sha256")},{"after",nullptr}};
+    for(const auto& file:value["stagedFiles"]) {
+        const auto stage=fs::path(toWide(file.get<std::string>()));const auto name=stage.filename().wstring();
+        if(stage.parent_path()==target.parent_path() && (name.starts_with(L"shortcuts.vdf.yeman-stage-")||name.starts_with(L"shortcuts.vdf.yeman-delete-stage-")))value["targetAfterSha256"]=transactionFileState(stage);
+        else if(stage.parent_path()==target.parent_path() && name.starts_with(L"localconfig.vdf.yeman-stage-"))value["localAfterSha256"]=transactionFileState(stage);
+        else if(stage.parent_path()==target.parent_path()/L"grid") {
+            const auto offset=name.find(L".yeman-stage-");if(offset==std::wstring::npos)throw std::runtime_error("Invalid artwork staging identity");
+            const auto original=stage.parent_path()/name.substr(0,offset);const auto key=toUtf8(original.wstring());
+            if(!artwork.contains(key))artwork[key]={{"before",transactionFileState(original,MAX_IMAGE_BYTES)},{"after",nullptr}};
+            artwork[key]["after"]=transactionFileState(stage,MAX_IMAGE_BYTES);
+        }
+    }
+    value["artworkStates"]=std::move(artwork);
+    writeJsonAtomic(path,value);
+}
+static void validateSteamPending(const fs::path& dataRoot,const fs::path& path,const json& value) {
+    if(!value.is_object() || !value.contains("schemaVersion") || !value["schemaVersion"].is_number_integer() || value["schemaVersion"]!=2)
+        throw std::runtime_error("Unverified legacy/corrupt Steam transaction debt; preserved for explicit repair");
+    const auto target=fs::path(toWide(transactionText(value,"targetPath"))),backup=fs::path(toWide(transactionText(value,"targetBackup")));
+    const auto account=transactionText(value,"accountId");requireSteamAccountBinding({target,account});
+    if(target.filename()!=L"shortcuts.vdf" || target.parent_path().filename()!=L"config" ||
+        (!realSteamShortcutsPath(target)&&!pathWithin(target,dataRoot)) ||
+        canonicalPathKey(path.parent_path().parent_path().parent_path())!=canonicalPathKey(dataRoot/L"backups"/L"steam-shortcuts") ||
+        toUtf8(path.parent_path().parent_path().filename().wstring())!=account ||
+        transactionText(value,"transactionId")!=toUtf8(path.parent_path().filename().wstring()) ||
+        transactionText(value,"targetIdentity")!=canonicalPathKey(target) || canonicalPathKey(backup)!=canonicalPathKey(path.parent_path()/L"shortcuts.before.vdf"))throw std::runtime_error("Steam transaction identity mismatch");
+    assertNoReparsePoints(path.parent_path());
+    const bool existed=transactionFlag(value,"targetExisted");transactionFlag(value,"shortcutsModified");
+    const auto before=transactionText(value,"targetBeforeSha256");transactionText(value,"targetAfterSha256");
+    if(!transactionFlag(value,"shortcutsModified")&&value["targetAfterSha256"]!=value["targetBeforeSha256"])throw std::runtime_error("Ambiguous unmodified shortcuts debt");
+    if((!existed&&before!=sha256({})) || sha256(readBinaryFile(backup))!=before)throw std::runtime_error("Steam transaction preimage mismatch");
+    if(existed)BinaryVdfDocument::parse(readBinaryFile(backup));
+    const bool localExisted=transactionFlag(value,"localConfigExisted");
+    if(!value.contains("localConfigPath") || !value.contains("localConfigBackup"))throw std::runtime_error("Missing localconfig recovery identity");
+    if(!value["localConfigPath"].is_null()) {
+        const auto local=fs::path(toWide(transactionText(value,"localConfigPath"))),copy=fs::path(toWide(transactionText(value,"localConfigBackup")));
+        if(!localExisted || canonicalPathKey(local)!=canonicalPathKey(target.parent_path()/L"localconfig.vdf") || canonicalPathKey(copy)!=canonicalPathKey(path.parent_path()/L"localconfig.before.vdf") ||
+            sha256(readBinaryFile(copy))!=transactionText(value,"localBeforeSha256"))throw std::runtime_error("Invalid localconfig preimage");
+        transactionText(value,"localAfterSha256");
+    } else if(localExisted || !value["localConfigBackup"].is_null())throw std::runtime_error("Ambiguous localconfig debt");
+    for(const auto* key:{"stagedFiles","artworkTargets","artworkBackups"})if(!value.contains(key)||!value[key].is_array())throw std::runtime_error("Missing Steam recovery inventory");
+    if(!value.contains("artworkStates")||!value["artworkStates"].is_object())throw std::runtime_error("Missing artwork existence evidence");
+    const auto grid=target.parent_path()/L"grid";
+    for(const auto& [file,state]:value["artworkStates"].items()) {
+        const auto original=fs::path(toWide(file));
+        if(canonicalPathKey(original.parent_path())!=canonicalPathKey(grid)||!supportedSteamArtworkExtension(original)||!state.is_object()||!state.contains("before")||!state.contains("after")||(!state["before"].is_null()&&!state["before"].is_string())||(!state["after"].is_null()&&!state["after"].is_string()))throw std::runtime_error("Invalid artwork debt");
+    }
+    std::set<std::string> backedArtwork;
+    for(const auto& row:value["artworkBackups"]) {
+        const auto original=fs::path(toWide(transactionText(row,"target"))),copy=fs::path(toWide(transactionText(row,"backup")));
+        const auto key=toUtf8(original.wstring());
+        if(!backedArtwork.insert(key).second)throw std::runtime_error("Duplicate artwork preimage");
+        if(canonicalPathKey(original.parent_path())!=canonicalPathKey(grid)||canonicalPathKey(copy)!=canonicalPathKey(path.parent_path()/L"grid-before"/original.filename())||!value["artworkStates"].contains(key)||value["artworkStates"][key]["before"]!=transactionText(row,"sha256")||sha256(readBinaryFile(copy,MAX_IMAGE_BYTES))!=transactionText(row,"sha256"))throw std::runtime_error("Invalid artwork preimage");
+    }
+    for(const auto& [file,state]:value["artworkStates"].items())if(!state["before"].is_null()&&!backedArtwork.count(file))throw std::runtime_error("Artwork original has no preimage");
+    for(const auto& item:value["artworkTargets"]) {if(!item.is_string()||!value["artworkStates"].contains(item.get<std::string>()))throw std::runtime_error("Artwork target has no existence evidence");}
+    for(const auto& item:value["stagedFiles"]) {
+        if(!item.is_string())throw std::runtime_error("Invalid stage path");const auto file=fs::path(toWide(item.get<std::string>()));const auto name=file.filename().wstring();
+        const bool vdf=canonicalPathKey(file.parent_path())==canonicalPathKey(target.parent_path())&&(name.starts_with(L"shortcuts.vdf.yeman-stage-")||name.starts_with(L"shortcuts.vdf.yeman-delete-stage-")||name.starts_with(L"localconfig.vdf.yeman-stage-"));
+        const bool art=canonicalPathKey(file.parent_path())==canonicalPathKey(grid)&&name.find(L".yeman-stage-")!=std::wstring::npos;
+        if(!vdf&&!art)throw std::runtime_error("Stage escaped transaction account");
+    }
+}
+static void requireSteamTransactionBeforeActivation(const fs::path& path) {
+    const auto pending=readLibraryTransactionDocument(path,8u<<20);
+    const auto target=fs::path(toWide(transactionText(pending,"targetPath")));
+    const json original=transactionFlag(pending,"targetExisted")?pending["targetBeforeSha256"]:json(nullptr);
+    if(transactionFileState(target)!=original)throw std::runtime_error("Steam target changed before transaction activation; retry");
+    if(!pending["localConfigPath"].is_null()&&transactionFileState(fs::path(toWide(transactionText(pending,"localConfigPath"))))!=pending["localBeforeSha256"])throw std::runtime_error("Localconfig changed before transaction activation");
+    for(const auto& [file,state]:pending["artworkStates"].items())if(transactionFileState(fs::path(toWide(file)),MAX_IMAGE_BYTES)!=state["before"])throw std::runtime_error("Artwork changed before transaction activation");
+}
+static void writeSteamComplete(const fs::path& directory,const fs::path& target) {
+    const auto pending=directory/L"transaction.pending.json";const auto bytes=readBinaryFile(pending,8u<<20);const auto record=parseLibraryTransactionBytes(bytes);
+    if(transactionFileState(target)!=record["targetAfterSha256"])throw std::runtime_error("Steam final bytes do not match the pending transaction");
+    if(!record["localConfigPath"].is_null()&&transactionFileState(fs::path(toWide(transactionText(record,"localConfigPath"))))!=record["localAfterSha256"])throw std::runtime_error("Localconfig final bytes mismatch");
+    for(const auto& [file,state]:record["artworkStates"].items())if(transactionFileState(fs::path(toWide(file)),MAX_IMAGE_BYTES)!=state["after"])throw std::runtime_error("Artwork final bytes mismatch");
+    writeJsonAtomic(directory/L"transaction.complete.json",{{"schemaVersion",2},{"completedAt",unixTimeMs()},{"targetPath",toUtf8(target.wstring())},{"targetIdentity",transactionText(record,"targetIdentity")},{"accountId",transactionText(record,"accountId")},{"transactionId",transactionText(record,"transactionId")},{"pendingSha256",sha256(bytes)},{"targetAfterSha256",record["targetAfterSha256"]}});
+}
+static bool validSteamComplete(const fs::path& path,const json& pending) {
+    const auto file=path.parent_path()/L"transaction.complete.json";if(!configRegularFile(file))return false;
+    const auto marker=readLibraryTransactionDocument(file,1u<<20);
+    if(!marker.is_object()||!marker.contains("schemaVersion")||marker["schemaVersion"]!=2||!marker.contains("targetAfterSha256")||!marker["targetAfterSha256"].is_string()||!marker.contains("completedAt")||!marker["completedAt"].is_number_unsigned()||marker["completedAt"]==0||transactionText(marker,"targetPath")!=transactionText(pending,"targetPath")||transactionText(marker,"targetIdentity")!=transactionText(pending,"targetIdentity")||transactionText(marker,"accountId")!=transactionText(pending,"accountId")||transactionText(marker,"transactionId")!=transactionText(pending,"transactionId")||transactionText(marker,"pendingSha256")!=sha256(readBinaryFile(path,8u<<20))||marker["targetAfterSha256"]!=pending["targetAfterSha256"])throw std::runtime_error("Unverified Steam completion marker; debt retained");
+    return true;
+}
+
 static size_t cleanupInterruptedTemporaryFiles(const fs::path& dataRoot) noexcept {
     size_t removed = 0;
     try {
@@ -12480,100 +13415,50 @@ static size_t cleanupInterruptedTemporaryFiles(const fs::path& dataRoot) noexcep
 
 static void cleanupInterruptedSteamTransactions(const fs::path& dataRoot) noexcept {
     try {
-        SteamShortcutWriterMutex writer(0);
-        DataTransactionMutex transaction(0);
-        const auto root = dataRoot / L"backups" / L"steam-shortcuts";
-        std::error_code iteratorError;
-        if (!fs::is_directory(root, iteratorError)) return;
-        for (fs::recursive_directory_iterator iterator(root, fs::directory_options::skip_permission_denied, iteratorError), end;
-             iterator != end; iterator.increment(iteratorError)) {
-            if (iteratorError) { iteratorError.clear(); continue; }
-            if (isReparsePoint(iterator->path())) { iterator.disable_recursion_pending(); continue; }
-            if (iterator->path().filename() != L"transaction.pending.json") continue;
-            const auto pendingPath = iterator->path();
+        SteamShortcutWriterMutex writer(0);DataTransactionMutex transaction(0);
+        const auto root=dataRoot/L"backups"/L"steam-shortcuts";
+        if(!fs::is_directory(root))return;
+        for(fs::recursive_directory_iterator it(root),last;it!=last;++it) {
+            if(isReparsePoint(it->path())){it.disable_recursion_pending();continue;}
+            if(it->path().filename()!=L"transaction.pending.json")continue;
+            const auto path=it->path();
             try {
-                const auto pending = loadJsonDocument(pendingPath, 8u << 20);
-                const auto target = fs::path(toWide(jsonStringOr(pending, "targetPath")));
-                const auto targetBackup = fs::path(toWide(jsonStringOr(pending, "targetBackup")));
-                const auto localConfig = fs::path(toWide(jsonStringOr(pending, "localConfigPath")));
-                const auto localConfigBackup = fs::path(toWide(jsonStringOr(pending, "localConfigBackup")));
-                if (target.empty() || target.filename() != L"shortcuts.vdf" || target.parent_path().filename() != L"config" ||
-                    (!realSteamShortcutsPath(target) && !pathWithin(target, dataRoot)) ||
-                    canonicalPathKey(targetBackup) != canonicalPathKey(pendingPath.parent_path() / L"shortcuts.before.vdf")) {
-                    throw std::runtime_error("Invalid Steam recovery target or backup binding");
+                const auto pending=readLibraryTransactionDocument(path,8u<<20);validateSteamPending(dataRoot,path,pending);
+                auto remove=[](const fs::path& file){std::error_code error;fs::remove(file,error);if(error)throw std::runtime_error("Cannot remove recovered transaction file");};
+                if(validSteamComplete(path,pending)) {
+                    for(const auto& file:pending["stagedFiles"])remove(fs::path(toWide(file.get<std::string>())));
+                    remove(path);continue;
                 }
-                if (!localConfig.empty() && (canonicalPathKey(localConfig) != canonicalPathKey(target.parent_path() / L"localconfig.vdf") ||
-                    canonicalPathKey(localConfigBackup) != canonicalPathKey(pendingPath.parent_path() / L"localconfig.before.vdf"))) {
-                    throw std::runtime_error("Invalid Steam recovery config binding");
+                if(processRunningByName(L"steam.exe"))continue;
+                const auto target=fs::path(toWide(transactionText(pending,"targetPath")));
+                const json before=transactionFlag(pending,"targetExisted")?pending["targetBeforeSha256"]:json(nullptr);
+                const auto current=transactionFileState(target);
+                if(current!=before && current!=pending["targetAfterSha256"])throw std::runtime_error("Steam target changed outside the pending transaction; debt preserved");
+                fs::path local;
+                if(!pending["localConfigPath"].is_null()) {
+                    local=fs::path(toWide(transactionText(pending,"localConfigPath")));const auto state=transactionFileState(local);
+                    if(state!=pending["localBeforeSha256"]&&state!=pending["localAfterSha256"])throw std::runtime_error("Localconfig changed after transaction; preserved");
                 }
-                const auto grid = target.parent_path() / L"grid";
-                const auto artworkTargets = pending.value("artworkTargets", json::array());
-                const auto stagedFiles = pending.value("stagedFiles", json::array());
-                const auto artworkBackups = pending.value("artworkBackups", json::array());
-                if (!artworkTargets.is_array() || !stagedFiles.is_array() || !artworkBackups.is_array()) throw std::runtime_error("Invalid Steam recovery inventory");
-                for (const auto& entry : artworkBackups) {
-                    if (!entry.is_object()) throw std::runtime_error("Invalid artwork backup entry");
-                    const auto original = fs::path(toWide(jsonStringOr(entry, "target")));
-                    const auto backup = fs::path(toWide(jsonStringOr(entry, "backup")));
-                    if (original.empty() || canonicalPathKey(original.parent_path()) != canonicalPathKey(grid) ||
-                        !supportedSteamArtworkExtension(original) ||
-                        canonicalPathKey(backup) != canonicalPathKey(pendingPath.parent_path() / L"grid-before" / original.filename())) {
-                        throw std::runtime_error("Invalid artwork recovery backup binding");
-                    }
+                for(const auto& [file,state]:pending["artworkStates"].items()) {
+                    const auto current=transactionFileState(fs::path(toWide(file)),MAX_IMAGE_BYTES);
+                    if(current!=state["before"]&&current!=state["after"])throw std::runtime_error("Artwork changed outside transaction; preserved");
                 }
-                for (const auto& value : artworkTargets) {
-                    if (!value.is_string()) throw std::runtime_error("Invalid recovery artwork path");
-                    const auto path = fs::path(toWide(value.get<std::string>()));
-                    if (canonicalPathKey(path.parent_path()) != canonicalPathKey(grid)) throw std::runtime_error("Recovery artwork escaped grid");
-                }
-                for (const auto& value : stagedFiles) {
-                    if (!value.is_string()) throw std::runtime_error("Invalid recovery stage path");
-                    const auto path = fs::path(toWide(value.get<std::string>()));
-                    const auto name = path.filename().wstring();
-                    const bool shortcutStage = canonicalPathKey(path.parent_path()) == canonicalPathKey(target.parent_path()) &&
-                        (name.starts_with(L"shortcuts.vdf.yeman-stage-") || name.starts_with(L"shortcuts.vdf.yeman-delete-stage-") || name.starts_with(L"localconfig.vdf.yeman-stage-"));
-                    const bool artworkStage = canonicalPathKey(path.parent_path()) == canonicalPathKey(grid) && name.find(L".yeman-stage-") != std::wstring::npos;
-                    if (!shortcutStage && !artworkStage) throw std::runtime_error("Recovery stage escaped Steam account");
-                }
-                const auto completedPath = pendingPath.parent_path() / L"transaction.complete.json";
-                auto removeChecked = [](const fs::path& path) { std::error_code error; fs::remove(path, error); if (error) throw std::runtime_error("Recovery file could not be removed"); };
-                if (fs::is_regular_file(completedPath)) {
-                    const auto completed = loadJsonDocument(completedPath, 1u << 20);
-                    if (jsonStringOr(completed, "targetPath") != jsonStringOr(pending, "targetPath")) throw std::runtime_error("Recovery completion marker mismatch");
-                    for (const auto& value : stagedFiles) removeChecked(fs::path(toWide(value.get<std::string>())));
-                    removeChecked(pendingPath);
-                    continue;
-                }
-                if (processRunningByName(L"steam.exe")) continue;
-                const bool targetExisted = pending.value("targetExisted", false);
-                const bool localConfigExisted = pending.value("localConfigExisted", false);
-                // Validate every preimage before modifying any recovery target.
-                const auto shortcutBytes = targetExisted ? readBinaryFile(targetBackup, 64u << 20) : std::vector<unsigned char>{};
-                const auto localBytes = !localConfig.empty() && localConfigExisted ? readBinaryFile(localConfigBackup, 64u << 20) : std::vector<unsigned char>{};
-                std::vector<std::pair<fs::path, std::vector<unsigned char>>> artworkPreimages;
-                for (const auto& entry : artworkBackups) {
-                    const auto bytes = readBinaryFile(fs::path(toWide(jsonStringOr(entry, "backup"))), MAX_IMAGE_BYTES);
-                    if (sha256(bytes) != jsonStringOr(entry, "sha256")) throw std::runtime_error("Artwork recovery backup hash mismatch");
-                    artworkPreimages.push_back({fs::path(toWide(jsonStringOr(entry, "target"))), bytes});
-                }
-                if (pending.value("shortcutsModified", true)) {
-                    if (targetExisted) writeAtomic(target, shortcutBytes);
-                    else removeChecked(target);
-                }
-                if (!localConfig.empty()) {
-                    if (localConfigExisted) writeAtomic(localConfig, localBytes);
-                    else removeChecked(localConfig);
-                }
-                for (const auto& value : artworkTargets) removeChecked(fs::path(toWide(value.get<std::string>())));
-                for (const auto& [original, bytes] : artworkPreimages) writeAtomic(original, bytes);
-                for (const auto& value : stagedFiles) removeChecked(fs::path(toWide(value.get<std::string>())));
-                writeJsonAtomic(pendingPath.parent_path() / L"transaction.recovered.json", {
-                    {"schemaVersion", 1}, {"recoveredAt", unixTimeMs()}, {"targetPath", toUtf8(target.wstring())}, {"reason", "workspace-startup-recovery"}
-                });
-                removeChecked(pendingPath);
-            } catch (...) { /* Keep unresolved journals and backups for another open or explicit repair. */ }
+                // Validate/read all preimages before the first mutation. A second
+                // recovery may see a mixture of before/after after prior I/O failure.
+                const auto shortcutBytes=readBinaryFile(fs::path(toWide(transactionText(pending,"targetBackup"))));
+                const auto localBytes=local.empty()?std::vector<unsigned char>{}:readBinaryFile(fs::path(toWide(transactionText(pending,"localConfigBackup"))));
+                std::vector<std::pair<fs::path,std::vector<unsigned char>>> art;
+                for(const auto& row:pending["artworkBackups"])art.push_back({fs::path(toWide(transactionText(row,"target"))),readBinaryFile(fs::path(toWide(transactionText(row,"backup"))),MAX_IMAGE_BYTES)});
+                if(transactionFlag(pending,"shortcutsModified")){if(transactionFlag(pending,"targetExisted"))writeAtomic(target,shortcutBytes);else remove(target);}
+                if(!local.empty())writeAtomic(local,localBytes);
+                for(const auto& file:pending["artworkTargets"])remove(fs::path(toWide(file.get<std::string>())));
+                for(const auto& [file,bytes]:art)writeAtomic(file,bytes);
+                for(const auto& file:pending["stagedFiles"])remove(fs::path(toWide(file.get<std::string>())));
+                writeJsonAtomic(path.parent_path()/L"transaction.recovered.json",{{"schemaVersion",2},{"recoveredAt",unixTimeMs()},{"targetPath",toUtf8(target.wstring())},{"accountId",pending["accountId"]},{"transactionId",pending["transactionId"]},{"pendingSha256",sha256(readBinaryFile(path,8u<<20))},{"reason","verified-preimage-recovery"}});
+                remove(path);
+            }catch(...){/* Unknown is persistent debt, never an invented original or a completion. */}
         }
-    } catch (...) { /* Startup recovery is best-effort, never destructive guesswork. */ }
+    }catch(...){/* Unreadable debt remains for an explicit retry. */}
 }
 
 // Separate same-account transactions even when they occur in one millisecond.
@@ -12585,19 +13470,15 @@ static fs::path steamTransactionDirectory(const fs::path& dataRoot, std::string 
         (std::to_wstring(unixTimeMs()) + L"-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(++sequence));
 }
 
-static void requireResolvedSteamTransactions(const fs::path& dataRoot, const fs::path& target) {
-    const auto root = dataRoot / L"backups" / L"steam-shortcuts";
-    if (!fs::is_directory(root)) return;
-    for (fs::recursive_directory_iterator it(root), end; it != end; ++it) {
-        if (isReparsePoint(it->path())) { it.disable_recursion_pending(); continue; }
-        if (it->path().filename() != L"transaction.pending.json") continue;
-        const auto pending = loadJsonDocument(it->path(), 8u << 20);
-        const auto recordedTarget = fs::path(toWide(jsonStringOr(pending, "targetPath")));
-        if (recordedTarget.empty()) throw std::runtime_error("Steam 恢复日志损坏，请先执行恢复，已拒绝新的写入");
-        if (canonicalPathKey(recordedTarget) != canonicalPathKey(target)) continue;
-        const auto complete = it->path().parent_path() / L"transaction.complete.json";
-        if (fs::is_regular_file(complete) && jsonStringOr(loadJsonDocument(complete), "targetPath") == jsonStringOr(pending, "targetPath")) continue;
-        throw std::runtime_error("此 Steam 账户存在未完成的恢复事务，请先关闭 Steam 并执行恢复，已拒绝覆盖");
+static void requireResolvedSteamTransactions(const fs::path& dataRoot,const fs::path& target) {
+    const auto root=dataRoot/L"backups"/L"steam-shortcuts";if(!fs::is_directory(root))return;
+    for(fs::recursive_directory_iterator it(root),last;it!=last;++it) {
+        if(isReparsePoint(it->path())){it.disable_recursion_pending();throw std::runtime_error("Uninspectable Steam transaction debt");}
+        if(it->path().filename()!=L"transaction.pending.json")continue;
+        const auto pending=readLibraryTransactionDocument(it->path(),8u<<20);validateSteamPending(dataRoot,it->path(),pending);
+        if(canonicalPathKey(fs::path(toWide(transactionText(pending,"targetPath"))))!=canonicalPathKey(target))continue;
+        if(validSteamComplete(it->path(),pending))continue;
+        throw std::runtime_error("Steam account has unresolved transaction debt; explicit verified recovery is required");
     }
 }
 
@@ -12670,6 +13551,7 @@ static json commitPreparedSteamAddPlan(
     const ULONGLONG mutexStarted = GetTickCount64();
     SteamShortcutWriterMutex writer;
     DataTransactionMutex transaction;
+    requireSteamAccountBinding(target,&plan);
     requireResolvedSteamTransactions(dataRoot, target.path);
 
     plan["transactionSerialization"] = "global-all-steam-accounts";
@@ -12785,7 +13667,7 @@ static json commitPreparedSteamAddPlan(
     std::vector<fs::path> stagedFiles{stagedVdf};
     if (!stagedLocalConfig.empty()) stagedFiles.push_back(stagedLocalConfig);
     for (const auto& artwork : stagedArtwork) stagedFiles.push_back(artwork.temporary);
-    writeJsonAtomic(pendingTransaction, {
+    writeSteamPending(pendingTransaction, {
         {"schemaVersion", 1}, {"createdAt", unixTimeMs()},
         {"targetPath", toUtf8(target.path.wstring())},
         {"targetExisted", shortcutsVdfExists},
@@ -12805,6 +13687,7 @@ static json commitPreparedSteamAddPlan(
     bool vdfActivated = false;
     bool localConfigActivated = false;
     try {
+        requireSteamTransactionBeforeActivation(pendingTransaction);
         activateStagedFile(stagedVdf, target.path, "激活暂存的 shortcuts.vdf");
         vdfActivated = true;
         if (injectSimulatedRecent) activateStagedFile(stagedLocalConfig, localConfigPath, "激活 Steam 导入记录");
@@ -12819,10 +13702,7 @@ static json commitPreparedSteamAddPlan(
         // Mark the transaction complete before publishing the UI result.  If
         // output JSON publication is interrupted afterward, the Steam files
         // are already a valid committed set and must not be rolled back.
-        writeJsonAtomic(backupDirectory / L"transaction.complete.json", {
-            {"schemaVersion", 1}, {"completedAt", unixTimeMs()},
-            {"targetPath", toUtf8(target.path.wstring())}
-        });
+        writeSteamComplete(backupDirectory,target.path);
     } catch (...) {
         bool restored = true;
         for (const auto& file : activatedArtwork) {
@@ -12871,6 +13751,7 @@ static json commitPreparedSteamAddPlan(
         item["simulatedRecentSignal"] = injectSimulatedRecent;
         item["simulatedRecentSignalTime"] = injectSimulatedRecent ? json(simulatedRecentTime) : json(nullptr);
     }
+    plan.erase("ymccMembershipAuthority");
     publishYmccGameWhitelist(plan, dataRoot, false);
     publishCommittedSteamResult(plan, {dataRoot / L"state" / L"last-steam-add.json",
         dataRoot / L"state" / toWide("last-steam-add-" + accountFileToken + ".json"), planPath});
@@ -12885,10 +13766,11 @@ static json commitSteamLibraryAddPlan(
     bool steamClosedConfirmed,
     const std::set<std::string>& selectedGameDirectories = {},
     bool explicitSelection = false) {
+    auto plan = buildSteamLibraryAddPlan(
+        dataRoot, statePath, target, planPath, selectedGameDirectories, explicitSelection);
+    if (!jsonBoolSafe(plan, "planWriteConfirmed", false)) return plan;
     return commitPreparedSteamAddPlan(
-        dataRoot, target, planPath, steamClosedConfirmed,
-        buildSteamLibraryAddPlan(
-            dataRoot, statePath, target, planPath, selectedGameDirectories, explicitSelection));
+        dataRoot, target, planPath, steamClosedConfirmed, std::move(plan));
 }
 
 static json refreshExistingSteamArtwork(
@@ -13032,7 +13914,7 @@ static json refreshExistingSteamArtwork(
         stagedFiles.push_back(stagedVdf);
     }
     const auto pendingTransaction = backupRoot / L"transaction.pending.json";
-    writeJsonAtomic(pendingTransaction, {{"schemaVersion", 1}, {"operation", "artwork-refresh"}, {"createdAt", unixTimeMs()},
+    writeSteamPending(pendingTransaction, {{"schemaVersion", 1}, {"operation", "artwork-refresh"}, {"createdAt", unixTimeMs()},
         {"targetPath", toUtf8(target.path.wstring())}, {"targetExisted", true}, {"shortcutsModified", iconUpdates > 0},
         {"targetBackup", toUtf8(backupFile.wstring())}, {"artworkTargets", steamTransactionPathList(artworkTargets)},
         {"artworkBackups", backupInventory}, {"stagedFiles", steamTransactionPathList(stagedFiles)}});
@@ -13040,6 +13922,7 @@ static json refreshExistingSteamArtwork(
     bool originalsTouched = false;
     bool vdfActivated = false;
     try {
+        requireSteamTransactionBeforeActivation(pendingTransaction);
         if (sha256(readBinaryFile(target.path, 16u << 20)) != sha256(originalShortcuts))
             throw std::runtime_error("shortcuts.vdf changed while preparing artwork; retry the refresh");
         for (const auto& [original, backup] : backups) {
@@ -13059,8 +13942,7 @@ static json refreshExistingSteamArtwork(
             if (readBinaryFile(target.path, 16u << 20) != shortcutDocument.serialize())
                 throw std::runtime_error("Committed Steam icon binding verification failed");
         }
-        writeJsonAtomic(backupRoot / L"transaction.complete.json", {
-            {"schemaVersion", 1}, {"completedAt", unixTimeMs()}, {"targetPath", toUtf8(target.path.wstring())}});
+        writeSteamComplete(backupRoot,target.path);
     } catch (...) {
         bool restored = true;
         if (vdfActivated) {
@@ -13182,37 +14064,75 @@ static fs::path commitGameWhitelistSync(
     const fs::path& dataRoot,
     const fs::path& whitelistPath,
     const fs::path& blacklistPath) {
-    if (readGameRuleFile(whitelistPath) != plan.currentWhitelist ||
-        readGameRuleFile(blacklistPath) != plan.currentBlacklist) {
+    // Match the publisher: library data transaction precedes the files guard.
+    DataTransactionMutex transaction;
+    ymcc::gamerules::FilesGuard coordinated(whitelistPath.parent_path().wstring());
+    ymcc::gamerules::requireNativeRecoveryComplete(whitelistPath.parent_path().wstring());
+    const auto white = readGameRuleTextSnapshot(whitelistPath), black = readGameRuleTextSnapshot(blacklistPath);
+    if (gameRuleTextRules(white.bytes) != plan.currentWhitelist || gameRuleTextRules(black.bytes) != plan.currentBlacklist)
         throw std::runtime_error("PID rule files changed after planning; retry synchronization to preserve the newer rules");
-    }
-    const auto oldWhitelist = snapshotRuleFile(whitelistPath);
-    const auto oldBlacklist = snapshotRuleFile(blacklistPath);
-    uint64_t stamp = unixTimeMs();
+    // Validate both outputs and current ownership before touching either file.
+    const auto encodedWhite = gameRuleFileBytes(plan.nextWhitelist, &white.bytes);
+    const auto encodedBlack = gameRuleFileBytes(plan.nextBlacklist);
+    const auto nextWhite = plan.nextWhitelist == plan.currentWhitelist ? white.bytes : encodedWhite;
+    const auto nextBlack = plan.nextBlacklist == plan.currentBlacklist ? black.bytes : encodedBlack;
+    const bool changeWhite = nextWhite != white.bytes, changeBlack = nextBlack != black.bytes;
+    const RuleFileSnapshot oldWhitelist{white.existed, white.bytes}, oldBlacklist{black.existed, black.bytes};
     fs::path backupDirectory;
-    std::error_code ec;
-    do {
-        backupDirectory = dataRoot / L"backups" / L"pid-rules" / std::to_wstring(stamp++);
-        ec.clear();
-    } while (fs::exists(backupDirectory, ec) && !ec);
-    fs::create_directories(backupDirectory);
-    if (oldWhitelist.existed) writeAtomic(backupDirectory / L"game-whitelist.before.txt", oldWhitelist.bytes);
-    if (oldBlacklist.existed) writeAtomic(backupDirectory / L"player-blacklist.before.txt", oldBlacklist.bytes);
+    fs::create_directories(dataRoot / L"backups" / L"pid-rules");
+    const auto stamp = unixTimeMs();
+    for (uint64_t attempt = 0; attempt < 32; ++attempt) {
+        const auto candidate = dataRoot / L"backups" / L"pid-rules" / std::to_wstring(stamp + attempt);
+        std::error_code error;
+        if (fs::create_directory(custom_steam_library::ioPath(candidate), error)) { backupDirectory = candidate; break; }
+        if (error && error != std::errc::file_exists) throw std::runtime_error("Cannot preserve PID rule originals");
+    }
+    if (backupDirectory.empty()) throw std::runtime_error("PID rule backup directory is busy; retry explicitly");
+    if (white.existed) writeAtomic(backupDirectory / L"game-whitelist.before.txt", white.bytes);
+    if (black.existed) writeAtomic(backupDirectory / L"player-blacklist.before.txt", black.bytes);
     writeJsonAtomic(backupDirectory / L"manifest.json", {
-        {"schemaVersion", 1}, {"contract", PID_COORDINATION_CONTRACT},
-        {"createdAt", unixTimeMs()},
-        {"whitelistPath", toUtf8(whitelistPath.wstring())},
-        {"playerBlacklistPath", toUtf8(blacklistPath.wstring())},
-        {"whitelistExisted", oldWhitelist.existed}, {"playerBlacklistExisted", oldBlacklist.existed},
+        {"schemaVersion", 1}, {"contract", PID_COORDINATION_CONTRACT}, {"createdAt", unixTimeMs()},
+        {"whitelistPath", toUtf8(whitelistPath.wstring())}, {"playerBlacklistPath", toUtf8(blacklistPath.wstring())},
+        {"whitelistExisted", white.existed}, {"playerBlacklistExisted", black.existed},
+        {"whitelistBeforeSha256", sha256(white.bytes)}, {"playerBlacklistBeforeSha256", sha256(black.bytes)},
         {"addedWhitelist", stringVectorJson(plan.addedWhitelist)},
         {"removedExactBlacklistConflicts", stringVectorJson(plan.removedBlacklistConflicts)}
     });
+    auto unchanged = [](const fs::path& path, const GameRuleTextSnapshot& before) {
+        if (!sameGameRuleTextSnapshot(before, readGameRuleTextSnapshot(path)))
+            throw std::runtime_error("PID rule source changed during synchronization; newer original retained");
+    };
+    bool blackAttempted = false, whiteAttempted = false;
     try {
-        writeGameRuleFileAtomic(blacklistPath, gameRuleFileBytes(plan.nextBlacklist));
-        writeGameRuleFileAtomic(whitelistPath, gameRuleFileBytes(plan.nextWhitelist));
+        unchanged(whitelistPath, white); unchanged(blacklistPath, black);
+        if (changeBlack) {
+            blackAttempted = true;
+            writeGameRuleFileAtomic(blacklistPath, nextBlack);
+            const auto saved = readGameRuleTextSnapshot(blacklistPath);
+            if (!saved.existed || saved.bytes != nextBlack) throw std::runtime_error("PID blacklist commit readback failed");
+        }
+        unchanged(whitelistPath, white);
+        if (changeWhite) {
+            whiteAttempted = true;
+            writeGameRuleFileAtomic(whitelistPath, nextWhite);
+            const auto saved = readGameRuleTextSnapshot(whitelistPath);
+            if (!saved.existed || saved.bytes != nextWhite) throw std::runtime_error("PID whitelist commit readback failed");
+        }
+        const auto savedWhite = readGameRuleTextSnapshot(whitelistPath), savedBlack = readGameRuleTextSnapshot(blacklistPath);
+        if (savedWhite.existed != (white.existed || changeWhite) || savedWhite.bytes != nextWhite ||
+            savedBlack.existed != (black.existed || changeBlack) || savedBlack.bytes != nextBlack)
+            throw std::runtime_error("PID rule pair final readback failed");
     } catch (...) {
-        try { restoreRuleFile(blacklistPath, oldBlacklist); } catch (...) {}
-        try { restoreRuleFile(whitelistPath, oldWhitelist); } catch (...) {}
+        // Roll back only our observable bytes; a newer external edit is not
+        // authority to overwrite. Preimages remain durable if rollback fails.
+        if (blackAttempted) try {
+            const auto current = readGameRuleTextSnapshot(blacklistPath);
+            if (current.existed && current.bytes == nextBlack) restoreRuleFile(blacklistPath, oldBlacklist);
+        } catch (...) {}
+        if (whiteAttempted) try {
+            const auto current = readGameRuleTextSnapshot(whitelistPath);
+            if (current.existed && current.bytes == nextWhite) restoreRuleFile(whitelistPath, oldWhitelist);
+        } catch (...) {}
         throw;
     }
     return backupDirectory;
@@ -13296,7 +14216,10 @@ static json buildSteamLibraryDeletePlan(
     const fs::path& outputPath,
     const std::set<std::string>& selectedGameDirectories) {
     if (selectedGameDirectories.empty()) throw std::runtime_error("删除 Steam 快捷方式必须明确选择游戏");
-    const auto state = loadLibraryScanState(statePath);
+    DataTransactionMutex scanTransaction;
+    LibraryScanObservation scanObservation;
+    const auto state = loadLibraryScanState(statePath, &scanObservation);
+    if (!scanObservation.active) return unavailableLibraryDiscoveryPlan("steam-library-delete-plan", statePath, target, "Library scan is inactive; original inventories retained");
     const auto existing = readShortcuts(target.path, target.accountId);
     json items = json::array();
     json unmatched = json::array();
@@ -13352,7 +14275,12 @@ static json buildSteamLibraryDeletePlan(
                       {"notFound", notFound}, {"ambiguous", ambiguous}}}, {"items", items}
     };
     for (const auto& key : selectedGameDirectories) plan["requestedSelections"].push_back(key);
-    writeJsonAtomic(outputPath, plan);
+    if (!libraryScanObservationCurrent(scanObservation, statePath))
+        return unavailableLibraryDiscoveryPlan("steam-library-delete-plan", statePath, target, "Observed scan source changed before plan publication");
+    std::string publicationError;
+    if (!writeLibraryDiscoveryPlan(dataRoot, outputPath, plan, publicationError))
+        return unavailableLibraryDiscoveryPlan("steam-library-delete-plan", statePath, target, publicationError);
+    plan["planWriteConfirmed"] = true;
     return plan;
 }
 
@@ -13367,6 +14295,7 @@ static json commitSteamLibraryDeletePlan(
     DataTransactionMutex transaction;
     requireResolvedSteamTransactions(dataRoot, target.path);
     auto plan = buildSteamLibraryDeletePlan(dataRoot, statePath, target, planPath, selectedGameDirectories);
+    if (!jsonBoolSafe(plan, "planWriteConfirmed", false)) return plan;
     if (plan.value("realSteamTarget", false)) {
         if (!steamClosedConfirmed) throw std::runtime_error("真实 Steam 删除必须先确认 Steam 已关闭");
         if (processRunningByName(L"steam.exe")) throw std::runtime_error("Steam 仍在运行，请先关闭 Steam 再删除 shortcuts.vdf");
@@ -13414,16 +14343,16 @@ static json commitSteamLibraryDeletePlan(
     const auto stagedCount = readShortcuts(stagedVdf, target.accountId).size();
     if (stagedCount + deleteCount != beforeCount) { std::error_code ec; fs::remove(stagedVdf, ec); throw std::runtime_error("Staged shortcuts.vdf deletion verification failed"); }
     const auto pendingTransaction = backupDirectory / L"transaction.pending.json";
-    writeJsonAtomic(pendingTransaction, {{"schemaVersion", 1}, {"operation", "delete"}, {"createdAt", unixTimeMs()},
+    writeSteamPending(pendingTransaction, {{"schemaVersion", 1}, {"operation", "delete"}, {"createdAt", unixTimeMs()},
         {"targetPath", toUtf8(target.path.wstring())}, {"targetExisted", true}, {"targetBackup", toUtf8(backupFile.wstring())},
         {"artworkTargets", json::array()}, {"stagedFiles", steamTransactionPathList({stagedVdf})}});
     bool activated = false;
     try {
+        requireSteamTransactionBeforeActivation(pendingTransaction);
         activateStagedFile(stagedVdf, target.path, "激活删除用的暂存 shortcuts.vdf");
         activated = true;
         if (readShortcuts(target.path, target.accountId).size() != stagedCount) throw std::runtime_error("Committed shortcuts.vdf deletion verification failed");
-        writeJsonAtomic(backupDirectory / L"transaction.complete.json", {
-            {"schemaVersion", 1}, {"completedAt", unixTimeMs()}, {"targetPath", toUtf8(target.path.wstring())}});
+        writeSteamComplete(backupDirectory,target.path);
     } catch (...) {
         bool restored = !activated;
         if (activated) { try { writeAtomic(target.path, original); restored = true; } catch (...) {} }
@@ -13434,6 +14363,7 @@ static json commitSteamLibraryDeletePlan(
     plan["mode"] = "steam-library-delete-commit"; plan["committed"] = true; plan["committedAt"] = unixTimeMs();
     plan["shortcutsVdfModified"] = true; plan["shortcutsAfterSha256"] = shortcutsAfterHash;
     plan["backup"] = toUtf8(backupFile.wstring()); plan["deletedCount"] = deleteCount;
+    plan.erase("ymccMembershipAuthority");
     publishYmccGameWhitelist(plan, dataRoot, false);
     publishCommittedSteamResult(plan, {dataRoot / L"state" / L"last-steam-delete.json", planPath});
     return plan;
@@ -14023,6 +14953,66 @@ static json downloadBaiduArtwork(const std::string& url, const std::string& type
     return {{"path", toUtf8(output.wstring())}, {"width", info->width}, {"height", info->height}, {"bytes", response.body.size()}, {"networkAttempts", attempts}, {"provider", provider}};
 }
 
+static json undoDeletedGameRecovery(const fs::path& dataRoot,const fs::path& gameDirectory) {
+    DataTransactionMutex transaction;
+    const auto libraryConfigPath=dataRoot/L"config"/L"library-config.json",configurationBackups=dataRoot/L"backups"/L"config";
+    const auto recovery = latestDeletedGameRecoveryPackage(dataRoot, gameDirectory);
+    const auto manifestBytes = readBinaryFile(recovery / L"recovery-manifest.json", 16u << 20);
+    const auto manifest = parseLibraryTransactionBytes(manifestBytes);
+    verifyRecoveryFiles(recovery, manifest, gameDirectory);
+    const auto oldState=recovery/L"recovery-state.json";
+    if(configRegularFile(oldState)&&!deletedRecoveryConsumed(recovery,manifest))
+        custom_steam_library::config::archive(oldState,nextConfigBackupPath(dataRoot/L"backups"/L"corrupt","deleted-game-recovery-state"));
+    const auto key = canonicalPathKey(gameDirectory);
+
+    auto config = loadLibraryConfig(libraryConfigPath);
+
+
+    auto configBaseline = config;
+    config["excludedGameDirectories"] = withoutConfiguredDirectory(
+        config.value("excludedGameDirectories", json::array()), gameDirectory);
+    if (manifest.contains("manualGameDirectory") && manifest["manualGameDirectory"].is_object() &&
+        !configuredDirectory(config.value("manualGameDirectories", json::array()), gameDirectory)) {
+        config["manualGameDirectories"].push_back(manifest["manualGameDirectory"]);
+    }
+    if (manifest.contains("manualPrimary") && manifest["manualPrimary"].is_object() &&
+        !config["manualPrimary"].contains(key)) {
+        config["manualPrimary"][key] = manifest["manualPrimary"];
+    }
+    config["updatedAt"] = unixTimeMs();
+    config = writeJsonWithBackup(libraryConfigPath, configurationBackups, "library-config", config, &configBaseline);
+    configBaseline = config;
+
+    const auto manualOverridesPath = dataRoot / L"config" / L"manual-overrides.json";
+    auto overrides = loadManualOverrides(manualOverridesPath);
+
+    auto overridesBaseline = overrides;
+    if (manifest.contains("manualOverrides") && manifest["manualOverrides"].is_object()) {
+        for (const auto& [overrideKey, value] : manifest["manualOverrides"].items()) {
+            if (!overrides["items"].contains(overrideKey)) overrides["items"][overrideKey] = value;
+        }
+        overrides = writeJsonWithBackup(manualOverridesPath, configurationBackups, "manual-overrides", overrides, &overridesBaseline);
+        overridesBaseline = overrides;
+    }
+
+    const auto id = manifest.value("gameDataId", gameDataId(gameDirectory));
+    uintmax_t copied = 0;
+    for (const auto& section : {L"games", L"artwork", L"cache"}) {
+        copied += mergeRecoveryDirectory(
+            recovery / section, dataRoot / section / toWide(id), dataRoot);
+    }
+    writeJsonAtomic(recovery / L"recovery-state.json", {
+        {"schemaVersion",1},{"gameDataId",id},{"manifestSha256",sha256(manifestBytes)},
+        {"restoredAt", unixTimeMs()}, {"mergeDidNotOverwriteNewerFiles", true},
+        {"restoredFiles", copied}
+    });
+    appendLifecycleEvent(dataRoot, {
+        {"type", "user-removal-undone"}, {"gameDirectory", toUtf8(gameDirectory.wstring())},
+        {"recoveryPackage", toUtf8(recovery.wstring())}, {"restoredFiles", copied}
+    });
+    return {{"recoveryPackage",toUtf8(recovery.wstring())},{"restoredFiles",copied},{"gameDataId",id},{"gameInstallFilesIncluded",false}};
+}
+
 int wmain(int argc, wchar_t** argv) {
     (void)ymcc::processEfficiency::applyCurrent();
     SetConsoleOutputCP(CP_UTF8);
@@ -14173,7 +15163,14 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         const fs::path dataRoot = steamBigPictureDataRoot(labRoot);
-        initializeSteamBigPictureDataRoot(dataRoot, labRoot);
+        if(!initializeSteamBigPictureDataRoot(dataRoot, labRoot)) {
+            if(_wcsicmp(argv[1],L"--show-library-data-root")==0 && argc==2) {
+                std::cout << "FEATURE_NAME: Custom Steam Library\nDATA_ROOT: " << toUtf8(dataRoot.wstring())
+                    << "\nDATA_ROOT_STATUS: unknown\nREAD_ONLY: true\nPORTABLE_REINSTALL_DATA: unknown\n";
+                return 0;
+            }
+            throw std::runtime_error("library-data-root-unknown: read-only defaults; preserve/repair original and retry");
+        }
         g_workerDataRoot = dataRoot;
         const fs::path libraryConfigPath = dataRoot / L"config" / L"library-config.json";
         const fs::path configurationBackups = dataRoot / L"backups" / L"config";
@@ -14339,14 +15336,24 @@ int wmain(int argc, wchar_t** argv) {
                     throw std::runtime_error("Unknown Steam account list option: " + toUtf8(argv[i]));
                 }
             }
-            const auto report = listSteamAccountTargets(steamRoots);
-            if (outputPath) writeJsonAtomic(*outputPath, report);
+            try {
+                LibraryScanSnapshot outputProof;
+                std::string publicationError;
+                if (outputPath && !discoveryOutputWritable(*outputPath, outputProof, publicationError)) throw LibraryScanReadError(publicationError);
+                const auto report = readLiveLibraryAccountReport(steamRoots);
+                if (outputPath && !writeLibraryDiscoveryPlan(dataRoot, *outputPath, report, publicationError, &outputProof, true)) throw LibraryScanReadError(publicationError);
             std::cout << "STEAM_ACCOUNTS: " << report.value("accounts", json::array()).size() << "\n";
             std::cout << "MULTIPLE_STEAM_ACCOUNTS: " << (report.value("multipleAccounts", false) ? "true" : "false") << "\n";
             std::cout << "EXPLICIT_ACCOUNT_SELECTION_REQUIRED: " << (report.value("requiresExplicitSelection", false) ? "true" : "false") << "\n";
-            if (outputPath) std::cout << "OUTPUT: " << toUtf8(outputPath->wstring()) << "\n";
+            if (outputPath) std::cout << "ACCOUNTS_WRITE_CONFIRMED: true\nOUTPUT: " << toUtf8(outputPath->wstring()) << "\n";
             else std::cout << report.dump(2) << "\n";
-            return 0;
+                std::cout << "STEAM_ACCOUNTS_STATUS: current\n";
+                return 0;
+            } catch (const std::exception& error) {
+                std::cout << "STEAM_ACCOUNTS_STATUS: unknown\nACCOUNTS_WRITE_CONFIRMED: false\n";
+                std::cerr << "WARNING_STEAM_ACCOUNTS_PUBLICATION: " << error.what() << "\n";
+                return 0;
+            }
         }
 
         if (_wcsicmp(argv[1], L"--commit-refresh-steam-artwork") == 0) {
@@ -14635,12 +15642,13 @@ int wmain(int argc, wchar_t** argv) {
             }
             if (reason.empty()) throw std::runtime_error("--reason is required; wakeups must be event-triggered");
 
-            auto queue = loadNetworkRetryQueue(dataRoot);
+            NetworkRetryQueueObservation observed;
+            auto queue = loadNetworkRetryQueue(dataRoot,&observed);
             const auto now = unixTimeMs();
             std::vector<std::string> selected;
             for (const auto& [id, job] : queue["jobs"].items()) {
                 if (static_cast<int>(selected.size()) >= maximum) break;
-                if (job.is_object() && (force || job.value("nextAttemptAt", static_cast<uint64_t>(0)) <= now)) {
+                if (networkRetryJobDue(job,now,force)) {
                     selected.push_back(id);
                 }
             }
@@ -14656,10 +15664,10 @@ int wmain(int argc, wchar_t** argv) {
                 {
                     // Only the queue read/modify/write transaction is locked;
                     // the replayed network request runs after this scope.
-                    DataTransactionMutex transaction;
-                    queue = loadNetworkRetryQueue(dataRoot);
+                    DataTransactionMutex transaction(2000);
+                    queue = loadNetworkRetryQueue(dataRoot,&observed);
                     auto iterator = queue["jobs"].find(id);
-                    if (iterator == queue["jobs"].end() || !iterator->is_object()) continue;
+                    if (iterator == queue["jobs"].end() || !networkRetryJobDue(*iterator,now,force)) continue;
                     job = *iterator;
                     executable = fs::path(toWide(job.value("executable", std::string{})));
                     const auto currentIdentity = executableIdentity(executable);
@@ -14669,8 +15677,7 @@ int wmain(int argc, wchar_t** argv) {
                         job["lastWakeAt"] = unixTimeMs();
                         job["currentExecutableIdentity"] = currentIdentity;
                         queue["jobs"][id] = job;
-                        writeJsonWithBackup(
-                            networkRetryQueuePath(dataRoot), dataRoot / L"backups" / L"state", "network-retry-queue", queue);
+                        commitNetworkRetryQueue(dataRoot,observed,queue);
                         needsManualReview = true;
                     } else {
                         const auto commandArgs = job.value("commandArgs", json::array());
@@ -14684,8 +15691,7 @@ int wmain(int argc, wchar_t** argv) {
                         job["lastWakeReason"] = reason;
                         job["lastWakeAt"] = unixTimeMs();
                         queue["jobs"][id] = job;
-                        writeJsonWithBackup(
-                            networkRetryQueuePath(dataRoot), dataRoot / L"backups" / L"state", "network-retry-queue", queue);
+                        commitNetworkRetryQueue(dataRoot,observed,queue);
                     }
                 }
                 if (needsManualReview) {
@@ -14698,20 +15704,20 @@ int wmain(int argc, wchar_t** argv) {
                 }
 
                 const DWORD exitCode = runLabChildProcess(fs::absolute(fs::path(argv[0])), arguments);
-                DataTransactionMutex transaction;
-                queue = loadNetworkRetryQueue(dataRoot);
+                DataTransactionMutex transaction(2000);
+                queue = loadNetworkRetryQueue(dataRoot,&observed);
                 auto iterator = queue["jobs"].find(id);
+                const bool stillClaimed=iterator!=queue["jobs"].end()&&iterator->is_object()&&*iterator==job;
                 if (exitCode == 0) {
-                    auto completed = iterator != queue["jobs"].end() && iterator->is_object() ? *iterator : job;
+                    auto completed = job;
                     completed["status"] = "completed";
                     completed["completedAt"] = unixTimeMs();
                     completed["completedByWakeReason"] = reason;
                     completed["exitCode"] = exitCode;
                     queue["history"].push_back(std::move(completed));
-                    if (iterator != queue["jobs"].end()) queue["jobs"].erase(iterator);
+                    if (stillClaimed) queue["jobs"].erase(iterator);
                     while (queue["history"].size() > 200) queue["history"].erase(queue["history"].begin());
-                    writeJsonWithBackup(
-                        networkRetryQueuePath(dataRoot), dataRoot / L"backups" / L"state", "network-retry-queue", queue);
+                    commitNetworkRetryQueue(dataRoot,observed,queue);
                     appendLifecycleEvent(dataRoot, {{"type", "network-retry-completed"}, {"jobId", id}, {"wakeReason", reason}});
                     ++succeeded;
                 } else {
@@ -14722,44 +15728,23 @@ int wmain(int argc, wchar_t** argv) {
                     // stuck as running-event-wakeup.
                     bool queueChanged = false;
                     const auto now = unixTimeMs();
-                    if (iterator == queue["jobs"].end() || !iterator->is_object()) {
-                        job["status"] = "waiting-network";
-                        job["updatedAt"] = now;
-                        job["lastExitCode"] = exitCode;
-                        job["lastFailure"] = {
-                            {"kind", "retry-worker-failed"},
-                            {"stage", "network-wake"},
-                            {"retryWhenNetworkReturns", true},
-                            {"exitCode", exitCode}
-                        };
-                        job["nextAttemptAt"] = now + 15ull * 60ull * 1000ull;
-                        job["consecutiveFailures"] = job.value("consecutiveFailures", 0) + 1;
-                        queue["jobs"][id] = job;
+                    // A completion belongs only to the exact claimed row. A
+                    // later re-enqueue/removal owns the new state, even for the
+                    // same stable game ID; never recreate or consume that state.
+                    if (stillClaimed) {
+                        auto failedJob = job;
+                        const int failures = (std::min)(1000000, failedJob.value("consecutiveFailures", 0) + 1);
+                        const auto delaySeconds = static_cast<uint64_t>((std::min)(15 * 60, 15 * (1 << (std::min)(failures - 1, 6))));
+                        failedJob["status"] = "waiting-network";
+                        failedJob["updatedAt"] = now;
+                        failedJob["lastExitCode"] = exitCode;
+                        failedJob["lastFailure"] = {{"kind","retry-worker-failed"},{"stage","network-wake"},{"retryWhenNetworkReturns",true},{"exitCode",exitCode}};
+                        failedJob["nextAttemptAt"] = now + delaySeconds * 1000ull;
+                        failedJob["consecutiveFailures"] = failures;
+                        queue["jobs"][id] = std::move(failedJob);
                         queueChanged = true;
-                    } else {
-                        auto failedJob = *iterator;
-                        const auto status = failedJob.value("status", std::string{});
-                        if (status == "running-event-wakeup" || status == "running") {
-                            const int failures = failedJob.value("consecutiveFailures", 0) + 1;
-                            const auto delaySeconds = static_cast<uint64_t>(
-                                (std::min)(15 * 60, 15 * (1 << (std::min)(failures - 1, 6))));
-                            failedJob["status"] = "waiting-network";
-                            failedJob["updatedAt"] = now;
-                            failedJob["lastExitCode"] = exitCode;
-                            failedJob["lastFailure"] = {
-                                {"kind", "retry-worker-failed"},
-                                {"stage", "network-wake"},
-                                {"retryWhenNetworkReturns", true},
-                                {"exitCode", exitCode}
-                            };
-                            failedJob["nextAttemptAt"] = now + delaySeconds * 1000ull;
-                            failedJob["consecutiveFailures"] = failures;
-                            queue["jobs"][id] = std::move(failedJob);
-                            queueChanged = true;
-                        }
                     }
-                    if (queueChanged) writeJsonWithBackup(
-                        networkRetryQueuePath(dataRoot), dataRoot / L"backups" / L"state", "network-retry-queue", queue);
+                    if (queueChanged) commitNetworkRetryQueue(dataRoot,observed,queue);
                     ++failed;
                 }
             }
@@ -14785,56 +15770,8 @@ int wmain(int argc, wchar_t** argv) {
                 }
             }
             if (!gameDirectory) throw std::runtime_error("--game-dir is required");
-            const auto recovery = latestDeletedGameRecoveryPackage(dataRoot, *gameDirectory);
-            const auto manifestBytes = readBinaryFile(recovery / L"recovery-manifest.json", 16u << 20);
-            const auto manifest = json::parse(manifestBytes.begin(), manifestBytes.end());
-            verifyRecoveryFiles(recovery, manifest);
-            const auto key = canonicalPathKey(*gameDirectory);
-
-            auto config = loadLibraryConfig(libraryConfigPath);
-
-
-            auto configBaseline = config;
-            config["excludedGameDirectories"] = withoutConfiguredDirectory(
-                config.value("excludedGameDirectories", json::array()), *gameDirectory);
-            if (manifest.contains("manualGameDirectory") && manifest["manualGameDirectory"].is_object() &&
-                !configuredDirectory(config.value("manualGameDirectories", json::array()), *gameDirectory)) {
-                config["manualGameDirectories"].push_back(manifest["manualGameDirectory"]);
-            }
-            if (manifest.contains("manualPrimary") && manifest["manualPrimary"].is_object() &&
-                !config["manualPrimary"].contains(key)) {
-                config["manualPrimary"][key] = manifest["manualPrimary"];
-            }
-            config["updatedAt"] = unixTimeMs();
-            config = writeJsonWithBackup(libraryConfigPath, configurationBackups, "library-config", config, &configBaseline);
-            configBaseline = config;
-
-            const auto manualOverridesPath = dataRoot / L"config" / L"manual-overrides.json";
-            auto overrides = loadManualOverrides(manualOverridesPath);
-
-            auto overridesBaseline = overrides;
-            if (manifest.contains("manualOverrides") && manifest["manualOverrides"].is_object()) {
-                for (const auto& [overrideKey, value] : manifest["manualOverrides"].items()) {
-                    if (!overrides["items"].contains(overrideKey)) overrides["items"][overrideKey] = value;
-                }
-                overrides = writeJsonWithBackup(manualOverridesPath, configurationBackups, "manual-overrides", overrides, &overridesBaseline);
-                overridesBaseline = overrides;
-            }
-
-            const auto id = manifest.value("gameDataId", gameDataId(*gameDirectory));
-            uintmax_t copied = 0;
-            for (const auto& section : {L"games", L"artwork", L"cache"}) {
-                copied += mergeRecoveryDirectory(
-                    recovery / section, dataRoot / section / toWide(id), dataRoot);
-            }
-            writeJsonAtomic(recovery / L"recovery-state.json", {
-                {"restoredAt", unixTimeMs()}, {"mergeDidNotOverwriteNewerFiles", true},
-                {"restoredFiles", copied}
-            });
-            appendLifecycleEvent(dataRoot, {
-                {"type", "user-removal-undone"}, {"gameDirectory", toUtf8(gameDirectory->wstring())},
-                {"recoveryPackage", toUtf8(recovery.wstring())}, {"restoredFiles", copied}
-            });
+            const auto result=undoDeletedGameRecovery(dataRoot,*gameDirectory);
+            const auto recovery=fs::path(toWide(jsonStringOr(result,"recoveryPackage")));const auto copied=result["restoredFiles"].get<uintmax_t>();
             std::cout << "LIBRARY_GAME_REMOVAL_UNDONE: " << toUtf8(gameDirectory->wstring()) << "\n";
             std::cout << "RECOVERY_PACKAGE: " << toUtf8(recovery.wstring()) << "\n";
             std::cout << "RECOVERY_FILES_RESTORED: " << copied << "\n";
@@ -14857,6 +15794,47 @@ int wmain(int argc, wchar_t** argv) {
                 }
             }
             if (!gameDirectory) throw std::runtime_error("--game-dir is required");
+            DataTransactionMutex removalTransaction;
+            if (!restore) {
+                // Removal may revoke an exact user-selected row, but a damaged
+                // catalog is not an empty writable inventory. Preserve the raw
+                // document, including rows the runtime view cannot authorize.
+                const auto statePath = dataRoot / L"state" / L"library-scan.json";
+                LibraryScanObservation observation;
+                (void)loadLibraryScanState(statePath, &observation);
+                auto unavailable = [](const std::string& reason) {
+                    std::cerr << "WARNING_LIBRARY_SCAN_REMOVAL: " << reason << "\n";
+                    std::cout << "LIBRARY_SCAN_STATE: unknown\nLIBRARY_SCAN_REMOVE_CONFIRMED: false\n";
+                };
+                if (!observation.active) {
+                    unavailable("Previous inventory is unknown; preserve/repair the original and explicitly retry");
+                    return 0;
+                }
+                try {
+                    auto document = parseLibraryScanSnapshot(observation.proof);
+                    const auto selected = canonicalPathKey(*gameDirectory);
+                    for (const auto* name : {"games", "missingGames", "unscannedGames"}) {
+                        if (!document.contains(name)) continue;
+                        json retained = json::array();
+                        for (const auto& row : document[name]) {
+                            const auto path = jsonStringOr(row, "gameDirectory");
+                            if (!libraryScanPathText(path) || canonicalPathKey(fs::path(toWide(path))) != selected)
+                                retained.push_back(row);
+                        }
+                        document[name] = std::move(retained);
+                    }
+                    document["updatedAfterUserRemovalAt"] = unixTimeMs();
+                    std::string reason;
+                    if (!writeLibraryDiscoveryPlan(dataRoot, statePath, document, reason, &observation.proof)) {
+                        unavailable(reason);
+                        return 0;
+                    }
+                } catch (const std::exception& error) { unavailable(error.what()); return 0; }
+                  catch (...) { unavailable("Inventory removal publication failed"); return 0; }
+                // Only a confirmed scan update may enter config/data removal.
+                // The later recovery-package/config steps retain their own
+                // existing failure contract; this is not a cross-file commit.
+            }
             auto config = loadLibraryConfig(libraryConfigPath);
 
             auto configBaseline = config;
@@ -14923,31 +15901,6 @@ int wmain(int argc, wchar_t** argv) {
                 std::error_code ec;
                 removedEntries += fs::remove_all(target, ec);
                 if (ec) throw std::runtime_error("Cannot remove persisted Custom Steam Library game data");
-            }
-            const auto statePath = dataRoot / L"state" / L"library-scan.json";
-            if (fs::is_regular_file(statePath)) {
-                try {
-                    const auto bytes = readBinaryFile(statePath, 64u << 20);
-                    auto state = json::parse(bytes.begin(), bytes.end());
-                    for (const auto* arrayName : {"games", "missingGames", "unscannedGames"}) {
-                        json filtered = json::array();
-                        for (const auto& game : state.value(arrayName, json::array())) {
-                            if (canonicalPathKey(fs::path(toWide(game.value("gameDirectory", std::string{})))) != key) {
-                                filtered.push_back(game);
-                            }
-                        }
-                        state[arrayName] = std::move(filtered);
-                    }
-                    state["updatedAfterUserRemovalAt"] = unixTimeMs();
-                    writeJsonAtomic(statePath, state);
-                } catch (...) {
-                    const auto corrupt = dataRoot / L"backups" / L"corrupt" /
-                        (L"library-scan-during-remove-" + std::to_wstring(unixTimeMs()) + L".json");
-                    fs::create_directories(corrupt.parent_path());
-                    std::error_code ec;
-                    fs::copy_file(statePath, corrupt, fs::copy_options::overwrite_existing, ec);
-                    fs::remove(statePath, ec);
-                }
             }
             appendLifecycleEvent(dataRoot, {
                 {"type", "user-removed-game"}, {"gameDirectory", toUtf8(gameDirectory->wstring())},
@@ -15090,6 +16043,7 @@ int wmain(int argc, wchar_t** argv) {
         if (_wcsicmp(argv[1], L"--set-library-primary") == 0) {
             std::optional<fs::path> gameDirectory;
             std::optional<fs::path> executable;
+            bool publishPrimaryState=false;std::optional<std::string> expectedPrimary;
             for (int i = 2; i < argc; ++i) {
                 if (_wcsicmp(argv[i], L"--game-dir") == 0) {
                     if (++i >= argc) throw std::runtime_error("--game-dir requires a path");
@@ -15097,6 +16051,8 @@ int wmain(int argc, wchar_t** argv) {
                 } else if (_wcsicmp(argv[i], L"--exe") == 0) {
                     if (++i >= argc) throw std::runtime_error("--exe requires a path");
                     executable = fs::weakly_canonical(fs::path(argv[i]));
+                } else if(_wcsicmp(argv[i],L"--publish-primary-state")==0){publishPrimaryState=true;
+                } else if(_wcsicmp(argv[i],L"--expected-primary")==0){if(++i>=argc)throw std::runtime_error("--expected-primary requires the captured EXE");expectedPrimary=toUtf8(argv[i]);
                 } else {
                     throw std::runtime_error("Unknown primary selection option: " + toUtf8(argv[i]));
                 }
@@ -15109,6 +16065,12 @@ int wmain(int argc, wchar_t** argv) {
             if (!pathWithin(*executable, *gameDirectory)) {
                 throw std::runtime_error("The primary EXE must be inside its game directory");
             }
+            if(publishPrimaryState){
+                if(!expectedPrimary)throw std::runtime_error("Editor primary save requires the captured previous EXE");
+                saveEditorPrimary(dataRoot,*gameDirectory,*executable,*expectedPrimary);
+                std::cout<<"LIBRARY_PRIMARY_SAVED: "<<toUtf8(executable->wstring())<<"\nTARGETED_STATE_PUBLISHED: true\n";return 0;
+            }
+            if(expectedPrimary)throw std::runtime_error("--expected-primary requires --publish-primary-state");
             auto config = loadLibraryConfig(libraryConfigPath);
 
             auto configBaseline = config;
@@ -15238,6 +16200,20 @@ int wmain(int argc, wchar_t** argv) {
             }
             const auto defaultTrainer = expandEnvironmentPath("%APPDATA%\\GCM Trainers");
             if (trainerRoots.empty() && !defaultTrainer.empty()) trainerRoots.push_back(defaultTrainer);
+            const auto persistentStatePath = dataRoot / L"state" / L"library-scan.json";
+            LibraryScanObservation previousObservation;
+            auto previousState = loadLibraryScanState(persistentStatePath, &previousObservation);
+            if (!previousObservation.active && !previousObservation.mayRebuild) {
+                printLibraryScanUnavailable("Previous scan is protected or unreadable; preserve it and retry after repair");
+                return 0;
+            }
+            bool unknownPreviousInventory = previousObservation.source == "damaged";
+            if (previousObservation.source == "missing") {
+                std::error_code membershipError;
+                unknownPreviousInventory = fs::exists(dataRoot / L"state" / L"ymcc-game-whitelist-membership.json", membershipError) || bool(membershipError);
+            }
+            if (previousState.contains("libraryScanRecovery") && previousState["libraryScanRecovery"].is_object())
+                unknownPreviousInventory = unknownPreviousInventory || jsonBoolSafe(previousState["libraryScanRecovery"], "unknownPreviousInventory", false);
             if (saveRoots) {
                 config["roots"] = json::array();
                 std::set<std::string> seen;
@@ -15265,51 +16241,6 @@ int wmain(int argc, wchar_t** argv) {
                 config = writeJsonWithBackup(libraryConfigPath, configurationBackups, "library-config", config, &configBaseline);
             configBaseline = config;
             }
-            const auto persistentStatePath = dataRoot / L"state" / L"library-scan.json";
-            json previousState = json::object();
-            bool previousStateLoaded = false;
-            std::vector<fs::path> stateCandidates;
-            if (fs::is_regular_file(persistentStatePath)) stateCandidates.push_back(persistentStatePath);
-            const auto stateBackups = stateBackupCandidates(dataRoot, persistentStatePath, "library-scan");
-            stateCandidates.insert(stateCandidates.end(), stateBackups.begin(), stateBackups.end());
-            std::optional<fs::path> corruptState;
-            for (const auto& candidate : stateCandidates) {
-                try {
-                    const auto bytes = readBinaryFile(candidate, 64u << 20);
-                    previousState = validateLibraryScanState(json::parse(bytes.begin(), bytes.end()));
-                    previousStateLoaded = true;
-                    if (candidate != persistentStatePath) {
-                        try {
-                            writeJsonWithBackup(
-                                persistentStatePath, dataRoot / L"backups" / L"state", "library-scan", previousState);
-                        } catch (...) {
-                            // Continue this scan with the recovered state;
-                            // the next successful scan retries durable repair.
-                        }
-                    }
-                    break;
-                } catch (...) {
-                    if (candidate == persistentStatePath && !corruptState) {
-                        corruptState = preserveCorruptStateFile(dataRoot, persistentStatePath, "library-scan");
-                    }
-                    continue;
-                }
-            }
-            if (!previousStateLoaded && fs::is_regular_file(persistentStatePath)) {
-                    previousState = json::object();
-                    appendLifecycleEvent(dataRoot, {
-                        {"type", "library-state-corrupt-detected"},
-                        {"corruptBackup", corruptState ? json(toUtf8(corruptState->wstring())) : json(nullptr)},
-                        {"recovery", "fresh-scan-rebuild"}
-                    });
-            } else if (corruptState) {
-                appendLifecycleEvent(dataRoot, {
-                    {"type", "library-state-recovered-from-backup"},
-                    {"corruptBackup", toUtf8(corruptState->wstring())},
-                    {"recovery", "state-backup"}
-                });
-            }
-
             auto report = scanLibraryRoots(roots, trainerRoots, maxDepth, config);
             // Root coverage remains in the report, including empty/unavailable
             // roots. Otherwise an empty result would erase user configuration
@@ -15418,9 +16349,13 @@ int wmain(int argc, wchar_t** argv) {
             report["summary"]["lifecycleTransitions"] = report["lifecycleTransitions"].size();
             const auto outputRoot = fs::absolute(requestedOutput.value_or(custom_steam_library::jobsRoot(dataRoot)));
             const auto output = outputRoot / L"library-scan.json";
-            writeJsonAtomic(output, report);
-            writeJsonWithBackup(
-                persistentStatePath, dataRoot / L"backups" / L"state", "library-scan", report);
+            if (unknownPreviousInventory) report["libraryScanRecovery"] = {{"schemaVersion", 1}, {"requiresFreshScan", true}, {"unknownPreviousInventory", true}};
+            bool stateCommitted = false;
+            std::string publicationError;
+            if (!publishFreshLibraryScan(dataRoot, persistentStatePath, output, previousObservation, report, stateCommitted, publicationError, &config["manualPrimary"])) {
+                printLibraryScanUnavailable(publicationError, stateCommitted);
+                return 0;
+            }
             for (const auto& game : report["games"]) {
                 const auto directory = fs::path(toWide(game.value("gameDirectory", std::string{})));
                 const auto id = gameDataId(directory);
@@ -15458,6 +16393,7 @@ int wmain(int argc, wchar_t** argv) {
             config["updatedAt"] = unixTimeMs();
             config = writeJsonWithBackup(libraryConfigPath, configurationBackups, "library-config", config, &configBaseline);
             configBaseline = config;
+            std::cout << "LIBRARY_SCAN_STATE: " << (unknownPreviousInventory ? "review-required" : "current") << "\nLIBRARY_SCAN_COMMITTED: true\nLIBRARY_STATE_COMMITTED: true\n";
             std::cout << "LIBRARY_ROOT_COUNT: " << config.value("roots", json::array()).size() << "\n";
             std::cout << "LIBRARY_GAMES: " << summary.value("games", 0) << "\n";
             std::cout << "LIBRARY_READY: " << summary.value("ready", 0) << "\n";
@@ -16017,7 +16953,9 @@ int wmain(int argc, wchar_t** argv) {
             const auto jobId = networkRetryJobId(exePath, requestedShortcutId, platformHint);
             auto retryJob = enqueueNetworkRetry(
                 dataRoot, jobId, exePath, replayArgumentsForNetwork(), failure);
-            failure["networkRetryJobId"] = jobId;
+            const bool queued=retryJob.value("queued",false);
+            failure["networkRetryQueued"]=queued;
+            if(queued)failure["networkRetryJobId"]=jobId;else{failure.erase("networkRetryJobId");failure["networkRetryQueueError"]=retryJob.value("error",std::string{"queue unavailable"});}
             failure["networkRetryNextAttemptAt"] = retryJob.value("nextAttemptAt", static_cast<uint64_t>(0));
             failure["networkRetryWakeMode"] = "event-driven-no-polling";
             failure["realSteamApplyDeferred"] = false;
@@ -16027,7 +16965,7 @@ int wmain(int argc, wchar_t** argv) {
                 {"stage", failure.value("stage", std::string{"metadata"})},
                 {"nextAttemptAt", retryJob.value("nextAttemptAt", static_cast<uint64_t>(0))}
             });
-            std::cout << "NETWORK_RETRY_JOB: " << jobId << "\n";
+            std::cout << (queued?"NETWORK_RETRY_JOB: ":"NETWORK_RETRY_QUEUE_UNAVAILABLE: ") << jobId << "\n";
             std::cout << "NETWORK_RETRY_WAKE_MODE: event-driven-no-polling\n";
             return retryJob;
         };

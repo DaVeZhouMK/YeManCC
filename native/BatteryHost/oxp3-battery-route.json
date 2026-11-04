@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "route": "oxp3-wmi-ec",
+  "family": "OneXPlayer 3",
+  "kind": "firmware-percent",
+  "min": 40,
+  "identity": {
+    "manufacturers": [
+      "ONE-NETBOOK",
+      "ONE-NETBOOK TECHNOLOGY CO., LTD."
+    ],
+    "field": "systemProduct",
+    "values": [
+      "ONEXPLAYER 3",
+      "ONEXPLAYER-3"
+    ],
+    "deviceClass": "OneXPlayer3"
+  },
+  "firmwareGate": {
+    "kind": "provider-probe-required",
+    "majorMin": 0,
+    "minorMin": 0
+  },
+  "source": {
+    "pinnedSource": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+    "sha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+    "deviceJson": "capabilities/upstream/f2e58468/OneXPlayer3.json",
+    "deviceJsonSha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a",
+    "commit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+    "upstreamSourcePin": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\upstream\\SOURCE-PIN.json",
+    "parentX2": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\upstream\\source\\HandheldCompanion\\Devices\\OneXPlayer\\OneXPlayerX2.cs",
+      "sha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b"
+    },
+    "wmiEc": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\upstream\\source\\HandheldCompanion\\Devices\\OneXPlayer\\OneXPlayerWmiEc.cs",
+      "sha256": "f84150a6e4714568e4cb14c019bd8e3cda394a32ef0cebe620a86f82c16a3021"
+    },
+    "identityEvidence": "IDevice.cs switch ProductName ONEXPLAYER 3 / ONEXPLAYER-3 with ManufacturerName ONE-NETBOOK"
+  },
+  "protocol": {
+    "namespace": "root\\WMI",
+    "class": "SuRwECRegInterface",
+    "readMethod": "ReadECReg",
+    "writeMethod": "WriteECReg",
+    "limitRegister": "0x04A3",
+    "bypassRegister": "0x04A4",
+    "addressPacking": "bank | offset << 8 (0x04A3 -> 0xA304)",
+    "writePacking": "packedAddress | value << 16",
+    "response": "hex status,value; status must be 0"
+  },
+  "limits": {
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "origin": "upstream source range; product choices remain 50..100 by 5"
+  },
+  "bypassModes": {
+    "0": "0x00",
+    "1": "0x01",
+    "2": "0x0B"
+  }
+}

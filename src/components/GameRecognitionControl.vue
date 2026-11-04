@@ -375,7 +375,7 @@ onUnmounted(() => {
     >
       <AppIcon :name="gameIdentifying ? 'search' : 'gamepad'" />
       <OverflowGameName class="game-recognition-label" :name="gameButtonStatus" :interactive="false" />
-      <small class="game-recognition-hint"><strong class="game-action-key game-action-key-y">Y</strong>菜单</small>
+      <small class="game-recognition-hint"><span class="controller-key controller-key--small game-action-key game-action-key-y" data-controller-key="Y">Y</span>菜单</small>
     </button>
 
     <div v-if="gameRuleMenu" ref="gameRulePanelEl" class="game-recognition-popover" data-gp-modal>

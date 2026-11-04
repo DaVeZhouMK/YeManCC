@@ -1,13 +1,13 @@
 export type MousePolicyMode='auto'|'on'|'off';
 export interface MouseModePresentation {
- mode:MousePolicyMode;on:boolean;stateKnown:boolean;provider:'ymcc'|'steam';
+ backend?:'joyxoff'|'gamebar';mode:MousePolicyMode;on:boolean;stateKnown:boolean;provider:'ymcc'|'steam';
  controlAllowed:boolean;mappingVerified:boolean;verification:string;scene:string;
  pending:boolean;ok:boolean;sequence:number;policyReason:string;ymccVisitRevision?:number;error?:string;
 }
 export function admitMouseModePresentation(raw:unknown):MouseModePresentation|null {
  const s=raw as Partial<MouseModePresentation>|null;
  if(!s||!['auto','on','off'].includes(s.mode??'')||typeof s.on!=='boolean'||typeof s.stateKnown!=='boolean'||!['ymcc','steam'].includes(s.provider??''))return null;
- return {mode:s.mode!,on:s.on,stateKnown:s.stateKnown,provider:s.provider!,controlAllowed:s.controlAllowed===true,mappingVerified:s.mappingVerified===true,verification:typeof s.verification==='string'?s.verification:'unobserved',scene:typeof s.scene==='string'?s.scene:'unknown',pending:s.pending===true,ok:s.ok===true,sequence:Number.isSafeInteger(s.sequence)?s.sequence!:0,policyReason:typeof s.policyReason==='string'?s.policyReason:'',ymccVisitRevision:Number.isSafeInteger(s.ymccVisitRevision)&&s.ymccVisitRevision!>=0?s.ymccVisitRevision!:0,...(typeof s.error==='string'?{error:s.error}:{})};
+ return {...(s.backend==='gamebar'||s.backend==='joyxoff'?{backend:s.backend}:{}),mode:s.mode!,on:s.on,stateKnown:s.stateKnown,provider:s.provider!,controlAllowed:s.controlAllowed===true,mappingVerified:s.mappingVerified===true,verification:typeof s.verification==='string'?s.verification:'unobserved',scene:typeof s.scene==='string'?s.scene:'unknown',pending:s.pending===true,ok:s.ok===true,sequence:Number.isSafeInteger(s.sequence)?s.sequence!:0,policyReason:typeof s.policyReason==='string'?s.policyReason:'',ymccVisitRevision:Number.isSafeInteger(s.ymccVisitRevision)&&s.ymccVisitRevision!>=0?s.ymccVisitRevision!:0,...(typeof s.error==='string'?{error:s.error}:{})};
 }
 export function mouseModeText(s:MouseModePresentation|null):{title:string;detail:string;icon:string} {
  if(!s)return {title:'状态待确认',detail:'模拟鼠标',icon:'mouse'};

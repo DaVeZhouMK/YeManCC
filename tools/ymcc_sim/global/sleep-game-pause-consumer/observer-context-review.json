@@ -12,7 +12,7 @@
     },
     {
       "path": "tools/sleep_game_pause_selftest.py",
-      "sha256": "84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d"
+      "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007"
     }
   ],
   "definitions": [
@@ -34,14 +34,20 @@
       "completeLfSha256": "ccbf08ef757e6aafff56e98bfc17c4e4d5cd2a59cd0302ab07f82ca07e3bcf1f"
     }
   ],
-  "templateSha256": "af6cb511b90597c36b63a5852a25a9e0971eed1a241d4d30a6297bd9e4732198",
+  "templateSha256": "b0e6ff31792dd40c247afa89dfa2f2a8b1527e2fcbd8f40b80e1756abb93fc78",
   "insertion": {
     "anchor": "static bool sgShouldKeepInputDuringStandby() {",
-    "include": "#include \"msi-observer-context.h\"\n"
+    "include": "#include \"msi-observer-context.h\"\n",
+    "scaffoldingReplacements": [
+      {
+        "before": "void msiVisibilityObserverNoteResume(unsigned long long){}",
+        "after": "static void msiVisibilityObserverNoteResume(unsigned long long) noexcept;"
+      }
+    ]
   },
   "originalScript": {
     "path": "tools/sleep_game_pause_selftest.py",
-    "sha256": "84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d"
+    "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007"
   },
   "changesReviewed": {
     "cause": "Complete product resume handler now calls diagnostic receipt helper; original generated memory preamble lacked that context.",
@@ -56,5 +62,33 @@
     "noLaunch": "Runtime launch/poll/process headers are not included; noteResume does not arm/start an observer. Six original OS refusals remain required.",
     "generator": "Exact original Python bytes, all extracted complete definitions, original worker block/48 assertions/28 groups and original identity negative retained. Removing the exact single include restores original generated C++ text.",
     "acceptance": false
+  },
+  "scaffoldingReview": "Replace only the old MSI memory stub with the exact static noexcept forward declaration for the actual injected product definition; add an explicit counted no-I/O Decky transport port. Original Python, consumer definitions, assertions and identity source mutant are unchanged.",
+  "eventAssertionMaintenance": {
+    "date": "2026-11-02",
+    "beforeSha256": "79cca43d2a39f455fea9635321a8a5738d235f531cfa414225eb14b729620808",
+    "afterSha256": "ab8831589fc20d02b68012f8ffd2c3003463ffca7e5a98bf09bbece69ebdb22c",
+    "reason": "Actual canceled-intent Ready publishes fan and gameMedia events; preserve strict cardinality, fan generation, shared generation and source fields",
+    "reverseDeltaOnlyOneAssertionRegion": true,
+    "oldFailurePreserved": true,
+    "originalCaseCountUnchanged": true,
+    "productChanged": false
+  },
+  "powerResumeRegressionReview": {
+    "date": "2026-11-03",
+    "beforeSha256": "ab8831589fc20d02b68012f8ffd2c3003463ffca7e5a98bf09bbece69ebdb22c",
+    "afterSha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007",
+    "originalCaseCountUnchanged": true,
+    "originalIdentityFaultUnchanged": true,
+    "addedSharedLeaseFunctions": [
+      "hardwareWriteAllowed",
+      "beginHardwareWriteLease",
+      "endHardwareWriteLease",
+      "powerLifecycleMatches",
+      "publishPowerResumeReady",
+      "reconcilePowerResumeReady",
+      "initialPowerGeneration"
+    ],
+    "hardwareValidated": false
   }
 }

@@ -144,7 +144,9 @@ class ModeObserver {
                     notify = !delivered_.is_object() || delivered_.value("mode", std::string{}) != result.value("mode", std::string{}) ||
                         delivered_.value("modeEpoch", std::string{}) != result.value("modeEpoch", std::string{}) ||
                         delivered_.value("deckyUpdateResidue",ModeJson()) != result.value("deckyUpdateResidue",ModeJson()) ||
-                        delivered_.value("deckyEmptyFrontend",ModeJson()) != result.value("deckyEmptyFrontend",ModeJson());
+                        delivered_.value("deckyEmptyFrontend",ModeJson()) != result.value("deckyEmptyFrontend",ModeJson()) ||
+                        delivered_.value("deckyBackendConnected",ModeJson()) != result.value("deckyBackendConnected",ModeJson()) ||
+                        delivered_.value("deckyHooksInstalled",ModeJson()) != result.value("deckyHooksInstalled",ModeJson());
                     cached_ = delivered_ = result;
                     stableBigPicture = !notify && result.value("mode", std::string{}) == "bigpicture";
                 } else {
@@ -202,11 +204,11 @@ public:
         if (wake_) SetEvent(wake_);
     }
     // Hints from existing Windows events or the Decky 30s recovery timer. No CDP here.
-    bool requestRefresh(const steamsession::Session& session) {
+    bool requestRefresh(const steamsession::Session& session, bool invalidate = true) {
         std::lock_guard lock(mutex_);
         if (stopping_ || !demand() || !validSession(session_) || !(session_ == session)) return false;
         if (inFlight_ && window_.timeout(GetTickCount64()) == INFINITE) ++hintGeneration_;
-        if (cached_.is_object()) cached_ = ModeJson{}; // Invalidate once; no repeated JSON construction under an event storm.
+        if (invalidate && cached_.is_object()) cached_ = ModeJson{}; // Health refresh retains last verified evidence; window hints still invalidate.
         // A pending deadline already owns the next wake. Repeated window/name
         // hints must not cause one kernel wake and loop iteration per event.
         const bool newlyArmed = window_.request(GetTickCount64(), inFlight_);

@@ -1,16 +1,17 @@
 [CmdletBinding()]
-param([string]$NativeSource = '')
+param([string]$NativeSource = '', [string]$HostSource = '')
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($NativeSource)) { $NativeSource = Join-Path $repoRoot 'native\main.cpp' }
 $native = Get-Content -Raw -LiteralPath $NativeSource
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $repoRoot)
 $hostCandidates = @(
+  (Join-Path $repoRoot 'FanLab\real-host\Program.cs'),
   (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs'),
   'G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\FanLab\real-host\Program.cs',
   'G:\YeManCC-Work\Isolated\Tasks\HC-Candidate-20260902\assets\candidates\FanHost-source-FANHOST-REAL-HOST-20260831\Program.cs'
 )
-$hostSourcePath = $hostCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$hostSourcePath = if (-not [string]::IsNullOrWhiteSpace($HostSource)) { (Resolve-Path -LiteralPath $HostSource).Path } else { $hostCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1 }
 if (-not $hostSourcePath) {
   throw "FanHost source baseline not found; checked: $($hostCandidates -join '; ')"
 }

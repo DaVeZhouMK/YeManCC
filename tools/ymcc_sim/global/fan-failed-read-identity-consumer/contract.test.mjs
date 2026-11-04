@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
 import {verifyReport,verifyExecution,mutateSource,summarizeActualCoverage} from './contract.mjs';
 const spec=JSON.parse(fs.readFileSync(new URL('./spec.json',import.meta.url),'utf8'));
-const positive=()=>({ok:true,checks:45,scope:spec.originalScope,results:spec.expectedCaseNames.map(name=>({name,ok:true,evidence:{retiredAdoptions:0,failureReads:0}}))});
+const positive=()=>({ok:true,checks:45,scope:spec.originalScope,results:spec.expectedCaseNames.map(name=>({name,ok:true,evidence:{retiredAdoptions:0,failureReads:0,...(name===spec.sourceRetirementRegression.caseName?{coldSource:{boundaries:spec.sourceRetirementRegression.boundaries.map(boundary=>({boundary,opened:boundary!=='current'})),publicReopenOrder:spec.sourceRetirementRegression.publicReopenOrder,writes:1},settledSource:{order:spec.sourceRetirementRegression.inUseRecovery.order,writes:1,manualOrder:spec.sourceRetirementRegression.inUseRecovery.manualOrder,manualWrites:1,failedManualOpenRetiredMirrors:true,sleepResumeRequests:0,physicalAcceptance:false,boundaries:[...spec.sourceRetirementRegression.inUseRecovery.boundaries.map(name=>({name,allowed:name==='current'})),...spec.sourceRetirementRegression.inUseRecovery.nativeAwaitEdges.map(name=>({name:'native-'+name,ordinaryWrites:0})),...spec.sourceRetirementRegression.inUseRecovery.manualNativeAwaitEdges.map(name=>({name:'manual-native-'+name,ordinaryWrites:0}))]}}:{})}}))});
 function negative(){const report=positive();report.ok=false;for(const row of spec.fault.expectedFailures)report.results[row.index]={name:row.name,ok:false,error:row.error,calls:['state'],observations:[{failureReads:1,retiredAdoptions:0,when:'during-write'}]};return report;}
 const raw=()=>({exitCode:0,error:null,signal:null,stdout:JSON.stringify(positive()),boundary:{kind:'fan-global-runtime-boundary',exitCode:0,status:'PASS',explicitExitCalled:false,denied:[],boundaries:Object.fromEntries(['realNetwork','realChildProcess','nativeLibraryLoad','writesOutsideEvidence','realHostMain','hardwareAccess','operatingSystemSleep'].map(key=>[key,false]))},observation:{beforeExitObserved:true,exitCode:0,nodeWindowAbsentAtStart:true,nodeChromeAbsentAtStart:true,nodeWindowAbsentAtEnd:true,nodeChromeAbsentAtEnd:true,activeResources:['PipeWrap']}});
 test('complete ordered45 is accepted and exact12 predicted identity failures remain separate',()=>{assert.equal(verifyReport(positive(),spec).passedRows,45);const result=verifyReport(negative(),spec,{fault:true});assert.equal(result.failedRows,12);assert.equal(result.passedRows,33);});
@@ -19,3 +19,19 @@ test('exact Node assertion rendering is independently fixed, not a prefix-only f
 import {verifyOriginalIdentityAssertion} from './contract.mjs';
 test('wrong original assertion line, wrong original source and wrong negative case identity reject',()=>{const original=fs.readFileSync(new URL('../../../../'+spec.original,import.meta.url),'utf8');assert.equal(verifyOriginalIdentityAssertion(original,spec).line,49);assert.throws(()=>verifyOriginalIdentityAssertion('\n'+original,spec));const wrong=structuredClone(spec);wrong.fault.expectedOriginalAssertionLine=48;assert.throws(()=>verifyOriginalIdentityAssertion(original,wrong));assert.throws(()=>verifyReport(negative(),wrong,{fault:true}));const report=negative();report.results[0].name=report.results[2].name;assert.throws(()=>verifyReport(report,spec,{fault:true}));});
 test('compile diagnostic without original final45 cannot count as a semantic negative',()=>{const row=raw();row.exitCode=1;row.boundary.exitCode=1;row.boundary.status='FAIL';row.observation.exitCode=1;row.stdout='SyntaxError: source did not compile';assert.throws(()=>verifyExecution(row,spec,{fault:true}),/SINGLE_ORIGINAL_JSON_REQUIRED/);});
+
+test('same45 summary must include every cold source boundary, a real reopen order and one submitted curve',()=>{for(const alter of [x=>delete x.coldSource,x=>x.coldSource.boundaries.pop(),x=>x.coldSource.publicReopenOrder=['open','events','acquire','enable'],x=>x.coldSource.writes=2]){const report=positive(),row=report.results.find(x=>x.name===spec.sourceRetirementRegression.caseName);alter(row.evidence);assert.throws(()=>verifyReport(report,spec),/COLD_SOURCE_REENTRY_EVIDENCE/);}});
+
+import {verifyColdSourceFaultReport} from './contract.mjs';
+test('cold source negative is a separate one-case semantic detection, never a complete45 pass',()=>{
+ const fault=spec.sourceRetirementRegression.fault,report={ok:false,checks:1,scope:spec.originalScope,results:[{name:fault.caseName,ok:false,error:fault.expectedFailure,calls:[],observations:[]}]};
+ assert.equal(verifyColdSourceFaultReport(report,spec).failedRows,1);assert.throws(()=>verifyReport(report,spec));
+ for(const alter of [x=>x.checks=45,x=>x.results[0].name='unrelated',x=>x.results[0].error='SyntaxError: broken source']){const wrong=structuredClone(report);alter(wrong);assert.throws(()=>verifyColdSourceFaultReport(wrong,spec));}
+});
+
+test('same45 report requires active-fault source reopen plus all retirement/native-await boundaries',()=>{
+ for(const alter of [x=>delete x.settledSource,x=>x.settledSource.failedManualOpenRetiredMirrors=false,x=>x.settledSource.manualOrder=['enable'],x=>x.settledSource.order=['resume'],x=>x.settledSource.sleepResumeRequests=1,x=>x.settledSource.boundaries.pop(),x=>x.settledSource.boundaries[1].allowed=true]){
+  const report=positive(),row=report.results.find(x=>x.name===spec.sourceRetirementRegression.caseName);alter(row.evidence);
+  assert.throws(()=>verifyReport(report,spec),/SETTLED_SOURCE_RECOVERY_EVIDENCE/);
+ }
+});

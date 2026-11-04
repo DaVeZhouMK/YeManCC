@@ -1,0 +1,187 @@
+﻿using RyzenSmu;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Runtime.Intrinsics.X86;
+using System.Text;
+using System.Windows;
+using Microsoft.Win32;
+using Universal_x86_Tuning_Utility.Scripts.AMD_Backend;
+using Universal_x86_Tuning_Utility.Scripts.Intel_Backend;
+
+namespace Universal_x86_Tuning_Utility.Scripts
+{
+    public class Family
+    {
+        public enum RyzenFamily
+        {
+            Unknown = -1,
+            SummitRidge,
+            PinnacleRidge,
+            RavenRidge,
+            Dali,
+            Pollock,
+            Picasso,
+            FireFlight,
+            Matisse,
+            Renoir,
+            Lucienne,
+            VanGogh,
+            Mendocino,
+            Vermeer,
+            Cezanne_Barcelo,
+            Rembrandt,
+            Raphael,
+            DragonRange,
+            PhoenixPoint,
+            PhoenixPoint2,
+            HawkPoint,
+            HawkPoint2,
+            SonomaValley,
+            GraniteRidge,
+            FireRange,
+            StrixHalo,
+            StrixPoint,
+            KrackanPoint,
+            KrackanPoint2,
+            Medusa1,
+            Medusa2,
+            OlympicRidge,
+        }
+
+        public static RyzenFamily FAM = RyzenFamily.Unknown;
+
+        public enum ProcessorType
+        {
+            Unknown = -1,
+            Amd_Apu,
+            Amd_Desktop_Cpu,
+            Amd_Laptop_Cpu,
+            Intel,
+        }
+
+        public static ProcessorType TYPE = ProcessorType.Unknown;
+
+
+        public static string CPUName = "";
+        public static int CPUFamily = 0, CPUModel = 0, CPUStepping = 0;
+        public static void setCpuFamily()
+        {
+            try
+            {
+                string processorIdentifier = System.Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
+
+                // Split the string into individual words
+                string[] words = processorIdentifier.Split(' ');
+
+                // Find the indices of the words "Family", "Model", and "Stepping"
+                int familyIndex = Array.IndexOf(words, "Family") + 1;
+                int modelIndex = Array.IndexOf(words, "Model") + 1;
+                int steppingIndex = Array.IndexOf(words, "Stepping") + 1;
+
+                // Extract the family, model, and stepping values from the corresponding words
+                CPUFamily = int.Parse(words[familyIndex]);
+                CPUModel = int.Parse(words[modelIndex]);
+                CPUStepping = int.Parse(words[steppingIndex].TrimEnd(','));
+
+                using RegistryKey? processorKey = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+                CPUName = processorKey?.GetValue("ProcessorNameString")?.ToString()?.Trim() ?? processorIdentifier;
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("Error: " + e.Message);
+            }
+
+            if (CPUName.Contains("Intel"))
+            {
+                TYPE = ProcessorType.Intel;
+            }
+            else
+            {
+                try
+                {
+                    //App.memTimings = Mem_Timings.RetrieveTimings();
+                }
+                catch (Exception ex)
+                {
+                    Misc.DiagnosticLogger.LogError(ex, "Failed to retrieve memory timings");
+                }
+
+                //Zen1 - Zen2
+                if (CPUFamily == 23)
+                {
+                    if (CPUModel == 1) FAM = RyzenFamily.SummitRidge;
+
+                    if (CPUModel == 8) FAM = RyzenFamily.PinnacleRidge;
+
+                    if (CPUModel == 17 || CPUModel == 18) FAM = RyzenFamily.RavenRidge;
+
+                    if (CPUModel == 24) FAM = RyzenFamily.Picasso;
+
+                    if (CPUModel == 32 && CPUName.Contains("15e") || CPUModel == 32 && CPUName.Contains("15Ce") || CPUModel == 32 && CPUName.Contains("20e")) FAM = RyzenFamily.Pollock;
+                    else if (CPUModel == 32) FAM = RyzenFamily.Dali;
+
+                    if (CPUModel == 80) FAM = RyzenFamily.FireFlight;
+
+                    if (CPUModel == 96) FAM = RyzenFamily.Renoir;
+
+                    if (CPUModel == 104) FAM = RyzenFamily.Lucienne;
+
+                    if (CPUModel == 113) FAM = RyzenFamily.Matisse;
+
+                    if (CPUModel == 144 || CPUModel == 145) FAM = RyzenFamily.VanGogh;
+
+                    if (CPUModel == 160) FAM = RyzenFamily.Mendocino;
+                }
+
+                //Zen3 - Zen4
+                if (CPUFamily == 25)
+                {
+                    if (CPUModel == 33) FAM = RyzenFamily.Vermeer;
+
+                    if (CPUModel == 63 || CPUModel == 68) FAM = RyzenFamily.Rembrandt;
+
+                    if (CPUModel == 80) FAM = RyzenFamily.Cezanne_Barcelo;
+
+                    if (CPUModel == 97 && CPUName.Contains("HX")) FAM = RyzenFamily.DragonRange;
+                    else if (CPUModel == 97) FAM = RyzenFamily.Raphael;
+
+                    if (CPUModel == 116) FAM = RyzenFamily.PhoenixPoint;
+
+                    if (CPUModel == 120) FAM = RyzenFamily.PhoenixPoint2;
+
+                    if (CPUModel == 117) FAM = RyzenFamily.HawkPoint;
+
+                    if (CPUModel == 124) FAM = RyzenFamily.HawkPoint2;
+                }
+
+                // Zen5 - Zen6
+                if (CPUFamily == 26)
+                {
+                    if (CPUModel == 68 && CPUName.Contains("HX")) FAM = RyzenFamily.FireRange;
+                    else if (CPUModel == 68) FAM = RyzenFamily.GraniteRidge;
+
+                    if (CPUModel == 96) FAM = RyzenFamily.KrackanPoint;
+
+                    if (CPUModel == 104) FAM = RyzenFamily.KrackanPoint2;
+
+                    if (CPUModel == 32 || CPUModel == 36) FAM = RyzenFamily.StrixPoint;
+
+                    if (CPUModel == 112) FAM = RyzenFamily.StrixHalo;
+
+                    if (CPUModel >= 128 && CPUModel <= 135) FAM = RyzenFamily.Medusa1;
+
+                    if (CPUModel >= 136 && CPUModel <= 143) FAM = RyzenFamily.OlympicRidge;
+
+                    if (CPUModel >= 224 && CPUModel <= 227) FAM = RyzenFamily.Medusa2;
+                }
+
+                if (FAM == RyzenFamily.SummitRidge || FAM == RyzenFamily.PinnacleRidge || FAM == RyzenFamily.Matisse || FAM == RyzenFamily.Vermeer || FAM == RyzenFamily.Raphael || FAM == RyzenFamily.GraniteRidge || FAM == RyzenFamily.OlympicRidge) TYPE = ProcessorType.Amd_Desktop_Cpu;
+                else TYPE = ProcessorType.Amd_Apu;
+
+                Addresses.setAddresses();
+            }
+        }
+    }
+}

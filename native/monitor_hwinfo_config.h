@@ -62,10 +62,10 @@ struct Entry{std::wstring section,key,value,identity;std::size_t index;};
 inline std::optional<std::wstring> sectionOf(const std::wstring& line){const auto s=trim(line);if(s.empty()||s.front()!=L'[')return {};const auto end=s.find(L']');if(end==std::wstring::npos||end==1)return {};const auto tail=trim(s.substr(end+1));if(!tail.empty()&&tail[0]!=L';'&&tail[0]!=L'#')return {};return trim(s.substr(1,end-1));}
 inline std::vector<Entry> entries(const Ini& ini){
     std::vector<Entry> out;std::map<std::wstring,bool> sections,seen;std::wstring section;
-    for(std::size_t i=0;i<ini.lines.size();++i){const auto& line=ini.lines[i];if(auto next=sectionOf(line)){section=*next;require(!sections[lower(section)],"HWiNFO INI contains a repeated section");sections[lower(section)]=true;continue;}
-        auto s=trim(line);if(s.empty()||s[0]==L';'||s[0]==L'#')continue;const auto eq=line.find(L'=');if(eq==std::wstring::npos)continue;const auto key=trim(line.substr(0,eq));if(key.empty())continue;
+    for(std::size_t i=0;i<ini.lines.size();++i){const auto& line=ini.lines[i];if(auto next=sectionOf(line)){section=*next;require(!section.empty(),"HWiNFO INI section is empty");require(!sections[lower(section)],"HWiNFO INI contains a repeated section");sections[lower(section)]=true;continue;}
+        auto s=trim(line);if(s.empty()||s[0]==L';'||s[0]==L'#')continue;const auto eq=line.find(L'=');require(eq!=std::wstring::npos,"HWiNFO INI contains malformed syntax");const auto key=trim(line.substr(0,eq));require(!key.empty(),"HWiNFO INI key is empty");
         require(!section.empty(),"HWiNFO INI contains a value outside a section");const auto identity=lower(section)+L'\x1f'+lower(key);require(!seen[identity],"HWiNFO INI contains a duplicate section/key pair");seen[identity]=true;out.push_back({section,key,line.substr(eq+1),identity,i});
-    }return out;
+    }require(!out.empty(),"HWiNFO INI has no confirmed values");return out;
 }
 inline Ini managedIni(std::optional<bool> snapshotPolling={}){
     // User-supplied stable background template, embedded in the YMCC image.

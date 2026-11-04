@@ -17,7 +17,7 @@
 // sessions. No retry, notification, IPC, focus, controller or device ownership.
 namespace ymcc::optiStartup {
 namespace fs = std::filesystem;
-inline constexpr DWORD delayMs=30000, workerBudgetMs=180000;
+inline constexpr DWORD delayMs=30000, workerBudgetMs=300000;
 struct Handle {
     HANDLE value=nullptr;
     explicit Handle(HANDLE h=nullptr):value(h){}
@@ -35,6 +35,8 @@ inline fs::path image(HANDLE process){
     return fs::path(std::wstring(buffer,n)).lexically_normal();
 }
 inline std::wstring quote(const fs::path& path){return L"\""+path.wstring()+L"\"";}
+// The optional child owns this cap; failure skips this one attempt.
+inline constexpr DWORD workerCpuRate=100; // Windows units: 1/100 percent (1%).
 struct Limits {DWORD delay=delayMs,budget=workerBudgetMs;};
 class Owner {
     struct State {
@@ -69,6 +71,10 @@ class Owner {
             Handle job{CreateJobObjectW(nullptr,nullptr)};if(!job.value)return;
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION bounds{};bounds.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             if(!SetInformationJobObject(job.value,JobObjectExtendedLimitInformation,&bounds,sizeof bounds))return;
+            JOBOBJECT_CPU_RATE_CONTROL_INFORMATION cpu{};
+            cpu.ControlFlags=JOB_OBJECT_CPU_RATE_CONTROL_ENABLE|JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
+            cpu.CpuRate=workerCpuRate;
+            if(!SetInformationJobObject(job.value,JobObjectCpuRateControlInformation,&cpu,sizeof cpu))return;
             std::wstring command=quote(executable)+L" --opti-startup "+
                 std::to_wstring(reinterpret_cast<ULONG_PTR>(parent.value))+L" "+
                 std::to_wstring(reinterpret_cast<ULONG_PTR>(signal.value))+L" "+identity;

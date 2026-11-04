@@ -1,4 +1,4 @@
-import type { FanState } from './fanApi';
+import { validSourceFanState, type FanState } from './fanApi';
 
 export interface FanSessionEvidenceContext {
   powerGeneration: number;
@@ -73,8 +73,8 @@ export function resolveFanSnapshotGenerationValues(
   if (generation === 0 && isNoPowerOperationReceipt(remote) && isCompleteAdmissibleHcSession(remote)) {
     if (explicitOpenGeneration === powerGeneration) {
       generation = powerGeneration; source = 'explicit-open';
-    } else if (powerGeneration === 1 && initialAwakeGeneration === 1) {
-      generation = 1; source = 'initial-awake';
+    } else if (Number.isSafeInteger(powerGeneration) && powerGeneration > 0 && initialAwakeGeneration === powerGeneration) {
+      generation = powerGeneration; source = 'initial-awake';
     }
   }
   return { generation, source, freshness: generation === powerGeneration ? 'current'
@@ -90,4 +90,21 @@ export function hasFailedFanOperation(remote: FanState): boolean {
   // later real manual Open. Its waiter still receives superseded from Host.
   return remote.powerOperationStatus === 'failed'
     || (remote.powerOperationStatus === 'superseded' && remote.powerOperationOutcome !== 'user-cancelled');
+}
+
+/** Exact source resource retirement; it does not claim an HC or physical callback. */
+export function hasRetiredSourceFanResources(remote: FanState, expectedGeneration?: number): boolean {
+  return remote.sourceFanMode === true && validSourceFanState(remote)
+    && (expectedGeneration === undefined || remote.sourceFanGeneration === expectedGeneration)
+    && remote.sourceFanClosed === true && remote.sourceFanClosePending === false
+    && remote.hcCloseCleanupPending === false && remote.openCalled === false && remote.openEventsCalled === false
+    && remote.hardwareWrites === false && remote.hardwareWritesEnabled === false;
+}
+export function hasSafeSourceFanRelease(remote: FanState, expectedGeneration?: number): boolean {
+  if (!hasRetiredSourceFanResources(remote, expectedGeneration) || remote.unknownState !== false) return false;
+  if (remote.hardwareWritesObserved === false) return true;
+  const claim = remote.recoveryClaimEvidence as Record<string, unknown>;
+  return remote.sourceFanAutomaticReturned === true
+    && claim.oemReleaseActionKind === 'proven-by-source-auto-register-and-terminal-close'
+    && claim.oemReleaseActionClass === 'release-action-proven';
 }

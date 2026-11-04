@@ -8,6 +8,7 @@ import { runInNewContext } from 'node:vm';
 async function main(): Promise<void> {
   const files = new Map<string, string>();
   const commits: any[] = [];
+  let nativeReads=0;
   let failNextWrite = false;
   let deferNextRead = false;
   let deferredReadStarted: (() => void) | null = null;
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
   (globalThis as any).__mockShellDryRun = true;
   (globalThis as any).__mockIpcResponder = (cmd: string, args: any) => {
     if (cmd === 'settings.read') {
+      nativeReads++;
       const content = files.get(args.path) || '';
       const stamp = content || 'missing';
       if (deferNextRead) {
@@ -49,7 +51,8 @@ async function main(): Promise<void> {
   const oldSleep = repo.normalizeSettings({ sleep: { autoWakeRecovery: false, steamOverlayOffFix: true } });
   assert.equal(oldSleep.sleep.autoWakeRecovery, false);
   assert.equal(oldSleep.sleep.steamOverlayOffFix, false);
-  assert.equal(repo.normalizeSettings({ sleep: { autoWakeRecovery: 'true' } }).sleep.autoWakeRecovery, false);
+  // Invalid scalar types use the current product default rather than boolean coercion.
+  assert.equal(repo.normalizeSettings({ sleep: { autoWakeRecovery: 'true' } }).sleep.autoWakeRecovery, true);
   console.log('PASS Steam sleep defaults on, explicit off preserved, legacy overlay true normalized off');
   const initial = repo.normalizeSettings({ tdp: { tdpMax: 37, fpsLimit: 75 } });
   files.set(repo.SETTINGS_FILE, JSON.stringify(initial));
@@ -259,9 +262,20 @@ async function main(): Promise<void> {
     assert.equal(sectionAfterQueuedCommit.input.ownership.externalControllerPriority, true);
     assert.equal(JSON.parse(files.get(repo.SETTINGS_FILE)!).tdp.tdpMax, 39);
   });
+  await repo.loadSettings();
+  const observed=repo.getSettingsSectionRevision('performanceSchedule'),readCount=nativeReads;
+  for(let i=0;i<1000;i++)assert.equal(repo.getSettingsSectionRevision('performanceSchedule'),observed);
+  check('1000 resident section revision reads use only the observed immutable document, zero native reads',()=>{assert.equal(nativeReads,readCount)});
+  await repo.saveSettingsSection('tray',{ fixtureUnrelatedRevision:true });
+  check('unrelated committed section does not invalidate performance ownership',()=>{assert.equal(repo.getSettingsSectionRevision('performanceSchedule'),observed)});
+  const originalSchedule=await repo.readSettingsSection<any>('performanceSchedule');
+  await repo.saveSettingsSection('performanceSchedule',{enabled:originalSchedule.enabled!==true});
+  check('observed performance section commit invalidates resident ownership',()=>{assert.notEqual(repo.getSettingsSectionRevision('performanceSchedule'),observed)});
+  await repo.replaceSettingsSection('performanceSchedule',originalSchedule);
   const canceledRead = await deferredRead();
   const canceledCheck = assert.rejects(canceledRead.reading, /配置缓存已失效|目录已切换/);
   repo.setSettingsDirectory('Q:\\YMCC-MEMORY-ONLY-NEXT');
+  assert.equal(repo.getSettingsSectionRevision('performanceSchedule'),null);
   canceledRead.release();
   await canceledCheck;
   check('newer-cache protection still cancels reads from a retired settings generation', () => {

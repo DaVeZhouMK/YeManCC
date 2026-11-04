@@ -1,28 +1,52 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF>
-    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems><StartupObject>LightSetterSelfTest</StartupObject>
-    <AssemblyName>LightingSignalsLegacyRegression</AssemblyName>
-  </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="../../../LightSetterSelfTest/Program.cs" Link="ExistingLegacyTests.cs" />
-    <Compile Include="../../../LightSetterSelfTest/FakeOneXDevice.cs" Link="FakeOneXDevice.cs" />
-    <Compile Include="../../../../FanLab/LightSetter/Program.cs" Link="Production.cs" />
-    <Compile Include="../../../../FanLab/LightSetter/OneXQueuedLighting.cs" Link="OneXQueuedLighting.cs" />
-    <Compile Include="../../../../FanLab/LightSetter/OneXLightingSession.cs" Link="OneXLightingSession.cs" />
-    <Compile Include="../../../../FanLab/LightSetter/DeviceCoreConsumer.cs" Link="DeviceCoreConsumer.cs" />
-    <Compile Include="../../../../FanLab/LightSetter/LightingAssemblyPins.cs" Link="LightingAssemblyPins.cs" />
-    <Compile Include="../../../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
-    <Compile Include="../../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
-    <Compile Include="../../../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
-    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Misc/SerialQueueTasks.cs" Link="PinnedHCSerialQueue.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="../../../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs" />
-    <Compile Include="../../../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs" />
-    <Compile Include="../../../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
-    <Compile Include="../../../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
-  </ItemGroup>
-</Project>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems><StartupObject>LightSetterSelfTest</StartupObject>
+    <!-- Immutable HC AYANEO input already warns in the original SelfTest; keep CS8629 visible without editing frozen source. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS8629</WarningsNotAsErrors>
+    <AssemblyName>LightingSignalsLegacyRegression</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../LightSetterSelfTest/Program.cs" Link="ExistingLegacyTests.cs" />
+    <Compile Include="../../../LightSetterSelfTest/ArtifactProbe.cs" Link="ArtifactProbe.cs" />
+    <Compile Include="../../../LightSetterSelfTest/FakeOneXDevice.cs" Link="FakeOneXDevice.cs" />
+    <Compile Include="../../../LightSetterSelfTest/FakeAyaneoDevice.cs" Link="FakeAyaneoDevice.cs" />
+    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEODeviceCEc.cs" Link="PinnedHCAyaneoCEc.cs" />
+    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEODeviceCEii.cs" Link="PinnedHCAyaneoCEii.cs" />
+    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEO2.cs" Link="PinnedHCAYANEO2.cs" />
+    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlus.cs" Link="PinnedHCAYANEOAIRPlus.cs" />
+    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlusAMD.cs" Link="PinnedHCAYANEOAIRPlusAMD.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/Program.cs" Link="Production.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/Oxp3LightingWriter.cs" Link="Oxp3LightingWriter.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/Oxp3OwnerLease.cs" Link="Oxp3OwnerLease.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/OneXQueuedLighting.cs" Link="OneXQueuedLighting.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/OneXLightingSession.cs" Link="OneXLightingSession.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/DeviceCoreConsumer.cs" Link="DeviceCoreConsumer.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/LightingAssemblyPins.cs" Link="LightingAssemblyPins.cs" />
+    <Compile Include="../../../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+    <Compile Include="../../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
+    <Compile Include="../../../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="../../../../deps/handheldcompanion-runtime/source/Misc/SerialQueueTasks.cs" Link="PinnedHCSerialQueue.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="../../../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="../../../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
+    <Compile Include="../../../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
+  </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../../../FanLab/LightSetter/AyaneoSuperJoyLighting.cs" Link="AyaneoSuperJoyLighting.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/AyaneoSuperJoyConsumer.cs" Link="AyaneoSuperJoyConsumer.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/AyaneoCeWindowsEcTransport.cs" Link="AyaneoCeWindowsEcTransport.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/SuperJoyOwnerLease.cs" Link="SuperJoyOwnerLease.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/SuperJoyWindowsHidTransport.cs" Link="SuperJoyWindowsHidTransport.cs" />
+    <Compile Include="../../../LightSetterSelfTest/SuperJoySourceOracle.cs" Link="SuperJoySourceOracle.cs" />
+    <Compile Include="../../../LightSetterSelfTest/SuperJoyProtocolTests.cs" Link="SuperJoyProtocolTests.cs" />
+    <Compile Include="../../../LightSetterSelfTest/SuperJoyWindowsTransportTests.cs" Link="SuperJoyWindowsTransportTests.cs" />
+    <Compile Include="../../../LightSetterSelfTest/AyaneoSuperJoyConsumerTests.cs" Link="AyaneoSuperJoyConsumerTests.cs" />
+    <Compile Include="../../../../capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs" Link="AYANEOSuperJoyRgb.cs" />
+  </ItemGroup>
+</Project>
+

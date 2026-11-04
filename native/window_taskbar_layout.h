@@ -13,6 +13,7 @@ struct TaskbarProbe {
     bool found = false;
     bool uncertain = false;
     bool visible = false;
+    bool autoHide = false;
 };
 
 inline BOOL CALLBACK collectTaskbar(HWND hwnd, LPARAM context) {
@@ -23,12 +24,28 @@ inline BOOL CALLBACK collectTaskbar(HWND hwnd, LPARAM context) {
     auto& probe = *reinterpret_cast<TaskbarProbe*>(context);
     if (MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != probe.monitor) return TRUE;
     probe.found = true;
-    if (!IsWindowVisible(hwnd)) return TRUE;
     RECT rect{};
-    if (!GetWindowRect(hwnd, &rect) || rect.right <= rect.left || rect.bottom <= rect.top) {
-        probe.uncertain = true;
-        return TRUE;
+    const bool geometryKnown = GetWindowRect(hwnd, &rect) && rect.right > rect.left && rect.bottom > rect.top;
+    // Query only this tray's monitor/edge, not all four edges on every reflow.
+    // Registration is stable while the taskbar's window RECT is animating.
+    if (geometryKnown) {
+        const auto& screen = probe.monitorRect;
+        const bool horizontal = rect.right - rect.left >= rect.bottom - rect.top;
+        APPBARDATA bar{sizeof(bar)};
+        bar.rc = screen;
+        bar.uEdge = horizontal ? (rect.top - screen.top <= screen.bottom - rect.bottom ? ABE_TOP : ABE_BOTTOM)
+                               : (rect.left - screen.left <= screen.right - rect.right ? ABE_LEFT : ABE_RIGHT);
+        if (reinterpret_cast<HWND>(SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &bar)) == hwnd) {
+            probe.autoHide = true;
+            if (bar.uEdge == ABE_LEFT) probe.safeArea.left = screen.left;
+            else if (bar.uEdge == ABE_TOP) probe.safeArea.top = screen.top;
+            else if (bar.uEdge == ABE_RIGHT) probe.safeArea.right = screen.right;
+            else if (bar.uEdge == ABE_BOTTOM) probe.safeArea.bottom = screen.bottom;
+            return TRUE;
+        }
     }
+    if (!IsWindowVisible(hwnd)) return TRUE;
+    if (!geometryKnown) { probe.uncertain = true; return TRUE; }
     const auto& screen = probe.monitorRect;
     const LONG left = (std::max)(rect.left, screen.left);
     const LONG top = (std::max)(rect.top, screen.top);
@@ -73,11 +90,12 @@ inline bool safeMonitorArea(HMONITOR targetMonitor, RECT& area) {
     // Unknown/failed observations retain the conservative work area. A saved
     // fullscreen game or the primary monitor's auto-hide flag cannot override
     // a visible taskbar on this monitor.
-    if (enumerated && probe.found && !probe.visible && !probe.uncertain) {
+    if (enumerated && probe.found && !probe.autoHide && !probe.visible && !probe.uncertain) {
         probe.safeArea.top = mi.rcMonitor.top;
         probe.safeArea.bottom = mi.rcMonitor.bottom;
     }
-    area = probe.safeArea;
+    // Failed enumeration cannot prove an overlay registration was observed.
+    area = enumerated ? probe.safeArea : mi.rcWork;
     return area.right > area.left && area.bottom > area.top;
 }
 
@@ -85,11 +103,48 @@ inline bool sameRect(const RECT& a, const RECT& b) {
     return a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom;
 }
 
+// Active only while YMCC is shown. Restrict notifications to Explorer's
+// taskbar process and window object; no desktop-wide polling or own resize loop.
+struct TaskbarEvents {
+    HWINEVENTHOOK visibility = nullptr, location = nullptr;
+    void (*notify)() = nullptr;
+    static inline TaskbarEvents* owner = nullptr;
+    static void CALLBACK observed(HWINEVENTHOOK hook, DWORD, HWND hwnd, LONG object, LONG child, DWORD, DWORD) {
+        auto* current = owner;
+        if (!current || (hook != current->visibility && hook != current->location) ||
+            !hwnd || object != OBJID_WINDOW || child != CHILDID_SELF) return;
+        wchar_t name[64]{};
+        if (!GetClassNameW(hwnd, name, 64) ||
+            (_wcsicmp(name, L"Shell_TrayWnd") != 0 && _wcsicmp(name, L"Shell_SecondaryTrayWnd") != 0)) return;
+        if (current->notify) current->notify();
+    }
+    bool start(void (*changed)()) {
+        if (visibility && location) return true;
+        stop();
+        const auto taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
+        DWORD process = 0;
+        if (!taskbar || !GetWindowThreadProcessId(taskbar, &process) || !process) return false;
+        owner = this; notify = changed;
+        constexpr DWORD flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
+        visibility = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, observed, process, 0, flags);
+        location = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, observed, process, 0, flags);
+        if (visibility && location) return true;
+        stop(); return false;
+    }
+    void stop() {
+        if (owner == this) owner = nullptr;
+        notify = nullptr;
+        if (visibility) UnhookWinEvent(visibility);
+        if (location) UnhookWinEvent(location);
+        visibility = location = nullptr;
+    }
+};
+
 struct TaskbarRecheck {
     static constexpr UINT intervalMs = 200;
     static constexpr unsigned passes = 6;
     unsigned remaining = 0;
-    void arm() { remaining = passes; }
+    void arm(bool observed = false) { remaining = observed ? 1 : passes; }
     void cancel() { remaining = 0; }
     bool active() const { return remaining != 0; }
     bool finishPass() { return remaining != 0 && --remaining != 0; }

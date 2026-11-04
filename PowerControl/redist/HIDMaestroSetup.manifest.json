@@ -8,23 +8,23 @@
                    },
                    {
                        "name":  "AutoSetup.cs",
-                       "sha256":  "EE14FCE58D52EA0AD792CCEE5D013B545150465EA3230A02F9CD9FD41E2BE3C3"
+                       "sha256":  "31F8599AF05DC52263F23A73C2B2F4EEAB0056D70254224B6A796DB7B98000D8"
                    },
                    {
                        "name":  "ModulePayloadBootstrap.cs",
-                       "sha256":  "EF6D3FAF3DA53A77DFCB3208801E3AD02F76B4CC8CEF0C8CDA8AAA85CBA2C446"
+                       "sha256":  "CD0D8F7AB989D9549595B4C69B20D402AE7B510320ABE631DD3CDF503BE74B58"
                    },
                    {
                        "name":  "HidMaestroPackagePreparation.cs",
-                       "sha256":  "9FE9AECF283177865D35FD3C6DA7845F9B1F6A480E42D685D876119AAC28769E"
+                       "sha256":  "88911E335B2413735C4B9D1444052265EED3D04C4277FC22D50A16B122984033"
                    },
                    {
                        "name":  "UsbipUpgrade.cs",
-                       "sha256":  "7F13EAE9E48E04F3175A5BCA7A6FFE9ACDD9E88777535690600B3614DB1D45ED"
+                       "sha256":  "D8E9A6D918A6BAF0200393C4F4AC68EBA34B52C36A800EE158B80B0D1B2733ED"
                    },
                    {
                        "name":  "UsbipUpgradeSelfTest.cs",
-                       "sha256":  "5BB6270A4CEA599A9B98C1A5D83827EB4CF777B8029A0E9E88E4DC1B6CCDC087"
+                       "sha256":  "78FBD86DBCED9BE328747D1F162A725C0FA8F17D5E98C700207C29C16EC27288"
                    },
                    {
                        "name":  "YeManGamepadPrerequisites.csproj",
@@ -36,7 +36,7 @@
                    },
                    {
                        "name":  "native/UsbipMaintenanceState.cs",
-                       "sha256":  "BCA29F1E3B8C3658EEDA496B9E95345BE54FA34847404499549D67E74FEB16EA"
+                       "sha256":  "2EB8220784E478217349E174772D24125855FBF50C3A6978029E2125F260F1C3"
                    },
                    {
                        "name":  "native/ModuleMaintenanceGate.cs",
@@ -47,12 +47,12 @@
                   {
                       "name":  "HIDMaestroSetup.exe",
                       "bytes":  162304,
-                      "sha256":  "C56E35DA2516200525D15C2436ABCD05CD583D137F45EFB0219A96B7F9395605"
+                      "sha256":  "697F3160D5329F40DFB02D6B83F397E91AB343008641218411E8D508FFE97AF0"
                   },
                   {
                       "name":  "HIDMaestroSetup.dll",
-                      "bytes":  225792,
-                      "sha256":  "F5D750D6132949CEBC69B5556405BEBFA7BFCDDB532BAF0FE1F81879DC319644"
+                      "bytes":  294400,
+                      "sha256":  "5631AAF8A13797C2E6207E5EA7CCF3C979206412CAAE46A50869333F3BDA687D"
                   },
                   {
                       "name":  "HIDMaestroSetup.deps.json",

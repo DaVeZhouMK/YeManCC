@@ -253,6 +253,11 @@
       "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\ws2_32.lib",
       "sha256": "a8a552a37d8935e272ff470e2620f55e05433b989707bd05e9911d2482f44134",
       "role": "explicit original typed-runtime link library"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\winternl.h",
+      "sha256": "a43424486349c38f697c009512dfe4eb8fca733d7665afab42f50752170b9785",
+      "role": "actual V1 legacy compiler dependency (native/game_process_inventory.h:3)"
     }
   ],
   "osLoadedModulesVerified": false

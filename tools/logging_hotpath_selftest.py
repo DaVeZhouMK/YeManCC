@@ -47,7 +47,11 @@ struct Sample {
     std::string inputSource="xinput";
     unsigned long long readTopologyGeneration=25,readPowerGeneration=1,readAttemptSequence=400,readStartedTick=990,readCompletedTick=999;
     unsigned primarySlot=0,connectedMask=1;
-    bool live=true,readContextStable=true;
+    bool live=true,readContextStable=true,specialXbox=false;
+    unsigned physicalReaderPid=0,physicalReaderPacket=0,physicalReaderActualSlot=0;
+    unsigned long long physicalReaderSequence=0,readMsiSourceRevision=0,readMsiModeGeneration=0;
+    struct RawPad {unsigned short wButtons=0;unsigned char bLeftTrigger=0,bRightTrigger=0;
+        short sThumbLX=0,sThumbLY=0,sThumbRX=0,sThumbRY=0;} physicalReaderRawPad;
 };
 static Sample sample;
 static Sample* t_commonFrameSource=&sample;
@@ -97,10 +101,16 @@ template<class Emit> static std::vector<json> exercise(Emit emit) {
 int main() {
     auto oldRows=exercise(before::inputCaptureCommonFrameEvidence);
     auto newRows=exercise(after::inputCaptureCommonFrameEvidence);
+    bool baselineLabelsMatch=oldRows.size()==newRows.size();
+    for(size_t i=0;i<oldRows.size()&&i<newRows.size();++i){
+        // Old baselines may predate snapshotReason; current baselines carry it.
+        if(oldRows[i].contains("snapshotReason"))baselineLabelsMatch &= oldRows[i]["snapshotReason"]==newRows[i]["snapshotReason"];
+        oldRows[i].erase("snapshotReason");oldRows[i]["formatVersion"]=1;
+    }
     unsigned periodic=0,changed=0;
     for(auto& row:newRows){if(row["snapshotReason"]=="periodic")++periodic;else if(row["snapshotReason"]=="state-change")++changed;
         row.erase("snapshotReason");row["formatVersion"]=1;}
-    check("producer-preserves-existing-observation-fields-and-emission-boundaries",oldRows==newRows && newRows.size()==10);
+    check("producer-preserves-existing-observation-fields-and-emission-boundaries",baselineLabelsMatch && oldRows==newRows && newRows.size()==10);
     check("producer-labels-two-periodic-and-eight-state-observations",periodic==2&&changed==8);
     check("producer-has-no-exceptions",g_commonFrameEvidenceFailures==0);
     const auto failuresBefore=g_commonFrameEvidenceFailures;const auto rowsBefore=rows.size();
@@ -156,7 +166,44 @@ int main() {
         measure("registry-before",100000,[]{lookupSink=before::nativeLifecycleEventIsBase("unregistered-fixture-sample");});
         measure("registry-after",100000,[]{lookupSink=after::nativeLifecycleEventIsBase("unregistered-fixture-sample");});
     }
-    bool zero=true;for(const auto& row:timings)if(row["path"]=="frame-after"||row["path"]=="frame-off-after"||row["path"]=="snapshot-after"||row["path"]=="registry-after")zero &= row["allocations"]==0;
+
+    // Same field sequence as the writer regression, measured without disk I/O.
+    json queuedWork={{"action","consuming"},{"requestId",3},{"originalDeadline",10000},{"persona","steamdeck"}};
+    json queuedDequeue={{"beat","dequeue"},{"reason","initial-target-admission"},{"requestedAtDequeue","steamdeck"},{"waitedMs",4000},{"deferCount",1}};
+    json queuedSettle={{"reason","initial-target-admission"},{"policy","queue-not-reject-coalesce-on-next-round"},{"deferMs",1000000},{"settleMs",1000000}};
+    json queuedMerge={{"outcome","coalesced"},{"coalesced",true},{"queueToken",4},{"runId","field-run"},{"hostGen",2},{"sourceGen",390},{"recordGen",7}};
+    for(int repeat=0;repeat<3;++repeat){
+        measure("queued-wait-before",20000,[&]{
+            lookupSink=before::nativeLifecycleRecordIsStreaming("input-host-player-start-work",queuedWork);
+            lookupSink=before::nativeLifecycleRecordIsStreaming("input-host-switch-audit",queuedDequeue);
+            lookupSink=before::nativeLifecycleRecordIsStreaming("input-host-switch-settle",queuedSettle);
+            lookupSink=before::nativeLifecycleRecordIsStreaming("late-hide-enqueue",queuedMerge);
+        });
+        measure("queued-wait-after",20000,[&]{
+            queuedDequeue["waitedMs"]=queuedDequeue["waitedMs"].get<unsigned long long>()+1;
+            queuedDequeue["deferCount"]=queuedDequeue["deferCount"].get<unsigned long long>()+1;
+            queuedSettle["deferMs"]=queuedSettle["deferMs"].get<unsigned long long>()-1;
+            lookupSink=after::nativeLifecycleRecordIsStreaming("input-host-player-start-work",queuedWork);
+            lookupSink=after::nativeLifecycleRecordIsStreaming("input-host-switch-audit",queuedDequeue);
+            lookupSink=after::nativeLifecycleRecordIsStreaming("input-host-switch-settle",queuedSettle);
+            lookupSink=after::nativeLifecycleRecordIsStreaming("late-hide-enqueue",queuedMerge);
+        });
+    }
+
+    ymcc::logging::IdentityObservationLogState identities;
+    ymcc::logging::IdentityObservationView collectionA{{"collection-one","instance-one","shared-container"},{0x17ef,0x61ed,1,5,1,1}};
+    auto collectionB=collectionA;collectionB.text[0]="collection-two";collectionB.text[1]="instance-two";
+    check("identity-two-interfaces-first-observations",identities.observe(collectionA)&&identities.observe(collectionB));
+    measure("identity-observation-after",100000,[&]{lookupSink=identities.observe(collectionA);lookupSink=identities.observe(collectionB);});
+    auto identityEdge=collectionA;identityEdge.numbers[5]=2;
+    check("identity-topology-generation-is-an-observation-edge",identities.observe(identityEdge));
+    identityEdge.numbers[4]=2;check("identity-power-generation-is-an-observation-edge",identities.observe(identityEdge));
+    identities.invalidate(identityEdge.text[0]);check("identity-invalidated-recovery-is-an-observation-edge",identities.observe(identityEdge));
+    ymcc::logging::IdentityObservationLogState bounded;std::array<std::string,17> paths;
+    for(size_t i=0;i<paths.size();++i){paths[i]="interface-"+std::to_string(i);auto v=collectionA;v.text[0]=paths[i];bounded.observe(v);}
+    auto evicted=collectionA;evicted.text[0]=paths[0];
+    check("identity-cache-bounded-to-sixteen-and-eviction-reemits-first",bounded.entries.size()==16&&bounded.observe(evicted));
+    bool zero=true;for(const auto& row:timings)if(row["path"]=="frame-after"||row["path"]=="frame-off-after"||row["path"]=="snapshot-after"||row["path"]=="registry-after"||row["path"]=="queued-wait-after"||row["path"]=="identity-observation-after")zero &= row["allocations"]==0;
     check("unchanged-off-and-classification-hot-paths-zero-allocations-after-warmup",zero);
     unsigned failures=0;for(const auto& c:checks)if(!c["pass"].get<bool>())++failures;
     std::cout<<json({{"checks",checks},{"failures",failures},{"measurements",timings},
@@ -181,7 +228,15 @@ def main():
     (run/'harness.cpp').write_text(cpp,encoding='utf-8')
     vcvars=pathlib.Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
     exe=run/'harness.exe';batch=run/'build.cmd'
-    batch.write_text('@echo off\ncall "'+str(vcvars)+'" >nul && cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 "'+str(run/'harness.cpp')+'" /I"'+str(run)+'" /I"'+str(ROOT/'deps/json')+'" /Fo"'+str(run/'harness.obj')+'" /Fe"'+str(exe)+'"\n',encoding='utf-8')
+    command='call "'+str(vcvars)+'" >nul && cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 "'+str(run/'harness.cpp')+'" /I"'+str(run)+'" /I"'+str(ROOT/'deps/json')+'" /Fo"'+str(run/'harness.obj')+'" /Fe"'+str(exe)+'"'
+    # Match the writer fixture: installed SDK files can exist without registry discovery.
+    sdk_root=pathlib.Path(r"C:\Program Files (x86)\Windows Kits\10")
+    installed=sorted((sdk_root/'Include').glob('10.*'),reverse=True)
+    sdk=next((p for p in installed if (p/'um/Windows.h').is_file() and (p/'ucrt/stdio.h').is_file()),None)
+    if sdk is not None:
+        command+=''.join(' /I"'+str(sdk/name)+'"' for name in ('um','shared','ucrt'))
+        command+=' /link'+''.join(' /LIBPATH:"'+str(sdk_root/'Lib'/sdk.name/name/'x64')+'"' for name in ('um','ucrt'))
+    batch.write_text('@echo off\n'+command+'\n',encoding='utf-8')
     build=subprocess.run(['cmd.exe','/d','/c',str(batch)],cwd=run,capture_output=True,text=True,errors='replace')
     (run/'compile.log').write_text(build.stdout+build.stderr,encoding='utf-8')
     if build.returncode:print(build.stdout+build.stderr);return build.returncode

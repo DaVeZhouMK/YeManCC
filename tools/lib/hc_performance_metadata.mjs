@@ -1,3 +1,22 @@
+import fs from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+export const pinnedPerformanceFactsFile='capabilities/upstream/f2e58468/performance-source-facts.json';
+export const pinnedPerformanceFactsSha256='ba10865993062679d63f659fcab86c0d9b5664882ee2e1e9a1e0db3109e9cd3c';
+const pinnedCommit='f2e58468d9917189d4be7ccfc242385ce2c3035b';
+const pinnedFactsPath=fileURLToPath(new URL('../../'+pinnedPerformanceFactsFile,import.meta.url));
+export function readPinnedPerformanceFacts(bytes=fs.readFileSync(pinnedFactsPath)) {
+    if(createHash('sha256').update(bytes).digest('hex')!==pinnedPerformanceFactsSha256)
+        throw Error('PINNED_PERFORMANCE_FACTS_IDENTITY');
+    const facts=JSON.parse(bytes.toString('utf8'));
+    if(facts.schemaVersion!==1||facts.mode!=='fixed-upstream-source-facts-only'||facts.commit!==pinnedCommit||
+        facts.repository!=='Valkirie/HandheldCompanion'||facts.devices.length!==102||facts.sourceFiles.length!==104||
+        facts.runtimeAvailabilityAuthority!==false||facts.hardwareAcceptance!==false||
+        new Set(facts.devices.map(d=>d.deviceId)).size!==102||new Set(facts.sourceFiles.map(f=>f.path)).size!==104)
+        throw Error('PINNED_PERFORMANCE_FACTS_SCHEMA');
+    return facts;
+}
+
 // Build-time reference data only. No generated C++/C# entry, runtime matcher or IO provider.
 // Factory contexts come from the existing Roslyn extractor; never turn a declaration into admission.
 const capabilities = ['OEMCPU', 'OEMGPU'];
@@ -55,7 +74,8 @@ export function buildPerformanceMetadata({catalog, inventory}) {
         runtimeAvailability: 'not-established-by-registration',
         cpu: {identityRegistrationOnly: true, addHcCalls: false, replaceCurrentConsumers: false},
         gpu: {identityRegistrationOnly: true, featureImplementedByThisRegistry: false, enableFromOemFlag: false},
-        tdp: {route: 'existing-independent-consumers', takeOverDispatch: false, applySourceLimits: false},
+        tdp: {route: 'existing-independent-consumers', takeOverDispatch: false, applySourceLimits: false,
+            ...(catalog.domains?.tdp ? {catalogBinding: 'hc-device-catalog.json#/domains/tdp', sharedCapabilityPolicy: 'uxtu-tdp-policy.json'} : {})},
         unknownIdentity: 'keep-unknown; no-model-or-cpu-inference-from-flags-or-class-name',
         scope: {
             registeredSourceClasses: rows.length,
@@ -67,6 +87,7 @@ export function buildPerformanceMetadata({catalog, inventory}) {
             classesWithPossibleOemGpuDeclaration: rows.filter(r => r.frozenOemDeclarations.possible.includes('OEMGPU')).length,
         },
         rows,
+        pinnedUpstream: buildPinnedPerformanceMetadata(),
     };
     const errors = checkPerformanceMetadata({metadata, catalog});
     if (errors.length) throw Error(errors.join(';'));
@@ -108,5 +129,55 @@ export function checkPerformanceMetadata({metadata: m, catalog}) {
             'PERFORMANCE_METADATA_CPU_CONTEXT:' + d.deviceId);
         need(r?.gpuIdentity?.adapterName === null, 'PERFORMANCE_METADATA_UNVERIFIED_GPU:' + d.deviceId);
     }
+    errors.push(...checkPinnedPerformanceMetadata(m?.pinnedUpstream));
+    return errors;
+}
+
+// The frozen identity/consumer root stays unchanged. This is the separately pinned
+// source layer for all 102 classes, including factory CPU conditions and defaults.
+export function buildPinnedPerformanceMetadata(facts=readPinnedPerformanceFacts()) {
+    const factory=facts.devices.find(d=>d.name==='IDevice');
+    const rows=facts.devices.map(device=>{
+        const contexts=facts.identities.filter(c=>c.deviceClass===device.name);
+        const processors=contexts.flatMap(c=>c.switches.filter(s=>s.field==='Processor'));
+        const names=[...new Set(processors.flatMap(s=>s.values))];
+        const conditions=contexts.some(c=>c.conditions.some(s=>/\bProcessor\b/.test(s)));
+        return {deviceId:device.deviceId,modelClass:device.name,family:device.family,
+            factoryInstantiable:device.factoryInstantiable,source:{file:device.sourcePath,sha256:device.sourceSha256},
+            inheritance:device.inheritance,cpuIdentity:{exactSourceNames:names,
+                evidence:names.length?'pinned-upstream-factory-processor-labels':conditions?'pinned-upstream-factory-condition-only':'cpu-name-unspecified-in-pinned-upstream-factory',
+                hasProcessorDefault:processors.some(s=>s.hasDefault),exhaustiveSupportedCpuList:false,factoryContexts:contexts},
+            gpuIdentity:{adapterName:null,evidence:'not-inventoried; processor-marketing-name-is-not-adapter-identity'},
+            upstreamOemDeclarations:flags(device),localSourceLimits:parameters(device),
+            limitsMeaning:'fixed-upstream-declarations-only; follow-inheritance-by-reference; not-current-YMCC-limits'};
+    });
+    return {schemaVersion:1,mode:'reference-metadata-only',repository:facts.repository,commit:facts.commit,
+        sourcePinSha256:facts.sourcePinSha256,factsInput:{file:pinnedPerformanceFactsFile,sha256:pinnedPerformanceFactsSha256},
+        sourceFiles:facts.sourceFiles,factorySource:{file:factory.sourcePath,sha256:factory.sourceSha256,method:'GetCurrent'},
+        scope:{registeredSourceClasses:rows.length,factoryInstantiableClasses:rows.filter(r=>r.factoryInstantiable).length,
+            factoryContexts:facts.identities.length,sourceFiles:facts.sourceFiles.length,
+            classesWithExactCpuNameEvidence:rows.filter(r=>r.cpuIdentity.exactSourceNames.length).length},
+        runtimeConsumers:[],runtimeAvailability:'not-established-by-registration',hardwareAcceptance:false,
+        cpu:{identityRegistrationOnly:true,addHcCalls:false,replaceCurrentConsumers:false},
+        gpu:{identityRegistrationOnly:true,featureImplementedByThisRegistry:false,enableFromOemFlag:false},
+        tdp:{route:'existing-independent-consumers',takeOverDispatch:false,applySourceLimits:false},
+        unknownIdentity:'keep-unknown; no-model-or-cpu-inference-from-flags-or-class-name',rows};
+}
+export function checkPinnedPerformanceMetadata(m) {
+    const errors=[],need=(ok,code)=>{if(!ok)errors.push(code);};let expected;
+    try{expected=buildPinnedPerformanceMetadata();}catch(error){return [error.message];}
+    need(m?.schemaVersion===1&&m.repository===expected.repository&&m.commit===expected.commit&&m.sourcePinSha256===expected.sourcePinSha256,
+        'PINNED_UPSTREAM_SOURCE_LINEAGE');
+    need(m?.mode==='reference-metadata-only'&&same(m.runtimeConsumers,[])&&m.runtimeAvailability==='not-established-by-registration'&&m.hardwareAcceptance===false,
+        'PINNED_UPSTREAM_RUNTIME_BOUNDARY');
+    need(same(m?.cpu,expected.cpu),'PINNED_UPSTREAM_CPU_BOUNDARY');
+    need(same(m?.gpu,expected.gpu),'PINNED_UPSTREAM_GPU_BOUNDARY');
+    need(same(m?.tdp,expected.tdp),'PINNED_UPSTREAM_TDP_BOUNDARY');
+    need(same(m?.factsInput,expected.factsInput),'PINNED_UPSTREAM_FACTS_IDENTITY');
+    const rows=m?.rows??[];
+    need(rows.length===102&&new Set(rows.map(r=>r.deviceId)).size===102&&same(m?.scope,expected.scope),'PINNED_UPSTREAM_MODEL_COVERAGE');
+    need(same(m?.sourceFiles,expected.sourceFiles)&&same(m?.factorySource,expected.factorySource),'PINNED_UPSTREAM_SOURCE_FILES');
+    need(same(rows.map(r=>r.cpuIdentity),expected.rows.map(r=>r.cpuIdentity)),'PINNED_UPSTREAM_FACTORY_CONTEXT');
+    need(same(rows,expected.rows)&&m?.unknownIdentity===expected.unknownIdentity,'PINNED_UPSTREAM_SOURCE_DECLARATIONS');
     return errors;
 }

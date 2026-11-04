@@ -3,9 +3,12 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const axisParserOnly=process.argv.includes('--axis-parser-only');
+const repoAt=process.argv.indexOf('--repo');
+if(repoAt>=0&&(!process.argv[repoAt+1]||process.argv[repoAt+1].startsWith('--')))throw Error('axis repo requires a path');
+const repo=path.resolve(repoAt>=0?process.argv[repoAt+1]:path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const workspace = path.resolve(repo, '../../..');
 const fixture = path.join(repo, 'tools/fixtures/hc_legacy_motion_catalog');
 const target = path.join(repo, 'native/hc_legacy_motion_catalog.h');
@@ -14,14 +17,16 @@ const sourceRoot = `${dependency}/source`;
 const validation = path.join(workspace, 'Build/Validation/HC-ModelCapabilities-20261017');
 const args = process.argv.slice(2);
 const option = name => { const at = args.indexOf(name); assert(at < 0 || args[at + 1] && !args[at + 1].startsWith('--'), `${name} requires a value`); return at < 0 ? null : args[at + 1]; };
-const known = new Set(['--check', '--out', '--inputs', '--vcvars']);
-for (let i = 0; i < args.length; i++) { assert(known.has(args[i]), `unknown argument ${args[i]}`); if (args[i] !== '--check') i++; }
+const known = new Set(['--check', '--out', '--inputs', '--vcvars', '--axis-parser-only', '--axis-function', '--repo']);
+for (let i = 0; i < args.length; i++) { assert(known.has(args[i]), `unknown argument ${args[i]}`); if (!['--check','--axis-parser-only'].includes(args[i])) i++; }
 const check = args.includes('--check');
 const out = path.resolve(option('--out') || path.join(validation, 'LegacyMotion/catalog', new Date().toISOString().replaceAll(':', '-')));
 assert(!fs.existsSync(out) || fs.readdirSync(out).length === 0, 'evidence directory must be fresh');
 assert(out !== repo && !out.startsWith(fixture + path.sep), 'evidence must be outside the implementation fixtures');
 fs.mkdirSync(out, { recursive: true });
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+assert(axisParserOnly||(!option('--axis-function')&&repoAt<0),'axis candidate/root ports require --axis-parser-only');
+if(axisParserOnly){await runAxisParserSubset();process.exit(0);}
 const read = p => fs.readFileSync(path.resolve(repo, p));
 const json = v => JSON.stringify(v, null, 2) + '\n';
 const save = (p, value) => { const full = path.join(out, p); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, value); };
@@ -259,3 +264,42 @@ try {
     save('artifact-hashes.json', json({ files: ['native/hc_legacy_motion_catalog.h', 'tools/hc_legacy_motion_catalog.mjs', ...fs.readdirSync(fixture).sort().map(f => 'tools/fixtures/hc_legacy_motion_catalog/' + f)].map(p => ({ path: p, sha256: sha(read(p)) })) }));
     save('summary.json', json(summary)); console.log(json(summary));
 } catch (error) { save('failure.json', json({ ok: false, error: error.stack })); console.error(error.stack); process.exitCode = 1; }
+
+// Explicit pure-math parameter of the original catalog consumer.
+async function runAxisParserSubset() {
+ const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),digest=file=>hash(fs.readFileSync(file)),pin=file=>({file,sha256:digest(file),bytes:fs.statSync(file).size}),inputs=[];
+ const freeze=file=>{const bytes=fs.readFileSync(file);inputs.push(pin(file));return bytes;};
+ const checkerFile=path.join(repo,'tools/hc_motion_matrix_binding_selftest.mjs'),toolchainFile=path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs');
+ const {runMatrixChild}=await import(pathToFileURL(checkerFile).href),{calibrationToolchainPreamble}=await import(pathToFileURL(toolchainFile).href);
+ const report={status:'RUNNING',scope:'original-axis-parser-only',repo,configurations:[],deviceIo:false,hostExecuted:false,physicalCpuMeasured:false};
+ const save=()=>fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(report,null,2)+'\n');save();
+ try {
+  const nativeFile=path.join(repo,'native/main.cpp'),native=freeze(nativeFile).toString('utf8'),splitAt=native.indexOf('static bool ymccSplitAxisRecipe(');
+  const entries=[block(native,'static bool ymccParseAxisToken('),block(native,'static bool ymccSplitAxisRecipe('),block(native,'static bool ymccApplyNamedImuMatrix(',splitAt)];
+  const legacyFile=path.join(path.dirname(fileURLToPath(import.meta.url)),'fixtures/hc_legacy_motion_catalog/axis-parser-legacy-reference.cpp'),legacyText=freeze(legacyFile).toString('utf8');
+  if(hash(fs.readFileSync(legacyFile))!=="cdef906232005b1456c91490ea23511231563e594da0d0de46181d51dabce035")throw Error('AXIS_LEGACY_COMPARISON_PIN');
+  const legacySplitAt=legacyText.indexOf('static bool ymccSplitAxisRecipe('),legacy=[block(legacyText,'static bool ymccParseAxisToken(').code,block(legacyText,'static bool ymccSplitAxisRecipe(').code,block(legacyText,'static bool ymccApplyNamedImuMatrix(',legacySplitAt).code];
+  report.legacyComparison={file:legacyFile,sha256:hash(fs.readFileSync(legacyFile)),immutableOriginalBodies:legacy.map(code=>hash(code)),source:'Actual prior mainline b069 before optimization; independent of current mainline function'};
+  const original=entries.map(x=>x.code);report.sourceFunctions=entries.map((x,i)=>({name:['ymccParseAxisToken','ymccSplitAxisRecipe','ymccApplyNamedImuMatrix'][i],startLine:native.slice(0,x.start).split('\n').length,sha256:x.sha256,bytes:Buffer.byteLength(x.code)}));
+  let current=original[2];const candidate=option('--axis-function');
+  if(candidate){const file=fs.realpathSync(path.resolve(candidate)),bytes=freeze(file);if(bytes.length>32*1024)throw Error('AXIS_CANDIDATE_SIZE');current=bytes.toString('utf8').replace(/^\uFEFF/,'').trim();if(current.includes('#include')||current.includes('int main(')||current.split('static bool ymccApplyNamedImuMatrix(').length!==2)throw Error('AXIS_CANDIDATE_FUNCTION_ONLY');report.candidate=pin(file);}else report.candidate='ACTUAL_CURRENT_SHARED_FUNCTION';
+  const fixtureFile=path.join(repo,'tools/fixtures/hc_legacy_motion_catalog/native-probe.cpp'),template=freeze(fixtureFile).toString('utf8'),marker=template.indexOf('@PRODUCTION_BLOCKS@');if(marker<0)throw Error('AXIS_ORIGINAL_TEMPLATE_MARKER');
+  const harnessFile=path.join(path.dirname(fileURLToPath(import.meta.url)),'fixtures/hc_legacy_motion_catalog/axis-parser-harness.cpp'),harness=freeze(harnessFile).toString('utf8');freeze(fileURLToPath(import.meta.url));freeze(checkerFile);freeze(toolchainFile);freeze(path.join(repo,'deps/json/json.hpp'));
+  const prefix=template.slice(0,marker);report.originalConsumerSlice={template:fixtureFile,headerSha256:hash(prefix),omittedUncalledDmiMainSha256:hash(template.slice(marker)),reason:'Pure recipe subset omits uncalled machine-selection/catalog route; default original route retained.'};
+  const cpp=prefix+harness.replace('// AXIS_LEGACY_BLOCKS',legacy.join('\n')).replace('// AXIS_CANDIDATE_BLOCKS',original.slice(0,2).concat(current).join('\n')),cppFile=path.join(out,'axis-probe.cpp');fs.writeFileSync(cppFile,cpp);report.generatedConsumer=pin(cppFile);
+  const ids=[];for(const tag of [':gyro:',':accel:'])for(const a of ['x','y','z'])for(const b of ['x','y','z'])for(const c of ['x','y','z'])for(let signs=0;signs<8;signs++)for(const swap of ['', '-swap-', '-swap-yz','-swap-xy','-swap-yzx','-swap-zyx'])for(const trail of ['', '-']){const core=[a,b,c].map((axis,n)=>(signs&(1<<n)?'neg-':'')+axis).join('-')+trail;ids.push('fixture'+tag+core+swap);}
+  ids.push('', 'x-y-z','fixture:gyro:','fixture:gyro:x-y-z--','fixture:gyro:x-y-z-swap-qq','a-swap-yz:gyro:x-y-z','a:accel:x-y-z:gyro:neg-x-y-z','a:gyro:x-y-z:accel:neg-x-y-z','a:gyro:x-y-z-swap-xy-swap-yz','a:gyro:x-y-z\0','a:gyro:neg-x-y-z-');
+  let state=0x6d2b79f5;const alphabet='xyzneg-swap:XYZ+_012\0';for(let n=0;n<1024;n++){let tail='';for(let i=0;i<n%43;i++){state^=state<<13;state^=state>>>17;state^=state<<5;tail+=alphabet[(state>>>0)%alphabet.length];}ids.push((n%3===0?'fixture:gyro:':n%3===1?'fixture:accel:':'')+tail);}
+  const dataFile=path.join(out,'axis-inputs.json');fs.writeFileSync(dataFile,JSON.stringify({matrixIds:ids,allocationMatrixId:'hc-06c0b954:xbox-rog-ally-x:gyro:x-z-neg-y'}));inputs.push(pin(dataFile));report.inputs=inputs;report.matrixIdCount=ids.length;save();
+  const vcvars=option('--vcvars')||'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';if(/["%\r\n]/.test(out))throw Error('AXIS_UNSUPPORTED_OUTPUT_PATH');
+  for(const profile of ['Release','Checked']){
+   const dir=path.join(out,profile);fs.mkdirSync(dir);const flags=profile==='Release'?'/O2 /DNDEBUG /MT':'/Od /RTC1 /D_DEBUG /D_ITERATOR_DEBUG_LEVEL=2 /MTd',driver=path.join(dir,'compile.cmd'),exe=path.join(dir,'axis-probe.exe');
+   fs.writeFileSync(driver,calibrationToolchainPreamble(vcvars)+'chcp 65001 >nul\r\ncl /nologo /std:c++20 /EHsc /utf-8 '+flags+' /I"'+path.join(repo,'deps/json')+'" "'+cppFile+'" /Fo"'+path.join(dir,'axis-probe.obj')+'" /Fe"'+exe+'" /sourceDependencies "'+path.join(dir,'dependencies.json')+'"\r\nexit /b %errorlevel%\r\n');
+   const compiled=await runMatrixChild({out:dir,label:'compile',exe:'cmd.exe',argv:['/d','/c',driver],cwd:dir,timeoutMs:60000});if(compiled.exitCode!==0||compiled.timedOut||compiled.signal||compiled.launchError)throw Error('AXIS_COMPILE_FAILED');
+   const executed=await runMatrixChild({out:dir,label:'native',exe,argv:[dataFile],cwd:dir,timeoutMs:60000});if(executed.timedOut||executed.signal||executed.launchError)throw Error('AXIS_NATIVE_NOT_NATURAL');const result=JSON.parse(executed.stdout.trim().split(/\r?\n/).at(-1));
+   const dep=JSON.parse(fs.readFileSync(path.join(dir,'dependencies.json'),'utf8').replace(/^\uFEFF/,''));report.configurations.push({profile,compileExit:compiled.exitCode,nativeExit:executed.exitCode,result,compileProcess:pin(compiled.processFile),nativeProcess:pin(executed.processFile),executable:pin(exe),actualIncludes:[dep.Data.Source,...dep.Data.Includes].map(file=>pin(file))});save();
+   if(executed.exitCode!==0||result.status!=='PASS')throw Error(result.error||'AXIS_NATIVE_FAILED');
+  }
+  for(const input of inputs)if(digest(input.file)!==input.sha256)throw Error('AXIS_SOURCE_DRIFT');if(digest(cppFile)!==report.generatedConsumer.sha256)throw Error('AXIS_GENERATED_DRIFT');report.status='PASS';save();console.log(JSON.stringify({status:report.status,scope:report.scope,matrixIds:ids.length,configurations:report.configurations.map(x=>({profile:x.profile,pairs:x.result.differentialPairs,legacyAllocations:x.result.legacyAllocations,candidateAllocations:x.result.candidateAllocations}))}));
+ }catch(error){report.status='FAIL';report.error=error.message;save();throw error;}
+}

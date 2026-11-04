@@ -16,7 +16,11 @@ export function prepareCase({repoRoot,caseDir,faultId=null}) {
   const view=path.join(caseDir,'sourceview','repo');fs.mkdirSync(view,{recursive:true});
   for(const row of sourceInputs){const dest=path.join(view,row.relative);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(row.path,dest);}
   let fault=null;
-  if(faultId){const file=path.join(view,spec.sourceInputs[1]),before=fs.readFileSync(file,'utf8'),after=mutate(before,faultId);fs.writeFileSync(file,after);fault={...spec.faults.find(f=>f.id===faultId),source:spec.sourceInputs[1],beforeSha256:sha(before),afterSha256:sha(after),changedFiles:1};}
+  if(faultId){const file=path.join(view,spec.sourceInputs[1]),before=fs.readFileSync(file,'utf8'),after=mutate(before,faultId);
+    // Windows copies a frozen source's readonly bit; change only this owned negative copy.
+    need(inside(view,fs.realpathSync(file))&&fs.lstatSync(file).isFile(),'MUTATION_COPY_SCOPE_REQUIRED');
+    fs.chmodSync(file,fs.statSync(file).mode|0o200);
+    fs.writeFileSync(file,after);fault={...spec.faults.find(f=>f.id===faultId),source:spec.sourceInputs[1],beforeSha256:sha(before),afterSha256:sha(after),changedFiles:1};}
   const viewInputs=sourceInputs.map(row=>({relative:row.relative,...fingerprint(path.join(view,row.relative))}));
   need(viewInputs.every((row,i)=>row.sha256===sourceInputs[i].sha256 || (faultId&&i===1)),'SOURCEVIEW_COPY_NOT_EXACT');
   const vm=extractVm(fs.readFileSync(path.join(view,spec.sourceInputs[1]),'utf8'));

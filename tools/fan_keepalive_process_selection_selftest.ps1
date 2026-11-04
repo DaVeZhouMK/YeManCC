@@ -11,11 +11,14 @@ $headerSha=(Get-FileHash -LiteralPath $header).Hash
 Copy-Item -LiteralPath $header -Destination (Join-Path $EvidenceRoot 'fan_keepalive_process_selection.h') -Force
 if((Get-FileHash -LiteralPath (Join-Path $EvidenceRoot 'fan_keepalive_process_selection.h')).Hash -ne $headerSha){throw 'Copied selection header identity mismatch'}
 function Extract([string]$signature){$start=$raw.IndexOf($signature,[StringComparison]::Ordinal);if($start-lt0){throw "Missing production function: $signature"};$open=$raw.IndexOf('{',$start);$depth=0;for($i=$open;$i-lt$raw.Length;$i++){if($raw[$i]-eq'{'){$depth++};if($raw[$i]-eq'}'){$depth--;if($depth-eq0){return $raw.Substring($start,$i-$start+1)}}};throw 'Unbalanced production function'}
+$startTime=Extract 'static unsigned long long fanHostProcessStartMs('
+$instanceSplit=Extract 'static json fanHostInstanceSplit('
+$instanceNote=Extract 'static void fanHostNoteInstanceObserved('
 $probe=Extract 'static FanHostIdentityProbe fanHostIdentityProbe() {'
 $legacy=Extract 'static bool fanHostExactProcessRunning() {'
 $hasSelection=$raw.Contains('static bool fanHostExactProcessRunningForKeepalive() {')
 $selected=if($hasSelection){Extract 'static bool fanHostExactProcessRunningForKeepalive() {'}else{'static bool fanHostExactProcessRunningForKeepalive() { return fanHostExactProcessRunning(); }'}
-foreach($entry in @(@('ProbeExtract.inc',$probe),@('LegacyExactExtract.inc',$legacy),@('KeepaliveExactExtract.inc',$selected))){[IO.File]::WriteAllText((Join-Path $EvidenceRoot $entry[0]),$entry[1],[Text.UTF8Encoding]::new($false))}
+foreach($entry in @(@('ProcessStartExtract.inc',$startTime),@('InstanceSplitExtract.inc',$instanceSplit),@('InstanceNoteExtract.inc',$instanceNote),@('ProbeExtract.inc',$probe),@('LegacyExactExtract.inc',$legacy),@('KeepaliveExactExtract.inc',$selected))){[IO.File]::WriteAllText((Join-Path $EvidenceRoot $entry[0]),$entry[1],[Text.UTF8Encoding]::new($false))}
 if($hasSelection){
  $post=Extract 'static bool fanLeaseKeepalivePostHeartbeat('
  if(-not$post.Contains('if (!fanHostExactProcessRunningForKeepalive())')){throw 'Warm probe disconnected from actual keepalive transport'}
@@ -28,6 +31,11 @@ $compile=Join-Path $EvidenceRoot 'compile.cmd'
 @echo off
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
+if not defined WindowsSdkDir set "WindowsSdkDir=C:\Program Files (x86)\Windows Kits\10\"
+if "%WindowsSDKVersion%"=="\" set "WindowsSDKVersion=10.0.26100.0\"
+if not defined WindowsSDKVersion set "WindowsSDKVersion=10.0.26100.0\"
+set "INCLUDE=%WindowsSdkDir%Include\%WindowsSDKVersion%um;%WindowsSdkDir%Include\%WindowsSDKVersion%shared;%WindowsSdkDir%Include\%WindowsSDKVersion%ucrt;%INCLUDE%"
+set "LIB=%WindowsSdkDir%Lib\%WindowsSDKVersion%um\x64;%WindowsSdkDir%Lib\%WindowsSDKVersion%ucrt\x64;%LIB%"
 cl /nologo /std:c++20 /EHsc /W4 /WX /utf-8 /MT /I"$EvidenceRoot" /I"$project\native" /I"$project\deps\json" "$PSScriptRoot\fan_keepalive_process_selection_selftest.cpp" /Fo"$EvidenceRoot\fixture.obj" /Fe"$EvidenceRoot\fixture.exe"
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++20 /EHsc /W4 /WX /utf-8 /MT /DYMCC_FAULT_INJECT /I"$EvidenceRoot" /I"$project\native" /I"$project\deps\json" "$PSScriptRoot\fan_keepalive_process_selection_selftest.cpp" /Fo"$EvidenceRoot\fault.obj" /Fe"$EvidenceRoot\fault.exe"

@@ -26,7 +26,12 @@ def _game_write_text(self,data,*args,**kwargs):
         raise RuntimeError('GAME_MSI_ORIGINAL_CPP_ANCHOR_NOT_EXACT')
     if kwargs.get('encoding')!='utf-8' or args or set(kwargs)!=set(['encoding']):
         raise RuntimeError('GAME_MSI_ORIGINAL_CPP_WRITE_SHAPE_CHANGED')
-    generated=data.replace(anchor,include+anchor,1)
+    generated=data
+    for edit in _game_context['insertion'].get('scaffoldingReplacements',[]):
+        if generated.count(edit['before'])!=1 or edit['after'] in generated:
+            raise RuntimeError('GAME_MSI_SCAFFOLDING_NOT_EXACT')
+        generated=generated.replace(edit['before'],edit['after'],1)
+    generated=generated.replace(anchor,include+anchor,1)
     result=_game_original_write_text(self,generated,**kwargs)
     _record['gameObserverContext']={'headerSha256':_game_context['header']['sha256'],'reviewSha256':_game_context['reviewSha256'],'originalScriptSha256':_game_context['originalScript']['sha256'],'originalTextSha256':hashlib.sha256(data.encode('utf-8')).hexdigest(),'generatedTextSha256':hashlib.sha256(generated.encode('utf-8')).hexdigest(),'generatedFileSha256':hashlib.sha256(self.read_bytes()).hexdigest(),'insertionOffset':data.index(anchor),'include':include,'originalGeneratorAndDefinitionsUnchanged':True}
     return result

@@ -15,9 +15,17 @@ if(fs.existsSync(out)||out.toLowerCase().startsWith(repo.toLowerCase()+path.sep)
 fs.mkdirSync(out,{recursive:true});
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const sourcePath=path.join(repo,'InputHost/Program.cs');
-const source=fs.readFileSync(sourcePath,'utf8');
+const source=fs.readFileSync(sourcePath,'utf8').replace(/\r\n/g,'\n');
+const authorityPath=path.join(repo,'native/UsbipMaintenanceState.cs');
+const gatePath=path.join(repo,'InputHost/UsbipMaintenanceGate.cs');
+const gateBytes=fs.readFileSync(gatePath);
+const gateSource=gateBytes.toString('utf8');
 const fixture=path.join(repo,'tools/fixtures/usbip_backend_preparation/Fixture.cs');
 const fixtureBytes=fs.readFileSync(fixture);
+const authorityBytes=fs.readFileSync(authorityPath),authoritySource=authorityBytes.toString('utf8');
+function authoritySlice(start,end){const a=authoritySource.indexOf(start),b=authoritySource.indexOf(end,a+start.length);if(a<0||b<=a||authoritySource.indexOf(start,a+1)>=0)throw Error('Nonunique maintenance authority dependency');return authoritySource.slice(a,b);}
+const authorityMembers=[authoritySlice('    internal const string BootSessionPrefix =','    private static string? cachedBootSession;'),authoritySlice('    internal static bool ValidBootSession(string? value) =>','    internal static string? CurrentBootSessionIdentity'),authoritySlice('    // Bounded record storage shared by setup and Host.','    internal static bool RequiresReboot(Guid? recordedBoot, Guid? currentBoot) =>')].join('\n');
+
 const mask=text=>text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,m=>m.replace(/[^\n]/g,' '));
 function member(marker){
  const start=source.indexOf(marker);
@@ -28,19 +36,26 @@ function member(marker){
 }
 const originalMembers=[member('private static T CreateTargetWithBackendWarning<T>'),member('private static bool TryEnsureDriverInstalled('),member('private static bool TryEnsureUsbipBackend(')].join('\n');
 const wrapper=members=>'using YeManInputHost.Diagnostics;\ninternal static partial class ProgramFixture {\n'+members+'\ninternal static int Execute(bool usbip,UsbipSetupEvidence? evidence,Func<int> factory,out string receipt) => CreateTargetWithBackendWarning(()=>{var ready=TryEnsureDriverInstalled(new HMContext(),out var detail,usbip,evidence);return(ready,detail);},factory,out receipt);\n}';
-const bindings=[{path:toolchainPath,sha256:hash(fs.readFileSync(toolchainPath))},{path:sourcePath,sha256:hash(fs.readFileSync(sourcePath))},{path:fixture,sha256:hash(fixtureBytes)},{path:fileURLToPath(import.meta.url),sha256:hash(fs.readFileSync(fileURLToPath(import.meta.url)))}];
-fs.writeFileSync(path.join(out,'SOURCE-BINDINGS.json'),JSON.stringify({bindings,selectedMembersSha256:hash(originalMembers),normalHostStarted:false,sdkAndDeviceTerminals:'inert HMContext and evidence callbacks only'},null,2));
+const bindings=[{path:authorityPath,sha256:hash(fs.readFileSync(authorityPath))},{path:gatePath,sha256:hash(gateBytes)},{path:toolchainPath,sha256:hash(fs.readFileSync(toolchainPath))},{path:sourcePath,sha256:hash(fs.readFileSync(sourcePath))},{path:fixture,sha256:hash(fixtureBytes)},{path:fileURLToPath(import.meta.url),sha256:hash(fs.readFileSync(fileURLToPath(import.meta.url)))}];
+fs.writeFileSync(path.join(out,'SOURCE-BINDINGS.json'),JSON.stringify({bindings,selectedMembersSha256:hash(originalMembers),normalHostStarted:false,sdkAndDeviceTerminals:'inert HMContext/evidence and V2/ACL authority ports; actual budget files only inside private output'},null,2));
 const results=[];
 for(const test of [
  {name:'positive',members:originalMembers},
+ {name:'negative-swallow-budget',from:'catch (Exception ex) when (ex is not YeManInputHost.UsbipBackendBudgetRejectedException)',to:'catch (Exception ex)',expected:'budget-rejection-blocks-factory-and-install'},
+ {name:'negative-probe-skips-budget',from:'YeManInputHost.UsbipHostBackendBudget.Reserve();\n                throw;',to:'throw;',expected:'probe-exception-reserves-before-factory'},
+ {name:'negative-refund-same-boot',gateFrom:'if (string.Equals(previousBoot, currentBoot, StringComparison.OrdinalIgnoreCase))',gateTo:'if (false && string.Equals(previousBoot, currentBoot, StringComparison.OrdinalIgnoreCase))',expected:'budget-rejection-blocks-factory-and-install'},
  {name:'negative-drop-progress',from:'HMContext.InstallUsbipBackend(progress);',to:'HMContext.InstallUsbipBackend(null);',expected:'progress-callback-reaches-official-install-only'},
  {name:'negative-backend-warning-gates-factory',from:'return createTarget();',to:'return backendReceipt.StartsWith("backend-warning:",StringComparison.Ordinal) ? default! : createTarget();',expected:'factory-called-once-even-when-backend-warning'}
 ]){
  const directory=path.join(out,test.name);fs.mkdirSync(directory);
  let members=test.members??originalMembers;
  if(test.from){if(members.split(test.from).length!==2)throw Error('Mutation anchor drift '+test.name);members=members.replace(test.from,test.to);}
+ let selectedGate=gateSource;
+ if(test.gateFrom){if(selectedGate.split(test.gateFrom).length!==2)throw Error('Gate mutation anchor drift '+test.name);selectedGate=selectedGate.replace(test.gateFrom,test.gateTo);}
+ fs.writeFileSync(path.join(directory,'UsbipMaintenanceGate.cs'),selectedGate);
  fs.writeFileSync(path.join(directory,'Consumers.cs'),wrapper(members));
  fs.writeFileSync(path.join(directory,'Fixture.cs'),fixtureBytes);
+ fs.writeFileSync(path.join(directory,'RecordStorage.cs'),'using System.Text.Json;\nnamespace YeManCC { internal static partial class UsbipMaintenanceState {\n'+authorityMembers+'\n} }\n');
  fs.writeFileSync(path.join(directory,'Fixture.csproj'),'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NuGetAudit>false</NuGetAudit></PropertyGroup></Project>');
  fs.writeFileSync(path.join(directory,'NuGet.Config'),'<configuration><packageSources><clear /></packageSources></configuration>');
  for(const [stage,argv] of [['build',['build','Fixture.csproj','-c','Release','--nologo']],['run',[path.join(directory,'bin/Release/net10.0-windows/Fixture.dll'),path.join(directory,'RESULT.json')]]]){

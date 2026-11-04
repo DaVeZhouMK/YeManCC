@@ -5,6 +5,8 @@
 static bool pointerMetadataEnabled=false;
 static UINT32 failedPointerMetadataId=0;
 static HWND failedClientConversion=nullptr;
+static HWND failedScreenConversion=nullptr;
+static BOOL fixtureClientToScreen(HWND window,POINT* point){if(window==failedScreenConversion){SetLastError(ERROR_INVALID_WINDOW_HANDLE);return FALSE;}return ClientToScreen(window,point);}
 static BOOL fixtureScreenToClient(HWND window,POINT* point){if(window==failedClientConversion){SetLastError(ERROR_INVALID_WINDOW_HANDLE);return FALSE;}return ScreenToClient(window,point);}
 static POINTER_INFO pointerMetadata{};
 static BOOL fixtureGetPointerInfo(UINT32 id,POINTER_INFO* value){
@@ -14,9 +16,11 @@ static BOOL fixtureGetPointerInfo(UINT32 id,POINTER_INFO* value){
 }
 #define GetPointerInfo fixtureGetPointerInfo
 #define ScreenToClient fixtureScreenToClient
+#define ClientToScreen fixtureClientToScreen
 #include "monitor_desktop_hud.test.h"
 #undef GetPointerInfo
 #undef ScreenToClient
+#undef ClientToScreen
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -24,9 +28,9 @@ using namespace ymcc;using namespace ymcc::desktophud;
 // COM boundary recorder only; production Carrier/Win32/input methods remain unchanged.
 class NoticeControllerRecorder final : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,ICoreWebView2Controller> {
 public:
- BOOL visible=TRUE,closed=FALSE,visibleAtClose=TRUE;RECT rect{};
+ BOOL visible=TRUE,closed=FALSE,visibleAtClose=TRUE;unsigned showWrites=0,closeCalls=0;bool callbackActive=false,closedInsideCallback=false;std::function<void()> onClose;RECT rect{};
  HRESULT STDMETHODCALLTYPE get_IsVisible(BOOL *isVisible) override {*isVisible=visible;return S_OK;}
- HRESULT STDMETHODCALLTYPE put_IsVisible(BOOL isVisible) override {visible=isVisible;return S_OK;}
+ HRESULT STDMETHODCALLTYPE put_IsVisible(BOOL isVisible) override {visible=isVisible;if(isVisible)++showWrites;return S_OK;}
  HRESULT STDMETHODCALLTYPE get_Bounds(RECT *bounds) override {*bounds=rect;return S_OK;}
  HRESULT STDMETHODCALLTYPE put_Bounds(RECT bounds) override {rect=bounds;return S_OK;}
  HRESULT STDMETHODCALLTYPE get_ZoomFactor(double *zoomFactor) override {return E_NOTIMPL;}
@@ -46,8 +50,18 @@ public:
  HRESULT STDMETHODCALLTYPE get_ParentWindow(HWND *parentWindow) override {return E_NOTIMPL;}
  HRESULT STDMETHODCALLTYPE put_ParentWindow(HWND parentWindow) override {return E_NOTIMPL;}
  HRESULT STDMETHODCALLTYPE NotifyParentWindowPositionChanged() override {return S_OK;}
- HRESULT STDMETHODCALLTYPE Close() override {visibleAtClose=visible;closed=true;return S_OK;}
+ HRESULT STDMETHODCALLTYPE Close() override {++closeCalls;closedInsideCallback=closedInsideCallback||callbackActive;visibleAtClose=visible;closed=true;auto action=std::move(onClose);if(action)action();return S_OK;}
  HRESULT STDMETHODCALLTYPE get_CoreWebView2(ICoreWebView2 **coreWebView2) override {return E_NOTIMPL;}
+};
+// A real WebMessageReceived args boundary; only source/body bytes are fixture input.
+class RendererCloseMessage final : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,ICoreWebView2WebMessageReceivedEventArgs> {
+ std::wstring source_,body_;
+ static HRESULT copy(const std::wstring& v,LPWSTR*out){*out=static_cast<LPWSTR>(CoTaskMemAlloc((v.size()+1)*sizeof(wchar_t)));if(!*out)return E_OUTOFMEMORY;memcpy(*out,v.c_str(),(v.size()+1)*sizeof(wchar_t));return S_OK;}
+public:
+ RendererCloseMessage(std::string source,const Json&body):source_(wide(source)),body_(wide(body.dump())){}
+ HRESULT STDMETHODCALLTYPE get_Source(LPWSTR*out)override{return copy(source_,out);}
+ HRESULT STDMETHODCALLTYPE get_WebMessageAsJson(LPWSTR*out)override{return copy(body_,out);}
+ HRESULT STDMETHODCALLTYPE TryGetWebMessageAsString(LPWSTR*out)override{*out=nullptr;return E_INVALIDARG;}
 };
 // Message replay runs on a private, never-displayed desktop. The real OS route
 // and second-process receiver are separately exercised by monitor-routing.
@@ -134,6 +148,27 @@ int wmain(int argc,wchar_t** argv){
     reset();pointer(WM_POINTERDOWN,25,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT|POINTER_FLAG_FIRSTBUTTON,POINTER_CHANGE_FIRSTBUTTON_DOWN);
     pointer(WM_POINTERUPDATE,25,type,30,25,POINTER_FLAG_CANCELED|POINTER_FLAG_UPDATE);check("cancelled pointer cannot retain a gesture",!s->drag.contact(),{{"type",type}});
    }
+   // Terminal input ownership must not depend on a coordinate conversion.
+   // A native shell/fullscreen/DPI transition can retire that transform first.
+   for(auto type:{PT_TOUCH,PT_PEN}){
+    reset();const auto beforeTemplates=templateCount();const unsigned beforeWheel=summons;
+    pointer(WM_POINTERDOWN,91,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT);
+    failedScreenConversion=s->inputWindow;SendMessageW(s->inputWindow,WM_POINTERCAPTURECHANGED,91,0);failedScreenConversion=nullptr;
+    check("capture loss clears its contact even when ClientToScreen is unavailable",!s->touchContact&&!s->drag.contact()&&!s->radialContact&&!IsWindowVisible(s->inputWindow),{{"type",type}});
+    reset();pointer(WM_POINTERDOWN,92,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT);
+    failedScreenConversion=s->inputWindow;pointer(WM_POINTERUPDATE,92,type,30,25,POINTER_FLAG_UPDATE|POINTER_FLAG_CANCELED);failedScreenConversion=nullptr;
+    check("cancelled touch does not need coordinates to withdraw its input owner",!s->touchContact&&!s->drag.contact()&&!s->radialContact&&!IsWindowVisible(s->inputWindow),{{"type",type}});
+    reset();pointer(WM_POINTERDOWN,93,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT);
+    pointer(WM_POINTERUPDATE,93,type,30,25,POINTER_FLAG_UPDATE|POINTER_FLAG_INRANGE);
+    check("hover without contact retires a lost UP instead of continuing a drag",!s->touchContact&&!s->drag.contact()&&!s->radialContact&&!IsWindowVisible(s->inputWindow),{{"type",type}});
+    reset();pointer(WM_POINTERDOWN,94,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT);
+    pointer(WM_POINTERDOWN,94,type,50,30,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT);
+    check("reused pointer DOWN after a lost UP starts a fresh contact",s->touchContact&&s->drag.contact()&&s->touchPointerId==94&&IsWindowVisible(s->inputWindow),{{"type",type}});
+    pointer(WM_POINTERUPDATE,94,type,74,42,POINTER_FLAG_UPDATE|POINTER_FLAG_INCONTACT);
+    pointer(WM_POINTERUP,94,type,74,42,POINTER_FLAG_UP);
+    check("reused pointer drag uses the new origin and releases normally",!s->drag.contact()&&!s->touchContact&&std::abs(s->panel.left-(s->placementArea.left+(LONG)std::lround(.1*(s->placementArea.right-s->placementArea.left)))-24)<=2,{{"type",type}});
+    check("terminal reconciliation cannot switch templates or summon a wheel",templateCount()==beforeTemplates&&summons==beforeWheel,{{"type",type}});
+   }
    for(auto type:{PT_TOUCH,PT_PEN})for(auto failedMessage:{WM_POINTERUP,WM_POINTERUPDATE}){
     reset();const auto count=templateCount();const unsigned beforeSummons=summons;
     pointer(WM_POINTERDOWN,61,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT|POINTER_FLAG_FIRSTBUTTON);
@@ -159,6 +194,13 @@ int wmain(int argc,wchar_t** argv){
    SendMessageW(s->hwnd,WM_TIMER,Carrier::holdTimer,0);pointer(WM_POINTERUP,72,PT_TOUCH,30,25,POINTER_FLAG_UP);
    check("late timer and UP after metadata loss cannot summon or revive input",summons==beforeFailedHold&&!s->drag.contact()&&!s->radialContact&&!IsWindowVisible(s->inputWindow));
    radial=false;
+   for(auto type:{PT_TOUCH,PT_PEN})for(auto failedPhase:{WM_POINTERDOWN,WM_POINTERUPDATE,WM_POINTERUP}){
+    reset();if(failedPhase!=WM_POINTERDOWN)pointer(WM_POINTERDOWN,95,type,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT);
+    failedScreenConversion=s->inputWindow;
+    pointer(failedPhase,95,type,30,25,failedPhase==WM_POINTERDOWN?POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT:failedPhase==WM_POINTERUP?POINTER_FLAG_UP:POINTER_FLAG_UPDATE|POINTER_FLAG_INCONTACT);
+    failedScreenConversion=nullptr;
+    check("unavailable screen transform retires the admitted contact at every phase",!s->touchContact&&!s->drag.contact()&&!s->radialContact&&!IsWindowVisible(s->inputWindow),{{"type",type},{"message",failedPhase}});
+   }
    reset();s->drag.position.locked=true;++s->drag.position.revision;owner.refresh(s);check("explicit lock hides the interactive panel while display remains visible",!IsWindowVisible(s->inputWindow)&&IsWindowVisible(s->hwnd));
    Carrier::inputEvent(s->inputWindow,{10,41,PT_TOUCH,screeninput::Phase::Down,30,25,false},s.get());check("late input cannot revive a hidden locked panel",!s->drag.contact());
    radial=true;owner.refresh(s);unsigned beforeSummons=summons;
@@ -173,6 +215,41 @@ int wmain(int argc,wchar_t** argv){
    }
    s->layout=false;owner.refresh(s);check("layout invalidation hides native windows while renderer measures",!IsWindowVisible(s->hwnd)&&!IsWindowVisible(s->inputWindow));s->layout=true;owner.refresh(s);
    s->visibility=hudvisibility::Mode::GameRunning;s->policyGamePid=0;owner.refresh(s);check("game visibility gate withdraws renderer and input",!record->visible&&!IsWindowVisible(s->inputWindow));s->visibility=hudvisibility::Mode::Always;owner.refresh(s);
+   // Conditional hiding must own the renderer/input state even when the
+   // top-level HWND is already hidden, and while layout waits for a receipt.
+   {
+    Carrier conditional;conditional.initialize(nullptr,cfg);auto [d,drecord]=create(conditional,91);
+    d->visibility=hudvisibility::Mode::GameRunning;d->policyGamePid=0;conditional.refresh(d);
+    const HWND parked=d->inputWindow;
+    check("conditional hide parks a disabled bounded input window",parked&&!IsWindowVisible(parked)&&!IsWindowEnabled(parked)&&!drecord->visible);
+    drecord->visible=TRUE;conditional.refresh(d);
+    check("already-hidden conditional output repairs a live renderer",!drecord->visible&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(parked));
+    d->layout=false;d->viewportKey="stale-conditional-viewport";drecord->visible=TRUE;conditional.refresh(d);
+    check("conditional denial precedes viewport and layout warmup",!drecord->visible&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(parked));
+    const auto shows=drecord->showWrites;bool framesAccepted=true,framesQuiet=true;
+    auto frame=[&](const char* mode,bool show=true,unsigned pid=0){
+     const Json payload={{"nonce",d->nonce},{"hudId",d->id},{"seq",d->seq+1},{"expiresAt",wallNow()+5000},{"show",show},
+       {"data",{{"source","ymcc-uniform"}}},{"preferences",{{"ymcc",{{"visibility",mode},{"crosshair","dot"},{"layout","capsule"},{"scale",1.0},{"fields",Json::object()}}}}},
+       {"policyGame",{{"pid",pid},{"processCreated","123"}}}};
+     return conditional.frame(d->id,d->nonce,payload);
+    };
+    for(int i=0;i<12;++i){framesAccepted=frame("game-running")&&framesAccepted;framesQuiet=framesQuiet&&!drecord->visible&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(parked)&&!IsWindowEnabled(parked);}
+    check("waiting-game data frames never reactivate invisible renderer or input",framesAccepted&&framesQuiet&&drecord->showWrites==shows);
+    const auto pending=d->visibilityRevision;d->layout=true;for(int i=0;i<20;++i)conditional.refresh(d);
+    check("repeated conditional waits do not churn visibility receipts",d->visibilityRevision==pending&&!drecord->visible);
+    const auto priorUploads=d->input.uploads;frame("game-running",true,GetCurrentProcessId());d->layout=true;conditional.refresh(d);
+    RECT resumedInput{};if(d->inputWindow)GetWindowRect(d->inputWindow,&resumedInput);
+    check("game-running resume reuses one bounded input and visible renderer",drecord->visible&&IsWindowVisible(d->hwnd)&&IsWindowVisible(d->inputWindow)&&d->input.active()&&d->inputWindow==parked&&d->input.uploads==priorUploads&&resumedInput.right-resumedInput.left==d->width&&resumedInput.bottom-resumedInput.top==d->height);
+    d->visibility=hudvisibility::Mode::GameFocused;d->policyGamePid=UINT32_MAX;conditional.refresh(d);const auto focusShows=drecord->showWrites;
+    frame("game-focused",true,UINT32_MAX);d->layout=true;conditional.refresh(d);
+    check("unfocused game leaves both native surfaces inactive across frames",!drecord->visible&&drecord->showWrites==focusShows&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(d->inputWindow)&&!IsWindowEnabled(d->inputWindow));
+    frame("always");d->layout=true;conditional.refresh(d);
+    check("always mode resumes without a game and keeps full-screen display inert",drecord->visible&&IsWindowVisible(d->hwnd)&&hudinput::inert(d->hwnd)&&d->input.active());
+    frame("always",false);const auto offShows=drecord->showWrites;conditional.refresh(d);
+    check("explicit off remains hidden with disabled input",!drecord->visible&&drecord->showWrites==offShows&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(d->inputWindow)&&!IsWindowEnabled(d->inputWindow));
+    conditional.close(d->id,d->nonce);
+    check("conditional owner closes without disturbing the always owner",!conditional.current&&drecord->closed&&!IsWindow(parked)&&s->input.active()&&IsWindowVisible(s->hwnd));
+   }
    const auto uploads=s->input.uploads;for(int i=0;i<50;++i)owner.refresh(s);check("unchanged snapshots never upload the input bitmap again",s->input.uploads==uploads);
    s->width=170;owner.refresh(s);GetWindowRect(s->inputWindow,&input);check("panel resize updates only the bounded input geometry",input.right-input.left==170&&s->input.uploads==uploads+1);
    SetWindowLongPtrW(s->inputWindow,GWL_EXSTYLE,GetWindowLongPtrW(s->inputWindow,GWL_EXSTYLE)|WS_EX_TRANSPARENT);owner.refresh(s);check("event-driven style repair preserves bounded native input",s->input.active());
@@ -233,6 +310,38 @@ int wmain(int argc,wchar_t** argv){
     check("notice renderer creates no interactive input window",!n->inputWindow&&hudinput::inert(n->hwnd));
     notices.noticeHide(n->id,n->nonce,n->seq);check("hidden notice suspends renderer without a click target",!nrecord->visible&&!IsWindowVisible(n->hwnd)&&!n->inputWindow);
     const HWND window=n->hwnd;notices.close(n->id,n->nonce);check("notice close hides controller and destroys HWND",nrecord->closed&&!nrecord->visibleAtClose&&!IsWindow(window)&&!notices.current);
+   }
+   {
+    Carrier retiring;retiring.initialize(nullptr,cfg);auto [d,drecord]=create(retiring,92);d->url="https://app.localhost/hud-output.html?fixture=self-close";
+    const HWND display=d->hwnd,input=d->inputWindow;
+    auto args=Microsoft::WRL::Make<RendererCloseMessage>(d->url,Json{{"id",1},{"cmd","desktopHud.close"},{"args",{{"hudId",d->id},{"nonce",d->nonce}}}});
+    drecord->callbackActive=true;retiring.receive(d,args.Get());drecord->callbackActive=false;
+    check("renderer close returns from its callback before controller destruction",!drecord->closedInsideCallback&&drecord->closeCalls==0);
+    check("renderer-requested retirement immediately hides and disables both surfaces",!IsWindowVisible(display)&&!IsWindowVisible(input)&&!IsWindowEnabled(input)&&!drecord->visible);
+    if(retiring.current){const auto oldSeq=d->seq;Json payload={{"hudId",d->id},{"nonce",d->nonce},{"seq",oldSeq+1},{"expiresAt",wallNow()+5000},{"show",true},{"data",{{"source","ymcc-uniform"}}}};
+     check("late frame cannot rearm a renderer-requested retiring owner",!retiring.frame(d->id,d->nonce,payload));
+    }else check("late frame cannot rearm a renderer-requested retiring owner",!retiring.frame(d->id,d->nonce,Json::object()));
+    MSG message{};while(PeekMessageW(&message,display,Carrier::updateMessage,Carrier::updateMessage,PM_REMOVE))DispatchMessageW(&message);
+    check("existing posted lane closes renderer and both native HWNDs exactly once",!retiring.current&&!IsWindow(display)&&!IsWindow(input)&&drecord->closeCalls==1);
+    check("renderer self-close preserves the other monitor",s->input.active()&&IsWindowVisible(s->hwnd));
+   }
+   {
+    Carrier reentrant;reentrant.initialize(nullptr,cfg);auto [d,drecord]=create(reentrant,93);bool nestedAck=true;
+    drecord->onClose=[&]{nestedAck=reentrant.close(d->id,d->nonce,"reentrant-switch-close");};
+    check("switch close does not acknowledge a second in-flight destruction",reentrant.close(d->id,d->nonce,"switch-to-rtss")&&!nestedAck);
+    unsigned closedEvents=0;for(const auto&ev:events)if(ev["name"]=="desktopHud.closed"&&ev["value"].value("id",0)==93)++closedEvents;
+    check("switch close invokes COM Close and final lifecycle receipt only once",drecord->closeCalls==1&&closedEvents==1&&!reentrant.current);
+   }
+   {
+    Carrier fallback;fallback.initialize(nullptr,cfg);auto [d,drecord]=create(fallback,94);d->url="https://app.localhost/hud-output.html?fixture=retire-fallback";
+    const HWND display=d->hwnd,input=d->inputWindow;const auto failures=fallback.recovery.failures();
+    auto args=Microsoft::WRL::Make<RendererCloseMessage>(d->url,Json{{"id",2},{"cmd","desktopHud.close"},{"args",{{"hudId",d->id},{"nonce",d->nonce}}}});
+    drecord->callbackActive=true;fallback.receive(d,args.Get());fallback.receive(d,args.Get());drecord->callbackActive=false;
+    check("duplicate renderer close cannot destroy during a callback",drecord->closeCalls==0&&!drecord->closedInsideCallback&&!IsWindowVisible(input));
+    MSG message{};while(PeekMessageW(&message,display,Carrier::updateMessage,Carrier::updateMessage,PM_REMOVE)){} // Simulate an unavailable posted update.
+    SendMessageW(display,WM_TIMER,Carrier::leaseTimer,0);
+    check("existing lease timer retires a renderer when its posted close is lost",!fallback.current&&!IsWindow(display)&&!IsWindow(input)&&drecord->closeCalls==1);
+    check("normal renderer retirement does not consume crash recovery budget",fallback.recovery.failures()==failures);
    }
    // Inject capture into our private test HWND only. Product must record the
    // live owner before cancellation releases it, then preserve that evidence.

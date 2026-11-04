@@ -204,7 +204,7 @@ export const HUD_VISIBILITIES = [
 ] as const;
 export type HudVisibility = typeof HUD_VISIBILITIES[number]['value'];
 // Text sizing changes glyph layout, independently from the panel's existing scale.
-export const HUD_TEXT_SCALE_MAX = 2;
+export const HUD_TEXT_SCALE_MAX = 4;
 export const HUD_VALUE_SCALE_MAX = 3;
 export function hudTextScale(value: unknown, fallback = 1, maximum = HUD_TEXT_SCALE_MAX): number { return typeof value === 'number' && Number.isFinite(value) ? Math.max(.5, Math.min(maximum, value)) : fallback; }
 export function hudValueScales(raw: unknown): Partial<Record<HudMetricId, number>> {

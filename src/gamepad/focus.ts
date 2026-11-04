@@ -45,6 +45,9 @@ export function getGamepadViewportSafeArea(): GamepadViewportSafeArea {
   let topGap = DEFAULT_SAFE_TOP;
 
   if (content) {
+    // Discard the previous correction before measuring. Its padding can exceed
+    // a newly smaller viewport and then perpetuate its own apparent clipping.
+    content.style.removeProperty('--gamepad-clip-bottom');
     const style = getComputedStyle(content);
     const scale = visualScale(content);
     bottomGap = parsePixels(style.scrollPaddingBottom, DEFAULT_SAFE_BOTTOM) * scale;
@@ -54,7 +57,7 @@ export function getGamepadViewportSafeArea(): GamepadViewportSafeArea {
     // CSS zoom can place the scroll container below the real viewport. Add
     // that clipped tail to the scrollable content so maxScrollTop can reveal
     // the final control instead of stopping at the container's layout bottom.
-    content.style.setProperty('--gamepad-clip-bottom', `${Math.ceil(clippedBottomCss)}px`);
+    if (clippedBottomCss > 0.5) content.style.setProperty('--gamepad-clip-bottom', `${Math.ceil(clippedBottomCss)}px`);
   }
 
   bottomGap = Math.max(DEFAULT_SAFE_BOTTOM, Math.min(64, bottomGap));

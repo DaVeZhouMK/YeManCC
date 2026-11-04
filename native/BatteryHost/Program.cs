@@ -53,7 +53,7 @@ internal static class Program
                 while(!stop.IsCancellationRequested)
                 {
                     if(parent.HasExited){stop.Cancel();break;}
-                    domains.Tick();await Task.Delay(2000,stop.Token);
+                    domains.Tick();await Task.Delay(TimeSpan.FromSeconds(60),stop.Token);
                 }
             }
             catch(OperationCanceledException){}

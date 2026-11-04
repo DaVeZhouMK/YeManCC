@@ -9,7 +9,6 @@ import { loadGameCustomConfig, removeGameCustomProfile, restorePerformanceSchedu
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import GyroSimulationWindow from '@/components/GyroSimulationWindow.vue';
 import { focusGamepadElement } from '@/gamepad/focus';
-import GyroStatusPreview from '@/components/GyroStatusPreview.vue';
 import GameProfileModeBanner from '@/components/GameProfileModeBanner.vue';
 import IntegratedPage from '@/components/IntegratedPage.vue';
 import UsbipUpgradeStatus from '@/components/UsbipUpgradeStatus.vue';
@@ -26,7 +25,6 @@ import { readGameInputEditor, onGameInputEditorChanged, type GameInputEditor } f
 import {saveGyroEditorPatch} from '@/bridge/gyroPresetSave';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { createGyroPresentationGate } from '@/bridge/gyroPresentation';
-import { formatGyroAxis } from '@/bridge/gyroAxisFormat';
 
 const simulationOpen = ref(false);
 const simulationSettings = ref<HTMLElement | null>(null);
@@ -600,6 +598,8 @@ function applyPreset(raw: string | number): void {
     motionTrigger.value = '';
     motionInput.value = 'local-space';
   } else if (next === 'fps') {
+    // FPS 默认权重倍率 1.3（2026-11-04）；已有预设记忆由原加载分支保留。
+    gyroWeight.value = 1.3;
     // 用户裁决（2026-09-29）：FPS 射击预设触发模式默认「常开」。
     motionMode.value = 'on';
     motionTrigger.value = '';
@@ -870,6 +870,8 @@ function applyDefaultParamsForPreset(kind: 'fps' | 'racing' | 'steam' | 'custom'
   autoCalibrate.value = true;
   // 预设特定默认（对齐 applyPreset 无记忆分支）
   if (kind === 'fps') {
+    // FPS 默认权重倍率 1.3（2026-11-04）；已有预设记忆由原加载分支保留。
+    gyroWeight.value = 1.3;
     // 用户裁决（2026-09-29）：FPS 射击预设触发模式默认「常开」。
     motionMode.value = 'on';
     motionTrigger.value = '';
@@ -1145,7 +1147,7 @@ async function detectMotionSources(): Promise<void> {
     <GameProfileModeBanner v-if="editingGame" :game-name="editingGame"><template #actions><button class="gyro-profile-exit" data-gyro-profile-exit data-gp-row="-1" data-gp-col="2" :disabled="controlsLocked" @click="requestProfileRemoval">退出专属</button></template></GameProfileModeBanner>
     <section class="card gyro-overview-card" aria-label="陀螺仪状态与预设">
       <div class="field-stack">
-        <GyroStatusPreview :orientation="gyroOrientation" :axes="gyroAxes" :connected="gyroConnected" :power="gyroPowerState" :calibration="calibUiStatus" :calibration-text="calibStatusText" :calibration-error="calibError"><template #rates><span v-for="axis in (['x', 'y', 'z'] as const)" :key="axis" class="gyro-xyz-axis">{{ axis.toUpperCase() }} <b>{{ formatGyroAxis(gyroAxes[axis]) }}</b></span></template><template #power><div class="gyro-power-row">
+        <div class="gyro-power-row">
           <button
             type="button"
             class="gyro-power-btn"
@@ -1172,7 +1174,7 @@ async function detectMotionSources(): Promise<void> {
           >
             <span>虚拟手柄联动</span><small>{{virtualPadLink?'已开启':'已关闭'}}</small>
           </button>
-        </div></template></GyroStatusPreview><p v-if="busy || status.includes('失败')" class="hint live-status">{{busy?'正在记录…':status}}</p>
+        </div><p v-if="busy || status.includes('失败')" class="hint live-status">{{busy?'正在记录…':status}}</p>
         <UsbipUpgradeStatus errors-only />
         <div class="field gyro-preset-field">
           <span>使用预设</span>
@@ -1182,8 +1184,8 @@ async function detectMotionSources(): Promise<void> {
     </section>
 
     <section class="card gyro-workflow-card" aria-label="陀螺仪预览、输入和输出">
-      <h3 class="card-title"><InlineIcon name="gamepad" /> 预览 · 输入 · 输出</h3>
-      <GyroInputOutputPreview :persona="virtualPersona" :trigger="motionTrigger" :mode="motionMode" :aiming-trigger="aimingSightsTrigger" :input-label="motionInputOptions.find(option=>option.value===motionInput)?.label || motionInput" :output-stick="outputStick" :output-axis="outputAxis" :steam="preset==='steam'" :motion="simulationMotion" :receiving="gyroConnected && enabled && simulationAdmitted" />
+      <h3 class="card-title"><InlineIcon name="rotate" /> 陀螺仪控制</h3>
+      <GyroInputOutputPreview :persona="virtualPersona" :trigger="motionTrigger" :mode="motionMode" :aiming-trigger="aimingSightsTrigger" :input-label="motionInputOptions.find(option=>option.value===motionInput)?.label || motionInput" :output-stick="outputStick" :output-axis="outputAxis" :steam="preset==='steam'" :motion="simulationMotion" :receiving="gyroConnected && enabled && simulationAdmitted" :output-shape="outputShape" :axes="gyroAxes" :connected="gyroConnected" :power="gyroPowerState" :calibration="calibUiStatus" :calibration-text="calibStatusText" :calibration-error="calibError" />
       <div class="gyro-workflow-section gyro-input-section">
         <h4>输入</h4>
         <div v-if="preset !== 'steam'" class="gyro-trigger-fields">

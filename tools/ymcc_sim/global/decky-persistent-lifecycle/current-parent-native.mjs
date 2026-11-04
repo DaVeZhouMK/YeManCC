@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {OWNED_SOURCES,OWNED_INPUTS,ownedToolDeclaration} from './owned-adapter.mjs';
-import {ORIGINAL_CASES,ORIGINAL_SELECTION,ORIGINAL_REGISTRATION_IDS,originalReadyConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
-import {resourceZero} from './typed-binding-gate.mjs';
+import {ORIGINAL_CASES,ORIGINAL_SELECTION,ORIGINAL_REGISTRATION_IDS,originalReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
+import {resourceZero,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {lockBundledNodeTools,verifyBundledToolScope} from '../bundled-node-tool-authority.mjs';
 const repo=path.resolve(import.meta.dirname,'../../../..');
 const moduleRel='tools/ymcc_sim/global/decky-persistent-lifecycle';
@@ -81,11 +81,14 @@ if(get('--consumer-native')){
   assert.deepEqual(frozen.files.map(r=>r.path).sort(),[...OWNED_SOURCES].sort(),'ORIGINAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED');
   const originalFrozen=new Map();for(const row of frozen.files){assert.equal(sourcePins.get(row.path)?.sha256,row.sha256);const p=path.join(frozen.source,row.path);assert.equal(sha(p),row.sha256);originalFrozen.set(key(p),row);}
   const readyConsumer=originalReadyConsumer(frozen.source);originalFrozen.set(key(readyConsumer.path),readyConsumer);report.generatedReadyConsumer=readyConsumer;
+  const offlineConsumer=originalOfflineConsumer(frozen.source);originalFrozen.set(key(offlineConsumer.path),offlineConsumer);report.generatedOfflineConsumer=offlineConsumer;
+   const managedBackendConsumer=originalManagedBackendConsumer(frozen.source);originalFrozen.set(key(managedBackendConsumer.path),managedBackendConsumer);report.generatedManagedBackendConsumer=managedBackendConsumer;
   report.originalCompilerGraph=validateGraph(path.join(originalDir,'dependencies.json'),originalFrozen);
   const originalBuild=read(path.join(originalDir,'BUILD.json'));assert.equal(originalBuild.exit,0);assert.equal(originalBuild.error,null);assert.equal(originalBuild.compilerSha256,toolPins.get(key(originalBuild.compiler))?.sha256);
   assert.equal(sha(path.join(originalDir,'FixtureSteam/steam.exe')),originalResult.exeSha256);assert.equal(sha(path.join(originalDir,'FixtureSteam/bin/cef/fixture/steamwebhelper.exe')),originalResult.exeSha256);
   assert.equal(sha(path.join(originalDir,'binding-client.obj')),originalResult.objectSha256);
-  report.originalProducer={raw:pin(path.join(originalDir,'typed-runtime-result.json')),result:pin(path.join(originalDir,'RESULT.json')),sourcePins:pin(path.join(originalDir,'SOURCE-PINS.json')),exe:pin(path.join(originalDir,'FixtureSteam/steam.exe'))};
+  report.deferredResourceProof=verifyDeferredResourceProof(raw,originalDir);
+  report.originalProducer={deferredRaw:report.deferredResourceProof.raw,raw:pin(path.join(originalDir,'typed-runtime-result.json')),result:pin(path.join(originalDir,'RESULT.json')),sourcePins:pin(path.join(originalDir,'SOURCE-PINS.json')),exe:pin(path.join(originalDir,'FixtureSteam/steam.exe'))};
   // The original six producer verdicts and all raw fields remain intact.
   report.cases.push(...originalAggregateCases(raw).map(row=>({id:row.id,passed:row.passed,measurements:Object.fromEntries(Object.entries(row).filter(([k])=>!['id','passed'].includes(k))),evidence:report.originalProducer.raw})));
   const nativeDir=path.join(work,'n'),source=path.join(nativeDir,'s');fs.mkdirSync(source,{recursive:true});const nativeFrozen=new Map();
@@ -93,7 +96,7 @@ if(get('--consumer-native')){
    const target=path.join(source,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(repo,relative),target);assert.equal(sha(target),sourcePins.get(relative).sha256);nativeFrozen.set(key(target),{path:target,sha256:sha(target)});
   }
   const currentReadyConsumer=originalReadyConsumer(source,{write:true});nativeFrozen.set(key(currentReadyConsumer.path),currentReadyConsumer);report.generatedCurrentReadyConsumer=currentReadyConsumer;
-  const mainStart=originalCpp.indexOf('\nint main(int argc,char** argv){');assert(mainStart>0&&originalCpp.indexOf('\nint main(',mainStart+1)<0,'ORIGINAL_PREAMBLE_BOUNDARY_CHANGED');
+  const mainStart=originalCpp.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END');assert(mainStart>0&&originalCpp.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END',mainStart+1)<0,'ORIGINAL_PREAMBLE_BOUNDARY_CHANGED');
   const helper=path.join(source,'tools/current-runtime-helpers.inc');fs.writeFileSync(helper,originalCpp.slice(0,mainStart)+'\n');nativeFrozen.set(key(helper),pin(helper));
   const main=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8'),start=main.indexOf('    case WM_POWER_RESUME_COMMIT:'),begin=main.indexOf('\n',start)+1,end=main.indexOf('            ipc_emit("power.resumed"',begin);
   assert(start>=0&&end>begin,'CURRENT_READY_EXTRACTION_BOUNDARY_CHANGED');const slice=main.slice(begin,end);

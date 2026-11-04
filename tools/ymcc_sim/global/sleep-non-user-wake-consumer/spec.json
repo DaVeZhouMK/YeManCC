@@ -133,7 +133,7 @@
     "schemaVersion": 2,
     "kind": "exact-current-source-reverse-deltas",
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "b33c488d82958637d7a994b37c23c7122b79f698c77292e1d17c88f618a6f637",
+    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
     "consumedExport": "evidencePath",
     "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
     "compilerAndEnvironmentTextUnchanged": true,
@@ -142,7 +142,7 @@
   },
   "sourceCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "b33c488d82958637d7a994b37c23c7122b79f698c77292e1d17c88f618a6f637",
+    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
     "oldIdentitiesRetained": true,
     "fullReverseDeltaRequired": true,
     "sourceApproval": false
@@ -250,5 +250,44 @@
     "originalProfileGroupCountsUnchanged": true,
     "noNewWorkerTimerOrOsAction": true,
     "historicalScriptBytesReverseVerified": true
+  },
+  "powerResumeRegressionReview": {
+    "date": "2026-11-03",
+    "changedCurrentIdentities": [],
+    "oldFailuresPreserved": true,
+    "originalIdAndNegativeUnchanged": true
+  },
+  "powerResumeSelfHealingReview": {
+    "date": "2026-11-03",
+    "currentIdentityUpdates": [
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "092130af531a72969f648a193b437badaf09a35e23d4b3f8f9fe15d8dc5188b6",
+        "afterSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "57d717a497d908e953b407365e57d642a50fba9749fb8309cac5366d9b95e89d",
+        "afterSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38"
+      }
+    ],
+    "oldFailuresPreserved": true,
+    "originalGroupsAndIdentityNegativeUnchanged": true
+  },
+  "powerRestartRecoveryReview": {
+    "date": "2026-11-03",
+    "currentIdentityUpdates": [
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38",
+        "afterSha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38",
+        "afterSha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267"
+      }
+    ],
+    "originalGroupsAndNegativesPreserved": true
   }
 }

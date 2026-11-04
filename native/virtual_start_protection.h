@@ -43,6 +43,7 @@ public:
         std::string candidateOutcome;
         unsigned fallbackAttempts = 0;
         Tick inspectionStartedElapsedMs = 0, inspectionDeadlineElapsedMs = 0;
+        bool operator==(const View&) const = default;
     };
     struct Admission { bool accepted = false; Tick requestId = 0; bool created = false; };
 

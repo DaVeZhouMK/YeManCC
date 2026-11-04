@@ -150,6 +150,123 @@ await check('旧自动专属的正帧率修改不重放CPU，AC/DC切换仍重�
  const custom=await f.schedule.loadGameCustomConfig();custom.rtss['game.exe']=frames.dedicatedFrameRateRecord(frames.frameRatePair({},100,60));await f.schedule.saveGameCustomConfig(custom);await flushRuntime(f);assert.equal(f.ownerLease,lease);
  f.sourceMode.value='dc';for(const callback of f.powerListeners)callback();await flushRuntime(f);assert.notEqual(f.ownerLease,lease);assert.equal(f.ownerSide,'dc');assert.equal(await lease(),false);assert.equal(await f.ownerLease(),true);f.runtime.stopGamePolicyRuntime();
 });
+for (const mode of ['auto','manual']) await check('SMT '+mode+' 同构ROG/无游戏可设置，全局偏好跨游戏与ACDC稳定',async()=>{
+ const f=fixture({mode,ports:{smtAvailable:true,heterogeneous:false,topologyDetected:false}});
+ let snap=await f.schedule.getContinuousPerformanceSnapshot('effective');
+ assert.equal(snap.hybrid,false);assert.equal(snap.smtAvailable,true);assert.equal(snap.hyperThreadMode,'default');
+ const configured=f.settings.performanceSchedule.configured,enabled=f.settings.performanceSchedule.enabled;
+ f.effects.length=0;f.hardwareWrites.length=0;
+ await f.schedule.updateContinuousPerformanceControls(snap.identity,{hyperThreadMode:'off'});
+ assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'off');assert.deepEqual(f.hardwareWrites,[]);assert.deepEqual(f.corePolicyCalls,[]);
+ assert.equal(f.settings.performanceSchedule.configured,configured);assert.equal(f.settings.performanceSchedule.enabled,enabled);
+ assert.equal(Object.keys((await f.schedule.loadGameCustomConfig()).entries).length,0);
+ f.runtime.startGamePolicyRuntime();await flushRuntime(f);
+ const games=[{pid:101,processCreated:'born101',name:'a.exe',path:'C:/a.exe'},null,{pid:102,processCreated:'born102',name:'b.exe',path:'C:/b.exe'}];
+ for(const game of games){f.setGame(game);await flushRuntime(f);snap=await f.schedule.getContinuousPerformanceSnapshot('global');assert.equal(snap.hyperThreadMode,'off');assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'off');}
+ assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[0].pid===101&&c.args[2]==='off'));
+ assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[0].pid===102&&c.args[2]==='off'));
+ f.sourceMode.value='dc';for(const callback of f.powerListeners)callback();await flushRuntime(f);
+ snap=await f.schedule.getContinuousPerformanceSnapshot('global');assert.equal(snap.hyperThreadMode,'off');
+ f.hardwareWrites.length=0;f.corePolicyCalls.length=0;
+ await f.schedule.updateContinuousPerformanceControls(snap.identity,{hyperThreadMode:'on'});
+ assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'default');assert.equal(f.corePolicyCalls.filter(c=>c.kind==='apply').length,0);
+ assert(f.corePolicyCalls.some(c=>c.kind==='clear'));assert.deepEqual(f.hardwareWrites,[]);
+ f.runtime.stopGamePolicyRuntime();
+});
+await check('SMT专属独立于全局，开启恢复默认；主性能页只显示全局偏好',async()=>{
+ const f=fixture({mode:'manual',dedicated:true,ports:{smtAvailable:true,heterogeneous:false}});
+ let global=await f.schedule.getContinuousPerformanceSnapshot('global');await f.schedule.updateContinuousPerformanceControls(global.identity,{hyperThreadMode:'off'});
+ assert.equal(f.corePolicyCalls.length,0,'Global editor cannot override an enabled dedicated profile');
+ assert.equal((await f.schedule.getContinuousPerformanceSnapshot('effective')).hyperThreadMode,'off');
+ let dedicated=await f.schedule.getContinuousPerformanceSnapshot('dedicated');assert.equal(dedicated.hyperThreadMode,'default');
+ await f.schedule.updateContinuousPerformanceControls(dedicated.identity,{hyperThreadMode:'off'});assert.equal(f.corePolicyCalls.at(-1).args[2],'off');
+ dedicated=await f.schedule.getContinuousPerformanceSnapshot('dedicated');await f.schedule.updateContinuousPerformanceControls(dedicated.identity,{hyperThreadMode:'default'});
+ assert.equal(f.corePolicyCalls.at(-1).kind,'clear');assert.equal((await f.schedule.getContinuousPerformanceSnapshot('global')).hyperThreadMode,'off');
+ assert.equal((await f.schedule.getContinuousPerformanceSnapshot('dedicated')).hyperThreadMode,'default');
+ f.runtime.startGamePolicyRuntime();await flushRuntime(f);f.corePolicyCalls.length=0;
+ const entry=(await f.schedule.loadGameCustomConfig()).entries['game.exe'];await f.setEntry({...entry,hyperThreadPolicyEnabled:true,hyperThreadPolicy:'off'});await flushRuntime(f);
+ assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[2]==='off'));
+ f.setGame(null);await flushRuntime(f);assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'off');
+ f.setGame({pid:33,processCreated:'born33',name:'other.exe',path:'C:/other.exe'});await flushRuntime(f);
+ assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[0].pid===33&&c.args[2]==='off'));f.runtime.stopGamePolicyRuntime();
+});
+await check('旧EXE独立记录不再反向改变全局开关；默认开启不施加线程限制',async()=>{
+ const f=fixture({mode:'manual',configured:false,gameActive:true,ports:{smtAvailable:true}});
+ await f.setEntry({displayName:'Legacy',enabled:false,smtIndependent:true,hyperThreadPolicyEnabled:true,hyperThreadPolicy:'off'});
+ assert.equal((await f.schedule.getContinuousPerformanceSnapshot('global')).hyperThreadMode,'default');
+ assert.equal((await f.schedule.getContinuousPerformanceSnapshot('effective')).hyperThreadMode,'default');
+ f.runtime.startGamePolicyRuntime();await flushRuntime(f);
+ assert.equal(f.corePolicyCalls.filter(c=>c.kind==='apply').length,0);assert.deepEqual(f.hardwareWrites,[]);
+ assert.equal(f.settings.performanceSchedule.configured,false);f.runtime.stopGamePolicyRuntime();
+});
+await check('SMT不支持时不制造能力；保存失败不改持久偏好或当前游戏限制',async()=>{
+ const unavailable=fixture({gameActive:true,ports:{smtAvailable:false}}),bad=await unavailable.schedule.getContinuousPerformanceSnapshot('global');
+ assert.equal(bad.smtAvailable,false);await assert.rejects(unavailable.schedule.updateContinuousPerformanceControls(bad.identity,{hyperThreadMode:'off'}));assert.deepEqual(unavailable.corePolicyCalls,[]);
+ const f=fixture({gameActive:true,ports:{smtAvailable:true,beforeSettingsCommit:()=>{throw Error('disk full')}}});const s=await f.schedule.getContinuousPerformanceSnapshot('global');
+ await assert.rejects(f.schedule.updateContinuousPerformanceControls(s.identity,{hyperThreadMode:'off'}),/disk full/);
+ assert.notEqual(f.settings.performanceSchedule.hyperThreadPolicy,'off');assert.deepEqual(f.corePolicyCalls,[]);
+});
+await check('正式编辑的空值/零/负TDP不能被钳成最低瓦数，原配置与硬件均保留',async()=>{
+ for(const dedicated of [false,true])for(const mode of ['manual','auto'])for(const bad of [null,undefined,'',NaN,Infinity,-1,0,1]){
+  const f=fixture({dedicated,mode}),snapshot=await f.schedule.getContinuousPerformanceSnapshot('effective'),before=JSON.stringify(f.settings);
+  await assert.rejects(f.schedule.updateContinuousPerformanceControls(snapshot.identity,{tdp:bad}));
+  assert.equal(JSON.stringify(f.settings),before);assert.deepEqual(f.hardwareWrites,[]);
+ }
+});
+await check('新TDP操作排队即撤销旧bank尚未派发的高瓦数，正常新操作仍可写入',async()=>{
+ let release,waiting=false;const f=fixture({mode:'auto',ports:{beforeTdpWrite:async()=>{if(!waiting){waiting=true;await new Promise(r=>release=r)}}}});
+ f.settings.performanceSchedule.controls.ac.tdp=30;
+ const restoring=f.schedule.restorePerformanceScheduleIfConfigured('ac',{automaticOnly:true});
+ for(let n=0;n<300&&!release;n++)await Promise.resolve();assert.equal(typeof release,'function');
+ const snapshot=await f.schedule.getContinuousPerformanceSnapshot('effective');const editing=f.schedule.updateContinuousPerformanceControls(snapshot.identity,{tdp:15});
+ release();await Promise.allSettled([restoring,editing]);
+ const writes=f.hardwareWrites.filter(w=>w.kind==='tdp');assert.deepEqual(writes.map(w=>w.watts),[15]);
+});
+await check('配置TDP缺失或损坏不再补成默认55/30W或最低2W，CPU独立生效且有效编辑可恢复',async()=>{
+ for(const side of ['ac','dc'])for(const bad of [null,undefined,'',NaN,Infinity,0,-1]){
+  const f=fixture({side,mode:'auto'});f.settings.performanceSchedule.controls[side].tdp=15;
+  await f.schedule.restorePerformanceScheduleIfConfigured(side,{automaticOnly:true});const begin=f.hardwareWrites.length;
+  f.settings.performanceSchedule.controls[side].tdp=bad;await f.schedule.restorePerformanceScheduleIfConfigured(side,{automaticOnly:true});
+  const delta=f.hardwareWrites.slice(begin);assert.deepEqual(delta.filter(w=>w.kind==='tdp'),[]);assert.ok(delta.some(w=>w.kind==='cpu'));assert.equal(f.floating,false);
+  const current=await f.schedule.getContinuousPerformanceSnapshot('effective');assert.equal(current.bank.tdp,15);
+  await f.schedule.updateContinuousPerformanceControls(current.identity,{tdp:16});assert.equal(f.hardwareWrites.filter(w=>w.kind==='tdp').at(-1).watts,16);assert.equal(f.floating,true);
+ }
+});
+await check('当前游戏专属文件读取失败不会自动升到全局TDP；恢复数据只撤销旧完成缓存',async()=>{
+ for(const dedicated of [false,true]){
+  const ports={},f=fixture({mode:'auto',gameActive:true,dedicated,ports});const initial=await f.schedule.getContinuousPerformanceSnapshot('effective');
+  await f.schedule.updateContinuousPerformanceControls(initial.identity,{tdp:15});let invalidated=0;const off=f.schedule.onContinuousPerformanceApplied(()=>{},()=>{invalidated++});
+  ports.customReadFailure=true;const begin=f.hardwareWrites.length;await f.schedule.restorePerformanceScheduleIfConfigured('ac',{automaticOnly:true});
+  assert.deepEqual(f.hardwareWrites.slice(begin).filter(w=>w.kind==='tdp'),[]);assert.equal(f.floating,false);
+  const count=invalidated;ports.customReadFailure=false;await f.schedule.loadGameCustomConfig();assert.ok(invalidated>count);
+  const recovery=f.hardwareWrites.length;await f.schedule.restorePerformanceScheduleIfConfigured('ac',{automaticOnly:true});
+  assert.equal(f.hardwareWrites.slice(recovery).filter(w=>w.kind==='tdp').at(-1).watts,15);assert.equal(f.floating,true);off();
+ }
+});
+await check('旧档位迁移也保留TDP无效状态，不能把空值或负数变成55W或2W',async()=>{
+ for(const side of ['ac','dc'])for(const bad of [null,undefined,'',0,-1]){
+  const f=fixture({side,mode:'auto'}),base=f.schedule.defaultPerformanceScheduleConfig();delete f.settings.performanceSchedule.controls;
+  f.settings.performanceSchedule.profiles=base.profiles;f.settings.performanceSchedule.active={ac:'elite',dc:'medium'};f.settings.performanceSchedule.enabled=true;
+  f.settings.performanceSchedule.profiles[side][base.active[side]].tdpMax=bad;await f.schedule.restorePerformanceScheduleIfConfigured(side,{automaticOnly:true});
+  assert.deepEqual(f.hardwareWrites.filter(w=>w.kind==='tdp'),[]);assert.equal(f.floating,false);assert.ok(f.hardwareWrites.some(w=>w.kind==='cpu'));
+ }
+});
+await check('已运行的连续配置整块缺失或结构错误，沿用15W缓存而不切回默认或旧档位',async()=>{
+ for(const side of ['ac','dc'])for(const bad of [null,undefined,{},[],'bad']){
+  const f=fixture({side,mode:'auto'});f.settings.performanceSchedule.controls[side].tdp=15;await f.schedule.restorePerformanceScheduleIfConfigured(side,{automaticOnly:true});
+  const begin=f.hardwareWrites.length;f.settings.performanceSchedule.controls=bad;await f.schedule.restorePerformanceScheduleIfConfigured(side,{automaticOnly:true});
+  assert.deepEqual(f.hardwareWrites.slice(begin).filter(w=>w.kind==='tdp'),[]);assert.equal(f.floating,false);assert.equal((await f.schedule.getContinuousPerformanceSnapshot('effective')).bank.tdp,15);
+ }
+});
+await check('同内容专属缓存重读不误撤销TDP发送权；实际TDP变更仍立即撤销',async()=>{
+ const f=fixture({mode:'auto',dedicated:true});await f.schedule.restorePerformanceScheduleIfConfigured('ac',{automaticOnly:true});const lease=f.ownerLease;
+ assert.equal(typeof lease.isCurrent,'function');assert.equal(lease.isCurrent(),true);await f.schedule.loadGameCustomConfig();assert.equal(lease.isCurrent(),true);
+ const config=await f.schedule.loadGameCustomConfig();config.entries['game.exe'].controls.ac.tdp=14;await f.schedule.saveGameCustomConfig(config);assert.equal(lease.isCurrent(),false);
+});
+await check('专属中无关扩展字段不阻断已确认的TDP与CPU消费',async()=>{
+ const f=fixture({mode:'auto',dedicated:true});const config=await f.schedule.loadGameCustomConfig();config.entries['game.exe'].controls.ac.futureBank={keep:true};await f.schedule.saveGameCustomConfig(config);
+ await f.schedule.restorePerformanceScheduleIfConfigured('ac',{automaticOnly:true});assert.equal(f.hardwareWrites.filter(w=>w.kind==='tdp').length,1);assert.ok(f.hardwareWrites.some(w=>w.kind==='cpu'));
+});
 const report={pass:results.every(x=>x.pass),count:results.length,failed:results.filter(x=>!x.pass).length,cases:results,hardwareCalls:0,scope:'Actual performanceSchedule.ts with in-memory external boundaries; AST checks passive callsite wiring. No YMCC process, OS power, service or device execution.',sources:Object.fromEntries(['src/bridge/performanceSchedule.ts','src/bridge/gamePolicyRuntime.ts','src/App.vue'].map(file=>[file,crypto.createHash('sha256').update(source(file)).digest('hex')]))};
 const out=process.argv[2]&&!process.argv[2].startsWith('--')?process.argv[2]:null;
 if(out)fs.mkdirSync(out,{recursive:true});

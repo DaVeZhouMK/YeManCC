@@ -21,10 +21,13 @@ function Test-CssDesktopEditing {$script:Editing}
 function Assert-CssDesktopNotEditing {if($script:Editing){throw 'editor-active'}}
 function Test-CurrentUserProcess($Process){$true}
 function Get-BackendProcesses {@($script:Rows|Where-Object Path -eq $script:BackendExe)}
-function Get-Process {param($Name) $script:Rows}
+function Update-AppearanceProcessInventory {}
+function Get-AppearanceBackendCandidates {$script:Rows}
+function Get-AppearanceParentId($Process){$Process.Parent}
+function Get-Process {param($Name) throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'}
 function Test-BackendOwner {$script:Ready}
 function Get-NetTCPConnection {param($State,$LocalPort) if($script:Port){[pscustomobject]@{OwningProcess=999}}}
-function Get-CimInstance {param($ClassName,$Filter) foreach($p in $script:Rows){[pscustomobject]@{ProcessId=$p.Id;ParentProcessId=$p.Parent}}}
+function Get-CimInstance {throw 'PRIVATE_CIM_ENUMERATION_DENIED'}
 function Start-ResidentAppearanceBackend {$script:Spawns++;$script:Rows=@((Row 100 0),(Row 101 100));$script:Ready=$true}
 function Start-Sleep {param($Milliseconds) $script:Waits++;throw 'bounded-not-ready-fixture'}
 $cases=New-Object Collections.Generic.List[string]

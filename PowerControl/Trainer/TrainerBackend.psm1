@@ -14,19 +14,146 @@ function Get-TrainerHash([string]$Value) {
     try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
 }
-function Read-TrainerJson([string]$Path, [int64]$Limit = 8388608) {
-    if (-not [IO.File]::Exists($Path)) { return $null }
-    if ((Get-Item -LiteralPath $Path).Length -gt $Limit) { throw '修改器缓存文件过大' }
-    return ([IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json)
+function New-TrainerJsonFault([string]$Kind,[string]$Message) {
+    $errorObject=New-Object IO.InvalidDataException($Message)
+    $errorObject.Data['ymccTrainerJson']=$Kind
+    return $errorObject
 }
-function Write-TrainerJson([string]$Path, $Value) {
-    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)) | Out-Null
-    $temp = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+function Get-TrainerJsonBaselines {
+    if (-not (Get-Variable -Name TrainerJsonBaselines -Scope Script -ErrorAction SilentlyContinue)) { $script:TrainerJsonBaselines=@{} }
+    return $script:TrainerJsonBaselines
+}
+function Get-TrainerJsonBytes([string]$Path,[long]$Limit=8388608) {
+    $stream=$null
     try {
-        [IO.File]::WriteAllText($temp, ($Value | ConvertTo-Json -Depth 12 -Compress), (New-Object Text.UTF8Encoding($false)))
-        if ([IO.File]::Exists($Path)) { [IO.File]::Replace($temp, $Path, [NullString]::Value) }
-        else { [IO.File]::Move($temp, $Path) }
-    } finally { if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) } }
+        $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        if ($stream.Length -gt $Limit) { throw (New-TrainerJsonFault 'oversize' '修改器JSON超过读取限制，原件已保留') }
+        $length=[int]$stream.Length;$bytes=New-Object byte[] $length;$offset=0
+        while ($offset -lt $length) { $count=$stream.Read($bytes,$offset,$length-$offset);if($count -le 0){throw (New-TrainerJsonFault 'read' '修改器JSON读取未完成')};$offset+=$count }
+        if ($stream.ReadByte() -ne -1) { throw (New-TrainerJsonFault 'read' '修改器JSON在读取期间改变') }
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try{$hash=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+        return @{exists=$true;bytes=$bytes;hash=$hash}
+    } catch {
+        $fault=$_.Exception
+        if($fault.Data.Contains('ymccTrainerJson')){throw}
+        while($fault.InnerException){$fault=$fault.InnerException}
+        $code=$fault.HResult -band 65535
+        # A typed PowerShell catch alone is insufficient proof of absence.
+        # Only the actual unwrapped file/path-not-found error may initialize.
+        if(($fault -is [IO.FileNotFoundException] -and $code -eq 2) -or ($fault -is [IO.DirectoryNotFoundException] -and $code -eq 3)) { return @{exists=$false;bytes=$null;hash='missing'} }
+        throw (New-TrainerJsonFault 'read' ('修改器JSON读取失败：'+$fault.Message))
+    }
+    finally { if($stream){$stream.Dispose()} }
+}
+function Assert-TrainerJsonNumbers($Value,[int]$Depth=0) {
+    if($Depth -gt 32){throw (New-TrainerJsonFault 'corrupt' '修改器JSON层级过深')}
+    if(($Value -is [double] -or $Value -is [single]) -and ([double]::IsNaN([double]$Value) -or [double]::IsInfinity([double]$Value))){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非有限数字')}
+    if($Value -is [Collections.IDictionary]){foreach($child in $Value.Values){Assert-TrainerJsonNumbers $child ($Depth+1)}}
+    elseif($Value -is [array]){foreach($child in $Value){Assert-TrainerJsonNumbers $child ($Depth+1)}}
+    elseif($Value -is [pscustomobject]){foreach($property in $Value.PSObject.Properties){Assert-TrainerJsonNumbers $property.Value ($Depth+1)}}
+}
+function Assert-TrainerJsonVersion($Value,[bool]$Owned,[bool]$Index=$false,[bool]$Foreign=$false) {
+    foreach($field in @('schema','schemaVersion','version','storageVersion')){
+        if($Foreign -and $field -eq 'version'){continue}
+        $property=$Value.PSObject.Properties[$field];if($null -eq $property){continue};$version=$property.Value
+        if($Index -and $version -is [pscustomobject] -and $null -ne $version.PSObject.Properties['gameName']){continue}
+        $number=$version -is [int] -or $version -is [long] -or $version -is [double] -or $version -is [decimal]
+        $supported=if($field -eq 'storageVersion'){2}else{1}
+        if($number -and [double]$version -gt $supported){throw (New-TrainerJsonFault 'future' '修改器JSON版本高于当前程序，原件已保留')}
+        if($Owned -and (-not $number -or [double]$version -lt 1 -or [Math]::Floor([double]$version) -ne [double]$version)){throw (New-TrainerJsonFault 'corrupt' '修改器JSON版本字段无效')}
+    }
+}
+function ConvertFrom-TrainerJsonBytes($Snapshot,[string]$Path) {
+    try{$text=(New-Object Text.UTF8Encoding($false,$true)).GetString($Snapshot.bytes)}catch{throw (New-TrainerJsonFault 'read' '修改器JSON不是有效UTF8，原件已保留')}
+    if($text.Length -and $text[0] -eq [char]0xFEFF){$text=$text.Substring(1)}
+    $trim=$text.Trim([char[]]@([char]32,[char]9,[char]10,[char]13));if(-not $trim){throw (New-TrainerJsonFault 'corrupt' '修改器JSON为空')}
+    $leaf=[IO.Path]::GetFileName($Path).ToLowerInvariant();$parent=[IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Path)).ToLowerInvariant()
+    $index=$leaf -eq 'trainers.json';$owned=$index -or $leaf -in @('ymcc-library.json','ymcc-data-state.json','ymcc-fling-public.json','last-game-status.json','last-launch-status.json') -or $parent -in @('requests','ymcc-validated')
+    if(($trim[0] -ne '{' -and $trim[0] -ne '[') -or ($owned -and $trim[0] -ne '{')){throw (New-TrainerJsonFault 'corrupt' '修改器JSON根类型无效')}
+    # ConvertFrom-Json permits comments, single quotes and named nonfinite tokens.
+    # Mask JSON strings before rejecting those extensions and trailing commas.
+    $outside=[regex]::Replace($trim,'"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"','""')
+    if($outside -match "'|/|\b(?:NaN|Infinity)\b|,\s*[}\]]"){throw (New-TrainerJsonFault 'corrupt' '修改器JSON语法无效')}
+    # PowerShell 5.1 also accepts unquoted names, +1 and leading-zero numbers.
+    # After masking valid strings, every remaining token must have JSON spelling.
+    $token='""|(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?=[ \t\r\n]*[,}\]]|$)|[{}\[\],: \t\r\n]'
+    if([regex]::Replace($outside,$token,'').Length){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非标准字段或数字')}
+    try{$value=ConvertFrom-Json -InputObject $trim -ErrorAction Stop}catch{throw (New-TrainerJsonFault 'corrupt' '修改器JSON损坏或截断')}
+    Assert-TrainerJsonNumbers $value
+    if($trim[0] -eq '{'){
+        # GCM's version describes a game/catalog, not this application's schema.
+        $foreign=-not $owned -and $leaf -in @('gcm_info.json','settings.json','translations.json','fling_main.json','fling_archive.json','gcm_trainers.json','cheat_table.json','xiaoxing.json')
+        Assert-TrainerJsonVersion $value $owned $index $foreign
+        if($index){foreach($property in $value.PSObject.Properties){$entry=$property.Value;if($entry -is [pscustomobject] -and ($null -ne $entry.PSObject.Properties['gameName'] -or $null -ne $entry.PSObject.Properties['state'])){Assert-TrainerJsonVersion $entry $true}}}
+    }
+    return $value
+}
+function Get-TrainerJsonSnapshot([string]$Path,[long]$Limit=8388608) {
+    try{return (Get-TrainerJsonBytes $Path $Limit)}catch{
+        if($_.Exception.Data['ymccTrainerJson'] -ne 'oversize' -or $Limit -ne 8388608){throw}
+    }
+    $leaf=[IO.Path]::GetFileName($Path).ToLowerInvariant()
+    $parent=[IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Path)).ToLowerInvariant()
+    # A foreign document or accounting history must never be reset by recovery.
+    $recoverable=$leaf -in @('trainers.json','last-game-status.json','last-launch-status.json','ymcc-fling-public.json') -or $parent -in @('requests','ymcc-validated')
+    if(-not $recoverable -or $leaf -in @('ymcc-library.json','ymcc-data-state.json')){throw (New-TrainerJsonFault 'oversize' '修改器JSON超过读取限制，原件已保留')}
+    # This separate ceiling applies only to evidence/archive admission. Ordinary
+    # valid reads and every newly serialized document keep their 8MiB limit.
+    $snapshot=Get-TrainerJsonBytes $Path 33554432
+    if(-not $snapshot.exists){throw (New-TrainerJsonFault 'read' '修改器JSON在恢复读取期间消失')}
+    try{$text=(New-Object Text.UTF8Encoding($false,$true)).GetString($snapshot.bytes)}catch{throw (New-TrainerJsonFault 'read' '修改器JSON不是有效UTF8，原件已保留')}
+    if($text.Length -and $text[0] -eq [char]0xFEFF){$text=$text.Substring(1)}
+    $trim=$text.Trim([char[]]@([char]32,[char]9,[char]10,[char]13))
+    if($trim.Length -and $trim[0] -eq '{'){throw (New-TrainerJsonFault 'oversize' '超大修改器对象可能包含未知版本或合法配置，原件已保留')}
+    # Mask complete valid JSON strings, then protect every object token. A
+    # future object inside an array is protected too; uncertainty never heals.
+    $outside=[regex]::Replace($trim,'"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"','""')
+    if($outside -match '[{}]'){throw (New-TrainerJsonFault 'oversize' '超大修改器JSON含对象成员，原件已保留')}
+    $snapshot.recoveryDamage=$true
+    return $snapshot
+}
+
+function Read-TrainerJson([string]$Path,[int64]$Limit=8388608) {
+    $full=[IO.Path]::GetFullPath($Path);$snapshot=Get-TrainerJsonSnapshot $full $Limit;$baselines=Get-TrainerJsonBaselines;$baselines[$full]=$snapshot.hash
+    if(-not $snapshot.exists){return $null}
+    if($snapshot.ContainsKey('recoveryDamage')){throw (New-TrainerJsonFault 'corrupt' '超大修改器JSON根损坏，可在精确归档后重建')}
+    return (ConvertFrom-TrainerJsonBytes $snapshot $full)
+}
+function Write-TrainerCorruptArchive([string]$Path,$Snapshot) {
+    $archive=$Path+'.corrupt-'+[DateTime]::UtcNow.Ticks+'-'+[guid]::NewGuid().ToString('N')+'.json'
+    $stream=[IO.File]::Open($archive,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{$stream.Write($Snapshot.bytes,0,$Snapshot.bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+    if((Get-TrainerJsonBytes $archive 33554432).hash -cne $Snapshot.hash){throw (New-TrainerJsonFault 'archive' '修改器JSON原件归档未确认')}
+    return $archive
+}
+function Write-TrainerJson([string]$Path,$Value) {
+    $full=[IO.Path]::GetFullPath($Path);Assert-TrainerJsonNumbers $Value
+    $content=ConvertTo-Json -InputObject $Value -Depth 32 -Compress -WarningAction Stop
+    $bytes=(New-Object Text.UTF8Encoding($false)).GetBytes($content)
+    if($bytes.Length -gt 8388608){throw (New-TrainerJsonFault 'oversize' '修改器JSON写入超过大小限制')}
+    $incoming=@{exists=$true;bytes=$bytes};ConvertFrom-TrainerJsonBytes $incoming $full|Out-Null
+    $mutex=[Threading.Mutex]::new($false,('Local\YMCC.TrainerJson.'+(Get-TrainerHash $full.ToLowerInvariant())))
+    $owned=$false;$temp=''
+    try{
+        try{$owned=$mutex.WaitOne(5000)}catch [Threading.AbandonedMutexException]{$owned=$true}
+        if(-not $owned){throw (New-TrainerJsonFault 'lock' '修改器JSON写入锁等待超时')}
+        Assert-TrainerNotReparse $full
+        $old=Get-TrainerJsonSnapshot $full;$baselines=Get-TrainerJsonBaselines
+        if($baselines.ContainsKey($full) -and $baselines[$full] -cne $old.hash){throw (New-TrainerJsonFault 'conflict' '修改器JSON已有更新，请显式重新读取')}
+        $corrupt=$old.ContainsKey('recoveryDamage')
+        if($old.exists -and -not $corrupt){try{ConvertFrom-TrainerJsonBytes $old $full|Out-Null}catch{if($_.Exception.Data['ymccTrainerJson'] -ne 'corrupt'){throw};$corrupt=$true}}
+        if($corrupt -and [IO.Path]::GetFileName($full).ToLowerInvariant() -in @('ymcc-library.json','ymcc-data-state.json')) { throw (New-TrainerJsonFault 'corrupt' '修改器额度台账损坏，不能重建出新额度') }
+        if($corrupt){Write-TrainerCorruptArchive $full $old|Out-Null}
+        if((Get-TrainerJsonSnapshot $full).hash -cne $old.hash){throw (New-TrainerJsonFault 'conflict' '修改器JSON在提交前改变')}
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($full))|Out-Null
+        $temp=$full+'.'+[guid]::NewGuid().ToString('N')+'.tmp';$stream=[IO.File]::Open($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+        $written=Get-TrainerJsonBytes $temp
+        if($old.exists){[IO.File]::Replace($temp,$full,[NullString]::Value)}else{[IO.File]::Move($temp,$full)}
+        $temp='';$baselines[$full]=$written.hash
+        if((Get-TrainerJsonBytes $full).hash -cne $written.hash){throw (New-TrainerJsonFault 'read' '修改器JSON提交后读回未确认')}
+    }finally{if($temp -and [IO.File]::Exists($temp)){[IO.File]::Delete($temp)};if($owned){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }
 function Get-TrainerProperty($Object, [string]$Name, $Default = $null) {
     if ($Object -is [Collections.IDictionary] -and $Object.Contains($Name)) { return $Object[$Name] }
@@ -52,15 +179,43 @@ function Assert-TrainerActive($Context) {
     if ([IO.File]::Exists($Context.CancelPath)) { throw [OperationCanceledException]::new('已取消修改器准备') }
     if ([DateTime]::UtcNow -gt $Context.Deadline) { throw [TimeoutException]::new('修改器准备超时，请稍后重试') }
 }
+function Get-TrainerRequestBinding([string]$Path,[string]$RequestId,[string]$GameExecutablePath='', [int]$GameProcessId=0,[string]$GameProcessCreated='') {
+    $pending=Read-TrainerJson $Path 65536
+    # Legacy callers have no per-renderer protocol. Do not reinterpret durable caches.
+    if($null -eq $pending){return @{}}
+    if($null -ne $pending.PSObject.Properties['requestClaimed'] -and ($pending.requestClaimed -isnot [bool] -or $pending.requestClaimed)){throw '修改器请求已被消费或占用状态无效'}
+    if($null -eq $pending.PSObject.Properties['requestProtocol']){
+        if($null -ne $pending.PSObject.Properties['requestToken'] -or $null -ne $pending.PSObject.Properties['sourceSession']){throw '修改器请求绑定不完整'}
+        return @{}
+    }
+    # ConvertFrom-Json uses Int32 in Windows PS5 and Int64 in pwsh for JSON 1.
+    if(($pending.requestProtocol -isnot [int] -and $pending.requestProtocol -isnot [long]) -or $pending.requestProtocol -ne 1){throw '修改器请求协议无效'}
+    foreach($field in @('requestId','requestToken','sourceSession','gameExecutablePath','gameProcessCreated')){
+        if($null -eq $pending.PSObject.Properties[$field] -or $pending.$field -isnot [string]){throw '修改器请求身份字段类型无效'}
+    }
+    if($pending.requestId -cne $RequestId -or $pending.requestToken -notmatch '^[a-zA-Z0-9-]{10,100}$' -or $pending.sourceSession -notmatch '^[a-zA-Z0-9:-]{10,120}$') {throw '修改器请求身份失配'}
+    if($null -eq $pending.PSObject.Properties['ok'] -or $pending.ok -isnot [bool] -or $pending.ok -ne $false){throw '修改器请求不是待确认状态'}
+    if(($pending.gameProcessId -isnot [int] -and $pending.gameProcessId -isnot [long]) -or $pending.gameProcessId -ne $GameProcessId -or
+        $pending.gameProcessCreated -cne $GameProcessCreated -or $pending.gameExecutablePath -ine $GameExecutablePath){throw '修改器请求的游戏进程身份失配'}
+    if(($GameProcessId -gt 0 -and $GameProcessCreated -notmatch '^[1-9][0-9]*$') -or $GameProcessId -lt 0){throw '修改器请求进程标识无效'}
+    $binding=@{requestProtocol=$pending.requestProtocol}
+    foreach($field in @('requestToken','sourceSession','gameExecutablePath','gameProcessId','gameProcessCreated')){$binding[$field]=$pending.$field}
+    return $binding
+}
 function Send-TrainerProgress($Context, [string]$State, [string]$Message, $Extra = @{}) {
     $result = @{ requestId = $Context.RequestId; gameName = $Context.GameName; ok = $State -eq 'ready'; state = $State; message = $Message; checkedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); gameExecutablePath = [string](Get-TrainerProperty $Context 'GameExecutablePath' ''); gameProcessId = [int](Get-TrainerProperty $Context 'GameProcessId' 0); gameProcessCreated = [string](Get-TrainerProperty $Context 'GameProcessCreated' '') }
     foreach ($key in $Extra.Keys) { $result[$key] = $Extra[$key] }
+    # Extra metadata cannot replace this worker's request or target binding.
+    $result.requestId=$Context.RequestId; $result.gameName=$Context.GameName
+    $binding=Get-TrainerProperty $Context 'RequestBinding' @{}
+    foreach($key in $binding.Keys){$result[$key]=$binding[$key]}
     Write-TrainerJson $Context.ResultPath $result
     # Keep the most recent per-game result after the renderer removes its IPC receipt.
     # Catalog checks never overwrite game evidence; this is a bounded diagnostic file.
     if($Context.GameName -ne 'YMCC Trainer Catalog'){
         $requests=[IO.Path]::GetDirectoryName($Context.ResultPath)
-        Write-TrainerJson (Join-Path ([IO.Path]::GetDirectoryName($requests)) 'last-game-status.json') $result
+        try { Write-TrainerJson (Join-Path ([IO.Path]::GetDirectoryName($requests)) 'last-game-status.json') $result }
+        catch { Write-Warning ('Trainer diagnostic status was not saved: ' + $_.Exception.Message) -WarningAction Continue }
     }
     return $result
 }
@@ -346,7 +501,11 @@ function Find-LocalTrainer([string[]]$Roots, [string[]]$Aliases, [string]$Databa
 }
 function Get-GcmTrainerRoot([string]$SettingsRoot, [string]$DefaultRoot) {
     $settings = Read-TrainerJson (Join-Path $SettingsRoot 'settings.json') 65536
-    $configured = [string](Get-TrainerProperty $settings 'downloadPath' '')
+    Assert-TrainerLaunchOptions $settings
+    $configured = ''
+    # Inspect the raw property: a helper returning a one-item array enumerates it
+    # into a scalar and would hide the persisted wrong type.
+    if ($null -ne $settings -and $null -ne $settings.PSObject.Properties['downloadPath'] -and $settings.downloadPath -is [string]) { $configured = $settings.downloadPath }
     $root = if ($configured) { $configured } else { $DefaultRoot }
     if (-not [IO.Path]::IsPathRooted($root)) { throw '修改器管理器下载目录必须是绝对路径' }
     $root = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
@@ -421,6 +580,17 @@ function Read-GcmLibraryRecord([string]$Path) {
         return @{ schema = 1; budget = @{ windowHours = 24; maxDownloads = 3; maxBytes = 209715200L }; downloads = @(); games = @{}; trainers = @{} }
     }
     if ((Get-TrainerProperty $saved 'schema' 0) -ne 1) { throw 'GCM 目录中的 YMCC 下载记录格式无效，已停止下载' }
+    # Existing ledgers cannot acquire fresh credit by omitting history or by
+    # coercing strings/bools into numbers. A missing file still uses defaults.
+    $number = { param($value) ($value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]) -and -not [double]::IsNaN([double]$value) -and -not [double]::IsInfinity([double]$value) -and [Math]::Floor([double]$value) -eq [double]$value }
+    if (-not (& $number $saved.schema) -or $null -eq $saved.PSObject.Properties['downloads'] -or $saved.downloads -isnot [array]) { throw '修改器下载台账字段类型无效，已停止下载且保留原记录' }
+    foreach ($field in @('maxDownloads','maxBytes')) {
+        if ($null -eq $saved.budget.PSObject.Properties[$field] -or -not (& $number $saved.budget.$field)) { throw '修改器下载预算字段类型无效，已停止下载' }
+    }
+    foreach ($entry in $saved.downloads) {
+        foreach ($field in @('at','chargedBytes')) { if ($null -eq $entry.PSObject.Properties[$field] -or -not (& $number $entry.$field)) { throw '修改器下载计费字段类型无效，已停止下载' } }
+        if ($null -ne $entry.PSObject.Properties['bytes'] -and -not (& $number $entry.bytes)) { throw '修改器下载字节字段类型无效，已停止下载' }
+    }
     $record = ConvertTo-TrainerMap $saved
     $record.budget = ConvertTo-TrainerMap (Get-TrainerProperty $saved 'budget')
     $record.games = ConvertTo-TrainerMap (Get-TrainerProperty $saved 'games')
@@ -488,7 +658,8 @@ function Invoke-TrainerPrepare {
     $ResultPath = Assert-TrainerChild $ResultPath (Join-Path $CacheRoot 'requests')
     if ([IO.Path]::GetFileName($ResultPath) -ne ($RequestId + '.json')) { throw '修改器任务身份不匹配' }
     if ($GameExecutablePath -and (-not [IO.Path]::IsPathRooted($GameExecutablePath) -or [IO.Path]::GetExtension($GameExecutablePath) -ine '.exe')) { throw '游戏启动程序路径无效' }
-    $context = @{ GameExecutablePath = $GameExecutablePath; GameProcessId = $GameProcessId; GameProcessCreated = $GameProcessCreated; DownloadBytes = 0L; GameName = $GameName; RequestId = $RequestId; ResultPath = $ResultPath; CancelPath = $ResultPath + '.cancel'; Deadline = [DateTime]::UtcNow.AddSeconds(180) }
+    $requestBinding=Get-TrainerRequestBinding $ResultPath $RequestId $GameExecutablePath $GameProcessId $GameProcessCreated
+    $context = @{ RequestBinding=$requestBinding; GameExecutablePath = $GameExecutablePath; GameProcessId = $GameProcessId; GameProcessCreated = $GameProcessCreated; DownloadBytes = 0L; GameName = $GameName; RequestId = $RequestId; ResultPath = $ResultPath; CancelPath = $ResultPath + '.cancel'; Deadline = [DateTime]::UtcNow.AddSeconds(180) }
     $mutex = [Threading.Mutex]::new($false, ('Local\YMCC.Trainer.' + (Get-TrainerHash $CacheRoot.ToLowerInvariant())))
     $owned = $false
     $stage = ''
@@ -500,6 +671,7 @@ function Invoke-TrainerPrepare {
     $downloadedNew = $false
     $indexPath = Join-Path $CacheRoot 'trainers.json'
     $index = @{}
+    $indexWritable = $false
     $key = Get-TrainerNameKey $GameName
     if ($GameExecutablePath) { $key += '|' + (Get-TrainerHash ([IO.Path]::GetFullPath($GameExecutablePath).ToLowerInvariant())) }
     try {
@@ -512,8 +684,12 @@ function Invoke-TrainerPrepare {
         try {
             $saved = Read-TrainerJson $indexPath
             if ($saved) { foreach ($property in $saved.PSObject.Properties) { $index[$property.Name] = $property.Value } }
-        } catch { # Rebuild an invalid index from local installations.
+        } catch {
+            # Only confirmed syntax/root damage may rebuild after exact-byte archive.
+            # An unreadable, oversized or future cache must remain protected.
+            if ($_.Exception.Data['ymccTrainerJson'] -ne 'corrupt') { throw }
         }
+        $indexWritable = $true
         $cached = $index[$key]
         $database = Join-Path $GcmSettingsRoot 'db'
         $aliases = @() # Resolve trusted EXE evidence before considering display-name aliases.
@@ -678,31 +854,43 @@ function Invoke-TrainerPrepare {
         $retryable = -not $cancelled -and $errorObject.Data.Contains('trainerRetryable') -and $errorObject.Data['trainerRetryable'] -eq $true
         $retryAfter=if($retryable){[DateTimeOffset]::UtcNow.AddSeconds(5).ToUnixTimeMilliseconds()}else{[DateTimeOffset]::UtcNow.AddHours(1).ToUnixTimeMilliseconds()}
         $failed = Send-TrainerProgress $context $state $message @{ error = $message; code = [string]$errorObject.Data['trainerCode']; retryable = $retryable; retryAfter = $retryAfter }
-        if ($owned) { $index[$key] = $failed; Write-TrainerJson $indexPath $index }
+        if ($owned -and $indexWritable) { $index[$key] = $failed; Write-TrainerJson $indexPath $index }
     } finally {
+        # A failed final accounting write must not strand the outer cache lock.
+        # Keep all original IO errors visible; only resource release is guaranteed.
         try {
-            if ($record -and $context.ContainsKey('DownloadReservation')) {
-                $reservation = $context.DownloadReservation
-                $actual = [long]$context.DownloadBytes
-                if ($package -and [IO.File]::Exists($package)) { $actual = [Math]::Max($actual, (Get-Item -LiteralPath $package).Length) }
-                if ($context.ContainsKey('CompletedDownloadBytes')) { $actual = [Math]::Max($actual, [long]$context.CompletedDownloadBytes) }
-                $reservation.bytes = $actual
-                $reservation.chargedBytes = $actual
-                $reservation.state = if ($index.ContainsKey($key) -and (Get-TrainerProperty $index[$key] 'state') -eq 'ready') { 'ready' } else { 'failed' }
-                Write-TrainerJson $recordPath $record
+            try {
+                if ($record -and $context.ContainsKey('DownloadReservation')) {
+                    $reservation = $context.DownloadReservation
+                    $actual = [long]$context.DownloadBytes
+                    if ($package -and [IO.File]::Exists($package)) { $actual = [Math]::Max($actual, (Get-Item -LiteralPath $package).Length) }
+                    if ($context.ContainsKey('CompletedDownloadBytes')) { $actual = [Math]::Max($actual, [long]$context.CompletedDownloadBytes) }
+                    $reservation.bytes = $actual
+                    $reservation.chargedBytes = $actual
+                    $reservation.state = if ($index.ContainsKey($key) -and (Get-TrainerProperty $index[$key] 'state') -eq 'ready') { 'ready' } else { 'failed' }
+                    Write-TrainerJson $recordPath $record
+                }
+            } finally {
+                if ($libraryMutex) {
+                    try { if ($libraryOwned) { $libraryMutex.ReleaseMutex() } }
+                    finally { $libraryMutex.Dispose() }
+                }
             }
         } finally {
-            if ($libraryOwned) { $libraryMutex.ReleaseMutex() }
-            if ($libraryMutex) { $libraryMutex.Dispose() }
+            try {
+                if ($stage -and [IO.Directory]::Exists($stage)) {
+                    $verifiedStage = Assert-TrainerChild $stage (Join-Path $CacheRoot 'staging')
+                    Assert-TrainerNotReparse $verifiedStage
+                    Remove-Item -LiteralPath $verifiedStage -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            } finally {
+                try { if ($owned) { $mutex.ReleaseMutex() } }
+                finally {
+                    $mutex.Dispose()
+                    if ([IO.File]::Exists($context.CancelPath)) { [IO.File]::Delete($context.CancelPath) }
+                }
+            }
         }
-        if ($stage -and [IO.Directory]::Exists($stage)) {
-            $verifiedStage = Assert-TrainerChild $stage (Join-Path $CacheRoot 'staging')
-            Assert-TrainerNotReparse $verifiedStage
-            Remove-Item -LiteralPath $verifiedStage -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        if ($owned) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
-        if ([IO.File]::Exists($context.CancelPath)) { [IO.File]::Delete($context.CancelPath) }
     }
 }
 . (Join-Path $PSScriptRoot 'TrainerGcmFallback.ps1')

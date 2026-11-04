@@ -25,13 +25,27 @@ export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPo
     const includeSteam=policy==='steam-first'||steamTouched||destination==='steam';
     if(includeSteam)steamTouched=true;
     const carriers:ReadonlyArray<readonly ['steam'|'desktop',HudCarrierPort]>=includeSteam?[['steam',steam],['desktop',desktop]]:[['desktop',desktop]];
+    if(!show){
+      // Closing has no new carrier to enable. Reclaim the known active owner
+      // first, then attempt the other touched carrier even if an ACK is lost.
+      const closing=includeSteam&&active!=='steam'?[...carriers].reverse():carriers;
+      const failures:string[]=[];
+      for(const [name,carrier]of closing){
+        try{
+          const ack=await carrier.setVisible(false,preferences);
+          if(!ack.confirmed){failures.push(ack.reason||name+' 旧窗口关闭未确认。');continue;}
+          if(name==='steam')steamTouched=false;
+          if(active===name)active=null;
+        }catch(error){failures.push(String(error instanceof Error?error.message:error)||name+' 旧窗口关闭异常。');}
+      }
+      return failures.length?{confirmed:false,reason:failures.join('；')}:{confirmed:true};
+    }
     for(const [name,carrier]of carriers){
       const ack=await carrier.setVisible(false,preferences);
       if(!ack.confirmed)return {confirmed:false,reason:ack.reason??name+' 旧窗口关闭未确认。'};
       if(name==='steam')steamTouched=false;
       if(active===name)active=null;
     }
-    if(!show)return {confirmed:true};
     const current=await kind(preferences);
     // A disappeared Steam binding should fall back to the globally usable desktop,
     // not turn a ready desktop into a game prerequisite. Other changes stay guarded.

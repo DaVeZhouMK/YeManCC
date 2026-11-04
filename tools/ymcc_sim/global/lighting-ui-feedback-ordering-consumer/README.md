@@ -35,3 +35,10 @@ node --test tools/ymcc_sim/global/lighting-ui-feedback-ordering-consumer/runner.
 
 
 2026-10-19 cleanup correction: the original browser.close finally also waits at most five seconds for this observer's already recorded compiler children to end through stdin EOF and actual close events. This applies identically to positive and private-fault runs, preserves the original AssertionError and exit status, and never invents child terminal facts or kills a compiler. The normal beforeExit EOF fallback remains.
+
+
+## 2026-11-01 灯光控件修复后的当前合同
+
+当前身份以 verify.mjs 的 2026-11-01 合同为准，历史合同继续保留。正式组件增加效果级左右颜色和已审查扩展的预设副色／固定速度显示；原两条乱序 guard、全部生命周期钩子、17 项原浏览器分组与8项预期乱序失败不变。浏览器基线的高端口修正是本轮之前已存在的修改，本轮未改该文件。
+
+原 Edge 155 清单已失效；tool-inputs.json 更新到本机当前 Edge 156.0.4314.50 的同范围顶层文件及全部 Locales，其他 Node 工具采用真实物理路径，仍受640项上限。source-inputs.json 补入观察器发现的真实 AppIcon PNG 与 sliderRepeat 依赖；没有删除不通过项或放宽来源检查。证据见项目核心层 Evidence/Lgt1101。

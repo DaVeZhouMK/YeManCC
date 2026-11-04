@@ -2,6 +2,7 @@
 // In-memory ports plus extracted actual armed-list helpers; no process launch, registry or device API.
 #include "sleep_static_wake_policy.h"
 #include "sleep_static_wake_receipt.h"
+#include "sleep_static_wake_schedule.h"
 #include <atomic>
 #include <thread>
 #include <map>
@@ -687,6 +688,7 @@ struct MachineLock {
     explicit MachineLock(DWORD wait):acquired(allowMachine){machineWait=wait;}
 };
 struct Native {
+    ymcc::staticwake::CollectionReadPace collectionReadPace;
     Memory& memory;
     ymcc::staticwake::SoftwareSnapshotCircuit& softwareCircuit;
     std::uint64_t deadline;

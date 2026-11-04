@@ -241,14 +241,15 @@ static void inputSemantics() {
         unsigned expectedRear = 0; // Independent reference state, never seeded from candidate snapshot.
         for (unsigned id = 0; id < 256; ++id) {
             const unsigned role = m.roles[id];
-            const bool click = std::find(oracle::clickRoles.begin(), oracle::clickRoles.end(), role) != oracle::clickRoles.end();
+            const bool click = std::find(m.clickRoles.begin(), m.clickRoles.end(), role) != m.clickRoles.end();
             for (const unsigned state : {1u, 1u, 0u, 0u, 2u, 255u}) {
                 const unsigned oldRear = expectedRear;
-                const unsigned bit = role == 4 ? 1u : 2u;
-                const unsigned nextRear = role == 4 || role == 5 ?
+                const bool held = role == 4 || role == 5 || (m.tag == 3 && (role == 3 || role == 6));
+                const unsigned bit = role == 4 ? 1u : role == 5 ? 2u : role == 3 ? 4u : 8u;
+                const unsigned nextRear = held ?
                     (state == 1 ? oldRear | bit : oldRear & ~bit) : oldRear;
                 deliver(s, c, id, state, at);
-                const bool isRear = role == 4 || role == 5;
+                const bool isRear = held;
                 const bool changed = oldRear != nextRear;
                 const bool expectedEvent = click ? state == 1 : isRear && (changed || state != 1);
                 const auto expectedKind = click ? p::EventKind::Click : changed ? p::EventKind::RearChanged : p::EventKind::RearObserved;
@@ -339,7 +340,7 @@ static void queueCapacity() {
         std::vector<ExpectedClick> expected;
         std::vector<unsigned> clickIds;
         for (unsigned id = 0; id < 256; ++id)
-            if (std::find(oracle::clickRoles.begin(), oracle::clickRoles.end(), m.roles[id]) != oracle::clickRoles.end())
+            if (std::find(m.clickRoles.begin(), m.clickRoles.end(), m.roles[id]) != m.clickRoles.end())
                 clickIds.push_back(id);
         require(!clickIds.empty(), "fixed-source model has front click inputs");
         std::size_t consumed = 0;

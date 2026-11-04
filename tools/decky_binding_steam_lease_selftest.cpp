@@ -54,6 +54,27 @@ int wmain(int argc,wchar_t** argv){
   leaseboundary::denied=unrelated;test("unreadable registered process never grants stale PID recovery",[&]{return !admitted(r,registry);});leaseboundary::denied=0;
   registry.number(L"pid",other);test("different live registered Steam remains a session conflict",[&]{return !admitted(r,registry,"steam-registered-pid");});
   registry.number(L"pid",MAXDWORD);registry.number(L"ActiveUser",124);test("stale PID cannot bypass changed Steam account",[&]{return !admitted(r,registry,"steam-account");});registry.number(L"ActiveUser",123);
+  registry.number(L"ActiveUser",0);
+  test("registry zero alone never authorizes an anonymous account",[&]{return !admitted(r,registry,"steam-account");});
+  auto offline=r;offline.liveUiAccount=true;
+  test("typed UI provenance permits only process observation before independent bootstrap guard",[&]{return admitted(offline,registry);});
+  registry.number(L"ActiveUser",124);
+  test("UI provenance cannot override another explicit registry account",[&]{return !admitted(offline,registry,"steam-account");});
+  registry.number(L"ActiveUser",123);
+  test("offline to online same account retains the verified process lease",[&]{return admitted(offline,registry);});
+  const Json mode{{"known",true},{"running",true},{"mode","bigpicture"},{"pid",r.steam.pid},{"birth",std::to_string(r.steam.created)},
+      {"observedAccount",123u},{"deckyAccountWatchAvailable",true}};
+  auto empty=r.steam;empty.account=0;
+  test("offline account resolves only a verified same-process current UI proof",[&]{const auto a=ymcc::deckysession::resolve(empty,mode);return a.value==123&&a.fromUi;});
+  test("missing raced malformed or foreign offline proofs never authorize",[&]{
+      for(const auto& bad:std::vector<Json>{nullptr,true,0,-1,1.5,"123",4294967296ull}){
+          auto m=mode;m["observedAccount"]=bad;if(ymcc::deckysession::resolve(empty,m).value)return false;
+      }
+      for(const auto* field:{"known","running","deckyAccountWatchAvailable"}){auto m=mode;m[field]=false;if(ymcc::deckysession::resolve(empty,m).value)return false;}
+      auto m=mode;m["birth"]="1";if(ymcc::deckysession::resolve(empty,m).value)return false;
+      m=mode;m["pid"]=r.steam.pid+1;if(ymcc::deckysession::resolve(empty,m).value)return false;
+      return ymcc::deckysession::resolve(empty,Json::object()).value==0;
+  });
   registry.setRoot((root/L"changed").wstring());test("stale PID cannot bypass changed Steam root",[&]{return !admitted(r,registry,"steam-root");});registry.setRoot(root.wstring());
   auto changed=r;++changed.steam.created;test("stale PID cannot bypass process birth mismatch",[&]{return !admitted(changed,registry,"steam-process-or-birth");});
   changed=r;++changed.windowsSession;test("stale PID cannot bypass Windows session mismatch",[&]{return !admitted(changed,registry,"steam-windows-session");});

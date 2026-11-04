@@ -1,25 +1,21 @@
 ﻿{
     "schema":  1,
     "component":  "YeManBatteryHost",
+    "execution":  "in-process",
     "frameworkDependent":  true,
     "hardwareValidated":  false,
     "contract":  {
                      "schema":  1,
                      "protocol":  2,
                      "component":  "YeManBatteryHost",
-                     "implementation":  "msi-cg3em-ap-unknown-v2",
-                     "sourceId":  "fc13ff0d2de77c84d9f3671b81f08900b9766ce90ec37d38013006b2579b2232"
+                     "implementation":  "in-process-60s-msi-cg3em-ap-v1",
+                     "sourceId":  "c261f7eaa4199f145eec0f8dd4c3411b235b01277bffac366e42868044eba776"
                  },
     "files":  [
                   {
-                      "path":  "YeManBatteryHost.exe",
-                      "sha256":  "a08af1b6f1100b2adcf2bd8764a867d59a064a7e1f8f607bf323d905e6421364",
-                      "bytes":  162304
-                  },
-                  {
                       "path":  "YeManBatteryHost.dll",
-                      "sha256":  "fb10c425df2638cb12c236bcf27f1abae290e0a5f106c2ea0aa45974fcd6ddb9",
-                      "bytes":  206336
+                      "sha256":  "a14b2dde641989336e4fbe40a5e1ca7790d30029a42af524c824b47ba48a2ece",
+                      "bytes":  232448
                   },
                   {
                       "path":  "YeManBatteryHost.deps.json",
@@ -28,8 +24,8 @@
                   },
                   {
                       "path":  "YeManBatteryHost.runtimeconfig.json",
-                      "sha256":  "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
-                      "bytes":  519
+                      "sha256":  "884423a0697f2aa0c0cf93868beb64093de3229d2ca41abd85b93f33c52f92d7",
+                      "bytes":  554
                   },
                   {
                       "path":  "LibreHardwareMonitorLib.dll",

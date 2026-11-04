@@ -23,6 +23,12 @@
 #include "fixture_json.hpp"
 #include "steam_original_recovery_wake_watch.h"
 #include "steam_original_recovery_file_hash.h"
+#include "steam_original_recovery_storage.h"
+#include "steam_original_recovery_config.h"
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <string_view>
 using Json=nlohmann::json;using J=Json;using U64=std::uint64_t;
 namespace fp=std::filesystem;
 using Emit=std::function<void(const J&)>;using Current=std::function<bool()>;using WakeSignal=std::uintptr_t;
@@ -75,7 +81,8 @@ struct LifetimeMutex {void acquire(DWORD,U64){}};
 unsigned moduleCapacity(DWORD){++fixture.capacity;return 1;}
 J normalizedIdentity(const J& value){return value;}
 @@REFERENCES@@
-J importReference(const J&,Scope&,U64){throw std::runtime_error("fixture-seed-path-not-covered");}
+J importReference(const J&,const Scope&,U64){throw std::runtime_error("fixture-seed-path-not-covered");}
+@@SEED@@
 J loadCompatibleReference(const fp::path& data,const Scope& s,const Snapshot& sample,U64 account){const auto p=data/L"references"/utf16(scopeKey(s,account)+".json");if(!fp::exists(p))return nullptr;const auto ref=readJson(p);matchReference(ref,s,sample,account);return ref;}
 std::size_t ledgerCount(){std::size_t n=0;if(fp::exists(fixture.data/L"consumed"))for(const auto& e:fp::directory_iterator(fixture.data/L"consumed"))if(e.is_regular_file())++n;return n;}
 struct QueryActor {
@@ -101,6 +108,35 @@ struct WakeProbeReader {
 DWORD fixtureWait(DWORD, const HANDLE*,BOOL,DWORD ms){++fixture.waits;fixture.tick+=ms;fixture.utc+=U64(ms)*10000;return WAIT_TIMEOUT;}
 #define WaitForMultipleObjects fixtureWait
 @@HANDLE@@
+
+// The complete runtime run/readJson are extracted unchanged below. Only the
+// external owner/event queue, status/log ports and data roots are controlled.
+namespace RuntimeOwner {
+using json=J;
+std::string W2U(const std::wstring& value){return utf8(value);}
+struct Pending {};
+struct Control {std::mutex mx;std::condition_variable cv;bool stop=true;std::deque<Pending> pending;std::atomic<bool> enabled{true},ownsRunning{true},active{false};};
+struct RuntimeState {fp::path base;std::function<void()> storageReady,afterReadExists;bool locationFault=false,publishFault=false;unsigned published=0,runOneCalls=0;J last;};
+RuntimeState runtimeState;
+namespace fspath {
+using fp::path;
+bool exists(const std::wstring& file,std::error_code& ec){if(runtimeState.afterReadExists)runtimeState.afterReadExists();return fp::exists(file,ec);}
+}
+std::wstring root(){return (runtimeState.base/L"legacy").wstring();}
+std::wstring runtimeRoot(){if(runtimeState.locationFault)throw std::runtime_error("fixture-location-unavailable");return (runtimeState.base/L"runtime").wstring();}
+void log(const std::shared_ptr<Control>&,const char* event,const J&){if(std::string_view(event)=="storage-ready"&&runtimeState.storageReady)runtimeState.storageReady();}
+void publish(const std::shared_ptr<Control>&,const J& value){++runtimeState.published;runtimeState.last=value;if(runtimeState.publishFault)throw std::runtime_error("fixture-evidence-unavailable");}
+void runOne(const std::shared_ptr<Control>&,const Pending&,const J&){++runtimeState.runOneCalls;throw std::runtime_error("unexpected-real-owner-event");}
+@@RUNTIME@@
+}
+void runtimeFile(const fp::path& file,const std::string& bytes){fp::create_directories(file.parent_path());std::ofstream output(file,std::ios::binary|std::ios::trunc);output<<bytes;need(bool(output),"runtime-fixture-write");}
+std::shared_ptr<RuntimeOwner::Control> runtimeSetup(const fp::path& dir,const std::string& bytes,bool absent=false){
+ RuntimeOwner::runtimeState={};RuntimeOwner::runtimeState.base=dir;
+ ymcc::steamOriginalStorage::prepare(dir/L"legacy",dir/L"runtime");
+ if(!absent)runtimeFile(dir/L"runtime"/L"enabled.json",bytes);
+ return std::make_shared<RuntimeOwner::Control>();
+}
+
 #undef WaitForMultipleObjects
 #undef GetTickCount64
 #undef Scope
@@ -144,8 +180,27 @@ J createHistoricalNoWriteAudit(J e){
  J audit={{"schema","ymcc.steam-original-audited-prepublication-transfer.v1"},{"authorizedBy","explicit-operator-no-write-audit-20261023"},{"targetRoute","legacy-dynamic"},{"life",identity},{"sourceEngineRevision","dual-route-original-recovery-20261023-r7"},{"sourceNativeSha256","66d147da3511e33c0c349244cd81c158d7547489ce1a082865a8711cbe5e260e"},{"sourceEventId",oldId},{"disabledSha256",fileHash(disabled.wstring())},{"operationSha256",fileHash((fixture.data/L"consumed"/utf16(operation+".json")).wstring())},{"eventSha256",fileHash((fixture.data/L"consumed"/utf16(eventKey+".json")).wstring())},{"sourceSummarySha256",fileHash((root/utf16(key+".source.json")).wstring())}};
  atomicJson(root/utf16(key+".json"),audit);fixture.priorLedger=2;e["recoveryRoute"]="legacy-dynamic";return e;
 }
-int main(int argc,char** argv){if(argc!=2)return 64;const auto root=fp::path(argv[1]);fp::create_directories(root);
- auto run=[&](const char* name,auto body){J row={{"name",name}};const auto dir=root/std::to_wstring(cases.size());reset(dir);try{body(dir);row["passed"]=true;}catch(const std::exception& e){row["passed"]=false;row["reason"]=e.what();}row["lastStatus"]=fixture.lastReceipt.value("status",std::string());row["lastReason"]=fixture.lastReceipt.value("reason",std::string());row["queries"]=fixture.queries;row["drivers"]=fixture.drivers;row["ledgerKeys"]=ledgerCount();row["trace"]=fixture.order;cases.push_back(row);};
+int main(int argc,char** argv){if(argc!=2&&argc!=3)return 64;const std::string selection=argc==3?argv[2]:"all";if(selection!="all"&&selection!="config-storm"&&selection!="runtime-config"&&selection!="negative-startup"&&selection!="negative-pins")return 64;const auto root=fp::path(argv[1]);fp::create_directories(root);
+ auto run=[&](const char* name,auto body){const std::string_view n=name;
+  if(selection=="runtime-config"&&!n.starts_with("runtime-config-"))return;
+  if(selection=="config-storm"&&!n.starts_with("runtime-config-")&&!n.starts_with("config-storm-")&&n!="original-startup-lost-recovers"&&n!="no-reference-cannot-invent-one-while-lost"&&n!="record-replaced-after-publish-refuses"&&n!="new-mutation-failure-overrules-old-readonly-audit")return;
+  if(selection=="negative-startup"&&n!="original-startup-lost-recovers")return;
+  if(selection=="negative-pins"&&n!="record-replaced-after-publish-refuses")return;
+  std::cerr<<"CASE "<<name<<std::endl;J row={{"name",name}};const auto dir=root/std::to_wstring(cases.size());reset(dir);fixture.lastReceipt=J::object();try{body(dir);row["passed"]=true;}catch(const std::exception& e){row["passed"]=false;row["reason"]=e.what();}catch(...){row["passed"]=false;row["reason"]="non-standard exception escaped consumer";}row["lastStatus"]=fixture.lastReceipt.value("status",std::string());row["lastReason"]=fixture.lastReceipt.value("reason",std::string());row["queries"]=fixture.queries;row["drivers"]=fixture.drivers;row["ledgerKeys"]=ledgerCount();row["trace"]=fixture.order;cases.push_back(row);};
+
+ run("runtime-config-duplicate-after-storage-is-off",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":false})");RuntimeOwner::runtimeState.storageReady=[&]{runtimeFile(dir/L"runtime"/L"enabled.json",R"({"enabled":false,"enabled":true})");};RuntimeOwner::run(c);check(!c->enabled&&!c->ownsRunning,"duplicate-second-read-enabled-recovery");});
+ run("runtime-config-deep-after-storage-is-off",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":false})");RuntimeOwner::runtimeState.storageReady=[&]{runtimeFile(dir/L"runtime"/L"enabled.json",std::string("{\"enabled\":true,\"opaque\":")+std::string(80,'[')+"0"+std::string(80,']')+"}");};RuntimeOwner::run(c);check(!c->enabled,"deep-second-read-enabled-recovery");});
+ run("runtime-config-read-off-not-promoted-by-later-missing",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":false})");RuntimeOwner::runtimeState.afterReadExists=[&]{const auto file=dir/L"runtime"/L"enabled.json";if(fp::exists(file)){fp::create_directories(dir/L"runtime"/L"work");fp::rename(file,dir/L"runtime"/L"work"/L"retained-off.json");}};RuntimeOwner::run(c);check(!c->enabled,"post-read-exists-promoted-off-to-built-in-on");});
+ run("runtime-config-read-denial-after-storage-is-off",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":true})");H lock(INVALID_HANDLE_VALUE);RuntimeOwner::runtimeState.storageReady=[&]{lock.h=CreateFileW((dir/L"runtime"/L"enabled.json").c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(lock.good(),"runtime-fixture-lock");};RuntimeOwner::run(c);check(!c->enabled,"unreadable-override-treated-as-absence");});
+ run("runtime-config-future-or-truncated-after-storage-is-off",[](const auto& dir){for(const auto& bad:std::vector<std::string>{"{",R"({"schema":"ymcc.steam-original-recovery-enabled.v99","enabled":true})","null","[]"}){auto c=runtimeSetup(dir,R"({"enabled":false})");RuntimeOwner::runtimeState.storageReady=[&]{runtimeFile(dir/L"runtime"/L"enabled.json",bad);};RuntimeOwner::run(c);check(!c->enabled,"unknown-second-read-treated-as-enabled");}});
+ run("runtime-config-location-exception-after-storage-is-contained",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":true})");RuntimeOwner::runtimeState.storageReady=[]{RuntimeOwner::runtimeState.locationFault=true;};RuntimeOwner::run(c);check(!c->enabled&&!c->ownsRunning,"failed-location-retained-admission");});
+ run("runtime-config-unknown-exception-is-contained",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":true})");RuntimeOwner::runtimeState.storageReady=[]{throw unsigned{41};};RuntimeOwner::run(c);check(!c->enabled&&!c->ownsRunning,"unknown-exception-retained-admission");});
+ run("runtime-config-genuine-absence-preserves-built-in-preference",[](const auto& dir){auto c=runtimeSetup(dir,"",true);RuntimeOwner::run(c);check(c->enabled&&!c->ownsRunning,"genuine-absence-lost-ordinary-preference");});
+ run("runtime-config-bad-status-write-does-not-throw",[](const auto& dir){auto c=runtimeSetup(dir,R"({"enabled":false})");RuntimeOwner::runtimeState.publishFault=true;RuntimeOwner::run(c);check(!c->enabled&&!c->ownsRunning,"failed-evidence-authorized-runtime");});
+ run("runtime-config-explicit-valid-retry-preserves-original",[](const auto& dir){const auto file=dir/L"runtime"/L"enabled.json";auto c=runtimeSetup(dir,R"({"enabled":false})");RuntimeOwner::runtimeState.storageReady=[&]{runtimeFile(file,R"({"enabled":false,"enabled":true})");};RuntimeOwner::run(c);check(!c->enabled,"bad-config-was-enabled");fp::create_directories(dir/L"runtime"/L"work");fp::rename(file,dir/L"runtime"/L"work"/L"bad-original.json");runtimeFile(file,R"({"schema":"ymcc.steam-original-recovery-enabled.v2","enabled":true,"extension":{"keep":7}})");RuntimeOwner::runtimeState.storageReady={};c=std::make_shared<RuntimeOwner::Control>();RuntimeOwner::run(c);check(c->enabled&&!c->ownsRunning&&RuntimeOwner::runtimeState.runOneCalls==0,"explicit-valid-retry-did-not-start-safely");check(readJson(file).at("extension").at("keep")==7&&fp::exists(dir/L"runtime"/L"work"/L"bad-original.json"),"retry-rewrote-original-or-extension");});
+ run("config-storm-bad-seed-healthy-independent-reference",[](const auto& dir){auto e=eventFor(dir,"startup");const auto seed=fixture.data/L"seed.json";durableCreate(seed,"{");const auto original=fileHash(seed.wstring());baseline(e);check(fileHash(seed.wstring())==original,"bad-seed-original-lost");fixture.flags=4;e["trigger"]["id"]="explicit-loss-after-health";expectSuccess(invoke(e),e);});
+ run("config-storm-bad-seed-lost-unknown-then-health-retry",[](const auto& dir){auto e=eventFor(dir,"startup");const auto seed=fixture.data/L"seed.json";durableCreate(seed,"{");const auto original=fileHash(seed.wstring());fixture.flags=4;auto r=invoke(e);check(r.at("status")=="refused"&&fixture.drivers==0&&ledgerCount()==0&&!fp::exists(fixture.data/L"references"),"bad-seed-invented-identity-or-debt");fixture.flags=8196;baseline(e);fixture.flags=4;e["trigger"]["id"]="explicit-valid-loss-after-health";expectSuccess(invoke(e),e);check(fileHash(seed.wstring())==original,"unknown-original-overwritten");});
+ run("config-storm-reference-write-failure-not-success",[](const auto& dir){auto e=eventFor(dir,"startup");durableCreate(fixture.data/L"seed.json","{");durableCreate(fixture.data/L"references","obstruction");auto r=invoke(e);check(r.at("status")=="refused"&&!r.value("referenceCaptured",false)&&!r.value("nativeRecovered",false)&&ledgerCount()==0,"failed-reference-write-reported-success");fp::create_directories(fixture.data/L"work");fp::rename(fixture.data/L"references",fixture.data/L"work"/L"kept-reference-obstruction");baseline(e);check(ledgerCount()==0&&fixture.drivers==0,"explicit-write-retry-spent-budget");});
  run("original-startup-lost-recovers",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;auto r=invoke(e);expectSuccess(r,e);});
  run("ymcc-restart-keeps-original-game-reference",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);e["ymcc"]["pid"]=9000u;e["ymcc"]["birthFileTime"]="134370000000900001";fixture.flags=4;expectSuccess(invoke(e),e);});
  run("changed-steam-birth-cannot-borrow-reference",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);e["steam"]["birthFileTime"]="134370000000900001";fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="lost-without-matching-healthy-reference"&&fixture.queries==0,"replacement-steam-reference-accepted");});

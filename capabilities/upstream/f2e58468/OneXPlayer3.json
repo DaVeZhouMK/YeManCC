@@ -1,0 +1,27 @@
+{
+  "DeviceClass": "OneXPlayer3",
+  "GyroMatrix": {
+    "Axis": {
+      "X": -1.0,
+      "Y": -1.0,
+      "Z": 1.0
+    },
+    "AxisSwap": {
+      "X": "Z",
+      "Y": "X",
+      "Z": "Y"
+    }
+  },
+  "AcceleroMatrix": {
+    "Axis": {
+      "X": -1.0,
+      "Y": -1.0,
+      "Z": 1.0
+    },
+    "AxisSwap": {
+      "X": "Z",
+      "Y": "X",
+      "Z": "Y"
+    }
+  }
+}

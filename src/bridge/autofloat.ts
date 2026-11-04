@@ -15,16 +15,15 @@ import { monitorProofFresh, monitorCpuFresh } from './monitorSnapshotSignals';
 // EPP、节流状态等）自动一起生效。
 //
 // 调度主要看帧率（目标 vs 实际 avg），并叠加 HWiNFO 信号：
-//   · 1% Low：低于「目标帧率 × 50%」→ 帧时间抖动 → 立即升压平滑
+//   · 1% Low：独立参与试探收益与回退；缺失时不制造帧率样本
 //   · CPU 使用率：CPU 压力大时暂停 CPU 降频，达到恢复条件时回升
-//   · CPU Package Power：仅用于显示和实际功耗监测；TDP 目标按电源方案的 TDP 最大值计算
+//   · CPU Package Power：复用监控快照识别持续超限；合法目标仍由当前设定及节能档位决定
 // 全部信号消费 YMCC 统一快照：后台 Displayed 与 HUD Presented 独立，CPU 压力来自统一 Windows 采样。
 // 真实游戏识别由 native 游戏识别阀门完成；HWiNFO 帧率只决定浮动输出是否可用。
 //
 // 守护生命周期（196）：start/stop 在统一入口同时登记 CPU 压力与 FPS 需求（{top:true,fps:true}），
 // 与展示端需求互不干扰；fps-status.json/fps-monitor.hb 契约仅在兼容（文件）通路存在。
 
-import { fs } from './api';
 import { invoke } from './ipc';
 import { acquireMonitorDemand, monitorDemandConfirmed, monitorSnapshotEpoch, readMonitorSnapshot, setMonitorDataPowerControlDir, type MonitorSnapshotView } from './monitorData';
 import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
@@ -38,7 +37,6 @@ import {
   detectVendor,
   readRtssLimit,
   setRtssLimit,
-  clampTdp,
   getTdpHardwareMinimum,
   getTdpHardwareMaximum,
   getTdpExecutionCapability,
@@ -53,17 +51,11 @@ import {
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
 // 196：fps-status.json / fps-monitor.hb / hwinfo-ok 的读取已并入统一数据入口
 // （monitorData.ts，路径由 setMonitorDataPowerControlDir 同步），本文件不再直接读。
-// 持久化配置：记住「帧数目标 + 调度档位 + TDP向下浮动策略」，跨重启保留上次选择
-let CONFIG = PC_DIR + '\\autofloat.json';
-// 浮动运行标志：native 手柄后台（Start+方向）据此判断浮动是否接管，运行时只转发按键事件
-let FLOAT_ACTIVE = PC_DIR + '\\float-active';
 
 export function setAutofloatPowerControlDir(dir: string): void {
   PC_DIR = dir.replace(/\//g, '\\').replace(/\\+$/, '');
   // 统一入口（含旧 native 的四文件回退通路）必须使用同一目录。
   setMonitorDataPowerControlDir(PC_DIR);
-  CONFIG = PC_DIR + '\\autofloat.json';
-  FLOAT_ACTIVE = PC_DIR + '\\float-active';
 }
 
 function safeProfile(p: string): FloatProfile {
@@ -168,33 +160,60 @@ export function getTdpTarget(tdpMax: number, strategy: TdpFloatStrategy): number
   return Math.max(getTdpHardwareMinimum(), Math.floor(maximum * (1 - p.ratio)));
 }
 
-async function applyTdpLimit(next: number): Promise<number> {
-  const runId = floatRunId, targetRevision = tdpTargetRevision;
-  if (continuousOwner && !await continuousOwner.current()) return tdpLimit;
+async function applyTdpLimit(next: number, reassert = false): Promise<number> {
+  const runId = floatRunId, targetRevision = tdpTargetRevision, owner = continuousOwner;
+  const game = getPolicyGame(), gamePid = game?.pid ?? 0, gameBirth = String(game?.processCreated || '');
+  // This owner's validated full budget is the fallback, never a missing value,
+  // a trial receipt or the UI slider's wider selectable range.
+  if (!owner || !Number.isFinite(owner.safeTdp) || owner.safeTdp < floatTdpMinimum() || owner.safeTdp > getTdpHardwareMaximum()) return 0;
+  const floor = getTdpTarget(owner.safeTdp, owner.bank.auto.saving);
+  if (!Number.isFinite(next) || next < floor || next > owner.safeTdp || owner.bank.tdp !== owner.safeTdp) {
+    owner.tdpSafetyReason = '浮动目标无效或越过允许区间，保留设定TDP并暂停浮动';
+    owner.bank.tdp = owner.safeTdp;
+    owner.state = { ...owner.state, watts: tdpLimit > 0 ? tdpLimit : owner.safeTdp, trial: null, stable: 0 };
+    notify(); return 0; // Bad data skips this round; never turn it into a command.
+  }
+  if (continuousOwner && (continuousOwner.revoked || !await continuousOwner.current())) return tdpLimit;
   const capability = await getTdpExecutionCapability(); // CPU bounds are brand-independent.
   if (runId !== floatRunId || targetRevision !== tdpTargetRevision) return tdpLimit;
-  const value = Math.max(floatTdpMinimum(), resolveTdpTarget(Math.round(next), capability).effectiveW);
-  if (value <= 0 || value === tdpLimit) return tdpLimit;
+  const value = resolveTdpTarget(Math.round(next), capability).effectiveW;
+  // Resolve/device bounds must not expand an otherwise valid game budget.
+  if (!Number.isFinite(value) || value < floor || value > owner.safeTdp) {
+    owner.tdpSafetyReason = '设备解析目标越过设定TDP区间，已暂停浮动';
+    notify(); return 0;
+  }
+  const isCurrent = () => runId === floatRunId && targetRevision === tdpTargetRevision && continuousOwner === owner && !owner.revoked && !owner.tdpEditPaused &&
+    (owner.current.isCurrent?.() ?? true) && (getPolicyGame()?.pid ?? 0) === gamePid && String(getPolicyGame()?.processCreated || '') === gameBirth &&
+    Number.isFinite(owner.safeTdp) && owner.bank.tdp === owner.safeTdp && value <= Math.min(owner.safeTdp, owner.pendingTdpMax ?? owner.safeTdp) && value >= getTdpTarget(owner.safeTdp, owner.bank.auto.saving);
+  if (value <= 0 || (!reassert && value === tdpLimit)) return tdpLimit;
   const vendor = capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' :
     tdpVendor !== 'unknown' ? tdpVendor : await detectVendor().catch(() => 'unknown' as Vendor);
   if (vendor === 'unknown') return tdpLimit;
   // 与顶部 TDP 滑块共用 setTdp 的实际下发路径；save:false 保证只改硬件临时值，不改 TDP最大值配置。
-  // 常驻 daemon 方案已生效：setTdp → ensureTdpDaemon（心跳新鲜直接复用）→ 写命令文件（毫秒级），
-  // 不再每几秒 CreateProcess(YeManTdpCtl.exe)，根治 IDC_APPSTARTING 转圈。
-  if (continuousOwner && !await continuousOwner.current()) return tdpLimit;
+  // Share the already authenticated resident pipe; no marker/ping/process probe.
+  // The native write lease remains authoritative at actual dispatch.
+  if (continuousOwner && (continuousOwner.revoked || !await continuousOwner.current())) return tdpLimit;
   let accepted: number | null = null;
-  const applied = await setTdp(tdpMode, value, { apply: true, save: false, vendor, source: 'autofloat', onAccepted: w => { accepted = w; } });
+  const applied = await setTdp(tdpMode, value, { apply: true, save: false, vendor, source: 'autofloat', minWatts: floor, maxWatts: owner.safeTdp, isCurrent, onAccepted: w => { accepted = w; } });
   if (runId !== floatRunId || targetRevision !== tdpTargetRevision) return tdpLimit;
-  if (!applied || accepted === null || !Number.isFinite(accepted) || accepted < getTdpHardwareMinimum() || accepted > value) { tdpLimit = 0; notify(); return 0; } // unknown is never an old value masquerading as applied
+  if (!isCurrent()) return 0; // Keep old/cancelled receipts out of this owner's state.
+  if (!applied) { tdpLimit = 0; notify(); return 0; }
+  if (accepted === null || !Number.isFinite(accepted) || accepted < getTdpHardwareMinimum() || accepted > value) {
+    owner.tdpSafetyReason = 'TDP回执缺失或无效，已暂停浮动并保留设定目标';
+    tdpLimit = 0; notify(); return 0;
+  }
+  if (accepted < floor) owner.tdpSafetyReason = 'TDP接受值低于浮动下限，已暂停浮动并恢复设定目标';
   tdpVendor = vendor;
   tdpLimit = accepted;
-  if (accepted < value) {
-    // This operation's OEM-accepted budget, NOT a CPU/model max and NOT a
-    // permanent ceiling. A new explicit target retries the requested intent.
-    tdpMax = Math.min(tdpMax, accepted);
-    tdpOriginal = Math.min(tdpOriginal, accepted);
-    if (continuousOwner) continuousOwner.bank.tdp = Math.min(continuousOwner.bank.tdp, accepted);
+  if (owner) owner.tdpHealth = { writtenAt: Date.now(), observedAt: 0, highSince: 0, retryAt: owner.tdpHealth?.retryAt ?? 0 };
+  if (tdpMax <= 0 && !owner.tdpSafetyReason) {
+    // Only the first confirmed full-budget write establishes this owner's
+    // baseline. A temporary trial/rollback receipt must never ratchet it down.
+    tdpMax = accepted;
+    tdpOriginal = accepted;
+    owner.bank.tdp = owner.safeTdp = accepted;
   }
+  if (owner.tdpSafetyReason) owner.state = { ...owner.state, watts: accepted, trial: null, stable: 0 };
   notify();
   return accepted;
 }
@@ -345,6 +364,7 @@ export interface FloatInfo {
   tdpRequestedMax?: number; // portable saved intent; tdpMax is the admitted baseline
   tdpTarget: number;
   tdpApplied: number;
+  tdpSafetyReason?: string; // probe pause; valid samples can resume the existing owner
   status: FloatStatus | null; // 守护最新状态（null=无数据/守护未就绪）
   state: CtlState; // 当前控制量（主频上限 + 积极性）
   lastAction: CtlAction | 'idle' | 'wait';
@@ -370,7 +390,6 @@ let tdpVendor: Vendor = 'unknown';
 let lastAction: FloatInfo['lastAction'] = 'idle';
 let lastTdpAction: FloatInfo['lastAction'] = 'idle';
 let lastStatus: FloatStatus | null = null;
-let lastFloatActiveTs = 0; // 浮动标志刷新时间戳（每 5 秒刷新，供 native 按 30s 新鲜度判定）
 let monitorLaunched = false; // 守护已被前端拉起（未显式停止）→ 失联时先不重拉，避免瞬读抖动把健康守护误杀重启
 const RESTART_BURST_MAX = 6; // 连续 6 次重拉仍无状态 → 冷却拉长到 30s，避免守护持续故障时 5s 一次的进程风暴
 let starting = false;    // 启用流程进行中标志（防并发双启动守护 + 双控制循环）
@@ -393,6 +412,7 @@ const TDP_MODE_CHECK_MS = 1000;
 const listeners = new Set<(info: FloatInfo) => void>();
 
 function notify() {
+  if (!listeners.size) return;
   const info = getFloatInfo();
   listeners.forEach((cb) => cb(info));
 }
@@ -406,6 +426,7 @@ export function getFloatInfo(): FloatInfo {
     tdpMax,
     tdpRequestedMax,
     tdpTarget: getTdpTarget(tdpMax, curTdpStrategy), // 策略目标（一次性下限，不随已下发值漂移）
+    tdpSafetyReason: continuousOwner?.tdpSafetyReason,
     tdpApplied: tdpLimit, // 当前实际下发的临时值（逐步逼近中）
     status: lastStatus,
     state: { ...ctl },
@@ -481,11 +502,75 @@ async function reactivateFloatPolicyAfterWrite(): Promise<void> {
   await setActiveScheme(PW.YEMAN).catch(() => {});
 }
 
+interface FloatTdpHealth { writtenAt: number; observedAt: number; highSince: number; retryAt: number }
 interface ContinuousFloatOwner {
-  bank: ContinuousSideControls; side: ControlSide; retryAfter?: number; current: () => Promise<boolean>;
+  tdpHealth?: FloatTdpHealth;
+  safeTdp: number; pendingTdpMax?: number; tdpSafetyReason?: string;
+  bank: ContinuousSideControls; side: ControlSide; revoked?: boolean; tdpEditPaused?: boolean; retryAfter?: number; current: (() => Promise<boolean>) & { revoke?: () => void; isCurrent?: () => boolean };
   applyCore: (watts: number) => Promise<void>; state: ContinuousFloatState; targetPid: number; initialTdp?: { requested: number; accepted: number };
 }
 let continuousOwner: ContinuousFloatOwner | null = null;
+
+// Source selection belongs to the shared power event lane, never the tick.
+// Revoke before the queued new-side bank can await/drain old hardware work.
+export function invalidateFloatPowerSource(side: ControlSide): void {
+  const owner = continuousOwner;
+  if (!owner || owner.revoked || owner.side === side) return;
+  owner.revoked = true;
+  owner.current.revoke?.();
+  ++floatRunId;
+  ctlApplyPending = null;
+  ctlDirty = false;
+  if (ctlFlushTimer !== null) { window.clearTimeout(ctlFlushTimer); ctlFlushTimer = null; }
+}
+
+
+// The existing schedule queue pauses the current owner before saving a TDP-only
+// edit. Drain already-submitted work while its old durable context still matches;
+// do not stop/reacquire monitoring, reload CPU policy or reset its control state.
+export async function pauseContinuousFloatForTdpEdit(nextTdp?: number): Promise<{
+  current(): boolean;
+  accept(requested: number, accepted: number | null): void;
+  release(): void;
+} | null> {
+  const owner = continuousOwner, run = floatRunId;
+  if (!owner || owner.revoked || owner.tdpEditPaused || starting || timer === null || peripheralInit) return null;
+  if (nextTdp !== undefined && (!Number.isFinite(nextTdp) || nextTdp < floatTdpMinimum() || nextTdp > getTdpHardwareMaximum())) return null;
+  owner.pendingTdpMax = nextTdp;
+  owner.tdpEditPaused = true;
+  const current = () => continuousOwner === owner && !owner.revoked && run === floatRunId && timer !== null;
+  const release = () => { owner.pendingTdpMax = undefined; owner.tdpEditPaused = false; };
+  try {
+    if (tickWork) await tickWork;
+    await ctlApplyQueue;
+    if (!current() || !await owner.current()) { release(); return null; }
+    return {
+      current,
+      accept(requested, accepted) {
+        if (!current()) return;
+        if (!Number.isFinite(requested) || requested < floatTdpMinimum() || requested > getTdpHardwareMaximum()) {
+          owner.tdpSafetyReason = 'TDP编辑目标无效，已暂停浮动并保留原设定';
+          owner.tdpHealth = { writtenAt: 0, observedAt: 0, highSince: 0, retryAt: 0 };
+          notify(); return;
+        }
+        ++tdpTargetRevision;
+        const maximum = boundFloatTdp(requested);
+        const confirmed = accepted !== null && Number.isFinite(accepted) && accepted >= getTdpTarget(maximum, owner.bank.auto.saving) && accepted <= maximum;
+        const baseline = confirmed ? accepted! : maximum;
+        tdpRequestedMax = requested; tdpMax = confirmed ? baseline : 0; tdpOriginal = tdpMax;
+        tdpLimit = confirmed ? baseline : 0;
+        owner.tdpHealth = { writtenAt: Date.now(), observedAt: 0, highSince: 0, retryAt: 0 };
+        owner.bank.tdp = owner.safeTdp = baseline;
+        owner.tdpSafetyReason = confirmed ? undefined : 'TDP回执缺失或越界，保留设定TDP并等待有效数据';
+        owner.state = { ...owner.state, watts: baseline, trial: null, stable: 0, lastDown: Date.now(), recoverUntil: Date.now() + 5000 };
+        owner.retryAfter = confirmed ? undefined : Date.now() + 30000;
+        lastTdpAction = confirmed ? 'hold' : 'wait';
+        notify();
+      },
+      release,
+    };
+  } catch (error) { release(); throw error; }
+}
 
 export function holdContinuousFloatAfterCoreChange(): void {
   if (continuousOwner) continuousOwner.state = { ...continuousOwner.state, trial: null, stable: 0, recoverUntil: Date.now() + 10000 };
@@ -496,19 +581,46 @@ export function updateContinuousFloatCoreRules(bank: ContinuousSideControls): vo
 }
 async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<typeof stepContinuousFloat>[2]): Promise<void> {
   const run = floatRunId;
-  if (continuousOwner !== owner || !await owner.current() || sample.now < (owner.retryAfter ?? 0)) return;
+  if (continuousOwner !== owner || owner.revoked || !await owner.current() || sample.now < (owner.retryAfter ?? 0)) return;
+  if (owner.tdpSafetyReason) {
+    if (tdpLimit > 0 && tdpLimit < getTdpTarget(owner.safeTdp, owner.bank.auto.saving)) {
+      const accepted = await applyTdpLimit(owner.safeTdp, true).catch(() => 0);
+      if (run === floatRunId && continuousOwner === owner && accepted !== owner.safeTdp) owner.retryAfter = sample.now + 30000;
+      return; // Restore an acknowledged under-floor value, never optimize on missing FPS.
+    }
+    const at = sample.observedAt;
+    const valid = typeof sample.fps === 'number' && Number.isFinite(sample.fps) && sample.fps > 0 &&
+      typeof sample.cpuBusy === 'number' && Number.isFinite(sample.cpuBusy) && sample.cpuBusy >= 0 && sample.cpuBusy <= 100 &&
+      monitorProofFresh(at, sample.now, 6000) && at! > (owner.state.observedAt ?? 0) && Number.isFinite(owner.safeTdp);
+    if (!valid) return;
+    if (tdpLimit !== owner.safeTdp) {
+      const accepted = await applyTdpLimit(owner.safeTdp, true).catch(() => 0);
+      if (run !== floatRunId || continuousOwner !== owner || owner.revoked) return;
+      if (accepted !== owner.safeTdp) { owner.retryAfter = sample.now + 30000; return; }
+    }
+    owner.tdpSafetyReason = undefined;
+    owner.state = { ...owner.state, watts: owner.safeTdp, trial: null, stable: 0, recoverUntil: sample.now + 5000 };
+    notify(); return;
+  }
   if (tdpLimit <= 0) {
-    const accepted = await applyTdpLimit(owner.bank.tdp).catch(() => { tdpLimit = 0; return 0; });
+    const accepted = await applyTdpLimit(owner.bank.tdp).catch(() => {
+      if (run === floatRunId && continuousOwner === owner && !owner.revoked) tdpLimit = 0;
+      return 0;
+    });
     if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
-    if (accepted <= 0) { owner.retryAfter = sample.now + 3000; return; }
+    if (accepted <= 0) { if (!owner.tdpSafetyReason || tdpLimit <= 0) owner.retryAfter = sample.now + (owner.tdpSafetyReason ? 30000 : 3000); return; }
     owner.state = { ...owner.state, watts: accepted, trial: null, stable: 0, recoverUntil: sample.now + 5000 };
     return;
   }
   const next = stepContinuousFloat(owner.bank, owner.state, sample), prior = owner.state;
   if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
   if (next.watts !== prior.watts) {
-    const accepted = await applyTdpLimit(next.watts).catch(() => { tdpLimit = 0; return 0; });
+    const accepted = await applyTdpLimit(next.watts).catch(() => {
+      if (run === floatRunId && continuousOwner === owner && !owner.revoked) tdpLimit = 0;
+      return 0;
+    });
     if (accepted <= 0) { owner.retryAfter = sample.now + 3000; return; }
+    if (owner.tdpSafetyReason) return;
     next.watts = accepted;
   }
   if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
@@ -530,10 +642,17 @@ async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<ty
 export async function enableContinuousFloat(bank: ContinuousSideControls, side: ControlSide, target: number,
   current: () => Promise<boolean>, applyCore: (watts: number) => Promise<void>,
   initialTdp?: { requested: number; accepted: number }): Promise<void> {
+  if (!bank || bank.tdpValid === false || !Number.isFinite(bank.tdp) || bank.tdp < floatTdpMinimum() || bank.tdp > getTdpHardwareMaximum()) {
+    if (continuousOwner) { continuousOwner.tdpSafetyReason = '启动目标无效，保留原TDP并等待有效数据'; notify(); }
+    return;
+  }
   await disableFloat();
   if (!await current()) return;
   const cpu = automaticCpuControls(bank);
-  const owner: ContinuousFloatOwner = { bank: structuredClone(bank), side, current, applyCore, initialTdp, targetPid: getPolicyGame()?.pid || 0,
+
+  const receipt = initialTdp && Number.isFinite(initialTdp.requested) && Number.isFinite(initialTdp.accepted) &&
+    initialTdp.accepted >= floatTdpMinimum() && initialTdp.accepted <= Math.min(bank.tdp, initialTdp.requested, getTdpHardwareMaximum()) && initialTdp.accepted >= getTdpTarget(bank.tdp, bank.auto.saving) ? initialTdp : undefined;
+  const owner: ContinuousFloatOwner = { bank: structuredClone(bank), safeTdp: receipt?.accepted ?? bank.tdp, side, current, applyCore, initialTdp: receipt, tdpSafetyReason: initialTdp && !receipt ? '启动TDP回执无效，保留设定目标并等待有效数据' : undefined, targetPid: getPolicyGame()?.pid || 0,
     state: { watts: bank.tdp, frequencyMHz: cpu.maxMHz, aggressiveness: cpu.aggressiveness, stable: 0, lastDown: Date.now(), recoverUntil: 0 } };
   await startFloatRuntime(target, owner, bank.auto.saving, false);
 }
@@ -543,7 +662,7 @@ async function applyCtl(): Promise<boolean> {
   // Every active float owner is continuous. There is no legacy profile branch
   // that can write a second CPU/TDP policy.
   const owner = continuousOwner;
-  if (!owner || !await owner.current()) return false;
+  if (!owner || owner.revoked || !await owner.current()) return false;
   const cpu = automaticCpuControls(owner.bank);
   const side = owner.side;
   const params: PowerParams = {
@@ -578,8 +697,7 @@ async function applyCtl(): Promise<boolean> {
         // Every CPU value is submitted directly. The manual CPU path reloads
         // the active policy after its write; floating must do the same after
         // each coalesced dynamic write, otherwise only the saved values move.
-        const currentSide = await detectPowerModeReliable();
-        if (!currentSide || !next.params.sides?.includes(currentSide) || (continuousOwner && !await continuousOwner.current())) continue;
+        if (owner.revoked || continuousOwner !== owner || !await owner.current()) continue;
         ctlLastApplied = false;
         const applied = await applyFloatPowerParams(next.params).catch(() => false);
         ctlLastApplied = applied;
@@ -594,6 +712,54 @@ async function applyCtl(): Promise<boolean> {
   return ctlLastApplied;
 }
 
+// A write receipt is not a lasting hardware limit. Reuse the monitor packet
+// already read by this tick; never query AC/DC, registers or another sensor here.
+async function reconcileFloatTdp(owner: ContinuousFloatOwner, view: MonitorSnapshotView | null): Promise<boolean> {
+  const now = Date.now(), game = getPolicyGame();
+  const health = owner.tdpHealth ??= { writtenAt: now, observedAt: 0, highSince: 0, retryAt: 0 };
+  if (!owner.targetPid || game?.pid !== owner.targetPid || owner.revoked || owner.tdpEditPaused) {
+    health.highSince = 0; return false;
+  }
+  const top = view?.top;
+  // Prefer the existing producer timestamp when supplied. A fast packet must
+  // not turn an old sensor value into several independent observations.
+  const at = view?.fps?.hardwareObservedAt || top?.ts;
+  const powerKnown = !!top && !view?.hwDown && !top.hwDown && top.cpuPowerValid !== false &&
+    monitorProofFresh(top.ts, now, 6000) && monitorProofFresh(at, now, 6000) && at! <= top.ts && typeof top.tdpW === 'number' && Number.isFinite(top.tdpW) && top.tdpW >= 0;
+  const target = Math.min(tdpLimit, owner.safeTdp);
+  if (!Number.isFinite(target) || target < floatTdpMinimum() || target > owner.safeTdp) return false;
+  let overdue = false;
+  if (powerKnown) {
+    if (at! <= health.observedAt) return false;
+    const interrupted = at! - health.observedAt > 6000;
+    health.observedAt = at!;
+    // Normal boost/ripple is not a failed limit. Require a sustained, material
+    // overshoot; this does not use package power as a replacement TDP receipt.
+    if (top!.tdpW > target + Math.max(3, target * .15)) {
+      if (!health.highSince || interrupted) health.highSince = at!;
+      overdue = at! - health.highSince >= 6000 && now - health.writtenAt >= 6000;
+    } else health.highSince = 0;
+  } else {
+    health.highSince = 0;
+    // Missing power is not zero, proof of a bad limit, or permission to write.
+    // Hold the last valid TDP and wait for real samples; no blind renewal.
+    overdue = false;
+  }
+  if (!overdue || now < health.retryAt || now < (owner.retryAfter ?? 0)) return false;
+  const run = floatRunId, revision = tdpTargetRevision;
+  const current = () => run === floatRunId && revision === tdpTargetRevision && continuousOwner === owner && !owner.revoked && !owner.tdpEditPaused;
+  if (!current() || !await owner.current() || !current()) return false;
+  health.retryAt = now + 30000; health.highSince = 0;
+  const accepted = await applyTdpLimit(target, true).catch(() => {
+    if (current()) tdpLimit = 0;
+    return 0;
+  });
+  if (!current()) return true;
+  if (accepted <= 0) owner.retryAfter = now + 30000;
+  else owner.state = { ...owner.state, watts: accepted };
+  return true; // One hardware axis per tick; do not derive CPU/core work here.
+}
+
 let tickWork: Promise<void> | null = null;
 function tick(): Promise<void> {
   if (tickWork) return tickWork;
@@ -602,13 +768,9 @@ function tick(): Promise<void> {
   return work;
 }
 async function tickOnce(): Promise<void> {
-  if (tickRunning) return;
+  if (tickRunning || continuousOwner?.revoked || continuousOwner?.tdpEditPaused) return;
   tickRunning = true;
   try {
-    if (Date.now() - lastFloatActiveTs > 5000) {
-      lastFloatActiveTs = Date.now();
-      await fs.writeTextFile(FLOAT_ACTIVE, '1').catch(() => {});
-    }
     const readRun = floatRunId, readDir = PC_DIR, readEpoch = monitorSnapshotEpoch();
     const readAt = performance.now(), readWallAt = Date.now();
     const view = await readMonitorSnapshot();
@@ -623,7 +785,10 @@ async function tickOnce(): Promise<void> {
     if (!continuousOwner) {
       lastAction = 'idle'; lastTdpAction = 'idle'; notify(); return;
     }
-    if (!st) {
+    if (await reconcileFloatTdp(continuousOwner, view)) { notify(); return; }
+    // A live heartbeat without Displayed is a missing sample. Keep the existing
+    // trial deadline running; tickContinuous still checks the current owner.
+    if (!st || st.idle) {
       await tickContinuous(continuousOwner, {now: Date.now(), fps: null, low: null, target: curTarget, minimum: getTdpHardwareMinimum(), cpuBusy: null}).catch(() => {});
       lastAction = 'wait'; lastTdpAction = 'wait'; notify(); return;
     }
@@ -698,20 +863,28 @@ async function initializeFloatPeripherals(runId: number, target: FpsTarget): Pro
 
     const targetRevision = tdpTargetRevision;
     const owner = continuousOwner;
-    const receipt = owner?.initialTdp;
-    const requested = receipt?.requested ?? await readTdp(tdpMode).catch(() => null) ?? 0;
+    if (!owner) return;
+    const receipt = owner.initialTdp;
+    // The submitted bank is already the target. Storage is neither a new
+    // instruction nor an applied receipt, especially when a read fails.
+    const requested = receipt?.requested ?? owner.bank.tdp;
     const capability = await getTdpExecutionCapability().catch(() => null);
     if (runId !== floatRunId) return;
     if (capability?.ready && targetRevision === tdpTargetRevision) {
-      const target = requested > 0 ? resolveTdpTarget(requested, capability) : null;
-      tdpRequestedMax = target?.intentW ?? 0;
-      tdpOriginal = receipt?.accepted ?? target?.effectiveW ?? 0;
+      const target = resolveTdpTarget(owner.bank.tdp, capability);
+      const vendor = capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' : await detectVendor().catch(() => 'unknown' as Vendor);
+      if (runId !== floatRunId || targetRevision !== tdpTargetRevision || continuousOwner !== owner || owner.revoked) return;
+      tdpRequestedMax = requested;
+      tdpOriginal = receipt?.accepted ?? 0;
       tdpMax = tdpOriginal;
-      if (continuousOwner) continuousOwner.bank.tdp = tdpOriginal;
-      // Native OEM applied values come from successful writes, not saved config.
-      // A direct enableFloat caller also gets a first admitted write below.
-      tdpLimit = receipt?.accepted ?? (capability.selected ? 0 : tdpOriginal);
-      tdpVendor = capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' : await detectVendor().catch(() => 'unknown' as Vendor);
+      if (!Number.isFinite(target.effectiveW) || target.effectiveW > owner.safeTdp || target.effectiveW < floatTdpMinimum()) {
+        owner.tdpSafetyReason = '初始化TDP越过设定区间，已暂停浮动'; return;
+      }
+      owner.bank.tdp = owner.safeTdp = receipt?.accepted ?? target.effectiveW;
+      // Missing write acknowledgement stays unknown on every transport. The
+      // existing tick will submit the intact full target once, before savings.
+      tdpLimit = tdpOriginal;
+      tdpVendor = vendor;
     }
     if (runId !== floatRunId) return;
 
@@ -775,12 +948,12 @@ async function startFloatRuntime(target: FpsTarget, owner: ContinuousFloatOwner,
     tdpOriginal = owner.initialTdp?.accepted ?? 0;
     tdpMax = tdpOriginal;
     tdpLimit = tdpOriginal;
+    owner.tdpHealth = { writtenAt: Date.now(), observedAt: 0, highSince: 0, retryAt: 0 };
     tdpVendor = 'unknown';
     lastAction = 'wait';
     hwinfoRecoveryAttempted = false;
     hwinfoDown = false;
     hwinfoErr = false;
-    await fs.writeTextFile(FLOAT_ACTIVE, '1').catch(() => {});
     if (runId !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
     await applyCtl();
     if (runId !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
@@ -814,10 +987,14 @@ function legacyContinuousBank(profile: FloatProfile, strategy: TdpFloatStrategy,
 
 export async function enableFloat(target: FpsTarget, profile: FloatProfile, tdpStrategy: TdpFloatStrategy = curTdpStrategy, owner: ContinuousFloatOwner | null = null): Promise<void> {
   const side = owner?.side ?? await detectPowerModeReliable() ?? 'ac';
-  const tdp = owner?.bank.tdp || await readTdp(side).catch(() => 0) || 0;
+  const tdp = owner?.bank.tdp ?? await readTdp(side).catch(() => NaN);
+  if (target > 0 && (!Number.isFinite(tdp) || tdp < floatTdpMinimum() || tdp > getTdpHardwareMaximum())) {
+    if (continuousOwner) { continuousOwner.tdpSafetyReason = '启动目标无效，保留原TDP并等待有效数据'; notify(); }
+    return;
+  }
   const bank = owner?.bank ?? legacyContinuousBank(profile, tdpStrategy, tdp, side);
   const legacyOwner: ContinuousFloatOwner = owner ?? {
-    bank, side, targetPid: 0, current: async () => true, applyCore: async () => {},
+    bank, safeTdp: tdp, side, targetPid: 0, current: async () => true, applyCore: async () => {},
     state: { watts: tdp, frequencyMHz: 0, aggressiveness: 100, stable: 0, lastDown: Date.now(), recoverUntil: 0 },
   };
   await startFloatRuntime(target, legacyOwner, tdpStrategy, true);
@@ -860,7 +1037,6 @@ export async function disableFloat(options: { unlockRtss?: boolean } = {}): Prom
   // 不恢复 RTSS/TDP/CPU 快照，不重制任何当前参数；TDP daemon 保持常驻。
   if (rtssSyncTimer !== null) { window.clearTimeout(rtssSyncTimer); rtssSyncTimer = null; }
   if (options.unlockRtss) await syncRtssLimit(0).catch(() => {});
-  await fs.remove(FLOAT_ACTIVE).catch(() => {});
   // 注意：curTarget / curProfile 保持不变，不再写 config（选择未变，也不能洗掉记忆）
   lastAction = 'idle';
   lastStatus = null;
@@ -939,48 +1115,7 @@ export async function setTdpFloatStrategy(strategy: TdpFloatStrategy): Promise<v
   notify();
 }
 
-// 手柄后台（Start+上/下）浮动运行时：改写程序记录的 TDP 最大值，
-// 自动浮动按新基准实时重算目标并 notify 刷新状态行；不直接下发硬件（由控制循环按新目标继续调节）。
-export async function adjustFloatTdpMax(delta: number): Promise<number> {
-  if (timer === null) return 0;
-  const capability = await getTdpExecutionCapability();
-  const next = resolveTdpTarget(clampTdp(Math.round(tdpMax) + delta), capability).effectiveW;
-  if (next === tdpMax) return tdpMax;
-  // Do not poison float state when the configuration save fails.
-  await setTdp(tdpMode, next, { apply: false, save: true, source: 'hotkey' });
-  ++tdpTargetRevision;
-  tdpRequestedMax = next;
-  tdpMax = next;
-  tdpOriginal = next;
-  // 已下发临时值若超过新最大值则钳制到新上限；等待真实下发后再更新 tdpLimit。
-  if (tdpLimit !== tdpMax) {
-    await applyTdpLimit(tdpMax).catch(() => {});
-  }
-  notify();
-  return tdpMax;
-}
-
-// 顶部 TDP 最大值滑块在浮动运行期间变更时调用：直接更新内存基准，
-// 不再依赖 tick() 每轮读取 tdp.txt（避免每秒一次 fs 读与守护写争用 → 鼠标转圈）。
-// 写盘由调用方 setTdp 完成；此处仅同步 autofloat 内部基准。
-export async function notifyTdpMaxChanged(watts: number): Promise<void> {
-  if (timer === null && !starting) return; // 浮动未运行/未启动则无需维护内存基准
-  const runId = floatRunId;
-  const capability = await getTdpExecutionCapability();
-  if (runId !== floatRunId || (timer === null && !starting)) return;
-  const target = resolveTdpTarget(watts, capability);
-  ++tdpTargetRevision;
-  tdpRequestedMax = target.intentW;
-  const w = target.effectiveW;
-  tdpMax = w;
-  tdpOriginal = w;
-  if (continuousOwner) continuousOwner.bank.tdp = w;
-  if (tdpLimit !== tdpMax && tdpMax > 0) {
-    // 上下调都立即把当前临时值收敛到新基准，避免 tdpLimit 与 tdpMax 长时间分叉。
-    await applyTdpLimit(tdpMax);
-  }
-  notify();
-}
+// 用户 TDP 修改统一由 performanceSchedule 的编辑事务更新缓存与实际写入。
 
 // 手柄后台（Start+左/右）在浮动运行时：以 ±5 帧步进调节帧数目标（30–90 连续，与 UI 滑块一致），
 // 并立即把 RTSS 锁帧应用到新目标；不再是循环固定档位。

@@ -1,3 +1,5 @@
+// Resource strings below are UTF-8 regardless of the build machine ANSI page.
+#pragma code_page(65001)
 #include "resource.h"
 #include "version.h"
 

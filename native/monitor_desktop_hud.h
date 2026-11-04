@@ -69,7 +69,7 @@ class Carrier {
    Carrier* owner=nullptr;int id=0;unsigned long long noticeLease=0;std::string nonce;std::shared_ptr<Target> target;bool global=false,notice=false;HMONITOR monitor=nullptr;
    HWND hwnd=nullptr;ComPtr<ICoreWebView2Controller> controller;ComPtr<ICoreWebView2> view;
    ComPtr<ICoreWebView2CompositionController> composition;ComPtr<IDCompositionDevice> device;ComPtr<IDCompositionTarget> visualTarget;ComPtr<IDCompositionVisual> visual;
-   bool closed=false,ready=false,armed=false,layout=false,queued=false,queuedRaise=false,crosshair=false,failed=false;
+   bool closed=false,ready=false,armed=false,layout=false,queued=false,queuedRaise=false,crosshair=false,failed=false,retiring=false,closing=false;
    HWND inputWindow=nullptr;hudinput::PanelInput input;huddrag::Gesture drag;touchhaptic::Motion dragHaptic;bool inputSuspended=false,mouseContact=false,touchContact=false;UINT32 mousePointerId=0,touchPointerId=0;POINTER_INPUT_TYPE touchType=PT_TOUCH;hudrecovery::Budget inputRecovery;std::string inputError;RECT panel{},placementArea{};
    bool radialContact=false,radialArmed=false;unsigned radialContactId=0;ULONGLONG radialDownAt=0;POINT radialDown{};
    std::string activeTemplate="A";unsigned long long templateRevision=0;
@@ -131,7 +131,7 @@ class Carrier {
    for(int count=0;before&&count<128;++count,before=GetWindow(before,GW_HWNDPREV))if(before==root)return true;
    return false;
  }
- bool owns(const std::shared_ptr<State>& s)const{return current==s&&!s->closed&&!s->failed&&s->hwnd;}
+ bool owns(const std::shared_ptr<State>& s)const{return current==s&&!s->closed&&!s->failed&&!s->retiring&&s->hwnd;}
  // WebView callbacks may not synchronously destroy their own controller. Hide
  // immediately, then retire this exact HWND on its existing posted-update lane.
  // The carrier-wide budget survives HWND/JS-owner recreation and never polls.
@@ -152,6 +152,15 @@ class Carrier {
    recovery.failed();hideOutput(s.get());
    // If posting fails, the already-armed native lease timer is the fallback.
    // Incoming frame ACK failure also causes the parent to close the exact owner.
+   PostMessageW(s->hwnd,updateMessage,0,0);
+ }
+ // A renderer must leave its WebMessage callback before its controller dies.
+ // Reuse the owned HWND update/lease lanes, without a worker or polling timer.
+ void retireFromRenderer(std::shared_ptr<State> s){
+   if(!owns(s))return;
+   s->retiring=true;s->ready=false;s->armed=false;s->layout=false;s->reason="renderer-close";
+   hideOutput(s.get());
+   // The existing lease timer remains the fallback if posting is unavailable.
    PostMessageW(s->hwnd,updateMessage,0,0);
  }
  static Json inputStateBeforeWithdrawal(const State& s){
@@ -203,7 +212,7 @@ class Carrier {
    const bool active=s->drag.contact()||s->radialContact||s->radialArmed;s->mouseContact=false;s->mousePointerId=0;s->touchContact=false;s->touchPointerId=0;s->radialContact=false;s->radialArmed=false;const bool moving=s->drag.dragging();
    // Hide before cancellation callbacks or COM work can pump messages.
    if(destroy&&!s->input.quiesce())s->inputError="drag-input-quiesce-failed";
-   if(s->inputWindow)ShowWindow(s->inputWindow,SW_HIDE);
+   if(s->inputWindow){ShowWindow(s->inputWindow,SW_HIDE);if(IsWindowEnabled(s->inputWindow))EnableWindow(s->inputWindow,FALSE);}
    s->input.cancel();s->drag.cancel();s->dragHaptic={};if(active&&config.haptic)config.haptic(false,false);
    // Input cancellation/hide may never deliver an UP. Revoke visual hold state too.
    if(active&&!s->closed)send(s,{{"event","desktopHud.radialHold"},{"data",{{"active",false}}}});
@@ -293,8 +302,9 @@ class Carrier {
      if(s&&s->owner&&s->owner->current.get()==s){
        if(s->mouseContact&&s->mousePointerId==GET_POINTERID_WPARAM(w))windowMouse(s,h,WM_CAPTURECHANGED,0,l);
        else if(s->touchContact&&s->touchPointerId==GET_POINTERID_WPARAM(w)){
-         const auto id=s->touchPointerId;s->touchContact=false;
-         inputEvent(h,{10,id,s->touchType,screeninput::Phase::Cancel,0,0,true},s);
+         // Cancellation owns no coordinates. During fullscreen/DPI changes the
+         // old client transform may already be gone; withdraw before any callback.
+         s->owner->stopInteraction(s->owner->current);
        }
      }return 0;
    }
@@ -308,7 +318,6 @@ class Carrier {
        if(state.get()==s&&s->inputWindow==h&&s->touchContact&&s->touchPointerId==pointerId)s->owner->stopInteraction(state);
      };
      POINTER_INFO pointer{};if(!GetPointerInfo(pointerId,&pointer)){cancelUnreadableContact();return 0;}
-     POINT point=pointer.ptPixelLocation;if(!ScreenToClient(h,&point)){cancelUnreadableContact();return 0;}
      if(pointer.pointerType==PT_MOUSE){
        // Use Windows' legacy mouse compatibility path. Handling PT_MOUSE as a
        // pointer gives it implicit capture even when GetCapture() is null.
@@ -316,8 +325,22 @@ class Carrier {
        return DefWindowProcW(h,m,w,l);
      }else if(pointer.pointerType==PT_TOUCH||pointer.pointerType==PT_PEN){
        const bool cancelled=(pointer.pointerFlags&POINTER_FLAG_CANCELED)!=0;
+       // Native cancellation/hover is terminal even if the matching UP was
+       // dropped. Do not query a retiring coordinate frame to release ownership.
+       if(cancelled||(m==WM_POINTERUPDATE&&!(pointer.pointerFlags&POINTER_FLAG_INCONTACT))){cancelUnreadableContact();return 0;}
+       POINT point=pointer.ptPixelLocation;if(!ScreenToClient(h,&point)){cancelUnreadableContact();return 0;}
        if(m==WM_POINTERDOWN){
-         if(cancelled||s->touchContact||s->mouseContact||point.x<0||point.y<0||point.x>=s->width||point.y>=s->height)return 0;
+         // One pointer ID cannot represent two simultaneous contacts. A fresh
+         // DOWN for our held ID proves the previous UP was lost, unlike a second
+         // finger which must never replace the admitted owner.
+         if(s->touchContact&&s->touchPointerId==pointerId){
+           auto* owner=s->owner;const auto state=owner->current;
+           owner->stopInteraction(state);
+           if(!owner->owns(state)||state->inputWindow!=h)return 0;
+           owner->syncInteraction(state);
+           if(!owner->owns(state)||state->inputWindow!=h||!IsWindowVisible(h))return 0;
+         }
+         if(s->touchContact||s->mouseContact||point.x<0||point.y<0||point.x>=s->width||point.y>=s->height)return 0;
          s->touchContact=true;s->touchPointerId=pointer.pointerId;s->touchType=pointer.pointerType;
        }else if(!s->touchContact||s->touchPointerId!=pointer.pointerId)return 0;
        const auto phase=cancelled?screeninput::Phase::Cancel:m==WM_POINTERDOWN?screeninput::Phase::Down:m==WM_POINTERUP?screeninput::Phase::Up:screeninput::Phase::Move;
@@ -333,7 +356,8 @@ class Carrier {
    if(e.type!=PT_TOUCH&&e.type!=PT_PEN&&e.type!=PT_MOUSE)return;
    auto* raw=static_cast<State*>(context);if(!raw||raw->inputSuspended||!raw->owner)return;
    auto* owner=raw->owner;auto s=owner->current;if(!s||s.get()!=raw||!owner->owns(s)||!IsWindowVisible(s->hwnd)||!s->inputWindow||source!=s->inputWindow||!IsWindowVisible(s->inputWindow))return;
-   POINT p{(LONG)std::lround(e.x),(LONG)std::lround(e.y)};if(!ClientToScreen(s->inputWindow,&p))return;
+   POINT p{(LONG)std::lround(e.x),(LONG)std::lround(e.y)};
+   if(!ClientToScreen(s->inputWindow,&p)){owner->stopInteraction(s);return;}
    if(e.phase==screeninput::Phase::Down&&(e.x<0||e.y<0||e.x>=s->width||e.y>=s->height))return;
    const auto tick=GetTickCount64();const auto at=huddrag::sourceEventTick(tick,e.sourceTime,e.timeKnown);const bool cancelled=e.cancelled||e.phase==screeninput::Phase::Cancel;
    const bool wheelHold=owner->config.radialSummon&&owner->config.radialHoldEnabled&&owner->config.radialHoldEnabled();
@@ -414,20 +438,23 @@ class Carrier {
    // Revalidate before showing/raising, including returning-game and data events.
    // Fail closed: an invalid display HWND may not become an input blocker.
    if(!hudinput::ensure(s->hwnd)){s->armed=false;s->reason="input-transparency-lost";hideOutput(s.get());emit(s,"desktopHud.unavailable");return;}
-   if(s->ready){
-     const auto viewport=viewportInfo(*s);const auto key=viewport.dump();
-     if(key!=s->viewportKey){s->viewportKey=key;s->layout=false;hideOutput(s.get(),!s->armed);send(s,{{"event","desktopHud.viewport"},{"data",viewport}});return;}
-   }
-   RECT r{};const HWND foreground=GetForegroundWindow();
-   const bool eligible=s->ready&&s->armed&&s->layout&&s->expires>wallNow()&&clientArea(*s,r)&&
-     (s->global||foreground==s->target->window||GetAncestor(foreground,GA_ROOT)==s->target->window);
-   if(!eligible){hideOutput(s.get(),!s->ready||!s->armed||s->expires<=wallNow());return;}
+   // Conditional denial owns all three surfaces even during layout warmup.
+   // A hidden top-level HWND alone cannot prove its WebView/input tree is idle.
+   const HWND foreground=GetForegroundWindow();
    if(!policyPermits(*s,foreground)){
-     if(IsWindowVisible(s->hwnd))hideOutput(s.get());
+     hideOutput(s.get());
      s->reason=s->visibility==hudvisibility::Mode::GameRunning?"waiting-game":"waiting-game-focus";
      if(!s->policyWaiting){s->policyWaiting=true;++s->visibilityRevision;emit(s,"desktopHud.prepared");}
      return;
    }
+   if(s->ready){
+     const auto viewport=viewportInfo(*s);const auto key=viewport.dump();
+     if(key!=s->viewportKey){s->viewportKey=key;s->layout=false;hideOutput(s.get(),!s->armed);send(s,{{"event","desktopHud.viewport"},{"data",viewport}});return;}
+   }
+   RECT r{};
+   const bool eligible=s->ready&&s->armed&&s->layout&&s->expires>wallNow()&&clientArea(*s,r)&&
+     (s->global||foreground==s->target->window||GetAncestor(foreground,GA_ROOT)==s->target->window);
+   if(!eligible){hideOutput(s.get(),!s->ready||!s->armed||s->expires<=wallNow());return;}
    const bool resumed=s->policyWaiting;s->policyWaiting=false;s->reason="active";
    RECT monitor=r;if(s->global&&!monitorArea(*s,monitor))return;
    const auto area=[](const RECT& v){return hudplacement::Area{static_cast<int>(v.left),static_cast<int>(v.top),static_cast<int>(v.right),static_cast<int>(v.bottom)};};
@@ -490,7 +517,7 @@ class Carrier {
        s->width=(int)std::ceil(w);s->height=(int)std::ceil(h);s->position=p;s->layout=true;refresh(s);response["result"]=true;
        if(IsWindowVisible(s->hwnd)&&s->paintedSeq!=s->seq){s->paintedSeq=s->seq;emit(s,"desktopHud.painted");}
      }else if(cmd=="desktopHud.close"){
-       response["result"]=true;send(s,response);close(s->id,s->nonce,"renderer-close");return;
+       response["result"]=true;send(s,response);retireFromRenderer(s);return;
      }else throw std::runtime_error("Desktop HUD is display-only; command denied");
    }catch(const std::exception& e){response["error"]=e.what();}
    send(s,response);
@@ -539,14 +566,14 @@ class Carrier {
      if(msg==WM_MOUSEACTIVATE)return MA_NOACTIVATE;
      if(msg==WM_ERASEBKGND)return 1;
      if(msg==WM_SIZE&&s->controller){RECT r{};GetClientRect(hwnd,&r);s->controller->put_Bounds(r);if(s->device)s->device->Commit();return 0;}
-     if(msg==updateMessage&&s->failed){if(s->owner&&s->owner->current.get()==s)s->owner->close(s->id,s->nonce,s->reason);return 0;}
+     if(msg==updateMessage&&(s->failed||s->retiring)){if(s->owner&&s->owner->current.get()==s)s->owner->close(s->id,s->nonce,s->reason);return 0;}
      if(msg==updateMessage){s->queued=false;const bool raise=s->queuedRaise;s->queuedRaise=false;if(s->owner&&s->owner->current.get()==s)s->owner->refresh(s->owner->current,raise);return 0;}
      if(msg==WM_TIMER&&w==radialFadeTimer){KillTimer(hwnd,radialFadeTimer);if(s->owner&&s->owner->radialSuspended){
        const auto now=GetTickCount64(),deadline=s->owner->radialHideAt;
        if(deadline>now){if(!SetTimer(hwnd,radialFadeTimer,(UINT)(deadline-now),nullptr))hideOutput(s);}
        else hideOutput(s);
      }return 0;}
-     if(msg==WM_TIMER&&w==leaseTimer&&s->failed){if(s->owner&&s->owner->current.get()==s)s->owner->close(s->id,s->nonce,s->reason);return 0;}
+     if(msg==WM_TIMER&&w==leaseTimer&&(s->failed||s->retiring)){if(s->owner&&s->owner->current.get()==s)s->owner->close(s->id,s->nonce,s->reason);return 0;}
      if(msg==WM_TIMER&&w==leaseTimer&&s->notice&&!s->ready){s->owner->close(s->id,s->nonce,"notice-renderer-ready-timeout");return 0;}
      if(msg==WM_TIMER&&w==leaseTimer){KillTimer(hwnd,leaseTimer);s->armed=false;s->reason="parent-data-lease-expired";hideOutput(s);if(s->notice)s->owner->send(s->owner->current,{{"event","monitorNotice.hide"},{"data",Json::object()}});if(s->owner&&s->owner->current.get()==s)s->owner->emit(s->owner->current,"desktopHud.expired");return 0;}
      if(msg==WM_CLOSE){if(s->owner)s->owner->close(s->id,s->nonce,"window-close");return 0;}
@@ -724,13 +751,23 @@ public:
    if(shape!=s->layoutKey){s->layoutKey=shape;s->layout=false;hideOutput(s.get());RECT r{};if(clientArea(*s,r))SetWindowPos(s->hwnd,nullptr,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE|SWP_NOZORDER);}
    s->seq=seq;s->expires=expires;s->armed=payload.value("show",false);s->reason=s->armed?"active":"hidden";
    KillTimer(s->hwnd,leaseTimer);SetTimer(s->hwnd,leaseTimer,(UINT)std::max(1ULL,expires-now),nullptr);
-   if(s->armed&&s->controller&&FAILED(s->controller->put_IsVisible(TRUE))){s->armed=false;hideOutput(s.get());return false;}
+   // Layout/data messages may still be processed by an invisible controller.
+   // Only an admitted visibility policy may warm the renderer for measurement.
+   // Recheck in refresh before showing native/input HWNDs after COM callbacks.
+   if(s->armed&&policyPermits(*s,GetForegroundWindow())){
+     if(s->controller&&FAILED(s->controller->put_IsVisible(TRUE))){s->armed=false;hideOutput(s.get());return false;}
+   }else hideOutput(s.get());
    // Identical JSON event bytes; serialize the body once, without a JSON-tree copy.
    if(s->view&&!s->closed)s->view->PostWebMessageAsJson(wide(hudserialization::desktopFrameEvent(body)).c_str());
    refresh(s);return true;
  }
  bool close(int id,const std::string& nonce,const std::string& reason="explicit-close"){
    auto s=current;if(!s)return true;if(s->id!=id||s->nonce!=nonce)return false;
+   // COM/Win32 teardown may reenter the same carrier. Pending destruction is
+   // not a completed close ACK and must not run Close or publish twice.
+   if(s->closing)return false;
+   s->closing=true;
+   struct ClosingScope {bool& active;~ClosingScope(){active=false;}} closing{s->closing};
    if(s->notice&&s->noticeLease==noticeLeaseSerial&&s->nonce==noticeLeaseNonce)noticeLeaseRetired=true;
    s->closed=true;s->ready=false;s->armed=false;s->reason=reason;stopInteraction(s,true);unhook();
    if(s->hwnd){KillTimer(s->hwnd,leaseTimer);KillTimer(s->hwnd,radialFadeTimer);hideOutput(s.get());}

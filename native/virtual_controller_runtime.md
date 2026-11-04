@@ -59,6 +59,12 @@ R4物理旧卡死恢复、关闭后实体归还、强制重启、连续睡眠、
 
 定向CLI为`node tools/input_coordinator_lifecycle_selftest.mjs --out <新绝对目录> --suite late-hide-publication`；`--product-before <带MANIFEST的原生产代码目录>`要求指定两条旧失败。`late-hide-current`同一编译候选分别执行pending和publication两种实际消费者，不共享case状态。全局场景`controller.msi-late-hide-pending`将这组交接与重复隐藏护栏纳入full回归。R5冻结包只包含前一轮空pending/token0修复，不含本次新增发布顺序修正。
 
+## 呼出隔离设置
+
+控制器页「呼出隔离」保存于 `input.ownership.frontendIsolationEnabled`，旧配置缺失/类型无效时默认开启，明确 `false` 时放行 YMCC 主窗口前景期间的手柄输出。`gamepadUiInputEligible` 继续只负责导航资格；`gamepadUiOutputIsolationEligible` 统一负责可关闭的主窗口输出隔离，独立轮盘/子窗口交接仍使用原所有权保护。
+
+同一个设置同时接到最终虚拟输出与本机手柄的前景隐藏入口。设置变化只发布原子状态并排入现有 native lease 归还工作，不在设置回调中操作驱动、不切换虚拟类型；无源、物理借用、切换、退出保护不受该设置覆盖。开机在旧设置目录迁移后、窗口创建前加载，热路径不新增读盘或设备扫描。关闭设置时原 native 隐藏项由原生命周期 owner 完成归还，无法证实归还时继续保留原债务。
+
 ## 修改位置
 
 | 要改的行为 | 实际生产入口 | 责任 |
@@ -86,6 +92,14 @@ R4物理旧卡死恢复、关闭后实体归还、强制重启、连续睡眠、
 关闭执行和最终检查共用 `inputHostDisabledCleanupProvenLocked`：只按实际资源与归还债务证明完成；微星物理归还债务必须由合格回读解除。`StartBlocked` 是后续开启权限，不是尚欠的关闭资源，不靠清掉它伪造成功。
 
 UI屏蔽用实际绑定persona和Host epoch，不用尚未执行的玩家请求代替。源、Host准备/中性回执、电源和现有写入门仍在原消费者实时复核；不能把这些活状态缓存成“机型能力”。不要把“YMCC有焦点”改成Stop/Start，也不要在此改OEM服务屏蔽或全局按键呼出。
+
+## 联想家族接入边界
+
+既有总库将 Lenovo SystemModel 分到 Tablet、Tablet2、SZ1、SZ2 四个具体类，共用基类与主板名不是独立型号。标准输入继续调用 `HcControllerInputCapabilityCatalog.bindStandardInput` 的当前 XInput provider，OEM/反馈/体感分别由原绑定消费者取得；motion-only vendor collection 不授予标准输入或隐藏权限，缺可选能力不禁止整个虚拟目标。
+
+已解析联想家族在原 `hidHideApplyPhysicalTransaction` 中使用现有完整配置判据：新隐藏及 retained journal 返回成功前都确认非空完整目标、cloak、程序豁免和 inverse=off；逆向/未知/漏项不报配置已验证，不覆写第三方设置，不增加重试预算。retained journal 继续只代表应归还责任。标准读源与隐藏源的同 slot/path/container/代次是独立证明，配置通过不代替它。
+
+当前 Lenovo native-OFF 前景隔离仍为 Unsupported；三种虚拟输出的公共呼出中性化不能转授 ROG root-cycle 或未登记设备写权限。GO S 与 Tablet vendor 协议、可拆左右 bank 和无线状态来源必须分别核对，修改与 motion/vendor 单写者协调。
 
 ## 唯一执行周期
 
@@ -421,3 +435,51 @@ VC-ROGX-AMPM-20261023-R1 保留真实HID/XUSB识别，分离实体停启权限�
 `msiNativeForegroundFacts`沿原Host锁读取`inputHostTargetReturnHistorySettledLocked`缓存：历史责任未结时不进入native-only借用/隐藏。`inputHostTargetReturnColdPassLocked`持盘结清，并确认原OFF/power/exit上下文仍有效后，复用`msiNativeForegroundUiEvent(true)`把当前前台意图交回原队列。禁止新建第二个请求、计时器或重试；不会用模式名/写入ACK替代归还证明。原R3的30秒/10秒/一次保底与三次cold观察保持。证据：工作区Testing/YMCC/Evidence/VC-Win5Return26-R9/DELIVERY.json。
 
 原coordinator可显式选择`off-lifecycle`或`family-lifecycle`；后者复用原first/Start/success/close，共9个GPD/OneX/AYA人格变体加物理Deck禁止自模拟负例。受控DMI来自能力库声明，但不冒充总库运行解析或硬件验收，不赋OneX/AYA未实现的native写能力。
+
+
+## 2026-11-03：ROG 首次延迟隐藏的刷新责任（R3 内补齐，不新建生命周期）
+
+114820 的空 journal 门缺口已有 deferred Start 责任。131128 现场 PID11164 的前两代实际补 hide/readback 成功，Steam 仍持续枚举 0B05:1B4C 实体与 28DE:1205 虚拟两入口；因此 `applied`、hidden list 和旧 `hideCycle=true` 初值均不是外部单手柄证明。
+
+新增行为仅限 ROG：原 source-pending Start 在没有 active journal 时保存一次刷新责任。源归来后先沿原 `hide(false)` 完成配置，再由 `inputHostDeferredPhysicalHideRefreshLocked` 对该 journal 精确自有、经原 ROG 型号/game-root 规则及原 USB 拓扑权威证实内置的同一 USB root，沿原 `hidHideCycleInstance` 至多尝试一次刷新。继承 journal、普通 reconnect、045E 外接源和其他家族不新增 cycle；OFF/归还链、能力总库、用户 persona 均不变。
+
+全部写入继承同 request/run/Host/power/persona 与原绝对 30 秒；cycle 的 pipe 预算不超过 5 秒或原剩余时间，实际 issue 前仍验证源与意图。busy 未结只延期，不补新预算；失败/未知 ACK 保留责任，不报完成且不重新发 cycle。成功 ACK 后允许该次刷新自身造成短暂掉源，但仍复验原意图和 deadline；sourceGen 变化不是重新 arm 或重复 cycle 的许可。这个同步 CyclePort 可能造成数秒采集/帧空窗，不能称无缝或硬件通过。
+
+同包后两代的 `refused-deferred-start-context` 没有具体 guard 事实，不能断言超时或旧 Stop 清债。保留原判据，完成行增加首个拒绝原因及 worker/transaction 阶段，不因该候选扩大共享采样链或放宽权限。原定向夹具扩展其 ROG 场景与语义反例；模拟不执行驱动操作，不代替 Steam 外部单虚拟与 OFF 实体归还验收。证据根：`G:/YeManCC-Work/Testing/YMCC/Evidence/VC-ROG-DoubleController-20261103-131128`。
+
+
+## 2026-11-03：ROG 首次无身份掉源在目标创建前接回
+
+151907 PID10440的头两次SD开启：原pretarget槽先准入，native归还刷新时RawInput身份尚空；掉源后expected/current均空，原严格reconfirm正确拒绝，locked/sourceMask0又阻止late-admission，两次原30秒过期。切PS5后的新轮才形成完整身份并沿原刷新恢复。
+
+`ymStartRecoverRogPendingIdentity` 是原inputHostStart在HELLO后、首次hide/PREPARE前的一次执行补强，仅ROG的原HID型目标请求、无已创建或可能已创建目标、无journal。原单槽pending、空身份和未解析selected、完整当前四槽边界、slot resolvedEpoch及无reprobe均成立后，复用原完整唯一PnP扫描与内置ROG game-root/USB拓扑权威，锁外读取、try-lock提交并重验原ticket/Host/power/意图/期限/缓存代次，再进入原ymStartAdmitSource。不会令空身份相等、替换已知源或在已发布目标后换源。
+
+该执行补强不新发cycle、不新建timer/常驻扫描或第二自愈周期，也不续期。正常初始hide仍可能走原CyclePort。扫描/锁/身份无法证明则仍按原source-pending处理，不把unknown报成功。OFF改善与其他家族不变。原夹具19/437通过，含实际Start接线及精确回退4FAIL；这不等于硬件或Steam单手柄验收。通用双入口的一次保底与不同第二方法由用户另交“风扇 (2)”推进，继续遵守原R3预算、唯一出口及已知操作排除。
+
+
+## 2026-11-03：虚拟手柄常驻成功帧回执精简（CPU1/CPU2，仍在稳定性核验）
+
+共享主线候选使用每次成功 PREPARE_TARGET/RECREATE_TARGET 新生成的 256-bit 随机 frameReplyBinding，将回复格式绑定到当前 HostSession 的实际 controller 对象。完整 target-prepared 回执经过原 tuple、Host instance、asset、目标 PnP 准入后，native 才记住该值；完整回执的全部原附加器运行结束后，Host 按 UTF-8 16KiB 预算附加 token，空间不足则保持原完整格式。旧 caller 不请求此格式，旧 Host 不提供 token，两端继续原路径。
+
+请求仍保留原完整 nonce/tuple/sequence/帧内容与新鲜度验证；仅该次请求明确附上当前 token 后，成功 SUBMIT_FRAME/frame-accepted 可回 compactFrameReplyVersion=1、协议版本、请求 ID、序号、token、状态、firstFrame、submitElapsedUs 及原动态附加字段。每次 ACK 重新生成，原游戏输出/电机 revision/stop 附加链不缓存；输入采集、SDK report 节奏、来源守卫和恢复预算不变。Native 附 token 增加 87 字节，接近 16KiB 上限时该次仍请求完整 ACK。超时或拒绝不自动补发同一帧。
+
+有效序号后的旧/错误 token 在 SDK 调用前返回完整 state-rejected/frame-reply-binding-mismatch，按原 post-sequence 拒绝合同消费该命令。目标替换、QUIESCE、RELEASE、SHUTDOWN 及实际本地 teardown 撤销绑定；熵生成失败只影响可选格式。Native 退役/HELLO 与相关生命周期命令也撤销所记 token，不能靠相同 PID、run/epoch 或旧 PREPARE 回执授权另一目标的紧凑回复。
+
+紧凑回执的 fast 与 DOM 回退都检查本次请求 token、动态请求身份及严格无符号版本/序号；DOM 只能在完整 raw message 经 observeWire 检查（非空、16KiB 内、无裸 NUL）、无重复关键键、无混合 legacy 身份字段后投影已绑定身份。旧完整 DOM 的已有兼容语义不被此协议放宽。定向测试发现的版本截断/浮点转换缺陷已经修复，原失败保留。
+
+本阶段没有 CPU 降幅或整体虚拟手柄稳定性验收。真实当前 Host 构建通过；原生 3ad0ba74 epoch 的 Release/Checked 定向各409条/1378断言通过，私有 Win32 pipe 每配置5条/193分片通过。其后 native 只增加87B请求预算守卫，另记源码身份及编译结果，不倒签旧回执为新 whole-main 验收。实际产品 pipe/完整 timeout 事务仍受旧生命周期夹具闭包缺口限制，未知项保留；完整夹具默认 NOT_RUN。固定成本尚未执行，876→271字节仅是同语义离线样例的 ACK 体积差异。
+
+证据入口：G:/YeManCC-Work/Testing/YMCC/Evidence/VirtualGamepadSteadyState-20261103/CompactFrameReply/。旧2026-10-25 UTC成本有界归因位于同专项 LegacyLogAttribution，不能冒当前版本基线。新 native 诊断入口仅显式 tools/fixtures/inputhost_compact_reply/native.mjs --out <该证据根下新目录> --case-group compact-regressions，续作消费原 --budget-ledger；不增加默认minimum、父门或产品启动项。
+
+
+## VC-ROG-PARTIAL-HIDE-20261103-R1 — 原执行事务半完成补齐
+
+164155现场PID11292：原SD请求已写HID子节点，USB根归还责任已持久保留，但hide事务失败，刷新未请求；Steam仍有实体与虚拟入口。此处补的是正常执行，不把它记成Stop/Start自愈。
+
+唯一接点为原late-hide worker：首次Apply失败且deferredStartHide时，仅ROG原Host/run/request/power/persona与原截止仍有效、writer结清、原内置完整身份与owned HID/root责任都明确，读回恰好一项已隐藏一项缺失，才进入一次原事务补齐。共享debt.executionContinuationAttempted先消费，不因同源通知重置；refreshAttempted仍独立控制原一次cycle。无新定时器、常驻扫描或target。
+
+补齐复用原active Apply/Refresh与BeforeHide的持久归还责任，TLS同时钉住原完整物理identity、root、HID和两项目标集合。实际Refresh的新发现或目标集合漂移立即拒绝；其第二份配置快照也必须有效、cloak on、应用登记且inverse off。补写接受后再次读回全部配置/原两项目标，重新确认Host transport、writer与原意图，才允许原单次根刷新。端口ACK可能导致短暂掉源，仍沿用原IntentCurrent收尾，不要求错误地立即source live。
+
+未知或失败保留责任，不授权第二次补齐/循环cycle。日志input-host-rog-hide-continuation区分write accepted/readback/configurationCompleted，仍不把配置读回称作Steam外部抑制证明。共用最终检查和Stop/Start保底由原R3自愈独立维护；非ROG、已有完整隐藏、OFF归还改善与玩家SD/PS5选择保持。
+
+原controller.msi-late-hide-pending在原19个场景中扩ROG/ROG-X反例；旧FAIL与旧437范围保持。新实际检查数和运行身份以后续独立执行回执为准，不能仅凭本注释计PASS。

@@ -13,6 +13,12 @@ struct Shared {
     std::atomic<DWORD> createdThread{0},destroyedThread{0};
     HANDLE readEntered=CreateEventW(nullptr,TRUE,FALSE,nullptr),release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     bool block=false,freeze=false,noTimestamp=false,missingAxis=false,denied=false,ambiguous=false,noSensors=false;
+    bool sdk=false,standardType=false,typed=false,categoryNull=false,categoryEmpty=false,typedNull=false,duplicateAccel=false,blockType=false;
+    HRESULT categoryResult=S_OK,gyroTypeResult=S_OK,accelTypeResult=S_OK;
+    std::atomic<unsigned> categoryCalls{0},gyroTypeCalls{0},accelTypeCalls{0};
+    std::vector<std::pair<std::string,HRESULT>> diagnostics;
+    std::vector<Descriptor> inventoried;
+    std::array<int,2> selected{-1,-1};
     std::mutex mx;
     std::vector<Sample> received;
     ~Shared(){CloseHandle(readEntered);CloseHandle(release);}
@@ -48,6 +54,11 @@ struct Report final : RefObject<ISensorDataReport> {
     }
     HRESULT STDMETHODCALLTYPE GetSensorValue(REFPROPERTYKEY key,PROPVARIANT* out) override {
         if(!out)return E_POINTER;
+        if(state->sdk) {
+            const DWORD first=kind==Kind::Gyro?10:2;
+            if(!IsEqualGUID(key.fmtid,kSdkMotion)||key.pid<first||key.pid>first+2||(state->missingAxis&&key.pid==first+2))return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+            *out=PROPVARIANT{};out->vt=VT_R8;out->dblVal=(kind==Kind::Gyro?10.0:100.0)+key.pid-first;return S_OK;
+        }
         if(!IsEqualGUID(key.fmtid,kClawHidMotion)||key.pid<7||key.pid>9||(state->missingAxis&&key.pid==9))return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
         *out=PROPVARIANT{};out->vt=VT_R8;out->dblVal=static_cast<double>((kind==Kind::Gyro?10:100)+key.pid);return S_OK;
     }
@@ -59,7 +70,7 @@ struct Sensor final : RefObject<ISensor> {
     ~Sensor(){--state->sensors;}
     HRESULT STDMETHODCALLTYPE GetID(SENSOR_ID* out) override {if(!out)return E_POINTER;*out=id;return S_OK;}
     HRESULT STDMETHODCALLTYPE GetCategory(SENSOR_CATEGORY_ID* out) override {if(!out)return E_POINTER;*out=kAllSensors;return S_OK;}
-    HRESULT STDMETHODCALLTYPE GetType(SENSOR_TYPE_ID* out) override {if(!out)return E_POINTER;*out=GUID{};return S_OK;}// EX-style custom type filtered by WinRT.
+    HRESULT STDMETHODCALLTYPE GetType(SENSOR_TYPE_ID* out) override {if(!out)return E_POINTER;if(state->standardType){*out=kind==Kind::Gyro?kGyroType:kAccelType;return S_OK;}*out=GUID{};return S_OK;}// EX-style custom type filtered by WinRT.
     HRESULT STDMETHODCALLTYPE GetFriendlyName(BSTR* out) override {if(!out)return E_POINTER;*out=SysAllocString(kind==Kind::Gyro?L"Physical Gyrometer":L"Physical Accelerometer");return *out?S_OK:E_OUTOFMEMORY;}
     HRESULT STDMETHODCALLTYPE GetProperty(REFPROPERTYKEY key,PROPVARIANT* out) override {
         if(!out)return E_POINTER;*out=PROPVARIANT{};
@@ -71,10 +82,10 @@ struct Sensor final : RefObject<ISensor> {
     }
     HRESULT STDMETHODCALLTYPE GetProperties(IPortableDeviceKeyCollection*,IPortableDeviceValues** out) override {if(out)*out=nullptr;return E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE GetSupportedDataFields(IPortableDeviceKeyCollection** out) override {
-        if(!out)return E_POINTER;auto* keys=new Keys;for(DWORD p=7;p<=9;++p)keys->keys.push_back(PROPERTYKEY{kClawHidMotion,p});*out=keys;return S_OK;
+        if(!out)return E_POINTER;auto* keys=new Keys;if(state->sdk){const DWORD first=kind==Kind::Gyro?10:2;for(DWORD p=first;p<=first+2;++p)keys->keys.push_back(PROPERTYKEY{kSdkMotion,p});*out=keys;return S_OK;}for(DWORD p=7;p<=9;++p)keys->keys.push_back(PROPERTYKEY{kClawHidMotion,p});*out=keys;return S_OK;
     }
     HRESULT STDMETHODCALLTYPE SetProperties(IPortableDeviceValues*,IPortableDeviceValues** out) override {++state->writes;if(out)*out=nullptr;return E_ACCESSDENIED;}
-    HRESULT STDMETHODCALLTYPE SupportsDataField(REFPROPERTYKEY key,VARIANT_BOOL* out) override {if(!out)return E_POINTER;*out=IsEqualGUID(key.fmtid,kClawHidMotion)&&key.pid>=7&&key.pid<=9?VARIANT_TRUE:VARIANT_FALSE;return S_OK;}
+    HRESULT STDMETHODCALLTYPE SupportsDataField(REFPROPERTYKEY key,VARIANT_BOOL* out) override {if(!out)return E_POINTER;if(state->sdk){const DWORD first=kind==Kind::Gyro?10:2;*out=IsEqualGUID(key.fmtid,kSdkMotion)&&key.pid>=first&&key.pid<=first+2?VARIANT_TRUE:VARIANT_FALSE;return S_OK;}*out=IsEqualGUID(key.fmtid,kClawHidMotion)&&key.pid>=7&&key.pid<=9?VARIANT_TRUE:VARIANT_FALSE;return S_OK;}
     HRESULT STDMETHODCALLTYPE GetState(SensorState* out) override {if(!out)return E_POINTER;*out=state->denied?SENSOR_STATE_ACCESS_DENIED:SENSOR_STATE_READY;return S_OK;}
     HRESULT STDMETHODCALLTYPE GetData(ISensorDataReport** out) override {
         if(!out)return E_POINTER;*out=nullptr;
@@ -103,11 +114,31 @@ struct Manager final : RefObject<ISensorManager> {
         ++state->managers;state->createdThread=GetCurrentThreadId();collection.Attach(new Collection);
         if(!state->noSensors){ComPtr<ISensor> gyro;gyro.Attach(new Sensor(state,Kind::Gyro,1));collection->sensors.push_back(gyro);
             if(state->ambiguous){ComPtr<ISensor> extra;extra.Attach(new Sensor(state,Kind::Gyro,3));collection->sensors.push_back(extra);}
-            ComPtr<ISensor> accel;accel.Attach(new Sensor(state,Kind::Accel,2));collection->sensors.push_back(accel);}
+            ComPtr<ISensor> accel;accel.Attach(new Sensor(state,Kind::Accel,2));collection->sensors.push_back(accel);
+            if(state->duplicateAccel){ComPtr<ISensor> extra;extra.Attach(new Sensor(state,Kind::Accel,4));collection->sensors.push_back(extra);}}
     }
     ~Manager(){state->destroyedThread=GetCurrentThreadId();--state->managers;}
-    HRESULT STDMETHODCALLTYPE GetSensorsByCategory(REFSENSOR_CATEGORY_ID,ISensorCollection** out) override {return collection.CopyTo(out);}
-    HRESULT STDMETHODCALLTYPE GetSensorsByType(REFSENSOR_TYPE_ID,ISensorCollection** out) override {if(out)*out=nullptr;return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE GetSensorsByCategory(REFSENSOR_CATEGORY_ID,ISensorCollection** out) override {
+        if(!out)return E_POINTER;*out=nullptr;++state->categoryCalls;
+        if(FAILED(state->categoryResult))return state->categoryResult;
+        if(state->categoryNull)return S_OK;
+        if(state->categoryEmpty){*out=new Collection;return S_OK;}
+        return collection.CopyTo(out);
+    }
+    HRESULT STDMETHODCALLTYPE GetSensorsByType(REFSENSOR_TYPE_ID type,ISensorCollection** out) override {
+        if(!out)return E_POINTER;*out=nullptr;
+        const bool gyro=IsEqualGUID(type,kGyroType),accel=IsEqualGUID(type,kAccelType);
+        if(!gyro&&!accel)return E_INVALIDARG;
+        if(gyro)++state->gyroTypeCalls;else ++state->accelTypeCalls;
+        if(!state->typed)return E_NOTIMPL;
+        if(state->blockType){SetEvent(state->readEntered);WaitForSingleObject(state->release,INFINITE);}
+        const HRESULT result=gyro?state->gyroTypeResult:state->accelTypeResult;
+        if(FAILED(result))return result;
+        if(state->typedNull)return S_OK;
+        ComPtr<Collection> filtered;filtered.Attach(new Collection);
+        for(const auto& sensor:collection->sensors){GUID actual{};if(SUCCEEDED(sensor->GetType(&actual))&&IsEqualGUID(actual,type))filtered->sensors.push_back(sensor);}
+        return filtered.CopyTo(out);
+    }
     HRESULT STDMETHODCALLTYPE GetSensorByID(REFSENSOR_ID,ISensor** out) override {if(out)*out=nullptr;return E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE SetEventSink(ISensorManagerEvents*) override {++state->writes;return E_ACCESSDENIED;}
     HRESULT STDMETHODCALLTYPE RequestPermissions(HWND,ISensorCollection*,BOOL) override {++state->permissions;return E_ACCESSDENIED;}
@@ -119,7 +150,37 @@ static Options options(const std::shared_ptr<Shared>& state,UINT64 generation=1)
     Options out;out.generation=generation;out.clawHidCompatible=true;
     out.managerFactory=[state](ISensorManager** manager){if(!manager)return E_POINTER;*manager=new Manager(state);return S_OK;};
     out.sample=[state](const Sample& sample){std::lock_guard<std::mutex> lock(state->mx);state->received.push_back(sample);++state->samples;};
+    out.diagnostic=[state](const char* event,HRESULT hr){std::lock_guard<std::mutex> lock(state->mx);state->diagnostics.emplace_back(event,hr);};
+    out.inventory=[state](const std::vector<Descriptor>& inventory,int gyro,int accel){std::lock_guard<std::mutex> lock(state->mx);state->inventoried=inventory;state->selected={gyro,accel};};
     return out;
+}
+static std::shared_ptr<Shared> typedState() {
+    auto state=std::make_shared<Shared>();state->sdk=state->standardType=state->typed=true;
+    state->categoryResult=HRESULT_FROM_WIN32(ERROR_NOT_FOUND);return state;
+}
+static Options typedOptions(const std::shared_ptr<Shared>& state,UINT64 generation=61) {
+    auto out=options(state,generation);out.clawHidCompatible=false;return out;
+}
+static bool diagnosed(const Shared& state,const char* event,HRESULT hr) {
+    for(const auto& entry:state.diagnostics)if(entry.first==event&&entry.second==hr)return true;
+    return false;
+}
+// Called only after the owning worker has drained; expose the actual callbacks,
+// not reconstructed readings, in the original test's raw output.
+static void traceTyped(const char* scenario,const Shared& state) {
+    std::cout<<"EVIDENCE scenario="<<scenario<<" samples="<<state.samples<<" gyroReads="<<state.gyroReads<<" accelReads="<<state.accelReads
+        <<" categoryCalls="<<state.categoryCalls<<" gyroTypeCalls="<<state.gyroTypeCalls<<" accelTypeCalls="<<state.accelTypeCalls
+        <<" inventory="<<state.inventoried.size()<<" selected="<<state.selected[0]<<","<<state.selected[1]
+        <<" managers="<<state.managers<<" sensors="<<state.sensors<<" reports="<<state.reports
+        <<" writes="<<state.writes<<" permissions="<<state.permissions<<" createdThread="<<state.createdThread<<" destroyedThread="<<state.destroyedThread<<"\n";
+    for(const auto& entry:state.diagnostics)std::cout<<"DIAGNOSTIC scenario="<<scenario<<" phase="<<entry.first<<" hresult="<<entry.second<<"\n";
+    std::array<bool,2> shown{};
+    for(const auto& sample:state.received) {
+        const unsigned slot=sample.kind==Kind::Gyro?0:1;if(shown[slot])continue;shown[slot]=true;
+        std::cout<<"SAMPLE scenario="<<scenario<<" kind="<<(slot==0?"gyro":"accel")<<" id="<<guidString(sample.descriptor.id)
+            <<" type="<<guidString(sample.descriptor.type)<<" layout="<<sample.layout<<" axes="<<sample.axes[0]<<","<<sample.axes[1]<<","<<sample.axes[2]
+            <<" timestamp100ns="<<sample.timestamp100ns<<" generation="<<sample.generation<<" receiptTick="<<sample.receiptTick<<"\n";
+    }
 }
 int main() {
     unsigned cases=0,failed=0;
@@ -195,6 +256,78 @@ int main() {
     {
         Provider provider;Options bad;std::atomic<unsigned> errors{0};bad.managerFactory=[](ISensorManager** out){*out=nullptr;return S_OK;};bad.diagnostic=[&](const char*,HRESULT){++errors;};
         provider.start(std::move(bad));check("invalid null COM result fails without dereferencing",await([&]{return !provider.running();})&&provider.stop(1500)&&errors==1);
+    }
+    {
+        auto state=typedState();Provider provider;
+        check("category ERROR_NOT_FOUND starts actual typed fallback",provider.start(typedOptions(state,61)));
+        check("typed SDK gyro and accel actually publish from poll",await([&]{return state->gyroReads>0&&state->accelReads>0&&state->samples>=2;}));
+        check("typed fallback normal stop settles owner",provider.stop(1500)&&provider.stopped());
+        bool gyro=false,accel=false,values=true;
+        for(const auto& sample:state->received){const bool g=sample.kind==Kind::Gyro;gyro|=g;accel|=!g;values&=sample.axes==(g?std::array<double,3>{10,11,12}:std::array<double,3>{100,101,102})&&sample.layout==(g?"sdk-motion-gyro-dps":"sdk-motion-accel-g")&&sample.generation==61&&sample.timestamp100ns>=134361240000100000ull;}
+        check("typed samples retain SDK layout raw axes timestamp and generation",gyro&&accel&&values);
+        check("typed complete inventory precedes unique pair selection",state->inventoried.size()==2&&state->selected==std::array<int,2>{0,1}&&state->categoryCalls==1&&state->gyroTypeCalls==1&&state->accelTypeCalls==1);
+        check("fallback diagnostics retain category HRESULT and both typed outcomes",diagnosed(*state,"enumeration-category-failed",HRESULT_FROM_WIN32(ERROR_NOT_FOUND))&&diagnosed(*state,"enumeration-gyro-type-result",S_OK)&&diagnosed(*state,"enumeration-accel-type-result",S_OK)&&diagnosed(*state,"enumeration-source-types",S_OK));
+        check("typed references drain on the original MTA without writes",state->managers==0&&state->sensors==0&&state->reports==0&&state->createdThread==state->destroyedThread&&state->writes==0&&state->permissions==0);
+        traceTyped("typed-success",*state);
+    }
+    for(unsigned empty=0;empty<2;++empty) {
+        auto state=typedState();state->categoryResult=S_OK;state->categoryNull=empty==0;state->categoryEmpty=empty==1;Provider provider;
+        provider.start(typedOptions(state));const bool delivered=await([&]{return state->samples>=2;});provider.stop(1500);
+        check(empty==0?"successful null category collection uses typed fallback":"successful empty category collection uses typed fallback",delivered&&state->gyroTypeCalls==1&&state->accelTypeCalls==1&&diagnosed(*state,"enumeration-category-empty",S_OK));
+    }
+    for(HRESULT failure:{E_ACCESSDENIED,E_FAIL}) {
+        auto state=typedState();state->categoryResult=failure;Provider provider;provider.start(typedOptions(state));
+        const bool ended=await([&]{return !provider.running();})&&provider.stop(1500);
+        check("category permission or other failure cannot be hidden by typed fallback",ended&&state->samples==0&&state->gyroTypeCalls==0&&state->accelTypeCalls==0&&diagnosed(*state,"enumeration-failed",failure));
+    }
+    for(unsigned failure=0;failure<4;++failure) {
+        auto state=typedState();if(failure==0){state->gyroTypeResult=E_ACCESSDENIED;state->accelTypeResult=E_FAIL;}
+        if(failure==1)state->gyroTypeResult=E_ACCESSDENIED;
+        if(failure==2)state->accelTypeResult=E_FAIL;
+        if(failure==3)state->typedNull=true;
+        Provider provider;provider.start(typedOptions(state));const bool ended=await([&]{return !provider.running();})&&provider.stop(1500);
+        const HRESULT gyro=state->typedNull?E_POINTER:state->gyroTypeResult,accel=state->typedNull?E_POINTER:state->accelTypeResult;
+        check("failed or null requested typed collection publishes neither partial nor guessed motion",ended&&state->samples==0&&state->gyroReads==0&&state->accelReads==0&&state->gyroTypeCalls==1&&state->accelTypeCalls==1&&diagnosed(*state,"enumeration-gyro-type-result",gyro)&&diagnosed(*state,"enumeration-accel-type-result",accel));
+        check("failed typed enumeration releases all COM references",state->managers==0&&state->sensors==0&&state->reports==0);
+        traceTyped(failure==0?"typed-both-failed":failure==1?"gyro-type-failed":failure==2?"accel-type-failed":"typed-null",*state);
+    }
+    {
+        auto state=typedState();state->noSensors=true;Provider provider;provider.start(typedOptions(state));
+        check("successful empty typed inventories cannot manufacture readings",await([&]{return !provider.running();})&&provider.stop(1500)&&state->samples==0&&state->gyroReads==0&&state->accelReads==0);
+    }
+    for(bool categorySuccess:{false,true}) {
+        auto state=typedState();state->ambiguous=state->duplicateAccel=true;if(categorySuccess)state->categoryResult=S_OK;
+        Provider provider;provider.start(typedOptions(state));const bool ended=await([&]{return !provider.running();})&&provider.stop(1500);
+        check(categorySuccess?"successful category keeps all duplicate sources and never uses typed":"typed enumeration retains duplicate source ambiguity instead of picking first",ended&&state->inventoried.size()==4&&state->selected==std::array<int,2>{-1,-1}&&state->samples==0&&state->gyroReads==0&&state->accelReads==0&&state->gyroTypeCalls==(categorySuccess?0u:1u)&&state->accelTypeCalls==(categorySuccess?0u:1u));
+        traceTyped(categorySuccess?"category-ambiguous":"typed-ambiguous",*state);
+    }
+    for(bool complete:{true,false}) {
+        auto state=typedState();state->ambiguous=true;Provider provider;auto opt=typedOptions(state);GUID gyro{},accel{};gyro.Data1=1;accel.Data1=complete?2:99;opt.explicitPair=std::array<GUID,2>{gyro,accel};
+        provider.start(std::move(opt));const bool done=await([&]{return complete?state->samples>=2:!provider.running();});provider.stop(1500);
+        bool exact=true;for(const auto& sample:state->received)exact&=sample.descriptor.id.Data1==(sample.kind==Kind::Gyro?1u:2u);
+        check(complete?"typed explicit source pair selects only the two exact IDs":"incomplete typed explicit pair cannot fall back to another ID",done&&exact&&(complete?state->samples>=2:state->samples==0&&state->gyroReads==0&&state->accelReads==0));
+    }
+    for(unsigned invalid=0;invalid<3;++invalid) {
+        auto state=typedState();state->freeze=invalid==0;state->noTimestamp=invalid==1;state->missingAxis=invalid==2;Provider provider;auto opt=typedOptions(state);opt.wantAccel=false;
+        provider.start(std::move(opt));const bool read=await([&]{return state->gyroReads>=3;});provider.stop(1500);
+        check(invalid==0?"typed cached timestamps cannot fake fresh samples":invalid==1?"typed missing timestamp cannot use receipt time":"typed incomplete axes cannot publish partial data",read&&state->samples==(invalid==0?1u:0u)&&state->accelTypeCalls==0);
+    }
+    {
+        auto state=typedState();state->sdk=false;Provider provider;provider.start(typedOptions(state));const bool read=await([&]{return state->gyroReads>=3;});provider.stop(1500);
+        check("OneX standard type never borrows MSI private field layout",read&&state->samples==0&&state->inventoried.size()==2);
+    }
+    for(bool enumeration:{false,true}) {
+        auto state=typedState();state->block=!enumeration;state->blockType=enumeration;Provider provider;provider.start(typedOptions(state,71));
+        check(enumeration?"typed enumeration can block inside the owned MTA":"typed GetData can block inside the owned MTA",WaitForSingleObject(state->readEntered,1500)==WAIT_OBJECT_0);
+        const ULONGLONG before=GetTickCount64();const bool settled=provider.stop(20);
+        check("typed blocked operation has bounded stop and retains its owner",!settled&&provider.running()&&GetTickCount64()-before<500);
+        auto fresh=typedState();check("typed retired owner prevents a stacked worker",!provider.start(typedOptions(fresh,72))&&fresh->managers==0);
+        SetEvent(state->release);const bool drained=await([&]{return !provider.running();})&&provider.stop(1500);
+        check("late typed enumeration or report cannot resurrect stopped generation",drained&&state->samples==0&&state->managers==0&&state->sensors==0&&state->reports==0&&state->createdThread==state->destroyedThread&&(!enumeration||(state->inventoried.empty()&&state->accelTypeCalls==0&&state->diagnostics.size()==2)));
+        traceTyped(enumeration?"stop-late-enumeration":"stop-late-report",*state);
+        const bool resumed=provider.start(typedOptions(fresh,72))&&await([&]{return fresh->samples>=2;});provider.stop(1500);
+        bool current=true;for(const auto& sample:fresh->received)current&=sample.generation==72;
+        check("typed restart publishes only the fresh generation after owner drains",resumed&&current&&fresh->managers==0&&fresh->sensors==0&&fresh->reports==0);
     }
     std::cout<<"cases="<<cases<<" failed="<<failed<<"\n";return failed?3:0;
 }

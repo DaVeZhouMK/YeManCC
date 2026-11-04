@@ -15,11 +15,11 @@ export const STALE_SOURCE='fault-inputs/HostGameOutputObservation.stale-revision
 export const TOOL_LIMIT=1024;
 // These are independent inputs. Neither the old19 builder nor its pin is consumed.
 export const MANAGED_SOURCES=Object.freeze([
- 'InputHost/Program.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostControllerOutputStop.cs',
+ 'InputHost/Program.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs',
  'InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs',
  'InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs',
  'InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs',
- 'InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs',
+ 'InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','InputHost/CompactFrameReplyBinding.cs',
  'tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs',
  'tools/inputhost_lifecycle_selftest.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs',
  'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json',
@@ -32,14 +32,15 @@ export const NATIVE_HEADERS=Object.freeze([
  'native/game_feedback_receipt.h','native/game_feedback_source_ticket.h','native/game_feedback_dispatch.h','native/touch_haptic_dispatch.h','capabilities/HcControllerFeedbackCapabilityCatalog.h',
  'capabilities/HcControllerFeedbackCapabilityCatalog.generated.h',
  'native/input_host_pipe_transport.h','native/input_host_transaction_mutex.h',
- 'native/input_host_transport_state.h','native/input_host_selftest_rules.h','native/input_frame_submission.h',
+ 'native/input_host_transport_state.h','native/input_host_compact_frame_reply.h','native/input_host_selftest_rules.h','native/input_frame_submission.h',
  'native/virtual_output_status.h','native/controller_persona.h','native/canonical_frame_fingerprint_memo.h',
  'native/msi_input_host_transport_evidence.h','native/msi_steamdeck_release_fence_1726.h',
  'native/input_chain_command_evidence.h','native/input_chain_ack_evidence.h','native/input_host_recovery_health.h',
  'native/virtual_start_protection.h','native/input_startup_diagnostics.h','native/ps_endpoint_ownership.h',
  'native/virtual_target_return_runtime.h','native/virtual_target_return_session.h','native/virtual_target_return_store.h',
  'native/virtual_target_return_record.h','native/virtual_target_return_process.h','native/virtual_target_return_physical_path.h',
- 'native/hidhide_cli_writer_runtime.h','native/hidhide_cli_writer_store.h','native/hidhide_cli_writer_record.h',...COLD_RETURN_INPUTS
+ 'native/hidhide_cli_writer_runtime.h','native/hidhide_cli_writer_store.h','native/hidhide_cli_writer_record.h',
+ 'native/process_efficiency.h','native/native_refresh_writer_runtime.h','native/msi_focus_visibility_evidence_20261012_fa1322.h','native/hidhide_cli_job_guard.h','native/native_refresh_writer_store.h','native/native_refresh_writer_record.h',...COLD_RETURN_INPUTS
 ]);
 export const NATIVE_SOURCES=Object.freeze([
  'native/main.cpp',...NATIVE_HEADERS,'deps/json/json.hpp',
@@ -63,6 +64,7 @@ export const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 export const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
 export const need=(v,m)=>{if(!v)throw Error(m);};
 export const inside=(root,file)=>{const r=path.relative(path.resolve(root),path.resolve(file));return r===''||(!r.startsWith('..'+path.sep)&&r!=='..'&&!path.isAbsolute(r));};
+export const caseRootAllowed=root=>typeof root==='string'&&path.isAbsolute(root)&&(inside(path.join(WORKSPACE,'Build'),root)||inside(path.join(WORKSPACE,'Testing/YMCC/Evidence'),root));
 export const row=p=>({path:path.resolve(p),sha256:hash(p)});
 export function write(p,value){fs.writeFileSync(p,JSON.stringify(value,null,2)+'\n',{flag:'wx'});}
 export function artifactFiles(){
@@ -92,7 +94,7 @@ export function verifyManaged(manifestPath,caseRoot){
  for(const name of ['normalHostMainExecuted','realSdkLoaded','hardwareIo','sourceFilesEdited'])need(value[name]===false,'MANAGED_BOUNDARY:'+name);
  const binding=value.inputBindings,expected=[...MANAGED_SOURCES,...(variant==='stale-revision'?[STALE_SOURCE]:[])];
  need(binding.variant===variant&&path.resolve(binding.caseRoot)===path.resolve(caseRoot),'MANAGED_BINDING_SCOPE');
- need(binding.sources.length===expected.length&&JSON.stringify(binding.sources.map(r=>r.relative))===JSON.stringify(expected),'MANAGED_EXACT24_OR25_MEMBERSHIP_REQUIRED');
+ need(binding.sources.length===expected.length&&JSON.stringify(binding.sources.map(r=>r.relative))===JSON.stringify(expected),'MANAGED_EXACT26_OR27_MEMBERSHIP_REQUIRED');
  need(new Set(expected).size===expected.length&&binding.generatedInputs.length<=40,'MANAGED_BINDING_BOUNDS');
  verifyRows(binding.sources,'MANAGED_SOURCE_STALE');
  for(const r of binding.sources){
@@ -110,12 +112,12 @@ export function verifyManaged(manifestPath,caseRoot){
  const actual=value.evaluatedCompilerInputs,declared=new Map(binding.toolchainAllowlist.map(r=>[path.resolve(r.path).toLowerCase(),r.sha256]));
  verifyRows(actual,'ACTUAL_COMPILER_INPUT_STALE');
  for(const r of actual){need(['Compile','Reference','Analyzer','Import'].includes(r.kind),'ACTUAL_COMPILER_KIND_INVALID');if(!inside(buildRoot,r.path))need(declared.get(path.resolve(r.path).toLowerCase())===r.sha256,'UNDECLARED_ACTUAL_COMPILER_INPUT:'+r.path);}
- const compiles=actual.filter(r=>r.kind==='Compile');need(compiles.length===19&&actual.some(r=>r.kind==='Reference'),'ACTUAL19_COMPILER_LEDGER_REQUIRED');
+ const compiles=actual.filter(r=>r.kind==='Compile');need(compiles.length===21&&actual.some(r=>r.kind==='Reference'),'ACTUAL21_COMPILER_LEDGER_REQUIRED');
  const observation=binding.sources.find(r=>r.relative===(variant==='stale-revision'?STALE_SOURCE:'InputHost/HostGameOutputObservation.cs'));
- for(const [name,source]of [['HostGameOutputObservation.cs',observation],['HcControllerGameFeedbackCapabilityCatalog.generated.cs',binding.sources.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs')],['PsEndpointOwnership.cs',binding.sources.find(r=>r.relative==='InputHost/PsEndpointOwnership.cs')],['HostRuntimeBinaryIdentity.cs',binding.sources.find(r=>r.relative==='InputHost/HostRuntimeBinaryIdentity.cs')]]){
+ for(const [name,source]of [['HostGameOutputObservation.cs',observation],['HostTerminalCleanup.cs',binding.sources.find(r=>r.relative==='InputHost/HostTerminalCleanup.cs')],['CompactFrameReplyBinding.cs',binding.sources.find(r=>r.relative==='InputHost/CompactFrameReplyBinding.cs')],['HcControllerGameFeedbackCapabilityCatalog.generated.cs',binding.sources.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs')],['PsEndpointOwnership.cs',binding.sources.find(r=>r.relative==='InputHost/PsEndpointOwnership.cs')],['HostRuntimeBinaryIdentity.cs',binding.sources.find(r=>r.relative==='InputHost/HostRuntimeBinaryIdentity.cs')]]){
   const matches=compiles.filter(r=>path.resolve(r.path)===path.resolve(buildRoot,name));need(matches.length===1&&matches[0].sha256===source.sha256,'ACTUAL_UNIQUE_COMPILE_MISSING:'+name);
  }
- for(const [name,file]of [['PsEndpointOwnership','PsEndpointOwnership.cs'],['HostRuntimeBinaryIdentity','HostRuntimeBinaryIdentity.cs']]){
+ for(const [name,file]of [['PsEndpointOwnership','PsEndpointOwnership.cs'],['HostRuntimeBinaryIdentity','HostRuntimeBinaryIdentity.cs'],['CompactFrameReplyBinding','CompactFrameReplyBinding.cs'],['HostTerminalCleanup','HostTerminalCleanup.cs']]){
   const owners=compiles.flatMap(r=>Array.from(fs.readFileSync(r.path,'utf8').matchAll(new RegExp('\\bclass\\s+'+name+'\\b','g')),()=>path.basename(r.path)));
   need(JSON.stringify(owners)===JSON.stringify([file]),'ACTUAL_HELPER_MUST_NOT_BE_SHADOWED:'+name);
  }

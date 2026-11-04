@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cwctype>
 #include "json.hpp"
+#include "update_config_state.h"
 namespace ymcc::updaterecovery {
 using Json = nlohmann::json;
 inline std::string utf8(const std::wstring& s) {
@@ -35,8 +36,28 @@ inline int64_t now(){FILETIME t{};GetSystemTimeAsFileTime(&t);return static_cast
 inline bool validSha(const std::string& s){return s.size()==64&&std::all_of(s.begin(),s.end(),[](unsigned char c){return isxdigit(c)!=0;});}
 inline bool unfinished(const Json& j){try{auto p=j.value("phase",std::string{});return p=="authorized"||p=="preparing"||p=="applying"||p=="repair-required";}catch(...){return false;}}
 inline bool same(const std::string& a,const std::string& b){return _stricmp(a.c_str(),b.c_str())==0;}
+// A protected ACL establishes origin, not JSON validity. Keep the byte and
+// field contracts strict before any phase or process identity is consumed.
+inline bool journalKeys(const Json& j,unsigned depth=0){
+    if(depth>32)return false;
+    if(j.is_object()){std::set<std::string> seen;for(auto it=j.begin();it!=j.end();++it){auto key=it.key();for(char& c:key)if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');if(!seen.insert(key).second||!journalKeys(*it,depth+1))return false;}}
+    else if(j.is_array()){for(const auto& item:j)if(!journalKeys(item,depth+1))return false;}return true;
+}
+inline bool journalValid(const Json& j){try{
+    using namespace ymcc::updateconfig;
+    if(!j.is_object()||!journalKeys(j)||!j.contains("schema")||!integer(j["schema"],1)||j["schema"]!=1||j.value("owner",std::string{})!="YMCC.FullInstall")return false;
+    if(j.contains("schemaVersion")&&(!integer(j["schemaVersion"],1)||j["schemaVersion"]!=1))return false;
+    for(const auto* key:{"operationId","version","sha256","exePath","powerControl","phase"})if(!j.contains(key)||!text(j[key],key==std::string("operationId")?128:32768)||j[key].get_ref<const std::string&>().empty())return false;
+    if(!version(j["version"].get<std::string>())||!validSha(j["sha256"].get<std::string>())||normalized(wide(j["exePath"].get<std::string>())).empty()||normalized(wide(j["powerControl"].get<std::string>())).empty())return false;
+    const auto phase=j["phase"].get<std::string>();if(phase!="authorized"&&phase!="preparing"&&phase!="applying"&&phase!="repair-required"&&phase!="committed"&&phase!="rolled-back"&&phase!="failed")return false;
+    for(const auto* key:{"authorizedAt","updatedAt"})if(j.contains(key)&&!integer(j[key]))return false;
+    for(const auto* key:{"launcherPid","helperPid"})if(j.contains(key)&&!integer(j[key],MAXDWORD))return false;
+    for(const auto* key:{"launcherCreation","helperCreation"})if(j.contains(key)&&(!text(j[key],20)||j[key].get_ref<const std::string&>().empty()||!std::all_of(j[key].get_ref<const std::string&>().begin(),j[key].get_ref<const std::string&>().end(),[](char c){return c>='0'&&c<='9';})))return false;
+    for(const auto* key:{"launcherImage","helperImage"})if(j.contains(key)&&(!text(j[key],32768)||normalized(wide(j[key].get<std::string>())).empty()))return false;
+    return true;
+}catch(...){return false;}}
 inline bool matches(const Json& j,const std::wstring& exe,const std::wstring& pc){
-    try{return j.is_object()&&j.value("schema",0)==1&&j.value("owner",std::string{})=="YMCC.FullInstall"&&
+    try{return journalValid(j)&&!normalized(exe).empty()&&!normalized(pc).empty()&&
         !j.value("operationId",std::string{}).empty()&&j.at("operationId").get<std::string>().size()<=128&&
         !j.value("version",std::string{}).empty()&&validSha(j.value("sha256",std::string{}))&&
         normalized(wide(j.value("exePath",std::string{})))==normalized(exe)&&
@@ -99,25 +120,46 @@ inline std::wstring pathFor(const std::wstring& root,const std::wstring& exe){
 inline Json readAt(const std::wstring& root,const std::wstring& path){
     if(!secureDirectory(root,false))return Json::object();
     HANDLE h=CreateFileW(path.c_str(),GENERIC_READ|READ_CONTROL,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-    if(h==INVALID_HANDLE_VALUE)return Json::object();Json result=Json::object();
-    LARGE_INTEGER size{};if(secureHandle(h)&&GetFileSizeEx(h,&size)&&size.QuadPart>0&&size.QuadPart<=65536){
-        std::string text(static_cast<size_t>(size.QuadPart),'\0');DWORD count=0;
-        if(ReadFile(h,text.data(),static_cast<DWORD>(text.size()),&count,nullptr)&&count==text.size())try{result=Json::parse(text);}catch(...){}
-    }CloseHandle(h);return result;
+    if(h==INVALID_HANDLE_VALUE)return Json::object();
+    struct Close{HANDLE value;~Close(){CloseHandle(value);}} close{h};
+    try{
+        LARGE_INTEGER size{};BY_HANDLE_FILE_INFORMATION before{},after{};
+        if(!secureHandle(h)||GetFileType(h)!=FILE_TYPE_DISK||!GetFileInformationByHandle(h,&before)||(before.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)||!GetFileSizeEx(h,&size)||size.QuadPart<=0||size.QuadPart>65536)return Json::object();
+        std::string text(static_cast<size_t>(size.QuadPart),'\0');DWORD count=0,extraCount=0;char extra{};
+        if(!ReadFile(h,text.data(),static_cast<DWORD>(text.size()),&count,nullptr)||count!=text.size()||!ReadFile(h,&extra,1,&extraCount,nullptr)||extraCount||!GetFileInformationByHandle(h,&after)||!ymcc::updateconfig::sameInfo(before,after))return Json::object();
+        auto result=ymcc::updateconfig::parse(text);return journalValid(result)?result:Json::object();
+    }catch(...){return Json::object();}
 }
 inline Json read(const std::wstring& exe,const std::wstring& pc){try{auto root=directory();auto j=readAt(root,pathFor(root,exe));return matches(j,exe,pc)?j:Json::object();}catch(...){return Json::object();}}
-inline std::wstring write(const std::wstring& exe,const std::wstring& pc,const std::string& id,const std::string& version,const std::string& sha){
-    if(id.empty()||id.size()>128||!validSha(sha))throw std::runtime_error("UPDATE_RECOVERY_ID_INVALID");
-    auto root=directory();if(!secureDirectory(root,true))throw std::runtime_error("UPDATE_RECOVERY_DIRECTORY_NOT_PROTECTED");
-    auto path=pathFor(root,exe);Json j={{"schema",1},{"owner","YMCC.FullInstall"},{"phase","authorized"},{"operationId",id},{"version",version},{"sha256",sha},
+inline std::wstring writeAt(const std::wstring& root,const std::wstring& exe,const std::wstring& pc,const std::string& id,const std::string& version,const std::string& sha){
+    if(id.empty()||id.size()>128||id.find('\0')!=std::string::npos||!validSha(sha)||!ymcc::updateconfig::version(version)||normalized(exe).empty()||normalized(pc).empty())throw std::runtime_error("UPDATE_RECOVERY_ID_INVALID");
+    if(!secureDirectory(root,true))throw std::runtime_error("UPDATE_RECOVERY_DIRECTORY_NOT_PROTECTED");
+    const auto path=pathFor(root,exe);const auto before=ymcc::updateconfig::read(path,65536);
+    if(before.kind!=ymcc::updateconfig::Kind::missing){
+        if(before.kind!=ymcc::updateconfig::Kind::ready||!matches(before.value,exe,pc)||readAt(root,path)!=before.value)throw std::runtime_error("UPDATE_RECOVERY_PREVIOUS_JOURNAL_UNCONFIRMED");
+        if(live(before.value))throw std::runtime_error("UPDATE_RECOVERY_INSTALLER_ACTIVE");
+    }
+    Json j={{"schema",1},{"owner","YMCC.FullInstall"},{"phase","authorized"},{"operationId",id},{"version",version},{"sha256",sha},
         {"exePath",utf8(normalized(exe))},{"powerControl",utf8(normalized(pc))},{"authorizedAt",now()},{"launcherPid",GetCurrentProcessId()},{"launcherImage",utf8(exe)}};
     FILETIME c{},e{},k{},u{};if(!GetProcessTimes(GetCurrentProcess(),&c,&e,&k,&u))throw std::runtime_error("UPDATE_RECOVERY_LAUNCHER_UNKNOWN");j["launcherCreation"]=std::to_string(filetime(c));
-    auto temp=path+L".tmp-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());auto sd=descriptor();SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};
+    if(before.kind==ymcc::updateconfig::Kind::ready){
+        const std::set<std::string> owned={"schema","owner","phase","operationId","version","sha256","exePath","powerControl","authorizedAt","launcherPid","launcherImage","launcherCreation","helperPid","helperImage","helperCreation","updatedAt"};
+        for(auto it=before.value.begin();it!=before.value.end();++it)if(!owned.contains(it.key()))j[it.key()]=*it;
+    }
+    if(!journalValid(j))throw std::runtime_error("UPDATE_RECOVERY_ID_INVALID");const auto text=j.dump();if(text.size()>65536)throw std::runtime_error("UPDATE_RECOVERY_JOURNAL_TOO_LARGE");
+    if(before.kind==ymcc::updateconfig::Kind::ready){
+        const auto backup=path+L".ymcc-before-"+ymcc::updateconfig::suffix();
+        if(!ymcc::updateconfig::sameImage(before,ymcc::updateconfig::read(path,65536))||!CopyFileW(path.c_str(),backup.c_str(),TRUE)||ymcc::updateconfig::read(backup,65536).raw!=before.raw||readAt(root,backup)!=before.value)throw std::runtime_error("UPDATE_RECOVERY_PREIMAGE_UNCONFIRMED");
+    }
+    const auto temp=path+L".tmp-"+ymcc::updateconfig::suffix();auto sd=descriptor();SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};
     HANDLE h=CreateFileW(temp.c_str(),GENERIC_WRITE|READ_CONTROL,0,&sa,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);LocalFree(sd);
-    if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("UPDATE_RECOVERY_WRITE_FAILED");auto text=j.dump();DWORD written=0;
+    if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("UPDATE_RECOVERY_WRITE_FAILED");DWORD written=0;
     bool ok=secureHandle(h)&&WriteFile(h,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()&&FlushFileBuffers(h);CloseHandle(h);
+    if(ok)ok=readAt(root,temp)==j&&ymcc::updateconfig::read(temp,65536).raw==text&&ymcc::updateconfig::sameImage(before,ymcc::updateconfig::read(path,65536))&&secureDirectory(root,false);
     if(ok)ok=MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE;
-    if(!ok){DeleteFileW(temp.c_str());throw std::runtime_error("UPDATE_RECOVERY_COMMIT_FAILED");}return path;
+    if(!ok){DeleteFileW(temp.c_str());throw std::runtime_error("UPDATE_RECOVERY_COMMIT_FAILED");}
+    if(readAt(root,path)!=j||ymcc::updateconfig::read(path,65536).raw!=text)throw std::runtime_error("UPDATE_RECOVERY_READBACK_FAILED");
+    return path;
 }
+inline std::wstring write(const std::wstring& exe,const std::wstring& pc,const std::string& id,const std::string& version,const std::string& sha){return writeAt(directory(),exe,pc,id,version,sha);}
 }
-

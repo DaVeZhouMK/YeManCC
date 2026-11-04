@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {extract} from './fixtures/msi_owned_return_retired_io/source-binding.mjs';
 
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2);
@@ -36,6 +37,14 @@ const build=execute('Release-build','pwsh',['-NoProfile','-File',path.join(repo,
 assert.equal(build.status,0,'Actual production TU: '+path.join(output,'Release-build.log'));
 const summary=JSON.parse(fs.readFileSync(path.join(positive,'fixture-data/msi-foreground-native-summary.json'),'utf8').replace(/^\uFEFF/,''));
 assert.equal(summary.failures,0);result.configurations.push({name:'Release',...summary});save();
+// Same actual production-TU executable, with only the original mutation
+// prerequisites/assertions selected. Prove that selection passes before mutating.
+const probeArgs=[path.join(positive,'mutation-probe-data'),'--shield-mutation-probes'];
+const probeRun=execute('mutation-probe-baseline',path.join(positive,'msi-foreground-native-regression.exe'),probeArgs,positive,30000);
+assert.equal(probeRun.status,0,'Original mutation probes must pass without a mutation');
+result.mutationProbeBaseline=JSON.parse(fs.readFileSync(path.join(positive,'mutation-probe-data/msi-foreground-native-summary.json'),'utf8'));
+assert.equal(result.mutationProbeBaseline.scope,'shield-mutation-probes');
+assert(result.mutationProbeBaseline.cases>0 && result.mutationProbeBaseline.failures===0);save();
 const libs=['user32','gdi32','shell32','shlwapi','ole32','oleaut32','dwmapi','winhttp','advapi32','shcore','version','psapi','PowrProf','ws2_32'].map(name=>name+'.lib').join(' ');
 for(const name of ['rog-hid-mutation-quarantine-disabled','original-xusb-and-journal','duplicate-shared-node-refresh']){
     const directory=path.join(workspace,name);fs.mkdirSync(directory,{recursive:true});
@@ -43,10 +52,16 @@ for(const name of ['rog-hid-mutation-quarantine-disabled','original-xusb-and-jou
     if(name==='rog-hid-mutation-quarantine-disabled'){
         const policy=path.join(snapshot,'native/native_foreground_source_policy.h');
         const source=fs.readFileSync(policy,'utf8');
-        const begin=source.indexOf('inline bool gameNodeRefreshMutationAllowed(');
-        const end=source.indexOf('inline bool xusbTargetAdmitted(',begin);
-        assert(begin>=0&&end>begin);
-        fs.writeFileSync(policy,source.slice(0,begin)+'inline bool gameNodeRefreshMutationAllowed(Profile,const std::string&,const std::string&) {return true;}\n'+source.slice(end));
+        // Mutate only the existing leaf policy; newly integrated family/root
+        // authority functions between it and xusbTargetAdmitted must survive.
+        const signature='inline bool gameNodeRefreshMutationAllowed(';
+        assert.equal(source.split(signature).length,2);
+        // The existing locator accepts static functions; restore the equal-
+        // length storage specifier before matching the exact original span.
+        const probe=source.replace(signature,'static bool gameNodeRefreshMutationAllowed(');
+        const body=extract(probe,'function','gameNodeRefreshMutationAllowed','native/native_foreground_source_policy.h',[]).replace(/^static /,'inline ');
+        assert.equal(source.split(body).length,2);
+        fs.writeFileSync(policy,source.replace(body,'inline bool gameNodeRefreshMutationAllowed(Profile,const std::string&,const std::string&) {return true;}'));
     }else if(name==='original-xusb-and-journal'){
         const policy=path.join(snapshot,'native/native_foreground_source_policy.h');
         const source=fs.readFileSync(policy,'utf8');assert.equal(source.split('profile==Profile::Rog && target.compare').length,2);
@@ -67,17 +82,21 @@ for(const name of ['rog-hid-mutation-quarantine-disabled','original-xusb-and-jou
     fs.writeFileSync(path.join(directory,'build.cmd'),command);
     const compiled=execute(name+'-build','cmd.exe',['/d','/c',path.join(directory,'build.cmd')],directory,240000);
     assert.equal(compiled.status,0,name+' compile must succeed');
-    const run=execute(name+'-run',path.join(directory,'Fixture.exe'),[path.join(directory,'fixture-data')],directory,30000);
+    const run=execute(name+'-run',path.join(directory,'Fixture.exe'),[path.join(directory,'fixture-data'),'--shield-mutation-probes'],directory,30000);
     assert.equal(run.status,3,name+' original bug must fail');
     const failures=(run.stdout??'').split(/\r?\n/).filter(line=>line.startsWith('FAIL '));
     if(name==='rog-hid-mutation-quarantine-disabled'){
-        assert(failures.some(line=>line.includes('native shielding never hides or refreshes quarantined HID game node')));
+        assert(failures.some(line=>line.includes('field ROGX known unsafe HID leaf policy remains quarantined')));
     }else if(name==='original-xusb-and-journal'){
-        assert(failures.some(line=>line.includes('field ROGX active HID XUSB')));
+        assert(failures.some(line=>line.includes('field ROG active HID XUSB identity remains recognized')));
         assert(failures.some(line=>line.includes('missing journal retains only')));
         assert(failures.some(line=>line.includes('journal continuation executes')));
     }else assert(failures.some(line=>line.includes('shared devnode refreshes exactly once')));
-    result.configurations.push({name,expectedFailure:true,exitCode:run.status,failures});save();
+    const mutationSummary=JSON.parse(fs.readFileSync(path.join(directory,'fixture-data/msi-foreground-native-summary.json'),'utf8'));
+    assert.equal(mutationSummary.scope,'shield-mutation-probes');
+    assert.equal(mutationSummary.cases,result.mutationProbeBaseline.cases,'Mutation must consume the same selected original assertions');
+    assert.equal(mutationSummary.failures,failures.length);
+    result.configurations.push({name,expectedFailure:true,exitCode:run.status,scope:mutationSummary.scope,cases:mutationSummary.cases,failures});save();
     console.log(name+': caught '+failures.length+' failures');
 }
 const helper=execute('helper','node',[path.join(repo,'tools/native_game_hid_caps_selftest.mjs'),'--output',path.join(output,'helper')],repo,180000);

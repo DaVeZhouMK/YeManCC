@@ -1,4 +1,5 @@
 import {selectedNativeTools,selectedOwnedTools,simulationCorePath,HOST_ENVIRONMENT_SOURCE_INPUTS} from './ymcc_sim/global/release-host-environment.mjs';
+import {resourceFixtureEnvironment} from './ymcc_sim/global/decky-persistent-lifecycle/baseline-environment.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -70,7 +71,7 @@ function resourceSession(root, out, config) {
       if(child)freeze(child);
     }
   }
-  for(const relative of [...HOST_ENVIRONMENT_SOURCE_INPUTS,'tools/'+config.cpp,'tools/'+config.module,'decky-plugin/vendor/decky-loader.lock.json',
+  for(const relative of ['tools/ymcc_sim/global/decky-persistent-lifecycle/baseline-environment.mjs',...HOST_ENVIRONMENT_SOURCE_INPUTS,'tools/'+config.cpp,'tools/'+config.module,'decky-plugin/vendor/decky-loader.lock.json',
     'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json',
     'tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json',
     'tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.json','tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.mjs']) freeze(path.join(root,relative));
@@ -106,7 +107,7 @@ function resourceSession(root, out, config) {
     const stdout=path.join(evidenceDir,kind+'.stdout.log'),stderr=path.join(evidenceDir,kind+'.stderr.log');
     fs.writeFileSync(stdout,result.stdout||'');fs.writeFileSync(stderr,result.stderr||'');
     fs.writeFileSync(path.join(evidenceDir,kind==='build'?'build.log':'run.log'),Buffer.concat([result.stdout||Buffer.alloc(0),result.stderr||Buffer.alloc(0)]));
-    const receipt={kind,program:pin(program),args,cwd:dir,pid:result.pid,startedAt,elapsedMs:performance.now()-started,budgetMs:budget,status:result.status,signal:result.signal,error:result.error?.message??null,natural:!result.error&&!result.signal&&Number.isInteger(result.status),environment:{TEMP:environment.TEMP,TMP:environment.TMP,INCLUDE:environment.INCLUDE,LIB:environment.LIB},stdout:pin(stdout),stderr:pin(stderr)};
+    const receipt={kind,program:pin(program),args,cwd:dir,pid:result.pid,startedAt,elapsedMs:performance.now()-started,budgetMs:budget,status:result.status,signal:result.signal,error:result.error?.message??null,natural:!result.error&&!result.signal&&Number.isInteger(result.status),environment:resourceFixtureEnvironment(environment),stdout:pin(stdout),stderr:pin(stderr)};
     save(path.join(evidenceDir,kind+'.PROCESS.json'),receipt);return {result,receipt};
   }
   function variant(index,mutation){
@@ -204,6 +205,8 @@ const CONFIG = {
     ]
   ]
 };
+
+export function resourceCacheReferenceContract(){return {family:'cache',step:'decky-local-resource-cache',module:'tools/'+CONFIG.module,exportName:CONFIG.exportName,short:CONFIG.short,fixture:CONFIG.fixture,cpp:CONFIG.cpp,positiveCaseCount:93,mutants:CONFIG.mutants.map(([name,path,from,to,failure])=>({name,path,from,to,failure,nativeCaseCount:1,selectedCase:failure}))};}
 
 export async function resourceCacheTests(root,out,{mutations=true}={}) {
   const session=resourceSession(root,out,CONFIG),{frozen}=session;

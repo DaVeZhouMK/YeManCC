@@ -35,8 +35,48 @@ inline const Json* stateFromReply(const std::string& path, const Json& response)
         path == "/api/restore" || path == "/api/suspend" || path == "/api/resume" || path == "/api/close";
     return legacy && state != response.end() && state->is_string() ? &response : nullptr;
 }
-inline bool stateValid(const Json& state) {
+inline bool sourceStateValid(const Json& state) {
     if (!state.is_object()) return false;
+    const auto mode = state.find("sourceFanMode");
+    const bool source = mode != state.end() && mode->is_boolean() && mode->get<bool>();
+    if (mode != state.end() && !mode->is_boolean()) return false;
+    for (const char* field : {"sourceFanOwnerEntered", "sourceFanClosePending", "sourceFanClosed", "sourceFanAutomaticReturned"}) {
+        const auto value = state.find(field);
+        if (source ? value == state.end() || !value->is_boolean()
+                   : value != state.end() && (!value->is_boolean() || value->get<bool>())) return false;
+    }
+    const auto generation = state.find("sourceFanGeneration");
+    if (!source) return generation == state.end() || generation->is_null();
+    const auto history = state.find("hardwareWritesObserved");
+    if (history == state.end() || !history->is_boolean() || generation == state.end()) return false;
+    if (state["sourceFanOwnerEntered"].get<bool>()) {
+        if (!positiveNumber(*generation, true)) return false;
+    } else if (!generation->is_null() || history->get<bool>() || state["sourceFanAutomaticReturned"].get<bool>() || state["sourceFanClosePending"].get<bool>()) return false;
+    if (state["sourceFanClosed"].get<bool>() && state["sourceFanClosePending"].get<bool>()) return false;
+    const auto claim = state.find("recoveryClaimEvidence");
+    return claim != state.end() && claim->is_object() && claim->contains("sourceFanGeneration")
+        && (*claim)["sourceFanGeneration"] == *generation;
+}
+inline bool sourceResourcesRetired(const Json& state) {
+    if (!sourceStateValid(state) || !state.value("sourceFanMode", false)) return false;
+    for (const char* field : {"sourceFanClosePending", "hcCloseCleanupPending", "openCalled", "openEventsCalled", "hardwareWrites", "hardwareWritesEnabled"}) {
+        const auto value = state.find(field);
+        if (value == state.end() || !value->is_boolean() || value->get<bool>()) return false;
+    }
+    return state["sourceFanClosed"].get<bool>();
+}
+inline bool sourceReleaseSafe(const Json& state) {
+    if (!sourceResourcesRetired(state)) return false;
+    const auto unknown = state.find("unknownState");
+    if (unknown == state.end() || !unknown->is_boolean() || unknown->get<bool>()) return false;
+    if (!state["hardwareWritesObserved"].get<bool>()) return true;
+    const auto& claim = state["recoveryClaimEvidence"];
+    return state["sourceFanAutomaticReturned"].get<bool>()
+        && claim.value("oemReleaseActionKind", Json{}) == "proven-by-source-auto-register-and-terminal-close"
+        && claim.value("oemReleaseActionClass", Json{}) == "release-action-proven";
+}
+inline bool stateValid(const Json& state) {
+    if (!state.is_object() || !sourceStateValid(state)) return false;
     const auto name = state.find("state");
     if (name == state.end() || !name->is_string() || name->get_ref<const std::string&>().find_first_not_of(" \t\r\n") == std::string::npos) return false;
     for (const char* field : {"hardwareWrites", "hardwareWritesEnabled", "hardwareWritesObserved", "unknownState", "openCalled", "openEventsCalled",

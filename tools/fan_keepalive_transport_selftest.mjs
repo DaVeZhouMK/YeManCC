@@ -5,11 +5,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const root=process.argv[2],variant=process.argv[3]??'CONTROL',run=promisify(execFile);
-const requests=[],sockets=new Set(),cases=[];
+const requests=[],sockets=new Set(),cases=[];const connectionIds=new WeakMap();let nextConnectionId=0;
 const receipt={ok:true,lease:{leaseId:'fixture-lease-0001',generation:1,expiresAtMonoMs:15000}};
 const server=createServer((req,res)=>{
  const token=req.headers['x-yeman-fan-session']??'';const kind=String(token).replace('fixture-token-','');
- requests.push({kind,method:req.method,url:req.url});
+ requests.push({kind,method:req.method,url:req.url,connection:connectionIds.get(req.socket)});
  if(req.method!=='POST'||req.url!=='/api/heartbeat'||!String(token).startsWith('fixture-token-')){res.writeHead(403);res.end('{}');return;}
  if(kind==='denied'){const body=JSON.stringify({ok:false,error:{code:'AUTH_UNAUTHORIZED'}});res.writeHead(401,{'Content-Length':Buffer.byteLength(body)});res.end(body);return;}
  if(kind==='undeclared-length'){res.writeHead(200);res.write(JSON.stringify(receipt));res.end();return;}
@@ -23,7 +23,7 @@ const server=createServer((req,res)=>{
  if(kind==='cancel-headers'){setTimeout(()=>{if(!res.destroyed)res.end(JSON.stringify(receipt));},500).unref();return;}
  res.end(JSON.stringify(receipt));
 });
-server.on('connection',s=>{sockets.add(s);s.on('close',()=>sockets.delete(s));});
+server.on('connection',s=>{connectionIds.set(s,++nextConnectionId);sockets.add(s);s.on('close',()=>sockets.delete(s));});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;
 let failure='';
 async function test(kind,check){
@@ -31,7 +31,7 @@ async function test(kind,check){
  try{stdout=(await run(path.join(root,variant,'fixture.exe'),[String(port),kind],{windowsHide:true,timeout:3400,maxBuffer:1<<20})).stdout;}
  catch(e){cases.push({kind,failed:true,killed:e.killed,code:e.code,stdout:e.stdout,reason:'fixture did not settle within bounded test deadline'});throw e;}
  const r=JSON.parse(stdout);cases.push({kind,...r});assert(requests.slice(before).every(x=>x.method==='POST'&&x.url==='/api/heartbeat'));
- check(r,requests.length-before);
+ check(r,requests.length-before,requests.slice(before));
 }
 try{
  await test('normal',r=>{assert(r.ok);assert.equal(r.lease,receipt.lease.leaseId);assert.equal(r.status,200);});
@@ -44,6 +44,7 @@ try{
  await test('slow-body',r=>{assert(!r.ok);assert(r.elapsed>=1700&&r.elapsed<2700,'one absolute budget, never refreshed by packets');assert(r.retryOk,'same fixture process can perform the next current request after timeout');});
  for(const kind of ['cancel-headers','cancel-body','exit-body'])await test(kind,r=>{assert(!r.ok);assert(r.elapsed<500,'shutdown interrupts pending network work before the 1s exit join bound');assert.equal(r.lease,'');assert.equal(r.displayObserved,0);});
  for(const kind of ['missing-token','wrong-identity'])await test(kind,(r,n)=>{assert(!r.ok);assert.equal(n,0);assert.equal(r.lease,'');});
+ for(const kind of ['session-reuse','owner-replaced','retry-after-denial','idle-reset','missing-token-after-warm','identity-after-warm'])await test(kind,(r,n,sent)=>{const earlyLoss=kind.endsWith('-after-warm');assert.equal(n,earlyLoss?2:3);assert(r.lastCallOk);assert.equal(r.credentialReads,3);assert.equal(r.identityReads,kind==='missing-token-after-warm'?2:3);assert.equal(r.acceptedCalls,kind==='retry-after-denial'||earlyLoss?2:3);if(earlyLoss)assert(r.middleRefusalClearedLease,'early refusal retained an old success receipt');const setups=kind==='session-reuse'?1:2;assert.equal(r.sessionSetups,setups,'wrong WinHTTP session setup count');assert.equal(r.connectionSetups,setups,'wrong logical connection setup count');assert.equal(r.parentCloses,kind==='session-reuse'?0:2,'old parent handles not retired exactly once');if(kind==='retry-after-denial'){assert.equal(sent[1].kind,'denied');assert.equal(sent[2].kind,'normal');assert.equal(r.authRejected,1);}});
 }catch(e){failure=e.stack??String(e);}
 finally{for(const s of sockets)s.destroy();await new Promise(r=>server.close(r));}
 const result={ok:!failure,variant,cases:cases.length,results:cases,requests,failure,scope:'exact production Fan keepalive + shared AsyncRequest/fan_response headers, real loopback WinHTTP; process/credential/display/mode fixtures; no FanHost/HC/device/CPU benchmark'};

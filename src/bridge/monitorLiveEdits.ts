@@ -31,7 +31,9 @@ export function createMonitorLiveEdits<P>(deps: MonitorLiveEditDeps<P>) {
   function flush(): Promise<void> {
     clear();
     if (running) return running;
-    running = Promise.resolve().then(drain).finally(() => { running = null; if (pending) void flush(); });
+    // A request accepted while drain settles still belongs to this flush. Join
+    // its continuation so close/dispose cannot finish before the latest apply.
+    running = Promise.resolve().then(drain).finally(() => { running = null; if (pending) return flush(); });
     return running;
   }
   function request(intent: MonitorLiveEditIntent = {}) {

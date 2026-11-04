@@ -18,12 +18,15 @@ std::string W2U(const std::wstring& value){return std::string(value.begin(),valu
 using DWORD=std::uint32_t;using ULONGLONG=unsigned long long;using SIZE_T=std::size_t;using HANDLE=void*;
 constexpr bool FALSE=false;constexpr DWORD PROCESS_QUERY_LIMITED_INFORMATION=1,PROCESS_VM_READ=2;
 constexpr SIZE_T SG_MIN_WS=500;
+@@DISCOVERY_TYPES@@
 @@GAME_STRUCT@@
 struct PROCESS_MEMORY_COUNTERS{DWORD cb=0;SIZE_T WorkingSetSize=0;};using PROCESS_MEMORY_COUNTERS_EX=PROCESS_MEMORY_COUNTERS;
 namespace ports {
 enum class Point{None,Rules,FirstIdentity,FinalIdentity};
 struct State {
  unsigned steps=0,identities=0,ruleReads=0,hooks=0,publications=0,scans=0;
+ unsigned rulesError=0,failAtSnapshot=1;unsigned long long publishedGeneration=0;
+ bool publicationOk=true;
  bool identityOk=true,sessionsOk=true,sameSession=true,memoryOk=true,openOk=true,excluded=false;
  SIZE_T memory=900;double now=100;
  NativeDetectedGame process,candidate;
@@ -49,17 +52,27 @@ bool focusQueryProcessIdentity(DWORD,std::wstring*path,ULONGLONG*born){
 HANDLE OpenProcess(DWORD,bool,DWORD){ports::step();return ports::s.openOk?reinterpret_cast<void*>(1):nullptr;}
 void CloseHandle(HANDLE){ports::step();}
 bool GetProcessMemoryInfo(HANDLE,PROCESS_MEMORY_COUNTERS*p,std::size_t){ports::step();p->WorkingSetSize=ports::s.memory;return ports::s.memoryOk;}
-void nativeRefreshGameRulesEpochFromDiskLocked(){++ports::s.ruleReads;ports::hit(ports::Point::Rules);}
-std::vector<std::wstring> sgExcludes(){ports::step();return ports::s.black;}
-std::vector<std::wstring> sgGameWhitelist(){ports::step();return ports::s.white;}
-std::vector<std::wstring> nativeConfiguredGameExes(){ports::step();return ports::s.custom;}
+void nativeRefreshGameRulesEpochFromDiskLocked(){++ports::s.ruleReads;ports::hit(ports::Point::Rules);if(ports::s.rulesError==1&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules metadata/read failure");}
+std::vector<std::wstring> sgExcludes(){ports::step();if(ports::s.rulesError==2&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules configuration unavailable");return ports::s.black;}
+std::vector<std::wstring> sgGameWhitelist(){ports::step();if(ports::s.rulesError==3&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules configuration unavailable");return ports::s.white;}
+std::vector<std::wstring> nativeConfiguredGameExes(){ports::step();if(ports::s.rulesError==4&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules configuration unavailable");return ports::s.custom;}
 bool nativeMonitorExcluded(const std::wstring&){ports::step();return ports::s.excluded;}
 bool nativeIsConfiguredGameExe(const std::wstring& name,const std::vector<std::wstring>& list){ports::step();return std::find(list.begin(),list.end(),name)!=list.end();}
-enum class NativeOnePidResult{Ok,NameUnavailable,Missing};
-NativeOnePidResult nativeScanGameOnePid(DWORD,const std::wstring&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*out){ports::step();++ports::s.scans;*out=ports::s.candidate;return out->pid?NativeOnePidResult::Ok:NativeOnePidResult::Missing;}
-NativeDetectedGame nativeScanGame(DWORD,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&){ports::step();++ports::s.scans;return ports::s.candidate;}
+NativeOnePidResult nativeScanGameOnePid(DWORD,const std::wstring&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*out,bool*topologyChanged=nullptr){ports::step();++ports::s.scans;if(topologyChanged)*topologyChanged=false;if(!out)return NativeOnePidResult::Rejected;*out=ports::s.candidate;return out->pid?NativeOnePidResult::Ok:NativeOnePidResult::Rejected;}
+NativeDetectedGame nativeScanGame(DWORD,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeGameDiscoveryState*discoveryState=nullptr){ports::step();++ports::s.scans;if(discoveryState)*discoveryState=NativeGameDiscoveryState::Complete;return ports::s.candidate;}
 bool nativeScanGameConfiguredBest(const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*){ports::step();++ports::s.scans;return false;}
 std::wstring nativeProcessWindowTitle(DWORD){ports::step();return L"Bluey";}
+static std::atomic<bool> g_updateGameDetected{true};
+static std::atomic<ULONGLONG> g_updateGameObservationTick{0};
+static ULONGLONG GetTickCount64(){return 100000;}
+struct FixtureDownloadControl {struct State{int operation=0;};State status(){return {};}void cancel(int){}};
+static FixtureDownloadControl g_updateDownloadControl;
+static const std::wstring MONITOR_GAME_TARGET_JSON=L"owned-memory-only";
+static bool sgWriteMonitorSnapshotDurable(const std::wstring&,const std::string&){ports::step();++ports::s.publications;return ports::s.publicationOk;}
+static void steamOriginalRecoveryTargetChanged(DWORD,ULONGLONG,const std::wstring&,unsigned long long){}
+static void gamepadSerialPostEvent(const char*,const json&){}
+static void appendNativeLifecycleLog(const char*,const json&){}
+
 namespace frozen {
 // BEGIN PRESERVED ROG 20261023-125040 FUNCTIONS
 struct NativeGameValveSnapshot {
@@ -365,34 +378,38 @@ static bool nativeValveReadCurrentTarget(
     return true;
 }
 // END PRESERVED ROG 20261023-125040 FUNCTIONS
+static unsigned long long g_gameValvePublishedGeneration=0;
 }
 namespace production {
 @@CURRENT_STRUCT@@
 static NativeGameValveSnapshot g_gameValveTarget;
 static unsigned long long g_gameValveGeneration=0;
 std::mutex g_gameValveMx;
-static void nativeValvePublish(const NativeGameValveSnapshot&){ports::step();++ports::s.publications;}
+static std::mutex g_gameValvePublishMx;
+static unsigned long long g_gameValvePublishedGeneration=0;
+static json nativeGameTargetJson(const NativeGameValveSnapshot& target);
+@@CURRENT_PUBLISHER@@
 @@CURRENT_FUNCTIONS@@
 }
 struct View{NativeDetectedGame game;unsigned long long generation=0,identity=0,rules=0;double selected=0,last=0;};
 template<class T> View viewOf(const T&t){View v{t.game,t.generation,0,t.rulesEpoch,t.selectedAtEpoch,t.lastSeenEpoch};if constexpr(requires{t.identityGeneration;})v.identity=t.identityGeneration;return v;}
-#define ADAPTER(TYPE,NS) struct TYPE{ \
- static void reset(){NS::g_gameValveTarget={};NS::g_gameValveGeneration=0;} \
+#define ADAPTER(TYPE,NS,CLEAR) struct TYPE{ \
+ static void reset(){NS::g_gameValveTarget={};NS::g_gameValveGeneration=0;NS::g_gameValvePublishedGeneration=0;} \
  static View view(){return viewOf(NS::g_gameValveTarget);} \
  static void commit(const NativeDetectedGame&g,unsigned long long e=5){std::lock_guard lock(NS::g_gameValveMx);NS::nativeValveCommitLocked(g,e);} \
  static void touch(){std::lock_guard lock(NS::g_gameValveMx);NS::nativeValveTouchLocked();} \
- static void clear(){std::lock_guard lock(NS::g_gameValveMx);NS::nativeValveClearLocked();} \
+ static void clear(){std::lock_guard lock(NS::g_gameValveMx);CLEAR;} \
  static void acquire(){NS::nativeValveAcquire();} \
  static bool read(NativeDetectedGame*g,unsigned long long*n){return NS::nativeValveReadCurrentTarget(g,n);} \
  static auto& raw(){return NS::g_gameValveTarget;} \
 };
-ADAPTER(Old,frozen)
-ADAPTER(New,production)
+ADAPTER(Old,frozen,frozen::nativeValveClearLocked())
+ADAPTER(New,production,production::nativeValveClearLocked(NativeGameDiscoveryState::Complete))
 #undef ADAPTER
 unsigned checks=0,cases=0,maxPortSteps=0;
 void check(bool okay,const std::string& why){++checks;if(!okay)throw std::runtime_error(why);}
 NativeDetectedGame original(){NativeDetectedGame g;g.pid=10340;g.name=L"bluey";g.title=L"Bluey";g.path=L"D:\\Game\\Bluey.exe";g.processCreated=134372069314736092ULL;g.workingSet=900;g.whitelisted=true;g.customConfigured=true;g.whitelistRule=L"bluey";return g;}
-template<class A> void reset(){ports::s={};g_gameRulesEpoch=5;ports::s.process=original();ports::s.candidate=original();A::reset();A::commit(original());}
+template<class A> void reset(){ports::s={};g_gameRulesEpoch=5;g_updateGameDetected=true;g_updateGameObservationTick=0;ports::s.process=original();ports::s.candidate=original();A::reset();A::commit(original());}
 struct Result{bool accepted=false;View begin,end;unsigned long long output=999;NativeDetectedGame game;unsigned hooks=0;};
 template<class A> Result round(ports::Point point,std::function<void()> hook,bool expected,const char*name){
  Result r;r.begin=A::view();ports::s.point=point;ports::s.hook=std::move(hook);r.game.pid=999;
@@ -466,4 +483,34 @@ void responses(){
  check(payload["valid"]==false&&payload["pid"]==0&&payload["processCreated"]=="0","no-game wire payload is an explicit invalid tombstone");
  check(payload["generation"]==observation.generation&&payload["identityGeneration"]==observation.identityGeneration,"invalid wire payload retains ordered generations");
 }
-int main(){try{readers();writers();responses();std::cout<<"{\"passed\":true,\"checks\":"<<checks<<",\"wireSamples\":"<<wireSamples.dump()<<",\"readerCases\":"<<cases<<",\"maxPortSteps\":"<<maxPortSteps<<",\"portStepBudget\":256,\"frozenHeartbeatFalseRejectionReproduced\":true,\"productionHeartbeatAccepted\":true,\"actualAcquireRetainedBranchExecuted\":true,\"targetAndClearABARejected\":true,\"realWindowsOrSteamActions\":0}";return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+void ruleConfigurationFailures(){
+ json rows=json::array();
+ auto scenario=[&](const std::string& name,const std::function<void()>& body){try{body();rows.push_back({{"name",name},{"ok",true}});}catch(const std::exception& error){rows.push_back({{"name",name},{"ok",false},{"error",error.what()}});}};
+ for(unsigned mode=1;mode<=4;++mode){
+  scenario("acquire configuration failure "+std::to_string(mode),[&]{reset<New>();ports::s.rulesError=mode;production::NativeGameValveSnapshot observation;auto result=production::nativeValveAcquire(0,0,&observation);check(!result.pid&&!observation.game.pid&&!New::view().game.pid,"rule error retained or elected a game");check(ports::s.scans==0&&ports::s.publications==1,"rule error scanned or failed to publish no-game");check(observation.generation==New::view().generation&&observation.generation>0&&observation.discoveryState==NativeGameDiscoveryState::Unavailable&&g_updateGameDetected.load()&&g_updateGameObservationTick.load()==0,"bad config fabricated successful idle proof");ports::s.rulesError=0;result=production::nativeValveAcquire(0,0,&observation);check(result.pid==original().pid&&observation.game.pid==result.pid,"repair did not recover normal election");});
+  scenario("read-only current target configuration failure "+std::to_string(mode),[&]{reset<New>();ports::s.white.clear();ports::s.rulesError=mode;NativeDetectedGame game;game.pid=999;unsigned long long publication=999;const bool ready=production::nativeValveReadCurrentTarget(&game,&publication);check(!ready&&game.pid==999&&publication==999,"failed config reader supplied output");check(ports::s.scans==0&&ports::s.publications==0,"read-only config failure arbitrated or published");ports::s.rulesError=0;check(production::nativeValveReadCurrentTarget(&game,&publication)&&game.pid==original().pid,"fixed config reader stuck");});
+  scenario("control validation second snapshot configuration failure "+std::to_string(mode),[&]{reset<New>();ports::s.rulesError=mode;ports::s.failAtSnapshot=2;NativeDetectedGame game;game.pid=999;const bool ready=production::nativeValveValidateCurrentTarget(original().pid,original().processCreated,&game);check(!ready&&game.pid==999,"second snapshot failure authorized a control target");ports::s.rulesError=0;check(production::nativeValveValidateCurrentTarget(original().pid,original().processCreated,&game)&&game.pid==original().pid,"fixed control snapshot stuck");});
+ }
+ scenario("persistent bad config does not create publication storm",[&]{reset<New>();ports::s.rulesError=2;production::nativeValveAcquire();const auto first=New::view();for(unsigned i=0;i<40;++i){auto value=production::nativeValveAcquire();check(!value.pid,"bad config regained target");}check(New::view().generation==first.generation&&New::view().identity==first.identity&&ports::s.publications==1&&ports::s.scans==0,"repeated failure changed lease or repeated writes");});
+ scenario("cold start bad config stays usable then repairs",[&]{reset<New>();New::reset();ports::s.rulesError=1;auto game=production::nativeValveAcquire();check(!game.pid&&ports::s.scans==0&&ports::s.publications==1,"cold bad config guessed identity");ports::s.rulesError=0;game=production::nativeValveAcquire();check(game.pid==original().pid,"cold repair did not re-elect");});
+ scenario("already published idle loses readiness on config error",[&]{reset<New>();production::nativeValveClearLocked();production::nativeValvePublish(production::g_gameValveTarget);check(!g_updateGameDetected.load()&&g_updateGameObservationTick.load()!=0,"healthy no-game publication fixture missing");const auto publications=ports::s.publications;ports::s.rulesError=2;production::NativeGameValveSnapshot observation;production::nativeValveAcquire(0,0,&observation);check(g_updateGameDetected.load()&&g_updateGameObservationTick.load()==0&&observation.generation==New::view().generation&&observation.generation>0&&observation.discoveryState==NativeGameDiscoveryState::Unavailable,"old no-game readiness remained trusted");check(ports::s.publications==publications+1,"idle-to-unavailable transition did not publish one tombstone");});
+ scenario("failed tombstone publication retries without new lease",[&]{reset<New>();ports::s.rulesError=2;ports::s.publicationOk=false;production::nativeValveAcquire();const auto generation=New::view().generation;ports::s.publicationOk=true;production::nativeValveAcquire();check(New::view().generation==generation&&ports::s.publications==2,"failed invalid publication did not retry stable generation");production::nativeValveAcquire();check(ports::s.publications==2,"successful tombstone was not de-duplicated");});
+ scenario("stale config error cannot revoke newer healthy observation",[&]{reset<New>();production::nativeValveClearLocked();const auto old=production::g_gameValveTarget;production::nativeValvePublish(old,false);const auto selected=production::nativeValveAcquire();check(selected.pid==original().pid&&g_updateGameObservationTick.load()!=0,"healthy successor missing");const auto writes=ports::s.publications;const auto observed=g_updateGameObservationTick.load();production::nativeValvePublish(old,false);check(g_updateGameObservationTick.load()==observed&&g_updateGameDetected.load()&&ports::s.publications==writes,"stale failure replaced fresher game readiness");});
+ unsigned failed=0;for(const auto& row:rows)if(!row.at("ok").get<bool>())++failed;std::cout<<json{{"passed",failed==0},{"cases",rows},{"caseCount",rows.size()},{"failed",failed},{"checks",checks},{"realWindowsActions",0}}.dump(2)<<"\n";if(failed)throw std::runtime_error("configuration caller scenarios failed");
+}
+
+void identityPathRecovery(){
+ reset<New>();New::raw().game.path.clear();const auto incomplete=New::view();
+ NativeDetectedGame held;unsigned long long generation=999;
+ check(!New::read(&held,&generation),"incomplete cached path must not authorize a reader");
+ check(generation==999,"rejected incomplete reader must preserve output");
+ New::acquire();const auto recovered=New::view();
+ check(recovered.game.pid==ports::s.process.pid&&recovered.game.processCreated==ports::s.process.processCreated,"path recovery must preserve exact PID/birth");
+ check(!recovered.game.path.empty()&&recovered.game.path==ports::s.process.path,"recovered current path must replace missing cached path");
+ check(recovered.identity!=incomplete.identity,"completing identity must revoke incomplete lease");
+ check(New::read(&held,&generation)&&held.path==recovered.game.path,"recovered exact reader must become valid");
+ const auto lease=recovered.identity;New::acquire();
+ check(New::view().identity==lease&&New::view().generation>recovered.generation,"later heartbeat must preserve completed lease");
+ std::cout<<"{\"passed\":true,\"selection\":\"identity-path-recovery\",\"checks\":"<<checks<<",\"actualAcquireExecuted\":true,\"realWindowsOrSteamActions\":0}";
+}
+int main(int argc,char** argv){try{if(argc>1&&std::string(argv[1])=="--identity-path-recovery-only"){identityPathRecovery();return 0;}if(argc>1&&std::string(argv[1])=="--config-read-errors-only"){ruleConfigurationFailures();return 0;}readers();writers();responses();std::cout<<"{\"passed\":true,\"checks\":"<<checks<<",\"wireSamples\":"<<wireSamples.dump()<<",\"readerCases\":"<<cases<<",\"maxPortSteps\":"<<maxPortSteps<<",\"portStepBudget\":256,\"frozenHeartbeatFalseRejectionReproduced\":true,\"productionHeartbeatAccepted\":true,\"actualAcquireRetainedBranchExecuted\":true,\"targetAndClearABARejected\":true,\"realWindowsOrSteamActions\":0}";return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

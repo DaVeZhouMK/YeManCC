@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
 import Dropdown from './Dropdown.vue';
+import { CONTROL_POWER_SCHEMES, normalizeContinuousControls } from '@/bridge/performanceControls';
 import Slider from './Slider.vue';
 import Toggle from './Toggle.vue';
 import ScreenTouchpadsSettings from './ScreenTouchpadsSettings.vue';
@@ -11,7 +12,6 @@ import { STEAM_APPEARANCE_THEMES } from '@/bridge/steamAppearance';
 import { switchMonitorHudTemplate } from '@/bridge/monitorHudModel';
 import { screenTouchpadProfile } from '@/bridge/screenTouchpads';
 import { gyroMotionParamsForPreset, isGyroPresetKey } from '@/bridge/gyroPresetModel';
-import { CONTROLLER_SHORTCUT_ACTIONS } from '@/bridge/controllerShortcutRules';
 const props = defineProps<{
     module: BootModeModule;
     value: BootConfig;
@@ -25,11 +25,15 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
     (event: 'change', value: BootConfig): void;
-    (event: 'edit-controller'): void;
     (event: 'shared-apps'): void;
 }>();
-const data = computed<any>(() => props.value), side = computed(() => powerSide.value);
+const data = computed<any>(() => props.module === 'performance'
+    ? { ...props.value, controls: normalizeContinuousControls(props.value.controls) }
+    : props.module === 'gyro' ? { ...props.value, motion: { ...(props.value.motion as Record<string, unknown> || {}) } } : props.value);
+const side = computed(() => powerSide.value);
 const powerSide = ref<'ac' | 'dc'>('ac');
+const performanceManual = computed(() => props.module === 'performance' && data.value.controls?.[side.value]?.mode === 'manual');
+const powerScheme = computed(() => data.value.powerSchemes?.[side.value] ?? 'yeman');
 const options = (values: readonly (string | number)[]) => values.map(value => ({ value, label: String(value) }));
 const cores = [{ value: 'bigFirst', label: '大核为主' }, { value: 'bigOnly', label: '仅大核' }, { value: 'littleFirst', label: '小核为主' }, { value: 'littleOnly', label: '仅小核' }];
 const personas = [{ value: 'disabled', label: '关闭虚拟手柄' }, { value: 'elite', label: 'Xbox' }, { value: 'steamdeck', label: 'SteamDeck' }, { value: 'dualsense-edge', label: 'PS5' }];
@@ -63,11 +67,13 @@ function get(path: string): any {
 function set(path: string, value: unknown) {
     if (props.disabled)
         return;
+    if (props.module === 'performance' && performanceManual.value && powerScheme.value !== 'yeman' && /^controls\.(ac|dc)\.(manual|auto|hyperThreadMode)(\.|$)/.test(path)) return;
+    if (props.module === 'performance' && path.startsWith('powerSchemes.') && !CONTROL_POWER_SCHEMES.some(option => option.value === value)) return;
     const next = JSON.parse(JSON.stringify(data.value));
     let target = next;
     const parts = path.split('.');
     for (const key of parts.slice(0, -1))
-        target = target[key] ??= {};
+        target = target[key] && typeof target[key] === 'object' && !Array.isArray(target[key]) ? target[key] : (target[key] = {});
     target[parts[parts.length - 1]] = value;
     if (props.module === 'gyro') {
         const before = data.value.motion || {}, motion = next.motion;
@@ -109,7 +115,7 @@ const fields = computed<Field[]>(() => {
         const prefix = 'controls.' + side.value + '.', bank = data.value.controls?.[side.value];
         if (!bank)
             return [];
-        return [s('调度模式', prefix + 'mode', [{ value: 'auto', label: '自动模式' }, { value: 'manual', label: '手动模式' }]), r('TDP 上限', prefix + 'tdpCeiling', 3, 150, 1, ' W'), r('TDP 功耗', prefix + 'tdp', 3, Math.max(3, bank.tdpCeiling), 1, ' W'), ...(bank.mode === 'auto' ? [r('GPU 倾向（0% 为 CPU 优先）', prefix + 'auto.bias', 0, 100, 5, '%'), s('浮动节能', prefix + 'auto.saving', [{ value: 'none', label: '无浮动' }, { value: 'small', label: '小幅' }, { value: 'medium', label: '中幅' }, { value: 'large', label: '大幅' }, { value: 'aggressive', label: '激进' }]), s('3–' + bank.auto.coreSplit + ' W', prefix + 'auto.coreLow', cores), s(bank.tdp <= bank.auto.coreSplit ? '高功耗段（当前无区间）' : (bank.auto.coreSplit + 1) + '–' + bank.tdp + ' W', prefix + 'auto.coreHigh', cores), r('核心切换瓦数', prefix + 'auto.coreSplit', 3, Math.min(25, Math.max(3, bank.tdp)), 1, ' W')] : [r('CPU 频率', prefix + 'manual.frequencyMHz', 800, 6500, 100, ' MHz'), r('积极性', prefix + 'manual.aggressiveness', 0, 100, 1, '%'), t('睿频', prefix + 'manual.turbo'), t('不限频率', prefix + 'manual.unlimited'), s('大小核心', prefix + 'manual.coreMode', cores)]), r('目标帧率', 'frames.' + side.value + '.fps', 0, 300, 1, ' FPS')];
+        return [s('调度模式', prefix + 'mode', [{ value: 'auto', label: '自动模式' }, { value: 'manual', label: '手动模式' }]), r('TDP 上限', prefix + 'tdpCeiling', 3, 150, 1, ' W'), r('TDP 功耗', prefix + 'tdp', 3, Math.max(3, bank.tdpCeiling), 1, ' W'), ...(bank.mode === 'auto' ? [r('GPU 倾向（0% 为 CPU 优先）', prefix + 'auto.bias', 0, 100, 5, '%'), s('浮动节能', prefix + 'auto.saving', [{ value: 'none', label: '无浮动' }, { value: 'small', label: '小幅' }, { value: 'medium', label: '中幅' }, { value: 'large', label: '大幅' }, { value: 'aggressive', label: '激进' }]), s('3–' + bank.auto.coreSplit + ' W', prefix + 'auto.coreLow', cores), s(bank.tdp <= bank.auto.coreSplit ? '高功耗段（当前无区间）' : (bank.auto.coreSplit + 1) + '–' + bank.tdp + ' W', prefix + 'auto.coreHigh', cores), r('核心切换瓦数', prefix + 'auto.coreSplit', 3, Math.min(25, Math.max(3, bank.tdp)), 1, ' W')] : powerScheme.value === 'yeman' ? [r('CPU 频率', prefix + 'manual.frequencyMHz', 800, 6500, 100, ' MHz'), r('积极性', prefix + 'manual.aggressiveness', 0, 100, 1, '%'), t('睿频', prefix + 'manual.turbo'), t('不限频率', prefix + 'manual.unlimited'), s('大小核心', prefix + 'manual.coreMode', cores)] : []), r('目标帧率', 'frames.' + side.value + '.fps', 0, 300, 1, ' FPS')];
     }
     if (props.module === 'fan')
         return [t('启用风扇控制', 'enabled'), s('风扇预设', 'preset', [{ value: 'soft', label: '静音' }, { value: 'balanced', label: '均衡' }, { value: 'aggressive', label: '散热优先' }])];
@@ -155,8 +161,8 @@ const fields = computed<Field[]>(() => {
     if (props.module === 'background')
         return [s('界面配色', 'ui.theme', [{ value: 'blue-black', label: '蓝黑' }, { value: 'red-black', label: '红黑' }, { value: 'cyberpunk', label: '黄黑' }]), r('面板透明度', 'ui.backgroundOpacity', .2, .8, .01, '×'), r('背景模糊', 'ui.backgroundBlur', 0, 24, 1), t('YMCC 动态壁纸', 'ui.dynamicBackgroundEnabled')];
     if (props.module === 'sleep') {
-        const buttons = [{ value: 0, label: 'S3 睡眠' }, { value: 1, label: 'S4 休眠' }, { value: 2, label: '不操作' }, { value: 3, label: '关闭显示器' }], timeouts = [0, 1, 2, 3, 5, 10, 15, 20, 25, 30, 45, 60, 120, 180, 240, 300, 480, 720, 1440, 2880, 5760].map(value => ({ value, label: value ? value + ' 分钟' : '从不' }));
-        return [s('睡眠优化', 'config.mode', [{value:'off',label:'关闭守护'},{value:'custom',label:'自选优化'}]), t('睡眠时暂停游戏', 'config.pauseGameOnSleep'), t('睡眠唤醒 Steam 自动修复', 'steamAutoRecovery'), t('唤醒需要密码', 'config.wakePasswordEnabled'), t('睡眠电源计划优化', 'config.sleepPowerPlanOptimizationEnabled'), t('睡眠失效强制睡眠', 'config.retryOnEntryFailure'), t('供电变动唤醒重睡', 'config.retryOnNonUserWake'), s('插电 AC · 电源键', 'acButton', buttons), s('电池 DC · 电源键', 'dcButton', buttons), t('系统休眠开关', 'hibernate'), r('休眠文件大小', 'hibernateSize', 30, 100, 5, '%'), ...['Screen', 'Sleep', 'Hibernate'].flatMap((key, i) => ['ac', 'dc'].map(side => s(['关闭屏幕', '进入睡眠', '进入休眠'][i] + ' · ' + side.toUpperCase(), 'timeouts.' + side + key, timeouts)))];
+        const buttons = [{ value: 0, label: '睡眠' }, { value: 1, label: '休眠' }, { value: 2, label: '不操作' }, { value: 3, label: '关闭显示器' }], timeouts = [0, 1, 2, 3, 5, 10, 15, 20, 25, 30, 45, 60, 120, 180, 240, 300, 480, 720, 1440, 2880, 5760].map(value => ({ value, label: value ? value + ' 分钟' : '从不' }));
+        return [s('睡眠优化', 'config.mode', [{value:'off',label:'关闭守护'},{value:'custom',label:'自选优化'}]), t('睡眠时暂停游戏', 'config.pauseGameOnSleep'), t('睡眠唤醒 Steam 自动修复', 'steamAutoRecovery'), t('唤醒需要密码', 'config.wakePasswordEnabled'), t('睡眠电源计划优化', 'config.sleepPowerPlanOptimizationEnabled'), t('入睡失败重试', 'config.retryOnEntryFailure'), t('睡眠超时', 'config.retryOnSleepTimeout'), t('供电变动唤醒重睡', 'config.retryOnNonUserWake'), s('插电 AC · 电源键', 'acButton', buttons), s('电池 DC · 电源键', 'dcButton', buttons), t('系统休眠开关', 'hibernate'), r('休眠文件大小', 'hibernateSize', 30, 100, 5, '%'), ...['Screen', 'Sleep', 'Hibernate'].flatMap((key, i) => ['ac', 'dc'].map(side => s(['关闭屏幕', '进入睡眠', '进入休眠'][i] + ' · ' + side.toUpperCase(), 'timeouts.' + side + key, timeouts)))];
     }
     return [];
 });
@@ -167,7 +173,6 @@ function updateTouch(config: ScreenTouchpadConfig) {
     emit('change', { ...data.value, profiles: { ...data.value.profiles, [touchPersona.value]: cloneBootValue(config) } });
 }
 function toggleApp(path: string) { const paths = Array.isArray(data.value.paths) ? data.value.paths : []; set('paths', paths.includes(path) ? paths.filter((p: string) => p !== path) : [...paths, path]); }
-const ruleLabel = (action: string) => CONTROLLER_SHORTCUT_ACTIONS.find(item => item.id === action)?.label || action;
 const fieldsRoot = ref<HTMLElement | null>(null);
 const sliderDrafts = new Map<HTMLInputElement, BootConfig>();
 let activeSlider: HTMLInputElement | null = null;
@@ -201,20 +206,25 @@ onBeforeUnmount(() => {
  <div ref="fieldsRoot" class="boot-mode-fields" data-gp-slider-draft @gp:slider-edit-start="beginSliderDraft" @gp:slider-edit-end="finishSliderDraft($event)" @gp:slider-edit-cancel="finishSliderDraft($event,true)">
  <div v-if="module==='performance'" class="boot-power-side"><button v-for="item in ['ac','dc'] as const" :key="item" :aria-pressed="powerSide===item" :disabled="disabled" @click="powerSide=item">{{item==='ac'?'交流电 AC':'电池 DC'}}</button></div>
  <ScreenTouchpadsSettings v-if="module==='touch'" :key="touchPersona" :persona="touchPersona" :preset-config="touchConfig" :disabled="disabled" :steam-deck-enabled="persona==='steamdeck'" :ps5-enabled="persona==='dualsense-edge'" @preset-update="updateTouch"/>
- <template v-else-if="module==='controller'"><div class="boot-controller-summary"><div><strong>{{(data.rules||[]).filter((rule:any)=>rule.enabled).length}} / {{(data.rules||[]).length}} 项已启用</strong><span>实体手柄按键、组合键与动作</span></div><button :disabled="disabled" class="boot-action primary" @click="emit('edit-controller')">编辑手柄自定义</button></div><div class="boot-rule-list"><div v-for="rule in data.rules" :key="rule.id"><i :class="{on:rule.enabled}"/><span>{{ruleLabel(rule.actionId)}}</span><kbd>{{(rule.inputs||[]).map((input:any)=>input.code).join(' + ')}}</kbd></div></div></template>
  <div v-else class="boot-fields" :class="{'monitor-fields':module==='monitor'}">
-  <div v-for="field in fields" :key="field.path" class="boot-field" :data-field="module+'.'+field.path">
+  <template v-for="field in fields" :key="field.path">
+  <div v-if="performanceManual && field.path==='controls.'+side+'.tdpCeiling'" class="boot-power-schemes" role="group" aria-label="电源方案" :data-field="'performance.powerSchemes.'+side">
+   <button v-for="option in CONTROL_POWER_SCHEMES" :key="option.value" :aria-pressed="powerScheme===option.value" :disabled="disabled" @click="set('powerSchemes.'+side,option.value)">{{option.value==='yeman'?'野蛮系统电源':option.label}}</button>
+  </div>
+  <div class="boot-field" :data-field="module+'.'+field.path">
    <Toggle v-if="field.type==='toggle'" :model-value="get(field.path)===true" :label="field.label" :disabled="disabled||field.disabled" @update:model-value="set(field.path,$event)"/>
    <Slider v-else-if="field.type==='range'" :model-value="typeof get(field.path)==='number'?get(field.path):field.min" :label="field.label" :min="field.min" :max="field.max" :step="field.step" :unit="field.unit" :disabled="disabled||field.disabled" @update:model-value="set(field.path,$event)"/>
    <label v-else><span>{{field.label}}</span><Dropdown :model-value="get(field.path)??''" :options="field.options||[]" :aria-label="field.label" :disabled="disabled||field.disabled" @update:model-value="set(field.path,$event)"/></label>
   </div>
+  </template>
  </div>
  <p v-if="module==='display'&&data.brightness==null" class="boot-field-note">当前亮度尚未读取；调整目标值后才会写入草稿。</p>
- <template v-if="module==='softwareLaunch'"><div class="boot-app-list"><Toggle v-for="app in apps" :key="app.path" :model-value="(data.paths||[]).includes(app.path)" :label="app.name" :disabled="disabled" @update:model-value="toggleApp(app.path)"/></div><button class="boot-action" :disabled="disabled" @click="emit('shared-apps')">管理全局快捷应用</button></template>
+ <template v-if="module==='softwareLaunch'"><div class="boot-app-list"><Toggle v-for="app in apps" :key="app.path" :model-value="Array.isArray(data.paths)&&data.paths.includes(app.path)" :label="app.name" :disabled="disabled" @update:model-value="toggleApp(app.path)"/></div><button class="boot-action" :disabled="disabled" @click="emit('shared-apps')">管理全局快捷应用</button></template>
  </div>
 </template>
 <style scoped>
-.boot-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;align-items:start}.boot-field{min-width:0}.boot-field>label{display:grid;gap:6px;color:var(--text-dim);font-size:14px}.boot-field :deep(.slider-label){font-size:14px}.boot-power-side{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px}.boot-power-side button,.boot-action{min-height:35px;padding:7px 11px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font:inherit;font-size:14px;cursor:pointer}.boot-power-side button[aria-pressed=true],.primary{background:color-mix(in srgb,var(--accent) 28%,var(--bg-input));border-color:var(--accent)}.monitor-fields .boot-field:first-child,.monitor-fields .boot-field:last-child{grid-column:1/-1}.boot-controller-summary{display:flex;justify-content:space-between;align-items:center;gap:12px}.boot-controller-summary>div{display:grid;gap:4px}.boot-controller-summary strong{font-size:17px}.boot-controller-summary span{font-size:14px;color:var(--text-dim)}.boot-rule-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}.boot-rule-list>div{display:flex;align-items:center;gap:6px;padding:9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);min-width:0}.boot-rule-list i{width:6px;height:6px;border-radius:50%;background:#6b7a86}.boot-rule-list i.on{background:#6cd4b2}.boot-rule-list span{font-size:14px;flex:1}.boot-rule-list kbd{font-size:14px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.boot-app-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}.boot-action:disabled,.boot-power-side button:disabled{opacity:.5;cursor:default}
-.boot-field :deep(.dd-trigger),.boot-field :deep(.toggle-label),.boot-field :deep(.slider-label),.boot-field :deep(.slider-val){font-size:14px}.boot-field-note{font-size:14px;line-height:1.5;color:var(--text-dim)}.boot-rule-list kbd{max-width:45%}:deep(.screen-touchpads-bubble){font-size:14px}:deep(.screen-touchpads-bubble label),:deep(.screen-touchpads-bubble .slider-label),:deep(.screen-touchpads-bubble .dd-trigger){font-size:14px}
+.boot-power-schemes{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.boot-power-schemes button{white-space:nowrap;min-width:0;min-height:35px;padding:7px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font:inherit;font-size:14px;cursor:pointer}.boot-power-schemes button[aria-pressed=true]{background:color-mix(in srgb,var(--accent) 28%,var(--bg-input));border-color:var(--accent)}.boot-power-schemes button:disabled{opacity:.5;cursor:default}
+.boot-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;align-items:start}.boot-field{min-width:0}.boot-field>label{display:grid;gap:6px;color:var(--text-dim);font-size:14px}.boot-field :deep(.slider-label){font-size:14px}.boot-power-side{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px}.boot-power-side button,.boot-action{min-height:35px;padding:7px 11px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font:inherit;font-size:14px;cursor:pointer}.boot-power-side button[aria-pressed=true],.primary{background:color-mix(in srgb,var(--accent) 28%,var(--bg-input));border-color:var(--accent)}.monitor-fields .boot-field:first-child,.monitor-fields .boot-field:last-child{grid-column:1/-1}.boot-app-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}.boot-action:disabled,.boot-power-side button:disabled{opacity:.5;cursor:default}
+.boot-field :deep(.dd-trigger),.boot-field :deep(.toggle-label),.boot-field :deep(.slider-label),.boot-field :deep(.slider-val){font-size:14px}.boot-field-note{font-size:14px;line-height:1.5;color:var(--text-dim)}:deep(.screen-touchpads-bubble){font-size:14px}:deep(.screen-touchpads-bubble label),:deep(.screen-touchpads-bubble .slider-label),:deep(.screen-touchpads-bubble .dd-trigger){font-size:14px}
 :deep(.touchpad-master-copy span),:deep(.screen-touchpad-status),:deep(.screen-touchpad-sliders .slider-val){font-size:14px}
 </style>

@@ -16122,7 +16122,9 @@
           "deviceClass": "HandheldCompanion.Devices.OneXPlayerX1Mini",
           "name": "OneXPlayerX1Mini",
           "brightness": true,
-          "secondColor": true,
+          "secondColor": false,
+          "sourceDeclaredSecondColor": true,
+          "consumerSecondColor": false,
           "declaredEffects": [
             "solid",
             "rainbow",
@@ -16682,18 +16684,471 @@
           "value": 8
         }
       ],
+      "frozenRegisteredClasses": 47,
+      "reviewedExtensionRows": 4,
+      "allRegisteredClasses": 51,
+      "extensionRows": [
+        {
+          "deviceId": "ymcc.device.OneXPlayer3",
+          "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
+          "name": "OneXPlayer3",
+          "family": "OneXPlayer",
+          "brightness": true,
+          "secondColor": true,
+          "declaredEffects": [
+            "solid",
+            "breathing",
+            "preset"
+          ],
+          "presetDeclared": true,
+          "presetSecondColor": true,
+          "presetAvailable": true,
+          "statusAvailable": false,
+          "statusTransportDisabled": true,
+          "capabilities": [
+            "DynamicLighting",
+            "DynamicLightingBrightness",
+            "DynamicLightingSecondLEDColor"
+          ],
+          "nativeAliasTargets": [],
+          "methodSources": {},
+          "independent": null,
+          "origin": "reviewed-native-extension",
+          "sourceAdapter": "oxp3-hid-v1",
+          "sourceDependencies": [],
+          "sourceFile": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+          "sourceSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "presetIds": [
+            "LEDPreset_OneXPlayerX1_Preset01",
+            "LEDPreset_OneXPlayerX1_Preset02",
+            "LEDPreset_OneXPlayerX1_Preset03",
+            "LEDPreset_OneXPlayerX1_Preset04",
+            "LEDPreset_OneXPlayerX1_Preset05",
+            "LEDPreset_OneXPlayerX1_Preset06",
+            "LEDPreset_OneXPlayerX1_Preset07",
+            "LEDPreset_OneXPlayerX1_Preset09",
+            "LEDPreset_OneXPlayerX1_Preset10",
+            "LEDPreset_OneXPlayerX1_Preset11"
+          ],
+          "presets": [
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset01",
+              "label": "预设 01",
+              "value": 13
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset02",
+              "label": "预设 02",
+              "value": 3
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset03",
+              "label": "预设 03",
+              "value": 11
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset04",
+              "label": "预设 04",
+              "value": 5
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset05",
+              "label": "预设 05",
+              "value": 7
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset06",
+              "label": "预设 06",
+              "value": 9
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset07",
+              "label": "预设 07",
+              "value": 12
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset09",
+              "label": "预设 09",
+              "value": 1000
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset10",
+              "label": "预设 10",
+              "value": 2
+            },
+            {
+              "id": "LEDPreset_OneXPlayerX1_Preset11",
+              "label": "预设 11",
+              "value": 8
+            }
+          ],
+          "fixedSpeed": true,
+          "requestLimits": [
+            "Preset second-set breathing comes from the HC LEDSecondSetBreathing setting; the one-shot request has no such field. Explicit color requests can select breathing.",
+            "Preset second-set color and main color follow the explicit request colors passed by the native caller; there is no hidden re-read of HC settings.",
+            "Fixed speed cannot be changed by request; speed is recorded as ignored."
+          ]
+        },
+        {
+          "deviceId": "ymcc.device.AYANEO3",
+          "deviceClass": "HandheldCompanion.Devices.AYANEO3",
+          "name": "AYANEO3",
+          "family": "AYANEO",
+          "brightness": true,
+          "secondColor": true,
+          "declaredEffects": [
+            "solid"
+          ],
+          "presetDeclared": false,
+          "presetSecondColor": false,
+          "presetAvailable": false,
+          "statusAvailable": true,
+          "statusTransportDisabled": false,
+          "capabilities": [
+            "DynamicLighting",
+            "DynamicLightingBrightness",
+            "DynamicLightingSecondLEDColor"
+          ],
+          "nativeAliasTargets": [],
+          "methodSources": {},
+          "independent": null,
+          "origin": "reviewed-native-extension",
+          "sourceAdapter": "superjoy-cec-v1",
+          "sourceDependencies": [
+            {
+              "role": "cec",
+              "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+              "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da"
+            },
+            {
+              "role": "superjoy",
+              "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+              "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12"
+            }
+          ],
+          "sourceFile": "capabilities/upstream/f2e58468/AYANEO3.cs",
+          "sourceSha256": "bee53cd4d730013900da5c542c751b018f006ee09b886c55926f0ac7c17ee88b",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "presetIds": [],
+          "presets": [],
+          "fixedSpeed": false,
+          "requestLimits": [
+            "Each one-shot request carries both explicit colors and brightness; no guessed or cached current colors.",
+            "Only fixed-source solid lighting is admitted; no presets, secondary display, charging or new controller reader.",
+            "Protocol completion and cleanup are software scope; physical effect, installed behavior and performance remain unverified."
+          ]
+        },
+        {
+          "deviceId": "ymcc.device.AYANEONEXT2",
+          "deviceClass": "HandheldCompanion.Devices.AYANEONEXT2",
+          "name": "AYANEONEXT2",
+          "family": "AYANEO",
+          "brightness": true,
+          "secondColor": true,
+          "declaredEffects": [
+            "solid"
+          ],
+          "presetDeclared": false,
+          "presetSecondColor": false,
+          "presetAvailable": false,
+          "statusAvailable": true,
+          "statusTransportDisabled": false,
+          "capabilities": [
+            "DynamicLighting",
+            "DynamicLightingBrightness",
+            "DynamicLightingSecondLEDColor"
+          ],
+          "nativeAliasTargets": [],
+          "methodSources": {},
+          "independent": null,
+          "origin": "reviewed-native-extension",
+          "sourceAdapter": "superjoy-cec-v1",
+          "sourceDependencies": [
+            {
+              "role": "cec",
+              "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+              "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da"
+            },
+            {
+              "role": "superjoy",
+              "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+              "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12"
+            }
+          ],
+          "sourceFile": "capabilities/upstream/f2e58468/AYANEONEXT2.cs",
+          "sourceSha256": "b47a90a52912eebd2568e920da7c1d0a264a286bb06657f9e274feb7f5da91c2",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "presetIds": [],
+          "presets": [],
+          "fixedSpeed": false,
+          "requestLimits": [
+            "Each one-shot request carries both explicit colors and brightness; no guessed or cached current colors.",
+            "Only fixed-source solid lighting is admitted; no presets, secondary display, charging or new controller reader.",
+            "Protocol completion and cleanup are software scope; physical effect, installed behavior and performance remain unverified."
+          ]
+        },
+        {
+          "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+          "deviceClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+          "name": "OneXPlayerX2MiniPro",
+          "family": "OneXPlayer",
+          "brightness": true,
+          "secondColor": true,
+          "declaredEffects": [
+            "solid",
+            "breathing"
+          ],
+          "presetDeclared": true,
+          "presetSecondColor": false,
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "statusTransportDisabled": true,
+          "capabilities": [
+            "DynamicLighting",
+            "DynamicLightingBrightness",
+            "DynamicLightingSecondLEDColor"
+          ],
+          "nativeAliasTargets": [],
+          "methodSources": {},
+          "independent": {
+            "brightness": true,
+            "color": [
+              "solid",
+              "breathing"
+            ],
+            "off": true
+          },
+          "origin": "reviewed-native-extension",
+          "sourceAdapter": "onex-x2mini-hid-v1",
+          "sourceDependencies": [
+            {
+              "role": "x1",
+              "path": "capabilities/upstream/f2e58468/OneXPlayerX1.cs",
+              "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485"
+            },
+            {
+              "role": "x2",
+              "path": "capabilities/upstream/f2e58468/OneXPlayerX2.cs",
+              "sha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b"
+            },
+            {
+              "role": "lighting-base",
+              "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+              "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+            },
+            {
+              "role": "report-base",
+              "path": "capabilities/upstream/f2e58468/IDevice.cs",
+              "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+            }
+          ],
+          "consumerSources": [
+            {
+              "role": "protocol",
+              "path": "FanLab/LightSetter/DeviceCore/PinnedX2MiniProProtocol.cs",
+              "sha256": "49257929a8d670c6c823be78e7695410b9606909d4419100bd92287f580cd330"
+            },
+            {
+              "role": "entry",
+              "path": "FanLab/LightSetter/DeviceCore/X2MiniProDeviceCore.cs",
+              "sha256": "602d14ce95f00a6f85972dbdfcb2816b7bfb3a2750a989be46b960fd3619ebb5"
+            },
+            {
+              "role": "transport",
+              "path": "FanLab/LightSetter/DeviceCore/WindowsHidTransport.cs",
+              "sha256": "a6acaacca7d18ff57788d77c2379555d153ac2dffca322772cf0326f468c89bf"
+            },
+            {
+              "role": "abi",
+              "path": "FanLab/LightSetter/DeviceCore/LightingDeviceCore.cs",
+              "sha256": "1a369735af086c140bbea47ab378a31b6a7d82ca9139e0b89fe6d28f8736f9af"
+            }
+          ],
+          "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2MiniPro.cs",
+          "sourceSha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "presetIds": [],
+          "presets": [],
+          "fixedSpeed": true,
+          "requestLimits": [
+            "Only the exact newer source five-zone solid/breathing and brightness writers are consumed. Main color=01/02/07; secondary=05/06; no side0 aggregate.",
+            "The existing native OneX owner must finish source initialization and lend its exact current-generation path. Revocation/deadline/cleanup remain mandatory; no independent device discovery or OXP3 wire protocol.",
+            "Existing off uses five brightness-zero and five explicit black solid reports; no SetLedStatus, serial preset, guessed cached colors or physical confirmation.",
+            "speedIgnored/fixedSpeed are effective consumer facts. Source did not declare DynamicLightingFixedSpeed; inherited LEDPreset declaration does not prove a five-zone preset writer."
+          ]
+        }
+      ],
+      "extensionModels": [
+        {
+          "name": "OneXPlayer3",
+          "deviceId": "ymcc.device.OneXPlayer3",
+          "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
+          "sourceFile": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+          "sourceSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "sourceAdapter": "oxp3-hid-v1",
+          "sourceDependencies": [],
+          "presetIds": [
+            "LEDPreset_OneXPlayerX1_Preset01",
+            "LEDPreset_OneXPlayerX1_Preset02",
+            "LEDPreset_OneXPlayerX1_Preset03",
+            "LEDPreset_OneXPlayerX1_Preset04",
+            "LEDPreset_OneXPlayerX1_Preset05",
+            "LEDPreset_OneXPlayerX1_Preset06",
+            "LEDPreset_OneXPlayerX1_Preset07",
+            "LEDPreset_OneXPlayerX1_Preset09",
+            "LEDPreset_OneXPlayerX1_Preset10",
+            "LEDPreset_OneXPlayerX1_Preset11"
+          ],
+          "requestLimits": [
+            "Preset second-set breathing comes from the HC LEDSecondSetBreathing setting; the one-shot request has no such field. Explicit color requests can select breathing.",
+            "Preset second-set color and main color follow the explicit request colors passed by the native caller; there is no hidden re-read of HC settings.",
+            "Fixed speed cannot be changed by request; speed is recorded as ignored."
+          ]
+        },
+        {
+          "name": "AYANEO3",
+          "deviceId": "ymcc.device.AYANEO3",
+          "deviceClass": "HandheldCompanion.Devices.AYANEO3",
+          "sourceFile": "capabilities/upstream/f2e58468/AYANEO3.cs",
+          "sourceSha256": "bee53cd4d730013900da5c542c751b018f006ee09b886c55926f0ac7c17ee88b",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "sourceAdapter": "superjoy-cec-v1",
+          "sourceDependencies": [
+            {
+              "role": "cec",
+              "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+              "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da"
+            },
+            {
+              "role": "superjoy",
+              "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+              "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12"
+            }
+          ],
+          "presetIds": [],
+          "requestLimits": [
+            "Each one-shot request carries both explicit colors and brightness; no guessed or cached current colors.",
+            "Only fixed-source solid lighting is admitted; no presets, secondary display, charging or new controller reader.",
+            "Protocol completion and cleanup are software scope; physical effect, installed behavior and performance remain unverified."
+          ]
+        },
+        {
+          "name": "AYANEONEXT2",
+          "deviceId": "ymcc.device.AYANEONEXT2",
+          "deviceClass": "HandheldCompanion.Devices.AYANEONEXT2",
+          "sourceFile": "capabilities/upstream/f2e58468/AYANEONEXT2.cs",
+          "sourceSha256": "b47a90a52912eebd2568e920da7c1d0a264a286bb06657f9e274feb7f5da91c2",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "sourceAdapter": "superjoy-cec-v1",
+          "sourceDependencies": [
+            {
+              "role": "cec",
+              "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+              "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da"
+            },
+            {
+              "role": "superjoy",
+              "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+              "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12"
+            }
+          ],
+          "presetIds": [],
+          "requestLimits": [
+            "Each one-shot request carries both explicit colors and brightness; no guessed or cached current colors.",
+            "Only fixed-source solid lighting is admitted; no presets, secondary display, charging or new controller reader.",
+            "Protocol completion and cleanup are software scope; physical effect, installed behavior and performance remain unverified."
+          ]
+        },
+        {
+          "name": "OneXPlayerX2MiniPro",
+          "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+          "deviceClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+          "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2MiniPro.cs",
+          "sourceSha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+          "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+          "sourceAdapter": "onex-x2mini-hid-v1",
+          "sourceDependencies": [
+            {
+              "role": "x1",
+              "path": "capabilities/upstream/f2e58468/OneXPlayerX1.cs",
+              "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485"
+            },
+            {
+              "role": "x2",
+              "path": "capabilities/upstream/f2e58468/OneXPlayerX2.cs",
+              "sha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b"
+            },
+            {
+              "role": "lighting-base",
+              "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+              "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+            },
+            {
+              "role": "report-base",
+              "path": "capabilities/upstream/f2e58468/IDevice.cs",
+              "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+            }
+          ],
+          "consumerSources": [
+            {
+              "role": "protocol",
+              "path": "FanLab/LightSetter/DeviceCore/PinnedX2MiniProProtocol.cs",
+              "sha256": "49257929a8d670c6c823be78e7695410b9606909d4419100bd92287f580cd330"
+            },
+            {
+              "role": "entry",
+              "path": "FanLab/LightSetter/DeviceCore/X2MiniProDeviceCore.cs",
+              "sha256": "602d14ce95f00a6f85972dbdfcb2816b7bfb3a2750a989be46b960fd3619ebb5"
+            },
+            {
+              "role": "transport",
+              "path": "FanLab/LightSetter/DeviceCore/WindowsHidTransport.cs",
+              "sha256": "a6acaacca7d18ff57788d77c2379555d153ac2dffca322772cf0326f468c89bf"
+            },
+            {
+              "role": "abi",
+              "path": "FanLab/LightSetter/DeviceCore/LightingDeviceCore.cs",
+              "sha256": "1a369735af086c140bbea47ab378a31b6a7d82ca9139e0b89fe6d28f8736f9af"
+            }
+          ],
+          "presetIds": [],
+          "requestLimits": [
+            "Only the exact newer source five-zone solid/breathing and brightness writers are consumed. Main color=01/02/07; secondary=05/06; no side0 aggregate.",
+            "The existing native OneX owner must finish source initialization and lend its exact current-generation path. Revocation/deadline/cleanup remain mandatory; no independent device discovery or OXP3 wire protocol.",
+            "Existing off uses five brightness-zero and five explicit black solid reports; no SetLedStatus, serial preset, guessed cached colors or physical confirmation.",
+            "speedIgnored/fixedSpeed are effective consumer facts. Source did not declare DynamicLightingFixedSpeed; inherited LEDPreset declaration does not prove a five-zone preset writer."
+          ]
+        }
+      ],
       "independentCore": {
         "provider": "ymcc-onex-hid-v1",
         "assemblyFile": "YeManLightDeviceCore.dll",
-        "sha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
-        "device": "OneXPlayerX1Mini",
-        "actions": {
-          "brightness": true,
-          "color": [
-            "solid",
-            "rainbow"
-          ]
-        }
+        "sha256": "924576fffd04ead813fc7cb0f1ddbda4b15d8e43416b564c1107b88a76211675",
+        "models": [
+          {
+            "device": "OneXPlayerX1Mini",
+            "actions": {
+              "brightness": true,
+              "color": [
+                "solid",
+                "rainbow"
+              ]
+            }
+          },
+          {
+            "device": "OneXPlayerX2MiniPro",
+            "actions": {
+              "brightness": true,
+              "color": [
+                "solid",
+                "breathing"
+              ],
+              "off": true
+            }
+          }
+        ]
       },
       "nativeBaseAliases": [
         {
@@ -16723,6 +17178,25 @@
           "reason": "The inherited SetLedStatus only queues serial-port writes; this model disables that transport. Off uses the real HID brightness and black-color writers instead.",
           "sourceFile": "OneXPlayer/OneXPlayerX1Mini.cs",
           "requiredSourceText": "EnableSerialPort = false"
+        }
+      ],
+      "secondColorExclusions": [
+        {
+          "device": "OneXPlayerX1Mini",
+          "sourceDeclaredSecondColor": true,
+          "consumerSecondColor": false,
+          "methodOwner": "OneXPlayerX1Mini",
+          "method": "SetLedColor",
+          "sourceFile": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+          "sourceSha256": "2bcc0688ac0cb65091f29432a2351e00d724259778ffb3891ac9ca82a05852c0",
+          "methodSha256": "6a343183d894a039d63255e315dd947204d9fbaf61ded1f1498c32447d483798",
+          "independentConsumer": {
+            "sourceFile": "FanLab/LightSetter/DeviceCore/PinnedOneXHidV1.g.cs",
+            "sourceSha256": "e4904be4ee0cf0a9ba2d32f73a5bfaa7a4b6413d2fdcaaf97439312b18e031c3",
+            "type": "PinnedX1MiniProtocol",
+            "method": "SetLedColor"
+          },
+          "reason": "Exact existing X1 Mini color writers use mainColor at side 0x00 and do not consume secondaryColor. Preserve the inherited source declaration; exclude only effective secondary-color consumption. This constraint adds no route, provider, model alias or write authority."
         }
       ],
       "brightnessCompatibility": [
@@ -16769,15 +17243,15 @@
           "reason": "Retain the reviewed in-process MSI command-interface HID writer; exact model registration replaces family-only dispatch"
         }
       ],
-      "catalogSha256": "56fcc0dcaed4376ead15956aeb9f05ce52e3552b782497617a7691370878f45e"
+      "catalogSha256": "2b1f4189623fa73ebb828ee7f4fcb368b573982df39ee06646b51668001683ce"
     },
     "battery": {
       "schemaVersion": 1,
       "ruleDocument": "native/BatteryHost/battery-routes.json",
-      "ruleDocumentSha256": "3b16212bb524128b99ef3498512c05e69c09a287c889b97abe7454dea90bda8a",
-      "registeredRules": 40,
+      "ruleDocumentSha256": "934eaea7bc1d8ef30de93f294bd32428211d9ed391913884c1a52e8e681bca09",
+      "registeredRules": 41,
       "frozenModelRules": 34,
-      "reviewedExtensionRules": 6,
+      "reviewedExtensionRules": 7,
       "providerRoutes": [
         "asus-ally-acpi",
         "lenovo-go-conservation",
@@ -16787,6 +17261,7 @@
         "ayaneo-ceii-bypass",
         "oxp-x1-amd-ec",
         "oxp-x1-intel-ec",
+        "oxp3-wmi-ec",
         "valve-deck-firmware",
         "gpd-win-mini-2025"
       ],
@@ -17867,6 +18342,34 @@
           },
           "min": 60,
           "kind": "firmware-percent"
+        },
+        {
+          "index": 40,
+          "ruleId": "battery.rule.oxp3-wmi-ec.OneXPlayer3",
+          "deviceId": "ymcc.device.OneXPlayer3",
+          "deviceClass": "OneXPlayer3",
+          "origin": "reviewed-native-extension",
+          "sourceDeclaredBattery": false,
+          "provider": "oxp3-wmi-ec",
+          "identity": {
+            "manufacturers": [
+              "ONE-NETBOOK",
+              "ONE-NETBOOK TECHNOLOGY CO., LTD."
+            ],
+            "field": "systemProduct",
+            "values": [
+              "ONEXPLAYER 3",
+              "ONEXPLAYER-3"
+            ],
+            "deviceClass": "OneXPlayer3"
+          },
+          "firmwareGate": {
+            "kind": "provider-probe-required",
+            "majorMin": 0,
+            "minorMin": 0
+          },
+          "min": 40,
+          "kind": "firmware-percent"
         }
       ],
       "sourceCoverage": [
@@ -18896,7 +19399,7 @@
         },
         {
           "file": "tools/battery-charge-generate-routes.mjs",
-          "sha256": "a2abcf654cf6e1db23c4ec2b26323a6216dce5dc0cb25a2555fdbe22c1032c54"
+          "sha256": "10a773ef8d9b71b433df308d3f8448df4f54050efca95c6da38ae0a22d05a338"
         },
         {
           "file": "native/BatteryHost/Policy.cs",
@@ -18904,11 +19407,11 @@
         },
         {
           "file": "native/BatteryHost/Controller.cs",
-          "sha256": "ea09e8e817f89e103044b3f1bd6d7a9251e6508e24f818f147a7f417424e9a86"
+          "sha256": "ec4872e44ed4c839f227669da89bfe9b70c40528915ba5b1f9447c6665224e80"
         },
         {
           "file": "native/BatteryHost/Providers.cs",
-          "sha256": "389f8da69124b7aa2fa42a276a8554637301c9b9ce1738fb0812c2650835952d"
+          "sha256": "d7221587741c95965911107682b54efa1ef24662f20652c4538e1f23b707b713"
         },
         {
           "file": "native/BatteryHost/MsiWmi.cs",
@@ -18919,7 +19422,7 @@
           "sha256": "206dcf6572758eb7416d922a3dd4dd991b9483ad1281fa443e4a1d633ba5df3d"
         }
       ],
-      "catalogSha256": "1c3fde4bce8cd74f3fc9b94919f31d956478fc8012b314f73c8d1905f8a7d681"
+      "catalogSha256": "3ce17e815aa219790abf8ee7bc6c1b494b0452ef31f7b45aa3af77ae71227aa5"
     },
     "motion": {
       "schemaVersion": 1,
@@ -18928,7 +19431,7 @@
           "kind": "Reviewed",
           "file": "native/hc_model_motion_catalog.h",
           "count": 27,
-          "sha256": "da5e2e3d2995137766e473fc64845d53e7270032b9c17913f9c6ada154e638d8"
+          "sha256": "cf7a49d67944d30ffe9efa16e428c27ebe216234a57fd49673fcb1f1a60f9546"
         },
         {
           "kind": "Legacy",
@@ -19083,10 +19586,10 @@
           "deviceId": "ymcc.device.OneXPlayer3",
           "origin": "reviewed-native-extension",
           "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
-          "selectorId": "hc-a250b19a:model:OneXPlayer3",
-          "gyroMatrixId": "hc-a250b19a:onexplayer-3:gyro:y-x-z",
-          "accelMatrixId": "hc-a250b19a:onexplayer-3:accel:y-x-z",
-          "sourceSha256": "40dba7177094cdfb03880554aaa22d38921a57ae2b8deca5eca5f7dc32ced10b",
+          "selectorId": "hc-f2e58468:model:OneXPlayer3",
+          "gyroMatrixId": "hc-f2e58468:onexplayer-3:gyro:neg-y-neg-z-x",
+          "accelMatrixId": "hc-f2e58468:onexplayer-3:accel:neg-y-neg-z-x",
+          "sourceSha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a",
           "controllerPreferred": false,
           "windowsAdmitted": true,
           "primaryKind": "Reviewed"
@@ -20488,7 +20991,7 @@
         "controller-source-qualified recipe/submit/calibration binding"
       ],
       "availability": "registration-is-not-provider-admission-or-physical-acceptance",
-      "catalogSha256": "fc58a9cdbc25aec19ce480232125dbc450abf2d285aee84d491fb7259a22580b"
+      "catalogSha256": "04681b0f2e0d54ffde0a99a759dc5baaabe37c429b370bb92f9682e554aac16b"
     },
     "controller": {
       "schemaVersion": 1,
@@ -21023,6 +21526,137 @@
       "catalogSha256": "471704887a4b8f5d910bfd79fe691a80e055b4c2cb381a4d2b2da0b2aafc1ce7"
     },
     "controllerMotion": {
+      "activation": {
+        "scope": "Existing four Lenovo models; immutable activation plans, explicit live source intent and owner required",
+        "recipes": [
+          {
+            "scope": "Tablet/Tablet2 selected vendor capture source only; no reset, RGB or SteamOS command",
+            "source": "Devices/Lenovo/LegionGoTablet.cs",
+            "method": "EnableControllerGyro",
+            "models": [
+              "LegionGoTablet",
+              "LegionGoTablet2"
+            ],
+            "commands": [
+              [
+                5,
+                6,
+                106,
+                2,
+                3,
+                1,
+                1
+              ],
+              [
+                5,
+                6,
+                106,
+                7,
+                3,
+                2,
+                1
+              ],
+              [
+                5,
+                6,
+                106,
+                2,
+                4,
+                1,
+                1
+              ],
+              [
+                5,
+                6,
+                106,
+                7,
+                4,
+                2,
+                1
+              ]
+            ],
+            "physicalAcceptance": false,
+            "id": "tablet",
+            "minReportBytes": 7,
+            "maxReportBytes": 64,
+            "inputReportBytes": 0,
+            "sourceSha256": "a05910fddd410a68e00f028b3760c784a6aa5a8bc0fca27bee96ed20d59f3414",
+            "sources": [
+              {
+                "model": "LegionGoTablet",
+                "file": "deps/handheldcompanion-runtime/source/Devices/Lenovo/LegionGoTablet.cs",
+                "sha256": "a05910fddd410a68e00f028b3760c784a6aa5a8bc0fca27bee96ed20d59f3414"
+              },
+              {
+                "model": "LegionGoTablet2",
+                "file": "deps/handheldcompanion-runtime/source/Devices/Lenovo/LegionGoTablet2.cs",
+                "sha256": "823586b37d8580ae5545b2b1d5ea091f7cd066037b78c4e04184e77729f804b2"
+              }
+            ]
+          },
+          {
+            "id": "go-s",
+            "scope": "GO S SZ1/SZ2 controller IMU enable only; no mapping reset, hibernation, polling or RGB command",
+            "source": "Devices/Lenovo/LegionGoSZ1.cs",
+            "method": "ControllerFactoryReset:IMU-only-subset",
+            "models": [
+              "LegionGoSZ1",
+              "LegionGoSZ2"
+            ],
+            "logicalCommands": [
+              [
+                4,
+                7,
+                1
+              ],
+              [
+                4,
+                5,
+                1
+              ]
+            ],
+            "commands": [
+              [
+                0,
+                4,
+                7,
+                1
+              ],
+              [
+                0,
+                4,
+                5,
+                1
+              ]
+            ],
+            "framingSource": "Devices/IDevice.cs",
+            "framingMethod": "WithReportID",
+            "minReportBytes": 65,
+            "maxReportBytes": 65,
+            "inputReportBytes": 65,
+            "physicalAcceptance": false,
+            "sourceSha256": "176c4aee0153aaa9956837b95b044e493c90ae0c5cd86eaaa1ac2754ca54cf66",
+            "sources": [
+              {
+                "model": "LegionGoSZ1",
+                "file": "deps/handheldcompanion-runtime/source/Devices/Lenovo/LegionGoSZ1.cs",
+                "sha256": "176c4aee0153aaa9956837b95b044e493c90ae0c5cd86eaaa1ac2754ca54cf66"
+              },
+              {
+                "model": "LegionGoSZ2",
+                "file": "deps/handheldcompanion-runtime/source/Devices/Lenovo/LegionGoSZ2.cs",
+                "sha256": "e03453471f06f9feccfa4db9ad165e0203ddf4ca69c141d011c4397c9aa5a241"
+              },
+              {
+                "model": "IDevice",
+                "file": "deps/handheldcompanion-runtime/source/Devices/IDevice.cs",
+                "sha256": "fbaed1dfd329e3328376488b8ec70c3a7fdcf97d70dcb37f1525ee33aa169c20"
+              }
+            ]
+          }
+        ],
+        "physicalAcceptance": false
+      },
       "schemaVersion": 1,
       "registeredProtocols": 2,
       "registeredModelBindings": 4,
@@ -21135,7 +21769,7 @@
       "liveOwnershipCached": false,
       "allControllerMotionConnected": false,
       "physicalAcceptance": false,
-      "catalogSha256": "1d199c230978de4261a913a8f57658890fa34ce4f240de3d0980bd98bfd4087d"
+      "catalogSha256": "b9cf5b988b62e8a49e53fbbda37ba14598739324cd62ae15700fc26dec8714c3"
     },
     "controllerFeedback": {
       "schemaVersion": 1,
@@ -21391,6 +22025,139 @@
       "allControllerFeedbackConnected": false,
       "physicalAcceptance": false,
       "catalogSha256": "ec609fdb31e5b2320d1dd067ee5eadf1b2ea4b89988a61d6f48175c17bfee041"
+    },
+    "tdp": {
+      "schemaVersion": 1,
+      "libraryId": "ymcc.uxtu.tdp",
+      "version": "26.3.1",
+      "policyFile": "capabilities/uxtu-tdp-policy.json",
+      "policySha256": "ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d",
+      "modelBinding": {
+        "source": "diagnostics-only; not capability, admission or watt limits",
+        "registeredModels": 92,
+        "unknownModel": "retain-unknown-model; existing CPU provider still resolves its own protocol"
+      },
+      "consumers": {
+        "native": "native/main.cpp::tdpExecutionCapability",
+        "helper": "PowerControl/pawnio/YeManTdpCtl.py::_AMD_FAMILIES",
+        "frontend": "src/bridge/yeman.ts::getTdpExecutionCapability",
+        "manualCcd": "native/main.cpp::cpu.topology/cpu.setCcdMode",
+        "manualCpuOffset": "PowerControl/pawnio/YeManTdpCtl.py::amd_uv_set_with/intel_uv_set_pawn"
+      },
+      "dispatch": "existing-engine-owners-generation-and-write-gates-retained",
+      "applyHcDeclaredLimits": false,
+      "machineMaximumKnown": false,
+      "activation": {
+        "tdp": true,
+        "coreSwitch": false,
+        "voltageScheduling": false
+      },
+      "hardwareAcceptance": false,
+      "workingRoutesPreserved": true,
+      "newModulesActivated": false,
+      "deferredCapabilities": [
+        {
+          "id": "am5-desktop-slow-rsmu-cb",
+          "familyRecipe": "FAM_DESKTOP_AM5",
+          "operation": "slow-limit",
+          "transport": "rsmu",
+          "command": 203,
+          "upstreamDeclared": true,
+          "runtimeApplied": false,
+          "reason": "User confirms working 9950 path; capability difference only. Preserve original three MP1 writes; future effect-logic upgrade is out of current scope."
+        }
+      ],
+      "ccdControl": {
+        "operation": "process_affinity",
+        "effectScope": "global_process_affinity_by_l3_domain",
+        "mechanism": "SetProcessAffinityMask",
+        "topologySource": "windows_relation_cache_l3",
+        "minimumDomains": 2,
+        "physicalCcdPowerOff": false,
+        "activation": true,
+        "semantics": "OS process affinity grouped by Windows L3 cache domains; not a firmware or physical CCD power-off."
+      },
+      "voltageOffset": {
+        "operation": "static_offset",
+        "activation": true,
+        "amd": {
+          "unit": "co_step",
+          "minimum": -60,
+          "maximum": 60,
+          "step": 1,
+          "scope": "all_core",
+          "readback": false,
+          "encodingSource": "familyRecipes.co_enc",
+          "semantics": "Signed all-core Curve Optimizer steps; no verified current-value readback.",
+          "encodingProducer": {
+            "nonHsmp": "u20",
+            "hsmp": "u16",
+            "source": "Views/Windows/MainWindow.xaml.cs::EncodeCurveOptimiserOffset",
+            "staticAllCoreSource": "Views/Pages/CustomPresets.xaml.cs",
+            "translatorSource": "Scripts/RyzenAdj_To_UXTU.cs",
+            "scope": "YMCC static all-core CPU offset only"
+          },
+          "candidateSelection": {
+            "recipeField": "co_commands",
+            "primaryFields": [
+              "co_transport",
+              "coall"
+            ],
+            "order": "existing-primary-then-upstream",
+            "retryOnly": {
+              "origin": "firmware_response",
+              "mailboxStatuses": [
+                254,
+                255
+              ]
+            },
+            "stopOnSuccess": true,
+            "retryOnTransportFailure": false,
+            "retryOnUnknownResult": false,
+            "eachCandidateAtMostOnce": true,
+            "originalArgumentsPerAttempt": true,
+            "hardwareAcceptanceFromDeclaration": false
+          }
+        },
+        "intel": {
+          "unit": "mv",
+          "minimum": -150,
+          "maximum": 0,
+          "step": 1,
+          "scope": "fivr_plane",
+          "planes": [
+            "core",
+            "cache"
+          ],
+          "readback": true,
+          "encoding": "msr_0x150_offset_bits_31_21_signed11_scale1.024",
+          "command": "set_vf_direct",
+          "semantics": "Signed FIVR offset per verified plane; direct write has no mailbox readback.",
+          "protocol": {
+            "msr": 336,
+            "planeDomains": {
+              "core": 0,
+              "cache": 2
+            },
+            "setCommand": 17,
+            "offsetScale": 1.024,
+            "offsetBits": 11,
+            "offsetShift": 21,
+            "settleMs": 100
+          }
+        },
+        "requestDomainSemantics": "YMCC bounded signed user request domain, not a manufacturer silicon safety limit or automatic tuning range."
+      },
+      "manualControls": {
+        "mode": "explicit_settings_apply",
+        "restoreSavedOnStartup": false,
+        "automaticReapply": false,
+        "voltageConsumerPlanes": [
+          "core",
+          "cache"
+        ],
+        "physicalCcdPowerOff": false
+      }
     }
   }
 }

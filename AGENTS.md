@@ -1,3 +1,19 @@
+<!-- DECKY-GLOBAL-RECOVERY-20261103 -->
+## Decky 全局分级恢复与日志总规则（用户最新时间裁决）
+
+总入口仍为：Decky ON，精确当前 Steam/账户的大屏确认，Decky 不可用，就进入原 Runtime；未知故障、漏回调及启动/睡眠/页面入口均适用。高阶开关大屏是用户明确允许的专用恢复授权，不扩大CSS、普通启动或公共UI手动接口的权限。
+
+用户已否决无证据的90/150/240秒累计升阶。现在按实际操作阶段和回执：认证镜像未连先原重绑；镜像已连接而官方层不可用，跳过无效重绑直接修服务；当前阶段明确失败或没有自有服务可重启，立即交下一阶，不等满时间。其余未确认阶段保留观察上限：重绑7秒，服务/页面动作完成后20秒；仅真实新建的初次冷Loader有一次从实际创建计时37秒宽限，重复状态/回调不延期。20/37秒均是候选保护上限，不是保证恢复或强制等待；最高一次自动开关大屏后仍失败就保留故障，不增加整个Steam进程自动重启。
+
+数值依据写在native/decky_sidebar_recovery.h，并在Testing/YMCC/Evidence/DeckySleepRecovery-20261103/bpm-reentry-213336/log-calibration/CALIBRATION-DECISION.json保留原日志入口、行号、SHA和删失样本。295包、200含Decky，跨文件夹相同JSON全局去重。可配对重绑190条中189条<=5128ms；另1条约67分钟后才见镜像，现场过疏不冒充7~90秒自行恢复。唤醒46条<=2804ms；两次上下文清理后镜像恢复13707/13777ms；加原共享模式核对5000ms间隔+600ms防抖，19377ms取整20秒。旧冷启动31371ms+5600ms=36971ms取整37秒，仅保留首次新子进程。镜像成功不能推出官方后端或视觉就绪；旧版本/长尾/中途干预/日志截断全部保留并分开，不承诺未来极端必成功。
+
+仅原worker管理一个episode：长暂停最多前进一阶，下一阶从实际动作/正回执计时；重复/旧阶段迟到回执不能跳级或退款。Steam/账户/原生Ready代次是episode边界。临时模式pending暂停，OFF/退出/电源非Ready/换身份及资源未归还停止或取消。新会话首次立即核对，不能被idle后备计时挡住。健康时每30秒用现有共享ModeObserver轻量读一次；故障期间复用原5秒模式读节奏，桌面不周期读；没有新常驻线程/服务或业务设置轮询。
+
+整体结构健康同时核对YMCC镜像、公开v3.3.1官方WS以及当前Loader同一QAM hook含原999页，hook不替代实机画面验收。页面重建和开关大屏先向主/备份保留各自原生持久额度，再用原同映像可取消私有子进程执行；开关大屏每Steam实例至多一次，实际读到同账户desktop后才送bigpicture并核对。命令返回不能当Decky就绪；未知派发不重放，普通配置保存/重置/坏文件回退不能退款。不删用户配置、重放业务写或再注入一份官方Loader。
+
+日志保留阶段上限、实际剩余、升阶依据（明确失败/观察到期）、episode、次数、操作结果和停止原因；字段经过真实过滤器。来源错误/假健康/缺回执不打绿，不写凭证/原始配置/游戏身份。复用原消费者做录入延时回放、多入口风暴、实际回执和墙钟检查；原FAIL/UNKNOWN与物理睡眠/联合主线编译/完整发布的未验收边界必须保留。
+<!-- /DECKY-GLOBAL-RECOVERY-20261103 -->
+
 # Steam integration maintenance / Steam 更新入口
 
 
@@ -38,7 +54,7 @@
 COM、native callback、接口继承及实现类的裁剪须先过 `tools/hc-application-dependency-trim` 的原始输入ABI审计和正反门，不能按托管MemberRef可达性删除COM槽位。interopAbiRepair 中34项恢复仅为历史记录，不得据此强制恢复上游大文件。软件模拟不证明掌机EC/固件/物理转速；未知或缺少回执必须保持未验收。
 ## Decky 双通道更新发布必检（2026-10-18 用户要求）
 
-每次 YMCC 发布，必须通过 tools/decky_update_release_gate.ps1 的 Build / Package 两阶段，并在导出安装前 Verify 对应回执。Build 验证 Decky 自身更新的支持平台、明确确认、失败备用、不重复安装、重启后的实际版本；YMCC 通道验证原更新管理器、认证回环、下载校验、游戏/电源及断线恢复。Package 在发布候选 ZIP 前检查 Loader/插件/主程序/网页匹配，并在临时目录验证完整安装、启动握手失败及子程序失败恢复。缺少回执、源码或产物变更、任一用例失败均阻断发布，不允许用版本查询或旧回执代替。Windows 的锁定兼容 Loader 不直接覆盖成上游 Linux 产物；原生通道不支持时明确走 YMCC 整包。真实 Steam/SteamOS 与物理手柄验收单独记录。
+原完整验收路径：只有明确要求 FullAcceptance 时，才通过 tools/decky_update_release_gate.ps1 的 Build / Package 两阶段并 Verify 对应回执。2026-10-30 用户已要求默认快速发布不等待完整夹具，必要 bug 按显式 ReleaseBugPlan 定向执行；以下完整门要求保留于独立验收，不得自动挂回普通导出或 FastRelease。Build 验证 Decky 自身更新的支持平台、明确确认、失败备用、不重复安装、重启后的实际版本；YMCC 通道验证原更新管理器、认证回环、下载校验、游戏/电源及断线恢复。Package 在发布候选 ZIP 前检查 Loader/插件/主程序/网页匹配，并在临时目录验证完整安装、启动握手失败及子程序失败恢复。缺少回执、源码或产物变更、任一用例失败均阻断发布，不允许用版本查询或旧回执代替。Windows 的锁定兼容 Loader 不直接覆盖成上游 Linux 产物；原生通道不支持时明确走 YMCC 整包。真实 Steam/SteamOS 与物理手柄验收单独记录。
 
 ## 全页导航模拟器维护入口（2026-10-19）
 
@@ -165,7 +181,7 @@ render4内容标记/重复注入和一次定向纠偏已部署并本机前后验
 当前旧模拟器扩建/自动整轮重跑已暂停，状态在 `G:/YeManCC-Work/Testing/YMCC/State`。普通导出默认不跑夹具，完整验收独立显式要求；日常按模块最小入口及源码/依赖/工具身份变化选择。不得无限增加父门或复制轮次实现；复用原测试，保留有效断言、负例及FAIL/UNKNOWN。缓存、共享和跳过不能算本轮实际通过。新增或修改夹具先读主线 `tools/ymcc_sim/FIXTURE-POLICY.md` 与 `tools/ymcc_sim/AGENTS.md`，入口为核心层 `Run.ps1 -Optimized`。本要求覆盖旧文档中自动触发整轮测试的默认安排；产品/安装/实机授权仍分别核对。
 
 ## 2026-10-23 普通导出工具默认合同
-普通导出直接使用 tools/publish.ps1 -WorkspaceRoot <独立工作区>，默认不运行测试夹具；旧 -TestExport 参数仍兼容。tools/build-workspace.ps1 和 tools/package-release.ps1 直接调用时也默认不跑夹具。只有用户明确要求完整验收时使用 -FullAcceptance；发布工作流显式选择完整验收。普通包标记 fixtureValidation=NOT_RUN、formalReleaseAccepted=false；不能把跳过的门写成通过。
+普通导出直接使用 tools/publish.ps1 -WorkspaceRoot <独立工作区>，默认不运行测试夹具；旧 -TestExport 参数仍兼容。tools/build-workspace.ps1 和 tools/package-release.ps1 直接调用时也默认不跑夹具。只有用户明确要求完整验收时使用 -FullAcceptance；当前默认发布工作流使用 -FastRelease，完整夹具为 NOT_RUN。发布必要 bug 通过 -ReleaseBugPlan <计划文件> 在 Build 后、Package 前执行一次原 ID 回归；HC 升级和 CPU 优化保留专项，不自动成为发布前置。普通包标记 fixtureValidation=NOT_RUN、formalReleaseAccepted=false；不能把跳过的门写成通过。
 
 <!-- FXSOUND-SILENT-RULE-20261024 -->
 ## FxSound 的新增静默规则（2026-10-24 用户要求）

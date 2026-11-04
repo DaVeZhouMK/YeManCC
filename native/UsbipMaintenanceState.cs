@@ -70,16 +70,18 @@ internal static class UsbipMaintenanceState
         lastTransition, pending = RecordEvidence(PendingPath),
         previousBoot = RecordEvidence(PendingPath + ".previous-boot"),
         attempt = RecordEvidence(Path.Combine(DirectoryPath, "attempt.json")),
+        hostBackendAttempt = RecordEvidence(Path.Combine(DirectoryPath, "host-backend-attempt.json")),
         scope = "bounded-read-only-maintenance-records;not-driver-ready-or-controller-proof"
     };
     private static object RecordEvidence(string path)
     {
         try {
-            if (!File.Exists(path)) return new { state = "absent" };
-            if (new FileInfo(path).Length > 4096) return new { state = "oversize-preserved" };
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var saved = ReadRecord(path);
+            if (saved.Kind == RecordKind.Missing) return new { state = "absent" };
+            if (saved.Kind != RecordKind.Ready) return new { state = "unknown-preserved", recordState = saved.Kind.ToString(), reason = saved.Error };
+            using var doc = JsonDocument.Parse(saved.Value.GetRawText());
             var row = new Dictionary<string, object?> { ["state"] = "read", ["requiresReboot"] = RecordRequiresReboot(doc.RootElement) };
-            foreach (var name in new[] { "schemaVersion", "operation", "session", "coreSha256", "targetVersion", "installedVersion", "mutationStarted", "uptimeMs", "bootIdentifier", "bootSequence", "bootSessionIdentity", "bootSessionEvidence" })
+            foreach (var name in new[] { "schemaVersion", "operation", "session", "coreSha256", "targetVersion", "installedVersion", "mutationStarted", "uptimeMs", "bootIdentifier", "bootSequence", "bootSessionIdentity", "bootSessionEvidence", "hostPid", "reservation", "startedAt", "scope" })
                 if (doc.RootElement.TryGetProperty(name, out var value)) row[name] = value.Clone();
             return row;
         } catch (Exception e) { return new { state = "unreadable-preserved", errorType = e.GetType().Name, hresult = e.HResult }; }
@@ -115,6 +117,151 @@ internal static class UsbipMaintenanceState
             return result >= 0 && returned >= 16 && info.Identifier != Guid.Empty ? info.Identifier : null;
         } catch { return null; }
     }
+    // Bounded record storage shared by setup and Host. Missing is a proved
+    // ordinary directory absence, never File.Exists swallowing an IO failure.
+    internal enum RecordKind { Missing, Ready, Malformed, Unsupported, Unavailable }
+    internal sealed record RecordRead(RecordKind Kind, byte[] Raw, JsonElement Value, string? Error = null);
+    internal static bool RecordStructure(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return false;
+        var stack = new Stack<JsonElement>(); stack.Push(root); int nodes = 0;
+        while (stack.Count > 0) {
+            var value = stack.Pop(); if (++nodes > 2048) return false;
+            if (value.ValueKind == JsonValueKind.Object) {
+                var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var field in value.EnumerateObject()) { if (!keys.Add(field.Name)) return false; stack.Push(field.Value); }
+            } else if (value.ValueKind == JsonValueKind.Array) foreach (var child in value.EnumerateArray()) stack.Push(child);
+        }
+        if (root.TryGetProperty("schemaVersion", out var schema) &&
+            (schema.ValueKind != JsonValueKind.Number || !schema.TryGetInt32(out int version) || version is < 1 or > 3)) return false;
+        foreach (string name in new[] { "operation", "session", "coreSha256", "targetVersion", "installedVersion", "startedAt", "reservation", "scope" })
+            if (root.TryGetProperty(name, out var text) && (text.ValueKind != JsonValueKind.String || text.GetString() is not { Length: > 0 and <= 1024 })) return false;
+        if (root.TryGetProperty("mutationStarted", out var started) && started.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+        if (root.TryGetProperty("operation", out var operation) && operation.GetString() is not ("usbip-install" or "usbip-uninstall" or "usbip-host-backend-attempt")) return false;
+        if (root.TryGetProperty("targetVersion", out var target) && !Version.TryParse(target.GetString(), out _)) return false;
+        if (root.TryGetProperty("installedVersion", out var installed) && installed.GetString() != "absent" && !Version.TryParse(installed.GetString(), out _)) return false;
+        foreach (string name in new[] { "uptimeMs", "bootSequence", "hostPid" }) if (root.TryGetProperty(name, out var number)) {
+            if (number.ValueKind != JsonValueKind.Number || !number.TryGetInt64(out long integer) || integer < 0 ||
+                name == "bootSequence" && integer > uint.MaxValue || name == "hostPid" && (integer == 0 || integer > int.MaxValue)) return false;
+        }
+        if (root.TryGetProperty("bootIdentifier", out var boot) && (boot.ValueKind != JsonValueKind.String || !Guid.TryParse(boot.GetString(), out var id) || id == Guid.Empty)) return false;
+        if (root.TryGetProperty("bootSessionIdentity", out var session) && (session.ValueKind != JsonValueKind.String || !ValidBootSession(session.GetString()))) return false;
+        return true;
+    }
+    private static void OrdinaryRecordParents(string path)
+    {
+        var parent = Path.GetDirectoryName(Path.GetFullPath(path)); int count = 0;
+        while (parent is not null) {
+            if (++count > 64) throw new IOException("USB/IP record ancestry is too deep");
+            try { var flags = File.GetAttributes(parent); if ((flags & FileAttributes.Directory) == 0 || (flags & FileAttributes.ReparsePoint) != 0) throw new IOException("USB/IP record parent is not an ordinary directory"); }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+            var next = Path.GetDirectoryName(parent); if (next == parent) break; parent = next;
+        }
+    }
+    internal static RecordRead ReadRecord(string path, bool pending = false, int maximum = 4096)
+    {
+        byte[] bytes = [];
+        try {
+            if (!Path.IsPathFullyQualified(path)) return new(RecordKind.Unavailable, bytes, default, "non-absolute-path");
+            if (maximum is < 1 or > 262144) return new(RecordKind.Unavailable, bytes, default, "invalid-budget");
+            OrdinaryRecordParents(path);
+            FileAttributes flags;
+            try { flags = File.GetAttributes(path); }
+            catch (FileNotFoundException) { return new(RecordKind.Missing, bytes, default); }
+            catch (DirectoryNotFoundException) { return new(RecordKind.Missing, bytes, default); }
+            if ((flags & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return new(RecordKind.Unavailable, bytes, default, "not-ordinary-file");
+            using (var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete)) {
+                if (input.Length > maximum) return new(RecordKind.Malformed, bytes, default, "oversize");
+                bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+                if (input.ReadByte() != -1) return new(RecordKind.Unavailable, [], default, "length-changed");
+            }
+            string text;
+            if (bytes.Length >= 2 && ((bytes[0] == 255 && bytes[1] == 254) || (bytes[0] == 254 && bytes[1] == 255)))
+                text = new System.Text.UnicodeEncoding(bytes[0] == 254, true, true).GetString(bytes, 2, bytes.Length - 2);
+            else { int start = bytes.AsSpan().StartsWith(new byte[] { 239, 187, 191 }) ? 3 : 0; text = new System.Text.UTF8Encoding(false, true).GetString(bytes, start, bytes.Length - start); }
+            using var document = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 16 }); var root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("schemaVersion", out var schema) && schema.ValueKind == JsonValueKind.Number && schema.TryGetInt64(out long future) && future > 3)
+                return new(RecordKind.Unsupported, bytes, default, "future-schema");
+            if (!RecordStructure(root)) return new(RecordKind.Malformed, bytes, default, "invalid-record");
+            if (root.TryGetProperty("coreSha256", out var core) && (core.GetString() is not { Length: 64 } hash || !hash.All(Uri.IsHexDigit)))
+                return new(RecordKind.Malformed, bytes, default, "invalid-core");
+            if (pending && (!root.TryGetProperty("operation", out var operation) || operation.GetString() is not ("usbip-install" or "usbip-uninstall") ||
+                !root.TryGetProperty("coreSha256", out _) || !root.TryGetProperty("targetVersion", out _))) return new(RecordKind.Malformed, bytes, default, "missing-pending-identity");
+            return new(RecordKind.Ready, bytes, root.Clone());
+        }
+        catch (System.Text.DecoderFallbackException) { return new(RecordKind.Malformed, bytes, default, "invalid-encoding"); }
+        catch (JsonException) { return new(RecordKind.Malformed, bytes, default, "invalid-json"); }
+        catch (Exception error) { return new(RecordKind.Unavailable, bytes, default, error.GetType().Name); }
+    }
+    private static bool SameRecord(RecordRead a, RecordRead b) => a.Kind == b.Kind &&
+        (a.Kind == RecordKind.Missing || a.Kind == RecordKind.Ready && a.Raw.AsSpan().SequenceEqual(b.Raw));
+    // Only identified, fully decoded metadata may enter a file transition.
+    // A conflict is not a missing file and never grants a new install budget.
+    internal static void PreserveRecord(string source, string destination, RecordRead expected, bool removeSource, int maximum = 4096)
+    {
+        if (expected.Kind != RecordKind.Ready || !SameRecord(expected, ReadRecord(source, maximum: maximum))) throw new IOException("USB/IP source record changed");
+        var prior = ReadRecord(destination, maximum: maximum);
+        if (prior.Kind == RecordKind.Ready && !SameRecord(expected, prior) &&
+            (destination.EndsWith(".previous-boot", StringComparison.Ordinal) || destination.EndsWith(".previous-boot.completed", StringComparison.Ordinal))) {
+            // A healthy historical transaction is retained under its content
+            // identity, not discarded or allowed to block every later upgrade.
+            string digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(prior.Raw)).ToLowerInvariant();
+            PreserveRecord(destination, destination + ".ymcc-history-" + digest + ".json", prior, removeSource: true, maximum: maximum);
+            prior = ReadRecord(destination, maximum: maximum);
+        }
+        if (prior.Kind != RecordKind.Missing && !SameRecord(expected, prior)) throw new IOException("USB/IP destination contains different or unknown evidence");
+        if (prior.Kind == RecordKind.Missing) {
+            string stage = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try {
+                using (var committed = new FileStream(stage, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                    committed.Write(expected.Raw); committed.Flush(flushToDisk: true);
+                }
+                if (!SameRecord(expected, ReadRecord(stage, maximum: maximum)) || !SameRecord(expected, ReadRecord(source, maximum: maximum))) throw new IOException("USB/IP preservation changed before publication");
+                File.Move(stage, destination, overwrite: false);
+            } finally { if (File.Exists(stage)) File.Delete(stage); }
+        }
+        if (!SameRecord(expected, ReadRecord(destination, maximum: maximum)) || !SameRecord(expected, ReadRecord(source, maximum: maximum))) throw new IOException("USB/IP preserved record readback mismatch");
+        if (removeSource) {
+            File.Delete(source);
+            if (ReadRecord(source, maximum: maximum).Kind != RecordKind.Missing || !SameRecord(expected, ReadRecord(destination, maximum: maximum))) throw new IOException("USB/IP source retirement not confirmed");
+        }
+    }
+    internal static void WriteRecord(string path, object value, bool omitNull = false, int maximum = 4096)
+    {
+        OrdinaryRecordParents(path);
+        var before = ReadRecord(path, maximum: maximum);
+        if (before.Kind is not (RecordKind.Missing or RecordKind.Ready)) throw new InvalidDataException("USB/IP previous evidence is unreadable or unsupported");
+        var options = omitNull ? new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull } : null;
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(value, options);
+        if (before.Kind == RecordKind.Ready) {
+            var next = System.Text.Json.Nodes.JsonNode.Parse(payload) as System.Text.Json.Nodes.JsonObject;
+            if (next is null) throw new InvalidDataException("USB/IP output is not an object");
+            var owned = new HashSet<string>(new[] { "schemaVersion", "operation", "session", "coreSha256", "targetVersion", "installedVersion", "mutationStarted", "uptimeMs", "bootIdentifier", "bootSequence", "bootSessionIdentity", "bootSessionEvidence", "hostPid", "reservation", "startedAt", "scope", "batch", "installRoot", "ownerPid", "usbipUpgrade", "usbipLifecycle" }, StringComparer.OrdinalIgnoreCase);
+            foreach (var field in before.Value.EnumerateObject()) if (!owned.Contains(field.Name) && !next.ContainsKey(field.Name)) next[field.Name] = System.Text.Json.Nodes.JsonNode.Parse(field.Value.GetRawText());
+            payload = JsonSerializer.SerializeToUtf8Bytes(next);
+        }
+        if (payload.Length == 0 || payload.Length > maximum) throw new InvalidDataException("USB/IP record exceeds its storage budget");
+        using var generated = JsonDocument.Parse(payload, new JsonDocumentOptions { MaxDepth = 16 });
+        if (!RecordStructure(generated.RootElement)) throw new InvalidDataException("USB/IP record is invalid");
+        if (before.Kind == RecordKind.Ready && before.Raw.AsSpan().SequenceEqual(payload)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try {
+            using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { output.Write(payload); output.Flush(flushToDisk: true); }
+            var prepared = ReadRecord(temp, maximum: maximum);
+            if (prepared.Kind != RecordKind.Ready || !prepared.Raw.AsSpan().SequenceEqual(payload)) throw new IOException("USB/IP temporary record was not confirmed");
+            if (!SameRecord(before, ReadRecord(path, maximum: maximum))) throw new IOException("USB/IP record changed before publication");
+            if (before.Kind == RecordKind.Ready) {
+                string digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(before.Raw)).ToLowerInvariant();
+                PreserveRecord(path, path + ".ymcc-before-" + digest + ".bak", before, removeSource: false, maximum: maximum);
+            }
+            if (!SameRecord(before, ReadRecord(path, maximum: maximum))) throw new IOException("USB/IP record changed after preservation");
+            File.Move(temp, path, overwrite: before.Kind == RecordKind.Ready);
+            var published = ReadRecord(path, maximum: maximum);
+            if (published.Kind != RecordKind.Ready || !published.Raw.AsSpan().SequenceEqual(payload)) throw new IOException("USB/IP published record was not confirmed");
+        } finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
     internal static bool RequiresReboot(Guid? recordedBoot, Guid? currentBoot) =>
         recordedBoot is null || currentBoot is null || recordedBoot == Guid.Empty || currentBoot == Guid.Empty || recordedBoot == currentBoot;
     internal static bool RequiresReboot(Guid? recordedBoot, Guid? currentBoot, uint? recordedSequence, uint? currentSequence) =>
@@ -123,6 +270,8 @@ internal static class UsbipMaintenanceState
     private static bool RecordRequiresReboot(JsonElement record) => RecordRequiresReboot(record,CurrentBootIdentifier,CurrentBootSequence,Environment.TickCount64,CurrentBootSessionIdentity);
     internal static bool RecordRequiresReboot(JsonElement record, Guid? currentBoot, uint? currentSequence, long currentUptime, string? currentBootSession=null)
     {
+        try {
+            if (!RecordStructure(record)) return true;
         if (record.TryGetProperty("bootSessionIdentity", out var session)) {
             var previous = session.ValueKind == JsonValueKind.String ? session.GetString() : null;
             return !ValidBootSession(previous) || !ValidBootSession(currentBootSession) ||
@@ -138,17 +287,12 @@ internal static class UsbipMaintenanceState
         // require a stable boot identifier before their first mutation.
         long uptime = record.GetProperty("uptimeMs").GetInt64();
         return RequiresReboot(uptime, currentUptime);
+        } catch { return true; }
     }
     internal static bool Pending
     {
-        get {
-            if (!File.Exists(PendingPath)) return false;
-            try {
-                if (new FileInfo(PendingPath).Length > 4096) return true;
-                using var doc = JsonDocument.Parse(File.ReadAllText(PendingPath));
-                return RecordRequiresReboot(doc.RootElement);
-            } catch { return true; }
-        }
+        get { var read = ReadRecord(PendingPath, pending: true); return read.Kind != RecordKind.Missing &&
+            (read.Kind != RecordKind.Ready || RecordRequiresReboot(read.Value)); }
     }
     internal static bool RequiresReboot(long recordedUptime, long currentUptime) => recordedUptime < 0 || currentUptime < 0 || currentUptime >= recordedUptime;
     internal static void PrepareProtectedDirectory()
@@ -171,12 +315,14 @@ internal static class UsbipMaintenanceState
         if (!prepare) return;
         try {
             if (!PrepareBootSessionIdentity()) { lastTransition = "boot-session-unavailable;fence-retained"; return; }
-            if (File.Exists(PendingPath)) {
-                if (new FileInfo(PendingPath).Length > 4096) { lastTransition = "pending-oversize;fence-retained"; return; }
-                using var doc = JsonDocument.Parse(File.ReadAllText(PendingPath));
+            var read = ReadRecord(PendingPath, pending: true);
+            if (read.Kind != RecordKind.Missing) {
+                if (read.Error == "oversize") { lastTransition = "pending-oversize;fence-retained"; return; }
+                if (read.Kind != RecordKind.Ready) { lastTransition = "record-transition-failed;fence-retained"; return; }
+                using var doc = JsonDocument.Parse(read.Value.GetRawText());
                 if (!RecordRequiresReboot(doc.RootElement)) {
                     PrepareProtectedDirectory();
-                    File.Move(PendingPath, PendingPath + ".previous-boot", true);
+                    PreserveRecord(PendingPath, PendingPath + ".previous-boot", read, removeSource: true);
                     lastTransition = "previous-boot-proven;normal-continuation";
                 } else if (AnchorLegacyBootSession(PendingPath)) {
                     // There is no earlier V2 observation for this old record.
@@ -190,9 +336,9 @@ internal static class UsbipMaintenanceState
     }
     private static bool AnchorLegacyBootSession(string path)
     {
-        if (!File.Exists(path) || new FileInfo(path).Length > 4096 || CurrentBootSessionIdentity is null) return false;
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return false;
-        string original = File.ReadAllText(path);
+        var saved = ReadRecord(path);
+        if (saved.Kind != RecordKind.Ready || CurrentBootSessionIdentity is null) return false;
+        string original = saved.Value.GetRawText();
         using var doc = JsonDocument.Parse(original); var record = doc.RootElement;
         if (record.TryGetProperty("bootSessionIdentity", out _) || !RecordRequiresReboot(record)) return false;
         // Migrate only this installer's bounded, identified transaction format.
@@ -207,15 +353,10 @@ internal static class UsbipMaintenanceState
         node["bootSessionEvidence"] = "legacy-baseline-only;no-prior-reboot-inferred";
         var payload = JsonSerializer.SerializeToUtf8Bytes(node);
         if (payload.Length > 4096) return false;
-        string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try {
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
-                stream.Write(payload); stream.Flush(flushToDisk: true);
-            }
-            if (File.ReadAllText(path) != original) return false;
-            string backup = path + ".before-boot-session-v2";
-            if (!File.Exists(backup)) File.Copy(path, backup, overwrite: false);
-            File.Move(temp, path, overwrite: true); return true;
-        } finally { if (File.Exists(temp)) File.Delete(temp); }
+        if (!SameRecord(saved, ReadRecord(path))) return false;
+        PreserveRecord(path, path + ".before-boot-session-v2", saved, removeSource: false);
+        WriteRecord(path, node);
+        var actual = ReadRecord(path);
+        return actual.Kind == RecordKind.Ready && actual.Value.TryGetProperty("bootSessionIdentity", out var observed) && observed.GetString() == CurrentBootSessionIdentity;
     }
 }

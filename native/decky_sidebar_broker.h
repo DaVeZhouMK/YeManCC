@@ -245,6 +245,12 @@ public:
     }
     Json bootstrap() {std::lock_guard lock(state_);if(!active_)return Json::object();return {{"endpoint","ws://127.0.0.1:"+std::to_string(port_)+"/mirror"},{"token",token_},{"runId",runId_},{"hudProtocol",1},{"wallpaperProtocol",1},{"wallpaperPrefetchProtocol",0},{"updaterProtocol",1}};}
     Json status() {std::lock_guard lock(state_);return {{"active",active_},{"runId",runId_},{"connection",connection_},{"connected",!connection_.empty()},{"revision",revision_},{"connectionRevision",connectionRevision_}};}
+    // Recheck queued private events at UI dispatch, not only socket receipt.
+    // Client payload flags never participate in this native transport fact.
+    bool acceptsRequest(const std::string& connection,const std::string& runId,unsigned long long connectionRevision) {
+        std::lock_guard lock(state_);
+        return active_&&!connection.empty()&&connection==connection_&&runId==runId_&&connectionRevision==connectionRevision_;
+    }
     bool reply(const std::string& connection,const Json& message) {
         const auto text=message.dump();if(text.size()>kMaxPayload)return false;
         std::lock_guard lock(state_);

@@ -62,8 +62,8 @@ inline std::string readManagedContract(const std::filesystem::path& home,Json& r
     }
     try{
         if((attributes&FILE_ATTRIBUTE_DIRECTORY)||std::filesystem::file_size(receipt)>131072)return "resource-package-invalid";
-        std::ifstream input(receipt,std::ios::binary);manifest=Json::parse(input);
-        if(manifest.value("schemaVersion",0)!=1||manifest.value("owner",std::string{})!="YMCC"||manifest.value("origin",std::string{})!="official-release"||
+        manifest=ymcc::deckyresources::readDocument(receipt,131072);
+        if(!ymcc::deckyresources::schemaOne(manifest)||manifest.value("owner",std::string{})!="YMCC"||manifest.value("origin",std::string{})!="official-release"||
             !manifest.contains("files")||!manifest["files"].is_array()||manifest["files"].size()!=managedFiles.size())return "resource-package-invalid";
         if(manifest.value("loaderVersion",std::string{})!=ymcc::deckyidentity::version||manifest.value("loaderSha256",std::string{})!=loaderSha)return "resource-upgrade-required";
         std::set<std::string> seen;

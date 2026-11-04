@@ -1,7 +1,7 @@
 // GameTargetArbiter race self-test. No process control is performed.
 // The IPC mock models a valve switch while the previous target is paused.
 import './mock-shell';
-import { refreshGameStatus, subscribeGameStatus, clearGameCache } from '@/bridge/gamedetect';
+import { refreshGameStatus, refreshGameStatusStrict, subscribeGameStatus, clearGameCache, isGameStatusCurrent, getCurrentGame } from '@/bridge/gamedetect';
 
 (globalThis as any).window.setInterval = setInterval;
 (globalThis as any).window.clearInterval = clearInterval;
@@ -22,6 +22,9 @@ let virtualSuspendState: string | null = null;
 let resumeArgs: any = null;
 const controlCalls: any[] = [];
 let invalidateDuringIdentity = false;
+const configurationOnly = process.argv.includes("--config-failure-only");
+let ruleReadUnavailable = false;
+let configGeneration = 0;
 
 function target(pid: number): Target {
   return {
@@ -36,7 +39,10 @@ function target(pid: number): Target {
 }
 
 (globalThis as any).__mockIpcResponder = (command: string, args: any) => {
-  if (command === 'game.detect') return target(valvePid);
+  if (command === 'game.detect') {
+    if (ruleReadUnavailable) throw new Error('GAME_TARGET_OBSERVATION_UNAVAILABLE');
+    return configurationOnly ? { ...target(valvePid), valid: true, generation: ++configGeneration, identityGeneration: 1 } : target(valvePid);
+  }
   if (command === 'process.identity') {
     const identity = { valid: true, pid: args.pid, processCreated: target(args.pid).processCreated };
     if (invalidateDuringIdentity) { invalidateDuringIdentity = false; clearGameCache(); valvePid = 444; }
@@ -66,6 +72,29 @@ function assert(condition: unknown, message: string): asserts condition {
 async function main(): Promise<void> {
   const stop = subscribeGameStatus(() => {});
   try {
+    if (configurationOnly) {
+      await refreshGameStatusStrict();
+      assert(isGameStatusCurrent() && getCurrentGame()?.pid === valvePid, 'healthy initial game authority missing');
+      ruleReadUnavailable = true;
+      let rejected = false;
+      try { await refreshGameStatusStrict(); } catch { rejected = true; }
+      assert(rejected && !isGameStatusCurrent(), 'configuration failure became confirmed no-game');
+      assert(getCurrentGame()?.pid === valvePid, 'configuration failure destroyed the last display snapshot');
+      for (let index = 0; index < 12; index += 1) {
+        await refreshGameStatus();
+        assert(!isGameStatusCurrent() && getCurrentGame()?.pid === valvePid, 'soft retry restored unconfirmed authority');
+      }
+      const { closeGame } = await import('@/bridge/gameproc');
+      let controlAllowed = false;
+      try { controlAllowed = (await closeGame(valvePid, 'saved display', target(valvePid).processCreated)).ok; } catch { /* Controlled failure is not permission. */ }
+      assert(!controlAllowed && controlCalls.length === 0 && resumeArgs === null, 'configuration failure permitted process control');
+      ruleReadUnavailable = false;
+      await refreshGameStatusStrict();
+      assert(isGameStatusCurrent() && getCurrentGame()?.pid === valvePid, 'fixed rules did not recover same authoritative game');
+      assert(controlCalls.length === 0 && resumeArgs === null, 'repair performed unsolicited process control');
+      console.log(JSON.stringify({ status: 'PASS', selector: 'config-failure-only', explicitFailedReads: 14, softwareControls: 0, retainedDisplay: true, unknownReadiness: true, repaired: true }));
+      return;
+    }
     await refreshGameStatus();
     virtualSuspendState = JSON.stringify({
       root: 111,

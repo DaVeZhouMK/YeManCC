@@ -8,13 +8,13 @@ import GameCustomProfilePanel from '@/components/GameCustomProfilePanel.vue';
 import GameRulePanel from '@/components/GameRulePanel.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import SwitchControl from '@/components/SwitchControl.vue';
-import {losslessProgramLabel,type LosslessProgramState} from '@/bridge/losslessProgramState';
+import {losslessProgramLabel,losslessToggleValue,losslessToggleLabel,type LosslessProgramState} from '@/bridge/losslessProgramState';
 import {retainLosslessObservation,readLosslessProgram} from '@/bridge/losslessRuntimeState';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { getCurrentGame, isCurrentGameTarget, refreshGameStatusStrict, validateGameTarget, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { GameTrainerCancelledError, openOrSearchGameTrainer, cancelGameTrainerPreparation, getReadyGameTrainer, getGameTrainerState, subscribeGameTrainerState } from '@/bridge/gameTrainer';
 import {
-  getLosslessGameState, setLosslessScalingEnabled, onLosslessScalingChanged, type LosslessGameState,
+  getLosslessGameState, setLosslessScalingEnabled, removeLosslessGameProfile, onLosslessScalingChanged, type LosslessGameState,
   oneClickOptiScaler,
   type OptiBackend,
   type OptiAction,
@@ -32,8 +32,6 @@ import {
   QUICKAPP_SUSPENDED_EVENT,
   resumeGame,
   suspendGame,
-  toggleMouseMode,
-  getMouseModeState,
   waitForProcessExit,
 } from '@/bridge/gameproc';
 import {
@@ -46,7 +44,6 @@ import {
 import { dialog, proc, shell, windowApi } from '@/bridge/api';
 import { subscribePolicyGameStatus, getPolicyGame } from '@/bridge/gamePolicyTarget';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
-import { isMouseModeSuppressed } from '@/gamepad/engine';
 import { readActivationEvidence } from '@/gamepad/activationEvidence';
 
 const props = defineProps<{ game: DetectedGame | null; open: boolean }>();
@@ -65,7 +62,7 @@ let stopTrainerState: (() => void) | null = null;
 const speedBusy = ref(false);
 const pauseBusy = ref(false);
 const closeBusy = ref(false);
-const mouseBusy = ref(false);
+const desktopBusy = ref(false);
 const taskViewBusy = ref(false);
 const losslessState = ref<LosslessGameState | null>(null);
 const losslessReading = ref(false);
@@ -80,29 +77,13 @@ let stopLosslessState: (() => void) | null = null;
 let stopLosslessObservation:(()=>void)|null=null;
 const losslessProgram=ref<LosslessProgramState|null>(null);
 const losslessHint=computed(()=>losslessProgramLabel(losslessProgram.value));
+const losslessNext=computed(()=>losslessToggleValue(losslessState.value));
+const losslessButtonLabel=computed(()=>losslessToggleLabel(losslessNext.value));
 let taskViewActionSequence = 0;
 const paused = ref(false);
-const mouseOn = ref(false);
-const mousePolicy = ref<'auto'|'on'|'off'>('off');
-const mouseScene = ref('unknown');
-const mouseControlAllowed = ref(false);
-const mouseVerification = ref('unobserved');
-const mouseProvider = ref<'ymcc'|'steam'>('ymcc');
-let mouseStateEpoch = 0;
-const mouseNotice = ref('');
 const statusMsg = ref('');
 const errMsg = ref('');
-const speedFactor = ref(1);
-// 2026-09-30 用户裁决：当前输出人格决定鼠标从哪来——SteamDeck 虚拟手柄时鼠标由
-// Steam 接管，这一行要如实显示「Steam鼠标」而不是笼统的「模拟鼠标」。
-const padPersona = ref('disabled');
-const steamDeckPadActive = computed(() => padPersona.value === 'steamdeck');
-const mouseModeLabel = computed(() => (steamDeckPadActive.value || mouseProvider.value === 'steam' ? 'Steam鼠标' : '模拟鼠标'));
-const mouseStateLabel = computed(() => steamDeckPadActive.value ? 'Steam管理'
-  : !mouseControlAllowed.value ? '状态待确认'
-  : mouseProvider.value === 'steam' ? (mouseOn.value ? '开启 · Steam桌面布局' : '关闭')
-  : mousePolicy.value === 'auto' ? (mouseScene.value === 'ymcc' ? '自动 · 已暂停' : mouseOn.value ? '自动 · 鼠标' : '自动 · 手柄')
-  : mouseOn.value ? (mouseVerification.value === 'process-liveness' ? '开启 · 映射待确认' : '开启 · 已开启') : '关闭');
+const speedFactor = ref<number|'unknown'>(1);
 const rulesOpen = ref(false);
 const speedOptions = SPEED_PRESETS.map((value) => ({ value, label: `${value}×` }));
 
@@ -172,7 +153,7 @@ const targetName = computed(() => targetGame.value
   : '未识别游戏');
 // 修改器是独立的异步任务：它处理中只锁住自身按钮，不能阻塞游戏菜单
 // 的其它功能（暂停、变速、FSR、黑白名单、专属配置等）。
-const disabledForAction = computed(() => busy.value || speedBusy.value || pauseBusy.value || closeBusy.value || mouseBusy.value || taskViewBusy.value);
+const disabledForAction = computed(() => busy.value || speedBusy.value || pauseBusy.value || closeBusy.value || desktopBusy.value || taskViewBusy.value);
 
 function status(message = '', error = ''): void {
   statusMsg.value = message;
@@ -252,12 +233,11 @@ async function refreshGame(): Promise<void> {
 async function refreshSpeedState(target: DetectedGame | null): Promise<void> {
   if (!isTargetCurrent(target)) return;
   const state = getGameSpeedState();
-  speedFactor.value = target && state && sameTarget(state, target) && state.factor > 0 ? state.factor : 1;
+  speedFactor.value = target && state && sameTarget(state,target) && state.cleanupPending ? 'unknown' : target && state && sameTarget(state, target) && state.factor > 0 ? state.factor : 1;
 }
 
 async function refreshControlState(target: DetectedGame | null): Promise<void> {
   const epoch = ++controlStateEpoch;
-  await refreshPadPersona();
   if (epoch !== controlStateEpoch || !isTargetCurrent(target)) return;
   if (!target) {
     paused.value = false;
@@ -269,52 +249,10 @@ async function refreshControlState(target: DetectedGame | null): Promise<void> {
   } catch { /* Transport failure does not prove that this game resumed. */ }
 }
 
-// 顶部菜单要如实反映当前输出人格（专属配置的覆盖也走同一份设置），
-// 读取失败保持上一次的值，不用错误值覆盖显示。
-async function refreshPadPersona(): Promise<void> {
-  const epoch = ++mouseStateEpoch;
-  mouseControlAllowed.value = false;
-  try {
-    const state = await getMouseModeState();
-    if (epoch !== mouseStateEpoch || disposed) return;
-    mouseProvider.value = state.provider === 'steam' ? 'steam' : 'ymcc';
-    padPersona.value = state.provider === 'steam' ? 'steamdeck' : 'disabled';
-    mouseOn.value = state.on;
-    mousePolicy.value = state.mode || 'off';
-    mouseScene.value = state.scene || 'unknown';
-    mouseVerification.value = state.verification || 'unobserved';
-    mouseControlAllowed.value = state.controlAllowed === true && state.stateKnown === true && !steamDeckPadActive.value;
-  } catch { /* 保持显示，状态未确认时不开放控制。 */ }
-}
-
 function onSuspendedStateSync(): void {
   // This legacy event has no PID/birth. Reread the current target instead of
   // assigning an old game's suspended bit to the new game's button.
   if (props.open) void refreshControlState(targetGame.value);
-}
-
-function onMouseModeSync(e: Event): void {
-  const detail = (e as CustomEvent<{ on?: boolean; verification?: string; controlAllowed?: boolean; stateKnown?: boolean; provider?: string; mode?: 'auto'|'on'|'off'; scene?: string }>).detail;
-  if (!detail) return;
-  ++mouseStateEpoch;
-  if (detail.provider === 'steam' || detail.provider === 'ymcc') mouseProvider.value = detail.provider;
-  mouseOn.value = Boolean(detail.on);
-  if (detail.mode) mousePolicy.value = detail.mode;
-  if (detail.scene) mouseScene.value = detail.scene;
-  mouseVerification.value = detail.verification || 'unobserved';
-  if (typeof detail.controlAllowed === 'boolean') mouseControlAllowed.value = detail.controlAllowed && detail.stateKnown !== false;
-  if (detail.provider === 'steam') { padPersona.value = 'steamdeck'; mouseControlAllowed.value = false; }
-}
-
-// 覆盖下发/恢复后 native 侧真正生效的人格由 gameInputOverride 广播（含游戏退出恢复）。
-function onPadPersonaSync(e: Event): void {
-  const persona = (e as CustomEvent<{ persona?: string }>).detail?.persona;
-  if (typeof persona === 'string' && persona) {
-    padPersona.value = persona;
-    ++mouseStateEpoch;
-    mouseControlAllowed.value = false;
-    void refreshPadPersona();
-  }
 }
 
 async function togglePause(): Promise<void> {
@@ -413,34 +351,32 @@ async function openTaskView(event?: MouseEvent): Promise<void> {
   }
 }
 
-async function toggleMouse(): Promise<void> {
-  if (mouseBusy.value || steamDeckPadActive.value || !mouseControlAllowed.value) return;
-  const epoch = targetEpoch;
-  mouseBusy.value = true;
-  mouseNotice.value = '';
+// 复用 native 的 Win+D 动作；无需游戏目标，也不依赖鼠标后端。
+async function returnDesktop(): Promise<void> {
+  if (disabledForAction.value) return;
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const restoreControllerFocus = previousFocus?.matches('[data-gp-game-control="return-desktop"]') &&
+    previousFocus.classList.contains('focused');
+  let accepted = false;
+  desktopBusy.value = true;
   try {
-    const result = await toggleMouseMode();
-    if (disposed || epoch !== targetEpoch) {
-      if (!disposed) void refreshPadPersona();
-      return;
-    }
-    if (!result.ok) {
-      if (result.provider === 'steam') { padPersona.value = 'steamdeck'; mouseControlAllowed.value = false; }
-      throw new Error(result.error || (mouseModeLabel.value + '切换失败'));
-    }
-    mouseOn.value = result.on;
-    mousePolicy.value = result.mode || 'off';
-    mouseScene.value = result.scene || 'unknown';
-    mouseVerification.value = result.verification || 'unobserved';
-    window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { ...result } }));
-    status(result.provider === 'steam' ? (result.on ? 'Steam 桌面鼠标已开启' : 'Steam 桌面鼠标已关闭') : result.pending ? '正在切换模拟鼠标挡位' : result.mode === 'auto' ? '自动挡：YMCC 内暂停，最小化后按前台恢复' : result.on && result.verification === 'process-liveness' ? 'JoyXoff 已启动，映射待确认' : result.on ? `${mouseModeLabel.value}已开启` : `${mouseModeLabel.value}已关闭`);
+    accepted = await shell.returnDesktop();
+    if (!accepted) throw new Error('Windows 未接受 Win+D 输入');
+    if (disposed || !props.open) return;
+    status('已请求返回桌面');
+    emit('close-request');
   } catch (error) {
-    if (disposed || epoch !== targetEpoch) return;
-    mouseNotice.value = (error as Error).message;
-    status('', `${mouseModeLabel.value}切换失败：${(error as Error).message}`);
-    void refreshPadPersona();
+    if (!disposed && props.open) status('', `返回桌面失败：${(error as Error).message}`);
   } finally {
-    mouseBusy.value = false;
+    desktopBusy.value = false;
+    if (!accepted && restoreControllerFocus && previousFocus) {
+      void nextTick(() => {
+        if (disposed || !props.open || document.visibilityState !== 'visible' || !document.hasFocus() ||
+          (document.activeElement !== document.body && document.activeElement !== document.documentElement) ||
+          !previousFocus.isConnected || !previousFocus.classList.contains('focused')) return;
+        focusGamepadElement(previousFocus);
+      });
+    }
   }
 }
 
@@ -563,24 +499,27 @@ async function refreshLosslessState(): Promise<void> {
     if (epoch === losslessReadEpoch) losslessState.value = null;
   } finally { if (epoch === losslessReadEpoch) losslessReading.value = false; }
 }
-async function runLosslessScaling(): Promise<void> {
-  if (disabledForAction.value) return;
+async function runLosslessScaling(remove=false): Promise<void> {
+  if (disabledForAction.value || !targetGame.value || losslessReading.value || losslessState.value?.pending || !losslessState.value?.controlAvailable || (remove && !losslessState.value.profile)) return;
+  const enabled=losslessNext.value==='on';
   const release = tryAcquireQuickAction('top-lossless');
   if (!release) { status('', '已有其它快捷操作正在执行，请稍候'); return; }
   const epoch = targetEpoch;
   let target: LockedGameTarget | null = null;
   busy.value = true;
-  status('正在为当前游戏一键缩放…');
+  status(remove?'正在解除此游戏的小黄鸭绑定…':enabled?'正在开启当前游戏的小黄鸭…':'正在关闭当前游戏的小黄鸭…');
   try {
     target = await ensureTarget();
     const captured = target;
     const checkpoint = () => assertActionTarget(captured);
     checkpoint();
-    const result = await setLosslessScalingEnabled(target.path, true, checkpoint, target);
+    const result = remove
+      ? await removeLosslessGameProfile(target.path, checkpoint, target)
+      : await setLosslessScalingEnabled(target.path, enabled, checkpoint, target);
     checkpoint();
     status(result.notice);
   } catch (error) {
-    if (epoch === targetEpoch && !disposed && (!target || isActionTargetCurrent(target))) status('', '小黄鸭一键缩放失败：' + (error as Error).message);
+    if (epoch === targetEpoch && !disposed && (!target || isActionTargetCurrent(target))) status('', (remove?'解除此游戏失败：':'小黄鸭开关操作失败：') + (error as Error).message);
   } finally {
     busy.value = false;
     release();
@@ -820,8 +759,6 @@ onMounted(() => {
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
   window.addEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
   window.addEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
-  window.addEventListener('gp:mouse-mode', onMouseModeSync as EventListener);
-  window.addEventListener('gp:pad-persona', onPadPersonaSync as EventListener);
   window.addEventListener('game-quick-target-lost', onTargetLost);
   window.addEventListener('game-quick-refresh', refreshGame);
   void refreshMenuState();
@@ -830,7 +767,6 @@ onBeforeUnmount(() => {
   disposed = true;
   ++menuStateEpoch;
   ++controlStateEpoch;
-  ++mouseStateEpoch;
   ++losslessReadEpoch;
   stopLosslessState?.();
   stopLosslessObservation?.();
@@ -840,8 +776,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
   window.removeEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
   window.removeEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
-  window.removeEventListener('gp:mouse-mode', onMouseModeSync as EventListener);
-  window.removeEventListener('gp:pad-persona', onPadPersonaSync as EventListener);
   window.removeEventListener('game-quick-target-lost', onTargetLost);
   window.removeEventListener('game-quick-refresh', refreshGame);
   if (fsrResolve) closeDialog(false);
@@ -855,29 +789,27 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 视觉顺序即手柄横向顺序：data-gp-col 必须与按钮的 DOM 顺序一致（0 切换程序、
-         1 暂停游戏、2 关闭游戏、3 模拟鼠标），否则手柄左右与看到的图标对不上。 -->
+         1 返回桌面、2 暂停游戏、3 关闭游戏），否则手柄左右与看到的图标对不上。 -->
     <div class="quick-game-controls" data-gp-group="game-quick-game-controls" data-gp-game-row="controls">
       <button type="button" data-gp-row="0" data-gp-col="0" data-gp-game-control="switch-program" :disabled="disabledForAction" @click="openTaskView">
         <AppIcon name="monitor" />切换程序
       </button>
-      <button ref="pauseButtonEl" type="button" data-gp-row="0" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="togglePause">
+      <button type="button" data-gp-row="0" data-gp-col="1" data-gp-game-control="return-desktop" :disabled="disabledForAction" title="Win+D" @click="returnDesktop">
+        <AppIcon name="return-desktop" />返回桌面
+      </button>
+      <button ref="pauseButtonEl" type="button" data-gp-row="0" data-gp-col="2" :disabled="disabledForAction || !targetGame" @click="togglePause">
         <AppIcon :name="paused ? 'play' : 'pause'" />{{ paused ? '继续游戏' : '暂停游戏' }}
       </button>
-      <button type="button" class="danger" data-gp-row="0" data-gp-col="2" :disabled="disabledForAction || !targetGame" @click="closeCurrentGame">
+      <button type="button" class="danger" data-gp-row="0" data-gp-col="3" :disabled="disabledForAction || !targetGame" @click="closeCurrentGame">
         <AppIcon name="close" />关闭游戏
       </button>
-      <button type="button" data-gp-row="0" data-gp-col="3" :class="{ active: mouseOn && !steamDeckPadActive }" :disabled="disabledForAction || steamDeckPadActive || !mouseControlAllowed" :title="steamDeckPadActive ? '由 Steam 管理，仅显示状态' : '切换 YMCC 模拟鼠标'" @click="toggleMouse">
-        <AppIcon name="mouse" /><span>{{ mouseModeLabel }}</span><small class="quick-control-state">{{ mouseStateLabel }}</small>
-      </button>
     </div>
-    <div v-if="mouseNotice" class="quick-control-notice">{{ mouseNotice }}</div>
 
     <!-- 第二排专属配置、第三排游戏黑白名单；视觉顺序与手柄导航一致。 -->
     <GameCustomProfilePanel
       :game="policyGame"
       :open="open"
       @status="onCustomStatus"
-      @changed="refreshPadPersona"
     />
 
     <GameRulePanel
@@ -890,26 +822,30 @@ onBeforeUnmount(() => {
     />
 
     <div class="game-quick-actions" data-gp-group="game-quick-actions">
-      <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
+      <button type="button" class="quick-action quick-fsr" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
         <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
       </button>
-      <button type="button" class="quick-action quick-lossless" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" data-gp-game-control="lossless-scaling"
-        :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable" @click="runLosslessScaling">
-        <AppIcon name="rocket" /><span class="quick-lossless-text"><strong>一键缩放</strong><small role="status" title="仅表示程序运行状态"><span class="lossless-program-dot" :class="{ running:losslessProgram?.known && losslessProgram.running,unknown:!losslessProgram?.known }" aria-hidden="true"></span>{{ losslessHint }}</small></span>
+      <button type="button" class="quick-action quick-lossless" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" data-gp-game-control="lossless-scaling"
+        :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable" @click="runLosslessScaling(false)">
+        <AppIcon name="rocket" /><span class="quick-lossless-text"><strong>{{ losslessButtonLabel }}</strong><small role="status" title="仅表示程序运行状态"><span class="lossless-program-dot" :class="{ running:losslessProgram?.known && losslessProgram.running,unknown:!losslessProgram?.known }" aria-hidden="true"></span>{{ losslessHint }}</small></span>
       </button>
-      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" data-gp-game-control="trainer-menu" :disabled="disabledForAction" :aria-expanded="trainerMenuOpen" aria-haspopup="dialog" @click="trainerMenuOpen = true">
+      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1" data-gp-game-control="lossless-remove"
+        :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable || !losslessState?.profile" @click="runLosslessScaling(true)">
+        <AppIcon name="close" /><span><strong>解除此游戏</strong></span>
+      </button>
+      <button type="button" class="quick-action" data-gp-game-row="actions-3" data-gp-row="3" data-gp-col="0" data-gp-game-control="trainer-menu" :disabled="disabledForAction" :aria-expanded="trainerMenuOpen" aria-haspopup="dialog" @click="trainerMenuOpen = true">
         <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>{{ trainerButtonLabel }}</strong><small>{{ trainerButtonHint }}</small></span>
       </button>
       <GameTrainerMenu v-if="trainerMenuOpen" :game="targetGame" :game-name="targetName" :has-game="!!targetGame" :busy="trainerBusy" :hint="trainerButtonHint" @close="closeTrainerMenu" @launch="runTrainer" @status="onCustomStatus" />
-      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1">
+      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-3" data-gp-row="3" data-gp-col="1">
         <span class="quick-speed-title"><AppIcon name="speed" /> 游戏变速</span>
-        <Dropdown :model-value="speedFactor" :options="speedOptions" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="2" gp-col="1" @change="(v) => runSpeed(Number(v))" />
+        <Dropdown :model-value="speedFactor" :options="speedOptions" placeholder="待确认" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="3" gp-col="1" @change="(v) => runSpeed(Number(v))" />
       </div>
     </div>
 
     <div class="game-quick-footer" data-gp-group="game-quick-footer" data-gp-game-row="footer">
-      <button type="button" :disabled="disabledForAction" @click="refreshGame"><strong class="quick-key-y">Y</strong>刷新游戏获取</button>
-      <button type="button" class="cancel" @click="$emit('close-request')"><strong class="quick-key-b">B</strong>关闭页面</button>
+      <button type="button" :disabled="disabledForAction" @click="refreshGame"><span class="controller-key quick-key-y" data-controller-key="Y">Y</span>刷新游戏获取</button>
+      <button type="button" class="cancel" @click="$emit('close-request')"><span class="controller-key quick-key-b" data-controller-key="B">B</span>关闭页面</button>
     </div>
 
     <Teleport to="body">
@@ -979,6 +915,7 @@ onBeforeUnmount(() => {
 .quick-action span { display: grid; gap: 2px; min-width: 0; }
 .quick-action strong { font-size: 11px; }
 .quick-action small, .quick-speed-title { color: var(--text-dim); font-size: 9px; }
+.quick-fsr { grid-column: 1 / -1; }
 .quick-lossless-text { flex: 1; }
 .lossless-program-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#c4c4c4; margin-right:6px; }
 .lossless-program-dot.running { background:#4cc38a; }
@@ -999,10 +936,9 @@ onBeforeUnmount(() => {
 .quick-submenu-pop-enter-from, .quick-submenu-pop-leave-to { opacity: 0; transform: translateY(-5px) scale(.985); }
 .quick-game-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .quick-game-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 38px; padding: 6px 5px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: var(--bg-input); color: var(--text); font-size: 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.quick-game-controls button :deep(svg) { width: 14px; height: 14px; flex: 0 0 auto; }
+.quick-game-controls button :deep(.app-icon) { width: 14px; height: 14px; flex: 0 0 auto; }
 .quick-game-controls button.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .quick-game-controls button.danger { color: var(--danger); }
-.quick-control-notice { color: var(--danger); font-size: 10px; line-height: 1.35; }
 .quick-status { color: var(--ok); font-size: 10px; line-height: 1.35; white-space: pre-line; }
 .quick-status.error { color: var(--danger); }
 .quick-dialog { box-sizing: border-box; overflow-y: auto; padding: 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: color-mix(in srgb, var(--bg-solid) 96%, #101722); box-shadow: 0 16px 40px rgba(0,0,0,.55); z-index: 1000; }

@@ -8,7 +8,7 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
   let now = 1000000000, online = true, gameRunning = false, manifestVersion = info.version;
   let policy: PredownloadPolicy = { enabled: true, bootId: 'boot-A', lastNotifiedBoot: '', failureCount: 0, nextCheckAt: 0, ...initial };
   let current: { info: UpdateInfo | null; progress: UpdateProgressState } = { info: null, progress: { phase: 'idle' } };
-  const calls = { check: 0, download: 0, cache: 0, cancel: 0, notice: 0, ack: 0, schedule: 0, noticeVersions: [] as string[] };
+  const calls = { refresh: 0, check: 0, download: 0, cache: 0, cancel: 0, notice: 0, ack: 0, schedule: 0, noticeVersions: [] as string[] };
   const timers = new Map<number, { at: number; fn: () => void }>(); let timerId = 0;
   let hasPackage = false, checkFail = false, prepareFail = false, cacheMissing = false, noticeAvailable = true, ackFail = false;
   let pendingCheck: (() => Promise<void>) | null = null, pendingPrepare: (() => Promise<void>) | null = null;
@@ -18,7 +18,7 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
     clearTimer: id => { timers.delete(id as number); },
     readPolicy: async () => ({ ...policy }), setEnabled: async enabled => ({ ...(policy = { ...policy, enabled }) }),
     saveSchedule: async (failureCount, nextCheckAt) => { calls.schedule++; policy = { ...policy, failureCount, nextCheckAt }; },
-    initialize: async () => {}, refresh: async () => {}, current: () => current,
+    initialize: async () => {}, refresh: async () => { calls.refresh++; }, current: () => current,
     check: async () => {
       calls.check++; await pendingCheck?.();
       if (checkFail) { current.progress = { phase: 'failed', error: 'offline', stage: 'download' }; return; }
@@ -37,6 +37,15 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
     notified: async () => { calls.ack++; if (ackFail) throw Error('disk full'); policy = { ...policy, lastNotifiedBoot: policy.bootId }; return true; },
   });
   return { scheduler, calls, timers, policy: () => policy, current: () => current,
+    now:()=>now,
+    async advance(ms:number) {
+      const end=now+ms; let wakes=0;
+      for(;;){const due=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;
+        assert(++wakes<1000,'scheduler timer storm'); now=due[1].at; timers.delete(due[0]);due[1].fn();
+        for(let i=0;i<100;i++)await Promise.resolve();
+      }
+      now=end;for(let i=0;i<100;i++)await Promise.resolve();return wakes;
+    },
     time(ms: number) { now += ms; }, game(value:boolean){gameRunning=value;scheduler.progress();}, manifest(version:string){manifestVersion=version;}, setVersion(version:string){current.info={...info,version};}, offline(value = true) { online = !value; },
     savedReady() { hasPackage = true; current = { info: { ...info }, progress: { phase: 'downloaded', stage: 'install' } }; },
     checkFails(value = true) { checkFail = value; }, prepareFails(value = true) { prepareFail = value; }, missingCache(value = true) { cacheMissing = value; },
@@ -44,6 +53,8 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
     holdCheck(fn: () => Promise<void>) { pendingCheck = fn; }, holdPrepare(fn: () => Promise<void>) { pendingPrepare = fn; },
   };
 }
+const idleTimersOnly=process.argv.includes('--idle-timers');
+if(!idleTimersOnly){
 {
  const f=fixture(); f.scheduler.start(); await f.scheduler.read();
  check('startup is delayed and provider reads perform no download',()=>{ assert.equal(f.calls.check,0);assert.equal(f.calls.download,0);assert.equal(f.timers.size,1); });
@@ -141,5 +152,54 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
 {
  const f=fixture();f.savedReady();f.manifest('99.0.3');await f.scheduler.run();
  check('fresh startup or post-game manifest supersedes old cache before consuming boot notice',()=>{assert.deepEqual(f.calls.noticeVersions,['99.0.3']);assert.equal(f.calls.download,1);});
+}
+}
+else {
+ const interval=6*60*60*1000;
+ const snapshots:any[]=[];
+ const delay=(f:ReturnType<typeof fixture>)=>Math.min(...[...f.timers.values()].map(t=>t.at-f.now()));
+ {
+  const f=fixture({enabled:false});f.scheduler.start();await f.advance(15000);const before={...f.calls};
+  const wakes=await f.advance(120000);
+  check('disabled empty cache owns no timer and repeats no refresh',()=>{assert.equal(f.timers.size,0);assert.equal(wakes,0);assert.deepEqual(f.calls,before);});
+  snapshots.push({case:'disabled',wakes,refreshes:f.calls.refresh-before.refresh,timers:f.timers.size});f.scheduler.stop();
+ }
+ {
+  const f=fixture({nextCheckAt:1000000000+interval});f.scheduler.start();await f.advance(15000);const before={...f.calls};
+  const wakes=await f.advance(120000);
+  check('healthy idle schedules the actual six-hour deadline',()=>{assert.equal(f.timers.size,1);assert.equal(wakes,0);assert.deepEqual(f.calls,before);assert.equal(delay(f),interval-135000);});
+  snapshots.push({case:'waiting-six-hours',wakes,refreshes:f.calls.refresh-before.refresh,timers:f.timers.size,nextDelayMs:delay(f)});
+  await f.advance(interval-135000);assert.equal(f.calls.check,1);assert.equal(f.calls.download,1);f.scheduler.stop();
+ }
+ {
+  const f=fixture();f.offline();f.scheduler.start();await f.advance(15000);
+  check('offline idle stops until an online wake',()=>assert.equal(f.timers.size,0));
+  f.offline(false);f.scheduler.wake(true);await f.advance(1000);assert.equal(f.calls.download,1);f.scheduler.stop();
+ }
+ {
+  const f=fixture();f.game(true);f.scheduler.start();await f.advance(15000);
+  check('game admission pauses the pump and existing recovery wake resumes it',()=>assert.equal(f.timers.size,0));
+  f.game(false);f.scheduler.wake(true);await f.advance(1000);assert.equal(f.calls.download,1);f.scheduler.stop();
+ }
+ {
+  const f=fixture();f.checkFails();f.scheduler.start();await f.advance(15000);
+  check('first failure schedules its actual one-minute backoff',()=>{assert.equal(delay(f),60000);assert.equal(f.policy().failureCount,1);});
+  await f.advance(59999);assert.equal(f.calls.check,1);await f.advance(1);assert.equal(f.calls.check,2);assert.equal(delay(f),300000);f.scheduler.stop();
+ }
+ {
+  const f=fixture();f.noticeAvailable(false);f.scheduler.start();await f.advance(15000);
+  check('declined ready notice retains the original thirty-second retry',()=>assert.equal(delay(f),30000));
+  await f.advance(30000);assert.equal(f.calls.notice,2);f.noticeAvailable(true);await f.advance(30000);assert.equal(f.calls.ack,1);assert.equal(delay(f),interval-60000);f.scheduler.stop();
+ }
+ {
+  const f=fixture({enabled:false,lastNotifiedBoot:'boot-A'});f.savedReady();f.offline();f.scheduler.start();await f.advance(15000);
+  check('disabled acknowledged cache retains its proof expiry deadline',()=>{assert.equal(f.calls.cache,1);assert.equal(delay(f),interval);});
+  const late=[...f.timers.values()];f.scheduler.stop();const before={...f.calls};for(const t of late)t.fn();for(let i=0;i<100;i++)await Promise.resolve();assert.equal(f.timers.size,0);assert.deepEqual(f.calls,before);
+ }
+ {
+  const f=fixture();f.scheduler.start();await f.advance(15000);f.scheduler.invalidateCache();await f.advance(30000);
+  check('cache cleanup quiet window schedules only its remaining deadline',()=>assert.equal(delay(f),570000));f.scheduler.stop();
+ }
+ console.log('UPDATER_IDLE_TIMER_MEASUREMENTS '+JSON.stringify(snapshots));
 }
 console.log('UPDATER_PREDOWNLOAD_SELFTEST_OK checks='+checks+' (fake clock and isolated IO; no network, install or device changes)');

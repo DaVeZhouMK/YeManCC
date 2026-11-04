@@ -115,6 +115,9 @@ async function refreshStartupResult() {
     const state = await loadBootModes({ overviewOnly: true });
     if (disposed) return;
     if (busy.value) { refreshPending = true; pendingReceipt ??= receipt; return; }
+    // A read started before a save/selection may finish afterwards. Never
+    // replace a newer local commit with that stale snapshot or erase its draft.
+    if (documentState.value && state.document.revision < documentState.value.revision) return;
     // Keep the user's selected next mode and any retained draft; only the live
     // document/result is refreshed. The editor reconciles metadata separately.
     documentState.value = state.document; startupResult.value = state.startupResult;
@@ -130,8 +133,10 @@ async function refreshStartupResult() {
 }
 function bootModeChanged(event: Event) {
   const receipt = (event as CustomEvent<BootModeReceipt>).detail;
-  if (disposed || !receipt || !BOOT_MODE_IDS.includes(receipt.mode) || !Array.isArray(receipt.skipped) || !Array.isArray(receipt.pending)) return;
-  pendingReceipt = cloneBootValue(receipt); refreshPending = true;
+  if (disposed || !receipt || !BOOT_MODE_IDS.includes(receipt.mode) ||
+      ![receipt.applied, receipt.skipped, receipt.pending].every(rows => Array.isArray(rows) && rows.every(row => typeof row === 'string'))) return;
+  const bounded = (rows: string[]) => rows.slice(0, 64).map(row => row.slice(0, 500));
+  pendingReceipt = { mode: receipt.mode, applied: bounded(receipt.applied), skipped: bounded(receipt.skipped), pending: bounded(receipt.pending) }; refreshPending = true;
   void refreshStartupResult();
 }
 watch(busy, value => { if (!value && refreshPending) void refreshStartupResult(); });
@@ -231,7 +236,7 @@ function revealOverviewTop() {
   <section ref="panel" class="boot-modes-panel">
     <div class="boot-panel-content" :inert="editor || modalOpen || undefined">
       <header class="boot-heading"><h1>开机模式</h1></header>
-      <button v-if="!documentState && !busy" @click="load">重新读取</button>
+      <button v-if="!busy && (!documentState || error)" @click="load">重新读取</button>
         <div class="boot-current"><span>当前：{{ documentState ? BOOT_MODE_LABELS[documentState.current] : '读取中…' }}</span><span>开机：{{ documentState ? documentState.bootEnabled ? BOOT_MODE_LABELS[documentState.boot] : BOOT_MODE_LABELS.global : '读取中…' }}</span></div>
         <div class="boot-mode-cards" @focusin="revealOverviewTop">
           <button v-for="id in BOOT_MODE_IDS" :key="id" :aria-pressed="selected === id" :disabled="busy && !!documentState" @click="selectMode(id)">
@@ -245,7 +250,7 @@ function revealOverviewTop() {
           <button class="primary" :disabled="busy || !documentState" @click="requestBoot">设为开机模式</button>
           
         </div>
-        <div class="boot-summary"><span>手柄<b>{{ personaLabels[String(snapshot?.input.persona)] || snapshot?.input.persona || '未读取' }}</b></span><span>鼠标<b>{{ mouseLabels[String(snapshot?.input.mouse)] || snapshot?.input.mouse || '未读取' }}</b></span><span>按键<b>{{ (snapshot?.controller.rules as any[])?.length || 0 }} 项</b></span><span>联动<b>{{ (snapshot?.softwareLaunch.paths as any[])?.length || 0 }} 个</b></span></div>
+        <div class="boot-summary"><span>手柄<b>{{ personaLabels[String(snapshot?.input.persona)] || snapshot?.input.persona || '未读取' }}</b></span><span>鼠标<b>{{ mouseLabels[String(snapshot?.input.mouse)] || snapshot?.input.mouse || '未读取' }}</b></span><span>联动<b>{{ (snapshot?.softwareLaunch.paths as any[])?.length || 0 }} 个</b></span></div>
       <p v-if="error" class="boot-error" role="alert">{{ error }}</p>
       <p v-if="statusText" class="boot-status" :class="{'boot-error': startupResult?.status === 'failed'}" :role="startupResult?.status === 'failed' ? 'alert' : 'status'" :title="statusText">{{ statusText }}</p>
       <p v-if="documentState?.bootNotice" class="boot-boot-notice" role="status">{{ documentState.bootNotice }}</p>

@@ -1,7 +1,8 @@
 #pragma once
 #include <string_view>
 
-// Fixed HC a250b19a resource recipes: nine new models and 18 reviewed legacy deltas.
+// HC resource recipes: a250b19a base plus reviewed f2e58468 OneXPlayer3 motion update.
+// Upgrade metadata lives in capabilities/HC-UPSTREAM-UPGRADE.json; this is the same total-library row.
 // This catalog declares model/recipe provenance; sensor/provider/generation
 // admission remains a separate runtime decision. It is not physical detection.
 namespace ymcc::hc_model_motion {
@@ -19,7 +20,7 @@ inline constexpr Recipe recipes[] = {
     {"HandheldCompanion.Devices.AYANEOFlip11", "hc-a250b19a:model:AYANEOFlip11", "hc-a250b19a:ayaneo-flip11:gyro:x-z-neg-y", "hc-a250b19a:ayaneo-flip11:accel:x-z-neg-y", "HandheldCompanion/Resources/Devices/AYANEOFlip1SKB.json", "2171b92f2a388aae0899a49d0c627108de219fee85da3a1c594d7230050e6fc6"},
     {"HandheldCompanion.Devices.OneXPlayerX2", "hc-a250b19a:model:OneXPlayerX2", "hc-a250b19a:onexplayer-x2:gyro:z-x-neg-y", "hc-a250b19a:onexplayer-x2:accel:z-x-neg-y", "HandheldCompanion/Resources/Devices/OneXPlayerX2.json", "6b3e2babf6b7c3482a3b73d2f51d3e9701f90239a7a1b39490337a1eb552bbe8"},
     {"HandheldCompanion.Devices.OneXPlayerX2MiniPro", "hc-a250b19a:model:OneXPlayerX2MiniPro", "hc-a250b19a:onexplayer-x2minipro:gyro:y-neg-z-neg-x", "hc-a250b19a:onexplayer-x2minipro:accel:neg-x-neg-z-y", "HandheldCompanion/Resources/Devices/OneXPlayerX2MiniPro.json", "5689156e5219ecc5009bfb208dbafbdae8b6607ece15b5f8ca41ea6b5953b57a"},
-    {"HandheldCompanion.Devices.OneXPlayer3", "hc-a250b19a:model:OneXPlayer3", "hc-a250b19a:onexplayer-3:gyro:y-x-z", "hc-a250b19a:onexplayer-3:accel:y-x-z", "HandheldCompanion/Resources/Devices/OneXPlayer3.json", "40dba7177094cdfb03880554aaa22d38921a57ae2b8deca5eca5f7dc32ced10b"},
+    {"HandheldCompanion.Devices.OneXPlayer3", "hc-f2e58468:model:OneXPlayer3", "hc-f2e58468:onexplayer-3:gyro:neg-y-neg-z-x", "hc-f2e58468:onexplayer-3:accel:neg-y-neg-z-x", "HandheldCompanion/Resources/Devices/OneXPlayer3.json", "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a", "hc-a250b19a:onexplayer-3:gyro:y-x-z", "hc-a250b19a:onexplayer-3:accel:y-x-z"},
     {"HandheldCompanion.Devices.AYANEONEXT2", "hc-a250b19a:model:AYANEONEXT2", "hc-a250b19a:ayanero-next2:gyro:neg-x-neg-z-y", "hc-a250b19a:ayanero-next2:accel:neg-x-neg-z-y", "HandheldCompanion/Resources/Devices/AYANEONEXT2.json", "bbef5352a5fcc4857e3f86d44955dfcb4206d6e17335bd8262090e424b034f67"},
     {"HandheldCompanion.Devices.AYANEO2", "hc-a250b19a:reviewed:AYANEO2", "hc-a250b19a:reviewed-AYANEO2:gyro:x-z-y", "hc-a250b19a:reviewed-AYANEO2:accel:x-z-y", "HandheldCompanion/Resources/Devices/AYANEO2.json", "a889b8dfd5c0ca23f67e3d0d8cb0256045fcf45b1d476850d79342bd2709d32a", "hc-06c0b954:ayanero-next:gyro:x-neg-z-y", "hc-06c0b954:ayanero-next:accel:neg-x-neg-z-y"},
     {"HandheldCompanion.Devices.AYANEO2S", "hc-a250b19a:reviewed:AYANEO2S", "hc-a250b19a:reviewed-AYANEO2S:gyro:x-z-y", "hc-a250b19a:reviewed-AYANEO2S:accel:x-z-y", "HandheldCompanion/Resources/Devices/AYANEO2.json", "a889b8dfd5c0ca23f67e3d0d8cb0256045fcf45b1d476850d79342bd2709d32a", "hc-06c0b954:ayanero-next:gyro:x-neg-z-y", "hc-06c0b954:ayanero-next:accel:neg-x-neg-z-y"},

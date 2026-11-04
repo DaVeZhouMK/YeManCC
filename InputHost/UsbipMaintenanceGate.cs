@@ -40,3 +40,69 @@ internal sealed class UsbipMaintenanceGate : IDisposable
         moduleLease?.Dispose(); moduleLease = null;
     }
 }
+
+// This exception is a hard admission refusal, not an advisory backend warning.
+internal sealed class UsbipBackendBudgetRejectedException : IOException
+{
+    internal UsbipBackendBudgetRejectedException(string reason, Exception? inner = null) : base(reason, inner) { }
+}
+
+// Called only under the existing USB/IP maintenance gate, before an unavailable
+// backend can reach either SDK install or the controller factory. One reservation
+// covers that entire prepare, including the stock SDK's own finite retries.
+// This record never confirms setup/product/driver completion and is not cleared
+// on success: a healthy backend bypasses it without any new budget I/O.
+internal static class UsbipHostBackendBudget
+{
+    private const string Operation = "usbip-host-backend-attempt";
+    internal static void Reserve()
+    {
+        try {
+            Reserve(Path.Combine(YeManCC.UsbipMaintenanceState.DirectoryPath, "host-backend-attempt.json"),
+                YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity,
+                YeManCC.UsbipMaintenanceState.PrepareProtectedDirectory);
+        }
+        catch (UsbipBackendBudgetRejectedException) { throw; }
+        catch (Exception ex) { throw Rejected("authority-unavailable", ex); }
+    }
+    // File/boot port for the original backend preparation fixture. Production
+    // supplies only its protected machine directory and actual V2 boot provider.
+    internal static void Reserve(string path, string? currentBoot, Action prepareDirectory)
+    {
+        string? temp = null;
+        try {
+            if (!YeManCC.UsbipMaintenanceState.ValidBootSession(currentBoot)) throw Rejected("boot-unverified");
+            string? previousBoot = null;
+            try {
+                var saved = YeManCC.UsbipMaintenanceState.ReadRecord(path);
+                if (saved.Kind == YeManCC.UsbipMaintenanceState.RecordKind.Missing) throw new FileNotFoundException();
+                if (saved.Kind != YeManCC.UsbipMaintenanceState.RecordKind.Ready) throw Rejected("record-invalid");
+                using var doc = System.Text.Json.JsonDocument.Parse(saved.Value.GetRawText());
+                var record = doc.RootElement;
+                if (record.GetProperty("schemaVersion").GetInt32() != 1 ||
+                    record.GetProperty("operation").GetString() != Operation) throw Rejected("record-invalid");
+                previousBoot = record.GetProperty("bootSessionIdentity").GetString();
+                if (!YeManCC.UsbipMaintenanceState.ValidBootSession(previousBoot)) throw Rejected("record-boot-unverified");
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+            if (string.Equals(previousBoot, currentBoot, StringComparison.OrdinalIgnoreCase))
+                throw Rejected("exhausted-this-boot");
+            prepareDirectory(); // Failure must prevent both install and factory.
+            temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            YeManCC.UsbipMaintenanceState.WriteRecord(path, new {
+                schemaVersion = 1, operation = Operation, bootSessionIdentity = currentBoot,
+                hostPid = Environment.ProcessId, reservation = Guid.NewGuid().ToString("N"),
+                startedAt = DateTimeOffset.UtcNow, scope = "host-backend-prepare;not-product-complete"
+            });
+            temp = null;
+        }
+        catch (UsbipBackendBudgetRejectedException) { throw; }
+        catch (Exception ex) { throw Rejected("record-unavailable:" + ex.GetType().Name, ex); }
+        finally {
+            if (temp is not null) { try { File.Delete(temp); } catch { } }
+        }
+    }
+    private static UsbipBackendBudgetRejectedException Rejected(string reason, Exception? inner = null) =>
+        new("usbip-host-backend-budget-" + reason, inner);
+}

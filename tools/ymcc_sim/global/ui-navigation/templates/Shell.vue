@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed,ref,nextTick,onMounted,onBeforeUnmount,watch} from 'vue';
 import NavRail from '@/components/NavRail.vue';import AppIcon from '@/components/AppIcon.vue';import Performance from '@/components/ContinuousPerformancePanel.vue';import GameRecognitionControl from '@/components/GameRecognitionControl.vue';
+import TouchMouse from '@/views/TouchMouseView.vue';
 import Fan from '@/views/FanView.vue';import Controller from '@/views/ButtonMappingView.vue';import Gyro from '@/views/GyroMotionView.vue';import Steam from '@/views/SteamView.vue';import Power from '@/views/PowerView.vue';import Sleep from '@/views/SleepGuardView.vue';import Monitor from '@/views/MonitorOutputView.vue';import Settings from '@/views/SettingsView.vue';import Quick from '@/views/QuickAppView.vue';
 import Radial from '@/views/RadialMenuView.vue';
 import {startRadialTestingHost} from '@/radial/testing';
@@ -13,10 +14,10 @@ import {proposalVariant} from './proposalState';
 const params=new URLSearchParams(location.search),variant='a';
 const performanceSimulationOpen=ref(false);
 const width=ref(innerWidth),height=ref(innerHeight),dedicated=ref(params.get('context')==='dedicated'),notice=ref(''),sectionTabs=ref<{id:string,title:string}[]>([]),selectedSection=ref(''),root=ref<HTMLElement|null>(null),background=ref(params.get('background')||'animated'),navTarget=ref<HTMLElement|null>(null);
-const titleMap:any={'/radial':'触摸轮盘','/schedule':'性能调度','/fan':'风扇控制','/button-mapping':'控制器','/gyro-motion':'陀螺仪','/steam':'Steam 大屏','/power':'开机启动','/sleep':'睡眠优化','/rtss':'监控','/settings':'设置','/quick':'快捷应用'};
-const pages:any={'/radial':Radial,'/fan':Fan,'/button-mapping':Controller,'/gyro-motion':Gyro,'/steam':Steam,'/power':Power,'/sleep':Sleep,'/rtss':Monitor,'/settings':Settings,'/quick':Quick};
+const titleMap:any={'/radial':'触摸轮盘','/schedule':'性能调度','/fan':'风扇控制','/button-mapping':'控制器','/touch-mouse':'触控鼠标','/gyro-motion':'陀螺仪','/steam':'Steam 大屏','/power':'开机启动','/sleep':'睡眠优化','/rtss':'监控','/settings':'设置','/quick':'快捷应用'};
+const pages:any={'/radial':Radial,'/fan':Fan,'/button-mapping':Controller,'/touch-mouse':TouchMouse,'/gyro-motion':Gyro,'/steam':Steam,'/power':Power,'/sleep':Sleep,'/rtss':Monitor,'/settings':Settings,'/quick':Quick};
 const scale=computed(()=>Math.min(height.value/YMCC_SHELL_BASE_HEIGHT*YMCC_SHELL_SCALE_BOOST,width.value/YMCC_SHELL_BASE_WIDTH));
-const stage=computed(()=>({width:ymccStageWidth(ymccDesignWidth(previewRoute.path),width.value,scale.value)+'px',height:Math.max(YMCC_SHELL_BASE_HEIGHT,Math.ceil(height.value/scale.value))+'px',zoom:scale.value,'--gamepad-safe-bottom':Math.max(32,Math.min(64,height.value*.06))/Math.max(.5,scale.value)+'px'}));
+const stage=computed(()=>({width:ymccStageWidth(ymccDesignWidth(previewRoute.path),width.value,scale.value)+'px',height:height.value/scale.value+'px',zoom:scale.value,'--gamepad-safe-bottom':Math.max(32,Math.min(64,height.value*.06))/Math.max(.5,scale.value)+'px'}));
 const game={name:'Cyberpunk2077.exe',path:'C:/Games/Cyberpunk2077.exe',pid:77,processCreated:'100077'};
 let timer:any,observer:MutationObserver,menuObserver:MutationObserver;
 function tell(message:string){notice.value=message;clearTimeout(timer);timer=setTimeout(()=>notice.value='',2200);}

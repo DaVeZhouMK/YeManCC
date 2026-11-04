@@ -1,15 +1,33 @@
 // Verify the actual compiled plugin's immutable fingerprint and final SHA.
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';
 import {root,task,validation} from './fixtures/decky_task_paths.mjs';
+import vm from 'node:vm';import {createRequire} from 'node:module';import {monitorHudVuePlugin} from './monitor_hud_vue_build.mjs';
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const manifest=JSON.parse(fs.readFileSync(path.join(validation,'plugin-build.json'),'utf8').replace(/^\ufeff/,'')),bytes=fs.readFileSync(path.join(task,'Build/DeckyPlugin/dist/index.js'));
 assert.match(manifest.buildId,/^[a-f0-9]{64}$/);assert(bytes.includes(Buffer.from(manifest.buildId)));
 assert.equal(sha(bytes),manifest.files.find(x=>x.name==='dist/index.js').sha256);
 assert.equal(sha(Buffer.from(bytes.toString().replaceAll(manifest.buildId,'0'.repeat(64)))),manifest.buildId);
+
+// Consume the same shared asset loader and inspect real bundled string literals.
+// No browser path/WAN is available when Decky loads this standalone module.
+const require=createRequire(path.join(root,'package.json')),{build}=require('esbuild'),ts=require('typescript');
+const strings=new Set(),tree=ts.createSourceFile('actual-plugin.js',bytes.toString('utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+(function visit(node){if(ts.isStringLiteralLike(node))strings.add(node.text);ts.forEachChild(node,visit);})(tree);
+const inlineAssets=[];
+for(const name of ['controller-xbox','controller-native','controller-sd','mouse-solid','gyro-on','gyro-off']){
+ const file=path.join(root,'src/assets/input-status',name+'.svg');
+ const compiled=await build({stdin:{contents:'import uri from '+JSON.stringify(file.replaceAll('\\','/'))+';export default uri;',resolveDir:root,loader:'ts'},bundle:true,platform:'browser',format:'cjs',write:false,plugins:[monitorHudVuePlugin(root)]});
+ const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports});
+ const uri=typeof module.exports==='string'?module.exports:module.exports.default;assert.match(uri,/^data:image\/svg\+xml[,;]/);assert(strings.has(uri),'Actual Decky payload must contain the current SVG mask: '+name);
+ inlineAssets.push({name,sourceSha256:sha(fs.readFileSync(file)),uriSha256:sha(Buffer.from(uri)),inlined:true});
+}
 const builder=fs.readFileSync(path.join(root,'tools/build-decky-sidebar-plugin.mjs'),'utf8');assert(builder.includes("const template=await build(options),buildId=hash(withFrontendVersion(template.outputFiles[0].contents,'0'.repeat(64)))"));
-const cpp=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');const callback=cpp.slice(cpp.indexOf('static std::string deckySidebarStartMirror()'),cpp.indexOf('// YMCC Decky sidebar:',cpp.indexOf('static std::string deckySidebarStartMirror()')));
+const cpp=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8'),begin=cpp.indexOf('static std::string deckySidebarStartMirrorBroker()'),end=cpp.indexOf('// YMCC Decky sidebar:',begin);assert(begin>=0&&end>begin,'Current original broker entry is required');const callback=cpp.slice(begin,end);
 assert(callback.includes('[buildReceipt=std::string{}]'));assert(callback.includes('if(build!=buildReceipt)'));assert(callback.includes('ymcc::deckydiag::validBuildId'));
-const fixture=`#include <algorithm>
+const fixture=`#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
@@ -18,6 +36,9 @@ const fixture=`#include <algorithm>
 #include "decky_sidebar_diagnostics.h"
 using json=nlohmann::json;
 struct FakeBroker {struct Config{std::function<void(const std::string&,const json&)> request;std::function<void(const std::string&,const std::string&,bool)> peer;};Config config;bool start(Config c){config=std::move(c);return true;}void stop(){}json status(){return {{"connection","1"},{"runId",std::string(32,'a')},{"revision",0}};}bool reply(const std::string&,const json&){return true;}}g_deckyMirrorBroker;
+// Only external callback ports are inert; the original broker body is unchanged.
+struct InertCostContext {void request(const json&,unsigned long long){}void peer(bool,unsigned long long){}}g_deckyCostContext;
+struct InertRuntime {bool requestConnectionCheck(){return true;}}g_deckySidebarRuntime;
 std::vector<json> logs;
 static void deckySidebarDiagnostic(const char* event,const json& detail,bool=false){logs.push_back(ymcc::deckydiag::record(event,detail));}
 static bool deckySidebarPost(const char*,const json&){return true;}
@@ -27,11 +48,11 @@ static size_t builds(){return std::count_if(logs.begin(),logs.end(),[](const aut
 int main(){try{
  const std::string a(64,'a'),b(64,'b');
  auto packet=[&](const std::string& id){return json{{"command","snapshot"},{"buildId",id},{"subscribe",true}};};
- if(!deckySidebarStartMirror().empty())throw std::runtime_error("start");
+ if(!deckySidebarStartMirrorBroker().empty())throw std::runtime_error("start");
  for(unsigned n=0;n<1000;++n)g_deckyMirrorBroker.config.request("1",packet(a));
  if(builds()!=1)throw std::runtime_error("1000 snapshots must produce one build record");
  g_deckyMirrorBroker.config.request("1",packet(b));if(builds()!=2)throw std::runtime_error("replacement build not recorded");
- deckySidebarStartMirror();g_deckyMirrorBroker.config.request("1",packet(b));if(builds()!=3)throw std::runtime_error("new broker lifecycle must record even the same build");
+ deckySidebarStartMirrorBroker();g_deckyMirrorBroker.config.request("1",packet(b));if(builds()!=3)throw std::runtime_error("new broker lifecycle must record even the same build");
  g_deckyMirrorBroker.config.request("2",packet(a));if(builds()!=3)throw std::runtime_error("stale peer recorded");
  g_deckyMirrorBroker.config.request("1",packet("private-path"));if(builds()!=3)throw std::runtime_error("arbitrary build label recorded");
  g_deckyMirrorBroker.config.request("1",json{{"command","snapshot"},{"subscribe",false}});
@@ -40,5 +61,5 @@ int main(){try{
 }catch(const std::exception& e){std::cerr<<e.what()<<std::endl;return 1;}}
 `;
 fs.writeFileSync(path.join(validation,'native-build-receipt-fixture.cpp'),fixture);
-const report={status:'passed',checks:7,buildId:manifest.buildId,finalPluginSha256:sha(bytes),actualCompiledPlugin:true,scope:'Fingerprint normalizes the fixed build-ID slot in bundled runtime inputs; final file SHA independently identifies exported bytes. Native dedup is scoped to a broker lifecycle, not every snapshot.'};
+const report={status:'passed',checks:7,inlineAssetChecks:inlineAssets.length,inlineAssets,buildId:manifest.buildId,finalPluginSha256:sha(bytes),actualCompiledPlugin:true,nativeFixtureGenerated:true,nativeFixtureExecuted:false,scope:'Fingerprint normalizes the fixed build-ID slot in bundled runtime inputs; final file SHA independently identifies exported bytes. Native dedup is scoped to a broker lifecycle, not every snapshot.'};
 fs.writeFileSync(path.join(validation,'BUILD-FINGERPRINT.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));

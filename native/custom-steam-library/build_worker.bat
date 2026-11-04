@@ -7,6 +7,10 @@ cd /d "%~dp0"
 set "OUTDIR=%~1"
 if not defined OUTDIR set "OUTDIR=%~dp0..\..\..\..\Build\CustomSteamLibrary"
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
+if defined YMCC_CSL_TOOL_HOST (
+  "%YMCC_CSL_TOOL_HOST%" -NoLogo -NoProfile -NonInteractive -File "%YMCC_CSL_TOOL_SCRIPT%" -CaptureCompilerTools "%OUTDIR%\compiler-tools-before.json"
+  if errorlevel 1 exit /b 1
+)
 rc /nologo /fo "%OUTDIR%\steam_artwork_lab.res" steam_artwork_lab.rc
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE ^
@@ -14,6 +18,10 @@ cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE
   /Fo"%OUTDIR%\steam_artwork_lab.obj" /Fe"%OUTDIR%\SteamArtworkLab.exe" ^
   /link /SUBSYSTEM:CONSOLE /MACHINE:x64 winhttp.lib iphlpapi.lib version.lib bcrypt.lib advapi32.lib shell32.lib user32.lib gdiplus.lib ole32.lib ws2_32.lib
 if errorlevel 1 exit /b 1
+if defined YMCC_CSL_TOOL_HOST (
+  "%YMCC_CSL_TOOL_HOST%" -NoLogo -NoProfile -NonInteractive -File "%YMCC_CSL_TOOL_SCRIPT%" -CaptureCompilerTools "%OUTDIR%\compiler-tools-after.json"
+  if errorlevel 1 exit /b 1
+)
 if /I not "%~2"=="selftest" exit /b 0
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE ^
   /FC "..\..\tools\custom_steam_library_localconfig_selftest.cpp" /I"..\..\deps\json" ^

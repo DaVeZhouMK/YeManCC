@@ -56,6 +56,10 @@ int main(){try{
  const auto clean=deckydiag::frontendRecord(input),record=deckydiag::record("snapshot-read-finished",clean);
  check(clean.value("elapsedMs",0)==500&&record.value("monitorMs",0)==490,"Numeric stage timings survive both native allowlists");
  check(!clean.contains("token")&&!record.contains("game"),"Paths, tokens and game content never enter the telemetry");
+  const auto recovered=deckydiag::frontendRecord(deckydiag::Json::parse(R"({"event":"snapshot-read-finished","ready":true,"performanceMs":123})"));
+  check(deckydiag::record("snapshot-read-finished",recovered).value("ready",false)&&deckydiag::record("snapshot-read-finished",recovered).value("performanceMs",0)==123,"Read readiness and performance timing survive both filters");
+  const auto held=deckydiag::frontendRecord(deckydiag::Json::parse(R"({"event":"snapshot-read-finished","ready":false,"performanceMs":-1})"));
+  check(held.contains("ready")&&!held["ready"].get<bool>()&&!held.contains("performanceMs"),"Not-ready remains explicit and invalid timing cannot enter logs");
  check(deckydiag::frontendRecord({{"event","arbitrary-log"}}).is_null(),"Unknown diagnostic events are rejected");
  check(deckydiag::frontendRecord(deckydiag::Json::parse(R"({"event":"snapshot-read-start","readId":"42","elapsedMs":-1,"stage":"C:/secret"})")).size()==1,"Wrong scalar types and arbitrary text are omitted");
  check(deckydiag::frontendRecord(deckydiag::Json::parse(R"({"event":"snapshot-read-finished","elapsedMs":999999999})")).value("elapsedMs",0)==3600000,"Telemetry timings are capped");

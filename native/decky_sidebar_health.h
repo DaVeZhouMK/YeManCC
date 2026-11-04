@@ -26,7 +26,9 @@ inline std::string exception(const Json& packet,int context){
         if(!((type=="TypeError"&&(text.find("Cannot read properties of undefined")!=std::string::npos||text.find("Cannot read properties of null")!=std::string::npos||text.find("is not a function")!=std::string::npos))||(type=="ReferenceError"&&text.find("is not defined")!=std::string::npos)))return {};
         const auto& frames=d.at("stackTrace").at("callFrames");
         if(!frames.is_array()||frames.empty()||frames.size()>64||!coreUrl(frames.front().value("url",std::string{})))return {};
-        for(size_t n=0;n<(std::min)(size_t(8),frames.size());++n){const auto url=frames[n].value("url",std::string{});if(url.find("/plugins/")!=std::string::npos||url.rfind("decky://decky/",0)==0)return {};}
+        // Inspect every accepted frame (already capped at64), so deep plugin
+        // wrappers cannot promote one plugin error to a Loader-wide candidate.
+        for(size_t n=0;n<frames.size();++n){const auto url=frames[n].value("url",std::string{});if(url.find("/plugins/")!=std::string::npos||url.rfind("decky://decky/",0)==0)return {};}
         const auto boot=frames.front().value("url",std::string{});const auto entry=boot.substr(0,boot.find_first_of("?#"));if(entry!="http://127.0.0.1:1337/frontend/index.js"&&entry!="http://localhost:1337/frontend/index.js")return {};
         return "decky-frontend-incompatible";
     }catch(...){return {};}

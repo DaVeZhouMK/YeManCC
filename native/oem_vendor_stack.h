@@ -1,4 +1,5 @@
 #pragma once
+#include <set>
 // HC ISpaceWatcher parity, with durable original-state leases and no new worker.
 // Included only after MachineIdentity/kOemBit*/json and serial-worker declarations.
 #ifndef YMCC_VENDOR_STACK_FIXTURE
@@ -17,18 +18,26 @@ struct OemVendorServiceLease {
     DWORD originalStartType = SERVICE_DEMAND_START;
     bool wasRunning = false;
     DWORD originalState = 0; // R13 schema1 infers Running/Stopped from wasRunning.
+    bool returnPrepared = false; // Durable authority for our partial return steps.
 };
-struct OemVendorTaskLease { std::wstring name; bool wasEnabled = false, wasRunning = false; };
+struct OemVendorTaskLease { std::wstring name; bool wasEnabled = false, wasRunning = false, returnPrepared = false, removePrepared = false; };
 struct OemVendorTaskFacts { bool exists = false, enabled = false, running = false; };
 static std::mutex g_oemVendorStackMx, g_oemVendorStackIoMx;
 static std::vector<OemVendorServiceLease> g_oemVendorServiceLeases;
 static std::vector<OemVendorTaskLease> g_oemVendorTaskLeases;
+// Full task paths discovered on an ordinary request; wake verification reuses
+// them instead of rescanning the entire scheduler every two seconds.
+static std::vector<std::wstring> g_oemVendorTaskPaths;
+static bool g_oemVendorTaskDiscoveryComplete = false;
+static constexpr size_t kOemVendorMaxTaskPaths = 64;
 static bool g_oemVendorStackWanted = false, g_oemVendorStackOpQueued = false;
 // Two independent owners feed the same reversible lease. The existing shortcut
 // path remains the default owner; the explicit MSI controller-only shield is a
 // second owner so a settings refresh cannot accidentally clear it.
 static bool g_oemVendorShortcutWanted = false;
+static bool g_oemVendorRecordingWanted = false; // Temporary listener lease, independent of saved rules.
 static bool g_oemVendorShieldWanted = false;
+static bool g_oemVendorMsiTaskShieldPreferenceSeen = false;
 static bool g_oemVendorStackIntentSeen = false, g_oemVendorStackStartupRecovered = false;
 static YmccFamily g_oemVendorStackIntentFamily = YmccFamily::Unknown;
 static unsigned long long g_oemVendorStackRequested = 1, g_oemVendorStackCompleted = 0;
@@ -36,7 +45,8 @@ static bool g_oemVendorStackIntentControllerOnly = false;
 static bool g_oemVendorStackLastOutcomeKnown = false, g_oemVendorStackLastOutcomeOk = false;
 static unsigned long long g_oemVendorStackLastOutcomeEpoch = 0;
 static const char* g_oemVendorStackLastOutcome = "none";
-static bool g_oemVendorStackLoaded = false, g_oemVendorStackJournalValid = true;
+static bool g_oemVendorStackLoaded = false;
+static std::atomic<bool> g_oemVendorStackJournalValid{true};
 static json g_oemVendorMsiServiceInventory = json::object();
 static json g_oemVendorMsiProtectedServiceObservation = json::object();
 static unsigned g_oemVendorStackAttempts = 0;
@@ -102,6 +112,91 @@ static std::vector<std::wstring> oemVendorTaskNamesForFamily(YmccFamily family) 
     return family == YmccFamily::MsiClaw
         ? std::vector<std::wstring>{L"MSI_Center_M_Server", L"MSI_Center_M_Updater"} : std::vector<std::wstring>{};
 }
+// Task names are an exact allowlist. A scheduler subfolder is part of the
+// leased identity, never a reason to broaden that allowlist to other MSI tasks.
+static bool oemVendorTaskPathSafe(const std::wstring& path, bool folder = false) {
+    if (path.empty() || path.size() > 1024 || path.find(L'/') != std::wstring::npos) return false;
+    if (folder && path == L"\\") return true;
+    size_t start = path.front() == L'\\' ? 1 : 0;
+    if (folder && start != 1) return false;
+    for (wchar_t c : path) if (c < 32) return false;
+    while (start < path.size()) {
+        const auto end = path.find(L'\\', start);
+        const auto segment = path.substr(start, end == std::wstring::npos ? end : end - start);
+        if (segment.empty() || segment == L"." || segment == L"..") return false;
+        if (end == std::wstring::npos) return true;
+        start = end + 1;
+    }
+    return false;
+}
+static bool oemVendorTaskPathAllowed(const std::wstring& path, const std::vector<std::wstring>& names) {
+    if (!oemVendorTaskPathSafe(path)) return false;
+    const auto split = path.find_last_of(L'\\');
+    // Legacy journal entries used only the root task's name.
+    if (split != std::wstring::npos && path.front() != L'\\') return false;
+    const auto leaf = path.substr(split == std::wstring::npos ? 0 : split + 1);
+    return std::any_of(names.begin(), names.end(), [&](const auto& n) { return _wcsicmp(leaf.c_str(), n.c_str()) == 0; });
+}
+static bool oemVendorTaskPathEqual(const std::wstring& a, const std::wstring& b) {
+    const wchar_t* left = a.c_str() + (!a.empty() && a.front() == L'\\');
+    const wchar_t* right = b.c_str() + (!b.empty() && b.front() == L'\\');
+    return _wcsicmp(left, right) == 0;
+}
+struct OemVendorTaskFolderFacts { std::vector<std::wstring> tasks, folders; };
+struct OemVendorTaskDiscovery {
+    std::vector<std::wstring> paths;
+    size_t foldersRead = 0, tasksRead = 0;
+    DWORD error = ERROR_SUCCESS;
+    bool complete = true;
+};
+template<class ReadFolder>
+static OemVendorTaskDiscovery oemVendorTaskDiscoverWithReader(const std::vector<std::wstring>& names, ReadFolder readFolder) {
+    OemVendorTaskDiscovery result;
+    if (names.empty()) return result;
+    struct Pending { std::wstring path; unsigned depth; };
+    std::vector<Pending> pending{{L"\\", 0}};
+    std::vector<std::wstring> visited;
+    const auto deadline = GetTickCount64() + 3000; // Soft budget between scheduler calls.
+    auto fail = [&](DWORD error) { result.complete = false; if (!result.error) result.error = error; };
+    while (!pending.empty()) {
+        if (visited.size() >= 256 || GetTickCount64() >= deadline) { fail(ERROR_TIMEOUT); break; }
+        auto current = std::move(pending.back()); pending.pop_back();
+        if (std::any_of(visited.begin(), visited.end(), [&](const auto& p) { return oemVendorTaskPathEqual(p, current.path); })) continue;
+        visited.push_back(current.path);
+        OemVendorTaskFolderFacts facts;
+        if (!readFolder(current.path, facts)) { const auto error = GetLastError(); fail(error ? error : ERROR_GEN_FAILURE); }
+        ++result.foldersRead;
+        for (const auto& path : facts.tasks) {
+            if (++result.tasksRead > 4096) { fail(ERROR_BUFFER_OVERFLOW); break; }
+            const auto split = path.find_last_of(L'\\');
+            const auto parent = split == std::wstring::npos ? L"\\" : split == 0 ? L"\\" : path.substr(0, split);
+            if (!oemVendorTaskPathAllowed(path, names) || !oemVendorTaskPathEqual(parent, current.path)) continue;
+            if (std::any_of(result.paths.begin(), result.paths.end(), [&](const auto& p) { return oemVendorTaskPathEqual(p, path); })) continue;
+            if (result.paths.size() >= kOemVendorMaxTaskPaths) { fail(ERROR_BUFFER_OVERFLOW); break; }
+            // Keep old root keys stable for journal migration; nested identities
+            // retain their absolute path through query, disable and restoration.
+            result.paths.push_back(split == 0 ? path.substr(1) : path);
+        }
+        if (result.tasksRead > 4096 || result.error == ERROR_BUFFER_OVERFLOW) break;
+        for (const auto& path : facts.folders) {
+            const auto split = path.find_last_of(L'\\');
+            const auto parent = split == 0 ? L"\\" : path.substr(0, split);
+            if (!oemVendorTaskPathSafe(path, true) || path == L"\\" || !oemVendorTaskPathEqual(parent, current.path)) { fail(ERROR_INVALID_DATA); continue; }
+            if (current.depth >= 16 || pending.size() + visited.size() >= 256) { fail(ERROR_BUFFER_OVERFLOW); continue; }
+            pending.push_back({path, current.depth + 1});
+        }
+    }
+    // Preserve per-name absence/readback receipts when a target is not installed.
+    for (const auto& name : names) {
+        const bool found = std::any_of(result.paths.begin(), result.paths.end(), [&](const auto& p) {
+            const auto split = p.find_last_of(L'\\');
+            return _wcsicmp(p.c_str() + (split == std::wstring::npos ? 0 : split + 1), name.c_str()) == 0;
+        });
+        if (!found && result.paths.size() < kOemVendorMaxTaskPaths) result.paths.push_back(name);
+    }
+    return result;
+}
+
 static std::vector<std::wstring> oemVendorProcessNamesForFamily(YmccFamily family) {
     switch (family) {
     case YmccFamily::LenovoLegionGo: return {L"LegionGoQuickSettings", L"LegionSpace", L"LSDaemon"};
@@ -119,7 +214,9 @@ static std::vector<std::wstring> oemVendorProcessNamesForFamily(YmccFamily famil
 // protected by default; no unverified service is stopped because the only
 // known MSI service has no validated controller-only dependency separation.
 static std::vector<std::wstring> oemVendorShieldProcessNamesForFamily(YmccFamily family) {
-    return oemVendorProcessNamesForFamily(family);
+    auto names = oemVendorProcessNamesForFamily(family);
+    if (family == YmccFamily::MsiClaw) names.push_back(L"MSI Center M Updater");
+    return names;
 }
 // Missing preference defaults on. A saved false remains authoritative across
 // upgrades/restarts; malformed values must neither enable isolation nor throw
@@ -228,6 +325,53 @@ static bool oemVendorStackIntentCurrent(unsigned long long epoch) {
 }
 
 #ifndef YMCC_VENDOR_STACK_FIXTURE
+// A single bounded read-only walk covers hidden tasks and scheduler subfolders.
+// Mutation still uses only a discovered allowlisted full path and the old lease.
+static OemVendorTaskDiscovery oemVendorTaskDiscover(const std::vector<std::wstring>& names) {
+    if (names.empty()) return {};
+    const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE)
+        return {{}, 0, 0, static_cast<DWORD>(initialized), false};
+    struct ComScope { bool own; ~ComScope() { if (own) CoUninitialize(); } } scope{SUCCEEDED(initialized)};
+    ComPtr<ITaskService> service;
+    VARIANT empty{}; VariantInit(&empty);
+    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&service));
+    if (SUCCEEDED(hr)) hr = service->Connect(empty, empty, empty, empty);
+    if (FAILED(hr)) return {{}, 0, 0, static_cast<DWORD>(hr), false};
+    return oemVendorTaskDiscoverWithReader(names, [&](const std::wstring& path, OemVendorTaskFolderFacts& facts) {
+        ComPtr<ITaskFolder> folder;
+        BSTR text = SysAllocString(path.c_str());
+        if (!text) { SetLastError(ERROR_OUTOFMEMORY); return false; }
+        HRESULT result = service->GetFolder(text, &folder); SysFreeString(text);
+        ComPtr<IRegisteredTaskCollection> tasks; ComPtr<ITaskFolderCollection> folders;
+        if (SUCCEEDED(result)) result = folder->GetTasks(TASK_ENUM_HIDDEN, &tasks);
+        LONG count = 0;
+        if (SUCCEEDED(result)) result = tasks->get_Count(&count);
+        if (SUCCEEDED(result) && (count < 0 || count > 4096)) result = HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+        for (LONG index = 1; SUCCEEDED(result) && index <= count; ++index) {
+            VARIANT key{}; VariantInit(&key); key.vt = VT_I4; key.lVal = index;
+            ComPtr<IRegisteredTask> task; result = tasks->get_Item(key, &task);
+            BSTR taskPath = nullptr;
+            if (SUCCEEDED(result)) result = task->get_Path(&taskPath);
+            if (SUCCEEDED(result) && taskPath) facts.tasks.emplace_back(taskPath, SysStringLen(taskPath));
+            SysFreeString(taskPath);
+        }
+        if (SUCCEEDED(result)) result = folder->GetFolders(0, &folders);
+        if (SUCCEEDED(result)) result = folders->get_Count(&count);
+        if (SUCCEEDED(result) && (count < 0 || count > 256)) result = HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+        for (LONG index = 1; SUCCEEDED(result) && index <= count; ++index) {
+            VARIANT key{}; VariantInit(&key); key.vt = VT_I4; key.lVal = index;
+            ComPtr<ITaskFolder> child; result = folders->get_Item(key, &child);
+            BSTR folderPath = nullptr;
+            if (SUCCEEDED(result)) result = child->get_Path(&folderPath);
+            if (SUCCEEDED(result) && folderPath) facts.folders.emplace_back(folderPath, SysStringLen(folderPath));
+            SysFreeString(folderPath);
+        }
+        if (FAILED(result)) SetLastError(static_cast<DWORD>(result));
+        return SUCCEEDED(result);
+    });
+}
+
 // COM is scoped to this existing worker job, not retained as a new task thread.
 static bool oemVendorTaskAccess(const std::wstring& name,
                                 const std::function<bool(IRegisteredTask*)>& action, bool& exists) {
@@ -265,6 +409,8 @@ static bool oemVendorTaskQuery(const std::wstring& name, OemVendorTaskFacts& fac
         return true;
     }, facts.exists);
 }
+#include "msi_task_xml_control.h"
+
 static bool oemVendorTaskSet(const std::wstring& name, bool enabled, bool stop, bool run) {
     bool exists = false;
     const bool ok = oemVendorTaskAccess(name, [&](IRegisteredTask* task) {
@@ -350,80 +496,212 @@ static bool oemVendorProcessesStop(const std::vector<std::wstring>& names, unsig
     return ok;
 }
 #else
+static OemVendorTaskDiscovery oemVendorTaskDiscover(const std::vector<std::wstring>&);
 static bool oemVendorTaskQuery(const std::wstring&, OemVendorTaskFacts&);
 static bool oemVendorTaskSet(const std::wstring&, bool, bool, bool);
+static bool oemVendorTaskRemovalReady(const std::wstring&);
+static bool oemVendorTaskRemove(const std::wstring&);
+static bool oemVendorTaskImport(const std::wstring&);
 static bool oemVendorProcessesStop(const std::vector<std::wstring>&, unsigned long long);
 #endif
 
 static std::wstring oemVendorStackJournalPath() { return POWER_CONTROL_DIR + L"\\oem-vendor-stack-lease.json"; }
-static bool oemVendorStackSaveJournal() {
-    json services = json::array(), tasks = json::array();
-    for (const auto& lease : g_oemVendorServiceLeases)
-        services.push_back({{"name", W2U(lease.name)}, {"originalStartType", lease.originalStartType}, {"wasRunning", lease.wasRunning}, {"originalState", lease.originalState ? lease.originalState : lease.wasRunning ? SERVICE_RUNNING : SERVICE_STOPPED}});
-    for (const auto& lease : g_oemVendorTaskLeases)
-        tasks.push_back({{"name", W2U(lease.name)}, {"wasEnabled", lease.wasEnabled}, {"wasRunning", lease.wasRunning}});
-    return sgWriteFileAtomic(oemVendorStackJournalPath(), json({{"schema", 2},
-        {"family", static_cast<int>(g_machineIdentity.family)}, {"services", services}, {"tasks", tasks}}).dump(2));
-}
-static bool oemVendorStackLoadJournal() {
-    if (g_oemVendorStackLoaded) return g_oemVendorStackJournalValid;
-    g_oemVendorStackLoaded = true;
-    const auto attr = GetFileAttributesW(oemVendorStackJournalPath().c_str());
+
+// This journal is a return obligation, never proof that SCM/tasks are disabled.
+// Bind the exact document observed in this process before changing or clearing
+// it. Unknown fields remain attached to their root or exact leased identity.
+static constexpr size_t kOemVendorJournalMaxBytes = 131072;
+static std::string g_oemVendorJournalBytes, g_oemVendorJournalPendingBytes;
+static bool g_oemVendorJournalExists = false;
+static YmccFamily g_oemVendorJournalFamily = YmccFamily::Unknown;
+static json g_oemVendorJournalDocument = json::object();
+static bool oemVendorStackReadJournal(std::string& bytes, bool& exists) {
+    bytes.clear(); exists = false;
+    const auto path = oemVendorStackJournalPath();
+    const auto attr = GetFileAttributesW(path.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES) {
         const auto error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return true;
-        g_oemVendorStackJournalValid = false;
-    } else try {
-        const auto doc = json::parse(sgReadFile(oemVendorStackJournalPath()));
-        auto names = oemVendorServiceNamesForFamily(g_machineIdentity.family);
-        // Migration-only allowance: older builds could have leased Foundation
-        // Service before it became protected. Allow that exact legacy lease to
-        // be restored once, but never include it in new apply targets.
-        if (g_machineIdentity.family == YmccFamily::MsiClaw)
-            names.push_back(L"MSI Foundation Service");
-        const auto taskNames = oemVendorTaskNamesForFamily(g_machineIdentity.family);
-        const int schema = doc.at("schema").get<int>();
-        if ((schema != 1 && schema != 2) || doc.at("family") != static_cast<int>(g_machineIdentity.family) ||
-            !doc.at("services").is_array() || doc.at("services").size() > names.size()) throw 0;
-        std::vector<OemVendorServiceLease> services;
-        for (const auto& item : doc.at("services")) {
-            OemVendorServiceLease lease{U2W(item.at("name").get<std::string>()), item.at("originalStartType").get<DWORD>(), item.at("wasRunning").get<bool>()};
-            lease.originalState = item.value("originalState", lease.wasRunning ? SERVICE_RUNNING : SERVICE_STOPPED);
-            if ((lease.originalState != SERVICE_RUNNING && lease.originalState != SERVICE_STOPPED && lease.originalState != SERVICE_PAUSED) ||
-                lease.wasRunning != (lease.originalState != SERVICE_STOPPED) || std::find(names.begin(), names.end(), lease.name) == names.end() ||
-                lease.originalStartType < SERVICE_AUTO_START || lease.originalStartType > SERVICE_DISABLED ||
-                std::any_of(services.begin(), services.end(), [&](const auto& x){return x.name == lease.name;})) throw 0;
-            services.push_back(std::move(lease));
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    exists = true;
+    if (attr & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    struct ReadLease { HANDLE value = INVALID_HANDLE_VALUE; ~ReadLease() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); } } file;
+    file.value = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (file.value == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION info{}; LARGE_INTEGER size{};
+    if (!GetFileInformationByHandle(file.value, &info) || (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ||
+        !GetFileSizeEx(file.value, &size) || size.QuadPart <= 0 || size.QuadPart > kOemVendorJournalMaxBytes) return false;
+    bytes.resize(static_cast<size_t>(size.QuadPart)); size_t used = 0;
+    while (used < bytes.size()) {
+        DWORD count = 0;
+        if (!ReadFile(file.value, bytes.data() + used, static_cast<DWORD>(bytes.size() - used), &count, nullptr) || !count) return false;
+        used += count;
+    }
+    return true;
+}
+static json oemVendorStackDecodeJournal(const std::string& bytes) {
+    std::vector<std::set<std::string>> keys;
+    return json::parse(bytes, [&](int depth, json::parse_event_t event, json& value) {
+        if (depth > 16) throw 0;
+        if (event == json::parse_event_t::object_start) keys.emplace_back();
+        else if (event == json::parse_event_t::key) {
+            if (keys.empty() || !keys.back().insert(value.get<std::string>()).second) throw 0;
+        } else if (event == json::parse_event_t::object_end) keys.pop_back();
+        return true;
+    });
+}
+static bool oemVendorStackJournalInteger(const json& value, unsigned long long minimum, unsigned long long maximum) {
+    if (!value.is_number_integer()) return false;
+    if (!value.is_number_unsigned() && value.get<long long>() < 0) return false;
+    const auto number = value.get<unsigned long long>();
+    return number >= minimum && number <= maximum;
+}
+static bool oemVendorStackLoadJournal() {
+    try {
+        std::string bytes; bool exists = false;
+        if (!oemVendorStackReadJournal(bytes, exists)) throw 0;
+        if (g_oemVendorStackLoaded) {
+            if (g_oemVendorJournalFamily != g_machineIdentity.family) throw 0;
+            if (exists == g_oemVendorJournalExists && bytes == g_oemVendorJournalBytes) {
+                g_oemVendorStackJournalValid = true; return true;
+            }
+            // A failed acknowledgement may have published our exact attempted
+            // bytes. Recognize only that candidate, retaining all in-memory debt
+            // and its extension fields until a later durable acknowledgement.
+            if (exists && !g_oemVendorJournalPendingBytes.empty() && bytes == g_oemVendorJournalPendingBytes) {
+                g_oemVendorJournalBytes = bytes; g_oemVendorJournalExists = true;
+                g_oemVendorJournalPendingBytes.clear(); g_oemVendorStackJournalValid = true; return true;
+            }
+            throw 0;
         }
+        json doc = json::object();
+        std::vector<OemVendorServiceLease> services;
         std::vector<OemVendorTaskLease> tasks;
-        if (schema == 2) {
-            if (!doc.at("tasks").is_array() || doc.at("tasks").size() > taskNames.size()) throw 0;
-            for (const auto& item : doc.at("tasks")) {
-                OemVendorTaskLease lease{U2W(item.at("name").get<std::string>()), item.at("wasEnabled").get<bool>(), item.at("wasRunning").get<bool>()};
-                if (std::find(taskNames.begin(), taskNames.end(), lease.name) == taskNames.end() ||
-                    std::any_of(tasks.begin(), tasks.end(), [&](const auto& x){return x.name == lease.name;})) throw 0;
-                tasks.push_back(std::move(lease));
+        if (exists) {
+            doc = oemVendorStackDecodeJournal(bytes);
+            auto names = oemVendorServiceNamesForFamily(g_machineIdentity.family);
+            // Migration-only: never admit the protected service to new apply.
+            if (g_machineIdentity.family == YmccFamily::MsiClaw) names.push_back(L"MSI Foundation Service");
+            const auto taskNames = oemVendorTaskNamesForFamily(g_machineIdentity.family);
+            if (!doc.is_object() || !oemVendorStackJournalInteger(doc.at("schema"), 1, 4) ||
+                !oemVendorStackJournalInteger(doc.at("family"), 0, 0x7fffffff) || doc.at("family") != static_cast<int>(g_machineIdentity.family) ||
+                !doc.at("services").is_array() || doc.at("services").size() > names.size()) throw 0;
+            const int schema = doc.at("schema").get<int>();
+            for (const auto& item : doc.at("services")) {
+                if (!item.is_object() || !item.at("name").is_string() || !item.at("wasRunning").is_boolean() ||
+                    !oemVendorStackJournalInteger(item.at("originalStartType"), SERVICE_AUTO_START, SERVICE_DISABLED)) throw 0;
+                OemVendorServiceLease lease{U2W(item.at("name").get<std::string>()), item.at("originalStartType").get<DWORD>(), item.at("wasRunning").get<bool>()};
+                if (!item.contains("originalState")) {
+                    if (schema != 1) throw 0;
+                    lease.originalState = lease.wasRunning ? SERVICE_RUNNING : SERVICE_STOPPED;
+                } else {
+                    if (!oemVendorStackJournalInteger(item.at("originalState"), SERVICE_STOPPED, SERVICE_PAUSED)) throw 0;
+                    lease.originalState = item.at("originalState").get<DWORD>();
+                }
+                if ((lease.originalState != SERVICE_RUNNING && lease.originalState != SERVICE_STOPPED && lease.originalState != SERVICE_PAUSED) ||
+                    lease.wasRunning != (lease.originalState != SERVICE_STOPPED) || std::find(names.begin(), names.end(), lease.name) == names.end() ||
+                    std::any_of(services.begin(), services.end(), [&](const auto& x) { return x.name == lease.name; })) throw 0;
+                if (item.contains("returnPrepared")) {
+                    if (!item["returnPrepared"].is_boolean()) throw 0;
+                    lease.returnPrepared = item["returnPrepared"].get<bool>();
+                }
+                services.push_back(std::move(lease));
+            }
+            if (schema == 1) {
+                // A v1 writer had no task debt. Never silently discard a known
+                // tasks field that this migration would otherwise not consume.
+                if (doc.contains("tasks") && (!doc["tasks"].is_array() || !doc["tasks"].empty())) throw 0;
+            } else {
+                const size_t taskLimit = schema == 2 ? taskNames.size() : taskNames.empty() ? 0 : kOemVendorMaxTaskPaths;
+                if (!doc.at("tasks").is_array() || doc.at("tasks").size() > taskLimit) throw 0;
+                for (const auto& item : doc.at("tasks")) {
+                    if (!item.is_object() || !item.at("name").is_string() || !item.at("wasEnabled").is_boolean() || !item.at("wasRunning").is_boolean()) throw 0;
+                    OemVendorTaskLease lease{U2W(item.at("name").get<std::string>()), item.at("wasEnabled").get<bool>(), item.at("wasRunning").get<bool>()};
+                    if (!oemVendorTaskPathAllowed(lease.name, taskNames) || (schema == 2 && std::find(taskNames.begin(), taskNames.end(), lease.name) == taskNames.end()) ||
+                        std::any_of(tasks.begin(), tasks.end(), [&](const auto& x) { return oemVendorTaskPathEqual(x.name, lease.name); })) throw 0;
+                    if (item.contains("returnPrepared")) {
+                        if (!item["returnPrepared"].is_boolean()) throw 0;
+                        lease.returnPrepared = item["returnPrepared"].get<bool>();
+                    }
+                    if (item.contains("removePrepared")) {
+                        if (schema < 4 || !item["removePrepared"].is_boolean() || g_machineIdentity.family != YmccFamily::MsiClaw) throw 0;
+                        lease.removePrepared = item["removePrepared"].get<bool>();
+                    }
+                    tasks.push_back(std::move(lease));
+                }
             }
         }
-        g_oemVendorServiceLeases = std::move(services); g_oemVendorTaskLeases = std::move(tasks); return true;
+        // Decoding is transactional: failures leave existing return obligations.
+        if (!g_oemVendorServiceLeases.empty() || !g_oemVendorTaskLeases.empty()) throw 0;
+        g_oemVendorServiceLeases = std::move(services); g_oemVendorTaskLeases = std::move(tasks);
+        g_oemVendorJournalBytes = std::move(bytes); g_oemVendorJournalExists = exists;
+        g_oemVendorJournalFamily = g_machineIdentity.family; g_oemVendorJournalDocument = std::move(doc);
+        g_oemVendorJournalPendingBytes.clear(); g_oemVendorStackLoaded = true; g_oemVendorStackJournalValid = true; return true;
     } catch (...) { g_oemVendorStackJournalValid = false; }
     appendNativeLifecycleLog("oem-vendor-stack", {{"state", "recovery-held"}, {"reason", "journal-unreadable-or-unbound"}}); return false;
 }
-static bool oemVendorStackRestoreLocked(const char* reason) {
+static bool oemVendorStackSaveJournal() {
+    try {
+        if (!oemVendorStackLoadJournal()) return false;
+        json services = json::array(), tasks = json::array();
+        for (const auto& lease : g_oemVendorServiceLeases) {
+            json item = json::object();
+            for (const auto& previous : g_oemVendorJournalDocument.value("services", json::array()))
+                if (previous.at("name") == W2U(lease.name)) { item = previous; break; }
+            item["name"] = W2U(lease.name); item["originalStartType"] = lease.originalStartType;
+            if (lease.returnPrepared) item["returnPrepared"] = true;
+            item["wasRunning"] = lease.wasRunning; item["originalState"] = lease.originalState ? lease.originalState : lease.wasRunning ? SERVICE_RUNNING : SERVICE_STOPPED;
+            services.push_back(std::move(item));
+        }
+        for (const auto& lease : g_oemVendorTaskLeases) {
+            json item = json::object();
+            for (const auto& previous : g_oemVendorJournalDocument.value("tasks", json::array()))
+                if (oemVendorTaskPathEqual(U2W(previous.at("name").get<std::string>()), lease.name)) { item = previous; break; }
+            if (lease.returnPrepared) item["returnPrepared"] = true;
+            if (lease.removePrepared) item["removePrepared"] = true;
+            item["name"] = W2U(lease.name); item["wasEnabled"] = lease.wasEnabled; item["wasRunning"] = lease.wasRunning;
+            tasks.push_back(std::move(item));
+        }
+        const bool nested = std::any_of(g_oemVendorTaskLeases.begin(), g_oemVendorTaskLeases.end(),
+            [](const auto& lease) { return lease.name.find(L'\\') != std::wstring::npos; });
+        auto doc = g_oemVendorJournalDocument;
+        const bool removed = std::any_of(g_oemVendorTaskLeases.begin(), g_oemVendorTaskLeases.end(),
+            [](const auto& lease) { return lease.removePrepared; });
+        doc["schema"] = removed || doc.value("schema", 1) == 4 ? 4 : nested || doc.value("schema", 1) == 3 ? 3 : 2;
+        doc["family"] = static_cast<int>(g_machineIdentity.family); doc["services"] = services; doc["tasks"] = tasks;
+        const auto bytes = doc.dump(2);
+        if (bytes.size() > kOemVendorJournalMaxBytes) return false;
+        g_oemVendorJournalPendingBytes = bytes;
+        const bool written = sgWriteFileAtomic(oemVendorStackJournalPath(), bytes);
+        std::string readback; bool exists = false;
+        if (!written || g_oemVendorJournalFamily != g_machineIdentity.family || !oemVendorStackReadJournal(readback, exists) || !exists || readback != bytes) return false;
+        g_oemVendorJournalBytes = bytes; g_oemVendorJournalExists = true; g_oemVendorJournalDocument = std::move(doc);
+        g_oemVendorJournalPendingBytes.clear(); return true;
+    } catch (...) { return false; }
+}
+static bool oemVendorStackRestoreLocked(const char* reason, bool tasksOnly = false) {
     if (!oemVendorStackLoadJournal()) return false;
     if (g_oemVendorServiceLeases.empty() && g_oemVendorTaskLeases.empty()) return true;
-    SC_HANDLE scm = g_oemVendorServiceLeases.empty() ? nullptr : OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    std::vector<OemVendorServiceLease> pending;
-    for (const auto& lease : g_oemVendorServiceLeases) {
+    SC_HANDLE scm = tasksOnly || g_oemVendorServiceLeases.empty() ? nullptr : OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    std::vector<OemVendorServiceLease> pending = tasksOnly ? g_oemVendorServiceLeases : std::vector<OemVendorServiceLease>{};
+    if (!tasksOnly) for (auto& lease : g_oemVendorServiceLeases) {
+        if (!oemVendorStackLoadJournal()) { pending.push_back(lease); continue; }
         bool ok = false; DWORD type = 0, state = 0, error = ERROR_SUCCESS;
         SC_HANDLE service = scm ? OpenServiceW(scm, lease.name.c_str(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_PAUSE_CONTINUE | SERVICE_CHANGE_CONFIG) : nullptr;
         if (service && oemVendorServiceQueryConfig(service, type)) {
-            bool configOk = type == lease.originalStartType;
-            if (!configOk && type == SERVICE_DISABLED)
-                configOk = ChangeServiceConfigW(service, SERVICE_NO_CHANGE, lease.originalStartType, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) != FALSE;
-            configOk = configOk && oemVendorServiceQueryConfig(service, type) && type == lease.originalStartType;
             bool runningOk = oemVendorServiceStable(service, state);
             const DWORD originalState = lease.originalState ? lease.originalState : lease.wasRunning ? SERVICE_RUNNING : SERVICE_STOPPED;
+            bool configOk = type == lease.originalStartType;
+            const bool original = configOk && runningOk && state == originalState;
+            bool admitted = runningOk && (original || type == SERVICE_DISABLED || lease.returnPrepared);
+            if (!admitted) error = ERROR_REVISION_MISMATCH;
+            if (admitted && !original && !lease.returnPrepared) {
+                lease.returnPrepared = true;
+                if (!oemVendorStackSaveJournal()) { lease.returnPrepared = false; admitted = false; }
+            }
+            if (admitted && !configOk && type == SERVICE_DISABLED)
+                configOk = ChangeServiceConfigW(service, SERVICE_NO_CHANGE, lease.originalStartType, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) != FALSE;
+            configOk = admitted && configOk && oemVendorServiceQueryConfig(service, type) && type == lease.originalStartType;
             if (configOk && runningOk && lease.wasRunning && state == SERVICE_STOPPED) {
                 runningOk = lease.originalStartType != SERVICE_DISABLED && StartServiceW(service, 0, nullptr) &&
                     oemVendorServiceWait(service, SERVICE_RUNNING, kOemVendorServiceBudgetMs);
@@ -434,7 +712,7 @@ static bool oemVendorStackRestoreLocked(const char* reason) {
                 runningOk = ControlService(service, originalState == SERVICE_PAUSED ? SERVICE_CONTROL_PAUSE : SERVICE_CONTROL_CONTINUE, &status) &&
                     oemVendorServiceWait(service, originalState, kOemVendorServiceBudgetMs);
             }
-            if (configOk && runningOk && lease.wasRunning) runningOk = oemVendorServiceQueryState(service, state) && state == originalState;
+            if (configOk && runningOk) runningOk = oemVendorServiceQueryState(service, state) && state == originalState;
             ok = configOk && runningOk;
             if (!configOk && type != SERVICE_DISABLED && type != lease.originalStartType) error = ERROR_REVISION_MISMATCH;
         }
@@ -446,27 +724,50 @@ static bool oemVendorStackRestoreLocked(const char* reason) {
     }
     if (scm) CloseServiceHandle(scm);
     std::vector<OemVendorTaskLease> pendingTasks;
-    for (const auto& lease : g_oemVendorTaskLeases) {
+    for (auto& lease : g_oemVendorTaskLeases) {
+        if (!oemVendorStackLoadJournal()) { pendingTasks.push_back(lease); continue; }
         OemVendorTaskFacts facts; bool ok = oemVendorTaskQuery(lease.name, facts);
+        bool imported = false;
+        if (ok && !facts.exists && lease.removePrepared) {
+            // The deletion obligation is durable before removal; retain it on any import/readback failure.
+            if (!lease.returnPrepared) {
+                lease.returnPrepared = true;
+                if (!oemVendorStackSaveJournal()) { lease.returnPrepared = false; ok = false; }
+            }
+            if (ok) {
+                imported = oemVendorTaskImport(lease.name);
+                ok = imported && oemVendorTaskQuery(lease.name, facts) && facts.exists;
+            }
+        }
         if (ok && facts.exists) {
-            if (facts.enabled != lease.wasEnabled || (lease.wasRunning && !facts.running)) {
+            const bool original = facts.enabled == lease.wasEnabled && facts.running == lease.wasRunning;
+            if (!original && (facts.enabled || facts.running) && (!lease.returnPrepared || (facts.running && !lease.wasRunning))) {
+                ok = false; SetLastError(ERROR_REVISION_MISMATCH);
+            }
+            if (ok && !original && !lease.returnPrepared) {
+                lease.returnPrepared = true;
+                if (!oemVendorStackSaveJournal()) { lease.returnPrepared = false; ok = false; }
+            }
+            if (ok && (facts.enabled != lease.wasEnabled || (lease.wasRunning && !facts.running))) {
                 if (lease.wasRunning && !lease.wasEnabled) {
                     // A disabled-but-running task is unusual but legal. Run it
                     // through a temporary enabled state, then restore the
                     // disabled policy without stopping the running instance.
-                    ok = oemVendorTaskSet(lease.name, true, false, true) &&
+                    ok = (facts.running || oemVendorTaskSet(lease.name, true, false, true)) &&
                         oemVendorTaskSet(lease.name, false, false, false);
                 } else {
                     ok = oemVendorTaskSet(lease.name, lease.wasEnabled, false, lease.wasRunning && !facts.running);
                 }
             }
             ok = ok && oemVendorTaskQuery(lease.name, facts) && facts.enabled == lease.wasEnabled &&
-                (!lease.wasRunning || facts.running);
+                facts.running == lease.wasRunning;
         }
         // An absent task is not mutated; keep its recovery debt for explicit review.
         ok = ok && facts.exists;
         appendNativeLifecycleLog("oem-vendor-stack", {{"state", ok ? "task-restored" : "task-restore-failed"},
-            {"task", W2U(lease.name)}, {"enabledReadback", facts.enabled}, {"win32Error", ok ? ERROR_SUCCESS : GetLastError()}});
+            {"task", W2U(lease.name)}, {"imported", imported}, {"definitionPolicy", lease.removePrepared ? "xml-import" : "enable-restore"},
+            {"enabledReadback", facts.enabled}, {"runningReadback", facts.running}, {"readbackVerified", ok},
+            {"win32Error", ok ? ERROR_SUCCESS : GetLastError()}});
         if (!ok) pendingTasks.push_back(lease);
     }
     // Do not forget restored entries until the updated journal is durable.
@@ -476,14 +777,19 @@ static bool oemVendorStackRestoreLocked(const char* reason) {
         g_oemVendorServiceLeases = std::move(oldServices); g_oemVendorTaskLeases = std::move(oldTasks);
         appendNativeLifecycleLog("oem-vendor-stack", {{"state", "restore-held"}, {"reason", "journal-write-failed"}}); return false;
     }
-    return g_oemVendorServiceLeases.empty() && g_oemVendorTaskLeases.empty();
+    return (tasksOnly || g_oemVendorServiceLeases.empty()) && g_oemVendorTaskLeases.empty();
 }
 static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long requestedEpoch = 0) {
+    if (!oemVendorStackLoadJournal()) return false;
     const bool controllerOnly = oemVendorShieldWantedSnapshot();
     const auto names = controllerOnly ? std::vector<std::wstring>{} : oemVendorServiceNamesForFamily(g_machineIdentity.family);
     const auto processNames = controllerOnly ? oemVendorShieldProcessNamesForFamily(g_machineIdentity.family)
                                              : oemVendorProcessNamesForFamily(g_machineIdentity.family);
-    const auto taskNames = oemVendorTaskNamesForFamily(g_machineIdentity.family);
+    bool taskReleaseWanted = false;
+    { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
+      taskReleaseWanted = g_machineIdentity.family == YmccFamily::MsiClaw &&
+          g_oemVendorMsiTaskShieldPreferenceSeen && !g_oemVendorShieldWanted; }
+    const auto taskNames = taskReleaseWanted ? std::vector<std::wstring>{} : oemVendorTaskNamesForFamily(g_machineIdentity.family);
     if (names.empty() && taskNames.empty() && processNames.empty()) return false;
     if (g_exitRequested.load(std::memory_order_acquire)) return false;
     if (!oemVendorStackMachineSupported()) return false;
@@ -492,7 +798,10 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
       epoch = requestedEpoch ? requestedEpoch : g_oemVendorStackRequested;
       wakePass = epoch == g_oemVendorShieldWake.epoch; }
     if (!oemVendorStackIntentCurrent(epoch)) return false;
-    bool allOk = true; size_t existing = 0, confirmed = 0, unavailable = 0;
+    // An explicit OFF owns the return of these two tasks even while shortcut
+    // takeover still owns its separate process/key policy. Never disable them again here.
+    bool allOk = !taskReleaseWanted || oemVendorStackRestoreLocked("msi-shield-task-release", true);
+    size_t existing = 0, confirmed = 0, unavailable = 0;
     // A wake pass needs only task/process readback. Do not repeat the broad
     // read-only service inventory or frontend diagnostics every two seconds.
     if (controllerOnly && !wakePass) {
@@ -503,8 +812,23 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
             {"inventory", inventory}, {"action", "read-only"}, {"discoveryAuthorizesMutation", false}});
         if (!oemVendorStackIntentCurrent(epoch)) return false;
     }
-    // Match HC: disable MSI startup tasks before stopping its service/processes.
-    for (const auto& name : oemVendorTaskNamesForFamily(g_machineIdentity.family)) {
+    // Discover once per ordinary request. The short wake guard reuses exact
+    // paths, preserving its original low-cost readback and retry schedule.
+    if (!taskNames.empty() && (!wakePass || g_oemVendorTaskPaths.empty())) {
+        auto discovery = oemVendorTaskDiscover(taskNames);
+        g_oemVendorTaskPaths = std::move(discovery.paths);
+        for (const auto& lease : g_oemVendorTaskLeases) {
+            if (std::none_of(g_oemVendorTaskPaths.begin(), g_oemVendorTaskPaths.end(), [&](const auto& p){return oemVendorTaskPathEqual(p, lease.name);}))
+                g_oemVendorTaskPaths.push_back(lease.name);
+        }
+        g_oemVendorTaskDiscoveryComplete = discovery.complete;
+        appendNativeLifecycleLog("oem-vendor-stack", {{"state", "task-discovery"}, {"requestedEpoch", epoch},
+            {"complete", discovery.complete}, {"foldersRead", discovery.foldersRead}, {"tasksRead", discovery.tasksRead},
+            {"includeHidden", true}, {"taskCount", g_oemVendorTaskPaths.size()}, {"win32Error", discovery.error}});
+    }
+    if (!taskNames.empty()) allOk = allOk && g_oemVendorTaskDiscoveryComplete;
+    // The explicit MSI shield removes tasks; legacy takeover retains its disable path.
+    for (const auto& name : taskNames.empty() ? std::vector<std::wstring>{} : g_oemVendorTaskPaths) {
         if (!oemVendorStackIntentCurrent(epoch)) return false;
         OemVendorTaskFacts facts;
         if (!oemVendorTaskQuery(name, facts)) {
@@ -516,8 +840,36 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
             appendNativeLifecycleLog("oem-vendor-stack", {{"state", "task-absent"}, {"task", W2U(name)}, {"requestedEpoch", epoch}});
             continue;
         }
-        auto lease = std::find_if(g_oemVendorTaskLeases.begin(), g_oemVendorTaskLeases.end(), [&](const auto& x){return x.name == name;});
+        auto lease = std::find_if(g_oemVendorTaskLeases.begin(), g_oemVendorTaskLeases.end(), [&](const auto& x){return oemVendorTaskPathEqual(x.name, name);});
+        if (controllerOnly) {
+            // Mirror YMCC task switches: remove while shielded, import the shipped XML on return.
+            // A missing/invalid template must never turn a recoverable disable into irreversible removal.
+            bool ok = oemVendorTaskRemovalReady(name), mutationAttempted = false;
+            if (ok && lease == g_oemVendorTaskLeases.end()) {
+                if (g_oemVendorTaskLeases.size() >= kOemVendorMaxTaskPaths) { allOk = false; continue; }
+                g_oemVendorTaskLeases.push_back({name, facts.enabled, facts.running, false, true});
+                if (!oemVendorStackSaveJournal()) { g_oemVendorTaskLeases.pop_back(); return false; }
+            } else if (ok && !lease->removePrepared) {
+                lease->removePrepared = true;
+                if (!oemVendorStackSaveJournal()) { lease->removePrepared = false; return false; }
+            }
+            if (ok) {
+                mutationAttempted = oemVendorStackIntentCurrent(epoch);
+                ok = mutationAttempted && oemVendorTaskRemove(name);
+                if (ok) {
+                    ok = oemVendorTaskQuery(name, facts);
+                    if (ok && facts.exists) { SetLastError(ERROR_REVISION_MISMATCH); ok = false; }
+                }
+            }
+            appendNativeLifecycleLog("oem-vendor-stack", {{"state", ok ? "task-removed" : "task-remove-failed"},
+                {"task", W2U(name)}, {"requestedEpoch", epoch}, {"definitionPolicy", "xml-import"},
+                {"mutationAttempted", mutationAttempted}, {"readbackVerified", ok},
+                {"existsReadback", facts.exists}, {"win32Error", ok ? ERROR_SUCCESS : GetLastError()}});
+            allOk = allOk && ok;
+            continue;
+        }
         if ((facts.enabled || facts.running) && lease == g_oemVendorTaskLeases.end()) {
+            if (g_oemVendorTaskLeases.size() >= kOemVendorMaxTaskPaths) { allOk = false; continue; }
             g_oemVendorTaskLeases.push_back({name, facts.enabled, facts.running});
             if (!oemVendorStackSaveJournal()) { g_oemVendorTaskLeases.pop_back(); return false; }
         }
@@ -718,7 +1070,7 @@ static void oemVendorStackUpdateIntent(const char* source, bool requested) {
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
       shortcut = g_oemVendorShortcutWanted;
       shield = g_oemVendorShieldWanted;
-      effective = oemVendorEffectiveWanted(shortcut, shield);
+      effective = oemVendorEffectiveWanted(shortcut || g_oemVendorRecordingWanted, shield);
       if (!g_oemVendorStackIntentSeen || g_oemVendorStackWanted != effective ||
           g_oemVendorStackIntentFamily != family || g_oemVendorStackIntentControllerOnly != shield) {
           g_oemVendorStackIntentSeen = true; g_oemVendorStackIntentFamily = family;
@@ -739,6 +1091,23 @@ static void oemVendorStackRequest(bool wanted) {
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx); g_oemVendorShortcutWanted = accepted; }
     oemVendorStackUpdateIntent("shortcut-rule", wanted);
 }
+static void oemVendorStackRecordingRequest(bool wanted) {
+    const auto family = g_machineIdentity.family;
+    const bool accepted = wanted && oemVendorStackFamilySupported(family) && oemVendorStackMachineSupported();
+    { std::lock_guard<std::mutex> lock(g_oemVendorStackMx); g_oemVendorRecordingWanted = accepted; }
+    oemVendorStackUpdateIntent("shortcut-recording", wanted);
+}
+// Preparation is best-effort. A rejected/failed lease never rejects input recording.
+static json oemVendorStackRecordingSnapshot() {
+    std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
+    const bool completed = g_oemVendorStackLastOutcomeKnown &&
+        g_oemVendorStackLastOutcomeEpoch == g_oemVendorStackRequested &&
+        g_oemVendorStackRequested == g_oemVendorStackCompleted;
+    return {{"requested", g_oemVendorRecordingWanted}, {"pending", g_oemVendorRecordingWanted && !completed},
+        {"applied", g_oemVendorRecordingWanted && completed && g_oemVendorStackLastOutcomeOk && g_oemVendorStackJournalValid.load()},
+        {"failed", g_oemVendorRecordingWanted && completed && !g_oemVendorStackLastOutcomeOk},
+        {"reason", g_oemVendorStackLastOutcome}};
+}
 static void oemVendorStackShieldRequest(bool wanted) {
     const auto family = g_machineIdentity.family;
     // Identity resolution is fail-closed but not a reason to tear down an
@@ -746,7 +1115,9 @@ static void oemVendorStackShieldRequest(bool wanted) {
     // family/model before changing the shield owner.
     if (family == YmccFamily::Unknown) return;
     const bool accepted = wanted && family == YmccFamily::MsiClaw && oemVendorStackMachineSupported();
-    { std::lock_guard<std::mutex> lock(g_oemVendorStackMx); g_oemVendorShieldWanted = accepted; }
+    { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
+      g_oemVendorShieldWanted = accepted;
+      if (family == YmccFamily::MsiClaw && oemVendorStackMachineSupported()) g_oemVendorMsiTaskShieldPreferenceSeen = true; }
     oemVendorStackUpdateIntent("msi-controller-shield", wanted);
 }
 static bool oemVendorStackShieldIsWanted() {
@@ -756,7 +1127,8 @@ static bool oemVendorStackShieldIsWanted() {
 static json oemVendorStackShieldRuntimeSnapshot() {
     std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
     const bool current = g_oemVendorShieldWanted;
-    const bool completed = g_oemVendorStackLastOutcomeKnown &&
+    const bool journalValid = g_oemVendorStackJournalValid.load(std::memory_order_acquire);
+    const bool completed = journalValid && g_oemVendorStackLastOutcomeKnown &&
         g_oemVendorStackLastOutcomeEpoch == g_oemVendorStackRequested &&
         g_oemVendorStackRequested == g_oemVendorStackCompleted;
     return {{"effective", current},
@@ -770,15 +1142,15 @@ static json oemVendorStackShieldRuntimeSnapshot() {
             {"protectedServiceObservation", g_oemVendorMsiProtectedServiceObservation},
             {"applied", current && completed && g_oemVendorStackLastOutcomeOk},
             {"pending", !completed},
-            {"lastOutcomeKnown", g_oemVendorStackLastOutcomeKnown},
-            {"lastOutcomeOk", g_oemVendorStackLastOutcomeOk},
-            {"lastOutcome", g_oemVendorStackLastOutcome},
+            {"lastOutcomeKnown", journalValid && g_oemVendorStackLastOutcomeKnown},
+            {"lastOutcomeOk", journalValid && g_oemVendorStackLastOutcomeOk},
+            {"lastOutcome", journalValid ? g_oemVendorStackLastOutcome : "journal-unreadable-or-unbound"},
             {"requestedEpoch", g_oemVendorStackRequested},
             {"completedEpoch", g_oemVendorStackCompleted}};
 }
 static void oemVendorStackRestore(const char* reason) {
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx); g_oemVendorStackWanted = false;
-      g_oemVendorShortcutWanted = false; g_oemVendorShieldWanted = false;
+      g_oemVendorShortcutWanted = false; g_oemVendorRecordingWanted = false; g_oemVendorShieldWanted = false;
       oemVendorStackShieldWakeRefreshLocked(GetTickCount64());
       g_oemVendorStackIntentControllerOnly = false;
       g_oemVendorStackLastOutcomeKnown = false; g_oemVendorStackLastOutcome = "pending";

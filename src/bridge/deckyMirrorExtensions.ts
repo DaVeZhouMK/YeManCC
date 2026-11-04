@@ -11,6 +11,12 @@ export function dispatchDeckyMirrorPeer(value:MirrorPeer):void {
   peer=value.connected===false?null:value;
   for(const extension of extensions){try{extension.connected(value);}catch{}}
 }
+// Called only after the Host accepts a private current-Broker request receipt.
+// Same-peer traffic must not reset wallpaper selection or other extension leases.
+export function observeDeckyMirrorRequestPeer(value:MirrorPeer):void {
+  if(peer&&peer.connection===value.connection&&peer.runId===value.runId)return;
+  dispatchDeckyMirrorPeer({connection:value.connection,runId:value.runId,connected:true,revision:value.revision,connectionRevision:value.connectionRevision});
+}
 export function dispatchDeckyMirrorRequest(event:MirrorRequest):boolean {
   for(const extension of extensions)if(event.request?.command?.startsWith(extension.prefix)){
     try{extension.request(event);}catch{}return true;

@@ -53,7 +53,12 @@ const mock = `
         setTimeout(()=>listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:false,error:window.fixtureFailures[request.command]}})),0);
         return;
       }
-      setTimeout(()=>listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:true,result}})),request.command==='commit'?80:0);
+      const complete=()=>{
+        if(request.command==='commit'&&window.fixtureSteamRunning){listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:false,error:'fixture Steam is running'}}));return;}
+        listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:true,result}}));
+      };
+      if(request.command==='commit'&&window.fixtureHoldCommit){(window.fixtureCommitReleases||=[]).push(complete);return;}
+      setTimeout(complete,request.command==='commit'?80:0);
     }
   };
 `;
@@ -224,6 +229,8 @@ try {
       if(editorOpen())closeEdit();
       if(!$('#steam-commit-modal').classList.contains('hidden'))closeSteamCommit();
       if(!$('#confirm-modal').classList.contains('hidden'))closeConfirm(false);
+      for(const release of (window.fixtureCommitReleases||[]))release();window.fixtureCommitReleases=[];window.fixtureHoldCommit=false;
+      await new Promise(resolve=>setTimeout(resolve,100));steamCommitTasks.clear();
       fixtureSteamRunning=false;fixtureFailures={};controllerBackLastAt=0;
       const games=['Portal','Other','Third'].map(name=>({...structuredClone(fixtureGame),directoryName:name,primaryProductName:name,gameDirectory:'G:/Fixture/Games/'+name,primaryExecutable:'G:/Fixture/Games/'+name+'/Game.exe'}));
       fixtureSnapshot.library.games=games;fixtureSnapshot.steamPlan={items:games.map(game=>({...game,status:'waiting-steam-verification'})),summary:{}};
@@ -234,7 +241,7 @@ try {
     window.commitCalls=()=>fixtureCalls.filter(call=>call.command==='commit');
     window.openSingleCommit=async()=>{
       focusWorkspaceElement($('#edit-add-to-steam'));routeWorkspaceAction('accept');
-      await waitFor(()=>!$('#steam-commit-modal').classList.contains('hidden'));
+      await waitFor(()=>commitCalls().length===1);
     };
   `);
   for(const height of [720,800]) {
@@ -266,83 +273,69 @@ try {
     const actionRow=await evaluate(`(()=>{const r=$('.edit-actions').getBoundingClientRect();return{x:r.left,y:r.top,width:r.width,height:r.height,scale:1};})()`);
     const rowScreenshot=await command('Page.captureScreenshot',{format:'png',clip:actionRow,captureBeyondViewport:false});
     fs.writeFileSync(path.join(root,'single-card-actions-'+height+'.png'),Buffer.from(rowScreenshot.data,'base64'));
-    await test('A-opens-existing-single-game-confirmation-and-B-returns-to-editor-'+height, `
-      await openSingleCommit();
-      check($('#commit-summary').textContent.includes('1 个'),'Confirmation did not show one game');
-      check(activeWorkspaceModal().id==='steam-commit-modal','Commit modal does not own navigation');
-      check($('#steam-commit-modal').contains(document.activeElement),'Focus stayed under confirmation');
-      controllerBackLastAt=0;routeWorkspaceAction('back');await frames();
-      check($('#steam-commit-modal').classList.contains('hidden') && editorOpen(),'B discarded editor');
-      check(document.activeElement===$('#edit-add-to-steam'),'Cancel did not restore add button');
-      check(commitCalls().length===0,'Cancel wrote Steam');
+    await test('A-queues-single-game-inline-and-B-keeps-the-write-'+height, `
+      window.fixtureHoldCommit=true;const key=keyFor(selectedActionGame);await openSingleCommit();await frames();
+      check($('#steam-commit-modal').classList.contains('hidden')&&$('#busy').classList.contains('hidden'),'Single-card operation opened a modal');
+      check(steamCommitTasks.get(key)?.phase==='queued'&&$('#edit-add-to-steam').disabled,'Inline queued state missing');
+      check(activeWorkspaceModal().id==='edit-modal','Queue took ownership from the editor');
+      controllerBackLastAt=0;routeWorkspaceAction('back');await frames();check(!editorOpen(),'B could not return during a write');
+      window.fixtureCommitReleases.shift()();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');
+      check(!editorOpen()&&commitCalls().length===1,'B cancelled or duplicated the accepted write');window.fixtureHoldCommit=false;
     `);
   }
-  await test('single-card-write-progress-owns-focus-above-editor-until-complete', `
-    await resetCommitFixture();await openSingleCommit();$('#steam-commit-confirm').click();
-    await waitFor(()=>!$('#busy').classList.contains('hidden'));
-    check(activeWorkspaceModal().id==='busy' && $('#busy').contains(document.activeElement),'Commit progress did not own editor input');
-    await waitFor(()=>$('#busy').classList.contains('hidden'));
-    check(editorOpen() && document.activeElement===$('#edit-add-to-steam'),'Write completion did not restore editor focus');
+  await test('single-card-write-progress-stays-inline-until-complete', `
+    await resetCommitFixture();window.fixtureHoldCommit=true;const key=keyFor(selectedActionGame);await openSingleCommit();await frames();
+    check($('#busy').classList.contains('hidden')&&$('#steam-commit-modal').classList.contains('hidden')&&activeWorkspaceModal().id==='edit-modal','Commit progress took modal ownership');
+    check($('#edit-status').textContent.includes('排队')&&$('#edit-add-to-steam').disabled,'Current card omitted its pending status');
+    window.fixtureCommitReleases.shift()();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');await frames();
+    check(editorOpen()&&!$('#edit-add-to-steam').disabled&&$('#edit-status').textContent.includes('已加入'),'Completion did not restore usable inline controls');window.fixtureHoldCommit=false;
   `);
   await test('single-card-target-survives-selection-page-and-background-changes', `
-    await resetCommitFixture();const key=keyFor(selectedActionGame);await openSingleCommit();
-    selectedGameDirectories=new Set([keyFor(mergedGames()[1])]);activeTab='unclassified';renderLibrary();
-    fixtureSnapshot.library.games.push({...structuredClone(fixtureGame),gameDirectory:'G:/Fixture/Games/Later',primaryExecutable:'G:/Fixture/Games/Later/Game.exe'});
-    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
-    const args=commitCalls()[0].arguments;
-    check(args.selectionMode==='all-steam-accounts' && args.accountId==='' && args.steamRoot==='','Existing account flow changed');
-    check(JSON.stringify(args.selectedGameDirectories)===JSON.stringify([key]),'Single-card target broadened');
-    check(selectedGameDirectories.size===1 && !selectedGameDirectories.has(key),'Join mutated page checkboxes');
-    check(fixtureCalls.filter(call=>call.command==='steamCommitPreflight').length===2,'Second Steam check skipped');
-    check(!fixtureCalls.some(call=>['saveManualName','identifyOne','saveArtworkOverride','setBucket'].includes(call.command)),'Join implicitly saved editor');
-    check(editorOpen(),'Successful join closed editor');
+    await resetCommitFixture();window.fixtureHoldCommit=true;const key=keyFor(selectedActionGame);await openSingleCommit();
+    selectedGameDirectories=new Set([keyFor(mergedGames()[1])]);closeEdit();activeTab='in-steam';renderLibrary();
+    window.dispatchEvent(new Event('blur'));window.fixtureCommitReleases.shift()();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Mutable page selection replaced captured one-game scope');
+    check(!editorOpen()&&$('#busy').classList.contains('hidden'),'Background completion reopened an editor or progress dialog');window.fixtureHoldCommit=false;
   `);
   await test('single-card-works-with-no-page-checkboxes-selected', `
-    await resetCommitFixture();selectedGameDirectories=new Set();renderLibrary();const key=keyFor(selectedActionGame);
-    await openSingleCommit();$('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    await resetCommitFixture();selectedGameDirectories=new Set();const key=keyFor(selectedActionGame);await openSingleCommit();
+    await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');
     check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Empty page selection replaced editor target');
   `);
-  await test('cancel-single-card-then-batch-still-imports-all-selected-games', `
-    await resetCommitFixture();await openSingleCommit();$('#steam-commit-cancel').click();closeEdit();
-    const expected=selectedCommitDirectories();check(expected.length===3,'Batch fixture missing: '+JSON.stringify(mergedGames().map(game=>({key:keyFor(game),category:category(game),steam:game.steam}))));
+  await test('return-from-single-card-keeps-batch-selection-independent', `
+    await resetCommitFixture();window.fixtureHoldCommit=true;const key=keyFor(selectedActionGame);await openSingleCommit();closeEdit();window.fixtureCommitReleases.shift()();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');window.fixtureHoldCommit=false;fixtureCalls.length=0;
+    const expected=selectedCommitDirectories();check(expected.length===3,'Batch fixture missing');
     $('#commit-button').click();await waitFor(()=>!$('#steam-commit-modal').classList.contains('hidden'));
     check($('#commit-summary').textContent.includes('3 个'),'Batch kept single-card count');
-    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1&&$('#busy').classList.contains('hidden'));
     check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify(expected),'Single target leaked into batch');
   `);
-  await test('running-Steam-cancel-keeps-editor-and-does-not-close-Steam', `
-    await resetCommitFixture();fixtureSteamRunning=true;focusWorkspaceElement($('#edit-add-to-steam'));routeWorkspaceAction('accept');
-    await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));
-    check(activeWorkspaceModal().id==='confirm-modal' && $('#confirm-modal').contains(document.activeElement),'Steam prompt is under editor');
-    controllerBackLastAt=0;routeWorkspaceAction('back');await waitFor(()=>!steamCommitRequestInFlight);
-    check(editorOpen() && commitCalls().length===0 && !fixtureCalls.some(call=>call.command==='closeSteam'),'Cancel altered Steam or editor');
-    check(document.activeElement===$('#edit-add-to-steam'),'Steam prompt did not restore editor action');
+  await test('running-Steam-fails-inline-and-B-does-not-close-Steam', `
+    await resetCommitFixture();fixtureSteamRunning=true;const key=keyFor(selectedActionGame);await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='failed');await frames();
+    check($('#confirm-modal').classList.contains('hidden')&&$('#steam-commit-modal').classList.contains('hidden')&&$('#edit-status').textContent.includes('fixture Steam'),'Running Steam did not stay an inline failure');
+    check(editorOpen()&&!fixtureCalls.some(call=>call.command==='closeSteam'),'Single-card failure silently closed Steam or the editor');
+    controllerBackLastAt=0;routeWorkspaceAction('back');await frames();check(!editorOpen()&&commitCalls().length===1,'Back retried or trapped a failed card');
   `);
-  await test('running-Steam-close-then-explicit-retry-keeps-one-game', `
-    await resetCommitFixture();fixtureSteamRunning=true;$('#edit-add-to-steam').click();
-    await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));$('#confirm-confirm').click();
-    await waitFor(()=>!steamCommitRequestInFlight && $('#busy').classList.contains('hidden'));
-    check(fixtureCalls.filter(call=>call.command==='closeSteam').length===1 && commitCalls().length===0,'Close implicitly imported');
-    await openSingleCommit();const key=keyFor(selectedActionGame);$('#steam-commit-confirm').click();
-    await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
-    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Retry broadened target');
+  await test('explicit-retry-after-Steam-stops-keeps-one-game', `
+    await resetCommitFixture();fixtureSteamRunning=true;const key=keyFor(selectedActionGame);await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='failed');
+    check(!fixtureCalls.some(call=>call.command==='closeSteam'),'Failure silently closed Steam');fixtureSteamRunning=false;fixtureCalls.length=0;
+    await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Explicit retry broadened target');
   `);
-  await test('Steam-restart-between-confirmations-still-only-closes-Steam', `
-    await resetCommitFixture();await openSingleCommit();fixtureSteamRunning=true;$('#steam-commit-confirm').click();
-    await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));$('#confirm-confirm').click();
-    await waitFor(()=>fixtureCalls.some(call=>call.command==='closeSteam') && $('#busy').classList.contains('hidden'));
-    check(commitCalls().length===0,'Steam restart bypassed original close-only flow');
+  await test('Steam-starts-after-queue-admission-and-is-never-silently-closed', `
+    await resetCommitFixture();window.fixtureHoldCommit=true;const key=keyFor(selectedActionGame);await openSingleCommit();fixtureSteamRunning=true;window.fixtureCommitReleases.shift()();await waitFor(()=>steamCommitTasks.get(key)?.phase==='failed');
+    check(commitCalls().length===1&&!fixtureCalls.some(call=>call.command==='closeSteam'),'Late Steam start retried or implicitly closed it');window.fixtureHoldCommit=false;
   `);
-  await test('preflight-failure-never-falls-back-to-batch', `
-    await resetCommitFixture();fixtureFailures.steamCommitPreflight='fixture preflight failure';$('#edit-add-to-steam').click();
-    await waitFor(()=>!steamCommitRequestInFlight && fixtureCalls.some(call=>call.command==='steamCommitPreflight'));
-    check(commitCalls().length===0 && $('#steam-commit-modal').classList.contains('hidden') && editorOpen(),'Failure opened or committed stale target');
+  await test('admission-and-batch-preflight-failures-never-expand-selection', `
+    await resetCommitFixture();const key=keyFor(selectedActionGame);fixtureFailures.commit='fixture admission failure';await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='failed');
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key])&&editorOpen(),'Native admission failure expanded the single target or discarded editor');
+    await resetCommitFixture();closeEdit();fixtureFailures.steamCommitPreflight='fixture preflight failure';$('#commit-button').click();await waitFor(()=>!steamCommitRequestInFlight&&fixtureCalls.some(call=>call.command==='steamCommitPreflight'));
+    check(commitCalls().length===0&&$('#steam-commit-modal').classList.contains('hidden'),'Batch preflight failure committed stale scope');
   `);
   await test('commit-failure-does-not-retry-or-expand-selection', `
-    await resetCommitFixture();await openSingleCommit();const key=keyFor(selectedActionGame);fixtureFailures.commit='fixture write failure';
-    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
-    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Failed write broadened target');
-    check(editorOpen(),'Write failure discarded editor');fixtureFailures={};
+    await resetCommitFixture();const key=keyFor(selectedActionGame);fixtureFailures.commit='fixture write failure';await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='failed');await frames();
+    check(commitCalls().length===1&&JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Failed write retried or broadened target');
+    check(editorOpen()&&!$('#edit-add-to-steam').disabled&&$('#edit-status').textContent.includes('fixture write failure'),'Write failure discarded or disabled the editor');fixtureFailures={};
   `);
   await test('native-and-media-only-editors-cannot-create-shortcuts', `
     await resetCommitFixture();closeEdit();openEdit({...structuredClone(fixtureGame),steamNative:true});

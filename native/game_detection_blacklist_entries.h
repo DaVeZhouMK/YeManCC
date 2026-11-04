@@ -16,4 +16,6 @@ L"csrss", L"winlogon", L"lsass", L"services", L"smss", L"system", L"idle",
     L"anydesk", L"todesk", L"steam", L"steamwebhelper", L"qq", L"chatgpt", L"discord",
     L"slack", L"teams", L"rtkauduservice64",
     L"vmware-vmx", L"virtualboxvm", L"qemu-system-*",
-    L"vmmem", L"vmmemwsl", L"wslhost", L"vmcompute"
+    L"vmmem", L"vmmemwsl", L"wslhost", L"vmcompute",
+
+#include "game_library_blacklist_entries.h"

@@ -1,22 +1,29 @@
 @echo off
 setlocal
+REM Preserve the caller's verified Node before the VC environment changes PATH.
+REM Standalone callers may set YEMAN_NODE_EXE; otherwise capture it from PATH now.
+if not defined YEMAN_NODE_EXE for %%N in (node.exe) do set "YEMAN_NODE_EXE=%%~$PATH:N"
+if not exist "%YEMAN_NODE_EXE%" (
+  echo NODE_EXECUTABLE_MISSING: set YEMAN_NODE_EXE to the existing node.exe 1>&2
+  goto :fail
+)
 where cl.exe >nul 2>nul
 if errorlevel 1 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 if errorlevel 1 goto :fail
 cd /d "%~dp0"
-node "%~dp0..\tools\battery-charge-contract.mjs" --check
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\battery-charge-contract.mjs" --check
 if errorlevel 1 goto :fail
 
 REM Verify the exact embedded Decky package transaction before compiling YMCC.
-node "%~dp0..\tools\module_package_maintenance_embed.mjs" --check
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\module_package_maintenance_embed.mjs" --check
 if errorlevel 1 goto :fail
-node "%~dp0..\tools\decky_package_maintenance_embed.mjs" --check
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\decky_package_maintenance_embed.mjs" --check
 if errorlevel 1 exit /b 1
-node "%~dp0..\tools\update_install_recovery_embed.mjs" --check
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\update_install_recovery_embed.mjs" --check
 if errorlevel 1 exit /b 1
-node "%~dp0..\tools\updater_hc_runtime_embed.mjs" --check
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\updater_hc_runtime_embed.mjs" --check
 if errorlevel 1 exit /b 1
-node "%~dp0..\tools\updater_hook_tools_embed.mjs" --check
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\updater_hook_tools_embed.mjs" --check
 if errorlevel 1 goto :fail
 
 REM C++/WinRT is required for HC-equivalent Windows default sensor selection.
@@ -47,7 +54,7 @@ REM Opening YMCC must never replay a remembered Steam mode or linked-loader use.
 REM Enforce the actual native callback boundaries before any native compilation.
 REM Ordinary exports skip fixtures; retain source selftests for explicit full acceptance.
 if "%YEMAN_FULL_ACCEPTANCE%"=="1" (
-  node "%~dp0..\tools\steam_manual_startup_source_selftest.mjs" "%OUTDIR%\steam-startup-admission"
+  "%YEMAN_NODE_EXE%" "%~dp0..\tools\steam_manual_startup_source_selftest.mjs" "%OUTDIR%\steam-startup-admission"
   if errorlevel 1 goto :fail
 )
 
@@ -58,7 +65,7 @@ if "%YEMAN_SCREEN_NATIVE_INPUT_CANDIDATE%"=="0" set "SCREEN_NATIVE_INPUT_DEFINE=
 if defined YEMAN_SCREEN_NATIVE_INPUT_CANDIDATE if not "%YEMAN_SCREEN_NATIVE_INPUT_CANDIDATE%"=="0" if not "%YEMAN_SCREEN_NATIVE_INPUT_CANDIDATE%"=="1" goto :fail
 
 REM compile resources (icon + version)
-rc /nologo /fo "%OUTDIR%\app.res" app.rc
+rc /nologo /c65001 /fo "%OUTDIR%\app.res" app.rc
 if errorlevel 1 goto :fail
 
 REM compile shell: /MT static CRT + WebView2 static loader. All outputs stay in Build.
@@ -69,7 +76,7 @@ if errorlevel 1 goto :fail
 REM Original-instance Steam recovery is linked into YMCC; no helper executable.
 REM Ordinary exports skip fixtures; retain source selftests for explicit full acceptance.
 if "%YEMAN_FULL_ACCEPTANCE%"=="1" (
-  node "%~dp0..\tools\steam_original_recovery_runtime_source_selftest.mjs"
+  "%YEMAN_NODE_EXE%" "%~dp0..\tools\steam_original_recovery_runtime_source_selftest.mjs"
   if errorlevel 1 goto :fail
 )
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE /c steam_original_recovery_engine.cpp /I"..\deps\json" /Fo"%OUTDIR%\steam_original_recovery_engine.obj"

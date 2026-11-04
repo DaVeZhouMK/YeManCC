@@ -52,7 +52,7 @@ function historicalAuthority({file,m,expectedSnapshotManifestSha256,primaryRepo}
  need(m?.schemaVersion===1&&m.kind==='ymcc-fixed-source-snapshot'&&['PASS','FAIL'].includes(m.status)&&m.isCurrent===(m.status==='PASS')&&m.executionPerformed===false&&m.requiresFinalCurrentComparison===true&&m.snapshotPassApprovesChangedSource===false&&m.installationPayloadFrozen===false,'NODE_TOOLS_HISTORICAL_SNAPSHOT_INVALID');
  const sourceRoot=plainDirectory(absolute(primaryRepo)),snapshotRoot=plainDirectory(absolute(m.snapshotRoot));
  need(key(sourceRoot)===key(absolute(m.sourceRoot))&&key(file)===key(path.join(snapshotRoot,METADATA,MANIFEST))&&m.metadataDirectory===METADATA,'NODE_TOOLS_SNAPSHOT_ROOT_DIFFERS');
- need(!inside(sourceRoot,snapshotRoot)&&!inside(snapshotRoot,sourceRoot)&&key(path.dirname(sourceRoot))===key(path.dirname(snapshotRoot)),'NODE_TOOLS_SIBLING_SNAPSHOT_REQUIRED');plainDirectory(path.join(snapshotRoot,METADATA));
+ capturedSnapshot.validateSourceSnapshotRoots(sourceRoot,snapshotRoot);plainDirectory(path.join(snapshotRoot,METADATA));
  need(typeof capturedSnapshot.verifyCapturedSourceSnapshot==='function','NODE_TOOLS_CAPTURE_VERIFIER_UNAVAILABLE');
  plain(verifierSourceFile);need(equal(hashFile(verifierSourceFile),verifierAtModuleLoad),'NODE_TOOLS_CAPTURE_VERIFIER_CODE_CHANGED');
  const captureVerification=validateCaptureVerification(capturedSnapshot.verifyCapturedSourceSnapshot({manifestFile:file,repoRoot:sourceRoot,expectedManifestSha256:expectedSnapshotManifestSha256}),{creationStatus:m.status,expectedManifestSha256:expectedSnapshotManifestSha256});
@@ -68,7 +68,7 @@ function authority({manifestFile,expectedSnapshotManifestSha256,primaryRepo,allo
  need(m?.schemaVersion===1&&m.kind==='ymcc-fixed-source-snapshot'&&m.status==='PASS'&&m.isCurrent===true&&m.executionPerformed===false&&m.requiresFinalCurrentComparison===true&&m.snapshotPassApprovesChangedSource===false&&m.installationPayloadFrozen===false,'NODE_TOOLS_SUCCESSFUL_SNAPSHOT_REQUIRED');
  const sourceRoot=plainDirectory(absolute(primaryRepo)),snapshotRoot=plainDirectory(absolute(m.snapshotRoot));
  need(key(sourceRoot)===key(absolute(m.sourceRoot))&&key(file)===key(path.join(snapshotRoot,METADATA,MANIFEST))&&m.metadataDirectory===METADATA,'NODE_TOOLS_SNAPSHOT_ROOT_DIFFERS');
- need(!inside(sourceRoot,snapshotRoot)&&!inside(snapshotRoot,sourceRoot)&&key(path.dirname(sourceRoot))===key(path.dirname(snapshotRoot)),'NODE_TOOLS_SIBLING_SNAPSHOT_REQUIRED');
+ capturedSnapshot.validateSourceSnapshotRoots(sourceRoot,snapshotRoot);
  plainDirectory(path.join(snapshotRoot,METADATA));
  need(m.sourceWorkspaceRoot===path.resolve(sourceRoot,'../../..')&&m.snapshotWorkspaceRoot===path.resolve(snapshotRoot,'../../..'),'NODE_TOOLS_WORKSPACE_DIFFERS');
  need(Array.isArray(m.files)&&m.files.length>0&&Array.isArray(m.directories)&&Array.isArray(m.excluded)&&m.copyVerifiedFiles===m.files.length&&m.sourceDiff?.equal===true&&m.snapshotDiff?.equal===true,'NODE_TOOLS_SNAPSHOT_CAPTURE_INCOMPLETE');

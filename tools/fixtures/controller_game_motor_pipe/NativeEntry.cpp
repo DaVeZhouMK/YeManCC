@@ -52,7 +52,7 @@ static bool g_inputHostHello=false,g_inputHostPipeConnected=false,g_inputHostPip
 static std::atomic<bool> g_inputHostTupleHealPending{false};
 static std::atomic<unsigned long long> g_inputCapturePreHostElapsedUs{0},g_inputHostLastSubmitElapsedUs{0};
 static std::atomic<int> g_backendInstallPrompt{0};static unsigned g_xinputConnectedMask=0;
-enum class YmccFamily{Unknown,MsiClaw};static struct{YmccFamily family=YmccFamily::Unknown;}g_machineIdentity;
+@@ROG_IDENTITY@@
 static json logs=json::array();static std::vector<std::string> queued;
 static void appendNativeLifecycleLog(const char* event,json row=json::object()){row["event"]=event;logs.push_back(std::move(row));}
 static void writeLog(const char*,const std::string&){}
@@ -74,7 +74,7 @@ static std::atomic<bool> g_inputReady{true},g_inputHostPowerAdmissionRevoked{fal
 static std::atomic<unsigned long long> g_inputHostVirtualIntentRevision{1},g_msiMainSourceRevision{1},g_msiFeedbackModeGeneration{1};
 static std::atomic<unsigned> g_xinputTopologyEpoch{1},g_xinputSlotIdentityEpoch{1},g_inputHostVirtualIntentWriters{0};
 static bool g_inputHostPrepared=false,g_inputHostNeutralized=false;
-static auto currentPowerGeneration(){return 3ULL;}
+@@POWER_CONTEXT@@
 static bool sgVirtualWriterAllowedNow(){return true;}
 static bool inputHostExitFenceRaised(){return false;}
 static bool inputHostPhysicalPublicationSourceAdmitted(bool admitted,bool neutral){return admitted&&!neutral;}
@@ -91,7 +91,7 @@ static void inputHostFrameSubmissionNote(ymcc::input::frameSubmission::Verdict,c
 @@NEW_ID@@
 static const char* inputHostBoundOrCurrentPersona(){return fixturePersona.c_str();}
 static const char* inputHostBoundOrCurrentProfileIdentity(){return ymcc::controllerPersona::profileIdentity(fixturePersona);}
-static unsigned long long inputHostProtocolPowerGenerationLocked(){return 3;}
+@@PROTOCOL_POWER_CONTEXT@@
 static const char kC6aHexDigits[]="0123456789abcdef";
 @@HASH@@
 @@ENVELOPE@@

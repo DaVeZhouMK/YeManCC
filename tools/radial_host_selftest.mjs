@@ -7,6 +7,14 @@ const {build}=require(toolScope.authority.compilerEntry);
 const development=process.argv.includes('--exercise-development');
 const state={handlers:new Map(),calls:[],revision:0,generation:1,power:1,ready:true,capable:true,ack:false,writes:[],results:[],created:[],closed:[],windows:[],model:null,delay:null};
 globalThis.__radialHostFixture=state;globalThis.window=new EventTarget();
+// Keep original production host/actions. Only its interval clock is virtual;
+// the native transport remains the existing explicit memory terminal.
+const originalSetInterval=globalThis.setInterval,originalClearInterval=globalThis.clearInterval;
+const heartbeatTimers=new Map();let heartbeatClock=0,heartbeatTimerId=0,heartbeatCallbacks=0;
+globalThis.setInterval=(callback,period)=>{const id=++heartbeatTimerId;heartbeatTimers.set(id,{callback,period,next:heartbeatClock+period});return id;};
+globalThis.clearInterval=id=>heartbeatTimers.delete(id);
+async function advanceHeartbeat(ms){const end=heartbeatClock+ms;for(;;){const next=[...heartbeatTimers.entries()].filter(([,v])=>v.next<=end).sort((a,b)=>a[1].next-b[1].next)[0];if(!next)break;heartbeatClock=next[1].next;next[1].next+=next[1].period;heartbeatCallbacks++;next[1].callback();for(let n=0;n<12;n++)await Promise.resolve();}heartbeatClock=end;}
+
 // The real preference/normalization/testing contract uses only this process's repository and storage terminals.
 const originalStorage=globalThis.localStorage,storage=new Map();globalThis.localStorage={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)};
 state.sections={ui:{}};state.testingAck=true;state.testingRequests=[];
@@ -27,7 +35,7 @@ const modules={
   enabled:()=>f.active,currentPreset:()=>f.preset,read:async()=>structuredClone(f.source),curves:(source,preset)=>source.presetCurves[preset],save:async(preset,expected)=>{if(JSON.stringify(expected)!==JSON.stringify(f.source))throw Error('SOURCE_CHANGED');f.preset=preset;f.source={...f.source,preset,nodes:structuredClone(f.source.presetCurves[preset])};f.calls.push('save:'+preset)},
   updateActive:()=>{},updateDuty:()=>{},power:async()=>({generation:s.power}),featureAllowed:alive,uiBusy:()=>false,currentDisplay:()=>f.display,display:value=>f.display=value,nextRevision:()=>String(++f.revision)});`,
  '@/bridge/deckyFanDisplay':`export const onFanMirrorDisplay=()=>()=>{};export const onFanMirrorUiGate=()=>()=>{};`,
- '@/bridge/ipc':`const s=globalThis.__radialHostFixture;export const isNativeRuntime=true;export function on(k,cb){if(!s.handlers.has(k))s.handlers.set(k,new Set());s.handlers.get(k).add(cb);return()=>s.handlers.get(k).delete(cb)}export const invoke=(cmd,a={})=>s.invoke(cmd,a);`,
+ '@/bridge/ipc':`const s=globalThis.__radialHostFixture;export const isNativeRuntime=true;export function on(k,cb){if(!s.handlers.has(k))s.handlers.set(k,new Set());s.handlers.get(k).add(cb);return()=>s.handlers.get(k).delete(cb)}export const invoke=(cmd,a={},options={})=>s.invoke(cmd,a,options);`,
  '@/bridge/api':`const s=globalThis.__radialHostFixture;export const powerLifecycle={get:async()=>({phase:s.ready?'ready':'suspending',generation:s.power,inputReady:s.ready})};export const shell={execute:async(...a)=>{s.windows.push(a);return true},open:async(...a)=>{s.windows.push(a);return true},taskView:async()=>{s.windows.push('taskView');return true}};export const windowApi={show:async()=>{s.windows.push('ymcc');return true}};`,
  'radial-preference-repository':`const s=globalThis.__radialHostFixture;export const getSettingsGeneration=()=>s.generation;export const assertSettingsGeneration=value=>{if(value!==s.generation)throw Error('settings generation changed')};export const readSettingsSection=async key=>structuredClone(s.sections[key]);export const saveSettingsSection=async(key,patch,generation=s.generation)=>{assertSettingsGeneration(generation);s.sections[key]={...s.sections[key],...structuredClone(patch)}};`,
  '@/bridge/settingsRepository':`export const getSettingsGeneration=()=>globalThis.__radialHostFixture.generation;`,
@@ -71,12 +79,46 @@ state.testingAck=true;await setRadialTestingPreference(true);check(isRadialTesti
 // Explicit menu data is local to the original memory settings terminal.
 state.model.enabled=true;
 host=startRadialHost({push:async route=>state.windows.push(route)});
+phase='admitted-idle-heartbeat';
+assert.equal(heartbeatTimers.size,0,'An admitted host without an open wheel must own no heartbeat timer');checks++;
+const idleCallbacks=heartbeatCallbacks;await advanceHeartbeat(120000);
+assert.equal(heartbeatCallbacks,idleCallbacks,'Two virtual idle minutes must perform no heartbeat callbacks');checks++;const idleCallbackDelta=heartbeatCallbacks-idleCallbacks;
 phase='original-host-business-scenarios';
 {
 async function summon(source='shortcut'){const count=state.created.length;emit('radial.summon-request',{source,x:42,y:84});await until(()=>state.created.length>count&&state.calls.some(c=>c.cmd==='radial.frame'&&c.args.wheelId===state.created.at(-1).receipt.id));const r=state.created.at(-1).receipt;return{wheelId:r.id,nonce:r.nonce};}
 emit('radial.summon-request',{source:'shortcut',issuedAt:Date.now()-7000,expiresAt:Date.now()-1000});await new Promise(r=>setTimeout(r,5));check(state.created.length===0);
 emit('radial.summon-request',{source:'shortcut',powerGeneration:0});await new Promise(r=>setTimeout(r,5));check(state.created.length===0);
 let owner=await summon();check(state.created.at(-1).args.source==='shortcut');
+phase='owned-heartbeat-lifecycle';
+check(heartbeatTimers.size===1);
+const originalInvoke=state.invoke;let keepAliveCalls=0,delayedHeartbeat;
+state.invoke=(cmd,args,options)=>{if(cmd==='radial.keepAlive'){keepAliveCalls++;return new Promise((resolve,reject)=>{delayedHeartbeat={resolve,reject,options,args};});}return originalInvoke(cmd,args,options);};
+await advanceHeartbeat(2000);check(keepAliveCalls===1);
+const firstHeartbeat=delayedHeartbeat;const oldHeartbeatTick=[...heartbeatTimers.values()][0].callback;
+await advanceHeartbeat(8000);
+assert.equal(keepAliveCalls,1,'A delayed heartbeat must not accumulate requests across later slots');checks++;
+emit('radial.closed',owner);check(heartbeatTimers.size===0);
+check(firstHeartbeat.options?.signal?.aborted===true);
+const afterCloseCallbacks=heartbeatCallbacks;await advanceHeartbeat(120000);check(heartbeatCallbacks===afterCloseCallbacks);
+owner=await summon();check(heartbeatTimers.size===1);
+await advanceHeartbeat(2000);check(keepAliveCalls===2);
+const secondHeartbeat=delayedHeartbeat;const successor=owner,closedBeforeStale=state.closed.length;
+oldHeartbeatTick();check(keepAliveCalls===2);
+firstHeartbeat.reject(new Error('late previous heartbeat'));
+for(let n=0;n<12;n++)await Promise.resolve();
+assert.equal(state.closed.length,closedBeforeStale,'Old heartbeat failure must not close the successor wheel');checks++;
+await advanceHeartbeat(6000);
+assert.equal(keepAliveCalls,2,'Old finally must not clear the successor in-flight heartbeat');checks++;
+state.invoke=originalInvoke;secondHeartbeat.resolve(true);
+for(let n=0;n<12;n++)await Promise.resolve();
+const beforeHealthy=state.calls.filter(c=>c.cmd==='radial.keepAlive').length;
+await advanceHeartbeat(2000);check(state.calls.filter(c=>c.cmd==='radial.keepAlive').length===beforeHealthy+1);
+const closeBeforeRefusal=state.closed.length;
+state.invoke=(cmd,args,options)=>cmd==='radial.keepAlive'?Promise.resolve(false):originalInvoke(cmd,args,options);
+await advanceHeartbeat(2000);check(state.closed.length===closeBeforeRefusal+1);check(heartbeatTimers.size===0);
+state.invoke=originalInvoke;owner=await summon();
+phase='original-host-business-scenarios';
+
 let request=0;
 async function intent(itemId,extra={}){const before=state.results.length,id='request-'+(++request),now=Date.now();const body={requestId:id,itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+5000,...extra};emit('radial.intent',{...owner,intent:body});await until(()=>state.results.length>before);return {outcome:state.results.at(-1).result,body};}
 try{
@@ -136,7 +178,7 @@ try{
  const old=owner;emit('power.sourceChanged',{});await until(()=>state.closed.some(c=>c.wheelId===old.wheelId));check(true);
  let release;state.delay={promise:new Promise(r=>release=r)};const before=state.created.length;emit('radial.summon-request',{source:'shortcut'});await until(()=>state.created.length>before);const late=state.created.at(-1).receipt;host.stop();release();await until(()=>state.closed.some(c=>c.wheelId===late.id&&c.nonce===late.nonce));check(true);
  check([...state.handlers.values()].every(v=>v.size===0));
- finalReport={pass:true,checks,defaultGateChecks,sourceHashes,toolScope:toolScope.report,gateContract:'Actual uiSettings -> setRadialTestingPreference -> syncRadialTestingPreference -> inert native receipt -> actual testingState; no environment bypass or direct ref write',actualConsumer:'src/radial/host.ts',performanceProvider:'memory fixture; real schedule writer separately covered by continuous_performance_selftest',hardwareWrites:0,installedApplicationMutated:false};
-}finally{host.stop();await setRadialTestingPreference(false);assert.equal(isRadialTestingEnabled(),false,'Public contract restores default-closed admission');for(const [input,digest]of Object.entries(sourceHashes))assert.equal(hash(path.join(root,input)),digest,'Source changed: '+input);verifyRadialHostTools(toolScope);if(finalReport){finalReport.restoredAdmissionClosed=true;finalReport.testingRequests=state.testingRequests;const output=process.argv[2];if(output)fs.writeFileSync(output,JSON.stringify(finalReport,null,2));console.log(JSON.stringify({pass:true,checks,defaultGateChecks,restoredAdmissionClosed:true}));}globalThis.localStorage=originalStorage;delete globalThis.__radialHostFixture;}
+ finalReport={pass:true,checks,defaultGateChecks,heartbeat:{virtualTime:true,idleObservationMs:120000,idleCallbacks:idleCallbackDelta,normalPeriodMs:2000,slowReadPeakInFlight:1,ownedTimersAfterStop:heartbeatTimers.size},sourceHashes,toolScope:toolScope.report,gateContract:'Actual uiSettings -> setRadialTestingPreference -> syncRadialTestingPreference -> inert native receipt -> actual testingState; no environment bypass or direct ref write',actualConsumer:'src/radial/host.ts',performanceProvider:'memory fixture; real schedule writer separately covered by continuous_performance_selftest',hardwareWrites:0,installedApplicationMutated:false};
+}finally{host.stop();await setRadialTestingPreference(false);assert.equal(isRadialTestingEnabled(),false,'Public contract restores default-closed admission');for(const [input,digest]of Object.entries(sourceHashes))assert.equal(hash(path.join(root,input)),digest,'Source changed: '+input);verifyRadialHostTools(toolScope);if(finalReport){finalReport.restoredAdmissionClosed=true;finalReport.testingRequests=state.testingRequests;const output=process.argv[2];if(output)fs.writeFileSync(output,JSON.stringify(finalReport,null,2));console.log(JSON.stringify({pass:true,checks,defaultGateChecks,restoredAdmissionClosed:true}));}globalThis.setInterval=originalSetInterval;globalThis.clearInterval=originalClearInterval;globalThis.localStorage=originalStorage;delete globalThis.__radialHostFixture;}
 
 }

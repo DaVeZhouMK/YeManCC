@@ -6,7 +6,7 @@
       "Release",
       "Debug"
     ],
-    "observationCases": 23,
+    "observationCases": 28,
     "lifecycleCases": 19,
     "legacyCases": 57,
     "retainedLegacyFailureNames": [

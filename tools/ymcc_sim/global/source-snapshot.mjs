@@ -13,16 +13,17 @@ const ROOT_RUNTIME_EXCLUSIONS=Object.freeze([
 const STEAM_APPEARANCE_RELEASE=Object.freeze({
  manifest:'PowerControl/steam-appearance/manifest.json',assetRoot:'PowerControl/steam-appearance/themes',
  consumedBy:'PowerControl/steam-appearance/preset.ps1::Read-PresetManifest',id:'ymcc-steam-appearance',version:1,
- themeNames:Object.freeze(['Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details']),
+ themeNames:Object.freeze(['Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details']),
  maxManifestBytes:65536,maxMembers:256,maxMemberBytes:262144,maxTotalBytes:1048576,maxRelativePathLength:240,
  resourceKinds:Object.freeze(['declared .css files','theme-root theme.json and config_USER.json release templates','theme-root LICENSE']),
  exactMembership:true,reparseAllowed:false,unknownResourcesAllowed:false,operationalPathsIncluded:false,
 });
 export const SNAPSHOT_POLICY=Object.freeze({
- version:8,
+ version:10,
+ opaqueExcludedRootLinks:Object.freeze(['node_modules']),
  rules:Object.freeze([
   Object.freeze({id:'git-metadata',match:'Any entry named .git; never read or descend.',reason:'Version-control metadata is outside the raw working-source identity.'}),
-  Object.freeze({id:'node-dependencies',match:'Any directory named node_modules; never descend.',reason:'Locally installed Node products are outside this fixed-source scope; source dependency declarations are retained.'}),
+  Object.freeze({id:'node-dependencies',match:'Any directory named node_modules; never descend. A root node_modules reparse entry is opaque: inspect only its own lstat, never resolve, traverse or freeze its target.',reason:'Locally installed Node products are outside this fixed-source scope; source dependency declarations are retained.'}),
   Object.freeze({id:'root-generated',match:'Root directories dist, Build, artifacts only; nested vendor/deps directories retained.',reason:'Root build/run products are outside the fixed-source scope.'}),
   ...ROOT_RUNTIME_EXCLUSIONS.map(({name,id,reason})=>Object.freeze({id,match:'Root directory '+name+' only; no descent or content reads.',reason})),
   Object.freeze({id:'powercontrol-nonsource',match:'Within mixed root PowerControl, preserve source-code/script/project files including .py, package.json and the exact retainedStaticSourceData/retainedSourceBuildRecipes paths; exclude other opaque runtime/data files without opening their bytes.',reason:'PowerControl contains first-party catalog sources and operational payload together. Only source/code manifests are fixed; runtime settings, leases, sessions, logs and binaries are not.'}),
@@ -56,7 +57,8 @@ function absolute(value){need(typeof value==='string'&&path.isAbsolute(value)&&!
 function noReparse(file){
  let cursor=path.resolve(file);
  for(;;){
-  if(exists(cursor)){const st=fs.lstatSync(cursor);need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:cursor});need(key(fs.realpathSync(cursor))===key(cursor),'SNAPSHOT_REPARSE_RESOLUTION',{path:cursor});}
+  let st;try{st=fs.lstatSync(cursor);}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(st){need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:cursor});need(key(fs.realpathSync(cursor))===key(cursor),'SNAPSHOT_REPARSE_RESOLUTION',{path:cursor});}
   const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;
  }
 }
@@ -69,12 +71,12 @@ function member(root,rel){relative(rel);const file=path.resolve(root,...rel.spli
 // File index, size and nanosecond times still bind the path to the descriptor.
 const fileState=stat=>[...(process.platform==='win32'?[]:[stat.dev]),stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs].map(String).join(':');
 /** The descriptor's bytes, rather than a VCS version or selected functions, are hashed. */
-function readHash(file,maxBytes=Number.MAX_SAFE_INTEGER){
+function readHash(file,maxBytes=Number.MAX_SAFE_INTEGER,scratchBuffer){
  noReparse(file);const initial=fs.lstatSync(file,{bigint:true});need(initial.isFile(),'SNAPSHOT_REGULAR_FILE_REQUIRED',{path:file});need(initial.size<=BigInt(maxBytes),'SNAPSHOT_FILE_SIZE_LIMIT',{path:file});
  const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));
  try{
   const before=fs.fstatSync(fd,{bigint:true});need(before.isFile()&&fileState(initial)===fileState(before),'SNAPSHOT_FILE_CHANGED_DURING_READ',{path:file});
-  const hash=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);let size=0,read;
+  const hash=createHash('sha256'),buffer=scratchBuffer??Buffer.allocUnsafe(1024*1024);let size=0,read;
   while((read=fs.readSync(fd,buffer,0,Math.min(buffer.length,maxBytes-size+1),null))>0){hash.update(buffer.subarray(0,read));size+=read;need(Number.isSafeInteger(size)&&size<=maxBytes,'SNAPSHOT_FILE_SIZE_LIMIT');}
   const after=fs.fstatSync(fd,{bigint:true});noReparse(file);const current=fs.lstatSync(file,{bigint:true});
   need(fileState(before)===fileState(after)&&fileState(after)===fileState(current)&&BigInt(size)===after.size,'SNAPSHOT_FILE_CHANGED_DURING_READ',{path:file});
@@ -126,7 +128,14 @@ function inventory(root,{snapshot=false,captureRoot=null,onCaptured=()=>{}}={}){
   noReparse(dir);const names=fs.readdirSync(dir).sort(),parentHasProject=names.some(n=>/\.(?:csproj|fsproj|vbproj)$/i.test(n)),projectContext=ancestorHasProject||parentHasProject;
   for(const name of names){
    const rel=prefix?prefix+'/'+name:name,file=path.join(dir,name);relative(rel);
-   noReparse(file);const st=fs.lstatSync(file);need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:rel});
+   const st=fs.lstatSync(file);
+   // The installed root Node dependency link is outside fixed source scope.
+   // Inspect the link itself only; target bytes remain the separate tool graph's
+   // responsibility. All included paths and other reparse entries stay denied.
+   if(!prefix&&SNAPSHOT_POLICY.opaqueExcludedRootLinks.includes(name.toLowerCase())&&st.isSymbolicLink()){
+    excluded.push({path:rel,type:'directory',rule:'node-dependencies',reason:EXCLUSION_REASONS.get('node-dependencies')});continue;
+   }
+   noReparse(file);need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:rel});
    if(!prefix&&name.toLowerCase()===SNAPSHOT_METADATA){need(snapshot,'SNAPSHOT_SOURCE_METADATA_COLLISION',{path:rel});need(st.isDirectory(),'SNAPSHOT_METADATA_DIRECTORY_REQUIRED');continue;}
    if(rel===STEAM_APPEARANCE_RELEASE.assetRoot||rel.startsWith(STEAM_APPEARANCE_RELEASE.assetRoot+'/'))need(st.isDirectory()?release.directories.has(rel):release.files.has(rel),'SNAPSHOT_STATIC_RELEASE_UNDECLARED_RESOURCE',{path:rel});
    const reason=exclusion(rel,st.isDirectory(),parentHasProject,projectContext,release);
@@ -156,11 +165,22 @@ function diff(expected,actual){
 function roots(sourceRoot,snapshotRoot,{fresh=false}={}){
  const source=directory(absolute(sourceRoot)),snapshot=absolute(snapshotRoot);
  need(!inside(source,snapshot)&&!inside(snapshot,source),'SNAPSHOT_ROOTS_OVERLAP');
- need(key(path.dirname(source))===key(path.dirname(snapshot)),'SNAPSHOT_SIBLING_DESTINATION_REQUIRED');
- noReparse(path.dirname(snapshot));need(directory(path.dirname(snapshot))===path.dirname(source),'SNAPSHOT_SHARED_PARENT_REQUIRED');
+ const sibling=key(path.dirname(source))===key(path.dirname(snapshot));
+ if(sibling){
+  noReparse(path.dirname(snapshot));need(directory(path.dirname(snapshot))===path.dirname(source),'SNAPSHOT_SHARED_PARENT_REQUIRED');
+ }else{
+  // A core-owned capture keeps the original repository/workspace layout.
+  // The source workspace, never a manifest-supplied owner, determines its boundary.
+  const sourceWorkspace=path.resolve(source,'../../..'),ownerWorkspace=path.resolve(snapshot,'../../..');
+  const coreWorkspace=path.join(sourceWorkspace,'Testing','YMCC','Workspace');
+  need(key(source)===key(path.join(sourceWorkspace,'Mainline','YeManCC-source','YeManCC'))&&inside(coreWorkspace,ownerWorkspace)&&key(ownerWorkspace)!==key(coreWorkspace)&&key(snapshot)===key(path.join(ownerWorkspace,'Mainline','YeManCC-source','YeManCC')),'SNAPSHOT_SIBLING_DESTINATION_REQUIRED');
+  directory(coreWorkspace);directory(path.dirname(snapshot));
+ }
  noReparse(snapshot);if(fresh)need(!exists(snapshot),'SNAPSHOT_FRESH_DESTINATION_REQUIRED');
  return {sourceRoot:source,snapshotRoot:snapshot};
 }
+// Share the same location checks with Node-tool binding and verification.
+export function validateSourceSnapshotRoots(sourceRoot,snapshotRoot){return roots(sourceRoot,snapshotRoot);}
 function writeJson(root,rel,value){
  const file=member(root,rel);noReparse(root);noReparse(path.dirname(file));noReparse(file);
  const temporary=path.join(path.dirname(file),'.write-'+randomUUID()+'.json');fs.writeFileSync(temporary,JSON.stringify(value,null,2)+'\n',{flag:'wx'});noReparse(file);fs.renameSync(temporary,file);return {path:rel,...readHash(file)};
@@ -185,17 +205,18 @@ function captureOneAtRead(sourceRoot,snapshotRoot,rel,maxBytes=Number.MAX_SAFE_I
  const source=member(sourceRoot,rel),target=member(snapshotRoot,rel);noReparse(source);noReparse(snapshotRoot);
  fs.mkdirSync(path.dirname(target),{recursive:true});noReparse(path.dirname(target));need(!exists(target),'SNAPSHOT_COPY_OVERWRITE_REJECTED',{path:rel});
  const initial=fs.lstatSync(source,{bigint:true});need(initial.isFile(),'SNAPSHOT_REGULAR_FILE_REQUIRED');
- const from=fs.openSync(source,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));let to,streamIdentity;
+ const from=fs.openSync(source,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));let to,streamIdentity,buffer;
  try{
   const state=fs.fstatSync(from,{bigint:true});need(fileState(state)===fileState(initial),'SNAPSHOT_FILE_CHANGED_DURING_CAPTURE',{path:rel});need(state.size<=BigInt(maxBytes),'SNAPSHOT_FILE_SIZE_LIMIT',{path:rel});
   to=fs.openSync(target,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL,Number(state.mode&0o777n));
-  const h=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);let size=0,n;
+  const h=createHash('sha256');buffer=Buffer.allocUnsafe(1024*1024);let size=0,n;
   while((n=fs.readSync(from,buffer,0,Math.min(buffer.length,maxBytes-size+1),null))>0){h.update(buffer.subarray(0,n));size+=n;need(Number.isSafeInteger(size)&&size<=maxBytes,'SNAPSHOT_FILE_SIZE_LIMIT');let offset=0;while(offset<n){const written=fs.writeSync(to,buffer,offset,n-offset);need(written>0,'SNAPSHOT_WRITE_INCOMPLETE',{path:rel});offset+=written;}}
   fs.fsyncSync(to);noReparse(source);noReparse(target);
   need(fileState(state)===fileState(fs.fstatSync(from,{bigint:true}))&&fileState(state)===fileState(fs.lstatSync(source,{bigint:true}))&&BigInt(size)===state.size,'SNAPSHOT_FILE_CHANGED_DURING_CAPTURE',{path:rel});
   streamIdentity={size,sha256:h.digest('hex')};
  }finally{if(to!==undefined)fs.closeSync(to);fs.closeSync(from);}
- const copied=readHash(target);need(same(copied,streamIdentity),'SNAPSHOT_COPIED_BYTES_DIFFER',{path:rel});return copied;
+ // Source hashing is finished; reuse only this file's scratch storage for an independent destination read.
+ const copied=readHash(target,Number.MAX_SAFE_INTEGER,buffer);need(same(copied,streamIdentity),'SNAPSHOT_COPIED_BYTES_DIFFER',{path:rel});return copied;
 }
 /** A callback is diagnostic/test instrumentation only. The CLI supplies none.
  * No retries, deletions, VCS checkout or program launch occur on any path. */

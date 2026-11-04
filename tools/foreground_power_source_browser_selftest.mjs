@@ -24,12 +24,12 @@ assert(!/fanHostLifecycle|globalRefreshKey|scheduleSleepPowerPlanOptimization/.t
 const panel=read('src/components/ContinuousPerformancePanel.vue');
 const binding=panel.match(/const side = computed\([\s\S]*?;/)?.[0];assert(binding?.includes('snapshot.value?.side'));
 assert(panel.includes('watch(powerSourceMode'));
-assert(read('src/views/PerformanceScheduleView.vue').includes('scope="global"'));
+assert(read('src/views/PerformanceScheduleView.vue').includes('scope="effective"'));
 assert(read('src/components/GameCustomProfilePanel.vue').includes('scope="dedicated"'));
 const native=read('native/main.cpp');const nativeHandler=native.match(/ipc_on\("power.sourceSnapshot", \[\]\(const json&\) -> json \{([\s\S]*?)\n    \}\);/)?.[1];assert(nativeHandler);
 assert.equal((nativeHandler.match(/GetSystemPowerStatus/g)||[]).length,1);
 assert(!/SetTimer|ipc_emit|powercfg|poolSubmit|g_lastAcState|Write|Reg/.test(nativeHandler));
-assert(app.includes('if (changed) schedulePowerChangePerformanceRestore(mode)'));
+assert(app.includes('if (changed) { invalidateFloatPowerSource(mode); schedulePowerChangePerformanceRestore(mode); }'));
 assert(app.includes('dedicatedOnly: schemeOwner !== \'auto\''));
 cases.push('Source contract: one read-only Win32 power call; no polling, hardware writes or blanket refresh; global/dedicated share the continuous panel side binding; real App callback restores existing owner only when side changed');
 const mocks={
@@ -55,6 +55,7 @@ const bundle=await build({stdin:{resolveDir:root,loader:'ts',contents:`
  type PowerSide='ac'|'dc';
  const onAcPower=ref(true);
  function applyVideoPowerMode(mode,authoritative){onAcPower.value=mode==='ac';window.__fixture.callbacks.push({mode,authoritative})}
+ function invalidateFloatPowerSource(mode){window.__fixture.revoked=mode}
  function schedulePowerChangePerformanceRestore(mode){window.__fixture.restores.push(mode)}
  const detectedPowerSide=ref<PowerSide>('ac'),detectedPowerMode=ref<PowerSide>('ac');
  const snapshot=ref({side:powerSourceMode.value});watchEffect(()=>{snapshot.value={side:powerSourceMode.value}});
@@ -93,8 +94,10 @@ try{
  await page.evaluate(()=>{window.__fixture.failFallback=false;window.__fixture.fallbackMode='ac'});await sends(['window.maximized']);await side('ac');assert.equal(await page.evaluate(()=>window.__fixture.fallbacks),2);cases.push('Old-shell compatibility can use one existing reliable fallback on a foreground request');
  await page.evaluate(()=>{window.__fixture.fail=false;window.__fixture.nativeMode='dc'});await sends(['window.minimized']);const beforeHidden=await reads();await page.waitForTimeout(300);assert.equal(await reads(),beforeHidden);await sends(['window.restored']);await side('dc');assert.equal(await reads(),beforeHidden+1);cases.push('Minimized windows stay idle; tray/restore repairs the mode immediately with one read');
  await page.evaluate(()=>{window.__fixture.hold=true;window.__fixture.fail=true});await sends(['window.maximized']);await page.waitForFunction(()=>window.__fixture.held.length===1);const beforeHiddenFallback=await page.evaluate(()=>window.__fixture.fallbacks);await sends(['window.hidden']);await page.evaluate(()=>{window.__fixture.hold=false;window.__release()});await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>window.__fixture.fallbacks),beforeHiddenFallback);await side('dc');await page.evaluate(()=>window.__fixture.fail=false);await sends(['window.maximized']);await side('dc');cases.push('A late native failure after the window hides does not start a background legacy/system probe');
+ const beforeHeartbeat=await reads();await page.evaluate(()=>window.__native('power.sourceHeartbeat',{ac:false}));await side('dc');await page.evaluate(()=>window.__native('power.sourceHeartbeat',{ac:true}));await side('ac');assert.equal(await page.evaluate(()=>window.__fixture.revoked),'ac');await page.evaluate(()=>window.__native('power.sourceHeartbeat',{ac:false}));await side('dc');assert.equal(await reads(),beforeHeartbeat);cases.push('The shared long heartbeat repairs missed source state and revokes the previous float context without any renderer power query');
  const stoppedCount=await reads();await page.evaluate(()=>window.__stop());await sends(['window.maximized','window.shown']);await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));window.__native('power.sourceChanged',{ac:true})});await page.waitForTimeout(120);assert.equal(await reads(),stoppedCount);await side('dc');cases.push('Stopping the App binding removes all visibility/native/focus listeners and blocks pending publication');
  await sends(['window.hidden']);await page.evaluate(()=>window.__start());await page.waitForTimeout(150);assert.equal(await reads(),stoppedCount);await page.evaluate(()=>window.__fixture.nativeMode='ac');await sends(['window.maximized']);await side('ac');assert.equal(await reads(),stoppedCount+1);cases.push('Starting/rebinding while hidden causes no query; next foreground reads once without duplicate listeners');
  assert.equal(await page.evaluate(()=>window.__fixture.writes),0);assert.deepEqual(errors,[]);
  const report={suite:'Foreground one-shot AC/DC refresh browser',passed:cases.length,cases,pageErrors:errors,scope:'Real uiLifecycle/powerSource/ipc/topmon plus verbatim production UI mode bindings/App callback; native transport mocked; hardware and installed configuration writes 0'};fs.writeFileSync(path.join(out,'browser-results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve))}
+

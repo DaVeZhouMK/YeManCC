@@ -1,5 +1,6 @@
 // A single foreground read repairs missed AC/DC notifications without resident polling.
-// Keep this UI snapshot separate from hardware-write detection/ownership checks.
+// Native source events also update the shared TDP source receipt; control reads
+// that memory. Actual hardware writes keep their native lifecycle lease.
 import { readonly, ref } from 'vue';
 import { tdpRuntimeStore } from './tdpRuntimeState';
 import { invoke, on } from './ipc';
@@ -50,7 +51,7 @@ export function startForegroundPowerSourceRefresh(
     } catch {
       // Preserve compatibility with an older native shell; its existing probe is
       // single-flight with bounded fallback. Failure is never authoritative AC.
-      return isCurrent() ? detectPowerModeReliable() : null;
+      return isCurrent() ? detectPowerModeReliable(true) : null;
     }
   };
 
@@ -96,6 +97,14 @@ export function startForegroundPowerSourceRefresh(
     rememberPowerSourceMode(ac ? 'ac' : 'dc');
   };
   const stopSource = on<{ ac: boolean }>('power.sourceChanged', onNativeSource);
+  const stopHeartbeat = on<{ ac: boolean }>('power.sourceHeartbeat', ({ ac }) => {
+    if (!active || typeof ac !== 'boolean') return;
+    const before=sourceMode.value;
+    onNativeSource({ ac });
+    const next=ac ? 'ac' : 'dc';
+    // Only a repaired change enters the existing new-side profile lane.
+    if (before !== next) onForegroundSnapshot(next);
+  });
   const stopSettled = on<{ ac: boolean }>('power.acChanged', onNativeSource);
   const stopVisibility = onUiVisibilityChange(({ visible }) => {
     if (!visible) {
@@ -118,6 +127,7 @@ export function startForegroundPowerSourceRefresh(
     followup = false;
     stopVisibility();
     stopSource();
+    stopHeartbeat();
     stopSettled();
     for (const event of showEvents) window.removeEventListener(event, request);
     window.removeEventListener('focus', request);

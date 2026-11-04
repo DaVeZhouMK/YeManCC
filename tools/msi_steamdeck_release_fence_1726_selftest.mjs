@@ -68,6 +68,19 @@ if(text.includes('observation.Bind(controller, envelope.ProfileIdentity)')){
  }
 }
 const gameOutputSdk = hasGameOutputObservation ? 'internal enum HMOutputSource : byte { Output=0, FeatureWrite=1, FeatureRead=3 }\ninternal readonly struct HMOutputPacket(HMOutputSource source,byte reportId,ReadOnlyMemory<byte> data,uint seqNo) { public readonly HMOutputSource Source=source;public readonly byte ReportId=reportId;public readonly ReadOnlyMemory<byte> Data=data;public readonly uint SeqNo=seqNo; }' : '';
+// The production binding/serializer stay in the extracted dispatcher. Only the
+// SDK frame terminal below is instrumented in the explicitly selected group.
+const hasCompactBinding = /\bCompactFrameReplyBinding\s+_compactFrameReplies\s*=/.test(text);
+if ((options.compactFrameReply || options.compactFrameReplyCost) && !hasCompactBinding) throw Error('runtime pending: Program._compactFrameReplies is not wired');
+const compactBindingFields = hasCompactBinding ? [extract('_compactFrameReplies', source, 'field')] : [];
+const compactSubstitutions = [];
+const compactBindingMethods = hasCompactBinding ? ['BindCompactFrameRepliesSafely', ...(text.includes('private string AppendCompactFrameReplyBinding(') ? ['AppendCompactFrameReplyBinding'] : [])].map(name=>extract(name)) : [];
+const frameTerminal = options.compactFrameReplyCost
+ ? 'Fixture.CostSubmitCalls++;Fixture.CostLastController=_controller;_lastSubmitElapsedUs=Fixture.NextSubmitElapsedUs;'
+ : options.compactFrameReply ? 'Fixture.FrameSubmitCalls++;Fixture.FrameControllers.Add(_controller!);_lastSubmitElapsedUs=Fixture.NextSubmitElapsedUs;' : '';
+const frameEvent = options.compactFrameReplyCost ? '' : 'Fixture.Events.Add("frame");';
+if (options.compactFrameReplyCost) compactSubstitutions.push('Explicit cost-only SDK terminal: identical no-allocation counter/reference/elapsed assignment for both full and compact; no Events or FrameControllers append. Real SDK workers, device IO, encoder and motor callbacks are NOT_RUN.');
+if (options.compactFrameReply) compactSubstitutions.push('TrySubmitFrame is the existing inert SDK terminal, instrumented with call count, controller reference and deterministic per-call elapsed us; actual SDK/frame encoder is not executed.');
 const session = ['HostSession', 'Handle', 'HandleLocked', 'ReleaseLocal', 'ReleaseLocalLocked', 'TryStopSteamDeckIdleForRelease', 'TryStopControllerOutputForRelease', 'TryCompleteIdleCtsRelease', 'RetainSdkDisposeFailure', 'RememberIdempotent', 'TryPrepare', 'SerializeResponse', 'Ack'].map(n => clock(extract(n)));
 let fake = `using System.Diagnostics; using System.Security.Cryptography; using System.Text; using System.Text.Json; using System.Threading; using YeManInputHost.Diagnostics;
 internal sealed class HMProfile { public string Id=""; public bool RequiresUsbipBackend; public ushort VendorId=0x28de,Pid=0x1205; public ushort ProductId=>Pid; }
@@ -106,6 +119,8 @@ internal static partial class Program {
  private Phase _phase=Phase.AwaitHello;private ulong _lastSequence;private long _lastActivityAt,_lastSubmitElapsedUs,_costJsonParseUsSum,_costJsonParseCount;private bool _costFlagEnabled,_assetVerified,_targetPnpAdmitted,_virtualEndpointReconciled;
  private VirtualEndpointObservation _virtualEndpoint=new(false,0,0,0,0,0,false,"pnp-not-observed");
  private MsiSteamDeckReleaseFence1726? _msiSteamDeckReleaseFence1726; private MsiReportChainRuntime1410? _reportChain1410;private bool _reportChainCapabilityAdvertised1410;
+ ${compactBindingFields.join('\n')}
+ ${compactBindingMethods.join('\n')}
  ${gameOutputFields.join('\n')}
  ${gameOutputMethods.join('\n')}
  ${session.join('\n')}
@@ -114,7 +129,7 @@ internal static partial class Program {
  private void CloseReportChain1410Safely(string r){Fixture.Events.Add("report-chain-close");}
  private void ArmReportChain1410Safely(CommandEnvelope e){} private void ResetBackendSubmitStats(){} private string ComposeBackendSubmitStatsDetail()=>"fake-stats";
  private bool TrySubmitNeutral(out string d,CommandEnvelope? e=null,string reason="release-local"){Fixture.Events.Add("neutral");d="fake-neutral";if(Fixture.NeutralThrows)throw new IOException(d);return !Fixture.NeutralFails;}
- private bool TrySubmitFrame(CommandEnvelope e,out string d){Fixture.Events.Add("frame");d="fake-frame";return !Fixture.FrameFails;}
+ private bool TrySubmitFrame(CommandEnvelope e,out string d){${frameEvent}${frameTerminal}d="fake-frame";return !Fixture.FrameFails;}
  private string Error(CommandEnvelope? e,string s,string d,string? releaseDisposition=null)=>SerializeResponse(e,false,s,d,null,releaseDisposition);
  private string HandleHidHideCommand(CommandEnvelope e,out bool shutdown){shutdown=false;Fixture.Events.Add(e.Command);return Ack(e,"fake-hidhide");}
  private string HandleCloseRefreshBegin(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-begin");}
@@ -140,14 +155,27 @@ if(options.includePsOwnershipSupport && text.includes('private readonly PsEndpoi
  receipt.push({name:'PsEndpointOwnership',file,sha256:sha(helper),substitution:'Actual helper body with equivalent namespace block. CM terminal deliberately unavailable; no SDK metadata/instance ownership forged. Detailed ownership/CM behavior is covered by its dedicated real-helper/Host and full-pipe consumers.'});
 }
 
-if (fixtureOnly) return { fake, receipt };
+// Virtual-signal diagnostics are optional IO, like the other inert observers.
+// Do not import their output writer or fabricate diagnostic evidence offline.
+if (text.includes('ResetVirtualSignalEvidenceSafely(')) {
+ const sessionAnchor='private sealed partial class HostSession {';
+ if(fake.split(sessionAnchor).length!==2)throw Error('Virtual signal no-op anchor drift');
+ fake=fake.replace(sessionAnchor,sessionAnchor+'\n private void ResetVirtualSignalEvidenceSafely(){}\n');
+ receipt.push({name:'ResetVirtualSignalEvidenceSafely',file:source,substitution:'Explicit inert optional diagnostic reset; no signal files or product evidence emitted.'});
+}
+if(text.includes('YeManInputHost.UsbipMaintenanceGate.TryEnter(')) {
+ // External maintenance ownership/registry IO is explicitly unavailable here.
+ fake+='\nnamespace YeManInputHost { internal static class UsbipMaintenanceGate { internal static IDisposable TryEnter(bool required)=>new Lease(); private sealed class Lease:IDisposable { public void Dispose(){} } } }\nnamespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending=>false; } }\n';
+ receipt.push({name:'UsbipMaintenanceGate/UsbipMaintenanceState',file:source,substitution:'Inert external maintenance/registry terminal: scope admitted, no actual mutex, pending registry state, or driver IO. The actual TryPrepare body still creates and retains its dummy SDK controller.'});
+}
+if (fixtureOnly) return { fake, receipt, sourceSha256:sha(text), substitutions:compactSubstitutions };
 const fakeDir = path.join(out, 'fake'); fs.mkdirSync(fakeDir, { recursive: true });
 fs.writeFileSync(path.join(fakeDir, 'ExtractedHost.cs'), fake);
 const esc = s => s.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 // Keep standalone execution on the original assertion set; the compatibility
 // declarations are the same inert shims used by the current lifecycle suite.
 fs.writeFileSync(path.join(fakeDir,'LegacyTest.cs'), fs.readFileSync(path.join(repo,'tools/msi_steamdeck_release_fence_1726_selftest.cs'),'utf8').replace('internal static class Fixture','internal static partial class Fixture'));
-const includes = ['MsiSteamDeckReleaseFence1726.cs', 'MsiVirtualReportChain1410.cs', 'CanonicalFrameFingerprintMemo.cs', 'HostResponseFields.cs'].map(n => path.join(host, n)).concat(path.join(fakeDir,'LegacyTest.cs'),path.join(repo,'tools/inputhost_lifecycle_selftest.cs'));
+const includes = ['MsiSteamDeckReleaseFence1726.cs', 'MsiVirtualReportChain1410.cs', 'CanonicalFrameFingerprintMemo.cs', 'HostResponseFields.cs', ...(hasCompactBinding ? ['CompactFrameReplyBinding.cs'] : [])].map(n => path.join(host, n)).concat(path.join(fakeDir,'LegacyTest.cs'),path.join(repo,'tools/inputhost_lifecycle_selftest.cs'));
 fs.writeFileSync(path.join(fakeDir, 'Fake.csproj'), `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NuGetAudit>false</NuGetAudit></PropertyGroup><ItemGroup><Compile Include="ExtractedHost.cs"/>${includes.map(p => `<Compile Include="${esc(p)}"/>`).join('')}</ItemGroup></Project>`);
 const hostDir = path.join(out, 'build'); fs.mkdirSync(hostDir, { recursive: true });
 function csFiles(dir) { return fs.readdirSync(dir,{withFileTypes:true}).flatMap(e => e.isDirectory() ? ['obj','bin'].includes(e.name) ? [] : csFiles(path.join(dir,e.name)) : e.name.endsWith('.cs') ? [path.join(dir,e.name)] : []); }

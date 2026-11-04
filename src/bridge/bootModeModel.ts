@@ -1,11 +1,12 @@
 /** Boot scenes are complete global presets. Game-specific records are never stored here. */
+import { retireBootControllerSnapshots } from './bootModeSharedShortcuts';
 import { screenTouchpadDefaults } from './screenTouchpadDefaults';
 const XBOX_DEFAULTS_VERSION = 1;
 const AUDIO_DEFAULTS_VERSION = 1;
 const CONTROLLER_DEFAULTS_VERSION = 2;
 export const BOOT_MODE_IDS = ['global', 'xbox', 'steam', 'xbox-steam'] as const;
 export type BootModeId = typeof BOOT_MODE_IDS[number];
-export const BOOT_MODE_MODULES = ['performance', 'fan', 'charge', 'input', 'gyro', 'controller', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background', 'sleep'] as const;
+export const BOOT_MODE_MODULES = ['performance', 'fan', 'charge', 'input', 'gyro', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background', 'sleep'] as const;
 export type BootModeModule = typeof BOOT_MODE_MODULES[number];
 export type BootValue = null | boolean | number | string | BootValue[] | {
     [key: string]: BootValue;
@@ -34,7 +35,6 @@ export interface BootModeDocument {
     activeSnapshot: BootModeSnapshot;
     scenes: Record<Exclude<BootModeId, 'global'>, BootModeScene>;
     presets: Partial<Record<BootModeId, Record<string, BootModeScene>>>;
-    controllerTemplates: Record<string, BootConfig>;
 }
 export interface BootStartupResult {
     schema: 1;
@@ -76,7 +76,6 @@ export const BOOT_MODE_CATEGORIES = [
     { id: 'performance', label: '性能与散热', icon: 'gauge', modules: ['performance', 'fan', 'charge'] },
     { id: 'optimization', label: '优化软件', icon: 'rocket', modules: ['audioOptimization', 'frameGeneration', 'softwareLaunch'] },
     { id: 'input', label: '手柄与陀螺仪', icon: 'gamepad', modules: ['input', 'gyro'] },
-    { id: 'controller', label: '手柄自定义', icon: 'gamepad', modules: ['controller'] },
     { id: 'touch', label: '触摸板与屏幕按键', icon: 'fullscreen', modules: ['touch'] },
     { id: 'steam', label: 'Steam 大屏', icon: 'steam', modules: ['steamAppearance', 'steamWallpaper', 'steamDecky'] },
     { id: 'sleep', label: '睡眠优化', icon: 'sleep', modules: ['sleep'] },
@@ -120,6 +119,90 @@ function overrides(value: unknown): Partial<BootModeSnapshot> {
                 out[id] = normalizeBootConfig(value[id]);
     return out;
 }
+// Stored modules are partial intent, so missing fields stay missing. Reject
+// malformed known fields before they reach Vue or a startup writer; never turn
+// a corrupt object into fabricated OFF/default settings and persist it.
+type BootShape = ((value: unknown) => boolean) | { [key: string]: BootShape };
+const flag = (v: unknown) => v === null || typeof v === 'boolean';
+const numeric = (v: unknown) => v === null || typeof v === 'number' && Number.isFinite(v);
+const string = (v: unknown) => v === null || typeof v === 'string';
+const choice = (...values: (string | number)[]) => (v: unknown) => v === null || values.includes(v as string | number);
+const strings = (v: unknown) => Array.isArray(v) && v.every(item => typeof item === 'string');
+const nullableRecord = (v: unknown) => v === null || object(v);
+const core = choice('bigFirst', 'bigOnly', 'littleFirst', 'littleOnly');
+const bank: BootShape = { mode: choice('auto', 'manual'), tdp: numeric, tdpCeiling: numeric,
+    auto: { bias: numeric, saving: choice('none', 'small', 'medium', 'large', 'aggressive'), coreSplit: numeric, coreLow: core, coreHigh: core },
+    manual: { frequencyMHz: numeric, unlimited: flag, aggressiveness: numeric, turbo: flag, coreMode: core } };
+const controls: BootShape = { ac: bank, dc: bank };
+const motion: BootShape = { enabled: flag, virtualPadLink: flag, preset: choice('fps', 'racing', 'custom', 'steam'),
+    motionMode: choice('on', 'off', 'toggle', 'suppress'), motionTrigger: string, outputStick: choice('left', 'right'), outputAxis: choice('xy', 'x', 'y'),
+    presets: { '*': nullableRecord }, calibration: nullableRecord };
+const touchProfile: BootShape = { masterEnabled: flag, enabled: flag, specialEnabled: flag, rearEnabled: flag, summonEnabled: flag,
+    specialMask: numeric, rearMask: numeric, layout: choice('off', 'single', 'dual'), standaloneSpecialMode: choice('off', 'steamdeck', 'ps5'),
+    transparency: numeric, mouseSensitivity: numeric, scale: numeric, autoHideSeconds: numeric };
+const monitorPanel: BootShape = { position: numeric, scale: numeric };
+const moduleShapes: Record<BootModeModule, BootShape> = {
+    performance: { powerSchemes: { ac: choice('yeman', 'besteff', 'bal', 'bestperf'), dc: choice('yeman', 'besteff', 'bal', 'bestperf') }, controls, schedule: { configured: flag, enabled: flag, controls }, frames: { ac: { fps: numeric, lastFps: numeric, ceiling: numeric }, dc: { fps: numeric, lastFps: numeric, ceiling: numeric } } },
+    fan: { enabled: flag, preset: choice('soft', 'balanced', 'aggressive') }, charge: { enabled: flag, limit: numeric },
+    input: { persona: v => typeof v === 'string' && ['disabled', 'elite', 'steamdeck', 'dualsense-edge'].includes(v), mouse: choice('off', 'microsoft', 'joyxoff', 'steamdeck'),
+        outputTarget: { persona: choice('disabled', 'elite', 'steamdeck', 'dualsense-edge'), buttonMappingEnabled: flag, gyroEnabled: flag },
+        ownership: { externalControllerPriority: flag } },
+    gyro: { motion }, touch: { profiles: { '*': touchProfile } },
+    audioOptimization: { enabled: flag }, frameGeneration: { enabled: flag },
+    softwareLaunch: { paths: strings, timing: choice('scene', 'steam', 'manual'), delay: numeric },
+    steamAppearance: { states: { '*': flag } }, steamWallpaper: { enabled: flag, download: flag, cpuThreshold: numeric }, steamDecky: { enabled: flag },
+    monitor: { preferences: { enabled: flag, ymccEnabled: flag, rtssEnabled: flag, ymccTemplate: choice('A', 'B'), ymcc: monitorPanel, templates: { '*': monitorPanel } } },
+    display: { brightness: numeric, resolution: string, hz: v => string(v) || numeric(v) }, background: { ui: { theme: string, backgroundOpacity: numeric, backgroundBlur: numeric, dynamicBackgroundEnabled: flag } },
+    sleep: { config: { mode: choice('off', 'custom'), enabled: flag, pauseGameOnSleep: flag, retryOnEntryFailure: flag, retryOnSleepTimeout: flag, retryOnNonUserWake: flag, wakePasswordEnabled: flag, sleepPowerPlanOptimizationEnabled: flag },
+        acButton: numeric, dcButton: numeric, hibernate: flag, hibernateSize: numeric, timeouts: v => v === null || object(v) && Object.values(v).every(numeric), steamAutoRecovery: flag },
+};
+function assertBootShape(value: unknown, shape: BootShape, path: string): void {
+    if (typeof shape === 'function') { if (shape(value)) return; }
+    else if (object(value)) {
+        for (const [key, child] of Object.entries(value)) {
+            if (['__proto__', 'prototype', 'constructor'].includes(key)) continue;
+            const rule = Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] : shape['*'];
+            if (rule) assertBootShape(child, rule, path + '.' + key);
+        }
+        return;
+    }
+    throw new Error('开机模式数据格式异常：' + path + '。原配置已保留，请修复该字段或恢复备份后重新读取。');
+}
+function assertBootSnapshot(value: unknown, path: string): void {
+    if (!object(value)) throw new Error('开机模式数据格式异常：' + path + '。原配置已保留。');
+    for (const module of BOOT_MODE_MODULES)
+        if (Object.prototype.hasOwnProperty.call(value, module)) assertBootShape(value[module], moduleShapes[module], path + '.' + module);
+}
+function assertStoredBootDocument(raw: Record<string, unknown>): void {
+    for (const key of ['current', 'boot']) if (raw[key] !== undefined && !isBootModeId(raw[key])) throw new Error('开机模式标识无效：' + key);
+    if (raw.bootEnabled !== undefined && typeof raw.bootEnabled !== 'boolean') throw new Error('开机模式开关格式无效');
+    if (raw.revision !== undefined && (!Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0)) throw new Error('开机模式版本号无效');
+    for (const key of ['global', 'activeSnapshot']) if (raw[key] !== undefined) assertBootSnapshot(raw[key], key);
+    if (raw.scenes !== undefined) {
+        assertBootShape(raw.scenes, {}, 'scenes');
+        for (const id of ['xbox', 'steam', 'xbox-steam']) {
+            const scene = (raw.scenes as Record<string, unknown>)[id];
+            if (scene === undefined) continue;
+            assertBootShape(scene, {}, 'scenes.' + id);
+            for (const key of ['overrides', 'rememberedOverrides']) if ((scene as Record<string, unknown>)[key] !== undefined)
+                assertBootSnapshot((scene as Record<string, unknown>)[key], 'scenes.' + id + '.' + key);
+        }
+    }
+    if (raw.presets !== undefined) {
+        assertBootShape(raw.presets, {}, 'presets');
+        for (const id of BOOT_MODE_IDS) {
+            const presets = (raw.presets as Record<string, unknown>)[id];
+            if (presets === undefined) continue;
+            assertBootShape(presets, {}, 'presets.' + id);
+            for (const [name, entry] of Object.entries(presets as Record<string, unknown>).slice(0, 30)) {
+                if (['__proto__', 'prototype', 'constructor'].includes(name)) continue;
+                assertBootShape(entry, {}, 'presets.' + id + '.' + name);
+                if ((entry as Record<string, unknown>).overrides !== undefined)
+                    assertBootSnapshot((entry as Record<string, unknown>).overrides, 'presets.' + id + '.' + name);
+            }
+        }
+    }
+}
 function sameFactoryValue(a: unknown, b: unknown): boolean {
     if (a === b) return true;
     if (Array.isArray(a) || Array.isArray(b))
@@ -134,7 +217,9 @@ function steamRecommendedScene(): BootModeScene {
     } };
 }
 export function createBootModeDocument(baseline: BootModeSnapshot): BootModeDocument {
-    const global = cloneBootValue(baseline);
+    assertBootSnapshot(baseline, 'baseline');
+    const global = cloneBootValue(baseline), activeSnapshot = cloneBootValue(baseline);
+    retireBootControllerSnapshots({ global, activeSnapshot });
     global.input = { ...global.input, persona: 'disabled',
         outputTarget: { ...normalizeBootConfig(global.input.outputTarget), persona: 'disabled', buttonMappingEnabled: false },
         ...(global.input.mouse === 'steamdeck' ? { mouse: 'off' } : {}) };
@@ -143,12 +228,14 @@ export function createBootModeDocument(baseline: BootModeSnapshot): BootModeDocu
     xbox.overrides.audioOptimization = { enabled: false };
     combined.overrides.audioOptimization = { enabled: true };
     steam.overrides.audioOptimization = { enabled: true };
-    return { schema: 1, xboxDefaultsVersion: XBOX_DEFAULTS_VERSION, controllerDefaultsVersion: CONTROLLER_DEFAULTS_VERSION, audioDefaultsVersion: AUDIO_DEFAULTS_VERSION, revision: 0, current: 'global', boot: 'global', bootEnabled: false, global, activeSnapshot: cloneBootValue(baseline), scenes: { xbox, steam, 'xbox-steam': combined }, presets: {}, controllerTemplates: {} };
+    return { schema: 1, xboxDefaultsVersion: XBOX_DEFAULTS_VERSION, controllerDefaultsVersion: CONTROLLER_DEFAULTS_VERSION, audioDefaultsVersion: AUDIO_DEFAULTS_VERSION, revision: 0, current: 'global', boot: 'global', bootEnabled: false, global, activeSnapshot, scenes: { xbox, steam, 'xbox-steam': combined }, presets: {} };
 }
 export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapshot): BootModeDocument {
+    if (object(raw) && raw.schema !== undefined && raw.schema !== 1)
+        throw new Error('开机模式配置版本不受支持，原配置已保留，请使用兼容版本。');
+    if (object(raw) && raw.schema === 1) assertStoredBootDocument(raw);
     const out = createBootModeDocument(baseline);
-    if (!object(raw) || raw.schema !== 1)
-        return out;
+    if (!object(raw) || raw.schema !== 1) return out;
     // Fill inherited legacy Xbox modules once. Explicit edited modules stay
     // authoritative; the version also preserves a later choice to follow global.
     const legacyXboxDefaults = !Number.isSafeInteger(raw.xboxDefaultsVersion) || Number(raw.xboxDefaultsVersion) < XBOX_DEFAULTS_VERSION;
@@ -217,10 +304,6 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
             }
             out.presets[id] = presets;
         }
-    if (object(raw.controllerTemplates))
-        for (const [name, value] of Object.entries(raw.controllerTemplates).slice(0, 30))
-            if (name.trim() && !['__proto__', 'constructor', 'prototype'].includes(name))
-                out.controllerTemplates[name.slice(0, 60)] = normalizeBootConfig(value);
     const active = overrides(raw.activeSnapshot);
     // Requested mode defaults are not proof of an applied runtime. Missing
     // legacy receipt fields fall back to the observed baseline, so saving or
@@ -228,6 +311,7 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     out.activeSnapshot = cloneBootValue(baseline);
     for (const [module, value] of Object.entries(active))
         out.activeSnapshot[module as BootModeModule] = mergeBootConfig(baseline[module as BootModeModule], value);
+    retireBootControllerSnapshots(out);
     return out;
 }
 /** Fill missing fields from the global baseline; arrays remain complete snapshots. */
@@ -242,6 +326,7 @@ export function mergeBootConfig(baseline: BootConfig, override: BootConfig): Boo
     return result;
 }
 export function resolveBootMode(document: BootModeDocument, id: BootModeId): BootModeSnapshot {
+    if (!isBootModeId(id)) throw new Error('开机模式标识无效');
     const snapshot = cloneBootValue(document.global);
     if (id !== 'global')
         for (const module of BOOT_MODE_MODULES) {
@@ -249,10 +334,11 @@ export function resolveBootMode(document: BootModeDocument, id: BootModeId): Boo
             if (value)
                 snapshot[module] = mergeBootConfig(snapshot[module], value);
         }
+    retireBootControllerSnapshots({ global: snapshot });
     return snapshot;
 }
 export function setBootModeModuleScope(document: BootModeDocument, id: BootModeId, module: BootModeModule, own: boolean): void {
-    if (id === 'global')
+    if (id === 'global' || !BOOT_MODE_MODULES.includes(module))
         return;
     if (own) {
         if (!document.scenes[id].overrides[module])

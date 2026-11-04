@@ -3,12 +3,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {task} from './fixtures/decky_task_paths.mjs';
-import {createOriginalLosslessMemoryOwner} from './fixtures/decky_lossless_memory_owner.mjs';
-import {createMirrorHostFixture} from './fixtures/decky_mirror_host_fixture.mjs';
+// Register callbacks before fixture imports so invalid exact selections have no side effects.
 const gamePath='C:\\Games\\Game.exe',target={pid:101,processCreated:'123456789',path:gamePath};
-const results=[],flush=async()=>{for(let i=0;i<400;i++)await Promise.resolve();};
-async function check(name,run){await run();results.push(name);}
+const results=[],registered=[],flush=async()=>{for(let i=0;i<400;i++)await Promise.resolve();};
+async function check(name,run){registered.push({name,run});}
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
 function assertInert(f){const s=f.stats();assert.equal(s.realFilesWritten,0);assert.equal(s.realProcessesStarted,0);assert.equal(s.physicalHardwareWrites,0);}
 await check('Xbox UIA unavailable: original owner does not falsely confirm scaling when UIA is unavailable',async()=>{
@@ -94,10 +92,18 @@ await check('production host drops previous game and power-stage cached display 
  for(const transition of ['game','power']){
   const pending=deferred();let hold=false;const host=await hostFixture({readHooks:{lossless:async()=>{if(hold)await pending.promise;}}});
   try{
-   Object.assign(host.state.lossless,{configuredEnabled:true,running:true,enabled:null,controlAvailable:true});await host.read();hold=true;
+   Object.assign(host.state.lossless,{configuredEnabled:true,running:true,enabled:null,controlAvailable:true});const initial=await host.read();hold=true;
    if(transition==='game'){host.state.game={...host.state.game,pid:102,processCreated:'new',path:'C:/Games/Other.exe'};host.gameChanged();}
    else{host.state.power.phase='suspending';host.state.power.hardwareWritesAllowed=false;host.powerChanged(true);}
-   const snapshot=await host.read();assert.equal(snapshot.game.fields.losslessScaling.value,'unknown');assert.equal(snapshot.game.fields.losslessScaling.supported,false);
+   const snapshot=await host.read();assert.equal(snapshot.game.fields.losslessScaling.value,'unknown');
+   if(transition==='game')assert.equal(snapshot.game.fields.losslessScaling.supported,false);
+   else{
+    // Native-not-ready retains same-game display, never write admissions.
+    assert.equal(snapshot.ready,false);assert.equal(snapshot.actions.game,false);
+    const denied=await host.set('off',initial);assert.equal(denied.ok,false);
+    assert.match(denied.error,/状态已变化|状态正在恢复/);
+    assert.equal(snapshot.gameAdmission,undefined);assert.equal(snapshot.controlAdmission,undefined);
+   }
   }finally{pending.resolve();host.stop();await flush();}
  }
 });
@@ -136,5 +142,114 @@ await check('host retains the running instance when foreground changes after the
  const owner=createOriginalLosslessMemoryOwner();owner.failActivations(1,false,'target-not-foreground');const host=await hostFixture({losslessOwner:owner});
  try{const before=await host.read();const result=await host.set('on',before);assert.equal(result.result.applied,false);assert.equal(result.result.pending,false);assert.equal(owner.stats().running,true);assert.equal(owner.stats().events.filter(e=>e==='original-timeout-reset').length,0);assert.equal(owner.stats().events.filter(e=>e==='original-launch').length,1);assert.equal((await host.read()).game.fields.losslessScaling.supported,true);assertInert(owner);}finally{host.stop();}
 });
-fs.writeFileSync(path.join(task,'validation/lossless-contract-selftest.json'),JSON.stringify({cases:results.length,results,productionHostAndOwnerExecuted:true,realFilesWritten:0,realProcessesStarted:0,hardwareWrites:0},null,2));
+
+await check('open close open uses actual receipts and preserves the existing game parameters',async()=>{
+ const f=createOriginalLosslessMemoryOwner(),original=f.readMemoryXml();
+ const on=await f.owner.setLosslessScalingEnabled(gamePath,true,()=>{},target);assert.equal(on.confirmed,true);
+ assert.equal((await f.owner.getLosslessGameState(gamePath)).enabled,true);
+ const off=await f.owner.setLosslessScalingEnabled(gamePath,false,()=>{},target);assert.equal(off.confirmed,true);
+ assert.equal(f.stats().profilePresent,true);assert.equal(f.stats().profileEnabled,false);
+ assert.equal(f.readMemoryXml(),original.replace('<AutoScale>true</AutoScale>','<AutoScale>false</AutoScale>'));
+ const reopened=await f.owner.setLosslessScalingEnabled(gamePath,true,()=>{},target);assert.equal(reopened.confirmed,true);
+ assert.equal(f.readMemoryXml(),original);assertInert(f);
+});
+await check('remove active owned EXE after normal exit even when UIAutomation becomes unreadable',async()=>{
+ const f=createOriginalLosslessMemoryOwner();await f.owner.setLosslessScalingEnabled(gamePath,true,()=>{},target);f.setUiReadable(false);
+ const result=await f.owner.removeLosslessGameProfile(gamePath,()=>{},target);assert.equal(result.confirmed,true);
+ assert.match(result.notice,/已解除/);assert.equal(f.stats().running,false);assert.equal(f.stats().profilePresent,false);
+ assert.equal(f.stats().events.filter(e=>e==='original-normal-close').length,1);
+ assert.match(f.readMemoryXml(),/<Unknown>retained<\/Unknown>/);assertInert(f);
+});
+await check('remove disabled EXE preserves the foreign game default and every unrelated byte',async()=>{
+ const other='<Profile><Title>Other</Title><Path>D:/Other/Other.exe</Path><AutoScale>true</AutoScale><Custom>retain</Custom></Profile>';
+ const current='<Profile><Title>Game</Title><Path>C:/Games/Game.exe</Path><AutoScale>false</AutoScale><Custom>7</Custom></Profile>';
+ const xml='<Settings><Unknown>retained</Unknown><GameProfiles>'+current+other+'</GameProfiles></Settings>';
+ const f=createOriginalLosslessMemoryOwner({settingsXml:xml});
+ const result=await f.owner.removeLosslessGameProfile(gamePath,()=>{},target);assert.equal(result.confirmed,true);
+ assert.equal(f.readMemoryXml(),xml.replace(current,''));assert.equal(f.stats().events.length,0);assertInert(f);
+});
+await check('already unbound is idempotent and does not close a foreign running instance',async()=>{
+ const f=createOriginalLosslessMemoryOwner({withProfile:false,initialRunning:true,uiReadable:false}),original=f.readMemoryXml();
+ const result=await f.owner.removeLosslessGameProfile(gamePath);assert.equal(result.confirmed,true);
+ assert.equal(f.stats().running,true);assert.equal(f.stats().events.length,0);assert.equal(f.readMemoryXml(),original);assertInert(f);
+});
+await check('remove refuses foreign scaling and unowned unreadable sessions without profile writes',async()=>{
+ for(const uiReadable of [true,false]){
+  const f=createOriginalLosslessMemoryOwner({initialRunning:true,uiReadable});
+  if(uiReadable)f.setObservedRuntime({button:'取消缩放',title:'Unrelated'});
+  const original=f.readMemoryXml();await assert.rejects(f.owner.removeLosslessGameProfile(gamePath),/未确认|未关闭|另一 EXE|暂不可读/);
+  assert.equal(f.stats().running,true);assert.equal(f.stats().memoryProfileWrites,0);assert.equal(f.readMemoryXml(),original);assertInert(f);
+ }
+});
+await check('normal close refusal prevents removal and releases queue for a later explicit retry',async()=>{
+ const f=createOriginalLosslessMemoryOwner();await f.owner.setLosslessScalingEnabled(gamePath,true);f.setCloseDenied(true);
+ const original=f.readMemoryXml();await assert.rejects(f.owner.removeLosslessGameProfile(gamePath),/normal close refused/);
+ assert.equal(f.readMemoryXml(),original);assert.equal(f.stats().running,true);f.setCloseDenied(false);
+ assert.equal((await f.owner.removeLosslessGameProfile(gamePath)).confirmed,true);assertInert(f);
+});
+await check('duplicate unbind requests join one action and later ON recreates only an explicit binding',async()=>{
+ const f=createOriginalLosslessMemoryOwner();const a=f.owner.removeLosslessGameProfile(gamePath),b=f.owner.removeLosslessGameProfile(gamePath);
+ assert.equal(a,b);assert.equal((await a).confirmed,true);assert.equal(f.stats().memoryProfileWrites,1);
+ assert.equal((await f.owner.setLosslessScalingEnabled(gamePath,true,()=>{},target)).confirmed,true);
+ assert.equal(f.stats().profilePresent,true);assert.equal(f.stats().profileEnabled,true);assertInert(f);
+});
+await check('newer user intent supersedes an unstarted removal and target revocation cannot remove a profile',async()=>{
+ const f=createOriginalLosslessMemoryOwner();const removal=f.owner.removeLosslessGameProfile(gamePath);
+ const refused=assert.rejects(removal,/较新的/),on=f.owner.setLosslessScalingEnabled(gamePath,true,()=>{},target);
+ await refused;assert.equal((await on).confirmed,true);assert.equal(f.stats().profilePresent,true);
+ const before=f.readMemoryXml();await assert.rejects(f.owner.removeLosslessGameProfile(gamePath,()=>{throw Error('GAME_CHANGED');}),/GAME_CHANGED/);
+ assert.equal(f.readMemoryXml(),before);assert.equal(f.stats().running,true);assertInert(f);
+});
+await check('production host converges open close and removal observations through the original owner',async()=>{
+ const owner=createOriginalLosslessMemoryOwner(),host=await hostFixture({losslessOwner:owner});
+ try{
+  let snapshot=await host.read();assert.equal(snapshot.game.fields.losslessScaling.nextValue,'on');
+  assert.equal((await host.set('on',snapshot)).result.applied,true);snapshot=await host.read();
+  assert.equal(snapshot.game.fields.losslessScaling.value,'on');assert.equal(snapshot.game.fields.losslessScaling.nextValue,'off');
+  assert.equal((await host.set('off',snapshot)).result.applied,true);snapshot=await host.read();
+  assert.equal(snapshot.game.fields.losslessScaling.nextValue,'on');assert.equal(owner.stats().profilePresent,true);
+  await owner.owner.removeLosslessGameProfile(gamePath);snapshot=await host.read();
+  assert.equal(snapshot.game.fields.losslessScaling.nextValue,'on');assert.equal(owner.stats().profilePresent,false);
+  assert.equal(snapshot.game.fields.losslessScaling.supported,true);assertInert(owner);
+ }finally{host.stop();}
+});
+
+await check('actual Y-panel buttons open close remove and reopen using the shared original owner',async()=>{
+ const owner=createOriginalLosslessMemoryOwner(),game={...target,name:'Game'},ui=createLosslessTopActions(owner,game);
+ try{
+  await ui.refresh();let toggle=ui.find('lossless-scaling'),remove=ui.find('lossless-remove');
+  assert.equal(toggle.props['data-gp-col'],'0');assert.equal(remove.props['data-gp-col'],'1');
+  assert.equal(ui.text(toggle).startsWith('一键开启小黄鸭'),true);assert.equal(toggle.props.disabled,false);
+  assert.equal(ui.navigate('lossless-scaling',1),'trainer-menu');assert.equal(ui.navigate('lossless-remove',1),'speed-factor');
+  assert.equal(ui.navigate('trainer-menu',-1),'lossless-scaling');assert.equal(ui.navigate('speed-factor',-1),'lossless-remove');
+  const starting=toggle.props.onClick();assert.equal(ui.find('lossless-scaling').props.disabled,true);
+  await toggle.props.onClick();await starting;await ui.refresh();toggle=ui.find('lossless-scaling');
+  assert.equal(owner.stats().events.filter(e=>e==='original-launch').length,1);
+  assert.equal(owner.stats().running,true);assert.equal(ui.text(toggle).startsWith('一键关闭小黄鸭'),true);
+  await toggle.props.onClick();await ui.refresh();assert.equal(owner.stats().running,false);assert.equal(owner.stats().profilePresent,true);
+  remove=ui.find('lossless-remove');assert.equal(remove.props.disabled,false);await remove.props.onClick();await ui.refresh();
+  assert.equal(owner.stats().profilePresent,false);assert.equal(ui.find('lossless-remove').props.disabled,true);
+  toggle=ui.find('lossless-scaling');assert.equal(toggle.props.disabled,false);await toggle.props.onClick();await ui.refresh();
+  assert.equal(owner.stats().running,true);assert.equal(owner.stats().profilePresent,true);assert.equal(ui.events.filter(e=>e[0]==='status'&&e[1].error).length,0);
+  ui.raw.policyGame.value=null;const count=owner.stats().events.length;
+  assert.equal(ui.find('lossless-scaling').props.disabled,true);assert.equal(ui.find('lossless-remove').props.disabled,true);
+  await ui.find('lossless-scaling').props.onClick();await ui.find('lossless-remove').props.onClick();assert.equal(owner.stats().events.length,count);assertInert(owner);
+ }finally{ui.stop();}
+});
+const requested=[],args=process.argv.slice(2);
+for(let i=0;i<args.length;i+=2){
+ if(args[i]!=='--case'||!args[i+1]||args[i+1].startsWith('--')){console.error('Expected --case <exact original case name>');process.exit(2);}
+ requested.push(args[i+1]);
+}
+if(new Set(requested).size!==requested.length||requested.some(name=>!registered.some(test=>test.name===name))){
+ console.error('Unknown or duplicate exact Lossless case');process.exit(2);
+}
+const selected=requested.length?registered.filter(test=>requested.includes(test.name)):registered;
+const {task}=await import('./fixtures/decky_task_paths.mjs');
+const {createOriginalLosslessMemoryOwner,createLosslessTopActions}=await import('./fixtures/decky_lossless_memory_owner.mjs');
+const {createMirrorHostFixture}=await import('./fixtures/decky_mirror_host_fixture.mjs');
+for(const {name,run} of selected){await run();results.push(name);}
+fs.writeFileSync(path.join(task,'validation/lossless-contract-selftest.json'),JSON.stringify({cases:results.length,results,
+ selectedCases:selected.map(test=>test.name),skippedCases:registered.filter(test=>!selected.includes(test)).map(test=>test.name),
+ fullSuite:selected.length===registered.length,productionHostAndOwnerExecuted:true,realFilesWritten:0,realProcessesStarted:0,hardwareWrites:0},null,2));
 console.log('Decky Lossless contract PASS '+results.length);

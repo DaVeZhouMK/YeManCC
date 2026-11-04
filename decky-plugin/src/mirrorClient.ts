@@ -3,7 +3,7 @@ import {validPerformanceMirror,performancePatchAllowed,type PerformanceMirrorVie
 // No unauthenticated localhost discovery, persisted credentials or polling.
 import { validSteamObservation, type SteamRunningObservation } from './steamRunningContext';
 export interface Choice { data: string; label: string; disabled?: boolean; }
-export interface MirrorField { displayLabel?: string; value: string; choices: Choice[]; supported: boolean; inherited?: boolean; sourceRevision?:string; }
+export interface MirrorField { displayLabel?: string; value: string; choices: Choice[]; supported: boolean; inherited?: boolean; sourceRevision?:string; nextValue?:'on'|'off'; }
 export type MirrorCommand = 'audioOptimization.setEnabled' | 'game.setField' | 'fan.setEnabled' | 'fan.setPreset' | 'fan.setChoice' | 'frame.setField' | 'touchpad.setField' | 'global.setField' | 'monitor.setEnabled' | 'performance.setControls';
 import type {LosslessProgramState} from '../../src/bridge/losslessProgramState';
 export interface MirrorFrameSetting {fps:number;ceiling:number;lastFps:number;}
@@ -29,7 +29,7 @@ export interface MirrorSnapshot {
   actions?: { audioOptimization?:boolean; fan:boolean; game:boolean; frames?:boolean; touchpads?:boolean; global?:boolean; monitor?:boolean; performance?:boolean };
   steam?:SteamRunningObservation;
 }
-export interface Bootstrap { endpoint: string; token: string; runId: string; hudProtocol?: number; wallpaperProtocol?: number; wallpaperPrefetchProtocol?: number; updaterProtocol?:number; frontendBuildId?: string; }
+export interface Bootstrap { revoked?: boolean; endpoint: string; token: string; runId: string; hudProtocol?: number; wallpaperProtocol?: number; wallpaperPrefetchProtocol?: number; updaterProtocol?:number; frontendBuildId?: string; }
 export interface ConnectionTestResult { pid:number;revision:number;elapsedMs:number; }
 export interface ClientState { connected: boolean; snapshot: MirrorSnapshot | null; notice: string; busy: boolean; connectionTest?:{pending:boolean;notice:string;elapsedMs?:number}; }
 export interface ClientDeps {
@@ -51,7 +51,7 @@ function validSnapshot(value: any, runId: string): value is MirrorSnapshot {
   if (value.game !== null) {
     if (!value.game || typeof value.game.label !== 'string' || typeof value.game.identity !== 'string' || !value.game.fields || typeof value.game.fields !== 'object' || Array.isArray(value.game.fields)) return false;
     const fields = Object.values(value.game.fields) as any[];
-    if (fields.length > 16 || !fields.every(field => field && typeof field.value === 'string' && typeof field.supported === 'boolean' && (field.inherited === undefined || typeof field.inherited === 'boolean') && (field.sourceRevision===undefined||typeof field.sourceRevision==='string'&&field.sourceRevision.length>0&&field.sourceRevision.length<=128) && validChoices(field.choices))) return false;
+    if (fields.length > 16 || !fields.every(field => field && typeof field.value === 'string' && typeof field.supported === 'boolean' && (field.nextValue===undefined||field.nextValue==='on'||field.nextValue==='off') && (field.inherited === undefined || typeof field.inherited === 'boolean') && (field.sourceRevision===undefined||typeof field.sourceRevision==='string'&&field.sourceRevision.length>0&&field.sourceRevision.length<=128) && validChoices(field.choices))) return false;
   }
   if(value.global!==undefined&&(!value.global||!value.global.fields||typeof value.global.fields!=='object'||Array.isArray(value.global.fields)||Object.keys(value.global.fields).length>8||!Object.values(value.global.fields).every((f:any)=>f&&typeof f.value==='string'&&typeof f.supported==='boolean'&&validChoices(f.choices))))return false;
   if(value.powerSource !== undefined && value.powerSource !== null && !['ac', 'dc'].includes(value.powerSource)) return false;
@@ -85,8 +85,10 @@ export class MirrorClient {
   private binding: Bootstrap | null = null;
   private socket: WebSocket | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
-  private connectDeadline: ReturnType<typeof setTimeout> | null = null;
-  private snapshotDeadline: ReturnType<typeof setTimeout> | null = null;
+  private retryLease: object | null = null;
+  private bootstrapWaiters = new Map<object,{active:boolean;queued:boolean;notify:()=>void;stop:()=>void}>();
+  private connectDeadline: {timer:ReturnType<typeof setTimeout>} | null = null;
+  private snapshotDeadline: {timer:ReturnType<typeof setTimeout>} | null = null;
   private wallpaperDeadline: null | {socket:WebSocket;runId:string;seq:number;appId?:string;timer:ReturnType<typeof setTimeout>} = null;
   private pending: null | { id: string; timer: ReturnType<typeof setTimeout>; resolve: (value: unknown) => void; reject: (error: Error) => void } = null;
   private probe: null | {id:string;started:number;timer:ReturnType<typeof setTimeout>;resolve:(value:ConnectionTestResult)=>void;reject:(error:Error)=>void} = null;
@@ -111,6 +113,44 @@ export class MirrorClient {
     if (connected !== this.state.connected) for (const listener of this.connectionListeners) { try { listener(this.connectionState()); } catch {} }
   }
   subscribeExtra(listener:(message:unknown)=>void){this.extraListeners.add(listener);return()=>{this.extraListeners.delete(listener);};}
+  // Observation-only, one-shot local-binding demand. A feature must still
+  // check its own protocol/OFF state and explicitly acquire passive demand.
+  // All waiters share the connection owner's existing capped retry timer.
+  waitForBootstrap(owner:object,onAvailable:()=>void):()=>void {
+    if(this.disposed||!owner||typeof owner!=='object'||typeof onAvailable!=='function')return()=>{};
+    const prior=this.bootstrapWaiters.get(owner);if(prior)return prior.stop;
+    const waiter={active:true,queued:false,notify:onAvailable,stop:()=>{}};
+    waiter.stop=()=>{
+      if(!waiter.active)return;waiter.active=false;
+      if(this.bootstrapWaiters.get(owner)===waiter)this.bootstrapWaiters.delete(owner);
+      // With a live socket only a local-binding wait can own retry. Without
+      // transport demand its last waiter must also release that single timer.
+      if(!this.bootstrapWaiters.size&&(this.socket||!this.transportWanted()))this.clearRetry();
+    };
+    this.bootstrapWaiters.set(owner,waiter);
+    if(this.retry===null)this.connect();
+    return waiter.stop;
+  }
+  private notifyBootstrapWaiters(raw:Bootstrap|undefined):void {
+    if(raw===undefined||raw===null)return;
+    for(const [owner,waiter]of this.bootstrapWaiters){
+      if(waiter.queued)continue;waiter.queued=true;
+      // Never activate a feature on the reader's stack or hand it a stale
+      // credential. Its callback rereads the actual current native property.
+      void Promise.resolve().then(()=>{
+        if(this.disposed||!waiter.active||this.bootstrapWaiters.get(owner)!==waiter)return;
+        // Availability may be withdrawn before this microtask runs. Preserve
+        // this owner and its spent backoff until a defined native result can
+        // actually be consumed; a stale observation must not strand the HUD.
+        if(this.deps.bootstrap()==null){
+          waiter.queued=false;
+          if(this.retry===null)this.recoverConnection();
+          return;
+        }
+        waiter.stop();try{waiter.notify();}catch{}
+      });
+    }
+  }
   setPassiveVisible(value:boolean){this.setPassiveDemand('hud',value);}
   setPassiveDemand(consumer:string,value:boolean){
     if(consumer==='wallpaper'&&!value)this.clearWallpaperDeadline();
@@ -119,7 +159,7 @@ export class MirrorClient {
     if(this.disposed||value===this.passive)return;
     this.passive=value;
     if(value&&!this.socket&&this.retry===null){this.attempt=0;this.connect();}
-    else if(!this.visible&&!this.passive)this.disconnect('被动显示已关闭');
+    else if(!this.visible&&!this.passive){this.disconnect('被动显示已关闭');if(this.bootstrapWaiters.size)this.recoverConnection();}
   }
   // All passive consumers share the original connection owner/backoff. A send
   // failure invalidates that socket, but never queues/replays the uncertain
@@ -175,8 +215,9 @@ export class MirrorClient {
   }
   updaterSupported(){return this.binding?.updaterProtocol===1;}
   updaterRunId(){return this.binding?.runId;}
-  private wanted(){return this.visible||this.passive;}
-  private passiveRecoveryWanted(){return this.passiveConsumers.has('hud')&&this.binding?.hudProtocol===1||this.passiveConsumers.has('wallpaper')&&this.binding?.wallpaperProtocol===1||this.passiveConsumers.has('updater')&&this.binding?.updaterProtocol===1;}
+  private transportWanted(){return this.visible||this.passive;}
+  private wanted(){return this.transportWanted()||this.bootstrapWaiters.size>0;}
+  private passiveRecoveryWanted(){return this.passiveConsumers.has('connection')||this.passiveConsumers.has('hud')&&this.binding?.hudProtocol===1||this.passiveConsumers.has('wallpaper')&&this.binding?.wallpaperProtocol===1||this.passiveConsumers.has('updater')&&this.binding?.updaterProtocol===1;}
   private now(){return this.deps.now?.()??Date.now();}
   sendHud(command:'hud.status'|'hud.ack',status:unknown,ok?:boolean):boolean {
     if(command!=='hud.status'&&command!=='hud.ack')return false;
@@ -193,12 +234,18 @@ export class MirrorClient {
     this.visible = visible;
     if(!visible)this.finishProbe(undefined,'侧栏已隐藏');
     if (visible) { this.attempt = 0; if(this.socket&&this.state.connected&&this.binding)this.requestSnapshot(this.socket,this.binding.runId);else this.connect(); }
-    else if(!this.passive)this.disconnect('侧栏已隐藏');
+    else if(!this.passive){this.disconnect('侧栏已隐藏');if(this.bootstrapWaiters.size)this.recoverConnection();}
     else {this.pauseSnapshotDemand();this.rejectPending('侧栏已隐藏；不重放未确认操作');this.publish({snapshot:null});}
   }
   bootstrapChanged(): void {
     if (!this.wanted() || this.disposed) return;
     const current = this.deps.bootstrap();
+    this.notifyBootstrapWaiters(current);
+    if(current?.revoked===true){this.disconnect('YMCC 已关闭镜像连接');return;}
+    // An absent native binding carries no new identity. Keep the one queued
+    // retry and its spent backoff, for cold starts and withdrawn sessions alike.
+    // This branch has no live socket; it grants no work without valid identity.
+    if(!current&&this.retry!==null)return;
     const same = !!current && !!this.binding && current.endpoint === this.binding.endpoint &&
       current.runId === this.binding.runId && current.token === this.binding.token && current.hudProtocol === this.binding.hudProtocol && current.wallpaperProtocol===this.binding.wallpaperProtocol && current.updaterProtocol===this.binding.updaterProtocol;
     if (same && (this.socket || this.retry !== null)) return;
@@ -219,23 +266,31 @@ export class MirrorClient {
     this.finishProbe(undefined,reason);
     this.operationError=null;this.endConnectionHealth();
     ++this.epoch;
-    if (this.retry !== null) { this.deps.cancel(this.retry); this.retry = null; }
-    if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
+    this.clearRetry();
+    if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline.timer); this.connectDeadline = null; }
     this.clearSnapshotDeadline();this.clearWallpaperDeadline();
     const old = this.socket; this.socket = null; try { old?.close(); } catch {}
     this.rejectPending('连接已结束，操作结果需重新确认');
     this.publish({ connected: false, snapshot: null, notice: reason });
   }
+  private clearRetry():void {
+    const timer=this.retry;this.retry=null;this.retryLease=null;
+    if(timer!==null)this.deps.cancel(timer);
+  }
   private recoverConnection() {
-    if(!this.wanted()||this.disposed||this.socket||this.retry!==null)return;
+    if(!this.wanted()||this.disposed||(this.socket&&!this.bootstrapWaiters.size)||this.retry!==null)return;
     // HUD demand survives a hidden sidebar and long outages. Back off without
     // creating timers or business polling while the shared socket is healthy.
     const background=this.passiveRecoveryWanted();
     const delays=[250,1000,3000,10000,30000];
     const delay=delays[Math.min(this.attempt,delays.length-1)],recoveryEpoch=this.epoch;
     this.attempt=Math.min(this.attempt+1,delays.length);
-    this.retry=this.deps.schedule(()=>{if(recoveryEpoch!==this.epoch)return;this.retry=null;this.connect();},delay);
-    this.publish({notice:background?'HUD 后台连接中断，正在自动重连':'侧栏连接中断，正在自动重连'});
+    const lease={};this.retryLease=lease;
+    this.retry=this.deps.schedule(()=>{
+      if(recoveryEpoch!==this.epoch||this.retryLease!==lease)return;
+      this.retry=null;this.retryLease=null;this.connect();
+    },delay);
+    this.publish({notice:!this.transportWanted()?'等待 YMCC 提供镜像连接':background?'HUD 后台连接中断，正在自动重连':'侧栏连接中断，正在自动重连'});
   }
   private finishProbe(snapshot?:MirrorSnapshot,error?:string):void {
     const probe=this.probe;if(!probe)return;
@@ -255,7 +310,10 @@ export class MirrorClient {
     if(this.pending||this.probe)return Promise.reject(new Error('请等待当前操作完成'));
     const id='probe:'+this.deps.clientId+':'+(++this.sequence),started=this.now();
     return new Promise((resolve,reject)=>{
-      const timer=this.deps.schedule(()=>this.finishProbe(undefined,'连接实测 15 秒内未取得实际状态；自动重连仍会继续'),15000);
+      const timer=this.deps.schedule(()=>{
+        if(this.probe?.id!==id)return;
+        this.finishProbe(undefined,'连接实测 15 秒内未取得实际状态；自动重连仍会继续');
+      },15000);
       this.probe={id,started,timer,resolve,reject};
       this.publish({connectionTest:{pending:true,notice:'正在向 YMCC 请求最新状态…'}});
       try {
@@ -265,7 +323,7 @@ export class MirrorClient {
     });
   }
 
-  private clearSnapshotDeadline(){if(this.snapshotDeadline!==null){this.deps.cancel(this.snapshotDeadline);this.snapshotDeadline=null;}}
+  private clearSnapshotDeadline(){if(this.snapshotDeadline!==null){this.deps.cancel(this.snapshotDeadline.timer);this.snapshotDeadline=null;}}
   private pauseSnapshotDemand(){
     this.clearSnapshotDeadline();
     // A failed pause also invalidates the shared passive transport.
@@ -277,9 +335,12 @@ export class MirrorClient {
     // Arm before send so a synchronous reply can cancel it; repeated demand never
     // postpones this deadline. There is no periodic healthy-state probe.
     if(this.visible&&this.socket===socket&&this.connectDeadline===null&&this.snapshotDeadline===null){
-      const epoch=this.epoch;
-      this.snapshotDeadline=this.deps.schedule(()=>{
-        if(epoch!==this.epoch||this.socket!==socket||!this.visible)return;
+      const epoch=this.epoch,pending={timer:null as unknown as ReturnType<typeof setTimeout>};
+      this.snapshotDeadline=pending;
+      // A valid reply can retire a deadline without changing this socket epoch.
+      // Old dispatched callbacks must not clear a newer read's timer or lease.
+      pending.timer=this.deps.schedule(()=>{
+        if(this.snapshotDeadline!==pending||epoch!==this.epoch||this.socket!==socket||!this.visible)return;
         this.snapshotDeadline=null;
         this.disconnect('YMCC 状态响应超时；正在重新连接，不重放未确认操作');
         this.recoverConnection();
@@ -297,14 +358,30 @@ export class MirrorClient {
     }
   }
   private connect() {
-    if (!this.wanted() || this.disposed || this.socket) return;
-    if(this.retry!==null){this.deps.cancel(this.retry);this.retry=null;}
+    if (!this.wanted() || this.disposed) return;
+    if(this.socket){
+      if(this.bootstrapWaiters.size){const current=this.deps.bootstrap();this.notifyBootstrapWaiters(current);if(current?.revoked===true)this.disconnect('YMCC 已关闭镜像连接');else if(current==null)this.recoverConnection();}
+      return;
+    }
+    this.clearRetry();
     const raw = this.deps.bootstrap();
+    this.notifyBootstrapWaiters(raw);
+    if(raw?.revoked===true){this.disconnect('YMCC 已关闭镜像连接');return;}
+    // A wait lease may observe availability but cannot create a socket. The
+    // original visible/passive feature owner supplies all transport authority.
+    if(!this.transportWanted()){if(raw==null)this.recoverConnection();return;}
     const boot = raw ? { endpoint:raw.endpoint,token:raw.token,runId:raw.runId,...(raw.hudProtocol===1?{hudProtocol:1}:{}),...(raw.wallpaperProtocol===1?{wallpaperProtocol:1}:{}),...(raw.updaterProtocol===1?{updaterProtocol:1}:{}) } : undefined;
     const port = typeof boot?.endpoint === 'string' ? /^ws:\/\/127\.0\.0\.1:(\d{1,5})\/mirror$/.exec(boot.endpoint)?.[1] : undefined;
     if (!boot || !port || Number(port) < 1 || Number(port) > 65535 || typeof boot.token !== 'string' || !boot.token || boot.token.length > 128 ||
       typeof boot.runId !== 'string' || !boot.runId || boot.runId.length > 64) {
-      this.publish({ connected: false, snapshot: null, notice: '等待 YMCC 提供镜像连接' }); if(this.binding)this.recoverConnection();else this.finishProbe(undefined,'YMCC 尚未提供镜像连接'); return;
+      this.publish({ connected: false, snapshot: null, notice: '等待 YMCC 提供镜像连接' });
+      if(!this.binding)this.finishProbe(undefined,'YMCC 尚未提供镜像连接');
+      // YMCC may start after this document, with its notification missed. The
+      // existing wanted-owner backoff may reread an absent local binding; no
+      // socket exists until a complete loopback identity passes validation.
+      // Malformed bindings also retry validation, covering a missed correction event.
+      this.recoverConnection();
+      return;
     }
     this.binding = boot;
     const epoch = ++this.epoch;
@@ -315,7 +392,7 @@ export class MirrorClient {
     socket.addEventListener('open', () => {
       if (epoch !== this.epoch || !this.wanted()) return;
       if(this.passive){
-        if(this.connectDeadline!==null){this.deps.cancel(this.connectDeadline);this.connectDeadline=null;}
+        if(this.connectDeadline!==null){this.deps.cancel(this.connectDeadline.timer);this.connectDeadline=null;}
         this.connectedAt=this.now();
         // HUD readiness belongs to the authenticated transport, independently
         // of whether the sidebar has received its business snapshot yet.
@@ -325,19 +402,19 @@ export class MirrorClient {
     });
     socket.addEventListener('message', (event: MessageEvent) => {
       if (epoch !== this.epoch || !this.wanted() || typeof event.data !== 'string') return;
-      if (event.data.length > 65536) { this.disconnect('镜像消息超限'); return; }
+      if (event.data.length > 65536) { this.disconnect('镜像消息超限'); this.recoverConnection(); return; }
       let message: any;
-      try { message = JSON.parse(event.data); } catch { this.disconnect('镜像消息格式错误'); return; }
-      if (!message || typeof message !== 'object' || Array.isArray(message)) { this.disconnect('镜像消息格式错误'); return; }
-      if (message.runId !== boot.runId) { this.disconnect('YMCC 会话已变更，请重新打开侧栏'); return; }
+      try { message = JSON.parse(event.data); } catch { this.disconnect('镜像消息格式错误'); this.recoverConnection(); return; }
+      if (!message || typeof message !== 'object' || Array.isArray(message)) { this.disconnect('镜像消息格式错误'); this.recoverConnection(); return; }
+      if (message.runId !== boot.runId) { this.disconnect('YMCC 会话已变更，请重新打开侧栏'); this.recoverConnection(); return; }
       if (message.type === 'snapshot') {
         // A restored YMCC renderer can briefly resume its prior demand. A hidden
         // sidebar explicitly pauses that business stream while the HUD stays linked.
         if(!this.visible){this.pauseSnapshotDemand();return;}
         const snap = message.snapshot as MirrorSnapshot;
-        if (!validSnapshot(snap, boot.runId)) { this.disconnect('镜像身份无效'); return; }
+        if (!validSnapshot(snap, boot.runId)) { this.disconnect('镜像身份无效'); this.recoverConnection(); return; }
         if (this.state.snapshot && snap.revision < this.state.snapshot.revision) return;
-        if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
+        if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline.timer); this.connectDeadline = null; }
         this.clearSnapshotDeadline();
         if(this.operationError && (this.operationError.runId!==snap.runId || this.operationError.generation!==snap.generation || this.operationError.identity!==(snap.game?.identity??'')))this.operationError=null;
         if(this.connectedAt===null)this.connectedAt=this.now();
@@ -358,7 +435,7 @@ export class MirrorClient {
         // JSON truthiness must not turn a malformed failure into a success or
         // place objects in the React notice. Optional null text remains absent.
         if (typeof message.ok !== 'boolean' || (message.notice != null && typeof message.notice !== 'string') ||
-            (message.error != null && typeof message.error !== 'string')) { this.disconnect('镜像操作回执格式错误；结果未确认，不自动重放'); return; }
+            (message.error != null && typeof message.error !== 'string')) { this.disconnect('镜像操作回执格式错误；结果未确认，不自动重放'); this.recoverConnection(); return; }
         const pending = this.pending; this.pending = null; this.deps.cancel(pending.timer);
         const error=message.ok?null:(message.error??'操作失败');
         this.operationError=error&&this.state.snapshot?{notice:error,runId:boot.runId,generation:this.state.snapshot.generation,identity:this.state.snapshot.game?.identity??''}:null;
@@ -370,7 +447,7 @@ export class MirrorClient {
     const closed = () => {
       if (epoch !== this.epoch || lost) return;
       lost = true;
-      if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
+      if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline.timer); this.connectDeadline = null; }
       this.clearSnapshotDeadline();this.clearWallpaperDeadline();
       ++this.epoch;
       this.endConnectionHealth();this.operationError=null;this.socket = null; this.rejectPending('连接中断；不自动重放设置操作');
@@ -378,8 +455,15 @@ export class MirrorClient {
       this.recoverConnection();
     };
     socket.addEventListener('close', closed);
-    this.connectDeadline = this.deps.schedule(() => {
-      if (epoch !== this.epoch || lost) return;
+    socket.addEventListener('error', () => {
+      if(epoch!==this.epoch||lost)return;
+      try{socket.close();}catch{}
+      closed(); // Some failed transports never deliver a separate close event.
+    });
+    const pending={timer:null as unknown as ReturnType<typeof setTimeout>};
+    this.connectDeadline=pending;
+    pending.timer = this.deps.schedule(() => {
+      if (this.connectDeadline!==pending || epoch !== this.epoch || lost) return;
       this.connectDeadline = null;
       try { socket.close(); } catch {}
       closed();
@@ -435,5 +519,5 @@ export class MirrorClient {
       }
     });
   }
-  dispose() { this.disposed = true; this.visibleOwners.clear(); this.visible = false; this.passive = false; this.passiveConsumers.clear(); this.disconnect('插件已卸载'); this.listeners.clear(); this.connectionListeners.clear(); this.extraListeners.clear(); }
+  dispose() { this.disposed = true; for(const waiter of this.bootstrapWaiters.values())waiter.active=false;this.bootstrapWaiters.clear(); this.visibleOwners.clear(); this.visible = false; this.passive = false; this.passiveConsumers.clear(); this.disconnect('插件已卸载'); this.listeners.clear(); this.connectionListeners.clear(); this.extraListeners.clear(); }
 }

@@ -1,4 +1,89 @@
+<!-- HC064-SUPERX-UMA-CURRENT -->
+**2026-11-04 Super X 风扇当前批已入普通主线包，按用户要求收口停手。** 原 FanCapabilityCatalog 保留九条 HC 基线及原匹配，新增独立来源 Super X，仅消费风扇。真实 Host 曲线、原 source session、UMAInterface 原始 EC16 地址、唯一端点、严格字节与写后读回已接通；清理失败保留原资源/代次。原夹具18个精确身份、572条通过检查来自保留前10项和后8项续作，原失败保留，不宣称一次整组通过。来源绑定 Fan 组件 candidate-onex-superx-uma-20261104 已构建采用；45份来源、1640冻结编译输入、616包内实际文件已核对，90份固定HC/模块、114 DLL名字保持。包 `G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261104-165414\YeManCC.zip`，SHA256 `0e4be09038d463714b75515e1ddd367e9a45764fd18a671af40000dd86a4d1bb`。来源事实见 `upstream/xmax-6d728795/SuperXFan.source-facts.json`；正式记录 G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-064-ONEX-SUPERX-UMA-ORDINARY-EXPORT.json。普通包仍 fixtureValidation=NOT_RUN/formalReleaseAccepted=false；未部署，实机风扇效果与全家族未验收；未启用Super X充电/灯光/RPM，不再安排后继批。
+<!-- /HC064-SUPERX-UMA-CURRENT -->
+
 # YMCC unified HC model capability catalog
+
+<!-- HC-CODEX-034-X2MINIPRO-ACTUAL-CONSUMER -->
+
+**2026-11-02：X2MiniPro的新组件实机Open拒绝已回到现有消费链修正；最终R2已进入R16主线整包并有安装回执，业务夹具未运行、实机仍待复测。** 17:20（日志+08:00）确认加载a398/00bc后仍报`PINNED_FAN_EXISTING_OWNER`，后续重试停在`HOST_NOT_OPEN`；初始control实际字节未记录，不能断言就是Manual=1，也不能把031的源码/身份核对当17类运行通过。
+
+当前选定`candidate-source-entry-20261102-r2`：Host `f0bbbe082157ae18de8f604191f2a7061a143dc3210fed7b4f61586e95dc75e5`，Backend `119b93b2ca3aaafb6a21b672f96893805f7cafecc6230fec729bfa10a3f12e9b`，payload清单`ed11d11f1c690f6b1303ee2128765dcd5b947e55c028dddc08b12d7da037f453`，source bundle `61ca5b7cc24d862dea055370eb3c3ff509bc95b73fd44af38a01a655eadfd8aa`。43份当前/归档源码及模块身份已核，组件Build/配对不等于业务fixture通过；旧1682/其中shipping25不转授。r1过渡组件ae166/70a62及原家族a398/00bc只保留各自历史。
+
+已有source consumer按每个descriptor的automatic/manual合法值识别模式，不再从一个manual位推断另一进程独占；Nxx仍为0/A5，未知值继续拒绝。首写之前先完成guard/endpoint核验，再紧邻记债和Write；未发写取消只Dispose，已发/部分失败保留原归还债。前端失败Open的占位撤回仅限同意图/进程/session/epoch、未ack原Open、无power操作且source资源已安全退还，不授予写/lease/当前代。
+
+仍只完成现有消费端：X2MiniPro为SuperIO16/255，旧MiniAMD100、旧MiniPro255及各家族精确合同保留；未消费的0470温度/duty reader不接线，原HWiNFO输入不变，无新增模型/provider/隐藏开关。新业务用例尚未执行；原fan300秒账以`HC-CODEX-021-LEGACY-FAN-PROFILE-RETURN/PROCESS-029-onex-family-current-audit.json`的297.839466999962秒为已定位原件，不重置、不借灯光。CPU1 R16已Build0/Package0并于2026-11-02T10:05:27.2684336Z自然结束；整包SHA `5866707e3fed5fd569cfbfb2c304c098ede783b9f34459340555578ae3d9cbaa`，621成员/10个fan文件逐SHA一致，本机11个安装文件字节一致且安装回执保留配置。9个前端当前源码与prebuild及final build清单一致；R16未留这些前端原始源码副本，不冒称原归档compiler证明。这四份后补源文档不倒写成旧Build已编译/ZIP已携带；现场初始control字节仍UNKNOWN、业务NOT_RUN、转速/温控/性能未验。证据：`G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-034-X2MINIPRO-LIVE-CONSUMER-REFUSAL/`；Fan修复来源：`G:/YeManCC-Work/Testing/YMCC/Evidence/Fan-X2MiniPro-Failure-20261102-172409/`。
+
+<!-- /HC-CODEX-034-X2MINIPRO-ACTUAL-CONSUMER -->
+
+<!-- HC-CODEX-025-EXISTING-CONSUMERS-FIRST -->
+
+**2026-11-02 用户最新要求：对不消费的不接入，任务很多，优先完成消费端。** 只推进已有真实页面/API/运行链的消费，以及必要初始化、停止归还、失败与换代依赖。总库/来源代码中的声明不自动触发新reader、writer或UI；source0470温度和duty寄存器遥测当前无生产调用，只记来源、不接线、不作为当前fan消费阻塞，现有HWiNFO共享内存曲线保持。决定见 `G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/decisions/HC-CODEX-025-consumers-first.json`。
+
+旧021守卫并非仍只覆盖9条OneX：当前实际源码已覆盖59条既有legacy callback路线（9＋50）。024原二进制1682项中包含436项legacy消费检查；raw入口6轨迹明确注入终端且未执行真实HC raw方法，不能当物理验收。42当前编译源pin与已选且已导出的组件一致，既有证据不重跑、不相加。旧2/G1四类void丢raw bool的静态审计未发现现有Compat消费者冒称物理成功，不为它新造结果writer或消费者。封存见 `HC-CODEX-025-ONEX-CONSUMPTION-AUDIT/LEGACY-PROFILE-CONSUMER-CHECKPOINT-SEAL.json`、`REPORT.md`。
+
+024实际Build、Package及后源检查已成功（后源通过2026-11-02T04:43:26.489399Z），621个成品文件与fan-host-v2配套10文件核对通过；固定留档ZIP f4497a92…7931a。后续其它主线源码变化另记，不倒写这次成功，也不把旧收据作为后来活动源码的fresh证明。下一综合生产者由CPU1统一负责。原普通导出夹具/current SourceOnly/global parent仍NOT_RUN，原fan297.839466999962/300与灯光TIMEOUT不重置；全家族硬件/性能和完整已启用能力目标仍OPEN。当前证据入口为 `G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-025-ONEX-CONSUMPTION-AUDIT/VERIFICATION.json`。
+
+<!-- /HC-CODEX-025-EXISTING-CONSUMERS-FIRST -->
+
+
+<!-- HC-CODEX-024-ONEX-FAMILY-SELECTED -->
+
+**2026-11-02：Mini Pro、G1、旧 Mini AMD 的本轮修正已实际选入主线风扇组件。** 新组件 `candidate-onex-family-20261102-r1`，Host `a3984a2f…10471`、清单 `00bc9025…44d85`。G1按随包HC精确模块/类型/写者补全冷合同；旧MiniAMD沿实际C4/C5写者正规化到100，MiniIntel及旧MiniPro仍255，X2MiniPro独立SuperIO16/255保持。原锁定HC夹具1682项通过，含25项真实shipping08a内存合同及无硬件继承写者检查；这不代表实机、全17分支生命周期或完整总库通过。原风扇300秒同账累计297.839466999962秒，灯光原TIMEOUT不重置。
+
+用户已明确要求合格修正直接主线导出，不能长期仅留私有候选。本批没有新增隐藏开关，原精确机型、写许可、lease及停止归还保护继续保留。普通整包的实际结果见 `G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-024-ONEX-FAMILY-FAN/EXPORT/EXPORT-TERMINAL.json`；该文件只在实际Build→Package及后源/载荷检查终态后写入。整包默认夹具NOT_RUN；023的旧25项PackageSource不移借给新载荷。首次完整构建已因并行ButtonMappingView源码变化被原身份门拒绝，失败保留；新快照需重新构建。固定104、冻结1048及原runtime123保持。全部ONEXPLAYER风扇继续优先，原完整库目标OPEN。
+
+<!-- /HC-CODEX-024-ONEX-FAMILY-SELECTED -->
+
+
+<!-- HC-CODEX-023-X2MINIPRO-SELECTED -->
+
+**2026-11-02：MiniPro能力组件已选入主线载荷，整包及实机验收仍OPEN。** 原PackageSource实际25项正反门通过，包含真实生产拷贝、新旧Host/Backend混装、源码归档与linked-source破坏；补做shipping HC `08a38660`→实际LHM `f7ed30`→生产SuperIO元数据绑定，原ALC拒绝native导入，未构造HC设备/真实端口或运行Host Main。当前主线已选 `candidate-x2minipro-20261102-r2`，Host `66505568`、Backend `9dff5adb`、manifest `12209388`；原主线载荷校验器与构建前门实际通过。未改HC/LHM或冻结源码、未更新安装版和现有ZIP；下一次配套构建必须采用新native清单身份。首次CAS因独立Decky源码变化拒绝且零写入，随后只在最新字节替换一个manifest值，保留mouse/Decky/CPU修改。见[023晋级证据](G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-023-X2MINIPRO-PACKAGE-SOURCE/PROMOTION-APPLIED.json)。
+
+用户最新优先顺序为：MiniPro配套交付核验之后，优先全部ONEXPLAYER家族风扇接入和排查。逐型号核识别、EC/ACPI/WMI/SuperIO路线、缩放、温度消费、默认与停止归还及代次；旧OneXPlayerMiniPro与X2MiniPro明确分开。只在已有fan域推进，不顺带开启其它未启用能力。全库原目标保留，软件通过不替代物理、CPU或安装验收。
+
+<!-- /HC-CODEX-023-X2MINIPRO-SELECTED -->
+
+<!-- HC-CODEX-022-X2MINIPRO-PRIORITY -->
+
+**2026-11-02：优先核实飞行家 X2 Mini Pro／AMD 395 的 git037 风扇反馈。** 用户日志已给出精确主板身份 `ONE-NETBOOK` / `ONEXPLAYER X2Mini PRO`；11:08:41 +08:00 的旧 Host 随即报告 `Device not yet supported`。v0.0.37 和当前发布载荷仍为旧 Host／Backend，普通应用构建不会自动把新增来源能力编进这两个组件。当前同一总库已按固定 f2e58468 来源接入 MiniPro 的 SuperIO16、0x44A/0x44B 和0..255缩放；不复用普通X2的WMI路线，不按CPU猜端口、不增加DMI别名。
+
+当前原锁定HC变体1657项通过，其中57项精确指向X2MiniPro；实际Host隔离构建和完整PDB源码闭包匹配。它们是注入终端的软件证据，不能说明用户实机已可用。原准备入口已生成绑定真实产物的[候选与身份](G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-022-X2MINIPRO-PRIORITY/candidate/PREPARED.json)，状态 `STAGED_SOURCE_BOUND_CANDIDATE_NOT_PROMOTED`；主线发布载荷、已安装产品及硬件均未改动。候选包含当前完整编译闭包及保留的并行风扇CPU优化，须整体审核并与native/桥配套交付。风扇CPU优化继续由“风扇 (2)”负责；能力库记录和[用户日志诊断](G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-022-X2MINIPRO-PRIORITY/USER-LOG-FINDINGS.json)在本lane维护。原021检查点和完整102类/485方法OPEN状态保留。
+
+<!-- /HC-CODEX-022-X2MINIPRO-PRIORITY -->
+
+<!-- HC-CODEX-020-ONEX-APPLIED-CURRENT -->
+
+**2026-11-02：九条既有OneXAcpi风扇路线补上无软件控制时的默认回调守卫。** 复用总库原strategy，不新增型号表或transport；回调进入前记归还责任，异常/未知归还、旧设备实例及清理未结算时保留。原HC虚拟Close仍执行，关闭和真实队列换代后的迟到回调不会制造责任。修复前原夹具已检出A1初始Hardware多余回调；当前合并源码原SourceOnly1276、锁定HC变体1299通过，其中各含新增78项软件消费检查，不跨范围相加。共享STA诊断并行改动已保留，并对合并后的当前源码重新编译/执行及核对完整PDB身份。
+
+这是外层软件消费修复；冻结真实A1 EC正路径未运行，冻结Close内部逻辑未替换，硬件/性能/安装和全方法等价仍不作通过。固定104、冻结1048和原运行库123保持；原风扇300秒同账约189.89秒，灯光240秒耗尽状态不重置。见[HC-CODEX-020执行记录](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/executions/HC-CODEX-020.json)。完整102类/485方法目标继续OPEN。
+
+<!-- /HC-CODEX-020-ONEX-APPLIED-CURRENT -->
+
+
+<!-- HC-CODEX-019-METHOD-CURRENT -->
+
+**2026-11-02 方法对账更新：** 固定源码的59个风扇声明已逐项与冻结Roslyn方法身份核对：31个声明相同、16个变化、12个无同签名项。13个控制方法的应用标志仍需与实际profile、Close及代次链核对；源码相同不代表该方法已执行。MSI已有结构化152/212与双块表回执，不能用上游无检查写法替换。见[方法级来源记录](G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/Codex/HC-CODEX-019-METHOD-CONSUMPTION/FAN-METHOD-RECONCILIATION.json)。
+
+灯光旧待办已更正：AYANEO3/NEXT2的native owner、固定CEc组合和typed总库准入已在007–009实现。原完整托管TIMEOUT、助手总库/生成检查NOT_RUN及UI仅源码等价仍保留，240秒预算未重置。当前没有新增夹具执行或完整验收结论；102类/485方法及全库目标继续OPEN。
+
+<!-- /HC-CODEX-019-METHOD-CURRENT -->
+
+
+<!-- HC-CODEX-018-SOURCE-FAN-CURRENT -->
+
+**2026-11-02：固定来源九条风扇机型的软件消费链已接通。** [PinnedFanSourceCatalog.cs](PinnedFanSourceCatalog.cs) 是原 FanCapabilityCatalog 的同一 partial 入口；来源 DMI 在旧 HC 工厂前选择，曲线、端口 owner、代次与停止归还均由该总库消费，不增加前端型号白名单。九条路线已进入现有 fan 域的代码准入，仍须原写许可、授权文件、会话与实时电源条件；这不启用其他暂缓域，也不代表已经部署。
+
+当前主线原 SourceOnly1198、原锁定 HC DLL 变体1221、实际 HTTP/桥正常及唤醒链7622通过；native 精确生产 JSON 判据消费234份实际 Host 状态，979项通过。实际 LHM 元数据由生产绑定器在拒绝 native 加载的隔离上下文核对，未运行端口/设备构造器。source 的自动寄存器读回与精确终端关闭是独立软件证据，HC Close/Manager/callback和物理字段不伪造；不同范围计数不相加。记录见 [HC-CODEX-018](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/executions/HC-CODEX-018.json)。完整102类/485方法对账、灯光耗尽240秒预算及全库目标仍OPEN，未做硬件或性能验收。
+
+<!-- /HC-CODEX-018-SOURCE-FAN-CURRENT -->
+
+<!-- FAN-CATALOG-CPU-REVIEW-20261101 -->
+
+> **2026-11-01 风扇复核：** 当前70条Fan路线与总库alias/归还策略逐项一致；上游新增10类中的9条Fan声明在该历史复核时仍为源码候选；当前软件准入与证据见上方HC-CODEX-018。ROG/G3E最新保留窗口未证明新的风扇故障；CPU样本按Host实例去重，不能替代功耗或全机型验收。已据旧Win5长时间1秒空转证据，对稳定故障详细快照限频；每秒维护和高CPU取证保留。正式Host编译、原8＋20项维护/缓冲测试、14项确定性诊断测试通过，旧行为及2个缺陷变异被拒；核心聚合入口被独立Steam库哈希漂移拦截，保留FAIL，未安装/未做功耗测试。见[源码、日志及CPU复核证据](G:/YeManCC-Work/Testing/YMCC/Evidence/Fan-Catalog-Cpu-Review-20261101/REVIEW.md)。
+
+<!-- /FAN-CATALOG-CPU-REVIEW-20261101 -->
+
 
 虚拟手柄修复（2026-10-25）：[能力总库适配支持](CONTROLLER-REPAIR-SUPPORT.md) · [机器可读支持信息](CONTROLLER-REPAIR-SUPPORT.json) · [全部102条源码/扩展覆盖](CONTROLLER-MODEL-COVERAGE.md)。先区分机型声明、实体来源、虚拟后端与屏蔽证据。
 
@@ -14,6 +99,18 @@
 
 <!-- /FAN-1296-STARTUP-MAINTENANCE-INDEX-20261020 -->
 
+<!-- HC-CODEX-CURRENT-SOFTWARE-PROGRESS -->
+
+灯光阶段及未结缺口见 [HC-UPSTREAM-UPGRADE.json](HC-UPSTREAM-UPGRADE.json) 的 HC-CODEX-009；当前风扇软件阶段为HC-CODEX-018：
+
+HC-CODEX-009：AYANEO3／NEXT2 已接唯一总库 SuperJoyCec 类型准入；原 native420项、来源策略42项通过，使用实际机型选择／正式助手解析器。根保持92类、47冻结灯光绑定，灯光合计50路线。只接已启用solid／第二色／亮度／状态，未启用能力不激活。
+
+托管完整夹具在原240秒累计上限处TIMEOUT；助手总库夹具及生成检查NOT_RUN。本批仅软件范围部分完成，旧1131／567等PASS不转移；全库102类／485方法的实际已启用消费核对仍OPEN。原native初次新断言失败及修复后完整回执均保留。
+
+当前源码／PDB对应native36用户＋3 SDK、助手19＋3、显式CEc oracle夹具37＋3，346份实际MSVC输入一致。固定104／冻结1048／原运行库123及其它总库域含TDP未变，并行设置缓存修改保留。第二色／效果UI函数只有生成等价证据，不声明全native应用编译；没有部署、物理设备、睡眠或性能验收。
+
+历史阶段和三份old004缺证保留于原记录。原裁决定时任务已删除且确认不存在，Codex接手职责未变，完整目标未完成；不得重置同一批预算求绿。
+
 <!-- YMCC-AI-NAVIGATION-INDEX:BEGIN -->
 ## 按问题定位：AI快速入口
 
@@ -25,18 +122,18 @@
 <!-- YMCC-CAPABILITY-OVERVIEW-20261020:BEGIN -->
 ## AI入口注释：总库、HC精简与验收
 
-**截至2026-10-20：9个维护域／8类已启用产品能力／92个源码机型类（80个factory类）／397条方法声明（191个不同名称、21个分类组）。** 机型、路线、配方、规则和测试是不同单位，不能合成“能力总数”。
+**截至2026-10-20：9个维护域／8类已启用产品能力／92个源码机型类（80个factory类）／397条方法声明（191个不同名称、21个分类组）。** 2026-10-31新增现有TDP接入后，当前为10个维护域／9类已启用能力；原冻结源码数量口径不变。 机型、路线、配方、规则和测试是不同单位，不能合成“能力总数”。
 
 能力总库属于HC精简／自主化工程，负责机型事实、统一分配和现有消费；HC工程还负责最小依赖、资源生命周期和标准出包。模拟环境验证绑定版本的实际消费，不成为正常运行中转。
 
 ```mermaid
 flowchart TB
-  P["HC精简与自主化总任务"] --> L["能力总库：描述、识别、分配、消费路线<br/>9个维护域；本轮8类已启用能力"]
+  P["HC精简与自主化总任务"] --> L["能力总库：描述、识别、分配、消费路线<br/>10个维护域；本轮9类已启用能力"]
   P --> R["运行依赖：精简HC、必要EC接口、独立组件"]
   P --> V["模拟环境：真实消费者、正反例、生命周期"]
   L --> E["已启用能力：允许继续接入与修复"]
   L --> G["未启用或用户排除：缺口记录／禁止导入"]
-  L --> M["CPU／GPU：资料登记<br/>现有CPU／TDP消费独立"]
+  L --> M["HC CPU／GPU：资料登记<br/>TDP：同总库策略，原引擎消费；本轮接入中"]
   E --> C["正式消费者：native／FanHost／InputHost／LightSetter／BatteryHost"]
   R --> C
   C -. "固定版本的实际消费代码" .-> V
@@ -45,7 +142,7 @@ flowchart TB
   B --> D["普通设备日志、安装版与物理验收"]
 ```
 
-本轮B40原24项软件接入已收口，变化后的整条主线、安装和硬件验收仍分别记录。未启用能力只记缺口；唤醒密码UI用户排除；CPU／GPU仅资料，现有CPU／TDP独立；进一步删DLL暂缓。
+本轮B40原24项软件接入已收口，变化后的整条主线、安装和硬件验收仍分别记录。未启用能力只记缺口；唤醒密码UI用户排除；HC CPU／GPU仅资料；2026-10-31获准将现有TDP接回总库，见TDP-INTEGRATION.md；进一步删DLL暂缓。
 
 详细类型、准确数量、HC任务关系与后续顺序见[总览说明](OVERVIEW.md)，机器可读统计及来源哈希见[数量快照](OVERVIEW-COUNTS.json)。当前状态以ACTIVE-INTEGRATION-SCOPE、INTEGRATION-STATUS、EXECUTION-CHAINS和具体域合同为准；下文保留的历史阶段说明不覆盖最新来源限定证书。
 <!-- YMCC-CAPABILITY-OVERVIEW-20261020:END -->
@@ -84,7 +181,7 @@ A recorded complete transport is not a BIOS acknowledgement. Partial, short and 
 
 Explicit handoff requires the latest default-curve operation to have complete transport, the YMCC handle to be closed, the release generation to remain current, and an actual HC-handle closure predicate. Failure to prove the latter retains the legacy writer block until process exit. The callback is never an automatic retry after uncertain IO. This catalog controls only its own process and callers; existing service-level admission remains necessary.
 
-The isolated `tools/fixtures/fan_capability_host_roundtrip` fixture compiles the actual Host sources, verifies this production consumer, and calls the hash-pinned original HC DLL with an injected in-memory terminal transport. It does not construct a real device, run the normal Host entry point or validate a physical fan. Its standalone runner is not shipped to handhelds.
+The isolated `tools/fixtures/fan_capability_host_roundtrip` fixture compiles the actual Host sources, verifies this production consumer, and calls the hash-pinned original HC DLL with an injected in-memory terminal transport. It does not construct a real device, run the normal Host entry point or validate a physical fan. Its standalone runner is not shipped to handhelds. Its explicit `run-roundtrip.ps1 -SourceOnly` diagnostic compiles the same Host/consumer fixture without the HC binary adapter, writes `source-only-roundtrip-results.json`, and verifies no HC assembly was loaded. That diagnostic cannot satisfy the registered full binary case and is rejected under `YMCC_SIM_GLOBAL_RUN=1`. The existing fixture also covers the actual event-driven profile timer, queue/callback/ledger/Complete, terminal Close and an independent successor Host; injected terminals are software evidence only.
 
 The remaining independent ASUS work is device detection, bootstrap, complete restore/readback ownership and removal of the HC factory/lifecycle dependency. Four catalog aliases do not imply four machines were physically tested.
 
@@ -124,13 +221,17 @@ hc-lighting-policy.json 只描述对冻结声明的已核验执行差异；C#/C+
 
 标准手柄输入已通过 `HcControllerInputCapabilityCatalog` 分配给真实 `inputHostFrameSubmissionSample`，现有XInput两种精确来源标签与MSI DInput标签接入；原物理来源、读取窗口、MSI代际、Host/意图/最终写入和中性归还校验保持。总库记录全部29个Controllers来源文件，但不据此开启背键、触摸、手柄运动、震动/灯光或屏蔽能力；这些仍按 `CONTROLLER-CONSUMPTION.json` 分批接通。
 
-## CPU/GPU 资料与独立 TDP 边界
+## 手动CCD与CPU电压偏移（2026-11-03当前范围）
+
+既有Settings手动CCD进程亲和性和CPU静态电压偏移消费同`uxtu-tdp-policy.json`，见[TDP-INTEGRATION.md](TDP-INTEGRATION.md)当前补充及`USER-SCOPE-DECISIONS.json`。AMD全核CO以`co_commands`完整有序声明，保留既有首选；仅当前typed固件UNKNOWN_CMD(0xFE)/FAILED(0xFF)且底层返回值与固件状态一致允许下一候选；裸整数、本地通信/互斥/超时/写入未知及BUSY/PREREQ停止。规则由同一生成policy实际消费。旧自动启动/电压调度、GPU/SA与per-core不因数据补齐启用。固定来源命令不证明当前固件接受、读回或物理效果；实际consumer/成品包/硬件验收分开。
+
+## CPU/GPU 资料与 TDP 接回总库
 
 按2026-10-19用户裁决，`hc-performance-metadata.json` 仅登记机型、CPU名称/型号证据、冻结OEMCPU/OEMGPU声明和原始频率/功耗参数来源。该资料由既有Roslyn语法盘点器的工厂上下文生成，保留厂商、产品、版本、CPU精确分支、条件表达式及default；不创建新的运行时匹配器。没有明确CPU名称的机型保持未知，类名与能力标记不能替代CPU身份；CPU营销名称中的GPU文字不能作为实际显卡识别证据。
 
-此JSON没有产品运行时消费者，不新增HC CPU调用，不接管当前CPU控制，不启用GPU功能。TDP保持现有独立调度与提供者，冻结nTDP/cTDP/CpuClock/GfxClock仅作局部源码资料，继承通过原类链引用，不能覆盖YMCC当前限制。现有被政策停用的CPU功能也不能因登记而开启。登记类数不是CPU或GPU已支持的机型数。
+此JSON没有产品运行时消费者，不新增HC CPU调用，不接管当前CPU控制，不启用GPU功能。2026-10-31用户已明确授权TDP能力接回唯一总库（见[TDP-INTEGRATION.md](TDP-INTEGRATION.md)），保留现有调度引擎与提供者；冻结nTDP/cTDP/CpuClock/GfxClock仅作局部源码资料，继承通过原类链引用，不能覆盖YMCC当前限制。现有被政策停用的CPU功能也不能因登记而开启。登记类数不是CPU或GPU已支持的机型数。
 
-资料单独输出并由正常总库生成器检查，现有运行时总账及C++/C#生成物不加入该域或更换消费指纹。维护检查拒绝资料被改成可用能力、CPU调用授权、TDP接管或GPU启用；任何未来消费接线均需新的明确任务与对应实际消费者验收。
+HC资料仍由原生成器检查；TDP使用同总库的uxtu-tdp-policy.json，经原总库生成器及定向生成入口更新catalog.domains.tdp、native头和现有helper配方。维护检查拒绝资料被改成可用能力、CPU调用授权、TDP接管或GPU启用；本次TDP是新的明确授权，实际消费者、helper/模块交付身份和硬件验收分开登记；来源资料不能授予写入能力。
 
 ## OEM 输入实际消费
 
@@ -150,6 +251,14 @@ hc-lighting-policy.json 只描述对冻结声明的已核验执行差异；C#/C+
 
 `controller.unified-motion-providers`执行真实解码、Source工厂、保留队列、Session及final/银行guard，并复用原pipe终端测试；控制器传感器身份、时钟、系统IO和GamepadMotion callback边界分别说明。实际锁定GamepadMotion DLL另有原主消费者测试，不能把回调模型当成DLL或硬件已运行。仅记录本地稳定绑定成本，缺输入/不完整消费不能视作CPU下降。其余物理手柄、MSI/Xbox私有提供者及跨域生命周期仍待接通。
 
+2026-11-02 联想家族控制器初始化：原 `hc-controller-motion-policy.json` 的 activation.recipes 从冻结 Device 源码派生两份计划。Tablet/Tablet2沿用 `LegionGoTablet::EnableControllerGyro` 左右四条命令；SZ1/SZ2仅取 `LegionGoSZ1::ControllerFactoryReset` 中的 enable gyro/HID IMU 两条子集，并用固定 `IDevice::WithReportID` 的00前缀和65字节输出边界，不执行FactoryReset其余命令、休眠、500Hz、RGB或SteamOS操作。继承类及framing源SHA同时登记；GO2原gZ TODO和所有型号物理效果保持未验。
+
+两个既有vendor owner复用同一有限异步初始化实现，各自保留handle/event/buffer/返回债；按明确体感或校准意图、selected物理容器和token/owner/power/raw/capture代次准入。明确OFF取消自有请求，OFF/ON允许同一设备重新初始化；成功/失败后的稳定ON不逐帧重试。真正完成及句柄关闭前保留资源，两个owner均接入原OemIo retirement。普通导出增加当前owner的activation只读回执（nativeEvidenceVersion=3），含配方命令数与已初始化输出长度；写完不证明固件或游戏已接受。
+
+证据持续入口 `G:/YeManCC-Work/Testing/YMCC/Evidence/LenovoGyro-20261102/Family/FAMILY-RESULT.json`。原 `controller.unified-motion-providers` 增加四机型初始化子项和 `-Case activation`，不增加ID、默认minimum或发布父门。冷校准现由真实 `gyro.calibrate` 在选中源Ready但尚无当前报告时创建同key/id、3500ms有界等待；首个当前报告到来才开始完整5000ms训练。初始化消费真实校准key，孤立hasRequest或旧源请求不授予写入。普通导出保留原请求/结果事件，不增加周期日志。
+
+当前消费续作证据在同目录 `Family/ConsumerClosure/CONSUMER-RESULT.json`：真实冷请求/原运动38场景两配置各6498断言；删等待反例各88个语义失败；keyed家族初始化各5885正断言，遗漏初始化/GO S错Report ID反例各64/48失败；原pipe已抽取实际inputCaptureBindStandardInput和实际ReadProgress，两配置27场景/39断言通过。旧父38计数已核对修为39（场景内38加最终禁止创建目标1），仅比对已执行回执与当前源码，不重复同源业务、不伪造新完整父PASS。旧FAIL和无关全局索引漂移保留。GO2原gZ TODO、所有型号新版实机样本/轴向及最终游戏效果仍未验，未部署或操作真实设备。
+
 风扇交回合同统一入口为 `FAN-RETURN-CONSUMPTION.json`：70条deviceId逐项保留实际RestoreStrategy、回执生产者/消费者和证据等级。4条MSI消费本次操作绑定的结构化控制位回读，4条ASUS消费scope回执，62条保留已审查的软件callback合同。Close返回、cleanup pending、释放动作和物理观察分别记录；历史2026-10-07 ClawA2VM及2026-10-16 ClawCG3EM(C8EX)释放/Close收据保留各自日期、版本和显式操作令牌日志字段缺口，不作为当前70路线整体验收。原当前输入业务回执与物理验收缺口均保留。
 
 MSI/Xbox私有Windows运动配方现纳入同一HcMotionCapabilityCatalog的Private类：原89条加6条，保留原hc_oem_windows_motion_catalog与MSI来源摘要。实际selector取得原配方绑定，Bound和私有校准消费者校验同一引用与当前身份；MSI不再逐帧构造临时selector回执。原数值矩阵、provider、成对样本、代际及最终发布/归还校验保持。当前软件证明涵盖7种板号输入及受控采样下的实际数值DLL，完整手柄、真实设备和全域生命周期仍未验收。
@@ -167,7 +276,7 @@ MSI/Xbox私有Windows运动配方现纳入同一HcMotionCapabilityCatalog的Priv
 
 游戏输出观察合同为 `CONTROLLER-GAME-OUTPUT-OBSERVATION.json`。当前目标通过原PnP准入后只订阅其OutputReceived；四项绑定字段与原SameTuple共同限制应答。固定256字节内存保存最新原始包并记录合并数，超长整包拒绝，callback不进行pipe或设备IO，没有新增轮询/线程。QUIESCE和Release最前撤销旧租约，再解绑；解绑异常保留重试并继续原stop/idle/dispose责任。此观察槽会合并报文，不能充当电机命令队列或完整协议记录。仅DualSense Edge锁定profile有extendedOutputReport，另两种须另验raw协议；三个模式均未开放游戏反馈。新Host/helper源码须更新managed18项输入并实际重建，旧回执不能改签。定向软件入口 `controller.host-game-output-observation`；完整native转发/仲裁/停止/实机验收仍待完成。
 
-用户范围裁决统一见 `USER-SCOPE-DECISIONS.json`。2026-10-19用户明确：单纯“唤醒密码 UI”是YemanCC不需要、明确不导入的能力，状态USER_EXCLUDED；不计机型能力、接线缺口、待重跑或完成率分母，不随HC升级自动补回。已存在产品源码与历史原测试/回执保留，新增统一模拟活动登记撤下；这不是删除原产品设置的授权。通用设置/启动恢复UI须先证明具体机型能力的必要消费或生命周期依赖，不能仅因旧测试存在就纳入总库。必要风扇、手柄、陀螺仪与硬件归还链继续，CPU/GPU资料和独立TDP边界保持。
+用户范围裁决统一见 `USER-SCOPE-DECISIONS.json`。2026-10-19用户明确：单纯“唤醒密码 UI”是YemanCC不需要、明确不导入的能力，状态USER_EXCLUDED；不计机型能力、接线缺口、待重跑或完成率分母，不随HC升级自动补回。已存在产品源码与历史原测试/回执保留，新增统一模拟活动登记撤下；这不是删除原产品设置的授权。通用设置/启动恢复UI须先证明具体机型能力的必要消费或生命周期依赖，不能仅因旧测试存在就纳入总库。必要风扇、手柄、陀螺仪与硬件归还链继续，HC CPU/GPU资料边界保持；TDP按2026-10-31新增授权接回总库，原引擎与实时保护保留。
 
 
 ## Sony 游戏马达接收合同（2026-10-19）
@@ -185,3 +294,5 @@ Flip DS 与冻结源码明确继承同一副屏实现的 Flip 1S DS，现有独�
 专用屏幕键沿现有键盘采样和串行任务队列消费，先见中性再接受一个按下边沿。已有快捷键或背键映射、录制及来源/电源/规则变化阻止默认动作，保持虚拟手柄和充电功能独立。没有新轮询器、线程或运行库DLL；不导入HC快工具、键盘或触控板UI。
 
 协议与边界见 SECONDARY-DISPLAY-CONSUMPTION.json。定向软件检查为 tools/hc_secondary_display_managed_selftest.mjs、tools/hc_secondary_display_native_selftest.mjs 和 tools/hc_secondary_display_pipe_selftest.mjs，均要求仓库外新证据目录。现有电池60组及原exact-dispatch提取门继续运行。本条仍是D候选：主线小增量合入、全局登记与对应源码审计、完整产品/载荷身份、安装和物理亮度效果分别待验，不能因登记就开放未验证能力。CPU/功耗收益未测量。
+
+2026-11-04 电压数据接入本批已在现有消费端完成并进入普通主线包 `YMCC-Mainline-Quick-TestPackage-20261104-024813`（ZIP SHA8f532747…；helper源3ec527…/EXE c39dfe…）。最新软件/入包证据见 `TDP-INTEGRATION.md` 顶部与 `G:\YeManCC-Work\Testing\YMCC\Evidence\HC-Code-Capability-Upgrade-20261031\Codex\HC-CODEX-061-UV-ORDINARY-EXPORT\reviewer\FINAL-RESULT.json`。这是本轮电压目标的软件交付完成；全库仍PARTIAL，ROG/Z2E实际固件/电压/稳定性未知，未部署或启用GPU/SA/per-core/自动电压调度。

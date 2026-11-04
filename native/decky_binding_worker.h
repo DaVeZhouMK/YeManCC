@@ -4,6 +4,7 @@
 // This is the child consumer; Runtime's legacy callback path is not replaced here.
 #include "decky_sidebar_bootstrap.h"
 #include "steam_session_observer.h"
+#include "decky_sidebar_session.h"
 #include <charconv>
 #include <limits>
 #include <mutex>
@@ -43,7 +44,7 @@ struct Request {
     ymcc::steamsession::Session steam;
     DWORD windowsSession=0;
     Json bootstrap;
-    bool requireFreshContext=false,retainedFrontendOnly=false;
+    bool requireFreshContext=false,retainedFrontendOnly=false,liveUiAccount=false;
 };
 inline Request parse(std::string_view bytes){
     require(!bytes.empty()&&bytes.size()<=maximumRequestBytes,"mirror-bootstrap-worker-request-size");
@@ -58,7 +59,8 @@ inline Request parse(std::string_view bytes){
     Request result;
     result.id=value.at("id").get<std::string>();require(hex(result.id,32),"mirror-bootstrap-worker-request-invalid");
     result.generation=decimal(value.at("generation"));
-    const auto& identity=value.at("steam");require(identity.is_object()&&identity.size()==5,"mirror-bootstrap-worker-identity-invalid");
+    const auto& identity=value.at("steam");require(identity.is_object()&&(identity.size()==5||identity.size()==6),"mirror-bootstrap-worker-identity-invalid");
+    if(identity.size()==6){require(identity.contains("accountSource")&&identity.at("accountSource")=="verified-steam-ui","mirror-bootstrap-worker-identity-invalid");result.liveUiAccount=true;}
     result.steam.root=ymcc::steamlive::normalizedPath(wide(identity.at("root")));
     require(!result.steam.root.empty()&&std::filesystem::path(result.steam.root).is_absolute(),"mirror-bootstrap-worker-identity-invalid");
     result.steam.pid=number(identity.at("pid"));result.steam.created=decimal(identity.at("created"));result.steam.account=number(identity.at("account"));result.windowsSession=number(identity.at("windowsSession"),false);
@@ -114,7 +116,7 @@ public:
         if(!process_||WaitForSingleObject(process_,0)!=WAIT_TIMEOUT)return reject("steam-process-exited");
         DWORD session=0;if(!ProcessIdToSessionId(request_.steam.pid,&session)||session!=request_.windowsSession)return reject("steam-windows-session");
         const auto registered=ymcc::steamsession::regNumber(registryPath_,L"pid");
-        if(ymcc::steamsession::regNumber(registryPath_,L"ActiveUser")!=request_.steam.account)return reject("steam-account");
+        if(!ymcc::deckysession::registryCompatible(ymcc::steamsession::regNumber(registryPath_,L"ActiveUser"),request_.steam.account,request_.liveUiAccount))return reject("steam-account");
         if(ymcc::steamsession::steamRoot(registryPath_)!=request_.steam.root)return reject("steam-root");
         if(!registeredPidCompatible(registered,request_.steam.pid,request_.steam.root))return reject("steam-registered-pid");
         return true;
@@ -157,6 +159,10 @@ int run(std::string_view bytes,HANDLE inheritedCancel,Emit&& emit){
     };
     try{
         request=parse(bytes);identified=true;
+        // Only the private, typed source marker can open the UI-proof path.
+        // Arbitrary bootstrap JSON cannot nominate an account or bypass registry.
+        require(!request.bootstrap.contains("account")&&!request.bootstrap.contains("accountSource"),"mirror-bootstrap-worker-request-invalid");
+        if(request.liveUiAccount){request.bootstrap["account"]=request.steam.account;request.bootstrap["accountSource"]="verified-steam-ui";}
         auto cancellation=std::make_shared<ymcc::deckymirror::CancelToken>(inheritedCancel);
         require(!cancellation->canceled(),"mirror-bootstrap-canceled");SteamLease steam(request,L"Software\\Valve\\Steam",&rejectedSessionCheck);Event watchDone;
         ymcc::deckymirror::BootstrapWatch watch;

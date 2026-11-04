@@ -70,3 +70,23 @@
 新增 Native 崩溃检查和稳定性矩阵已接入 Decky 更新 Build 必检，并纳入源码身份记录。证据：`D:/Codex/2026-10-18/d/work/decky-resilience-20261019`。
 
 本轮没有重新构建/发布完整 YMCC 包，没有更新正在运行的安装实例，也没有新的真实 Steam UI 预览或实物手柄验收。0.0.36 正式出包时须重新构建 Native/Web/Decky 并通过新的 Build/Package/Verify 回执，旧包回执不适用。
+
+
+## Decky：旧上下文的分级清理（2026-11-01）
+
+本机已升级 YMCC，而 Steam 旧文档仍保留旧插件、1337 后台缺失，原策略只停在等待手动刷新。当前新增独立的 FinalCleanup，不改变普通 decky.recoverConnection 的拒绝边界。两次温和复查分别保留30秒间隔；已确认当前 Steam 身份、账号、大屏文档、YMCC 旧模块、官方版本与资源，并排除外部占用后，才重建一次该 Steam 页面。这会短暂重载 Decky/壁纸，不重启 Steam 或游戏进程，不清理用户配置、专属配置、主题和壁纸文件。资源损坏仍由已有校验缓存按当前受管合同修复，未知来源数据不通删。
+
+用户同日明确允许放宽自愈等待。深度自愈允许最多30秒，完成后另给30秒连接确认，避免慢恢复吃掉确认窗口。OFF、退出、睡眠/会话撤销走独立立即取消；Steam/磁盘/设置操作在现有同 EXE 私有子进程中执行，沿用原 Job、管道归还及400/200毫秒 drain，不新增生产 EXE。仍保留原3200毫秒卡死退出回归，不能把它当自愈等待上限。
+
+一次性保险丝为设置中的 deckyContextCleanup，只记录 schema 和当前 Steam PID/birth ticket。写入先于实际请求；YMCC 重启、开关切换、丢失回执不能补充这次自动清理预算。当前账号/文档在实际 JS 执行和延迟回调时再次核验。成功派发不是已连接，必须等当前原生快照确认。源码入口为 native/decky_sidebar_automatic_repair.h、native/decky_sidebar_manual_repair.h、native/decky_context_cleanup_worker.h 和 native/main.cpp 的依赖组装。
+
+复用原 plugins.decky-update-recovery 内的 retained/manual 消费者及原 runtime regression；不新增父门、不自动重跑完整生命周期。证据位于 Testing/YMCC/Evidence/DeckyLifecycleGoal-20261031/bounded-context-cleanup-20261101。安装版与物理复杂场景仍单独验收，原 R8 只证明原冻结软件候选。
+
+
+### Decky 最终清理次数：主文件损坏后的备份回退（2026-11-01）
+
+原 DeckyReserve 在普通备份保存后才写主文件的原生次数记录，备份缺少这次已花额度。实际正式 helper→破损主文件→实际备份恢复已复现重获清理次数。当前仅将该私有记录同步到兼容备份，并在实际页面重建请求前回读主/备份两份记录；写入失败、回读不一致或取消均拒绝放行。业务配置不变，资源/Steam/账号/版本准入与原30秒自愈窗口保持。
+
+复用原 settings_baseline_native_selftest，最新实际37case/112Win32 IO/33原负写入，20段源码提取；相同 helper 在内存与隔离Windows文件均实际运行。两个可编译行为反例分别恢复旧单副本和去掉回读，原断言均失败。并发配置版本新增 boot intent CAS 时，原 memory consumer 补提取真实依赖，不使用假谓词；旧编译失败保留。证据 cleanup-backup-replay-20261101/RESULT.json。
+
+本机此前V2恢复仍为独立已验收场景；本补丁尚未再次部署，不能把V2恢复回执当作它的安装验证。未启动新全局父门或整包链，整体生命周期仍未完成。

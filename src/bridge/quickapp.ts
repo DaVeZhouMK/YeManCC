@@ -135,6 +135,121 @@ function xmlEscape(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+// Configuration receipts must describe the complete file, not a truncated prefix.
+const lsSettingsMaxBytes = 2 * 1024 * 1024;
+interface LsSettingsXmlNode {
+  name: string; start: number; end: number; text: string;
+  attributes: string[]; children: LsSettingsXmlNode[];
+}
+function validateLsSettingsText(xml: string): void {
+  const invalid = () => { throw new Error('小黄鸭 Settings.xml 格式或字段身份不明确，已保留原文件和备份'); };
+  if (typeof xml !== 'string') invalid();
+  let bytes = 0;
+  for (const character of xml) {
+    const n = character.codePointAt(0)!;
+    bytes += n < 0x80 ? 1 : n < 0x800 ? 2 : n < 0x10000 ? 3 : 4;
+    if (bytes > lsSettingsMaxBytes) throw new Error('小黄鸭 Settings.xml 超出读取上限，已保留原文件和备份');
+  }
+  const validCharacters = (value: string, references = true) => {
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value)) invalid();
+    if (!references) return;
+    if (/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);)/i.test(value)) invalid();
+    for (const match of value.matchAll(/&#(x[\da-f]+|\d+);/gi)) {
+      const n = parseInt(match[1].replace(/^x/i, ''), /^x/i.test(match[1]) ? 16 : 10);
+      if (!(n === 9 || n === 10 || n === 13 || (n >= 32 && n <= 0xd7ff) ||
+          (n >= 0xe000 && n <= 0xfffd) || (n >= 0x10000 && n <= 0x10ffff))) invalid();
+    }
+  };
+  const roots: LsSettingsXmlNode[] = [], stack: LsSettingsXmlNode[] = [];
+  let cursor = 0;
+  while (cursor < xml.length) {
+    const next = xml.indexOf('<', cursor), start = next < 0 ? xml.length : next;
+    const text = xml.slice(cursor, start); validCharacters(text);
+    if (text.includes(']]>') || (!stack.length && text.replace(/^\ufeff/, '').trim())) invalid();
+    if (stack.length) stack[stack.length - 1].text += text;
+    if (next < 0) break;
+    if (xml.startsWith('<!--', start)) {
+      const end = xml.indexOf('-->', start + 4);
+      if (end < 0 || xml.slice(start + 4, end).includes('--')) invalid();
+      cursor = end + 3; continue;
+    }
+    if (xml.startsWith('<![CDATA[', start)) {
+      const end = xml.indexOf(']]>', start + 9);
+      if (end < 0 || !stack.length) invalid();
+      const content = xml.slice(start + 9, end); validCharacters(content, false);
+      stack[stack.length - 1].text += content; cursor = end + 3; continue;
+    }
+    if (xml.startsWith('<?', start)) {
+      const end = xml.indexOf('?>', start + 2); if (end < 0) invalid();
+      cursor = end + 2; continue;
+    }
+    if (xml.startsWith('<!', start)) invalid();
+    let end = start + 1, quote = '';
+    for (; end < xml.length; end++) {
+      const c = xml[end];
+      if (quote) { if (c === quote) quote = ''; }
+      else if (c === '"' || c === "'") quote = c;
+      else if (c === '>') break;
+    }
+    if (end === xml.length || quote) invalid();
+    const token = xml.slice(start + 1, end);
+    if (token.startsWith('/')) {
+      if (!/^\/[\p{L}_][\p{L}\p{N}\p{M}_.:-]*\s*$/u.test(token)) invalid();
+      const node = stack.pop(); if (!node || node.name !== token.slice(1).trim()) invalid();
+      node!.end = end + 1;
+    } else {
+      const name = /^[\p{L}_][\p{L}\p{N}\p{M}_.:-]*/u.exec(token); if (!name) invalid();
+      const selfClosing = token.endsWith('/'), attributes: string[] = [];
+      let rest = token.slice(name![0].length, selfClosing ? -1 : undefined);
+      while (rest.trim()) {
+        const attr = /^\s+([\p{L}_][\p{L}\p{N}\p{M}_.:-]*)\s*=\s*(["'])(.*?)\2/su.exec(rest);
+        if (!attr || attributes.includes(attr[1]) || attr[3].includes('<')) invalid();
+        validCharacters(attr![3]); attributes.push(attr![1]); rest = rest.slice(attr![0].length);
+      }
+      const node: LsSettingsXmlNode = {name:name![0],start,end:selfClosing ? end + 1 : 0,text:'',attributes,children:[]};
+      if (stack.length) stack[stack.length - 1].children.push(node); else roots.push(node);
+      if (!selfClosing) stack.push(node);
+      if (stack.length > 128) invalid();
+    }
+    cursor = end + 1;
+  }
+  if (stack.length || roots.length !== 1 || roots[0].name !== 'Settings') invalid();
+  const root = roots[0], version = /^(?:schema(?:[-_]?version)?|format[-_]?version|version)$/i;
+  if (root.text.trim()) invalid();
+  // No format-version migration is documented by this owner. Keep an explicit
+  // unknown/future declaration untouched instead of guessing a supported version.
+  if (root.attributes.some(name => version.test(name.split(':').pop()!)) || root.children.some(node => version.test(node.name)))
+    throw new Error('小黄鸭 Settings.xml 版本未确认，已保留原文件和备份');
+  const lists = root.children.filter(node => node.name === 'GameProfiles');
+  if (lists.length !== 1 || lists[0].text.trim()) invalid();
+  const nodes = lists[0].children.filter(node => node.name === 'Profile'), profiles = parseLsProfiles(xml);
+  if (nodes.length !== profiles.length) invalid();
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]; if (node.text.trim()) invalid();
+    if (node.start !== profiles[i].start || node.end !== profiles[i].end) invalid();
+    for (const name of ['Title','Path','AutoScale']) {
+      const fields = node.children.filter(field => field.name === name);
+      if (fields.length > 1 || (name === 'AutoScale' && fields.length !== 1) || fields.some(field => field.children.length || field.attributes.length || xml.slice(field.start, field.end).includes('<![CDATA['))) invalid();
+    }
+  }
+  if (typeof DOMParser !== 'undefined' && new DOMParser().parseFromString(xml, 'application/xml').querySelector('parsererror')) invalid();
+}
+async function readLsSettingsText(file: string): Promise<string> {
+  const xml = await fs.readTextFile(file, lsSettingsMaxBytes, {bounded:true});
+  validateLsSettingsText(xml); return xml;
+}
+async function writeLsSettingsTransaction(file: string, original: string, next: string, checkpoint: () => void): Promise<void> {
+  validateLsSettingsText(next);
+  const backup = file + '.ymccbak';
+  if (await fs.exists(backup)) await readLsSettingsText(backup);
+  checkpoint(); await fs.writeTextFileAtomic(backup, original); checkpoint();
+  if (await readLsSettingsText(backup) !== original) throw new Error('小黄鸭配置备份回读不一致，未覆盖原文件');
+  checkpoint();
+  if (await readLsSettingsText(file) !== original) throw new Error('小黄鸭配置已变化，未覆盖；请重试');
+  checkpoint(); await fs.writeTextFileAtomic(file, next); checkpoint();
+  if (await readLsSettingsText(file) !== next) throw new Error('小黄鸭配置写入后的回读不一致，未宣称保存成功');
+}
+
 // 用户提供的 LS 优质模板（LSFG3 / 1.5x / FIXED 等），精确缩进对齐 LS 原生 Settings.xml
 // 只改 Title 与 Path，其他字段一字不动
 function buildProfileXml(title: string, path: string): string {
@@ -194,7 +309,7 @@ export function ensureLsProfile(gamePath: string, checkpoint: () => void = () =>
     // Validate first; a malformed document is never a reason to close LS.
     const file = await getLsSettingsPath(); checkpoint();
     if (!await fs.exists(file)) throw new Error('未找到 Lossless Scaling 配置文件，请先手动启动一次小黄鸭');
-    const before = await fs.readTextFile(file, 2 * 1024 * 1024); checkpoint();
+    const before = await readLsSettingsText(file); checkpoint();
     parseLsProfiles(before);
     const ls = await resolveLs(); checkpoint();
     const running = ls.source !== 'none' ? await proc.findExact(ls.exe) : {found:false,pid:0}; checkpoint();
@@ -228,7 +343,7 @@ async function ensureLsProfileUnlocked(gamePath: string, attempt = 0, checkpoint
     );
   }
 
-  const original = await fs.readTextFile(settingsPath, 2 * 1024 * 1024); checkpoint();
+  const original = await readLsSettingsText(settingsPath); checkpoint();
   parseLsProfiles(original);
 
   if (!original.includes('</Settings>') || !original.includes('</GameProfiles>'))
@@ -249,21 +364,22 @@ async function ensureLsProfileUnlocked(gamePath: string, attempt = 0, checkpoint
       `<Path>${xmlEscape(gamePath)}</Path>`);
     xml = original.slice(0, existing.start) + block + original.slice(existing.end);
   } else {
-    const idx = xml.lastIndexOf('\n  </GameProfiles>');
-    if (idx === -1) throw new Error('Settings.xml 格式异常：找不到 </GameProfiles>');
-    xml = xml.slice(0, idx) + '\n' + buildProfileXml(title, gamePath) + xml.slice(idx);
+    // LS can save compact XML. Match the closing tag, including its existing
+    // line indent, so removing the last EXE still allows a later explicit ON.
+    const ending = /(?:\r?\n[ \t]*)?<\/GameProfiles>/.exec(xml);
+    if (!ending) throw new Error('Settings.xml 格式异常：找不到 </GameProfiles>');
+    const newline=xml.includes('\r\n')?'\r\n':'\n';
+    xml = xml.slice(0, ending.index) + newline + buildProfileXml(title, gamePath).replace(/\n/g,newline) +
+      (ending[0].startsWith('<')?newline:'') + xml.slice(ending.index);
   }
   if (xml === original) return;
   // LS itself may have saved while we prepared the profile. Retry from its
   // newer document instead of intentionally overwriting an observed change.
-  if (await fs.readTextFile(settingsPath) !== original) {
+  if (await readLsSettingsText(settingsPath) !== original) {
     if (attempt >= 2) throw new Error('Lossless Scaling 配置正在变化，请稍后重试');
     return ensureLsProfileUnlocked(gamePath, attempt + 1, checkpoint);
   }
-  checkpoint();await fs.writeTextFileAtomic(settingsPath + '.ymccbak', original);checkpoint();
-  if (await fs.readTextFile(settingsPath, 2 * 1024 * 1024) !== original) throw new Error('小黄鸭配置已变化，未覆盖；请重新导入');checkpoint();
-  await fs.writeTextFileAtomic(settingsPath, xml);checkpoint();
-  if (await fs.readTextFile(settingsPath, 2 * 1024 * 1024) !== xml) throw new Error('小黄鸭配置写入后的回读不一致，未宣称导入成功');
+  await writeLsSettingsTransaction(settingsPath, original, xml, checkpoint);
 }
 
 // ───────────────────────── 一键插帧（写 XML → 启动 LS） ─────────────────────────
@@ -278,7 +394,7 @@ export async function hasLsProfile(gamePath: string): Promise<boolean> {
       'Settings.xml'
     );
     if (!(await fs.exists(settingsPath))) return false;
-    const xml = await fs.readTextFile(settingsPath);
+    const xml = await readLsSettingsText(settingsPath);
     return !!matchLsProfile(parseLsProfiles(xml), gamePath);
   } catch {
     return false;
@@ -308,7 +424,7 @@ async function oneClickFrameGenAttempt(
   let already = false;
   try {
     const file = await getLsSettingsPath();
-    already = await fs.exists(file) && matchLsProfile(parseLsProfiles(await fs.readTextFile(file, 2 * 1024 * 1024)), gamePath)?.enabled === true;
+    already = await fs.exists(file) && matchLsProfile(parseLsProfiles(await readLsSettingsText(file)), gamePath)?.enabled === true;
     checkpoint();
   } catch {
     /* 检测失败视为不存在，正常写入 */
@@ -735,7 +851,7 @@ export interface LosslessGameState {
   settingsPath: string; xml: string; profile: LsProfile | null;
   /** Actual Scale-button receipt only; null is unreadable, not disabled. */
   enabled: boolean | null; running: boolean; reason: string;
-  configuredEnabled: boolean; controlAvailable: boolean; pending?:boolean; phase?:'starting'|'stopping';
+  configuredEnabled: boolean; controlAvailable: boolean; pending?:boolean; phase?:'starting'|'stopping'|'removing';
 }
 // UI observation is optional evidence. The game configuration switch remains
 // controllable in Xbox fullscreen even if LS's WPF window is not exposed to UIA.
@@ -747,11 +863,11 @@ export async function getLosslessGameState(gamePath:string,waitForEnabled?:boole
   if(losslessDocuments.size>8)losslessDocuments.delete(losslessDocuments.keys().next().value!);
   void task.catch(()=>{if(losslessDocuments.get(key)?.task===task)losslessDocuments.delete(key);});return withLosslessAction(await task);
 }
-function withLosslessAction(document:LosslessGameState):LosslessGameState{return losslessAction?{...document,pending:true,phase:losslessAction.enabled?'starting':'stopping'}:{...document,pending:false};}
+function withLosslessAction(document:LosslessGameState):LosslessGameState{return losslessAction?{...document,pending:true,phase:losslessAction.action==='remove'?'removing':losslessAction.action==='on'?'starting':'stopping'}:{...document,pending:false};}
 async function readLosslessGameState(gamePath:string,waitForEnabled?:boolean):Promise<LosslessGameState>{
   const settingsPath = await getLsSettingsPath();
   if (!await fs.exists(settingsPath)) return {settingsPath,xml:'',profile:null,enabled:false,running:false,configuredEnabled:false,controlAvailable:false,reason:'未找到小黄鸭 Settings.xml；请先手动启动一次'};
-  const xml = await fs.readTextFile(settingsPath, 2 * 1024 * 1024);
+  const xml = await readLsSettingsText(settingsPath);
   const profiles = parseLsProfiles(xml), profile = matchLsProfile(profiles, gamePath);
   const configuredEnabled = profile?.enabled === true;
   const runtime=await readLosslessRuntime();
@@ -788,12 +904,18 @@ async function readLosslessGameState(gamePath:string,waitForEnabled?:boolean):Pr
   }
 }
 export async function stopLosslessScaling(gamePath: string, checkpoint: () => void = () => {}): Promise<void> {
+  return changeLosslessGameProfile(gamePath, false, checkpoint);
+}
+// Removing a game means removing its LS Profile/EXE association only. No game
+// executable or LS program file is deleted. Stop the exact owned session before
+// taking fresh XML, so LS cannot save its old in-memory association back later.
+async function changeLosslessGameProfile(gamePath:string,remove:boolean,checkpoint:()=>void):Promise<void> {
   return withLsSettingsLock(async () => {
     const state = await getLosslessGameState(gamePath); checkpoint();
     // Already absent means this game's toggle is off. Never close another
     // game's LS process just because it shares the same global settings file.
     const hasOwnedIntent = losslessSession?.gamePath === normalizeLsPath(gamePath);
-    if(state.profile?.enabled===false&&state.enabled!==true&&!hasOwnedIntent)return;
+    if(!remove&&state.profile?.enabled===false&&state.enabled!==true&&!hasOwnedIntent)return;
     if (!state.profile && (!state.running || !hasOwnedIntent)) return;
     if (state.running) {
       const ls = await resolveLs(); checkpoint();
@@ -810,21 +932,15 @@ export async function stopLosslessScaling(gamePath: string, checkpoint: () => vo
       }
     }
     // LS has finished its last in-memory save. Take the fresh document and
-    // disable only AutoScale in the exact profile; retain custom parameters.
-    const original = await fs.readTextFile(state.settingsPath, 2 * 1024 * 1024); checkpoint();
+    // disable AutoScale (preserving parameters), or remove only this EXE profile.
+    const original = await readLsSettingsText(state.settingsPath); checkpoint();
     const profile = matchLsProfile(parseLsProfiles(original), gamePath);
     if (!profile) { losslessSession = null; notifyLosslessScalingChanged(); return; }
-    const disabled=profile.block.replace(/(<AutoScale>\s*)true(\s*<\/AutoScale>)/,'$1false$2');
+    const disabled=remove?'':profile.block.replace(/(<AutoScale>\s*)true(\s*<\/AutoScale>)/,'$1false$2');
     const next=original.slice(0,profile.start)+disabled+original.slice(profile.end);
     if(next===original){losslessSession=null;notifyLosslessScalingChanged();return;}
     parseLsProfiles(next);
-    await fs.writeTextFileAtomic(state.settingsPath + '.ymccbak', original); checkpoint();
-    if (await fs.readTextFile(state.settingsPath, 2 * 1024 * 1024) !== original)
-      throw new Error('小黄鸭配置已变化，未关闭自动缩放；请重试');
-    checkpoint();
-    await fs.writeTextFileAtomic(state.settingsPath, next); checkpoint();
-    if (await fs.readTextFile(state.settingsPath, 2 * 1024 * 1024) !== next)
-      throw new Error('小黄鸭关闭后的配置回读不一致，未宣称关闭成功');
+    await writeLsSettingsTransaction(state.settingsPath, original, next, checkpoint);
     losslessSession = null;
     notifyLosslessScalingChanged();
   });
@@ -833,14 +949,28 @@ export interface LosslessReturnTarget { pid:number; processCreated:string; path:
 export interface LosslessToggleResult { confirmed:boolean; runtimeConfirmed:boolean|null; notice:string; pending?:boolean; }
 let losslessActionSerial=0;
 let losslessActionQueue:Promise<unknown>=Promise.resolve();
-let losslessAction:{key:string;enabled:boolean;task:Promise<LosslessToggleResult>}|null=null;
+type LosslessAction = 'on'|'off'|'remove';
+let losslessAction:{key:string;action:LosslessAction;task:Promise<LosslessToggleResult>}|null=null;
 export function setLosslessScalingEnabled(gamePath:string,enabled:boolean,checkpoint:()=>void=()=>{},gameTarget?:LosslessReturnTarget):Promise<LosslessToggleResult>{
-  const key=JSON.stringify([normalizeLsPath(gamePath),enabled,gameTarget?.pid,gameTarget?.processCreated]);
+  return queueLosslessAction(gamePath,enabled?'on':'off',checkpoint,gameTarget,
+    check=>applyLosslessScalingEnabled(gamePath,enabled,check,gameTarget));
+}
+export function removeLosslessGameProfile(gamePath:string,checkpoint:()=>void=()=>{},gameTarget?:LosslessReturnTarget):Promise<LosslessToggleResult>{
+  return queueLosslessAction(gamePath,'remove',checkpoint,gameTarget,async check=>{
+    await changeLosslessGameProfile(gamePath,true,check);check();
+    const state=await getLosslessGameState(gamePath);check();
+    const confirmed=state.profile===null;
+    return {confirmed,runtimeConfirmed:!state.running?false:null,notice:confirmed?'已解除此游戏的小黄鸭 EXE 绑定':'解除此游戏结果待确认，未自动重发',pending:false};
+  });
+}
+function queueLosslessAction(gamePath:string,action:LosslessAction,checkpoint:()=>void,gameTarget:LosslessReturnTarget|undefined,
+    run:(check:()=>void)=>Promise<LosslessToggleResult>):Promise<LosslessToggleResult>{
+  const key=JSON.stringify([normalizeLsPath(gamePath),action,gameTarget?.pid,gameTarget?.processCreated]);
   if(losslessAction?.key===key)return losslessAction.task;
   const serial=++losslessActionSerial;
   const check=()=>{if(serial!==losslessActionSerial)throw new Error('小黄鸭操作已被较新的开关请求替代');checkpoint();};
-  const task=losslessActionQueue.catch(()=>{}).then(()=>{check();notifyLosslessScalingChanged();return applyLosslessScalingEnabled(gamePath,enabled,check,gameTarget);});
-  losslessAction={key,enabled,task};losslessActionQueue=task;
+  const task=losslessActionQueue.catch(()=>{}).then(()=>{check();notifyLosslessScalingChanged();return run(check);});
+  losslessAction={key,action,task};losslessActionQueue=task;
   void task.finally(()=>{if(losslessAction?.task===task){losslessAction=null;notifyLosslessScalingChanged();}}).catch(()=>{});
   return task;
 }

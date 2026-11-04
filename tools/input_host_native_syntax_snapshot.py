@@ -15,12 +15,12 @@ def save(p,v):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps
 def need(v,s):
  if not v:raise RuntimeError(s)
 def main():
- ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',required=True,type=Path);a=ap.parse_args();out=a.out.resolve()
+ ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',required=True,type=Path);ap.add_argument('--timeout-seconds',type=int,choices=range(1,121),default=120);a=ap.parse_args();out=a.out.resolve()
  need(a.out.is_absolute() and not out.exists() and not out.is_relative_to(ROOT.resolve()),'fresh absolute evidence outside source required');out.mkdir(parents=True)
  receipt={'pass':False,'snapshotCompiled':False,'currentTreeAccepted':False,'hardwareAccepted':False,'fullLifecycleAccepted':False,'status':'PREPARING','startedAt':datetime.datetime.now().astimezone().isoformat()}
  try:
   names=[]
-  for folder in ['native','capabilities','deps/webview2/build/native/include']:
+  for folder in ['native','capabilities','deps/webview2/build/native/include','deps/adlx-sdk']:
    names.extend(str(p.relative_to(ROOT)).replace('\\','/') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix.lower() in ('.h','.hpp','.cpp','.inc','.inl','.tpp','.idl','.rc'))
   names=sorted(set([*names,'deps/json/json.hpp','native/build_native.bat',AUTH,SELF]))
   original={n:(ROOT/n).read_bytes() for n in names};hashes={n:sha(b) for n,b in original.items()};snapshot=out/'source'
@@ -37,7 +37,7 @@ def main():
   env.update(PATH=';'.join(map(str,[compiler.parent,windows/'System32',windows])),INCLUDE=';'.join(tools['native']['include']),LIB=';'.join(tools['native']['lib']),TEMP=str(temp),TMP=str(temp),VSLANG='1033')
   argv=[str(compiler),'/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/bigobj',*defines,'/Zs',str(snapshot/'native/main.cpp'),'/I'+str(snapshot/'deps/webview2/build/native/include'),'/I'+str(snapshot/'deps/json'),'/I'+tools['native']['include'][-1]]
   receipt.update(command=argv,compiler={'path':str(compiler),'sha256':declared['sha256']},productionDefines=defines)
-  proc=subprocess.run(argv,cwd=snapshot/'native',env=env,capture_output=True,timeout=120,creationflags=subprocess.CREATE_NO_WINDOW)
+  proc=subprocess.run(argv,cwd=snapshot/'native',env=env,capture_output=True,timeout=a.timeout_seconds,creationflags=subprocess.CREATE_NO_WINDOW)
   raw=proc.stdout+proc.stderr
   try:text=raw.decode('utf-8')
   except UnicodeDecodeError:text=raw.decode('mbcs',errors='replace')

@@ -14,7 +14,7 @@ public sealed record FanCapabilityDescriptor(string DeviceId, string LegacyFacto
         throw new InvalidOperationException("HC_CAPABILITY_UNREGISTERED_DEVICE: " + LegacyFactoryType);
 }
 
-public static class FanCapabilityCatalog
+public static partial class FanCapabilityCatalog
 {
     private static readonly object Gate = new();
     private static AsusFanCapabilitySession? owner;
@@ -40,7 +40,7 @@ public static class FanCapabilityCatalog
         var descriptor = ResolveAsusCurve(factoryType);
         lock (Gate)
         {
-            if (owner is not null || legacyDispatchInProgress)
+            if (owner is not null || pinnedSourceOwner is not null || legacyDispatchInProgress)
                 throw new InvalidOperationException("FAN_CAPABILITY_BUSY: fan writer already owned in this process");
             owner = new AsusFanCapabilitySession(descriptor, ++ownershipGeneration);
             return owner;
@@ -90,7 +90,7 @@ public static class FanCapabilityCatalog
         ArgumentNullException.ThrowIfNull(hcHandleReleased);
         lock (Gate)
         {
-            if (owner is not null || legacyDispatchInProgress || AsusACPI.IsOpen ||
+            if (owner is not null || pinnedSourceOwner is not null || legacyDispatchInProgress || AsusACPI.IsOpen ||
                 !previous.CanHandBackToHc || previous.HandoffClaimed || previous.Generation != ownershipGeneration)
                 throw new InvalidOperationException("FAN_CAPABILITY_HANDOFF_PENDING: default curves and handle release required");
             previous.HandoffClaimed = true;

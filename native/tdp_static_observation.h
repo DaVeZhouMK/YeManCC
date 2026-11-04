@@ -11,20 +11,38 @@
 #include <functional>
 #include <regex>
 #include <string>
+#include <string_view>
+#include <set>
 #include <vector>
 #include "json.hpp"
 namespace ymcc::tdpdiag {
 using Json = nlohmann::json;
 namespace fs = std::filesystem;
+// Success detail is classified before allocating native row copies. Unknown and
+// failed outcomes retain base evidence even when optional detail is disabled.
+inline bool successfulFloatingDetail(const char* event, const Json& detail) {
+    if (!detail.is_object()) return false;
+    const auto source = detail.find("source");
+    if (source == detail.end() || !source->is_string() || *source != "autofloat") return false;
+    const std::string_view name(event);
+    if (name == "tdp.failed" || name == "tdp.skipped" || name == "tdp.unverified" || name == "tdp.runtime-identity") return false;
+    const auto rc = detail.find("rc"), ok = detail.find("ok");
+    return !(rc != detail.end() && rc->is_number_integer() && *rc != 0) &&
+        !(ok != detail.end() && ok->is_boolean() && !ok->get<bool>());
+}
 inline std::string boundedText(std::string value, size_t limit = 4096) {
     try {
         // Broken/bootstrap stderr may end in an incomplete UTF-8 sequence.
         // Preserve it with replacement markers rather than losing the entire JSON row.
         value = Json::parse(Json(value).dump(-1, ' ', false, Json::error_handler_t::replace)).get<std::string>();
-        value = std::regex_replace(value, std::regex(R"((?:[A-Za-z]:[\\/]+Users[\\/]+)[^\\/\r\n\"']+)", std::regex::icase), "<USER>");
-        value = std::regex_replace(value, std::regex(R"((authorization[\"'\s]*[:=][\"'\s]*(?:bearer\s+)?)[^\r\n,}\"']+)", std::regex::icase), "$1<REDACTED>");
-        value = std::regex_replace(value, std::regex(R"((bearer\s+)[A-Za-z0-9._~+/=-]+)", std::regex::icase), "$1<REDACTED>");
-        value = std::regex_replace(value, std::regex(R"((sessionToken|authorization|pipeSecret|password|secret)[\"'\s]*[:=][\"'\s]*[^\s,\r\n}\"]+)", std::regex::icase), "$1=<REDACTED>");
+        static const std::regex redact1 = std::regex(R"((?:[A-Za-z]:[\\/]+Users[\\/]+)[^\\/\r\n\"']+)", std::regex::icase);
+        value = std::regex_replace(value, redact1, "<USER>");
+        static const std::regex redact2 = std::regex(R"((authorization[\"'\s]*[:=][\"'\s]*(?:bearer\s+)?)[^\r\n,}\"']+)", std::regex::icase);
+        value = std::regex_replace(value, redact2, "$1<REDACTED>");
+        static const std::regex redact3 = std::regex(R"((bearer\s+)[A-Za-z0-9._~+/=-]+)", std::regex::icase);
+        value = std::regex_replace(value, redact3, "$1<REDACTED>");
+        static const std::regex redact4 = std::regex(R"((sessionToken|authorization|pipeSecret|password|secret)[\"'\s]*[:=][\"'\s]*[^\s,\r\n}\"]+)", std::regex::icase);
+        value = std::regex_replace(value, redact4, "$1=<REDACTED>");
     } catch (...) { return "redaction-error"; }
     if (value.size() > limit) {
         size_t end = limit;
@@ -67,6 +85,43 @@ inline Json encodingsZip(const fs::path& path) {
     bool complete=true;for(size_t i=0;i<wanted.size();++i){result["entries"][wanted[i]]=found[i];complete=complete&&found[i];}
     result["status"]=complete?"ok":"encodings-entry-missing";return result;
 }
+// Manifest contents attest only the bounded installed-file snapshot below;
+// malformed/future input never becomes a successful identity statement.
+inline Json parseRuntimeIdentityManifest(const std::string& text) noexcept {
+    try {
+        if (text.empty() || text.size() > (1u << 20)) return Json(Json::value_t::discarded);
+        struct Invalid {};
+        std::vector<std::set<std::string>> containers;
+        auto value = Json::parse(text, [&](int depth, Json::parse_event_t event, Json& field) {
+            if (depth > 64) throw Invalid{};
+            if (event == Json::parse_event_t::object_start || event == Json::parse_event_t::array_start) {
+                if (containers.size() >= 64) throw Invalid{};
+                containers.emplace_back();
+            } else if (event == Json::parse_event_t::key) {
+                if (containers.empty() || !containers.back().insert(field.get<std::string>()).second) throw Invalid{};
+            } else if (event == Json::parse_event_t::object_end || event == Json::parse_event_t::array_end) {
+                if (containers.empty()) throw Invalid{};
+                containers.pop_back();
+            }
+            return true;
+        });
+        if (!value.is_object()) throw Invalid{};
+        if (value.contains("schemaVersion") && (!value["schemaVersion"].is_number_integer() || value["schemaVersion"] < 0 || value["schemaVersion"] > 1)) throw Invalid{};
+        auto hash = [](const Json& v) {
+            if (!v.is_string()) return false;
+            const auto& text = v.get_ref<const std::string&>();
+            return text.size() == 64 && std::all_of(text.begin(), text.end(), [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); });
+        };
+        if (!value.contains("helperSha256") || !hash(value["helperSha256"]) || !value.contains("files") || !value["files"].is_array()) throw Invalid{};
+        if (value.contains("pythonVersion") && !value["pythonVersion"].is_string()) throw Invalid{};
+        for (const auto& file : value["files"]) {
+            if (!file.is_object() || !file.contains("name") || !file["name"].is_string() || !file.contains("sha256") || !hash(file["sha256"])) throw Invalid{};
+            const auto& name = file["name"].get_ref<const std::string&>();
+            if (name.empty() || name.size() > 4096 || name.find('\0') != std::string::npos) throw Invalid{};
+        }
+        return value;
+    } catch (...) { return Json(Json::value_t::discarded); }
+}
 class RuntimeIdentityCache {
 public:
     Json snapshot(const fs::path& exe, std::uint64_t now, bool failure, const std::function<std::string(const std::wstring&)>& sha) {
@@ -83,15 +138,16 @@ public:
         std::wstring signature;
         auto metadata=files;metadata.push_back(exe.parent_path()/L"tdp-runtime-manifest.json");
         for(const auto& file:metadata){ec.clear();auto size=fs::file_size(file,ec);signature+=file.wstring()+L":"+std::to_wstring(ec?0:size)+L":"+std::to_wstring(ec?ec.value():0);ec.clear();auto m=fs::last_write_time(file,ec);signature+=L":"+std::to_wstring(ec?0:m.time_since_epoch().count());}
-        if(exe==path_&&known_&&signature==signature_&&(!failure||failureCollected_)){lastChecked_=now;return cached_;}
+        if(exe==path_&&known_&&signature==signature_&&!retryableIo_&&(!failure||failureCollected_)){lastChecked_=now;return cached_;}
         if(signature!=signature_||exe!=path_)failureCollected_=false;
         path_=exe;signature_=signature;known_=true;lastChecked_=now;if(failure)failureCollected_=true;
+        retryableIo_=false;
         cached_={{"schemaVersion",1},{"revision",++revision_},{"sampleTick",now},{"files",Json::array()},
             {"manifestCheck","not-checked-no-version-matched-manifest"},{"evidenceScope","installed-files-only-not-helper-execution"}};
         for(const auto& file:files){
             Json item={{"name",boundedText(file.filename().string())},{"status","missing"},{"readable",false},{"sha256","not-observed"}};
             ec.clear();const auto size=fs::file_size(file,ec);
-            if(!ec){std::ifstream probe(file,std::ios::binary);item["bytes"]=size;item["readable"]=static_cast<bool>(probe);item["status"]=probe?"present":"unreadable";if(probe){const auto hash=sha(file.wstring());item["sha256"]=hash.empty()?"read-error":hash;}}
+            if(!ec){std::ifstream probe(file,std::ios::binary);item["bytes"]=size;item["readable"]=static_cast<bool>(probe);item["status"]=probe?"present":"unreadable";if(!probe)retryableIo_=true;if(probe){const auto hash=sha(file.wstring());item["sha256"]=hash.empty()?"read-error":hash;if(hash.empty())retryableIo_=true;}}
             else item["errorCode"]=ec.value();
             cached_["files"].push_back(std::move(item));
         }
@@ -103,7 +159,9 @@ public:
                 manifest.seekg(0,std::ios::end);const auto bytes=manifest.tellg();manifest.seekg(0);
                 if(bytes<=0||bytes>1024*1024)throw std::runtime_error("manifest-size");
                 std::string text(static_cast<size_t>(bytes),'\0');manifest.read(text.data(),bytes);
-                const auto declared=Json::parse(text);
+                if(!manifest){retryableIo_=true;throw std::runtime_error("manifest-short-read");}
+                const auto declared=parseRuntimeIdentityManifest(text);
+                if(declared.is_discarded())throw std::runtime_error("manifest-invalid-or-unsupported");
                 const auto normalized=[](std::string value){std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return char(std::tolower(c));});return value;};
                 const auto actualHash=cached_["files"][0].value("sha256",std::string{});
                 const auto expectedHash=declared.value("helperSha256",std::string{});
@@ -126,11 +184,15 @@ public:
                         {"helperSha256",actualHash},{"pythonVersion",declared.value("pythonVersion",std::string("not-observed"))}};
                 }
             }catch(...){cached_["manifestCheck"]={{"status","read-error"},{"evidenceScope","no-control-gate-changed"}};}
+        }else{
+            // A sharing/access fault is not immutable metadata. Retry only on
+            // a later actual request after the existing 30-second budget.
+            ec.clear();if(fs::exists(manifestPath,ec)||ec)retryableIo_=true;
         }
         return cached_;
     }
 private:
-    fs::path path_;std::wstring signature_;Json cached_;bool known_=false,failureCollected_=false;
+    fs::path path_;std::wstring signature_;Json cached_;bool known_=false,failureCollected_=false,retryableIo_=false;
     std::uint64_t lastChecked_=0,revision_=0;
 };
 // Transient STDERR snapshot for the ALREADY-REQUESTED daemon launch. Never a

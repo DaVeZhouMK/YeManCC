@@ -1,8 +1,9 @@
 // OpenSpeedy game-speed bridge. Each operation owns one PowerShell client
 // transaction, while the target DLL stays injected for the lifetime of the
 // target process. Changing a factor must not be treated as a new injection.
-import { fs, shell } from './api';
-import { detectGame, type DetectedGame } from './gamedetect';
+import { fs, shell, proc, powerLifecycle, type ShellIntentAdmission } from './api';
+import { on } from './ipc';
+import { detectGame, subscribeGameStatus, type DetectedGame } from './gamedetect';
 
 export const OPENSPEEDY_DIR = 'C:\\SOFT\\YeMan\\PowerControl\\OpenSpeedy';
 export const SPEED_PRESETS = [0.5, 0.8, 1, 1.2, 1.5, 2, 4, 8];
@@ -25,7 +26,8 @@ export interface SpeedResult {
     | 'operation_failed'
     | 'valve_no_target'
     | 'valve_target_mismatch'
-    | 'stale_target';
+    | 'stale_target'
+    | 'unconfirmed';
 }
 
 export interface SpeedTargetIdentity {
@@ -65,19 +67,29 @@ async function blockedTargetReason(
   if (isMinecraftTarget(target)) return 'minecraft-or-java';
   if (!target) return null;
   try {
-    if (!await fs.exists(BLOCKLIST_PATH)) return null;
+    const present = await fs.exists(BLOCKLIST_PATH, 1500);
+    // Absence disables only the optional custom list. An unavailable or changing
+    // list cannot authorize an operation; every explicit request reads it again.
+    if (present === false) return await fs.exists(BLOCKLIST_PATH, 1500) === false ? null : 'custom-blocklist-changed';
+    if (present !== true) return 'custom-blocklist-unavailable';
+    const read = () => fs.readTextFile(BLOCKLIST_PATH, 1 << 20, { bounded: true, timeoutMs: 1500 });
+    const text = await read();
+    // The range receipt checks complete UTF-8 byte length. Replacement characters,
+    // unpaired surrogates and binary controls also cannot form trustworthy rules.
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]|[\ud800-\udfff]/u.test(text)) return 'custom-blocklist-invalid';
+    if (text !== await read()) return 'custom-blocklist-changed';
     const identity = [target.name, target.title]
       .filter((value): value is string => typeof value === 'string')
       .join(' ')
       .toLowerCase();
     const processName = (target.name || '').toLowerCase();
-    const entries = (await fs.readTextFile(BLOCKLIST_PATH))
+    const entries = text
       .split(/\r?\n/)
       .map((line) => line.replace(/#.*$/, '').trim().toLowerCase())
       .filter(Boolean);
     return entries.find((entry) => identity.includes(entry) || processName === entry) || null;
   } catch {
-    return null;
+    return 'custom-blocklist-unavailable';
   }
 }
 
@@ -246,12 +258,15 @@ function Write-TargetSnapshot([string]$stage, [int]$targetPid) {
 type SpeedOperation = { kind: 'apply'; factor: number } | { kind: 'clear' };
 
 export type SpeedOperationSource = 'user-factor' | 'user-reset' | 'target-change' | 'unknown';
+// Optional caller admission; the original owner retains its queue and exact game lease.
+export interface SpeedOperationAdmission {generation:number;nativePeer?:ShellIntentAdmission['expectedMirrorPeer'];checkpoint:()=>Promise<void>;}
 
 type SpeedRequestContext = {
   id: number;
   source: SpeedOperationSource;
   requestedAt: number;
   intentEpoch: number;
+  admission?: SpeedOperationAdmission;
 };
 
 type SpeedSession = {
@@ -265,6 +280,35 @@ type SpeedSession = {
 };
 
 let speedSession: SpeedSession | null = null;
+// Ownership of a possibly-dispatched transaction is not a successful speed state.
+let speedCleanupLease:{id:number;target:SpeedTargetIdentity;resetConfirmed?:boolean}|null=null;
+let speedCleanupTask:Promise<SpeedResult>|null=null;
+let stopSpeedGame:(()=>void)|null=null,stopSpeedWake:(()=>void)|null=null;
+let automaticCleanupAttempted=false,lastCleanupWakeGeneration=0;
+function normalizedSpeedPath(value:string|undefined){return (value||'').replace(/\//g,'\\').toLowerCase();}
+function currentSpeedCleanupTarget():SpeedTargetIdentity|null{return speedCleanupLease?.target||speedSession?.target||null;}
+function releaseSpeedObservations(){if(currentSpeedCleanupTarget())return;stopSpeedGame?.();stopSpeedWake?.();stopSpeedGame=stopSpeedWake=null;}
+function retainSpeedObservations(){
+ if(stopSpeedGame)return;
+ // Reuse the existing shared target and native wake notifications, with no timer.
+ stopSpeedGame=()=>{};
+ const release=subscribeGameStatus(game=>{const target=currentSpeedCleanupTarget();if(target&&(!game||!sameSpeedLease(target,game)))void cleanupOwnedSpeedTarget(true).catch(()=>{});});
+ stopSpeedGame=release;
+ stopSpeedWake=on<{generation?:number}>('power.resumed',event=>{const generation=event?.generation;if(speedCleanupLease&&Number.isSafeInteger(generation)&&generation!>lastCleanupWakeGeneration){lastCleanupWakeGeneration=generation!;automaticCleanupAttempted=false;void cleanupOwnedSpeedTarget(true).catch(()=>{});}});
+}
+export async function cleanupOwnedSpeedTarget(automatic=false):Promise<SpeedResult>{ if(speedCleanupTask)return speedCleanupTask;
+ const target=currentSpeedCleanupTarget();if(!target)return {ok:true,skipped:true,msgs:['No owned speed cleanup target']};
+ if(automatic&&automaticCleanupAttempted)return {ok:false,reason:'unconfirmed',msgs:['自动清理已尝试，保留原目标等待明确重试']};
+ if(automatic)automaticCleanupAttempted=true;
+ const work=(async()=>{
+   const first=await clearGameSpeed(target.pid,'target-change');if(!first.ok)return first;
+   const remaining=currentSpeedCleanupTarget();
+   // At most the distinct prior confirmed lease remains. Never repeat this target.
+   return remaining&&!sameSpeedLease(remaining,target)?clearGameSpeed(remaining.pid,'target-change'):first;
+ })();speedCleanupTask=work;
+ void work.finally(()=>{if(speedCleanupTask===work)speedCleanupTask=null;releaseSpeedObservations();}).catch(()=>{});return work;
+}
+
 let speedOperationSequence = 0;
 let speedIntentEpoch = 0;
 export interface GameSpeedState {
@@ -272,9 +316,11 @@ export interface GameSpeedState {
   processCreated: string;
   factor: number;
   enabled: boolean;
+  cleanupPending?:boolean;
 }
 
 export function getGameSpeedState(): GameSpeedState | null {
+  if(speedCleanupLease)return {pid:speedCleanupLease.target.pid,processCreated:speedCleanupLease.target.processCreated||'',factor:1,enabled:speedCleanupLease.resetConfirmed===true,cleanupPending:speedCleanupLease.resetConfirmed!==true};
   if (!speedSession) return null;
   return {
     pid: speedSession.target.pid,
@@ -526,6 +572,7 @@ async function speedOp(
   const currentTarget = target || { pid };
   const expectedCreated = normalizeProcessCreated(currentTarget.processCreated);
   const oldTarget = speedSession?.target || null;
+  const ownedCleanupAtStart=speedCleanupLease;
   const oldExpectedCreated = normalizeProcessCreated(oldTarget?.processCreated);
   if (expectedCreated === '0') {
     return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['Game valve identity is missing; kept at 1x'] };
@@ -546,8 +593,8 @@ async function speedOp(
       msgs: ['The game valve target changed while queued; kept at 1x'],
     };
   }
-  if (source === 'target-change' && speedSession &&
-      !sameSpeedTarget(speedSession.target, currentTarget)) {
+  if (source === 'target-change' && currentSpeedCleanupTarget() &&
+      !sameSpeedLease(currentSpeedCleanupTarget(), currentTarget)) {
     return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['A newer speed target superseded the old cleanup'] };
   }
   if (!latestMatchesTarget && request?.intentEpoch !== speedIntentEpoch) {
@@ -646,7 +693,17 @@ Write-TargetSnapshot 'after_getspeed' ${pid}
 [Console]::Out.WriteLine('TARGET_MAPPING_AFTER_SPEED:' + (Get-TargetMappingState ${pid}))
 [Console]::Out.WriteLine('RESULT:ok')
 `
-    : `
+    : source==='target-change' ? `
+# Owned cleanup is target-local. Never change the shared factor of another game.
+if (-not (Test-TrackedProcessIdentity ${pid} [UInt64]${expectedCreated}) -or
+    (Get-Process -Id ${pid} -ErrorAction Stop).Path -ine '${escapePowerShell(currentTarget.path||'')}') {
+  [Console]::Out.WriteLine('SAFE_SKIP:target_identity_mismatch')
+  [Console]::Out.WriteLine('RESULT:failed')
+  exit 3
+}
+$resp = Send-BridgeCommand 'DISABLE ${pid}'
+if (Test-BridgeOk $resp) { [Console]::Out.WriteLine('RESULT:ok') } else { [Console]::Out.WriteLine('RESULT:failed'); exit 2 }
+` : `
 # X1 only resets the shared factor. Do not unload the DLL while the game runs.
 if (-not (Test-TargetIdentity ${pid} [UInt64]${expectedCreated})) {
   [Console]::Out.WriteLine('SAFE_SKIP:target_identity_mismatch')
@@ -756,7 +813,17 @@ ${transaction}
 $pipe.Close()
 `.trim();
 
-  const r = await shell.run('powershell', ['-NoProfile', '-Command', ps], 30000);
+  if (request?.admission) await request.admission.checkpoint();
+  if(operation.kind==='apply'){
+    if(speedCleanupLease&&!sameSpeedLease(speedCleanupLease.target,currentTarget))return {ok:false,reason:'unconfirmed',msgs:['原变速目标仍待清理，请先恢复 1×']};
+    speedCleanupLease={id:operationId,target:structuredClone(currentTarget)};automaticCleanupAttempted=false;retainSpeedObservations();
+  }
+  const uncertain = ():SpeedResult => ({ok:false,reason:'unconfirmed',msgs:['变速请求未获完成确认；实际效果待确认，不自动重放']});
+  let r:Awaited<ReturnType<typeof shell.run>>;
+  try{
+    r = await shell.run('powershell', ['-NoProfile', '-Command', ps], 30000, undefined, request?.admission?{expectedPowerGeneration:request.admission.generation,...(request.admission.nativePeer?{expectedMirrorPeer:request.admission.nativePeer}:{})}:undefined);
+    if(request?.admission)await request.admission.checkpoint();
+  }catch(error){if(request?.admission)return uncertain();throw error;}
   const raw = (r.stdout || '') + '\n' + (r.stderr || '');
   const rawForLog = raw.length > 8000 ? `${raw.slice(0, 8000)}\n...[truncated]` : raw;
   await log(`RAW op=${operationId} bytes=${raw.length}\n${rawForLog}`);
@@ -797,8 +864,16 @@ $pipe.Close()
       };
     }
   }
+  // Shell success, diagnostic logging and final game reads can all outlive admission.
+  // An expired receipt is uncertain; never commit a new session or replay it.
+  if(request?.admission){try{await request.admission.checkpoint();}catch{return uncertain();}}
   if (bridgeConflict) return { ok: true, skipped: true, safeFallback: true, reason: 'bridge_conflict', msgs: ['OpenSpeedy bridge conflict; kept at 1x'] };
   if (targetIdentityMismatch) return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['Target process instance changed; kept at 1x'] };
+  if(ok&&operation.kind==='clear'&&source==='target-change'){
+    if(speedCleanupLease===ownedCleanupAtStart)speedCleanupLease=null;
+    if(sameSpeedLease(speedSession?.target||null,currentTarget))speedSession=null;
+    releaseSpeedObservations();return {ok:true,msgs:['已解除原目标的变速挂钩；未修改其它游戏倍率']};
+  }
   if (ok && operation.kind === 'apply') {
     const completedAt = Date.now();
     const continuingSession = sameSpeedTarget(speedSession?.target || null, currentTarget);
@@ -813,7 +888,11 @@ $pipe.Close()
       factorHistory: [...(previousSession?.factorHistory ?? []), operation.factor].slice(-12),
     };
   }
-  if (ok && operation.kind === 'clear' && speedSession?.target.pid === pid) {
+  // A confirmed explicit1x establishes a real1x state; its hook remains owned.
+  if(ok&&operation.kind==='clear'&&!speedSession&&speedCleanupLease&&sameSpeedLease(speedCleanupLease.target,currentTarget)){
+    const at=Date.now();speedSession={target:structuredClone(currentTarget),enabled:true,factor:1,appliedAt:at,firstAppliedAt:at,operationCount:0,factorHistory:[]};
+  }
+  if (ok && operation.kind === 'clear' && sameSpeedLease(speedSession?.target||null,currentTarget)&&normalizedSpeedPath(speedSession?.target.path)===normalizedSpeedPath(currentTarget.path)) {
     const resetCompletedAt = Date.now();
     speedSession.enabled = true;
     speedSession.factor = 1;
@@ -828,8 +907,15 @@ $pipe.Close()
       transactionBridgePid,
     );
   }
-  if (!ok && operation.kind === 'apply') speedSession = null;
-  return { ok, safeFallback, reason: ok ? undefined : 'operation_failed', msgs: resps };
+  if(ok&&speedCleanupLease&&sameSpeedLease(speedCleanupLease.target,currentTarget)){
+    // A different prior confirmed target must not absorb this target's hook.
+    // Preserve both responsibilities until their own exact cleanup is confirmed.
+    if(sameSpeedLease(speedSession?.target||null,currentTarget)&&normalizedSpeedPath(speedSession?.target.path)===normalizedSpeedPath(currentTarget.path))speedCleanupLease=null;
+    else if(operation.kind==='clear')speedCleanupLease.resetConfirmed=true;
+  }
+  if(!ok&&operation.kind==='apply'&&!speedCleanupLease)speedSession=null;
+  releaseSpeedObservations();
+  return { ok, safeFallback:ok&&operation.kind==='clear'?false:safeFallback, reason: ok ? undefined : 'operation_failed', msgs: resps };
 }
 
 async function applyGameSpeedInternal(
@@ -837,7 +923,9 @@ async function applyGameSpeedInternal(
   factor: number,
   target?: SpeedTargetIdentity,
   source: SpeedOperationSource = 'user-factor',
+  admission?: SpeedOperationAdmission,
 ): Promise<SpeedResult> {
+  if(speedCleanupLease&&!speedCleanupLease.resetConfirmed)return {ok:false,reason:'unconfirmed',msgs:['原变速结果未确认，请先恢复 1×，不会重放旧倍率']};
   if (!Number.isFinite(factor) || factor <= 0 || factor > 16) return { ok: true, skipped: true, safeFallback: true, reason: 'invalid_factor', msgs: ['Invalid speed factor; kept at 1x'] };
   if (!Number.isSafeInteger(pid) || pid <= 0) return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['Invalid game PID; kept at 1x'] };
   speedIntentEpoch += 1;
@@ -851,6 +939,7 @@ async function applyGameSpeedInternal(
   // The caller-provided PID is only an expected value. The actual control
   // target and all identity metadata come from the valve response above.
   const valveTarget = admitted.target;
+  if(speedCleanupLease&&!sameSpeedLease(speedCleanupLease.target,valveTarget))return {ok:false,reason:'unconfirmed',msgs:['另一目标的挂钩仍待归还，未更改新游戏倍率']};
   const blocked = await blockedTargetReason(valveTarget);
   if (blocked) return { ok: true, skipped: true, safeFallback: true, reason: 'blocked_target', msgs: [`Blocked by compatibility rule: ${blocked}; kept at 1x`] };
   const request: SpeedRequestContext = {
@@ -858,6 +947,7 @@ async function applyGameSpeedInternal(
     source,
     requestedAt: Date.now(),
     intentEpoch: speedIntentEpoch,
+    admission,
   };
   await log(
     `QUEUE diagVersion=4 appSession=${speedDiagnosticSession} op=${request.id} source=${source} ` +
@@ -869,16 +959,27 @@ async function applyGameSpeedInternal(
 async function clearGameSpeedInternal(
   pid: number,
   source: SpeedOperationSource = 'unknown',
+  admission?: SpeedOperationAdmission,
 ): Promise<SpeedResult> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['Invalid game PID; kept at 1x'] };
-  const sessionTarget = speedSession?.target || null;
+  const sessionTarget = currentSpeedCleanupTarget();
+  const capturedCleanup=speedCleanupLease;
   if (!sessionTarget || sessionTarget.pid !== pid || !sessionTarget.processCreated) {
     return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['No matching valve-admitted speed session; kept at 1x'] };
   }
   const cleanupOldTarget = source === 'target-change';
+  if(cleanupOldTarget){
+    const name=sessionTarget.path?.replace(/\\/g,'/').split('/').slice(-1)[0]||sessionTarget.name;
+    if(!name)return {ok:false,reason:'unconfirmed',msgs:['原变速目标路径缺失，未清理']};
+    const observation=await proc.identities([name]);
+    if(!observation.known)return {ok:false,reason:'unconfirmed',msgs:['原变速目标不可确认，保留清理归属']};
+    const alive=observation.processes.some(p=>p.pid===sessionTarget.pid&&p.processCreated===sessionTarget.processCreated&&normalizedSpeedPath(p.path)===normalizedSpeedPath(sessionTarget.path));
+    if(!alive){if(speedCleanupLease===capturedCleanup)speedCleanupLease=null;if(sameSpeedLease(speedSession?.target||null,sessionTarget))speedSession=null;releaseSpeedObservations();return {ok:true,msgs:['原变速进程已结束，清理归属已归还']};}
+    if(speedCleanupLease!==capturedCleanup)return {ok:false,reason:'unconfirmed',msgs:['变速清理归属已变化']};
+  }
   const current = cleanupOldTarget ? null : await detectGame(true).catch(() => null);
   const currentTarget = current ? valveTargetFromGame(current) : null;
-  const sameAsValve = !!currentTarget && sameSpeedTarget(sessionTarget, currentTarget);
+  const sameAsValve = !!currentTarget && sameSpeedLease(sessionTarget,currentTarget)&&normalizedSpeedPath(sessionTarget.path)===normalizedSpeedPath(currentTarget.path);
   if (!cleanupOldTarget && !sameAsValve) {
     return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['The current valve target is different; kept at 1x'] };
   }
@@ -891,21 +992,27 @@ async function clearGameSpeedInternal(
     source,
     requestedAt: Date.now(),
     intentEpoch: speedIntentEpoch,
+    admission,
   };
   await log(
     `QUEUE diagVersion=4 appSession=${speedDiagnosticSession} op=${request.id} source=${source} ` +
     `pid=${clearTarget.pid} processCreated=${clearTarget.processCreated} action=clear`,
   );
-  return enqueueSpeedOperation(() => speedOp(clearTarget.pid, { kind: 'clear' }, clearTarget, request));
+  return enqueueSpeedOperation<SpeedResult>(async()=>{
+    if(speedCleanupLease!==capturedCleanup||!sameSpeedLease(currentSpeedCleanupTarget(),clearTarget))return {ok:false,reason:'unconfirmed',msgs:['原变速清理归属已被替代']};
+    const power=await powerLifecycle.get();if(power.phase!=='ready'||!power.hardwareWritesAllowed)return {ok:false,reason:'unconfirmed',msgs:['等待电源就绪后清理原变速目标']};
+    const cleanupAdmission=admission??{generation:power.generation,checkpoint:async()=>{const fresh=await powerLifecycle.get();if(fresh.generation!==power.generation||fresh.phase!=='ready'||!fresh.hardwareWritesAllowed)throw Error('SPEED_CLEANUP_POWER_CHANGED');}};
+    return speedOp(clearTarget.pid,{kind:'clear'},clearTarget,{...request,admission:cleanupAdmission});
+  });
 }
 
 // Event-driven mirror refresh; uses the same session, never polls or persists.
 const speedStateListeners = new Set<() => void>();
 export function onGameSpeedStateChanged(listener: () => void): () => void { speedStateListeners.add(listener); return () => { speedStateListeners.delete(listener); }; }
 function notifySpeedStateChanged() { for (const listener of speedStateListeners) { try { listener(); } catch {} } }
-export async function applyGameSpeed(pid: number, factor: number, target?: SpeedTargetIdentity, source: SpeedOperationSource = 'user-factor'): Promise<SpeedResult> {
-  try { return await applyGameSpeedInternal(pid, factor, target, source); } finally { notifySpeedStateChanged(); }
+export async function applyGameSpeed(pid: number, factor: number, target?: SpeedTargetIdentity, source: SpeedOperationSource = 'user-factor', admission?: SpeedOperationAdmission): Promise<SpeedResult> {
+  try { return await applyGameSpeedInternal(pid, factor, target, source, admission); } finally { notifySpeedStateChanged(); }
 }
-export async function clearGameSpeed(pid: number, source: SpeedOperationSource = 'unknown'): Promise<SpeedResult> {
-  try { return await clearGameSpeedInternal(pid, source); } finally { notifySpeedStateChanged(); }
+export async function clearGameSpeed(pid: number, source: SpeedOperationSource = 'unknown', admission?: SpeedOperationAdmission): Promise<SpeedResult> {
+  try { return await clearGameSpeedInternal(pid, source, admission); } finally { notifySpeedStateChanged(); }
 }

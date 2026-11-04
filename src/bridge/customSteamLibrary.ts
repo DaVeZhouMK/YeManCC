@@ -42,10 +42,25 @@ export interface CustomSteamLibraryStatus {
   phase?: 'disabled' | 'launching' | 'active';
 }
 
-let sessionActive = false;
-let sessionWatchTimer: ReturnType<typeof setInterval> | null = null;
-let sessionWatchDeadline = 0;
-let sessionWatchObservedPresent = false;
+const SESSION_POLL_MS = 250;
+const SESSION_STARTUP_GRACE_MS = 10000;
+interface SessionWatch {
+  generation: number;
+  timer: ReturnType<typeof setInterval> | null;
+  deadline: number;
+  observedPresent: boolean;
+  read: AbortController | null;
+}
+let sessionGeneration = 0;
+let sessionWatch: SessionWatch | null = null;
+// A local abort cannot undo a native write or a dispatched child launch. Wait
+// for those receipts in order, and skip superseded work before dispatching it.
+let sessionMutationTail: Promise<void> = Promise.resolve();
+function mutateSession<T>(generation: number, action: () => Promise<T>): Promise<T | undefined> {
+  const work = sessionMutationTail.then(() => generation === sessionGeneration ? action() : undefined);
+  sessionMutationTail = work.then(() => {}, () => {});
+  return work;
+}
 
 // The custom library is a separate process. Window hand-off is therefore
 // deliberately best-effort: an older shell, a missing YMCC window, or a
@@ -238,57 +253,68 @@ export async function readCustomSteamLibrarySummary(): Promise<CustomSteamLibrar
 }
 
 function clearSessionWatch(): void {
-  if (sessionWatchTimer) clearInterval(sessionWatchTimer);
-  sessionWatchTimer = null;
-  sessionWatchDeadline = 0;
-  sessionWatchObservedPresent = false;
+  const watch = sessionWatch;
+  sessionWatch = null;
+  if (!watch) return;
+  if (watch.timer !== null) clearInterval(watch.timer);
+  watch.timer = null;
+  watch.read?.abort(); // Forget only the read's local IPC wait, not native work.
+  watch.read = null;
 }
 
-async function stopNativeIntegrationSession(): Promise<void> {
-  await invoke<boolean>('customSteamLibrary.setIntegrationSession', { enabled: false }).catch(() => false);
+async function setCustomSteamLibrarySessionIntent(enabled: boolean, generation: number): Promise<boolean | undefined> {
+  if (!CUSTOM_STEAM_LIBRARY_INTEGRATION_ENABLED && enabled) return false;
+  return mutateSession(generation, () => invoke<boolean>('customSteamLibrary.setIntegrationSession', { enabled }));
+}
+async function stopNativeIntegrationSession(generation: number): Promise<void> {
+  await setCustomSteamLibrarySessionIntent(false, generation).catch(() => false);
 }
 
-function beginSessionWatch(): void {
+function beginSessionWatch(generation: number): void {
+  if (generation !== sessionGeneration) return;
   clearSessionWatch();
-  sessionWatchDeadline = Date.now() + 10000;
+  const watch: SessionWatch = { generation, timer: null, deadline: Date.now() + SESSION_STARTUP_GRACE_MS,
+    observedPresent: false, read: null };
+  sessionWatch = watch;
+  const current = () => sessionWatch === watch && generation === sessionGeneration;
+  const close = async (event: 'closed' | 'conflict', detail?: { inputOwner: string; pid?: number }) => {
+    if (!current()) return;
+    // Retire synchronously. A late disable receipt must never clear a newer
+    // watch, and a queued disable must check generation before it is sent.
+    clearSessionWatch();
+    requestYeManWindowAction('show');
+    await stopNativeIntegrationSession(generation);
+    if (generation !== sessionGeneration) return;
+    window.dispatchEvent(new CustomEvent('customSteamLibrary:' + event, { detail }));
+  };
   const poll = async () => {
-    if (!sessionActive) return;
+    if (!current() || watch.read) return;
+    const read = new AbortController();
+    watch.read = read;
     try {
-      const status = await invoke<CustomSteamLibraryStatus>('customSteamLibrary.status');
+      const status = await invoke<CustomSteamLibraryStatus>('customSteamLibrary.status', {}, {
+        signal: read.signal, timeoutMs: SESSION_STARTUP_GRACE_MS,
+      });
+      if (!current()) return;
       if (status.present) {
-        sessionWatchObservedPresent = true;
+        watch.observedPresent = true;
         if (status.compatible === false || status.inputOwner !== 'parent') {
-          sessionActive = false;
-          requestYeManWindowAction('show');
-          await stopNativeIntegrationSession();
-          clearSessionWatch();
-          window.dispatchEvent(new CustomEvent('customSteamLibrary:conflict', {
-            detail: { inputOwner: status.inputOwner || 'unknown', pid: status.pid },
-          }));
-          return;
+          await close('conflict', { inputOwner: status.inputOwner || 'unknown', pid: status.pid });
         }
         return;
       }
-      // The native process can need several turns to create WebView2. Keep
-      // the parent fully suppressed during this window; never pass the input
-      // back merely because the child window is not painted yet.
-      if (Date.now() < sessionWatchDeadline && !sessionWatchObservedPresent) return;
-      sessionActive = false;
-      requestYeManWindowAction('show');
-      await stopNativeIntegrationSession();
-      clearSessionWatch();
-      window.dispatchEvent(new CustomEvent('customSteamLibrary:closed'));
+      // Preserve the launch grace until a child has actually been observed.
+      if (Date.now() < watch.deadline && !watch.observedPresent) return;
+      await close('closed');
     } catch {
-      if (Date.now() >= sessionWatchDeadline) {
-        sessionActive = false;
-        requestYeManWindowAction('show');
-        await stopNativeIntegrationSession();
-        clearSessionWatch();
-        window.dispatchEvent(new CustomEvent('customSteamLibrary:closed'));
-      }
+      if (current() && Date.now() >= watch.deadline) await close('closed');
+    } finally {
+      if (watch.read === read) watch.read = null;
     }
   };
-  sessionWatchTimer = setInterval(() => { void poll(); }, 250);
+  // Keep the original cadence even with the parent hidden. A busy tick skips
+  // IO rather than starting another request or moving the next deadline.
+  watch.timer = setInterval(() => { void poll(); }, SESSION_POLL_MS);
   void poll();
 }
 
@@ -296,39 +322,46 @@ export async function launchCustomSteamLibrary(): Promise<CustomSteamLibraryLaun
   if (!CUSTOM_STEAM_LIBRARY_INTEGRATION_ENABLED) {
     return { ok: false, executable: '', reason: 'Custom Steam Library integration is hidden' };
   }
+  const generation = ++sessionGeneration;
+  clearSessionWatch();
+  let executable = '';
+  const superseded = (): CustomSteamLibraryLaunchResult => ({ ok: false, executable,
+    reason: 'Custom Steam Library session was stopped or replaced' });
   try {
-    // The native YeManCC gamepad engine owns input arbitration. This call only
-    // arms that native owner before the child process is created.
-    await setCustomSteamLibrarySessionIntent(true);
-    const executable = await resolveExecutable();
+    // Native remains the sole input owner. Mutations have no local abort or
+    // timeout: an unknown native outcome cannot grant a newer launch passage.
+    const armed = await setCustomSteamLibrarySessionIntent(true, generation);
+    if (generation !== sessionGeneration) return superseded();
+    if (armed !== true) throw new Error('Custom Steam Library session was not accepted');
+    executable = await resolveExecutable();
+    if (generation !== sessionGeneration) return superseded();
     const parentPid = await app.pid();
-    const launched = await shell.hidden(executable, [
+    if (generation !== sessionGeneration) return superseded();
+    const launched = await mutateSession(generation, () => shell.hidden(executable, [
       '--integration=YeManCC',
-      `--protocol=${CUSTOM_STEAM_LIBRARY_PROTOCOL_VERSION}`,
-      `--parent-pid=${parentPid}`,
+      '--protocol=' + CUSTOM_STEAM_LIBRARY_PROTOCOL_VERSION,
+      '--parent-pid=' + parentPid,
       '--input-owner=parent',
-    ]);
-    sessionActive = launched.ok === true;
-    if (sessionActive) {
-      beginSessionWatch();
+    ]));
+    if (generation !== sessionGeneration) return superseded();
+    if (launched?.ok === true) {
+      beginSessionWatch(generation);
       requestYeManWindowAction('minimize');
+    } else {
+      await stopNativeIntegrationSession(generation);
     }
-    return { ok: sessionActive, executable, pid: launched.pid };
+    return { ok: launched?.ok === true, executable, pid: launched?.pid };
   } catch (error) {
-    await stopCustomSteamLibrarySession();
+    if (generation === sessionGeneration) {
+      clearSessionWatch();
+      await stopNativeIntegrationSession(generation);
+    }
     throw error;
   }
 }
 
-async function setCustomSteamLibrarySessionIntent(
-  enabled: boolean,
-): Promise<void> {
-  if (!CUSTOM_STEAM_LIBRARY_INTEGRATION_ENABLED && enabled) return;
-  await invoke<boolean>('customSteamLibrary.setIntegrationSession', { enabled });
-}
-
 export async function stopCustomSteamLibrarySession(): Promise<void> {
+  const generation = ++sessionGeneration;
   clearSessionWatch();
-  sessionActive = false;
-  await stopNativeIntegrationSession();
+  await stopNativeIntegrationSession(generation);
 }

@@ -6,7 +6,12 @@
 namespace ymcc::capabilities::controller_motion {
 enum class ProtocolKind { Tablet, GoS };
 struct Descriptor { std::uint16_t token; std::string_view deviceId, deviceClass, capabilityId; ProtocolKind protocol; std::uint16_t vendorId; unsigned bankCount; };
-inline constexpr std::string_view catalogSha256 = "1d199c230978de4261a913a8f57658890fa34ce4f240de3d0980bd98bfd4087d";
+struct ActivationCommand { std::array<std::uint8_t, 7> bytes{}; unsigned length = 0; };
+struct ActivationRecipe { std::array<ActivationCommand, 4> commands{}; unsigned count = 0, minReportBytes = 0, maxReportBytes = 0, inputReportBytes = 0; };
+inline constexpr ActivationRecipe noActivationRecipe{};
+inline constexpr ActivationRecipe tabletActivationRecipe = {std::array<ActivationCommand, 4>{{ActivationCommand{{5, 6, 106, 2, 3, 1, 1}, 7}, ActivationCommand{{5, 6, 106, 7, 3, 2, 1}, 7}, ActivationCommand{{5, 6, 106, 2, 4, 1, 1}, 7}, ActivationCommand{{5, 6, 106, 7, 4, 2, 1}, 7}}}, 4, 7, 64, 0};
+inline constexpr ActivationRecipe goSActivationRecipe = {std::array<ActivationCommand, 4>{{ActivationCommand{{0, 4, 7, 1, 0, 0, 0}, 4}, ActivationCommand{{0, 4, 5, 1, 0, 0, 0}, 4}, ActivationCommand{}, ActivationCommand{}}}, 2, 65, 65, 65};
+inline constexpr std::string_view catalogSha256 = "b9cf5b988b62e8a49e53fbbda37ba14598739324cd62ae15700fc26dec8714c3";
 inline constexpr std::array<Descriptor, 4> descriptors = {{
     {1, "hc.device.LegionGoTablet", "HandheldCompanion.Devices.LegionGoTablet", "controller.motion.legion-tablet", ProtocolKind::Tablet, 6127, 2},
     {2, "hc.device.LegionGoTablet2", "HandheldCompanion.Devices.LegionGoTablet2", "controller.motion.legion-tablet", ProtocolKind::Tablet, 6127, 2},

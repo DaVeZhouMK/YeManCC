@@ -24,7 +24,7 @@ const chainFailures=['empty leftover invokes no second hide','empty leftover pre
 const publicationFailures=['accepted MSI late-hide work retains a drainable notification or completed receipt','accepted MSI notification executes without a second producer'];
 const inflightFailures=['same in-flight MSI episode reuses the worker token without enqueueing another hide','one MSI source episode has exactly one actual successful hide after in-flight BUS reentry'];
 const orphanFailures=['retained late-hide marker without a running owner permits a fresh BUS notification','a new actual worker completes the episode after the diagnostic exception'];
-const modeCounts={'late-hide-pending':{cases:19,checks:75},'late-hide-publication':{cases:1,checks:7},'late-hide-inflight':{cases:1,checks:8},'late-hide-inflight-edges':{cases:13,checks:33},'late-hide-orphaned-inflight':{cases:1,checks:3}};
+const modeCounts={'late-hide-pending':{cases:19,checks:519},'late-hide-publication':{cases:1,checks:7},'late-hide-inflight':{cases:1,checks:8},'late-hide-inflight-edges':{cases:13,checks:33},'late-hide-orphaned-inflight':{cases:1,checks:3}};
 function replaceOnce(bytes,needle,replacement,label){const token=Buffer.from(needle),at=bytes.indexOf(token);if(at<0||bytes.indexOf(token,at+token.length)>=0)throw Error('CURRENT_ROLLBACK_ANCHOR_NOT_UNIQUE: '+label);return Buffer.concat([bytes.subarray(0,at),Buffer.from(replacement),bytes.subarray(at+token.length)]);}
 function prepareRollbacks(){
  const mainPath=path.join(REPO,'native/main.cpp'),headerPath=path.join(REPO,'native/msi_late_hide_pending.h');
@@ -44,13 +44,15 @@ function prepareRollbacks(){
  const ownerMatches=[...main.toString('utf8').matchAll(/^[ \t]*g_inputHostLifecycleWorkInFlight\.load\(std::memory_order_acquire\) &&\r?\n/gm)];
  if(ownerMatches.length!==1)throw Error('CURRENT_ACTUAL_OWNER_CHECK_NOT_UNIQUE');
  const ownerFrom=ownerMatches[0][0];
- const guard=/^[ \t]*struct LateHideFlightClaim \{\r?\n[ \t]*bool armed;\r?\n[ \t]*~LateHideFlightClaim\(\) \{ if \(armed\) inputHostLateHideInFlightSet\(false, 0\); \}\r?\n[ \t]*\} lateHideFlightClaim\{ymcc::msi::latehide::buildEnabled &&\r?\n[ \t]*inputHostLateHideManagedMsiRouteType\(\)\};\r?\n/gm;
+ const guard=/^[ \t]*struct LateHideFlightClaim \{\r?\n[ \t]*bool armed;\r?\n[ \t]*~LateHideFlightClaim\(\) \{ if \(armed\) inputHostLateHideInFlightSet\(false, 0\); \}\r?\n[ \t]*\} lateHideFlightClaim\{\(ymcc::msi::latehide::buildEnabled &&\r?\n[ \t]*inputHostLateHideManagedMsiRouteType\(\)\) \|\| lateHideEpisode\.deferredStartHide\};\r?\n/gm;
  const guards=[...main.toString('utf8').matchAll(guard)];if(guards.length!==1)throw Error('CURRENT_MSI_FLIGHT_GUARD_NOT_UNIQUE');
- const guardFrom=guards[0][0];const discharge=/^[ \t]*lateHideFlightClaim\.armed = false;[^\r\n]*\r?\n/gm;
- const discharges=[...main.toString('utf8').matchAll(discharge)];if(discharges.length!==1)throw Error('CURRENT_MSI_FLIGHT_GUARD_DISCHARGE_NOT_UNIQUE');
- const dischargeFrom=discharges[0][0];
- let withoutOwner=replaceOnce(main,ownerFrom,'','actual worker ownership check');withoutOwner=replaceOnce(withoutOwner,guardFrom,'','MSI exception flight guard');withoutOwner=replaceOnce(withoutOwner,dischargeFrom,'','MSI exception flight discharge');
- const ownerPatches=[{file:'native/main.cpp',from:ownerFrom,to:'',scope:'actual lifecycle owner check only'},{file:'native/main.cpp',from:guardFrom,to:'',scope:'MSI-only exceptional flight marker retirement guard only'},{file:'native/main.cpp',from:dischargeFrom,to:'',scope:'MSI guard normal discharge only; original normal marker clearing stays'}];
+ const guardFrom=guards[0][0];
+ // Roll back only the MSI arm. Preserve the distinct deferred-Start guard and
+ // its normal discharge, so the older MSI negative never weakens ROG recovery.
+ const guardTo=guardFrom.replace(/\(ymcc::msi::latehide::buildEnabled &&\r?\n[ \t]*inputHostLateHideManagedMsiRouteType\(\)\) \|\| /,'');
+ if(guardTo===guardFrom)throw Error('CURRENT_MSI_FLIGHT_ARM_NOT_FOUND');
+ let withoutOwner=replaceOnce(main,ownerFrom,'','actual worker ownership check');withoutOwner=replaceOnce(withoutOwner,guardFrom,guardTo,'MSI exception flight arm only');
+ const ownerPatches=[{file:'native/main.cpp',from:ownerFrom,to:'',scope:'actual lifecycle owner check only'},{file:'native/main.cpp',from:guardFrom,to:guardTo,scope:'MSI exceptional flight arm only; deferred-Start arm and normal discharge retained'}];
  const cleanupPatch={file:'native/main.cpp',from:tail,to:'',scope:'known worker empty-item cleanup guard only'};
  const configs=[
   {name:'rollback-both',suite:'late-hide-pending',main:withoutTail,header:replaceOnce(header,'inline constexpr bool buildEnabled=true;','inline constexpr bool buildEnabled=false;','pending default'),patches:[cleanupPatch,{file:'native/msi_late_hide_pending.h',from:'inline constexpr bool buildEnabled=true;',to:'inline constexpr bool buildEnabled=false;',scope:'existing pending guard default only'}],expectedFailures:[...chainFailures,...tokenFailures]},

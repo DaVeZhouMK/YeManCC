@@ -13,7 +13,7 @@ public interface ILightingHidTransport : IDisposable
 public readonly record struct RgbColor(byte R, byte G, byte B);
 
 [Flags]
-internal enum LEDLevel { SolidColor = 1, Rainbow = 4, LEDPreset = 128 }
+internal enum LEDLevel { SolidColor = 1, Breathing = 2, Rainbow = 4, LEDPreset = 128 }
 
 // No HC types cross this ABI. The consumer checks assembly identity, release
 // SHA256 and ApiVersion before calling Supports, then Execute.

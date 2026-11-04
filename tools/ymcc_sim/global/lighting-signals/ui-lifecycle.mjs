@@ -11,7 +11,7 @@ const component='src/components/ControllerFeedbackCapabilitiesCard.vue';
 const api='src/bridge/api.ts';
 const helper='tools/controller_lighting_lifecycle_browser_selftest.mjs';
 const baseline='tools/controller_lighting_operations_browser_selftest.mjs';
-const sources=[component,api,helper,baseline,'src/components/Dropdown.vue','src/components/Slider.vue',
+const sources=[component,api,helper,baseline,'capabilities/hc-device-catalog.json','src/gamepad/engine.ts','src/gamepad/focus.ts','src/gamepad/spatial.ts','src/gamepad/performanceNavigation.ts','src/components/Dropdown.vue','src/components/Slider.vue',
  'src/components/Toggle.vue','src/components/InlineIcon.vue','src/styles/tokens.css',
  'tools/ymcc_sim/global/lighting-signals/ui-lifecycle.mjs'];
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');

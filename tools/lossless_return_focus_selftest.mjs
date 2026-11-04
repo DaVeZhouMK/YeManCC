@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const out=path.resolve(process.argv[2]||path.join(root,'../../../Build/Validation/Lossless-Toggle-Xbox-20261022/focus'));
 fs.mkdirSync(out,{recursive:true});
-const inputs=['native/lossless_return_focus.h','native/resume_focus.h','native/monitor_identity.h','tools/lossless_return_focus_selftest.cpp','tools/lossless_return_focus_selftest.py','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/lossless_return_focus_selftest.mjs'];
+const inputs=['native/lossless_return_focus.h','native/resume_focus.h','native/monitor_identity.h','native/process_inventory.h','tools/lossless_return_focus_selftest.cpp','tools/lossless_return_focus_selftest.py','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/lossless_return_focus_selftest.mjs'];
 const hash=name=>createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
 const sourceHashes=Object.fromEntries(inputs.map(name=>[name,hash(name)]));
 const run=spawnSync('python',['tools/lossless_return_focus_selftest.py','--output',path.join(out,'native')],{cwd:root,encoding:'utf8',windowsHide:true,timeout:60000});

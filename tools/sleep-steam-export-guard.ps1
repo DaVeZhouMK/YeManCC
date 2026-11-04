@@ -33,9 +33,31 @@ function Get-SteamSleepExportContract([string]$ProjectRoot) {
     $originalHostPolicy = 'ymcc-original-game-identity-v2'
     $hostText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'native/main.cpp'))
     foreach ($anchor in @('g_gameValveTarget.identityGeneration != snapshot.identityGeneration',
-      '!snapshot.identityGeneration', 'g_gameValveTarget.identityGeneration = g_gameValveTarget.generation',
-      '"identityPolicy", "ymcc-original-game-identity-v2"')) {
+      '!snapshot.identityGeneration', 'g_gameValveTarget.identityGeneration = g_gameValveTarget.generation')) {
       if (-not $hostText.Contains($anchor)) { throw 'EXPORT_STEAM_ORIGINAL_HOST_IDENTITY_MISSING' }
+    }
+    # Bind the policy to the actual returned target JSON, not its construction syntax.
+    # The initializer and direct-object forms must keep the same serialized contract.
+    $cppTokenPattern = '(?<raw>\b(?:u8|u|U|L)?R"(?<delimiter>[^\s()\\]{0,16})\([\s\S]*?\)\k<delimiter>")|(?<literal>"(?:\\[\s\S]|[^"\\])*"|''(?:\\[\s\S]|[^''\\])*'')|(?<comment>/\*[\s\S]*?\*/|//[^\r\n]*)'
+    $maskedHost = [regex]::Replace($hostText, $cppTokenPattern, [Text.RegularExpressions.MatchEvaluator]{ param($m) [string]::new([char]32, $m.Length) })
+    $serializers = @([regex]::Matches($maskedHost, '(?m)^static json nativeGameTargetJson\(const NativeGameValveSnapshot& target\)\s*\{'))
+    if ($serializers.Count -ne 1) { throw 'EXPORT_STEAM_ORIGINAL_HOST_IDENTITY_MISSING' }
+    $open = $serializers[0].Index + $serializers[0].Length - 1
+    $cursor = $open + 1; $depth = 1
+    while ($cursor -lt $maskedHost.Length -and $depth -gt 0) {
+      if ($maskedHost[$cursor] -eq '{') { $depth++ } elseif ($maskedHost[$cursor] -eq '}') { $depth-- }
+      $cursor++
+    }
+    if ($depth -ne 0) { throw 'EXPORT_STEAM_ORIGINAL_HOST_IDENTITY_MISSING' }
+    $serializerBody = $hostText.Substring($open + 1, $cursor - $open - 2)
+    $serializerCode = [regex]::Replace($serializerBody, $cppTokenPattern, [Text.RegularExpressions.MatchEvaluator]{ param($m) if ($m.Groups['literal'].Success) { $m.Value } else { [string]::new([char]32, $m.Length) } })
+    $legacyReturn = [regex]::Match($serializerCode, '(?s)\breturn\s*\{(?<object>.*)\};\s*$')
+    $legacyIdentity = $legacyReturn.Success -and [regex]::IsMatch($legacyReturn.Groups['object'].Value, '(?m)^\s*\{"identityPolicy",\s*"ymcc-original-game-identity-v2"\},?\s*$')
+    $directIdentity = [regex]::IsMatch($serializerCode, '(?m)^\s*json result = json::object\(\);\s*$') -and
+      [regex]::IsMatch($serializerCode, '(?m)^\s*result\["identityPolicy"\] = "ymcc-original-game-identity-v2";\s*$') -and
+      [regex]::IsMatch($serializerCode, '(?s)\breturn result;\s*$')
+    if ([regex]::Matches($serializerCode, '"identityPolicy"').Count -ne 1 -or (-not $legacyIdentity -and -not $directIdentity)) {
+      throw 'EXPORT_STEAM_ORIGINAL_HOST_IDENTITY_MISSING'
     }
     $trackerText = [IO.File]::ReadAllText($linkRuntime)
     if (@([regex]::Matches($trackerText, 'TrackingScope::ProcessLifetime')).Count -ne 2) {

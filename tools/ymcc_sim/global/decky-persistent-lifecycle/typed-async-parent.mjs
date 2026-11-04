@@ -25,8 +25,8 @@ const fail = label => 'TYPED_ASYNC_PARENT_' + label;
 export function verifyTypedAsyncReadyExtraction(row,{repo,workRoot,sourcePins}) {
   const origin='native/main.cpp',sourceFile=path.join(repo,origin),source=fs.readFileSync(sourceFile,'utf8');
   assert.equal(sourcePins.get(origin),digest(sourceFile),fail('READY_SOURCE_PREBINDING'));
-  const match=source.match(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation\) \{[\s\S]*?\n\}/);
-  assert(match,fail('READY_SOURCE_REQUIRED'));assert.equal(source.split(match[0]).length-1,1,fail('READY_SOURCE_UNIQUE'));
+  const matches=[...source.matchAll(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation(?:,const char\* scope="sleep-intent-ready")?\) \{[\s\S]*?\n\}/g)],match=matches[0];
+  assert(match,fail('READY_SOURCE_REQUIRED'));assert.equal(matches.length,1,fail('READY_SOURCE_UNIQUE'));
   assert(row&&row.origin===origin,fail('READY_ORIGIN'));assert.equal(row.originSha256,sourcePins.get(origin));
   assert.deepEqual(row.slice,{begin:match.index,end:match.index+match[0].length,appendNewline:true});assert.equal(row.bytePreserved,true);
   samePath(row.path,path.join(workRoot,'s/native/decky_wake_ready_consumer.inc'),fail('READY_PATH'));
@@ -188,9 +188,11 @@ export function reconstructTypedAsyncNative(raw, {executablePath}) {
     assert(Array.isArray(row.samples) && row.samples.length > 0, fail('CALIBRATION_SAMPLES'));
     row.samples.forEach(n => integer(n, fail('CALIBRATION_SAMPLE')));
     assert.equal(row.samples.at(-1), row.afterHandles, fail('CALIBRATION_LAST_SAMPLE'));
-    integer(row.stableSamples, fail('CALIBRATION_STABILITY')); assert(row.stableSamples <= 10);
+    integer(row.stableSamples, fail('CALIBRATION_STABILITY')); // Stability may exceed ten while the unchanged second count-return condition remains false.
     let tail = 1; for (let j = row.samples.length - 2; j >= 0 && row.samples[j] === row.samples.at(-1); --j) ++tail;
     assert(row.stableSamples <= tail, fail('CALIBRATION_STABILITY_REPORT'));
+    if (tail < row.samples.length) assert.equal(row.stableSamples, tail - 1, fail('CALIBRATION_STABILITY_SEQUENCE'));
+    else assert(row.stableSamples === tail || row.stableSamples === tail - 1, fail('CALIBRATION_STABILITY_SEQUENCE'));
     assert.deepEqual(row.probes.map(r => r.id), KINDS.map(k => 'current.direct-real-async-cancel.' + k));
     row.probes.forEach((probe, j) => direct(probe, KINDS[j], 'normal'));
     if (row.stableSamples < 10 || (i === 1 && row.beforeHandles !== row.afterHandles)) calibrationPassed = false;
@@ -283,11 +285,18 @@ export function validateTypedAsyncRequestParentReceipt(value, {
   assert.deepEqual(value.originalContract, originalContract, fail('ORIGINAL_CONTRACT'));
   assert.deepEqual(read(path.join(evidenceRoot,'ORIGINAL-CONTRACT.json')), originalContract, fail('ORIGINAL_CONTRACT_FILE'));
   const runtime = fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8');
+  // Current producers declare the closed shared prefix explicitly. Historical
+  // frozen views may predate that marker; their original main boundary remains
+  // valid provenance only and still cannot authorize current acceptance.
+  const markedHelpersEnd=runtime.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END');
+  const sharedHelpersEnd=markedHelpersEnd>=0?markedHelpersEnd:sourceMode==='frozen'?runtime.indexOf('\nint main(int argc,char** argv){'):-1;
+  assert(sharedHelpersEnd>0,fail('SHARED_HELPER_BOUNDARY_REQUIRED'));
+
   const peer = fs.readFileSync(path.join(repo,'tools/decky_sidebar_bootstrap_selftest.cpp'),'utf8');
   const legacy = fs.readFileSync(path.join(repo,LEGACY),'utf8');
   const ioBegin = legacy.indexOf('                AsyncRequest request(');
   const extractions = [
-    {name:'helpers',origin:'tools/decky_binding_runtime_selftest.cpp',source:runtime,begin:0,end:runtime.indexOf('\nint main(int argc,char** argv){')},
+    {name:'helpers',origin:'tools/decky_binding_runtime_selftest.cpp',source:runtime,begin:0,end:sharedHelpersEnd},
     {name:'local-peer',origin:'tools/decky_sidebar_bootstrap_selftest.cpp',source:peer,begin:0,end:peer.indexOf('\nint main()')},
     {name:'original-io',origin:LEGACY,source:legacy,begin:ioBegin,end:legacy.indexOf('\n            }catch',ioBegin)},
   ];
@@ -441,4 +450,139 @@ export function verifyTypedAsyncRequestOriginalRun(originalRunPin, options) {
     assert.equal(digest(path.join(caller,name)),digest(path.join(pointer.root,name)),fail('PUBLIC_COPY:')+name);
   const verified = validateTypedAsyncRequestParentReceipt(read(resultPin.path),{...options,receiptPin:resultPin});
   return {...verified,originalRun:originalRunPin,publicCopiesVerified:4};
+}
+// One same-parent legacy producer may satisfy the original parent and V2 coverage.
+// The returned row is a reference, never a fabricated execution or a V1 verdict upgrade.
+export function typedLegacyEnvironment(workRoot, inherited = process.env) {
+  const native = selectedNativeTools().native;
+  const env = Object.fromEntries(Object.entries(inherited).map(([name,value]) => [name.toUpperCase(),value]));
+  env.PATH = path.dirname(native.compiler)+';'+inherited.SystemRoot+'/System32';
+  env.INCLUDE = native.include.join(';'); env.LIB = native.lib.join(';');
+  for (const name of ['CL','_CL_','LINK','_LINK_']) env[name]='';
+  for (const name of Object.keys(env)) if (name.startsWith('YMCC_BINDING_') || name.startsWith('YMCC_DECKY_') || name==='YMCC_TYPED_ASYNC_TELEMETRY') delete env[name];
+  env.TEMP=path.join(workRoot,'t'); env.TMP=env.TEMP;
+  return env;
+}
+export function typedLegacyEnvironmentIdentity(env,workRoot) {
+  const expected=path.join(workRoot,'t');
+  samePath(env.TEMP,expected,fail('SHARED_TEMP')); samePath(env.TMP,expected,fail('SHARED_TMP'));
+  // Only the two private scratch-directory values are normalized. All other
+  // inherited and explicitly selected environment names/values remain bound.
+  const values=Object.keys(env).sort().map(name=>[name,['TEMP','TMP'].includes(name)?'@OWNED_TEMP':env[name]]);
+  return {kind:'exact-native-environment-with-owned-temp-v1',sha256:hash(Buffer.from(JSON.stringify(values))),names:values.map(row=>row[0])};
+}
+export function validateTypedLegacySharedReference(referencePin, {
+  repo,sourcePins,toolPins,expectedContext,consumerStartedAt,consumerWorkRoot,requireImmediateParent=false
+}) {
+  const label=name=>fail('LEGACY_SHARED_'+name), verifiedFiles=new Map();
+  assert(sourcePins instanceof Map && toolPins instanceof Map,label('PREBINDING'));
+  assert(expectedContext && expectedContext.invocation && expectedContext.v1,label('CURRENT_CONTEXT_REQUIRED'));
+  const context=expectedContext,owner=context.invocation,v1=context.v1;
+  assert(/^[a-f0-9-]{36}$/.test(owner.id??''),label('INVOCATION_ID'));
+  integer(owner.pid,label('PARENT_PID'),1);samePath(owner.repo,repo,label('REPO'));
+  const epoch=value=>{const result=Date.parse(value);assert(Number.isFinite(result),label('TIME'));return result;};
+  const parentStarted=epoch(owner.startedAt),consumerStarted=epoch(consumerStartedAt);
+  assert(parentStarted<=consumerStarted,label('INVOCATION_ORDER'));
+  if(requireImmediateParent) assert.equal(owner.pid,process.ppid,label('IMMEDIATE_PARENT'));
+  function verify(row,scope) {
+    assert(row && path.isAbsolute(row.path??'') && /^[a-f0-9]{64}$/.test(row.sha256??''),label('PIN'));
+    if(scope) assert(inside(scope,row.path),label('PATH_ESCAPE'));
+    const previous=verifiedFiles.get(key(row.path));
+    if(previous){assert.equal(previous.sha256,row.sha256,label('CONFLICTING_PIN'));assert.equal(previous.bytes,row.bytes,label('CONFLICTING_SIZE'));return row;}
+    samePath(fs.realpathSync(row.path),row.path,label('REPARSE'));
+    assert.equal(digest(row.path),row.sha256,label('FILE_CHANGED:'+row.path));
+    integer(row.bytes,label('PIN_BYTES'));assert.equal(fs.statSync(row.path).size,row.bytes,label('FILE_SIZE'));
+    verifiedFiles.set(key(row.path),row);return row;
+  }
+  for(const directory of [repo,owner.evidenceRoot,v1.evidenceRoot,v1.workRoot,consumerWorkRoot]) {
+    assert(path.isAbsolute(directory),label('ABSOLUTE_ROOT'));samePath(fs.realpathSync(directory),directory,label('ROOT_REPARSE'));
+  }
+  assert(!inside(v1.workRoot,consumerWorkRoot)&&key(v1.workRoot)!==key(consumerWorkRoot),label('DISTINCT_WORKSPACE'));
+  verify(referencePin,owner.evidenceRoot);
+  samePath(referencePin.path,path.join(owner.evidenceRoot,'LEGACY-CANCEL-SHARED.json'),label('REFERENCE_PATH'));
+  const reference=read(referencePin.path);
+  assert.deepEqual(reference,{schemaVersion:1,kind:'current-parent-v1-legacy-reference',context},label('REFERENCE_CONTEXT'));
+  verify(v1.result,v1.evidenceRoot);samePath(v1.result.path,path.join(v1.evidenceRoot,'result.json'),label('RESULT_PATH'));
+  verify(v1.process,owner.evidenceRoot);
+  samePath(v1.process.path,path.join(owner.evidenceRoot,'processes/diagnostic.typed-async-same-process-v1.json'),label('PROCESS_PATH'));
+  const outer=read(v1.process.path),value=read(v1.result.path);validateTypedAsyncParentEnvelope(value);
+  assert(!value.auditCandidate,label('OVERLAY_NOT_SHAREABLE'));
+  const native=selectedNativeTools().native,expectedNode=key(process.execPath),toolSha=p=>{const row=toolPins.get(key(p));return typeof row==='string'?row:row?.sha256;};
+  assert.equal(outer.id,'diagnostic.typed-async-same-process-v1',label('PROCESS_ID'));
+  assert.equal(key(outer.program.path),expectedNode,label('NODE_PROGRAM'));verify(outer.program);
+  assert.equal(toolSha(outer.program.path),outer.program.sha256,label('NODE_TOOL'));
+  assert.deepEqual(outer.arguments,[path.join(repo,DRIVER+'.mjs'),'--workspace-dir',v1.workRoot,'--evidence-dir',v1.evidenceRoot],label('OUTER_ARGV'));
+  samePath(outer.cwd,repo,label('OUTER_CWD'));integer(outer.pid,label('PRODUCER_PID'),1);
+  assert.equal(outer.originalBudgetMs,135000,label('OUTER_ORIGINAL_BUDGET'));
+  assert(outer.timeoutMs>0&&outer.timeoutMs<=135000&&outer.elapsedMs<=outer.timeoutMs,label('OUTER_BUDGET'));
+  assert.equal(outer.exitCode,value.passed?0:1,label('V1_VERDICT_PRESERVED'));
+  for(const field of ['signal','error']) assert.equal(outer[field],null,label('OUTER_'+field));
+  assert.equal(outer.timedOut,false,label('OUTER_TIMEOUT'));assert.equal(outer.outputTruncated,false,label('OUTER_TRUNCATED'));
+  assert(parentStarted<=epoch(outer.startedAt)&&epoch(outer.startedAt)<=epoch(value.startedAt),label('PRODUCER_START'));
+  assert(epoch(value.startedAt)<=epoch(value.finishedAt)&&epoch(value.finishedAt)<=epoch(outer.finishedAt)&&epoch(outer.finishedAt)<=consumerStarted,label('COMPLETED_BEFORE_CONSUMER'));
+  for(const channel of ['stdout','stderr']) {
+    samePath(outer[channel].path,path.join(owner.evidenceRoot,'processes',outer.id+'.'+channel+'.bin'),label('OUTER_LOG'));
+    verify(outer[channel],owner.evidenceRoot);
+  }
+  const legacy=value.legacyRegression,old=path.join(v1.workRoot,'l'),image=path.join(old,'legacy.exe');
+  assert.equal(legacy.status,'PASS',label('LEGACY_NOT_PASS'));assert.equal(legacy.naturalExit,0,label('LEGACY_EXIT'));
+  assert.deepEqual(read(path.join(v1.evidenceRoot,'LEGACY-RESULT.json')),legacy,label('ORIGINAL_LEGACY_RECEIPT'));
+  assert.deepEqual(legacy.environmentIdentity,typedLegacyEnvironmentIdentity(typedLegacyEnvironment(consumerWorkRoot),consumerWorkRoot),label('ENVIRONMENT_IDENTITY'));
+  assert.deepEqual(read(path.join(v1.evidenceRoot,'SOURCE-PINS.json')),value.sourceInputs,label('SOURCE_PRECOMPILE_RECEIPT'));
+  assert.deepEqual(read(path.join(v1.evidenceRoot,'TOOL-PINS.json')),value.toolArtifacts,label('TOOL_PRECOMPILE_RECEIPT'));
+  const producerTools=new Map(value.toolArtifacts.map(row=>[key(row.path),row]));assert.equal(producerTools.size,value.toolArtifacts.length,label('DUPLICATE_TOOL'));
+  const sourceByPath=new Map();
+  for(const row of value.sourceInputs) {
+    assert(typeof row.path==='string'&&!path.isAbsolute(row.path)&&!row.path.includes('\\')&&row.path.split('/').every(part=>part&&part!=='.'&&part!=='..'),label('SOURCE_PATH'));
+    assert(!sourceByPath.has(row.path),label('DUPLICATE_SOURCE'));sourceByPath.set(row.path,row);
+  }
+  for(const required of [LEGACY,DRIVER+'.mjs',MODULE+'/typed-async-parent.mjs']) {
+    const row=sourceByPath.get(required);assert(row,label('REQUIRED_SOURCE'));
+    assert.equal(row.sha256,sourcePins.get(required),label('SOURCE_PREBOUND:'+required));verify({...row,path:path.join(repo,required)},repo);
+  }
+  const flags=['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE','/I'+path.join(v1.workRoot,'s/native'),'/I'+path.join(v1.workRoot,'s/deps/json'),'/I'+path.join(v1.workRoot,'s/tools')];
+  const libraries=['advapi32.lib','user32.lib','userenv.lib','winhttp.lib','ws2_32.lib','bcrypt.lib','shell32.lib'];
+  const expectedArgs=[ [...flags,path.join(v1.workRoot,'s',LEGACY),'/sourceDependencies',path.join(old,'d.json'),'/Fo'+path.join(old,'p.obj'),'/Fe'+image,'/link',...libraries], [path.join(old,'binding-fixtures')] ];
+  const executions=value.executions.slice(0,2);
+  for(const [index,row] of executions.entries()) {
+    assert.deepEqual(read(path.join(v1.evidenceRoot,row.id+'.process.json')),row,label('ORIGINAL_PROCESS'));
+    assert.deepEqual(row.args,expectedArgs[index],label('ARGUMENTS'));samePath(row.cwd,old,label('CWD'));
+    samePath(row.program.path,index===0?native.compiler:image,label('PROGRAM'));verify(row.program,index===1?v1.workRoot:undefined);
+    if(index===0) assert.equal(toolSha(row.program.path),row.program.sha256,label('COMPILER_PREBOUND'));
+    assert(epoch(value.startedAt)<=epoch(row.startedAt)&&epoch(row.startedAt)<=epoch(row.finishedAt)&&epoch(row.finishedAt)<=epoch(value.finishedAt),label('ACTUAL_PROCESS_TIME'));
+    assert.equal(row.exitCode,0,label('NATURAL_SUCCESS'));
+    for(const channel of ['stdout','stderr']) {
+      samePath(row[channel].path,path.join(v1.evidenceRoot,row.id+'.'+channel+'.log'),label('LOG_PATH'));verify(row[channel],v1.evidenceRoot);
+    }
+  }
+  assert.deepEqual(legacy.compile,executions[0],label('COMPILE_RECEIPT'));
+  const graphPin=legacy.compilerGraph;verify(graphPin,v1.workRoot);samePath(graphPin.path,path.join(old,'d.json'),label('GRAPH_PATH'));
+  assert.equal(graphPin.allDeclared,true);assert.equal(graphPin.osLoadedModuleGraph,false);
+  const graph=read(graphPin.path);assert.equal(graph.Version,'1.2');samePath(graph.Data.Source,path.join(v1.workRoot,'s',LEGACY),label('GRAPH_SOURCE'));
+  const inputs=[graph.Data.Source,...graph.Data.Includes];assert.equal(inputs.length,graphPin.inputs,label('GRAPH_COUNT'));
+  for(const file of inputs) {
+    if(inside(path.join(v1.workRoot,'s'),file)) {
+      const relative=path.relative(path.join(v1.workRoot,'s'),file).replaceAll('\\','/'),row=sourceByPath.get(relative);
+      assert(row,label('UNDECLARED_SOURCE:'+relative));assert.equal(sourcePins.get(relative),row.sha256,label('CURRENT_SOURCE:'+relative));
+      verify({...row,path:path.join(repo,relative)},repo);verify({...row,path:file},v1.workRoot);
+    } else {
+      const row=producerTools.get(key(file));assert(row,label('UNDECLARED_TOOL'));
+      assert.equal(toolSha(file),row.sha256,label('TOOL_PREBOUND'));verify({...row,path:file});
+    }
+  }
+  verify(legacy.raw,v1.workRoot);samePath(legacy.raw.path,path.join(old,'binding-cancel-results.json'),label('RAW_PATH'));
+  const raw=read(legacy.raw.path);assert.deepEqual(raw,legacy.rawValue,label('RAW_VALUE'));assert.deepEqual(raw,read(executions[1].stdout.path),label('RAW_STDOUT'));
+  assert.deepEqual(raw.cases.map(row=>row.kind),['http-silent','ws-silent'],label('EXACT_CASES'));
+  assert.equal(raw.ok,true);assert.equal(raw.realSteamActions,0);assert.equal(raw.officialLoaderExecuted,false);
+  for(const row of raw.cases) {
+    assert.equal(row.deadlineMs,1500);integer(row.shutdownMs,label('SHUTDOWN_MS'));assert(row.shutdownMs<1500,label('SHUTDOWN_DEADLINE'));
+    for(const field of ['ok','bindingReturned','requestCallbackOwnersReleased','ownedChildExitObserved','offSurvivedLateRequests']) assert.equal(row[field],true,label(field));
+    assert.equal(row.bindingReason,'mirror-bootstrap-canceled',label('BINDING_REASON'));
+  }
+  // Recheck the producer's actual pins after consumption; no rewritten historical receipt.
+  for(const row of verifiedFiles.values()) assert.equal(digest(row.path),row.sha256,label('CHANGED_DURING_CONSUMPTION'));
+  return {status:'SHARED_REFERENCE',producerStatus:'PASS',executionKind:'SHARED_REFERENCE',executedThisRun:false,actualPassedThisRun:false,
+    source:LEGACY,historicalResultsReclassified:false,naturalExit:0,reference:referencePin,context,
+    raw:legacy.raw,rawValue:raw,environmentIdentity:legacy.environmentIdentity,compilerGraph:graphPin,
+    producerResult:v1.result,producerProcess:v1.process,producerExecutionIds:executions.map(row=>row.id),compilerGraphInputs:inputs.length};
 }

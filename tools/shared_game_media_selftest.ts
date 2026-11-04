@@ -1,6 +1,9 @@
+import {readFileSync} from 'node:fs';
+import {resolve as resolveSourcePath} from 'node:path';
+import {startSteamWallpaperHost} from '../src/bridge/steamWallpaperHost';
 import {strict as assert} from 'node:assert';
 
-import {SharedGameMedia,wallpaperTargetKey,gameMediaPairComplete,MediaInventoryScan,type GameMediaEntry} from '../src/bridge/sharedGameMedia';
+import {SharedGameMedia as ProductionSharedGameMedia,wallpaperTargetKey,gameMediaPairComplete,MediaInventoryScan,reconcileMediaAliases,type GameMediaEntry} from '../src/bridge/sharedGameMedia';
 
 import {effectiveGameMediaRange,DEFAULT_GAME_MEDIA_PLAYBACK} from '../src/bridge/gameMediaPlayback';
 
@@ -10,10 +13,27 @@ import {GameMediaRevisionFence} from '../src/bridge/gameMediaRevisionFence';
 
 import {GameMediaPreparationPolicy} from '../src/bridge/gameMediaPreparationPolicy';
 
+// Original preparation scenarios explicitly supply a current native admission
+// at their IO boundary. New ticket negatives below use the unwrapped class.
+const steamTicket=(current=()=>true)=>({demandConsumer:'steam' as const,demandEpoch:'native-focus-1',demandRevision:1,current});
+class SharedGameMedia extends ProductionSharedGameMedia {
+  override ensure(target:Parameters<ProductionSharedGameMedia['ensure']>[0],consumer:Parameters<ProductionSharedGameMedia['ensure']>[1],priority=false,completePair=false,demand?:Parameters<ProductionSharedGameMedia['ensure']>[4]){return super.ensure(target,consumer,priority,completePair,consumer==='steam'?(demand||steamTicket()):demand);}
+}
+const stabilityRecoveryOnly=process.argv.includes('--stability-recovery');
 let cases=0,checks=0;
 
 function equal(actual:unknown,expected:unknown,message:string){checks++;assert.deepEqual(actual,expected,message);}
 
+async function foregroundDemandCases(){
+ for(const invalid of [undefined,steamTicket(()=>false),{...steamTicket(),demandEpoch:''},{...steamTicket(),demandRevision:-1}]){
+  const calls:string[]=[];const owner=new ProductionSharedGameMedia({enabled:()=>true,invoke:(async command=>{calls.push(command);return {key:'steam-570',bindingRevision:1,status:'missing'};}) as any});
+  await assert.rejects(()=>owner.ensure({appId:570,name:'Fixture',verified:true},'steam',true,true,invalid),/steam-foreground-required/);checks++;equal(calls.length,0,'missing/withdrawn native ticket causes zero IPC');owner.stop();
+ }
+ await run('Steam demand revoked during lookup cannot enter background queue',async()=>{let active=true,release!:(value:any)=>void;const calls:any[]=[];const owner=new ProductionSharedGameMedia({enabled:()=>true,backgroundEnabled:()=>true,invoke:(async(command,args)=>{calls.push({command,args});if(command==='gameMedia.resolve')return new Promise(r=>release=r);throw Error('revoked lookup entered '+command);}) as any});const pending=owner.ensure({appId:570,name:'Fixture',verified:true},'steam',true,true,steamTicket(()=>active));await Promise.resolve();active=false;release({key:'steam-570',bindingRevision:1,status:'missing'});await assert.rejects(()=>pending,/steam-demand-withdrawn/);checks++;equal(calls.length,1,'only already-issued local lookup remains');owner.stop();});
+ await run('Steam current ticket reaches lookup and native background without altering other consumers',async()=>{let active=true;const calls:any[]=[];const owner=new ProductionSharedGameMedia({enabled:()=>true,backgroundEnabled:()=>true,invoke:(async(command,args)=>{calls.push({command,args});return command==='gameMedia.resolve'?{key:'steam-570',bindingRevision:1,status:'missing'}:{};}) as any});await owner.ensure({appId:570,name:'Fixture',verified:true},'steam',true,true,steamTicket(()=>active));equal(calls.map(x=>[x.args.demandConsumer,x.args.demandEpoch,x.args.demandRevision]),[['steam','native-focus-1',1],['steam','native-focus-1',1]],'both Steam boundaries retain native ticket');active=false;calls.length=0;await owner.ensure({appId:570,name:'Fixture',verified:true},'ymcc',true,true);equal(calls.some(x=>x.args.demandConsumer==='steam'),false,'YMCC demand has independent ownership');equal(calls.map(x=>x.command),['gameMedia.resolve','gameMedia.background'],'YMCC lookup and supplementation remain functional');calls.length=0;await owner.ensure({appId:570,name:'Fixture',verified:true},'library',true,true);equal(calls.some(x=>x.args.demandConsumer==='steam'),false,'library demand has independent ownership');owner.stop();});
+ await run('late Steam failure receipt cannot schedule retries or announce after demand withdrawal',async()=>{let active=true,release!:(value:any)=>void;let notices=0;const timers:any[]=[];const owner=new ProductionSharedGameMedia({schedule:((fn:any)=>{timers.push(fn);return timers.length;}) as any,cancel:(()=>{}) as any,invoke:(async()=>new Promise(r=>release=r)) as any});owner.subscribe(()=>notices++);const pending=owner.playbackFailed({key:'steam-570',assetId:'good',bindingRevision:1},steamTicket(()=>active));active=false;release({key:'steam-570',bindingRevision:2,status:'error',retryAt:Date.now()+60000});await pending;equal(timers.length,0,'old demand cannot arm a retry');equal(notices,0,'old demand cannot trigger fresh consumer reads');owner.stop();});
+ await run('Steam late playback failure cannot quarantine a current shared asset',async()=>{const calls:any[]=[];const owner=new ProductionSharedGameMedia({invoke:(async(command,args)=>{calls.push({command,args});return {};}) as any});await assert.rejects(()=>owner.playbackFailed({key:'steam-570',assetId:'good',bindingRevision:1},steamTicket(()=>false)),/steam-demand-withdrawn/);checks++;equal(calls.length,0,'withdrawn failure never enters Store.edit');owner.stop();});
+}
 function fixture(options:{enabled?:boolean;candidateFailure?:boolean;crossLease?:boolean;pair?:boolean;legacy?:boolean;install?:(args:any)=>Promise<void>}={}){
 
  const entries=new Map<number,GameMediaEntry>();const counts={resolve:0,begin:0,metadata:0,install:0,fail:0,legacy:0};const order:number[]=[];const timers:Array<()=>void>=[];let enabled=options.enabled??true;
@@ -48,7 +68,69 @@ const target=(id:number)=>({appId:id,name:'Fixture '+id,verified:true});
 
 const cached=(id:number):GameMediaEntry=>({key:'steam-'+id,appId:id,bindingRevision:4,status:'ready',ready:true,url:'http://fixture/'+id});
 
-async function run(name:string,fn:()=>Promise<void>|void){await fn();cases++;console.log('PASS '+name);}
+const reports:any[]=[];
+async function run(name:string,fn:()=>Promise<void>|void){if(stabilityRecoveryOnly&&!name.startsWith('R18 recovery:'))return;try{await fn();reports.push({name,ok:true});console.log('PASS '+name);}catch(error){reports.push({name,ok:false,error:String(error instanceof Error?error.message:error)});console.log('FAIL '+name);}cases++;}
+
+
+async function lookupCoalescingCases(){
+ const fixtures:any[]=[],callCounts:Record<string,number>={};
+ const value=(revision=1)=>({key:'steam-570',bindingRevision:revision,status:'ready',ready:true,asset:{id:'asset-'+revision,revision:'1',kind:'image',mime:'image/png',extension:'png',bytes:12},assets:{static:{id:'asset-'+revision,revision:'1',kind:'image',mime:'image/png',extension:'png',bytes:12}},playback:{start:8,end:38,fit:'cover'}} as GameMediaEntry);
+ const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
+ const fixture=()=>{
+  const calls:any[]=[],pending:any[]=[],tasks:Promise<any>[]=[];
+  const owner=new ProductionSharedGameMedia({enabled:()=>true,backgroundEnabled:()=>true,invoke:((command:string,args:any)=>{calls.push({command,args});return new Promise((resolve,reject)=>pending.push({command,resolve,reject}));}) as any});
+  const f:any={owner,calls,pending,tasks};fixtures.push(f);return f;
+ };
+ const one=(f:any,target:any={appId:570},demand?:any)=>{let result:Promise<GameMediaEntry>;try{result=Promise.resolve(f.owner.lookup(target,demand));}catch(error){result=Promise.reject(error);}void result.catch(()=>{});f.tasks.push(result);return result;};
+ const release=(f:any,revision=1)=>{for(const pending of f.pending.splice(0))pending.resolve(JSON.parse(JSON.stringify(value(revision))));};
+ const scenario=async(name:string,fn:(f:any)=>Promise<void>)=>{const at=process.argv.indexOf('--lookup-case');if(at>=0&&process.argv[at+1]!==name)return;await run(name,async()=>{const f=fixture();try{await fn(f);}finally{f.owner.stop();release(f);await Promise.allSettled(f.tasks);callCounts[name]=f.calls.length;}});};
+ await scenario('lookup: 200 simultaneous identical reads share one original native request',async f=>{
+  const tasks=Array.from({length:200},()=>one(f));release(f);const entries=await Promise.all(tasks);equal(entries.length,200,'all consumers receive their own response');equal(f.calls.length,1,'one native resolve for two hundred overlapping readers');equal(f.calls[0].command,'gameMedia.resolve','the original RPC is used');equal((f.owner as any).lookupFlights?.size,0,'settled flight is not retained');
+ });
+ await scenario('lookup: settled result is never a response cache',async f=>{const first=one(f);release(f,1);equal((await first).bindingRevision,1,'first observation');const second=one(f);release(f,2);equal((await second).bindingRevision,2,'later lookup gets a new observation');equal(f.calls.length,2,'settled reads always dispatch again');});
+ await scenario('lookup: each consumer owns nested response values',async f=>{const a=one(f),b=one(f);release(f);const [x,y]=await Promise.all([a,b]);x.asset!.id='changed';x.assets!.static!.id='changed-nested';x.playback!.start=99;equal(y.asset!.id,'asset-1','top asset isolated');equal(y.assets!.static!.id,'asset-1','nested asset isolated');equal(y.playback!.start,8,'nested playback isolated');equal(f.calls.length,1,'isolation does not require duplicate native work');});
+ await scenario('lookup: top-level request key order does not duplicate work',async f=>{const a=one(f,{appId:570,name:'A'}),b=one(f,{name:'A',appId:570});release(f);await Promise.all([a,b]);equal(f.calls.length,1,'same serialized argument values share one request');});
+ await scenario('lookup: different target and binding metadata remain separate',async f=>{const tasks=[one(f,{appId:570,key:'steam-570',bindingRevision:1}),one(f,{appId:570,key:'steam-570',bindingRevision:2}),one(f,{appId:730,key:'steam-730',bindingRevision:1})];release(f);await Promise.all(tasks);equal(f.calls.length,3,'identity and caller metadata do not merge');});
+ await scenario('lookup: nested request metadata differences remain separate',async f=>{const tasks=[one(f,{appId:570,selection:{url:'https://example.invalid/a'}}),one(f,{appId:570,selection:{url:'https://example.invalid/b'}})];release(f);await Promise.all(tasks);equal(f.calls.length,2,'all nested native arguments participate');});
+ await scenario('lookup: Steam epochs revisions and ordinary readers never share authority',async f=>{const tasks=[one(f,{appId:570},steamTicket()),one(f,{appId:570},{...steamTicket(),demandEpoch:'new-focus'}),one(f,{appId:570},{...steamTicket(),demandRevision:2}),one(f,{appId:570})];release(f);await Promise.all(tasks);equal(f.calls.length,4,'different native authority creates independent reads');});
+ await scenario('lookup: equal ticket bytes still validate each caller after response',async f=>{let active=true;const a=one(f,{appId:570},steamTicket(()=>active)),b=one(f,{appId:570},steamTicket());active=false;release(f);await assert.rejects(()=>a,/steam-demand-withdrawn/);checks++;equal((await b).ready,true,'other current ticket remains usable');equal(f.calls.length,1,'identical native ticket values share only transport work');});
+ await scenario('lookup: already withdrawn demand sends zero native requests',async f=>{const a=one(f,{appId:570},steamTicket(()=>false));await assert.rejects(()=>a,/steam-demand-withdrawn/);checks++;equal(f.calls.length,0,'denied before IPC');});
+ await scenario('lookup: event invalidation and old completion preserve a replacement flight',async f=>{
+  const a=one(f);f.owner.changed('asset','steam-570');const b=one(f);equal(f.calls.length,2,'post-change read does not share pre-change query');f.pending.shift().resolve(value(1));await a;const c=one(f);equal(f.calls.length,2,'old cleanup cannot remove the replacement flight');release(f,2);equal((await b).bindingRevision,2,'new query owns current result');equal((await c).bindingRevision,2,'later overlapping read shares replacement');
+ });
+ await scenario('lookup: raw native event can invalidate without listener fanout',async f=>{let notifications=0;f.owner.subscribe(()=>notifications++);const a=one(f);f.owner.invalidateLookups();const b=one(f);release(f);await Promise.all([a,b]);equal(f.calls.length,2,'raw invalidation opens new read');equal(notifications,0,'invalidation itself creates no demand event');});
+ await scenario('lookup: rejected transport is removed and a later call retries',async f=>{const a=one(f);f.pending.shift().reject(Error('fixture-read-failed'));await assert.rejects(()=>a,/fixture-read-failed/);checks++;const b=one(f);release(f,2);equal((await b).bindingRevision,2,'next query can recover');equal(f.calls.length,2,'failure is not cached');});
+ await scenario('lookup: stop rejects both a late response and future queries',async f=>{const a=one(f);f.owner.stop();release(f);await assert.rejects(()=>a,/media-owner-stopped/);checks++;const b=one(f);release(f);await assert.rejects(()=>b,/media-owner-stopped/);checks++;equal(f.calls.length,1,'no new native query after stop');equal((f.owner as any).lookupFlights?.size,0,'stop releases all sharing records');const inactive=await f.owner.ensure({appId:570,name:'Fixture',verified:true},'library');equal(inactive.status,'consumer-inactive','stopped ensure completes inertly under the original contract');equal(f.calls.length,1,'inert ensure creates no query or admission');});
+ await scenario('lookup: bounded map dispatches every overflow request',async f=>{const tasks=Array.from({length:80},(_,i)=>one(f,{appId:1000+i}));const retained=(f.owner as any).lookupFlights?.size;tasks.push(one(f,{appId:1079}));release(f);const responses=await Promise.all(tasks);equal(responses.length,81,'overflow is not dropped');equal(f.calls.length,81,'untracked overflow dispatches independently');equal(retained,64,'retained in-flight keys have a fixed bound');equal((f.owner as any).lookupFlights?.size,0,'settling overflow leaves no records');});
+ await scenario('lookup: synchronous transport exceptions do not poison later reads',async f=>{let count=0;const owner=new ProductionSharedGameMedia({invoke:((command:string)=>{equal(command,'gameMedia.resolve','original command');if(++count===1)throw Error('fixture-sync-failure');return Promise.resolve(value(2));}) as any});try{let first:Promise<any>;try{first=Promise.resolve(owner.lookup({appId:570}));}catch(error){first=Promise.reject(error);}await assert.rejects(()=>first,/fixture-sync-failure/);checks++;equal((await owner.lookup({appId:570})).bindingRevision,2,'second read recovers');equal(count,2,'two actual boundary calls');}finally{owner.stop();}});
+ await scenario('lookup: two ordinary ensure callers retain one native admission',async f=>{const target={appId:570,name:'Fixture',verified:true};const a=f.owner.ensure(target,'ymcc',true,true),b=f.owner.ensure(target,'library',true,true);void a.catch(()=>{});void b.catch(()=>{});f.tasks.push(a,b);for(const pending of f.pending.splice(0))pending.resolve({key:'steam-570',bindingRevision:1,status:'missing'});await flush();const native=f.calls.filter((x:any)=>x.command==='gameMedia.background').length;release(f);await Promise.all([a,b]);equal(f.calls.filter((x:any)=>x.command==='gameMedia.resolve').length,1,'one common lookup');equal(native,1,'original background admission sharing preserved');});
+  await scenario('lookup: replaced flight survives old transport rejection',async f=>{
+   const old=one(f),rejected=assert.rejects(()=>old,/fixture-old-transport-failed/);void rejected.catch(()=>{});f.tasks.push(rejected);
+   f.owner.invalidateLookups();const current=one(f);
+   f.pending.shift().reject(Error('fixture-old-transport-failed'));await rejected;checks++;
+   const joined=one(f);equal(f.calls.length,2,'old rejection cannot remove replacement flight');
+   release(f,2);equal((await Promise.all([current,joined])).map(entry=>entry.bindingRevision),[2,2],'replacement readers receive the new result');
+  });
+  await scenario('lookup: tracked flight survives earlier overflow completion',async f=>{
+   const occupied=Array.from({length:64},(_,i)=>one(f,{appId:1000+i}));
+   const oldA=one(f,{appId:1079}),oldB=one(f,{appId:1079});
+   equal(f.calls.length,66,'full map dispatches both overflow reads independently');
+   f.pending.shift().resolve(value(1));await occupied[0];await flush();
+   const current=one(f,{appId:1079});
+   for(const pending of f.pending.splice(occupied.length-1,2))pending.resolve(value(1));
+   await Promise.all([oldA,oldB]);await flush();
+   const joined=one(f,{appId:1079});equal(f.calls.length,67,'old overflow cannot remove replacement flight');
+   release(f,2);equal((await Promise.all([current,joined])).map(entry=>entry.bindingRevision),[2,2],'tracked replacement readers receive the new result');
+   await Promise.all(occupied);
+  });
+ return callCounts;
+}
+if(process.argv.includes('--lookup-coalescing-only')){
+ const invocationCounts=await lookupCoalescingCases();
+ const selectedOk=reports.length>0&&reports.every(row=>row.ok);
+ console.log(JSON.stringify({ok:selectedOk,cases,checks,reports,invocationCounts,selection:'lookup-coalescing-only',defaultGroups:'NOT_RUN',realNetworkOrApplication:false}));
+ process.exit(selectedOk?0:1);
+}
 
 await run('cache hit has no network or task',async()=>{const f=fixture({candidateFailure:true});f.entries.set(1,cached(1));const e=await f.owner.ensure(target(1),'ymcc');equal(e.url,'http://fixture/1','cached source returned');equal(f.counts.metadata,0,'no external lookup');equal(f.counts.begin,0,'no prepare request');f.owner.stop();});
 
@@ -288,5 +370,78 @@ await run('default media clocks keep the browser receiver required by WebView2',
 
 await run('automatic inventory never re-enrolls cache-only popular games',async()=>{let snapshots=0;const queued:any[]=[];const owner=new SharedGameMedia({nativeBackground:true,enabled:()=>true,backgroundEnabled:()=>true,installed:async()=>[{appId:570,name:'Installed',lastPlayed:123,verified:true}],invoke:(async(command:string,args:any={})=>{if(command==='gameMedia.inventory')return[{appId:620,name:'Confirmed local',lastPlayed:456,verified:true}];if(command==='gameMedia.snapshot'){snapshots++;return{entries:{'steam-730':{appId:730,name:'Old popular-only cache',identityVerified:true}}};}if(command==='gameMedia.background'){queued.push(...args.targets);return{};}throw Error(command);}) as any});await owner.supplement();equal(snapshots,0,'shared cache is not enumerated as a user game catalog');equal(queued.map(x=>x.appId).sort((a,b)=>a-b),[570,620],'only installed and local inventory targets are submitted');owner.stop();});
 await run('viewing a card does not manufacture a last-played timestamp',async()=>{const submitted:any[]=[];const owner=new SharedGameMedia({nativeBackground:true,now:()=>999999,enabled:()=>true,backgroundEnabled:()=>true,invoke:(async(command:string,args:any={})=>{if(command==='gameMedia.resolve')return{key:'steam-570',status:'missing',ready:false,bindingRevision:1};if(command==='gameMedia.background'){submitted.push(...args.targets);return{};}throw Error(command);}) as any});await owner.ensure({appId:570,name:'Viewed',verified:true,lastPlayed:123},'steam',true,true);equal(submitted.length,1,'missing current game still enters native queue');equal(submitted[0].lastPlayed,123,'actual play record survives display demand');owner.stop();});
-console.log(JSON.stringify({ok:true,cases,checks,scope:'production preparation queue and HLS planner; transport fixture only'}));
+
+await run('playback failure has a finite native deadline and propagates unknown outcome',async()=>{
+ const calls:any[]=[],timers:any[]=[];let failed=true,notifications=0;
+ const owner=new SharedGameMedia({schedule:((fn:any,ms:number)=>{timers.push({fn,ms});return timers.length;}) as any,cancel:(()=>{}) as any,invoke:(async(command:string,args:any,options:any)=>{calls.push({command,args,options});if(failed)throw Error('inert media IPC timeout');return{key:'steam-570',bindingRevision:2,status:'error',ready:false,retryAt:100010};}) as any,now:()=>100000});const off=owner.subscribe(()=>notifications++);
+ try{const report={key:'steam-570',assetId:'old-asset',bindingRevision:1,kind:'video'};await assert.rejects(owner.playbackFailed(report),/inert media IPC timeout/);
+  equal(calls[0].options?.timeoutMs,5000,'native failure report cannot remain pending forever');equal(calls[0].args,{key:'steam-570',assetId:'old-asset',bindingRevision:1,slot:'dynamic',action:'playback-failed'},'deadline retains exact asset revision and native CAS action');equal(notifications,0,'unknown result is not announced as a committed edit');equal(timers.length,0,'media wrapper never blindly retries unknown write');
+  failed=false;const result=await owner.playbackFailed(report);equal(result.bindingRevision,2,'actual receipt supplies the committed revision');equal(notifications,1,'confirmed edit notifies consumers once');equal(timers.length,1,'confirmed native retryAt retains existing preparation path');
+ }finally{off();owner.stop();}
+});
+
+await run('stopped media owner cannot arm retry from a late failure receipt',async()=>{
+ let finish!:(value:GameMediaEntry)=>void,calls=0,notifications=0;const timers=new Map<number,()=>void>();const owner=new SharedGameMedia({invoke:(async()=>{calls++;return new Promise(resolve=>finish=resolve);}) as any,now:()=>100000,schedule:((fn:()=>void)=>{timers.set(1,fn);return 1;}) as any,cancel:((id:number)=>timers.delete(id)) as any});owner.subscribe(()=>notifications++);
+ const report={key:'steam-570',assetId:'old',bindingRevision:1,kind:'video'},pending=owner.playbackFailed(report);owner.stop();finish({key:'steam-570',bindingRevision:2,status:'error',retryAt:200000});await pending;equal(timers.size,0,'late receipt cannot schedule retry after stop');equal(notifications,0,'stopped owner does not announce a late mutation');await assert.rejects(owner.playbackFailed(report),/media-owner-stopped/);equal(calls,1,'stopped owner cannot start another cache write');
+});
+
+const admissionSamples:any[]=[];
+function nativeDemandFixture(){
+ let entry:GameMediaEntry={key:'steam-570',appId:570,bindingRevision:1,status:'missing',ready:false},resolveCalls=0;const pending:Array<{args:any;resolve:(x?:any)=>void;reject:(e:Error)=>void}>=[],timers:any[]=[],commands:string[]=[];
+ const owner=new SharedGameMedia({nativeBackground:true,enabled:()=>true,backgroundEnabled:()=>true,now:()=>100000,installed:async()=>[],schedule:((fn:any,ms:any)=>{timers.push({fn,ms});return timers.length;}) as any,cancel:(()=>{}) as any,invoke:((command:string,args:any={})=>{commands.push(command);if(command==='gameMedia.resolve'){resolveCalls++;return Promise.resolve({...entry});}if(command==='gameMedia.background')return new Promise((resolve,reject)=>pending.push({args,resolve,reject}));throw Error('unexpected renderer preparation '+command);}) as any});
+ return{owner,pending,timers,commands,setEntry:(x:Partial<GameMediaEntry>)=>entry={...entry,...x},resolveCalls:()=>resolveCalls,stop:()=>{owner.stop();for(const p of pending)p.resolve({});}};
+}
+const admissionTick=()=>new Promise<void>(resolve=>setImmediate(resolve));
+await run('identical native demand burst has one in-flight enrollment',async()=>{
+ const f=nativeDemandFixture();try{const work=Array.from({length:80},(_,n)=>f.owner.ensure(n%3===0?{verified:true,name:'Same',appId:570,executable:undefined}:n%2?{verified:true,name:'Same',appId:570}:{appId:570,name:'Same',verified:true},'steam',true,true));await admissionTick();admissionSamples.push({name:'80-same-target',resolveCalls:f.resolveCalls(),nativeSubmissions:f.pending.length});equal(f.pending.length,1,'same Steam ticket enrollment is sent once independent of target property order');for(const p of f.pending)p.resolve({});const returned=await Promise.all(work);equal(returned.length,80,'every display caller receives its own native cache result');equal(returned.every(x=>x.bindingRevision===1),true,'coalescing never invents a completed asset');equal(f.timers.length,0,'enrollment does not schedule renderer retry');}finally{f.stop();}
+});
+await run('different native provenance and play records never share enrollment',async()=>{
+ const f=nativeDemandFixture();try{const inputs=[{...target(570),executable:'G:/games/a.exe',steamAccount:'a',shortcutAppId:'1'},{...target(570),executable:'G:/games/b.exe',steamAccount:'a',shortcutAppId:'1'},{...target(570),executable:'G:/games/a.exe',steamAccount:'b',shortcutAppId:'2'},{...target(570),lastPlayed:99},{...target(571)},{...target(570),legacyTarget:{pid:42,processCreated:'first-birth'}},{...target(570),legacyTarget:{pid:42,processCreated:'second-birth'}}];const work=inputs.map(x=>f.owner.ensure(x,'library',false,true));await admissionTick();equal(f.pending.length,inputs.length,'different EXE/account/play record/appID is preserved');equal(f.pending.map(x=>x.args.targets[0]),inputs,'native payload retains every exact target');for(const p of f.pending)p.resolve({});await Promise.all(work);}finally{f.stop();}
+});
+await run('new media binding does not join an older native enrollment',async()=>{
+ const f=nativeDemandFixture();try{const old=f.owner.ensure(target(570),'steam',false,true);await admissionTick();f.setEntry({bindingRevision:2,refreshRequested:true});const fresh=f.owner.ensure(target(570),'library',true,true);await admissionTick();equal(f.pending.length,2,'new binding must submit independently');f.pending[0].reject(Error('old result unavailable'));await old;const joined=f.owner.ensure(target(570),'ymcc',true,true);await admissionTick();equal(f.pending.length,2,'settling old revision must not release the current in-flight admission');f.pending[1].resolve({});const values=await Promise.all([fresh,joined]);equal(values.map(x=>x.bindingRevision),[2,2],'new revision callers retain their own lookup receipt');}finally{f.stop();}
+});
+await run('failed native enrollment retires without retry timers or a poisoned cache',async()=>{
+ const f=nativeDemandFixture();try{const work=[f.owner.ensure(target(570),'steam'),f.owner.ensure(target(570),'steam'),f.owner.ensure(target(570),'steam')];await admissionTick();equal(f.pending.length,1,'concurrent same-ticket failure shares a single native attempt');f.pending[0].reject(Error('native return lost'));const values=await Promise.all(work);equal(values.every(x=>x.ready===false),true,'failed enrollment retains missing-cache truth');equal(f.timers.length,0,'optional enqueue failure must not create a retry timer');const retry=f.owner.ensure(target(570),'steam');await admissionTick();equal(f.pending.length,2,'later explicit demand is allowed after failure');f.pending[1].resolve({});await retry;}finally{f.stop();}
+});
+await run('completed native enrollment is not cached across later demand',async()=>{
+ const f=nativeDemandFixture();try{const first=f.owner.ensure(target(570),'steam');await admissionTick();f.pending[0].resolve({});await first;const next=f.owner.ensure(target(570),'steam');await admissionTick();equal(f.pending.length,2,'only in-flight work is shared, not a later still-missing-cache request');f.pending[1].resolve({});await next;f.setEntry({ready:true,dynamicReady:true,staticReady:true,status:'ready'});const ready=await f.owner.ensure(target(570),'steam',true,true);equal(ready.ready,true,'complete cache is usable');equal(f.pending.length,2,'already complete wallpaper creates no new enrollment');}finally{f.stop();}
+});
+await run('stopping native demand preserves accepted work without followup',async()=>{
+ const f=nativeDemandFixture();try{const work=[f.owner.ensure(target(570),'steam'),f.owner.ensure(target(570),'steam')];await admissionTick();equal(f.pending.length,1,'accepted same-ticket native work has one submission');let finished=false;void Promise.all(work).then(()=>finished=true);f.owner.stop();await admissionTick();equal(finished,false,'stop cannot invent completion for an accepted native promise');f.pending[0].resolve({});await Promise.all(work);await f.owner.ensure(target(570),'library');equal(f.pending.length,1,'stopped owner cannot enqueue followup');equal(f.timers.length,0,'stopped native owner leaves no retry timer');}finally{f.stop();}
+});
+await run('independent consumers never join a revocable Steam admission',async()=>{const f=nativeDemandFixture();try{const work=[f.owner.ensure(target(570),'steam'),f.owner.ensure(target(570),'ymcc'),f.owner.ensure(target(570),'library'),f.owner.ensure(target(570),'steam')];await admissionTick();equal(f.pending.length,2,'one captured Steam ticket and one independent admission remain separate');equal(f.pending.filter(x=>x.args.demandConsumer==='steam').length,1,'Steam same-ticket callers still coalesce');equal(f.pending.filter(x=>x.args.demandConsumer!=='steam').length,1,'YMCC and library retain their independent shared owner');for(const p of f.pending)p.resolve({});await Promise.all(work);equal(f.timers.length,0,'separate ownership creates no polling');}finally{f.stop();}});
+if(!stabilityRecoveryOnly)await foregroundDemandCases();
+await stabilityRecoveryCases();
+// Reuse the shipping refresh body and its retry subscription. Remove only its
+// one erased TypeScript call annotation; do not model the dispatch algorithm.
+async function stabilityRecoveryCases(){
+ const sourcePath=process.env.YMCC_SHARED_RETRY_SOURCE||resolveSourcePath('src/bridge/sharedGameMedia.ts');
+ const source=readFileSync(sourcePath,'utf8'),begin=source.indexOf('  async function refresh(){'),end=source.indexOf("  const off=on('gameMedia.changed'",begin);
+ assert.ok(begin>=0&&end>begin,'exact production refresh function boundaries');
+ let body=source.slice(begin,end);const annotation='invoke<{entries:Record<string,GameMediaEntry>;aliases?:Record<string,string>}>';
+ assert.equal(body.split(annotation).length,2,'one TS call annotation in actual refresh');body=body.replace(annotation,'invoke');
+ const retryAt=source.indexOf("  const retry=sharedGameMedia.subscribe(reason=>",end),retryEnd=source.indexOf('\n',retryAt);assert.ok(retryAt>=end&&retryEnd>retryAt,'actual retry subscription boundary');
+ const makeRefresh=new Function('env','with(env){'+body+source.slice(retryAt,retryEnd)+';return {refresh,stop:retry};}');
+ const flush=async()=>{for(let n=0;n<4;n++)await new Promise<void>(r=>setImmediate(r));};
+ function harness(consumer:string|undefined,options:{steam?:boolean;ymcc?:boolean;background?:boolean;requested?:boolean;attachHost?:boolean;deadline?:boolean}={}){
+  let clock=Date.now(),id=0;const settings={steam:options.steam??true,ymcc:options.ymcc??true,background:options.background??true};const calls:any[]=[],ensures:any[]=[],timers=new Map<number,{fn:()=>void;ms:number}>();
+  let record:GameMediaEntry={key:'steam-570',appId:570,name:'Current fixture',bindingRevision:4,status:'error',ready:false,retryAt:options.deadline===false?0:clock+1000,refreshRequested:options.requested===true,...(consumer===undefined?{}:{demandConsumer:consumer})};
+  const schedule=((fn:()=>void,ms:number)=>{timers.set(++id,{fn,ms});return id;}) as any,cancel=((timer:number)=>timers.delete(timer)) as any;
+  const owner=new ProductionSharedGameMedia({enabled:()=>settings.steam,backgroundEnabled:()=>settings.background,nativeBackground:true,now:()=>clock,schedule,cancel,invoke:(async(command:string,args:any)=>{calls.push({command,args});if(command==='gameMedia.resolve')return {...record};if(command==='gameMedia.background')return {};throw Error('unexpected owner command '+command);}) as any});
+  const actualEnsure=owner.ensure.bind(owner);owner.ensure=((...args:any[])=>{ensures.push(args);return (actualEnsure as any)(...args);}) as any;
+  const env:any={disposed:false,refreshing:false,refreshAgain:false,revisions:new Map([['steam-570',4]]),aliases:new Map(),reconcileMediaAliases,sharedGameMedia:owner,steamWallpaperEnabled:()=>settings.steam,backgroundDownloadEnabled:()=>settings.background,manualAllowed:()=>false,getUiSetting:()=>settings.ymcc,gameMediaPairComplete,window:{dispatchEvent(){}},CustomEvent:globalThis.CustomEvent,Date:{now:()=>clock},scan(){},invoke:async(command:string)=>{calls.push({command});if(command!=='gameMedia.snapshot')throw Error(command);return {entries:{'steam-570':{...record}},aliases:{}};}};
+  const reader=makeRefresh(env);let host:ReturnType<typeof startSteamWallpaperHost>|null=null,extension:any,foreground:(value:any)=>void=()=>{};
+  if(options.attachHost){host=startSteamWallpaperHost({enabled:()=>settings.steam,readForeground:async()=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'live-retry',revision:1}),onForeground:handler=>{foreground=handler;return()=>{};},onResume:()=>()=>{},inventory:()=>{},appearance:()=>({opacity:.64,blur:0}),media:owner,now:()=>clock,schedule,cancel,register:value=>{extension=value;return()=>{};},invoke:(async(command:string)=>{if(command==='deckySidebar.mirrorReply')return true;throw Error(command);}) as any});host.ready();extension.connected({connection:'1',runId:'a'.repeat(32)});extension.request({connection:'1',runId:'a'.repeat(32),request:{command:'wallpaper.context',contextSeq:1,appId:'570',visible:true}});}
+  return {owner,reader,calls,ensures,timers,settings,env,foreground,async fire(){const next=[...timers][0];assert.ok(next,'retained failure needs a deadline timer');timers.delete(next[0]);clock+=next[1].ms;next[1].fn();await flush();},setRecord(value:Partial<GameMediaEntry>){record={...record,...value};},async settle(){await flush();},stop(){host?.stop();reader.stop();owner.stop();}};
+ }
+ for(const consumer of ['library','ymcc',undefined])await run('R18 recovery: '+(consumer||'legacy library')+' keeps independent identity through failure deadline',async()=>{const f=harness(consumer,{steam:false});try{await f.reader.refresh();equal(f.timers.size,1,'independent owner retains one deadline with Steam OFF');equal(f.ensures.length,0,'no preparation before its deadline');await f.fire();equal(f.ensures.length,1,'deadline submits one current independent retry');equal(f.ensures[0][1],consumer==='ymcc'?'ymcc':'library','library/legacy never become ticketless Steam');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,1,'one native background admission');equal(f.calls.some(x=>x.args?.demandConsumer==='steam'),false,'independent request never borrows a Steam ticket');equal(f.timers.size,0,'no duplicate deadline timer');}finally{f.stop();}});
+ await run('R18 recovery: global refresh never manufactures a Steam retry ticket',async()=>{const f=harness('steam');try{await f.reader.refresh();equal(f.timers.size,1,'retained Steam failure announces one shared deadline');await f.fire();equal(f.ensures.length,0,'global refresh must leave Steam retry to selected Host');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,0,'global refresh cannot submit a ticketless Steam request');}finally{f.stop();}});
+ await run('R18 recovery: real Shared owner and Host share one deadline and one current-ticket retry',async()=>{const f=harness('steam',{attachHost:true});try{await f.reader.refresh();await f.settle();equal(f.timers.size,1,'Host and global refresh share one existing retry owner');equal(f.ensures.length,0,'failed resource waits for actual deadline');await f.fire();equal(f.ensures.length,1,'only current Host owns ensure at deadline');equal(f.ensures[0][1],'steam','retry keeps Steam consumer');equal([f.ensures[0][4].demandEpoch,f.ensures[0][4].demandRevision],['live-retry',1],'retry captures current native proof');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,1,'one target admission, not global plus Host');equal(f.timers.size,0,'completed attempt leaves no duplicate retry timer');}finally{f.stop();}});
+ await run('R18 recovery: expired deadline cannot recreate Steam demand after native blur',async()=>{const f=harness('steam',{attachHost:true});try{await f.reader.refresh();await f.settle();f.foreground({source:'native-steam-bigpicture-foreground',known:true,foreground:false,current:false,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'blur-retry',revision:2});await f.settle();await f.fire();equal(f.ensures.length,0,'blurred Host never retries from global deadline');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,0,'blurred deadline cannot submit background work');}finally{f.stop();}});
+ await run('R18 recovery: explicit library refresh and disabled independent owners retain their own gates',async()=>{const manual=harness('steam',{steam:false,requested:true,deadline:false});try{await manual.reader.refresh();equal(manual.ensures.length,1,'explicit library request is preserved');equal(manual.ensures[0][1],'library','explicit edit uses independent library consumer');}finally{manual.stop();}for(const [consumer,settings] of [['ymcc',{steam:false,ymcc:false}],['library',{steam:false,background:false}],['background',{steam:true}],['unrecognized',{steam:true}]] as const){const f=harness(consumer,{...settings,deadline:false});try{await f.reader.refresh();equal(f.ensures.length,0,'disabled/unknown owner has no implicit fallback authorization');equal(f.timers.size,0,'disabled/unknown owner has no retry clock');}finally{f.stop();}}});
+}
+
+const ok=reports.every(row=>row.ok);if(!ok)process.exitCode=1;
+console.log(JSON.stringify({ok,selection:stabilityRecoveryOnly?'stability-recovery':'default',cases,checks,reports,admissionSamples,scope:'production preparation queue and HLS planner; transport fixture only'}));
 

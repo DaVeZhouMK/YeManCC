@@ -14,12 +14,16 @@ static int passed=0,writes=0,backups=0,mouseWrites=0,liveCalls=0,liveSetCalls=0,
 static bool running=false,writeOk=true,copyOk=true,poolOk=true,storeOk=true;
 static std::string account="42",liveMode="ok",liveSetMode="ok",disk;
 static DWORD activePid=777;
-static json getPatch=json::object();
+static json getPatch=json::object(),replyOverride=nullptr;
+static bool overrideGet=false,overrideSet=false,throwGet=false,throwSet=false;
+static std::vector<json> storePreimages,monitorEvents;
 static std::wstring path=LR"(R:\memory-only\42\config\localconfig.vdf)";
 static json prefs=json::object(),client=json::object();
 static std::vector<std::function<void()>> jobs;
 static std::vector<std::string> order;
 static std::function<void()> liveHook,liveGetHook;
+static std::function<void(const char*,const json&)> storeHook;
+static bool readFault=false;
 static struct {bool isolated=false;} g_aiFanMockSession;
 static std::mutex g_sofMx,g_sdmMx;
 static std::atomic<bool> g_sofQueued{false},g_sofPending{false},g_sofEnabled{false},g_sdmEventPending{false},g_sdmRefreshRequested{false},g_sdmApplyRequested{false};
@@ -30,14 +34,15 @@ static std::string W2U(const std::wstring& value){return std::string(value.begin
 static bool sofRegDWORD(HKEY,const wchar_t*,const wchar_t*,DWORD* pid){*pid=activePid;return true;}
 static bool sofFindLocalConfig(std::wstring* out,std::string* user){if(out)*out=path;if(user)*user=account;return !account.empty();}
 static bool sofSteamRunning(){return running;}
-static std::string sgReadFile(const std::wstring& file){if(file!=path)throw std::runtime_error("unexpected-file-read");return disk;}
+static std::string sgReadFile(const std::wstring& file){if(file!=path)throw std::runtime_error("unexpected-file-read");if(readFault)throw std::runtime_error("controlled-temporary-read-failure");return disk;}
 static BOOL memoryCopy(const wchar_t*,const wchar_t*,BOOL){++backups;return copyOk;}
 #define CopyFileW memoryCopy
 static bool sgWriteFileAtomic(const std::wstring& file,const std::string& text){if(file!=path || running)throw std::runtime_error("unsafe-file-write");++writes;order.push_back("localconfig");if(writeOk)disk=text;return writeOk;}
-static json ymSettingsSection(const char* name){return prefs.value(name,json::object());}
-static bool ymSettingsWriteSection(const char* name,const json& value){++storeWrites;if(!storeOk)return false;prefs[name]=value;return true;}
+static json ymSettingsRead(){return prefs;}
+static json ymSettingsSection(const char* name){const auto it=prefs.find(name);return it!=prefs.end()&&it->is_object()?*it:json::object();}
+static bool ymSettingsWriteSection(const char* name,const json& value){++storeWrites;if(!storeOk)return false;storePreimages.push_back(prefs);prefs[name]=value;if(storeHook)storeHook(name,value);return true;}
 static bool ymSettingsPatchSection(const char* name,const json& value){auto merged=ymSettingsSection(name);merged.update(value);return ymSettingsWriteSection(name,merged);}
-static void ipc_emit(const char*,const json&){}
+static void ipc_emit(const char* name,const json& value){if(std::string(name)=="steam.settings.updated")monitorEvents.push_back(value);}
 static void appendNativeLifecycleLog(const char*,const json&){}
 static bool poolSubmit(std::function<void()> job){if(!poolOk)return false;jobs.push_back(std::move(job));return true;}
 static json steamOverlayFixStateLocked(){return ymcc::sleepprefs::retiredOverlayReply();}
@@ -45,6 +50,8 @@ static json steamOverlayFixGet(){return steamOverlayFixStateLocked();}
 static int sofCurrentValue(const std::string& text,bool*){const auto roots=ymcc::steamdeck::Vdf(text).parse();const auto& sys=ymcc::steamsettings::system(roots);auto value=ymcc::steamdeck::scalar(sys.children,"EnableGameOverlay");return value.empty()?1:std::stoi(value);}
 static json steamLiveRequest(DWORD user,json request){
     ++liveCalls;request["operation"]=="settings.set"?++liveSetCalls:++liveGetCalls;
+    if((request["operation"]=="settings.set"&&throwSet)||(request["operation"]=="settings.get"&&throwGet))throw json::type_error::create(302,"controlled malformed transport receipt",&request);
+    if((request["operation"]=="settings.set"&&overrideSet)||(request["operation"]=="settings.get"&&overrideGet))return replyOverride;
     if(std::to_string(user)!=account)return {{"ok",false},{"reason","steam-account-changed"},{"mutated",false}};
     if(liveMode!="ok")return {{"ok",false},{"reason",liveMode},{"mutated",liveMode=="live-transport-uncertain"}};
     if(request["operation"]=="settings.set"){
@@ -69,7 +76,7 @@ static json steamDeckMouseSet(const json& args){if(!args.contains("percent")||!a
 static void check(bool condition,const char* text){if(!condition)throw std::runtime_error(text);++passed;std::cout<<"PASS "<<text<<'\n';}
 static void flush(){while(!jobs.empty()){auto next=std::move(jobs);jobs.clear();for(auto& job:next)job();}}
 static void reset(){
-    prefs=json::object();jobs.clear();order.clear();liveHook={};liveGetHook={};getPatch=json::object();activePid=777;running=false;writeOk=copyOk=poolOk=storeOk=true;
+    prefs=json::object();jobs.clear();order.clear();liveHook={};liveGetHook={};storeHook={};readFault=false;getPatch=json::object();storePreimages.clear();monitorEvents.clear();overrideGet=overrideSet=throwGet=throwSet=false;replyOverride=nullptr;activePid=777;running=false;writeOk=copyOk=poolOk=storeOk=true;
     account="42";path=LR"(R:\memory-only\42\config\localconfig.vdf)";liveMode=liveSetMode="ok";
     disk=R"VDF("UserLocalConfigStore" {
         "Software" { "system" { "EnableGameOverlay" "SHADOW" } }
@@ -83,7 +90,9 @@ static void reset(){
     g_steamOverlayAccount.clear();g_steamOverlayPath.clear();g_steamOverlayPinnedSerial=0;
     client=ymcc::steamsettings::clientPatch(ymcc::steamsettings::read(disk),1);
 }
-int main(){try{
+int main(int argc,char** argv){try{
+    const bool sectionOnly=argc==2&&std::string(argv[1])=="--section-only";
+    if(!sectionOnly){
     reset();const auto original=disk;
     auto read=steamSettingsGet({{"scope","monitor"}});check(read["available"]==true&&read["scale"].get<double>()>.8,"get uses Steam value without rounding or writing");
     check(writes==0&&jobs.empty()&&prefs.empty(),"opening monitor page never queues or persists a change");
@@ -175,5 +184,57 @@ int main(){try{
         reset();auto rejected=steamSettingsSet(invalid);
         check(rejected["ok"]==false&&prefs.empty()&&jobs.empty()&&liveCalls==0,"awaited entry rejects malformed/extra/other-scope parameters before mutation");
     }
+
+    }
+    // The persisted steamMonitor document is untrusted independently of root JSON.
+    // Native Steam/VDF and durable-store ports remain controlled by this consumer.
+    int sectionFailures=0,sectionScenarios=0;
+    const auto sectionCase=[&](const std::string& name,const std::function<void()>& fn){
+        ++sectionScenarios;try{fn();}catch(const std::exception& e){++sectionFailures;std::cerr<<"FAIL section "<<name<<": "<<e.what()<<'\n';}
+    };
+    const auto seed=[](){return json{{"pending",true},{"account",account},{"path",W2U(path)},{"desired",{{"position",2}}},{"reason",""},{"restartRequired",false}};};
+    std::vector<json> broken={nullptr,true,7,"bad",json::array(),json{{"pending",true}},json{{"pending",false},{"via","live"},{"liveConfirmed",true}}};
+    reset();const auto validSeed=seed();
+    for(const auto& [key,value]:std::vector<std::pair<std::string,json>>{
+        {"pending","true"},{"pending",1},{"pending",nullptr},{"account",42},{"account",""},{"account","4294967296"},{"account","42x"},{"path",false},{"path",""},
+        {"reason",true},{"restartRequired","false"},{"via",true},{"via","invented"},{"desired",nullptr},{"desired",json::array()},{"desired",json::object()},
+        {"desired",{{"position",true}}},{"desired",{{"position",7}}},{"desired",{{"scale",1e200}}},{"desired",{{"ok",true},{"pending",false},{"position",0}}},
+        {"livePid",-1},{"livePid",1.5},{"livePid",4294967296ULL},{"liveValues","bad"},{"liveValues",{{"ok",true},{"position",2}}},
+        {"schemaVersion",2},{"schemaVersion","1"}}){auto item=validSeed;item[key]=value;broken.push_back(item);}
+    auto badLive=validSeed;badLive["pending"]=false;badLive["via"]="live";badLive["livePid"]=777;badLive["liveValues"]=ymcc::steamsettings::read(disk);badLive["liveValues"]["position"]="0";broken.push_back(badLive);
+    auto incompleteLive=validSeed;incompleteLive["pending"]=false;incompleteLive["via"]="live";broken.push_back(incompleteLive);
+    for(size_t n=0;n<broken.size();++n)sectionCase("bad-persistent-"+std::to_string(n),[&,n]{
+        reset();running=true;prefs["steamMonitor"]=broken[n];const auto before=prefs;const auto vdf=disk;
+        const auto state=steamSettingsGet({{"scope","monitor"}});
+        check(state["ok"]==false&&state["pending"]==false&&!state.value("liveConfirmed",false)&&!state.value("applicationConfirmed",false),"bad section read is safe and never signs live/application confirmation");
+        check(prefs==before&&storeWrites==0&&liveCalls==0&&writes==0&&backups==0,"bad section GET preserves exact original without a Steam query or write");
+        g_steamClientPending=true;steamSettingsQueue("section-retry");flush();steamSettingsQueue("section-retry-again");flush();
+        check(!g_steamClientPending&&jobs.empty()&&prefs==before&&storeWrites==0&&liveCalls==0&&disk==vdf,"bad pending is disarmed across retries without replaying or rewriting the original");
+        const auto recovered=steamSettingsSet({{"monitor",{{"position",4}}},{"awaitApplied",true}});
+        check(recovered["ok"]==true&&recovered["applicationConfirmed"]==true&&recovered["liveConfirmed"]==true&&recovered["position"]==4,"explicit valid save recovers monitor and obtains a new independent live receipt");
+        check(!storePreimages.empty()&&storePreimages.front()==before&&prefs["steamMonitor"]["desired"]==json{{"position",4}}&&liveSetCalls==1&&disk==vdf&&writes==0,"valid recovery preserves original preimage through store port and does not merge damaged desired");
+        const auto reread=steamMonitorGet();check(reread["ok"]==true&&reread["liveConfirmed"]==true&&reread["pending"]==false&&reread["position"]==4,"recovered persisted receipt survives readback");
+    });
+    for(const auto& reply:std::vector<json>{nullptr,true,json::array(),json{{"ok","true"}},json{{"ok",false},{"reason",true}},json{{"ok",false},{"reason","live-debug-unavailable"},{"mutated","false"}},json{{"ok",true},{"values","wrong"}}}){
+        sectionCase("malformed-live-GET",[&]{reset();running=true;overrideGet=true;replyOverride=reply;const auto before=prefs;const auto state=steamMonitorGet();check(state["ok"]==false&&state["pending"]==false&&!state.value("liveConfirmed",false)&&prefs==before&&storeWrites==0&&writes==0,"malformed live GET receipt returns unknown without throwing or changing persistent state");});
+        sectionCase("malformed-live-SET",[&]{reset();running=true;overrideSet=true;replyOverride=reply;const auto state=steamMonitorSet({{"position",4}},true);check(state["ok"]==false&&state["pending"]==false&&!state.value("liveConfirmed",false)&&!state.value("applicationConfirmed",false),"malformed live SET cannot be confirmed by a later valid GET");check(!g_steamClientPending&&prefs["steamMonitor"]["pending"]==false&&writes==0&&backups==0,"invalid SET receipt is non-replayable and never falls back to Steam file writes");overrideSet=false;steamSettingsQueue("section-receipt-retry");flush();check(liveSetCalls==1&&writes==0,"retry after invalid SET receipt does not replay uncertain work");const auto good=steamMonitorSet({{"position",4}},true);check(good["applicationConfirmed"]==true&&good["liveConfirmed"]==true,"explicit valid save also recovers after bad live receipt");});
+    }
+    sectionCase("store-refusal-preserves-bad-original",[&]{reset();running=true;prefs["steamMonitor"]=broken[7];const auto original=prefs;storeOk=false;const auto denied=steamMonitorSet({{"position",4}},true);check(denied["ok"]==false&&prefs==original&&storePreimages.empty()&&liveCalls==0&&jobs.empty(),"store preservation/write refusal blocks valid recovery before a Steam SET");});
+    sectionCase("valid-deferred-legacy-section",[&]{reset();running=true;prefs["steamMonitor"]=seed();prefs["steamMonitor"]["via"]="deferred";prefs["steamMonitor"]["restartRequired"]=true;const auto state=steamMonitorGet();check(state["ok"]==true&&state["pending"]==true&&state["liveConfirmed"]==true,"valid legacy pending remains queryable; no blanket removal of deferred monitor settings");check(liveSetCalls==0&&storeWrites==0,"valid pending GET stays read only");});
+
+    for(const bool setter:{false,true})sectionCase(setter?"throwing-live-SET":"throwing-live-GET",[&]{reset();running=true;throwSet=setter;throwGet=!setter;const auto state=setter?steamMonitorSet({{"position",4}},true):steamMonitorGet();check(state["ok"]==false&&state["pending"]==false&&!state.value("liveConfirmed",false)&&!state.value("applicationConfirmed",false),"throwing live transport is contained without a fabricated confirmation");check(writes==0&&backups==0&&!g_steamClientPending,"transport exception causes no Steam file fallback or automatic replay");});
+    sectionCase("valid-live-cache-and-unknown-extension",[&]{reset();running=true;const auto applied=steamMonitorSet({{"position",4}},true);check(applied["applicationConfirmed"]==true,"well formed live receipt is accepted");prefs["steamMonitor"]["futureNote"]={{"preserve","owned elsewhere"}};const auto state=steamMonitorGet();check(state["liveConfirmed"]==true&&state["position"]==4,"unknown harmless metadata does not invalidate a complete bounded receipt");});
+    for(const auto& args:std::vector<json>{nullptr,true,json::array(),json{{"scope",nullptr}},json{{"scope",3}}})sectionCase("malformed-public-scope",[&]{reset();const auto state=steamSettingsGet(args);check(state["ok"]==false&&!state.value("pending",false)&&liveCalls==0&&storeWrites==0,"bad get schema is rejected before settings or Steam mutation");});
+
+    for(const DWORD nextPid:{DWORD{778},DWORD{0}})sectionCase("same-account-process-change-after-durable-SET",[&]{
+        reset();running=true;bool changed=false;
+        storeHook=[&](const char* name,const json& value){if(std::string(name)=="steamMonitor"&&value.value("via",std::string())=="live"&&!value.value("pending",true)){activePid=nextPid;changed=true;storeHook={};}};
+        const auto reply=steamMonitorSet({{"position",4}},true);
+        check(changed&&reply["ok"]==false&&!reply.value("applicationConfirmed",false)&&reply["reason"]=="steam-session-changed","SET receipt cannot confirm a different process even when a fresh GET matches its values");
+        check(liveSetCalls==1&&writes==0&&backups==0&&!g_steamClientPending,"session change after durable receipt never replays SET or falls back to a file write");
+        activePid=779;const auto repaired=steamMonitorSet({{"position",3}},true);check(repaired["applicationConfirmed"]==true&&repaired["liveConfirmed"]==true,"explicit request in the new stable process can confirm independently");
+    });
+    sectionCase("temporary-read-fault-before-explicit-save",[&]{reset();running=true;readFault=true;const auto reply=steamMonitorSet({{"position",4}},true);check(reply["ok"]==false&&prefs.empty()&&storeWrites==0&&liveCalls==0&&jobs.empty(),"temporary localconfig read failure cannot persist intent or manufacture an apply");readFault=false;const auto recovered=steamMonitorSet({{"position",4}},true);check(recovered["applicationConfirmed"]==true,"explicit valid save recovers after a temporary read error");});
+    std::cout<<"steamMonitor section scenarios: "<<sectionScenarios<<" failed: "<<sectionFailures<<'\n';if(sectionFailures)return 1;
     std::cout<<"steam settings production batch: "<<passed<<" cases passed; all IO in memory\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
