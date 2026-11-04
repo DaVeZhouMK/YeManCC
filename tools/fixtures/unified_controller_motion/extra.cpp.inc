@@ -69,3 +69,50 @@ static void unifiedModelCacheCost() {
     CHECK(observed==1);CHECK(!cache.bind("hc.device.LegionGo").known());
     std::printf("LOCAL_BINDING_COST calls=10000 elapsedNs=%lld sourceBytes=%zu wholeProcessCpuMeasured=false\n",static_cast<long long>(elapsed),sizeof(ymcc::legion_motion::Source));
 }
+
+static void unifiedColdCalibration() {
+    const char* models[]={"LegionGoTablet","LegionGoTablet2","LegionGoSZ1","LegionGoSZ2"};
+    for(unsigned model=0;model<4;++model){
+        reset(800+model);g_machineIdentity.deviceClass=std::string("HandheldCompanion.Devices.")+models[model];
+        if(model>=2){g_hidHidePhysicalIdentity.vendorId=0x1A86;g_hidHidePhysicalIdentity.productId=0xE310;}
+        const auto originalEpoch=epoch();const auto requested=clockMs;
+        const auto ack=inputCaptureControllerCalibrationRequest();CHECK(ack.value("ok",false));
+        if(!ack.value("ok",false))continue;
+        const auto id=ack.value("requestId",uint64_t(0));CHECK(id!=0);CHECK(ack.value("initializingSource",false));CHECK(ack.at("pollWindowMs")==8500);
+        CHECK(g_controllerCalibrationRequest&&g_controllerCalibrationRequest->awaitingSource);CHECK(g_controllerCalibrationHasRequest.load());
+        const auto selected=inputCaptureControllerCalibrationSelectedKey();CHECK(selected.has_value());
+        if(selected)CHECK(inputCaptureControllerCalibrationIntentCurrent(*selected,clockMs));
+        CHECK(inputCaptureControllerCalibrationStatus().at("status")=="calibrating");
+        CHECK(!inputCaptureControllerCalibrationRequest().value("ok",true));CHECK(g_controllerCalibrationRequest&&g_controllerCalibrationRequest->id==id);
+        clockMs=requested+3400;
+        CHECK(!inputCaptureLegionMotion(std::nullopt,{},static_cast<double>(clockMs)/1000.0));
+        CHECK(g_controllerCalibrationHasRequest.load());CHECK(epoch()==originalEpoch);CHECK(createCalls==0&&processCalls==0);
+        controllerConfidence=0.0f;++clockMs;const auto trainingStarted=clockMs;
+        CHECK(!consume(sample(clockMs),static_cast<double>(clockMs)/1000.0));
+        CHECK(g_controllerCalibrationRequest&&!g_controllerCalibrationRequest->awaitingSource);
+        if(g_controllerCalibrationRequest){CHECK(g_controllerCalibrationRequest->id==id);CHECK(g_controllerCalibrationRequest->requestedAt==trainingStarted);}
+        CHECK(g_controllerCalibrationActiveRequest&&g_controllerCalibrationActiveRequest->id==id);
+        for(unsigned n=0;n<8;++n){clockMs+=500;CHECK(!consume(sample(clockMs),static_cast<double>(clockMs)/1000.0));CHECK(g_controllerCalibrationHasRequest.load());}
+        controllerConfidence=1.0f;clockMs+=200;(void)consume(sample(clockMs),static_cast<double>(clockMs)/1000.0);
+        CHECK(!g_controllerCalibrationHasRequest.load());CHECK(!g_controllerCalibrationRequest);
+        bool saved=false;for(const auto& row:calibrationEvents)if(row.at("event")=="gyro.calibrate.result"){
+            const auto& value=row.at("value");saved=saved||(value.value("saved",false)&&value.value("requestId",uint64_t(0))==id);
+        }CHECK(saved);
+        // A second explicit cold request must not survive its source-wait bound.
+        inputCaptureLegionMotionSessionRevoke();g_legionMotion.revoke();++clockMs;
+        const auto timeout=inputCaptureControllerCalibrationRequest();CHECK(timeout.value("ok",false));
+        if(timeout.value("ok",false)){
+            const auto before=clockMs;clockMs=before+3500;
+            CHECK(!inputCaptureControllerCalibrationWaitingForSource(clockMs));
+            CHECK(!inputCaptureLegionMotion(std::nullopt,{},static_cast<double>(clockMs)/1000.0));
+            CHECK(!g_controllerCalibrationHasRequest.load());CHECK(!g_controllerCalibrationRequest);
+        }
+        // A source switch ends the old request; it cannot authorize the new unit.
+        ++clockMs;const auto oldSource=inputCaptureControllerCalibrationRequest();CHECK(oldSource.value("ok",false));
+        selectPhysical(physical("USB\\COLD-REPLACEMENT"));
+        CHECK(!inputCaptureControllerCalibrationWaitingForSource(clockMs));
+        (void)inputCaptureLegionMotion(std::nullopt,{},static_cast<double>(clockMs)/1000.0);CHECK(!g_controllerCalibrationHasRequest.load());
+        g_inputCaptureReady=false;CHECK(!inputCaptureControllerCalibrationRequest().value("ok",true));
+        CHECK(!g_controllerCalibrationHasRequest.load());g_inputCaptureReady=true;
+    }
+}

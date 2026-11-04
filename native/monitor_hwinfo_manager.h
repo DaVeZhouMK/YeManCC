@@ -1,6 +1,8 @@
 #pragma once
 #include "monitor_hwinfo_transaction.h"
 #include "monitor_hwinfo_config_commit.h"
+#include <filesystem>
+#include "monitor_hwinfo_sensor_journal.h"
 #include "monitor_freshness.h"
 #include <tlhelp32.h>
 #include <shellapi.h>
@@ -56,33 +58,129 @@ inline void writeAtomic(const std::wstring&path,const std::string&bytes,bool kee
     // One named recovery mutex serializes all callers, including legacy entries.
     if(keepExisting&&exists(path))return;static std::atomic<unsigned long long> sequence{0};const auto temp=path+L".ymcc-tmp-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++sequence);
     Handle f(CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr));if(!f)winFail(5,"HWiNFO staged configuration could not be created");
-    struct Clean{std::wstring p;~Clean(){DeleteFileW(p.c_str());}}clean{temp};DWORD wrote=0;
+    struct Clean{const std::wstring& p;Handle& file;~Clean(){file.reset();DeleteFileW(p.c_str());}}clean{temp,f};DWORD wrote=0;
     if((!bytes.empty()&&(!WriteFile(f.h,bytes.data(),static_cast<DWORD>(bytes.size()),&wrote,nullptr)||wrote!=bytes.size()))||!FlushFileBuffers(f.h))winFail(5,"HWiNFO staged configuration write failed");f.reset();
     if(keepExisting){if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)){const auto e=GetLastError();if((e==ERROR_FILE_EXISTS||e==ERROR_ALREADY_EXISTS)&&exists(path))return;winFail(5,"HWiNFO original backup commit failed",e);}}
     else if(exists(path)){if(!ReplaceFileW(path.c_str(),temp.c_str(),nullptr,0,nullptr,nullptr))winFail(5,"HWiNFO configuration atomic replacement failed");}
     else if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH))winFail(5,"HWiNFO configuration commit failed");
     const auto verified=readBytes(path,bytes.size()+1);if(!verified||*verified!=bytes)throw Error(5,"HWiNFO committed bytes did not verify");
 }
-inline std::optional<bool> acquisition(const std::wstring&powerControl){
-    const auto data=readBytes((fs::path(powerControl)/L"yeman-settings.json").wstring(),16777216,true);if(!data)return {};
-    // Keep one bounded read buffer. Skipping a BOM must not clone or shift the
-    // entire unified settings document on each startup/recovery transaction.
-    auto first=data->cbegin();if(data->compare(0,3,"\xef\xbb\xbf")==0)first+=3;
-    Json document;try{
-        // Small policy-only documents retain the original parser. For larger
-        // unified settings, validate every token but retain only this owner's
-        // policy subtree; all other settings stay in their existing repository.
-        if(data->size()<=4096)document=Json::parse(first,data->cend());
-        else document=Json::parse(first,data->cend(),[](int depth,Json::parse_event_t event,Json& parsed){
-            if(event!=Json::parse_event_t::key)return true;
-            const auto& key=parsed.get_ref<const std::string&>();
-            if(depth==1)return key=="rtss";
-            if(depth==2)return key=="monitorAcquisition";
-            return depth==3&&(key=="version"||key=="enabled"||key=="snapshotPolling");
-        });
-    }catch(...){throw Error(8,"Unified YMCC settings are malformed");}require(document.is_object(),"Unified YMCC settings must be an object");
-    if(!document.contains("rtss")||document["rtss"].is_null())return {};const auto& rtss=document["rtss"];require(rtss.is_object(),"Unified rtss settings must be an object");if(!rtss.contains("monitorAcquisition")||rtss["monitorAcquisition"].is_null())return {};const auto&p=rtss["monitorAcquisition"];
-    require(p.is_object()&&p.contains("version")&&p["version"].is_number_integer()&&p["version"]==1&&p.contains("enabled")&&p["enabled"].is_boolean(),"Unsupported HWiNFO acquisition settings");if(!p["enabled"].get<bool>())return {};require(p.contains("snapshotPolling")&&p["snapshotPolling"].is_boolean(),"HWiNFO acquisition choices must be booleans");return p["snapshotPolling"].get<bool>();
+// Same authoritative PowerControl/yeman-settings.json used by the settings
+// store (settings-baseline.json document.maxBytes). The old 16 MiB allowance
+// exceeded that root's 4 MiB contract; it was not a separate HWiNFO document.
+inline constexpr std::size_t acquisitionRootMaxBytes=4U*1024U*1024U;
+struct AcquisitionRead {
+    std::optional<bool> snapshotPolling;
+    const char* state="default:read-fault";
+    DWORD win32Error=ERROR_SUCCESS;
+};
+// Validate every token/key, including discarded branches, while retaining only
+// the root version/baseline and this owner's policy. DOM callbacks can stop
+// reporting keys in discarded branches and cannot enforce decoded uniqueness.
+struct AcquisitionProjection : nlohmann::json_sax<Json> {
+    enum class Role {Root,Baseline,Rtss,Policy,Other};
+    struct Frame {bool object;Role role;Json* target;std::string pending;std::set<std::string> keys;};
+    struct Selection {Json* target;Role role;};
+    Json document;
+    std::vector<Frame> frames;
+    const char* fault="default:corrupt";
+    Selection next(){
+        if(frames.empty())return {&document,Role::Root};
+        auto& parent=frames.back();if(!parent.object)return {nullptr,Role::Other};
+        auto key=std::move(parent.pending);parent.pending.clear();Role role=Role::Other;bool retain=false;
+        switch(parent.role){
+        case Role::Root:
+            retain=key=="schemaVersion"||key=="configurationBaseline"||key=="rtss";
+            if(key=="configurationBaseline")role=Role::Baseline;else if(key=="rtss")role=Role::Rtss;break;
+        case Role::Baseline:retain=key=="id"||key=="revision"||key=="legacyImported";break;
+        case Role::Rtss:retain=key=="monitorAcquisition";if(retain)role=Role::Policy;break;
+        case Role::Policy:retain=key=="version"||key=="enabled"||key=="snapshotPolling";break;
+        default:break;
+        }
+        return {retain&&parent.target?&(*parent.target)[key]:nullptr,role};
+    }
+    template<class Value> bool value(Value&& v){const auto selected=next();if(selected.target)*selected.target=std::forward<Value>(v);return true;}
+    bool null()override{return value(nullptr);}
+    bool boolean(bool v)override{return value(v);}
+    bool number_integer(Json::number_integer_t v)override{return value(v);}
+    bool number_unsigned(Json::number_unsigned_t v)override{return value(v);}
+    bool number_float(Json::number_float_t v,const std::string&)override{return value(v);}
+    bool string(std::string&v)override{return value(v);}
+    bool binary(Json::binary_t&)override{return false;}
+    bool begin(bool object){
+        if(frames.size()>=64){fault="default:depth";return false;}
+        const auto selected=next();if(selected.target)*selected.target=object?Json::object():Json::array();
+        frames.push_back({object,object?selected.role:Role::Other,selected.target,{},{}});return true;
+    }
+    bool start_object(std::size_t)override{return begin(true);}
+    bool start_array(std::size_t)override{return begin(false);}
+    bool key(std::string&v)override{auto& f=frames.back();if(!f.keys.insert(v).second)return false;f.pending=v;return true;}
+    bool end_object()override{frames.pop_back();return true;}
+    bool end_array()override{frames.pop_back();return true;}
+    bool parse_error(std::size_t,const std::string&,const nlohmann::detail::exception&)override{return false;}
+};
+inline AcquisitionRead acquisitionDocument(const std::string&data){
+    auto first=data.cbegin();if(data.compare(0,3,"\xef\xbb\xbf")==0)first+=3;
+    const auto count=static_cast<int>(data.cend()-first);
+    if(count&&MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,&*first,count,nullptr,0)==0)return {{},"default:encoding"};
+    if(data.find('\0')!=std::string::npos)return {{},"default:corrupt"};
+    AcquisitionProjection parsed;
+    if(!Json::sax_parse(first,data.cend(),&parsed,Json::input_format_t::json,true))return {{},parsed.fault};
+    const auto& d=parsed.document;if(!d.is_object())return {{},"default:corrupt"};
+    const auto schema=d.find("schemaVersion");if(schema!=d.end()){
+        if(!schema->is_number_integer()||*schema<0)return {{},"default:corrupt"};
+        if(*schema>1)return {{},"default:future"};
+    }
+    const auto baseline=d.find("configurationBaseline");if(baseline!=d.end()){
+        if(!baseline->is_object())return {{},"default:corrupt"};
+        const auto id=baseline->find("id"),revision=baseline->find("revision"),imported=baseline->find("legacyImported");
+        if(id==baseline->end()||!id->is_string()||revision==baseline->end()||!revision->is_number_integer()||
+            imported==baseline->end()||!imported->is_boolean()||!imported->get<bool>())return {{},"default:corrupt"};
+        if(*id!="ymcc-settings"||*revision!=1)return {{},"default:future"};
+    }
+    const auto rtss=d.find("rtss");if(rtss==d.end()||rtss->is_null())return {{},"default:absent"};
+    if(!rtss->is_object())return {{},"default:corrupt"};
+    const auto policy=rtss->find("monitorAcquisition");if(policy==rtss->end()||policy->is_null())return {{},"default:absent"};
+    if(!policy->is_object())return {{},"default:corrupt"};
+    const auto version=policy->find("version"),enabled=policy->find("enabled"),snapshot=policy->find("snapshotPolling");
+    if(version==policy->end()||!version->is_number_integer()||enabled==policy->end()||!enabled->is_boolean()||
+        (snapshot!=policy->end()&&!snapshot->is_boolean()))return {{},"default:corrupt"};
+    if(*version!=1)return {{},"default:future"};
+    if(!enabled->get<bool>())return {{},"default:disabled"};
+    if(snapshot==policy->end())return {{},"default:corrupt"};
+    return {snapshot->get<bool>(),"configured"};
+}
+inline AcquisitionRead readAcquisition(const std::wstring&powerControl)noexcept{
+    try{
+        // Refuse non-directories and reparse endpoints instead of following an
+        // unexpected settings root. Only this read fault falls back; INI and
+        // ownership-journal failures still use their original strict behavior.
+        Handle parent(CreateFileW(powerControl.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+            nullptr,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
+        if(!parent){const auto e=GetLastError();return {{},e==ERROR_FILE_NOT_FOUND||e==ERROR_PATH_NOT_FOUND?"default:missing":"default:read-fault",e};}
+        BY_HANDLE_FILE_INFORMATION directory{};
+        if(GetFileType(parent.h)!=FILE_TYPE_DISK||!GetFileInformationByHandle(parent.h,&directory)||
+            !(directory.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)||(directory.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT))return {{},"default:read-fault"};
+        const auto path=(fs::path(powerControl)/L"yeman-settings.json").wstring();
+        Handle file(CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,
+            FILE_FLAG_SEQUENTIAL_SCAN|FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
+        if(!file){const auto e=GetLastError();return {{},e==ERROR_FILE_NOT_FOUND||e==ERROR_PATH_NOT_FOUND?"default:missing":"default:read-fault",e};}
+        BY_HANDLE_FILE_INFORMATION before{};
+        if(GetFileType(file.h)!=FILE_TYPE_DISK||!GetFileInformationByHandle(file.h,&before)||
+            (before.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))return {{},"default:read-fault"};
+        const auto size=(static_cast<std::uint64_t>(before.nFileSizeHigh)<<32)|before.nFileSizeLow;
+        if(size>acquisitionRootMaxBytes)return {{},"default:oversize"};
+        std::string data(static_cast<std::size_t>(size),'\0');DWORD got=0;
+        if(!data.empty()&&(!ReadFile(file.h,data.data(),static_cast<DWORD>(data.size()),&got,nullptr)||got!=data.size()))return {{},"default:read-fault",GetLastError()};
+        char extra=0;if(!ReadFile(file.h,&extra,1,&got,nullptr)||got)return {{},"default:read-fault",GetLastError()};
+        BY_HANDLE_FILE_INFORMATION after{};
+        if(!GetFileInformationByHandle(file.h,&after)||before.nFileSizeHigh!=after.nFileSizeHigh||before.nFileSizeLow!=after.nFileSizeLow||
+            CompareFileTime(&before.ftLastWriteTime,&after.ftLastWriteTime)!=0)return {{},"default:read-fault"};
+        return acquisitionDocument(data);
+    }catch(...){return {{},"default:read-fault"};}
+}
+inline std::optional<bool> acquisition(const std::wstring&powerControl,AcquisitionRead* observation=nullptr)noexcept{
+    const auto read=readAcquisition(powerControl);if(observation)*observation=read;return read.snapshotPolling;
 }
 inline std::wstring registryString(HKEY parent,const wchar_t*value){DWORD type=0,size=0;auto r=RegQueryValueExW(parent,value,nullptr,&type,nullptr,&size);if(r==ERROR_FILE_NOT_FOUND)return {};if(r!=ERROR_SUCCESS||type!=REG_SZ||size>65536||size%2)return {};std::wstring s(size/2,L'\0');if(RegQueryValueExW(parent,value,nullptr,&type,reinterpret_cast<BYTE*>(s.data()),&size)!=ERROR_SUCCESS)return {};while(!s.empty()&&s.back()==L'\0')s.pop_back();if(s.find(L'\0')!=std::wstring::npos)return {};return s;}
 inline std::wstring resolve(const std::wstring& explicitPath){
@@ -121,34 +219,29 @@ inline std::optional<Proof> sharedProof(unsigned expected=0){
         if(proof)return proof;
     }return {};
 }
-inline constexpr const char* verifiedSensorImage="e4ce0c85c4288fa7e8eb12ebeece99efff4d81e0b13de53f091daabc81a3c9d3";
-struct SensorState {bool exists=false;DWORD value=0;bool operator==(const SensorState&v)const{return exists==v.exists&&(!exists||value==v.value);}};
-inline bool sensorGroupAllowed(const std::wstring& group){if(group==L"F00F5000_0")return true;for(const auto* family:{L"F0000101_",L"F0000302_"}){const std::wstring prefix=family;if(group.compare(0,prefix.size(),prefix)!=0)continue;const auto suffix=group.substr(prefix.size());unsigned n=0;return number(suffix,n)&&n<=31&&suffix==std::to_wstring(n);}return false;}
-inline std::vector<std::wstring> sensorGroups(){std::vector<std::wstring> groups;groups.reserve(65);for(const auto* family:{L"F0000101_",L"F0000302_"})for(unsigned i=0;i<32;++i)groups.push_back(std::wstring(family)+std::to_wstring(i));groups.push_back(L"F00F5000_0");return groups;}
-inline std::string ascii(const std::wstring&s){std::string out;for(auto c:s){require(c>0&&c<128,"Non-ASCII fixed sensor identity");out+=static_cast<char>(c);}return out;}
 inline SensorState readSensor(const std::wstring& group){require(sensorGroupAllowed(group),"Unsupported unused-sensor group identity");Key key;const auto path=L"Software\\HWiNFO64\\Sensors\\"+group;auto rc=RegOpenKeyExW(HKEY_CURRENT_USER,path.c_str(),0,KEY_QUERY_VALUE|KEY_WOW64_64KEY,&key.h);if(rc==ERROR_FILE_NOT_FOUND)return {};if(rc!=ERROR_SUCCESS)winFail(8,"HWiNFO sensor preference read failed",rc);DWORD type=0,size=sizeof(DWORD),value=0;rc=RegQueryValueExW(key.h,L"Enabled",nullptr,&type,reinterpret_cast<BYTE*>(&value),&size);if(rc==ERROR_FILE_NOT_FOUND)return {};if(rc!=ERROR_SUCCESS||type!=REG_DWORD||size!=4)throw Error(8,"Unexpected sensor Enabled registry type");return {true,value};}
 inline void writeSensor(const std::wstring&group,SensorState state){require(sensorGroupAllowed(group),"Unsupported unused-sensor group identity");Key key;const auto path=L"Software\\HWiNFO64\\Sensors\\"+group;LSTATUS rc;
     if(state.exists){rc=RegCreateKeyExW(HKEY_CURRENT_USER,path.c_str(),0,nullptr,0,KEY_SET_VALUE|KEY_WOW64_64KEY,nullptr,&key.h,nullptr);if(rc!=ERROR_SUCCESS)winFail(8,"HWiNFO sensor preference open failed",rc);rc=RegSetValueExW(key.h,L"Enabled",0,REG_DWORD,reinterpret_cast<const BYTE*>(&state.value),sizeof(DWORD));}
     else{rc=RegOpenKeyExW(HKEY_CURRENT_USER,path.c_str(),0,KEY_SET_VALUE|KEY_WOW64_64KEY,&key.h);if(rc==ERROR_FILE_NOT_FOUND)return;if(rc!=ERROR_SUCCESS)winFail(8,"HWiNFO sensor preference open failed",rc);rc=RegDeleteValueW(key.h,L"Enabled");if(rc==ERROR_FILE_NOT_FOUND)return;}
     if(rc!=ERROR_SUCCESS)winFail(8,"HWiNFO sensor preference write failed",rc);
 }
-inline std::string sensorReceipt(const std::map<std::wstring,SensorState>& states,const std::wstring&prefix=L""){Json values=Json::object();for(const auto&[group,state]:states)if(prefix.empty()||group.compare(0,prefix.size(),prefix)==0)values[ascii(group)]={{"Exists",state.exists},{"Value",state.value}};const auto text=Json({{"schema",1},{"executableSha256",verifiedSensorImage},{"values",std::move(values)}}).dump();require(text.size()<=16384,"Unused-sensor backup exceeds fixed budget");return text;}
-inline std::string applySensorBudget(const std::wstring&exe,const std::wstring&destination){
-    const SensorState disabled{true,0};std::map<std::wstring,SensorState> before;std::vector<std::wstring> pending,changed;
-    try{
-        if(sha256(exe)!=verifiedSensorImage)return "unsupported-image";
-        for(const auto&e:entries(decodeIni(*readBytes(destination,262144))))if(lower(e.section)==L"settings"&&lower(e.key)==L"rememberpreferences"){unsigned n=0;if(!number(e.value,n)||!n)return "preferences-disabled";}
-        for(const auto&group:sensorGroups()){const auto state=readSensor(group);before[group]=state;if(!(state==disabled))pending.push_back(group);}if(pending.empty())return "already-configured";
-        writeAtomic(destination+L".ymcc-sensor-groups-original.json",sensorReceipt(before,L"F0000101_"),true);
-        writeAtomic(destination+L".ymcc-sensor-groups-last.json",sensorReceipt(before));
-        if(std::any_of(pending.begin(),pending.end(),[](const auto&g){return g.compare(0,9,L"F0000302_")==0;}))writeAtomic(destination+L".ymcc-sensor-groups-cstate-original.json",sensorReceipt(before,L"F0000302_"),true);
-        if(std::find(pending.begin(),pending.end(),L"F00F5000_0")!=pending.end())writeAtomic(destination+L".ymcc-sensor-groups-rtss-original.json",sensorReceipt(before,L"F00F5000_0"),true);
-        for(const auto&group:pending){if(!processes().empty())throw Error(4,"Producer appeared during sensor configuration");if(!(readSensor(group)==before[group]))throw Error(8,"Concurrent sensor preference changed");changed.push_back(group);writeSensor(group,disabled);if(!(readSensor(group)==disabled))throw Error(8,"Sensor Enabled verification failed");}return "configured";
-    }catch(...){bool rollback=true;for(auto i=changed.rbegin();i!=changed.rend();++i){try{if(!processes().empty())throw Error(4,"Producer running during sensor rollback");const auto current=readSensor(*i);if(current==before[*i])continue;if(!(current==disabled))throw Error(8,"Concurrent sensor choice preserved during rollback");writeSensor(*i,before[*i]);if(!(readSensor(*i)==before[*i]))throw Error(8,"Sensor rollback verification failed");}catch(...){rollback=false;}}
-        // Optional producer savings must never block required data/FPS recovery.
-        return rollback?"unconfirmed-rolled-back":"unconfirmed-rollback-deferred";
+struct SensorJournalOperations {
+    std::wstring destination;explicit SensorJournalOperations(std::wstring path):destination(std::move(path)){}
+    std::optional<std::string> read(const std::string&kind){return readBytes(destination+L".ymcc-sensor-groups-"+sensorWide(kind)+L".json",16384,true);}
+    void write(const std::string&kind,const std::string&value,const std::optional<std::string>&expected){
+        const auto path=destination+L".ymcc-sensor-groups-"+sensorWide(kind)+L".json";
+        require(read(kind)==expected,"Sensor receipt changed concurrently");writeAtomic(path,value,!expected);require(read(kind)==std::optional<std::string>{value},"Sensor receipt write unconfirmed");
     }
-}
+    std::wstring executable;
+    bool verified(){return sha256(executable)==verifiedSensorImage;}
+    bool enabled(){const auto bytes=readBytes(destination,262144);for(const auto&e:entries(decodeIni(*bytes)))if(lower(e.section)==L"settings"&&lower(e.key)==L"rememberpreferences"){unsigned n=0;if(!number(e.value,n)||!n)return false;}return true;}
+    void stopped(){if(!processes().empty())throw Error(4,"Producer running; sensor debt unchanged");}
+    SensorState state(const std::wstring&group){return readSensor(group);}
+    void set(const std::wstring&group,SensorState value){writeSensor(group,value);}
+};
+inline void validateIniBackups(const std::wstring&destination){for(const auto* suffix:{L".ymcc-original.bak",L".ymcc-last.bak"})if(const auto bytes=readBytes(destination+suffix,262144,true))(void)entries(decodeIni(*bytes));}
+inline std::string applySensorBudget(const std::wstring&exe,const std::wstring&destination){SensorJournalOperations ops(destination);ops.executable=exe;return sensorJournalBudget(ops);}
+
 struct Operations {
     Handle mutex,producer;bool owned=false;
     std::wstring powerControl,destination;
@@ -159,11 +252,12 @@ struct Operations {
     void release(){if(owned&&mutex){ReleaseMutex(mutex.h);owned=false;}mutex.reset();}
     bool interrupted(){return cancelled&&cancelled();}
     bool healthy(){return !processes().empty()&&sharedProof().has_value();}
+    std::string healthySensorPolicy(const Request&request){try{const auto exe=resolve(request.executable);if(exe.empty())return "unconfirmed-installation";const auto path=(fs::path(exe).parent_path()/L"HWiNFO64.INI").wstring();validateIniBackups(path);SensorJournalOperations ops(path);return sensorJournalHealth(ops);}catch(...){return "unconfirmed-journal";}}
     void applyAffinity(){for(auto pid:processes()){Handle p(OpenProcess(PROCESS_SET_INFORMATION,FALSE,pid));if(p)SetProcessAffinityMask(p.h,0xA0);}}
     std::wstring resolve(const std::wstring& explicitPath){return hwinfo::resolve(explicitPath);}
     std::string planned(const Request&request,const std::optional<std::string>&existing){return mergeIni(managedIni(acquisition(powerControl)),existing?std::optional<Ini>{decodeIni(*existing)}:std::optional<Ini>{},request.period);}
     std::string planned(const Request&request){return planned(request,readBytes(destination,262144,true));}
-    void prepare(const std::wstring&path,const Request&request){destination=(fs::path(path).parent_path()/L"HWiNFO64.INI").wstring();(void)planned(request);}
+    void prepare(const std::wstring&path,const Request&request){destination=(fs::path(path).parent_path()/L"HWiNFO64.INI").wstring();validateIniBackups(destination);(void)planned(request);}
     void assertStopped(){if(!processes().empty())throw Error(4,"HWiNFO64.exe is running; configuration/launch refused");}
     void stop(){
         const auto list=processes();std::vector<Handle> running;running.reserve(list.size());
@@ -181,6 +275,7 @@ struct Operations {
     }
     void configure(const std::wstring&,const Request&request){
         assertStopped();
+        validateIniBackups(destination);
         const auto previous=readBytes(destination,262144,true);
         const auto plan=planned(request,previous);
         if(previous){
@@ -240,11 +335,17 @@ template<class Ops> Result confirmParentProducer(Ops& ops,unsigned period){
         if(ops.interrupted())return {15,false,ERROR_CANCELLED,"Parent producer confirmation cancelled",{}};
         const auto proof=ops.proof(period);
         if(ops.interrupted())return {15,false,ERROR_CANCELLED,"Parent producer confirmation cancelled",{}};
-        if(proof){sawProof=true;if(previous&&proof->continues(*previous))return {0,false,0,"elevated-parent-producer-confirmed",{}};previous=proof;}
+        if(proof){sawProof=true;if(previous&&proof->continues(*previous)){Result ready{0,false,0,"elevated-parent-producer-confirmed",{}};ready.dataReady=true;return ready;}previous=proof;}
         else previous.reset();
         if(!ops.wait(1000))return {15,false,ERROR_CANCELLED,"Parent producer confirmation interrupted",{}};
     }
     return {sawProof?14:period?13:7,false,0,"Elevated producer was not confirmed readable and advancing from YMCC",{}};
+}
+template<class Ops> Result confirmElevatedProducer(Ops&ops,unsigned period,DWORD childCode){
+    if(childCode!=0&&childCode!=16)return {static_cast<int>(childCode),false,0,"elevated-recovery-failed",{}};
+    auto parent=confirmParentProducer(ops,period);
+    if(parent.code==0&&childCode==16){parent.code=16;parent.sensorPolicy="unconfirmed-elevated-journal";parent.detail="producer-ready-configuration-unconfirmed";}
+    return parent;
 }
 // Pool threads and the private elevated command may start without a COM
 // apartment. Scope it to this transaction; preserve a pre-existing apartment.
@@ -263,9 +364,9 @@ inline Result run(Request request,std::function<bool()> cancelled={},bool allowE
     // YMCC child, never its deliberately long-lived HWiNFO descendant.
     request.elevated=true;request.restart=true;const auto self=selfPath(),args=arguments(request),directory=fs::path(self).parent_path().wstring();SHELLEXECUTEINFOW info{sizeof(info)};info.fMask=SEE_MASK_NOCLOSEPROCESS|SEE_MASK_NOASYNC;info.lpVerb=L"runas";info.lpFile=self.c_str();info.lpParameters=args.c_str();info.lpDirectory=directory.c_str();info.nShow=SW_HIDE;
     if(!ShellExecuteExW(&info)){result.detail="HWiNFO recovery administrator permission was not granted";result.win32=GetLastError();return elevatedResult(result);}Handle child(info.hProcess);if(!child)return elevatedResult({15,false,0,"Elevated YMCC process handle unavailable",{}});
-    const auto start=GetTickCount64();for(;;){const auto rc=WaitForSingleObject(child.h,100);if(rc==WAIT_OBJECT_0){DWORD code=0;if(!GetExitCodeProcess(child.h,&code)||code==STILL_ACTIVE)return elevatedResult({15,false,GetLastError(),"Elevated YMCC result unavailable",{}});if(code==0)return elevatedResult(confirmParentProducer(ops,request.period));return elevatedResult({static_cast<int>(code),false,0,"elevated-recovery-failed",{}});}if(rc==WAIT_FAILED)return elevatedResult({15,false,GetLastError(),"Elevated YMCC wait failed",{}});if(GetTickCount64()-start>=60000||(cancelled&&cancelled()))return elevatedResult({15,false,0,"Elevated YMCC result not confirmed; process was not terminated",{}});}
+    const auto start=GetTickCount64();for(;;){const auto rc=WaitForSingleObject(child.h,100);if(rc==WAIT_OBJECT_0){DWORD code=0;if(!GetExitCodeProcess(child.h,&code)||code==STILL_ACTIVE)return elevatedResult({15,false,GetLastError(),"Elevated YMCC result unavailable",{}});return elevatedResult(confirmElevatedProducer(ops,request.period,code));}if(rc==WAIT_FAILED)return elevatedResult({15,false,GetLastError(),"Elevated YMCC wait failed",{}});if(GetTickCount64()-start>=60000||(cancelled&&cancelled()))return elevatedResult({15,false,0,"Elevated YMCC result not confirmed; process was not terminated",{}});}
 }
-inline Json asJson(const Result&r){return {{"ok",r.code==0},{"code",r.code},{"detail",r.detail},{"win32Error",r.win32},{"needsElevation",r.needsElevation},{"elevationAttempted",r.elevationAttempted},{"sensorPolicy",r.sensorPolicy},{"owner","ymcc-native"}};}
+inline Json asJson(const Result&r){return {{"ok",r.code==0},{"code",r.code},{"detail",r.detail},{"win32Error",r.win32},{"needsElevation",r.needsElevation},{"elevationAttempted",r.elevationAttempted},{"sensorPolicy",r.sensorPolicy},{"dataReady",r.dataReady},{"configurationConfirmed",r.code==0},{"owner","ymcc-native"}};}
 // The exact private command is recognized before any UI/device/startup path.
 // No implicit normal startup on malformed arguments or unsupported choices.
 inline bool tryCommandLine(const wchar_t*commandLine,const std::wstring&defaultPowerControl,int&exitCode){

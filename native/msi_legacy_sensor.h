@@ -202,14 +202,62 @@ class Provider {
         if (FAILED(hr)||!manager) { state->diag("manager-unavailable",FAILED(hr)?hr:E_POINTER); return; }
         ComPtr<ISensorCollection> collection;
         hr=manager->GetSensorsByCategory(kAllSensors,&collection);
-        if (FAILED(hr)||!collection) { state->diag("enumeration-failed",FAILED(hr)?hr:E_FAIL); return; }
-        ULONG count=0; hr=collection->GetCount(&count);
-        if (FAILED(hr)) { state->diag("enumeration-count-failed",hr); return; }
+        if (state->stopping()) return;
+        const HRESULT categoryResult=hr;
+        if (FAILED(categoryResult)) {
+            state->diag("enumeration-category-failed",categoryResult);
+            // Only the observed missing-category gap is eligible. Never hide
+            // permission/transport failures behind a different enumeration API.
+            if (categoryResult!=HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) {
+                state->diag("enumeration-failed",categoryResult); return;
+            }
+        }
+        ULONG count=0;
+        if (SUCCEEDED(categoryResult) && collection) {
+            hr=collection->GetCount(&count);
+            if (FAILED(hr)) { state->diag("enumeration-count-failed",hr); return; }
+        }
+        std::array<ComPtr<ISensorCollection>,2> collections;
+        std::array<ULONG,2> counts{};
+        size_t collectionCount=0;
+        if (FAILED(categoryResult) || !collection || !count) {
+            if (SUCCEEDED(categoryResult)) state->diag("enumeration-category-empty",categoryResult);
+            state->diag("enumeration-type-fallback",S_OK);
+            collection.Reset();
+            HRESULT typeFailure=S_OK;
+            for (unsigned slot=0;slot<2 && !state->stopping();++slot) {
+                if (!(slot==0 ? state->options.wantGyro : state->options.wantAccel)) continue;
+                ComPtr<ISensorCollection> typed;
+                hr=manager->GetSensorsByType(slot==0 ? kGyroType : kAccelType,&typed);
+                if (state->stopping()) return;
+                if (SUCCEEDED(hr) && !typed) hr=E_POINTER;
+                state->diag(slot==0 ? "enumeration-gyro-type-result" : "enumeration-accel-type-result",hr);
+                if (FAILED(hr)) { if (SUCCEEDED(typeFailure)) typeFailure=hr; continue; }
+                ULONG typedCount=0;
+                hr=typed->GetCount(&typedCount);
+                if (FAILED(hr)) {
+                    state->diag(slot==0 ? "enumeration-gyro-type-count-failed" : "enumeration-accel-type-count-failed",hr);
+                    if (SUCCEEDED(typeFailure)) typeFailure=hr;
+                    continue;
+                }
+                collections[collectionCount]=std::move(typed);
+                counts[collectionCount++]=typedCount;
+            }
+            // Do not publish from an incomplete requested type inventory.
+            if (FAILED(typeFailure)) { state->diag("enumeration-failed",typeFailure); return; }
+            state->diag("enumeration-source-types",S_OK);
+        } else {
+            // Preserve the complete category inventory, including private OEM
+            // fields and ambiguity. Typed enumeration must not narrow it.
+            collections[0]=std::move(collection); counts[0]=count; collectionCount=1;
+            state->diag("enumeration-source-category",S_OK);
+        }
         std::vector<ComPtr<ISensor>> sensors;
         std::vector<Descriptor> inventory;
-        for (ULONG i=0;i<count && i<256 && !state->stopping();++i) {
+        for (size_t batch=0;batch<collectionCount && !state->stopping();++batch) {
+        for (ULONG i=0;i<counts[batch] && i<256 && !state->stopping();++i) {
             ComPtr<ISensor> sensor;
-            if (FAILED(collection->GetAt(i,&sensor)) || !sensor) continue;
+            if (FAILED(collections[batch]->GetAt(i,&sensor)) || !sensor) continue;
             Descriptor descriptor;
             if (FAILED(sensor->GetID(&descriptor.id))) continue;
             sensor->GetType(&descriptor.type);
@@ -220,6 +268,7 @@ class Provider {
             descriptor.documentedGyroFields=documentedFields(sensor.Get(),Kind::Gyro);
             descriptor.documentedAccelFields=documentedFields(sensor.Get(),Kind::Accel);
             sensors.push_back(sensor); inventory.push_back(descriptor);
+        }
         }
         const auto exactPair=state->options.explicitPair
             ? chooseExplicitPair(inventory,*state->options.explicitPair,state->options.wantGyro&&state->options.wantAccel&&!state->options.clawHidCompatible)

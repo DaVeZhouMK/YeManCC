@@ -46,7 +46,7 @@ onBeforeUnmount(() => { if (appRoot && !rootWasInert) appRoot.removeAttribute('i
     <section ref="panel" class="appearance-editor" data-gp-modal data-gp-page-lock data-gp-scope="steam-appearance-editor" role="dialog" aria-modal="true" aria-labelledby="appearance-editor-title">
       <header class="appearance-editor-header">
         <div><span class="appearance-eyebrow">STEAM · 外观编辑</span><h2 id="appearance-editor-title">定制你的大屏界面</h2><p>只切换效果，不改动你已经调好的参数。</p></div>
-        <div class="appearance-header-actions"><button class="appearance-apply" :disabled="busy" data-gp-row="0" data-gp-col="1" @click="emit('refresh')">重新应用外观 <kbd>Y</kbd></button><button class="appearance-back" data-gp-row="0" data-gp-col="2" @click="emit('close')">返回 <kbd>B</kbd></button></div>
+        <div class="appearance-header-actions"><button class="appearance-apply" :disabled="busy" data-gp-row="0" data-gp-col="1" @click="emit('refresh')">重新应用外观 <span class="controller-key" data-controller-key="Y">Y</span></button><button class="appearance-back" data-gp-row="0" data-gp-col="2" @click="emit('close')">返回 <span class="controller-key" data-controller-key="B">B</span></button></div>
       </header>
       <div class="appearance-editor-scroll">
         <div class="appearance-editor-summary"><span><strong>{{ count }}</strong> / {{ rows.length }} 项{{ pending ? '已选择 · 待应用' : snapshot ? '已配置开启' : '默认开启 · 状态待确认' }}</span><span>全局外观 · 不随游戏切换</span></div>
@@ -72,7 +72,7 @@ onBeforeUnmount(() => { if (appRoot && !rootWasInert) appRoot.removeAttribute('i
           <p>恢复 YMCC 预设会开启全部 {{ rows.length }} 项并恢复默认参数，同时暂停其它主题。原文件会备份，不会直接删除。尚未提交的开关选择将取消。</p>
           <button class="preset-confirm" :disabled="busy || !snapshot?.packAvailable" data-gp-row="0" data-gp-col="0" @click="reset('preset')">恢复 YMCC 预设</button>
           <button :disabled="busy || !snapshot?.canRestore" data-gp-row="1" data-gp-col="0" @click="reset('previous')">恢复接管前的外观</button>
-          <button data-gp-row="2" data-gp-col="0" @click="closeReset">取消 <kbd>B</kbd></button>
+          <button data-gp-row="2" data-gp-col="0" @click="closeReset">取消 <span class="controller-key" data-controller-key="B">B</span></button>
         </section>
       </div>
     </section>

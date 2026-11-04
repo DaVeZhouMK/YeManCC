@@ -1,5 +1,6 @@
 import { isGyroPresetKey, gyroMotionParamsForPreset } from './gyroPresetModel';
-import { compareAndSwapInputSettings, loadSettings, mergeSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
+import { compareAndSwapInputSettings, loadSettings, mergeSettings, onInputSettingsChanged, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
+import { isGameStatusCurrent, isCurrentGameTarget } from './gamedetect';
 import { subscribePolicyGameStatus, getPolicyGame, gamePolicyKey, isPolicyGameInitialized } from '@/bridge/gamePolicyTarget';
 import { invoke } from '@/bridge/ipc';
 import { registerScheduledTask } from '@/scheduler';
@@ -65,21 +66,39 @@ export function buildGameInputOverlay(input: InputSettingsSnapshot, profile: Gam
 
 let stopGame: (() => void) | null = null;
 let stopConfig: (() => void) | null = null;
+let stopInput: (() => void) | null = null;
 let stopRetry: (() => void) | null = null;
 let sessionId = '';
 let epoch = 0;
 let running = false;
 let pending = false;
 let active = false;
+let dirty = true;
+
+function requestInputRefresh(): void {
+  if (!active) return;
+  dirty = true;
+  // CAS revisions protect concurrent base edits. Our own commit also emits this
+  // event, so coalesce it into one confirmation rather than cancelling itself.
+  void evaluate();
+}
+function invalidate(): void {
+  epoch += 1;
+  requestInputRefresh();
+}
 
 async function evaluate(): Promise<void> {
-  if (!active || !isPolicyGameInitialized()) return;
+  if (!active || !dirty || !isPolicyGameInitialized() || !isGameStatusCurrent()) return;
   if (running) { pending = true; return; }
   running = true;
   const generation = epoch;
+  const gameAtStart = getPolicyGame();
+  const current = () => active && generation === epoch && isGameStatusCurrent() &&
+    (gameAtStart ? isCurrentGameTarget(gameAtStart) : getPolicyGame() === null);
+  let settled = false;
   try {
     if (!sessionId) sessionId = await invoke<string>('input.gameOverride.session', {});
-    if (!sessionId || !active || generation !== epoch) return;
+    if (!sessionId || !current()) return;
     // Old versions rewrote the base. Recover that durable snapshot once before overlays.
     const config = await loadGameCustomConfig();
     if (config.inputRestore) {
@@ -87,7 +106,7 @@ async function evaluate(): Promise<void> {
       publishLock(true, 'legacy-restore');
       const restoreId = JSON.stringify(restore);
       const input = (await loadSettings()).input;
-      if (!active || generation !== epoch) return;
+      if (!current()) return;
       if (input.legacyGameRestoreId !== restoreId) {
         const result = await compareAndSwapInputSettings(input.revision, {
           legacyGameRestoreId: restoreId,
@@ -96,10 +115,10 @@ async function evaluate(): Promise<void> {
             outputTarget: { persona: restore.persona, buttonMappingEnabled: restore.buttonMappingEnabled, gyroEnabled: restore.gyroEnabled },
             gyroMotion: { ...restore.gyroMotion, enabled: restore.motionEnabled },
           }), gameOverride: null,
-        }, () => active && generation === epoch);
+        }, current);
         if (!result.ok) return;
       }
-      await clearGameInputRestoreSnapshot(restore);
+      await clearGameInputRestoreSnapshot(restore, current);
     }
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const latestConfig = await loadGameCustomConfig();
@@ -108,35 +127,47 @@ async function evaluate(): Promise<void> {
       const identity = game ? game.pid + ':' + game.processCreated + ':' + key + (game.identityGeneration ? ':' + game.identityGeneration : '') : '';
       const input = (await loadSettings()).input;
       const overlay = buildGameInputOverlay(input, latestConfig.entries[key], identity, sessionId);
-      if (!active || generation !== epoch) return;
+      if (!current()) return;
       // Lock before dispatch. Unlock only after the effective overlay is removed.
       if (overlay) publishLock(true, identity);
       if (JSON.stringify(input.gameOverride ?? null) === JSON.stringify(overlay)) {
-        publishLock(!!overlay, overlay ? identity : ''); return;
+        publishLock(!!overlay, overlay ? identity : ''); settled = true; return;
       }
-      const result = await compareAndSwapInputSettings(input.revision, { gameOverride: overlay }, () => active && generation === epoch);
+      const result = await compareAndSwapInputSettings(input.revision, { gameOverride: overlay }, current);
+      if (!current()) return;
       if (!result.ok) continue;
       publishLock(!!overlay, overlay ? identity : '');
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('gp:pad-persona', {
         detail: { persona: effectiveInputPersona(result.value) },
       }));
+      settled = true;
       return;
     }
   } catch {
     // Keep the prior effective overlay and lock on failure; resident retry heals it.
   } finally {
     running = false;
-    if (pending && active) { pending = false; void evaluate(); }
+    const followup = pending;
+    pending = false;
+    if (active && settled && generation === epoch && !followup) {
+      dirty = false;
+      stopRetry?.(); stopRetry = null;
+    } else if (active && !stopRetry) {
+      // Only unresolved work owns a retry. Healthy background state has no
+      // timer and performs no repeated config/session reads.
+      stopRetry = registerScheduledTask('game-input-overlay-retry', 2000, evaluate, { pauseWhenHidden: false });
+    }
+    if (active && followup && (settled || generation !== epoch)) void evaluate();
   }
 }
 export function startGameInputOverrideWatch(): void {
   if (active) return;
-  active = true; epoch += 1;
-  stopGame = subscribePolicyGameStatus(() => { epoch += 1; void evaluate(); });
-  stopConfig = onGameCustomConfigChanged(() => { epoch += 1; void evaluate(); });
-  stopRetry = registerScheduledTask('game-input-overlay-retry', 2000, evaluate, { pauseWhenHidden: false });
+  active = true; dirty = true; epoch += 1;
+  stopInput = onInputSettingsChanged(requestInputRefresh);
+  stopConfig = onGameCustomConfigChanged(invalidate);
+  stopGame = subscribePolicyGameStatus(invalidate);
 }
 export function stopGameInputOverrideWatch(): void {
   active = false; epoch += 1; pending = false;
-  stopGame?.(); stopGame = null; stopConfig?.(); stopConfig = null; stopRetry?.(); stopRetry = null;
+  stopGame?.(); stopGame = null; stopConfig?.(); stopConfig = null; stopInput?.(); stopInput = null; stopRetry?.(); stopRetry = null;
 }

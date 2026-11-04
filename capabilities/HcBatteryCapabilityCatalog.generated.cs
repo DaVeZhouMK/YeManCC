@@ -2,8 +2,8 @@
 namespace YeManFanBackend.Capabilities;
 public static partial class HcBatteryCapabilityCatalog
 {
-    public const string RuleDocumentSha256 = "3b16212bb524128b99ef3498512c05e69c09a287c889b97abe7454dea90bda8a";
-    public const string CatalogSha256 = "1c3fde4bce8cd74f3fc9b94919f31d956478fc8012b314f73c8d1905f8a7d681";
+    public const string RuleDocumentSha256 = "934eaea7bc1d8ef30de93f294bd32428211d9ed391913884c1a52e8e681bca09";
+    public const string CatalogSha256 = "3ce17e815aa219790abf8ee7bc6c1b494b0452ef31f7b45aa3af77ae71227aa5";
     internal static readonly BatteryCapabilityDescriptor[] GeneratedRules = {
         new("battery.rule.asus-ally-acpi.ROGAlly", "hc.device.ROGAlly", "ROGAlly", "frozen-HC-identity", "asus-ally-acpi", "boardProduct", new[] { "ASUSTEK COMPUTER INC." }, new[] { "RC71L" }, null, true),
         new("battery.rule.asus-ally-acpi.ROGAllyX", "hc.device.ROGAllyX", "ROGAllyX", "frozen-HC-identity", "asus-ally-acpi", "boardProduct", new[] { "ASUSTEK COMPUTER INC." }, new[] { "RC72LA" }, null, true),
@@ -45,5 +45,6 @@ public static partial class HcBatteryCapabilityCatalog
         new("battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel", "hc.device.OneXPlayerX1Intel", "OneXPlayerX1Intel", "frozen-HC-identity", "oxp-x1-intel-ec", "boardProduct", new[] { "ONE-NETBOOK", "ONE-NETBOOK TECHNOLOGY CO., LTD." }, new[] { "ONEXPLAYER X1 i" }, null, true),
         new("battery.rule.valve-deck-firmware.SteamDeck", "hc.device.SteamDeck", "SteamDeck", "frozen-HC-identity", "valve-deck-firmware", "boardProduct", new[] { "VALVE" }, new[] { "Jupiter", "Galileo" }, null, true),
         new("battery.rule.gpd-win-mini-2025.GPDWinMini_HX370", "hc.device.GPDWinMini_HX370", "GPDWinMini_HX370", "frozen-HC-identity", "gpd-win-mini-2025", "boardProduct", new[] { "GPD" }, new[] { "G1617-02" }, "\\bHX\\s*370\\b", false),
+        new("battery.rule.oxp3-wmi-ec.OneXPlayer3", "ymcc.device.OneXPlayer3", "OneXPlayer3", "reviewed-native-extension", "oxp3-wmi-ec", "systemProduct", new[] { "ONE-NETBOOK", "ONE-NETBOOK TECHNOLOGY CO., LTD." }, new[] { "ONEXPLAYER 3", "ONEXPLAYER-3" }, null, false),
     };
 }

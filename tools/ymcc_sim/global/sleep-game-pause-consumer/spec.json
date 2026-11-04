@@ -2,8 +2,9 @@
   "schemaVersion": 1,
   "originalScript": {
     "path": "tools/sleep_game_pause_selftest.py",
-    "sha256": "84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d",
-    "priorReviewedSha256": "886cf55b4ef5221245c1b9c427023627f48f61d65e6e9eccb47e37acccf4e09a"
+    "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007",
+    "priorReviewedSha256": "886cf55b4ef5221245c1b9c427023627f48f61d65e6e9eccb47e37acccf4e09a",
+    "priorReviewedEventContractSha256": "79cca43d2a39f455fea9635321a8a5738d235f531cfa414225eb14b729620808"
   },
   "productSources": [
     "tools/sleep_game_pause_selftest.py",
@@ -13,7 +14,9 @@
     "deps/json/json.hpp",
     "native/sleep_recovery_auto.h",
     "native/msi_visibility_wake_runtime.h",
-    "native/msi_visibility_wake_diagnostics.h"
+    "native/msi_visibility_wake_diagnostics.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "native/sleep_request_fallback.h"
   ],
   "sharedLeaves": [
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
@@ -103,11 +106,11 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
-      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+      "sha256": "4a0fdff6a9b1507023ca7e2fc5963a113346fe7f607d9dfdd9caa39780061eb3"
     },
     {
       "path": "tools/ymcc_sim/global/host-process.ps1",
-      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+      "sha256": "5b531a161afb33cd0596b92444a38caabb9fe2e23b80c981516f71c926a6c3bb"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
@@ -115,7 +118,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
-      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+      "sha256": "39aa4ead41e3f519eb3eae18e03d744409ae5da4d2522039baef86378d69afaa"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
@@ -135,13 +138,14 @@
     "contextOnlySha256": "afbb12bbc4292d6b7c878da55a06cf50dfcebe5d8944e239591e9aba85417770",
     "originalAssertionStatementsPreserved": 48,
     "originalPassGroupsPreserved": 24,
-    "additionalPassGroups": 4
+    "additionalPassGroups": 4,
+    "scaffoldingReverseDelta": true
   },
   "reviewedSharedLeafMaintenance": {
     "schemaVersion": 2,
     "kind": "exact-current-source-reverse-deltas",
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
     "consumedExport": "evidencePath",
     "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
     "compilerAndEnvironmentTextUnchanged": true,
@@ -150,7 +154,7 @@
   },
   "sourceCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
     "oldIdentitiesRetained": true,
     "fullReverseDeltaRequired": true,
     "sourceApproval": false
@@ -220,12 +224,111 @@
   },
   "observerContextReview": {
     "manifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
-    "sha256": "9086bbcb4f8fe1e61335c8a3357aa3e5b9bb5bc61916b74cd23c22a6cc081e31",
-    "originalGeneratorUnchanged": true,
+    "sha256": "f2a3e9f5d042bd17049e725a2998b0cd9ea046979d2fa154b6073f61318e2089",
+    "originalGeneratorUnchanged": false,
     "originalGroups": 28,
     "originalIdentityNegativeUnchanged": true,
     "memoryContextChecks": 12,
     "wholeSourceDriftGateUnchanged": true,
-    "hardwareValidated": false
+    "hardwareValidated": false,
+    "originalGeneratorReviewedOneRegionDelta": true,
+    "eventAssertionMaintenance": {
+      "date": "2026-11-02",
+      "beforeSha256": "79cca43d2a39f455fea9635321a8a5738d235f531cfa414225eb14b729620808",
+      "afterSha256": "ab8831589fc20d02b68012f8ffd2c3003463ffca7e5a98bf09bbece69ebdb22c",
+      "reason": "Actual canceled-intent Ready publishes fan and gameMedia events; preserve strict cardinality, fan generation, shared generation and source fields",
+      "reverseDeltaOnlyOneAssertionRegion": true,
+      "oldFailurePreserved": true,
+      "originalCaseCountUnchanged": true,
+      "productChanged": false
+    },
+    "powerResumeRegressionAssertionsReviewed": true
+  },
+  "corePidToolMaintenance": {
+    "date": "2026-11-02",
+    "reason": "Repair observed original registration, command calibration, multiline mutation and UI context defects; original IDs/cases/expected failures unchanged",
+    "originalFailPreserved": true,
+    "productModified": false,
+    "sharedRulesModified": false
+  },
+  "powerResumeRegressionReview": {
+    "date": "2026-11-03",
+    "changedCurrentIdentities": [
+      {
+        "path": "tools/sleep_game_pause_selftest.py",
+        "beforeSha256": "ab8831589fc20d02b68012f8ffd2c3003463ffca7e5a98bf09bbece69ebdb22c",
+        "afterSha256": "f0bdd16d98046b9cd50dcf8d68c728fd68954f44ac3faba351a7669c491980ca"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+        "beforeSha256": "471fe687a3496ebd7a4c315efbdadec8de08394b6e065bddd5a69c9eaf8b98e0",
+        "afterSha256": "d22e815e31c2f928a05e5c7ba37e84930b6b60c08e8bb1be75c0bb4662bc2c1a"
+      }
+    ],
+    "oldFailuresPreserved": true,
+    "originalIdAndNegativeUnchanged": true
+  },
+  "powerResumeSelfHealingReview": {
+    "date": "2026-11-03",
+    "currentIdentityUpdates": [
+      {
+        "path": "tools/sleep_game_pause_selftest.py",
+        "beforeSha256": "f0bdd16d98046b9cd50dcf8d68c728fd68954f44ac3faba351a7669c491980ca",
+        "afterSha256": "e66a86f6a9ca3ba80e0f9ce32d3e8e14632572dd04c629e7593d01b96c88c2de"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+        "beforeSha256": "d22e815e31c2f928a05e5c7ba37e84930b6b60c08e8bb1be75c0bb4662bc2c1a",
+        "afterSha256": "b31b29baaff4dd02d6a0e5d696c09016a52ba1185b3dd5ff31fbc06a9e318b4f"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "092130af531a72969f648a193b437badaf09a35e23d4b3f8f9fe15d8dc5188b6",
+        "afterSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "57d717a497d908e953b407365e57d642a50fba9749fb8309cac5366d9b95e89d",
+        "afterSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
+        "beforeSha256": "0e697b0d22f4d7ca8ffec9c82fd5a69e2d36462d3d6c7f6b279bee3cccea5a37",
+        "afterSha256": "4da80948792adbb4fd396912afb7c07e2e65e628a4717833e664cc4904ce750b"
+      }
+    ],
+    "oldFailuresPreserved": true,
+    "originalGroupsAndIdentityNegativeUnchanged": true
+  },
+  "powerRestartRecoveryReview": {
+    "date": "2026-11-03",
+    "currentIdentityUpdates": [
+      {
+        "path": "tools/sleep_game_pause_selftest.py",
+        "beforeSha256": "e66a86f6a9ca3ba80e0f9ce32d3e8e14632572dd04c629e7593d01b96c88c2de",
+        "afterSha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+        "beforeSha256": "b31b29baaff4dd02d6a0e5d696c09016a52ba1185b3dd5ff31fbc06a9e318b4f",
+        "afterSha256": "4a0fdff6a9b1507023ca7e2fc5963a113346fe7f607d9dfdd9caa39780061eb3"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38",
+        "afterSha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+        "beforeSha256": "0c2c5e5345fce55ae3a83e368c21e9748f404abe562c366738a91eeaf23c5b38",
+        "afterSha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
+        "beforeSha256": "4da80948792adbb4fd396912afb7c07e2e65e628a4717833e664cc4904ce750b",
+        "afterSha256": "f2a3e9f5d042bd17049e725a2998b0cd9ea046979d2fa154b6073f61318e2089"
+      }
+    ],
+    "originalGroupsAndNegativesPreserved": true
   }
 }

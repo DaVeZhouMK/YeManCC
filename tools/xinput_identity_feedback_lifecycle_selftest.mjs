@@ -1,8 +1,8 @@
 import {currentFeedbackHeaders,currentFeedbackSupport} from './fixtures/xinput_identity_feedback_context.mjs';
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),workspace=path.resolve(repo,'../../..');
-const opts={out:path.join(workspace,'Build/Validation/VirtualInput-IdentityFeedback-R104-20261016'),current:path.join(repo,'native/main.cpp'),production:false};
-for(let i=2;i<process.argv.length;i++){const a=process.argv[i];if(a==='--help'){console.log('node tools/xinput_feedback_identity_refresh_selftest.mjs [--current [MAIN_CPP]] [--out DIR]');process.exit(0)}if(a==='--current'){opts.production=true;if(process.argv[i+1]&&!process.argv[i+1].startsWith('--'))opts.current=path.resolve(process.argv[++i]);}else if(a==='--out'){opts.out=path.resolve(process.argv[++i]);}else throw Error('Unknown argument '+a);}
+const opts={out:path.join(workspace,'Build/Validation/VirtualInput-IdentityFeedback-R104-20261016'),current:path.join(repo,'native/main.cpp'),production:false,resumeOld:null};
+for(let i=2;i<process.argv.length;i++){const a=process.argv[i];if(a==='--help'){console.log('node tools/xinput_feedback_identity_refresh_selftest.mjs [--current [MAIN_CPP]] [--out DIR]');process.exit(0)}if(a==='--current'){opts.production=true;if(process.argv[i+1]&&!process.argv[i+1].startsWith('--'))opts.current=path.resolve(process.argv[++i]);}else if(a==='--out'){opts.out=path.resolve(process.argv[++i]);}else if(a==='--resume-old-profiles'){opts.resumeOld=path.resolve(process.argv[++i]);}else throw Error('Unknown argument '+a);}
 fs.mkdirSync(opts.out,{recursive:true});// Keep nested MSVC include paths below MAX_PATH; mkdir uses an exclusive random run identity.
 const runRoot=path.join(opts.out,'runs');fs.mkdirSync(runRoot,{recursive:true});const run=fs.mkdtempSync(path.join(runRoot,'r-'));
 const sha=x=>crypto.createHash('sha256').update(x).digest('hex'),save=(n,j)=>fs.writeFileSync(path.join(run,n),JSON.stringify(j,null,2)+'\n');
@@ -14,7 +14,13 @@ function extract(text,file){const masked=text.replace(/\/\/[^\r\n]*|\/\*[\s\S]*?
  const reader=text.indexOf('static void gamepadReadStateUnlocked('),a=text.indexOf('            const DWORD slotBit = (1u << i);',reader),b=masked.indexOf('if (edgeProbe || reprobeRequested || unknownBefore',a);assert(a>=0&&b>a);
  const dropStart=text.indexOf('            g_xinputKnownSlotMask &= ~(1u << i);',reader),dropEnd=text.indexOf('\n        }',dropStart);assert(dropStart>reader&&dropEnd>dropStart);
  const parts={DISCONNECT:record('known-slot disconnect',dropStart,dropEnd,'block'),CLASSIFICATION:record('slot identity classification',a,text.includes('xinputFeedbackIdentityProbe')?text.indexOf('            YmccXInputStateSecret secret{};',b):end(masked.indexOf('{',b)),'block'),IDENTITY_ENUM:type('XInputSlotIdentity'),TARGET:type('PhysicalFeedbackTarget'),METHODS:['xinputNonVirtualConnectedMask','xinputPhysicalConnectedMask','xinputSlotIdentityVerdict','xinputSlotsMarkDiscoveryDirty','xinputSlotsRequestIdentityReprobe','hidHideUpper','hidHideIsVirtualIdentity'].map(fn).join('\n'),CURRENT:fn('physicalFeedbackSlotCurrent'),STOP:fn('physicalFeedbackStopTarget'),FINISH:fn('physicalFeedbackFinish'),READY:fn('nativePhysicalFeedbackReady'),START:fn('nativePhysicalFeedbackStart'),SCHEDULE:fn('gamepadSerialScheduleFeedbackStop')};
- if(text.includes('static bool xinputFeedbackIdentityProbe('))parts.POLICY_HELPER=record('xinputFeedbackIdentityProbe',text.indexOf('static std::array<ymcc::input::identityRefresh::Slot,4> g_xinputFeedbackIdentity;'),text.indexOf('\n}',text.indexOf('static bool xinputFeedbackIdentityProbe('))+2);
+ if(text.includes('static bool xinputFeedbackIdentityProbe(')){
+  const declarations=['g_xinputFeedbackIdentity','g_axisCalibrationXinputKeys','g_msiOwnedReturnSlotPaths','g_msiOwnedReturnSourceEvent','g_xinputDeferredFeedbackStop'].map(name=>{
+   const matches=[...text.matchAll(/^static[^\r\n]*;/gm)].filter(match=>match[0].includes(' '+name));assert.equal(matches.length,1,'Actual probe declaration '+name);
+   const match=matches[0];return record(name,match.index,match.index+match[0].length,'declaration');
+  });
+  parts.POLICY_HELPER=declarations.concat(fn('ascii_lower'),fn('xinputFeedbackIdentityProbe')).join('\n');
+ }
  if(parts.START.includes('target.unifiedBinding='))parts.RECEIPT=fn('nativeFeedbackReceiptJson');
  if(parts.START.includes('target.unifiedBinding=')){
   parts.MSI_SOURCE=type('HidHideMsiMainSourceRecord')+'\nstatic std::mutex g_msiMainSourceMx;\nstatic HidHideMsiMainSourceRecord g_msiMainSource;\nstatic std::shared_ptr<const HidHideMsiMainSourceRecord> g_msiFeedbackSourceRecord,msiSource;\nstatic std::atomic<unsigned long long> g_msiFeedbackIdentityBuilds{0};\nstatic bool msiClawKnownBoardAuthority();\n'+fn('msiDinputFeedbackSourceSnapshot')+'\n'+fn('msiDinputFeedbackSourceCurrent');
@@ -105,10 +111,29 @@ for(const [variant,parts]of [['old',oldOnly],['fixed',tested]])for(const[n,c]of 
 const receipt={mode:opts.production?'production':'candidate-not-yet-integrated',currentFile:opts.current,currentFileSha256:sha(sourceBytes),baselineRanges:baseline.ranges,currentRanges:current.ranges.map(({code,...r})=>r),headerSha256:sha(header),parts:Object.fromEntries(Object.entries(tested).map(([n,c])=>[n,sha(c)])),noWholeMainCopyOrCompile:true,noDeviceOrSDK:true};save('source-ranges.json',receipt);
 function command(label,exe,args,cwd,expected=0){const startedAt=new Date().toISOString();const r=spawnSync(exe,args,{cwd,encoding:'utf8',timeout:60000,windowsHide:true});fs.writeFileSync(path.join(run,label+'.stdout.txt'),r.stdout??'');fs.writeFileSync(path.join(run,label+'.stderr.txt'),r.stderr??'');save(label+'.command.json',{exe,args,cwd,pid:r.pid??null,startedAt,endedAt:new Date().toISOString(),status:r.status,signal:r.signal,timedOut:r.error?.code==='ETIMEDOUT',expected,error:r.error?String(r.error):null});assert(!r.error&&r.status===expected,label+' failed unexpectedly; see outputs');return r.stdout;}
 const vcvars=process.env.YMCC_VCVARS64??'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
+const sharedProfiles=[];
+const resumedOld=opts.resumeOld?JSON.parse(fs.readFileSync(opts.resumeOld,'utf8')):null;
+if(resumedOld){
+ assert(opts.production&&resumedOld.canonicalCaseId==='controller.xinput-feedback-lifecycle','Resume is only for the same original case');
+ assert.equal(resumedOld.fixtureSha256,sha(fs.readFileSync(path.join(repo,'tools/fixtures/xinput_identity_feedback_lifecycle_fixture.cpp'))));
+ assert.equal(resumedOld.baselineSha256,sha(fs.readFileSync(baselineFile)));
+ for(const tool of resumedOld.toolPins)assert.equal(sha(fs.readFileSync(tool.path)),tool.sha256,'Previously captured tool identity changed');
+}
 const results={};for(const [variant,parts]of [['old',oldOnly],['fixed',tested]])for(const profile of ['off','on']){
  const dir=path.join(run,variant+'-'+profile);fs.mkdirSync(dir,{recursive:true});let code=(parts.GAME_COMMAND?'#define YMCC_CURRENT_GAME_FEEDBACK_CONTEXT 1\n':'')+(parts.START.includes('target.unifiedBinding=')?'#define YMCC_UNIFIED_PHYSICAL_FEEDBACK 1\n':'')+(deps.some(([name])=>name==='HcControllerFeedbackCapabilityCatalog.h')?'#include "HcControllerFeedbackCapabilityCatalog.h"\n':'')+template;
  code=code.replace('@@GAME_COMMAND@@',()=>parts.GAME_COMMAND??'').replace('@@GAME_DISPATCH@@',()=>parts.GAME_DISPATCH??'').replace('@@RECEIPT@@',()=>parts.RECEIPT??'').replace('@@MSI_SOURCE@@',()=>parts.MSI_SOURCE??'').replace('@@MSI_NATIVE@@',()=>parts.MSI_NATIVE??'').replace('@@MSI_RETRY@@',()=>parts.MSI_RETRY??'');for(const[n,c]of Object.entries(parts)){if(['GAME_COMMAND','GAME_DISPATCH','RECEIPT','MSI_SOURCE','MSI_NATIVE','MSI_RETRY'].includes(n))continue;assert(code.includes('@@'+n+'@@'),n);code=code.replace('@@'+n+'@@',()=>c);}assert(!/@@\w+@@/.test(code));fs.writeFileSync(path.join(dir,'fixture.cpp'),code);
  const batch=path.join(dir,'compile.cmd');fs.writeFileSync(batch,'@echo off\r\ncall "'+vcvars+'" >nul\r\nif errorlevel 1 exit /b 1\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DFIXED_POLICY='+(variant==='fixed'?1:0)+(profile==='on'?' /DYMCC_MSI_REPORT_CHAIN_DIAGNOSTIC':'')+(parts.POLICY_HELPER?.includes('g_msiOwnedReturnSourceEvent')?' /DR108_MSI_RETURN_TAP':'')+' "'+path.join(dir,'fixture.cpp')+'" /I"'+inc+'" /Fo"'+path.join(dir,'fixture.obj')+'" /Fe"'+path.join(dir,'fixture.exe')+'"\r\nexit /b %errorlevel%\r\n');
+ if(variant==='old'&&resumedOld){
+  const label=variant+'-'+profile,prior=resumedOld.profiles.find(row=>row.label===label);assert(prior,'Original profile receipt required');
+  for(const file of prior.files)assert.equal(sha(fs.readFileSync(file.path)),file.sha256,'Prior raw/input/artifact changed');
+  assert.equal(sha(code),prior.emittedCppSha256,'Old profile actual emitted source changed');
+  for(const [name,bytes]of deps){const previous=prior.dependencies.find(row=>row.name===name);assert(previous,'Prior declared dependency missing');assert.equal(sha(bytes),previous.sha256,'Old profile dependency changed');}
+  const previousBatch=fs.readFileSync(prior.compileBatch,'utf8').replaceAll(prior.runRoot,run);assert.equal(previousBatch,fs.readFileSync(batch,'utf8'),'Original compile recipe/flags changed');
+  const build=JSON.parse(fs.readFileSync(prior.buildReceipt,'utf8')),execute=JSON.parse(fs.readFileSync(prior.executeReceipt,'utf8'));
+  assert(build.status===0&&execute.status===1&&!build.error&&!execute.error&&!build.signal&&!execute.signal&&!build.timedOut&&!execute.timedOut,'Original process terminal required');
+  const j=JSON.parse(fs.readFileSync(prior.rawStdout,'utf8'));assert(j.failedCases>0&&j.actualStartStopFinishAndScheduleExtracted===true&&j.deviceHostSdkExecuted===false);
+  results[label]=j;const reference={label,status:'SHARED_REFERENCE',executedThisRun:false,prior};sharedProfiles.push(reference);save(label+'-shared-reference.json',reference);continue;
+ }
  command(variant+'-'+profile+'-build','cmd.exe',['/d','/c',batch],dir);
  const j=JSON.parse(command(variant+'-'+profile+'-execute',path.join(dir,'fixture.exe'),[],dir,variant==='old'?1:0));results[variant+'-'+profile]=j;save(variant+'-'+profile+'-results.json',j);
  if(variant==='fixed')assert(j.failedCases===0,'Candidate invariant failed');else assert(j.failedCases>0,'Old chain must reproduce missing-zero failure');
@@ -128,4 +153,4 @@ if(!opts.production){
  save('patch-edits.json',edits.map(({old,next,...e})=>({...e,old_sha256:sha(old),next_sha256:sha(next)})));
 }
 const end=extract(fs.readFileSync(opts.current,'utf8'),opts.current);const drift=current.ranges.filter(r=>!end.ranges.some(x=>x.name===r.name&&x.sha256===r.sha256));save('scope-drift.json',{changed:drift.map(r=>r.name)});assert(drift.length===0,'Relevant source changed during run: '+drift.map(r=>r.name).join(','));
-const summary={passed:true,mode:receipt.mode,run,profiles:Object.fromEntries(Object.entries(results).map(([k,j])=>[k,{cases:j.caseCount,checks:j.checks,failedCases:j.failedCases}])),header:path.join(repo,'native/xinput_identity_refresh_policy.h'),header_sha256:sha(header),source_range_drift:false,main_cpp_edited:false,productionHostSdkOrDeviceExecuted:false,output:path.join(opts.out,'summary.json')};save('summary.json',summary);fs.writeFileSync(path.join(opts.out,'summary.json'),JSON.stringify(summary,null,2)+'\n');console.log(JSON.stringify(summary,null,2));
+const summary={passed:true,mode:receipt.mode,run,sharedProfiles,executedThisRunProfiles:sharedProfiles.length?['fixed-off','fixed-on']:['old-off','old-on','fixed-off','fixed-on'],profiles:Object.fromEntries(Object.entries(results).map(([k,j])=>[k,{cases:j.caseCount,checks:j.checks,failedCases:j.failedCases}])),header:path.join(repo,'native/xinput_identity_refresh_policy.h'),header_sha256:sha(header),source_range_drift:false,main_cpp_edited:false,productionHostSdkOrDeviceExecuted:false,output:path.join(opts.out,'summary.json')};save('summary.json',summary);fs.writeFileSync(path.join(opts.out,'summary.json'),JSON.stringify(summary,null,2)+'\n');console.log(JSON.stringify(summary,null,2));

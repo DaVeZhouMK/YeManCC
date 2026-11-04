@@ -1,6 +1,7 @@
 // Thin mirror adapter only. All writes/start/stop are owned by YMCC quickapp.ts.
 import { waitForDeckyLosslessAction, deckyLosslessText, type DeckyLosslessDiagnostic } from './deckyLosslessState';
 import { powerLifecycle } from './api';
+import { losslessToggleValue } from './losslessProgramState';
 import { getLosslessGameState, setLosslessScalingEnabled, onLosslessScalingChanged } from './quickapp';
 import { getPolicyGame } from './gamePolicyTarget';
 import { gameMirrorIdentity } from './deckyGameActions';
@@ -11,13 +12,13 @@ import type { MirrorActionResult } from './deckyFanActions';
 export { onLosslessScalingChanged };
 export async function readLosslessScaling(gamePath:string){return getLosslessGameState(gamePath);}
 export function losslessSwitchEnabled(document:LsDocument|null):boolean {
-  return document?.running===true&&(document.enabled===true||(document.enabled===null&&document.configuredEnabled===true));
+  return losslessToggleValue(document)==='off';
 }
 export function losslessField(document:Awaited<ReturnType<typeof readLosslessScaling>>|null,pending=false):MirrorField {
   // Decky shows ON only when the current game profile and LS process are both enabled.
   // UIAutomation is optional: a hidden LS window must still allow explicit control.
   const active=losslessSwitchEnabled(document);
-  return {value:document ? document.running&&document.enabled===null?'unknown':active?'on':'off' : 'unknown',supported:!!document?.controlAvailable&&!pending&&!document.pending,
+  return {nextValue:losslessToggleValue(document),value:document ? document.running&&document.enabled===null?'unknown':active?'on':'off' : 'unknown',supported:!!document?.controlAvailable&&!pending&&!document.pending,
     choices:[{data:'off',label:'关闭'},{data:'on',label:'开启'}]};
 }
 export type LsDocument=Awaited<ReturnType<typeof readLosslessScaling>>;

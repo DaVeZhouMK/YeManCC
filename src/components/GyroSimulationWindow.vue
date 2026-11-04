@@ -20,7 +20,7 @@ const hud=ref({speed:270,shots:0,hits:0,ammo:30,reload:false,ads:false,lt:false,
 const signal=computed(()=>demo.value?'演示动作 · 仅预览':!playing.value?'按 Start 开始测试 · RT / LT 操作':!inputActive.value?'等待测试窗口接管输入':!props.connected?'可用鼠标或键盘体验':!props.enabled?'陀螺仪已关闭':props.admitted?'使用实际陀螺仪输出':'等待触发或有效输出');
 const opener=document.activeElement as HTMLElement|null;
 const widthOwner=`gyro-simulation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-let alive=true,widthOwned=false,frame=0,last=0,lastHud=0,range=createRange(),motorcycle=createMotorcycle();
+let alive=true,widthOwned=false,frame:number|null=null,renderGeneration=0,last=0,lastHud=0,range=createRange(),motorcycle=createMotorcycle();
 let nativePad=triggerSnapshot(null),stopPad:(()=>void)|undefined,stopVisibility:(()=>void)|undefined,triggerArmed=true,restartHeld=false;
 let pointerLT=false,pointerRT=false,dragging=false,mouseX=0,mouseY=0;
 let feedbackPad:HapticPad|null=null,feedbackRunning=false;const haptics=createGameHaptics(()=>feedbackPad);
@@ -62,7 +62,21 @@ function keydown(event:KeyboardEvent){
 }
 function keyup(event:KeyboardEvent){keys.delete(event.code);}
 function neutralize(){stopPlay(false);nativePad=triggerSnapshot(null);demo.value=false;last=0;}
-function visibility(){if(document.hidden)neutralize();}
+// Presentation follows the same native/document/power visibility as the
+// rest of YMCC. Hidden WebView documents can still report DOM visible.
+function pauseRendering(){renderGeneration++;if(frame!==null)cancelAnimationFrame(frame);frame=null;last=0;}
+function scheduleFrame(){
+ if(!alive||!isUiVisible()||frame!==null)return;
+ const generation=renderGeneration;
+ frame=requestAnimationFrame(now=>{
+  // A canceled old callback must not clear the new visible session's ticket.
+  if(generation!==renderGeneration)return;
+  frame=null;
+  if(!alive||!isUiVisible()){last=0;return;}
+  draw(now);scheduleFrame();
+ });
+}
+function visibility(){if(document.hidden){neutralize();pauseRendering();}else scheduleFrame();}
 // Native semantic actions already passed the window-owner gate. WebView2 can
 // report a transient DOM blur while that owner remains active in full-screen
 // shells; only the native blur/visibility boundary ends a native test session.
@@ -86,7 +100,7 @@ function stopDrag(){dragging=false;mouseX=0;mouseY=0;}
 function focusChanged(event:FocusEvent){if(playing.value&&event.target!==canvas.value&&!(event.target as HTMLElement)?.closest('.gyro-game-pedal,.gyro-play-button'))stopPlay(false);}
 function pointerChanged(event:PointerEvent){if(playing.value&&(event.target as HTMLElement)?.closest('.gyro-simulation-editor,.gyro-scene-tabs,.gyro-simulation-heading'))stopPlay(false);}
 function draw(now:number){
- if(!alive)return;frame=requestAnimationFrame(draw);if(document.hidden){last=0;return;}
+ if(!alive||!isUiVisible()){last=0;return;}
  const dt=last?clamp((now-last)/1000,0,.05):0;last=now;
  const el=canvas.value,ctx=el?.getContext('2d');if(!el||!ctx||!el.clientWidth||!el.clientHeight)return;
  const w=el.clientWidth,h=el.clientHeight,dpr=Math.min(devicePixelRatio||1,2);
@@ -125,21 +139,21 @@ async function widen(){if(!isNativeRuntime||/[?&]__ymccChild=\d+/.test(location.
 onMounted(async()=>{
  void loadRange3D().then(renderer=>{if(!alive){renderer.dispose();return;}range3d=renderer;modelStatus.value='ready';}).catch(()=>{if(alive)modelStatus.value='fallback';});
  void widen();acceptPad(getLastGamepadState());stopPad=onIpc('gamepad.state',acceptPad);
- stopVisibility=onUiVisibilityChange(({visible})=>{if(!visible)neutralize();});
+ stopVisibility=onUiVisibilityChange(({visible})=>{if(!visible){neutralize();pauseRendering();}else scheduleFrame();});
  window.addEventListener('ipc:window.blur',neutralize);
  window.addEventListener('ipc:gamepad-back',back);window.addEventListener('gp:page-command',pageCommand);
  window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('blur',browserBlur);document.addEventListener('visibilitychange',visibility);
- frame=requestAnimationFrame(draw);await nextTick();focusGamepadElement(closeButton.value);
+ scheduleFrame();await nextTick();focusGamepadElement(closeButton.value);
 });
 onBeforeUnmount(()=>{
- alive=false;haptics.dispose();range3d?.dispose();range3d=null;clearInput();stopPad?.();stopVisibility?.();cancelAnimationFrame(frame);emit('settings-host',null);
+ alive=false;haptics.dispose();range3d?.dispose();range3d=null;clearInput();stopPad?.();stopVisibility?.();pauseRendering();emit('settings-host',null);
  window.removeEventListener('ipc:window.blur',neutralize);window.removeEventListener('ipc:gamepad-back',back);window.removeEventListener('gp:page-command',pageCommand);window.removeEventListener('keydown',keydown);window.removeEventListener('keyup',keyup);window.removeEventListener('blur',browserBlur);document.removeEventListener('visibilitychange',visibility);
  if(widthOwned)void windowApi.controllerEditorWidth(widthOwner,false).catch(()=>undefined);if(opener?.isConnected)opener.focus({preventScroll:true});
 });
 </script>
 <template>
  <Teleport to="body"><section ref="modal" class="gyro-simulation-window app-root" role="dialog" aria-modal="true" aria-label="模拟陀螺仪" data-gp-modal data-gp-page-lock data-gp-scope="gyro-simulation" data-gp-spatial="nearest" @focusin="focusChanged" @pointerdown.capture="pointerChanged">
-  <header class="gyro-simulation-heading"><div><h1>模拟陀螺仪</h1><button class="gyro-preview-entry" data-gp-pane="gyro-preview" @click="focusPreviewEntry">左侧试玩</button><span>右侧实时调节</span></div><button ref="closeButton" data-gp-pane="gyro-settings" @click="emit('close')"><b>B</b> 返回</button></header>
+  <header class="gyro-simulation-heading"><div><h1>模拟陀螺仪</h1><button class="gyro-preview-entry" data-gp-pane="gyro-preview" @click="focusPreviewEntry">左侧试玩</button><span>右侧实时调节</span></div><button ref="closeButton" data-gp-pane="gyro-settings" @click="emit('close')"><span class="controller-key" data-controller-key="B">B</span> 返回</button></header>
   <div class="gyro-simulation-body">
    <section class="gyro-simulation-preview" data-gp-pane="gyro-preview" aria-label="陀螺仪模拟窗口">
     <div class="gyro-scene-tabs" role="group" aria-label="模拟场景"><button :class="{active:scene==='fps'}" :aria-pressed="scene==='fps'" @click="scene='fps'">FPS 射击</button><button :class="{active:scene==='motorcycle'}" :aria-pressed="scene==='motorcycle'" @click="scene='motorcycle'">暴力摩托</button><button :class="{active:demo}" :aria-pressed="demo" @click="toggleDemo">{{demo?'停止演示':'演示动作'}}</button></div>
@@ -156,10 +170,10 @@ onBeforeUnmount(()=>{
      <div class="gyro-game-controls">
       <div class="gyro-game-control-row">
        <button class="gyro-game-pedal" :class="{held:hud.lt}" :aria-pressed="hud.lt" :aria-label="'LT '+sceneText.left" @click="togglePedal($event,'lt')" @pointerdown="hold($event,'lt')" @pointerup="release($event,'lt')" @pointercancel="release($event,'lt')" @lostpointercapture="pointerLT=false" @contextmenu.prevent><kbd>LT</kbd><span>{{sceneText.left}}</span></button>
-       <button ref="playButton" class="gyro-play-button" :class="{active:playing}" data-gyro-enter-play @click="playing?stopPlay():enterPlay()"><kbd>{{playing?'B':'Start'}}</kbd><span>{{playing?'返回调节':'进入试玩'}}</span></button>
+       <button ref="playButton" class="gyro-play-button" :class="{active:playing}" data-gyro-enter-play @click="playing?stopPlay():enterPlay()"><kbd :class="{ 'controller-key': playing }" :data-controller-key="playing ? 'B' : undefined">{{playing?'B':'Start'}}</kbd><span>{{playing?'返回调节':'进入试玩'}}</span></button>
        <button class="gyro-game-pedal" :class="{held:hud.rt}" :aria-pressed="hud.rt" :aria-label="'RT '+sceneText.right" @click="togglePedal($event,'rt')" @pointerdown="hold($event,'rt')" @pointerup="release($event,'rt')" @pointercancel="release($event,'rt')" @lostpointercapture="pointerRT=false" @contextmenu.prevent><kbd>RT</kbd><span>{{sceneText.right}}</span></button>
       </div>
-      <div class="gyro-game-help"><span>{{sceneText.help}}</span><span><kbd>Start</kbd> 开始测试 · <kbd>X</kbd> {{scene==='motorcycle'?'挥击':'重开'}} · <kbd>B</kbd> 返回调节</span></div>
+      <div class="gyro-game-help"><span>{{sceneText.help}}</span><span><kbd>Start</kbd> 开始测试 · <span class="controller-key" data-controller-key="X">X</span> {{scene==='motorcycle'?'挥击':'重开'}} · <span class="controller-key" data-controller-key="B">B</span> 返回调节</span></div>
       <div class="gyro-keyboard-help">{{sceneText.keyboard}} · 空格 RT · Shift LT · R 重开</div>
      </div>
     </div>

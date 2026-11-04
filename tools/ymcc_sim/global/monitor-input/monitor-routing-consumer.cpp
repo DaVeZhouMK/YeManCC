@@ -1,14 +1,19 @@
 #define NOMINMAX
 #include <windows.h>
 static UINT32 failedLivePointerId=0;
+static HWND failedLiveScreenConversion=nullptr;
+static unsigned liveScreenConversionFailures=0;
+static BOOL liveFixtureClientToScreen(HWND h,POINT* p){if(h==failedLiveScreenConversion){++liveScreenConversionFailures;SetLastError(ERROR_INVALID_WINDOW_HANDLE);return FALSE;}return ClientToScreen(h,p);}
 static unsigned livePointerMetadataFailures=0;
 static BOOL liveFixtureGetPointerInfo(UINT32 id,POINTER_INFO* value){
  if(failedLivePointerId&&id==failedLivePointerId){++livePointerMetadataFailures;SetLastError(ERROR_NOT_FOUND);return FALSE;}
  return GetPointerInfo(id,value);
 }
 #define GetPointerInfo liveFixtureGetPointerInfo
+#define ClientToScreen liveFixtureClientToScreen
 #include "monitor_desktop_hud.test.h"
 #undef GetPointerInfo
+#undef ClientToScreen
 #include <WebView2EnvironmentOptions.h>
 #include <filesystem>
 #include <fstream>
@@ -176,6 +181,17 @@ static int worker(const std::filesystem::path& out,const std::wstring& runtime,c
  touchFrame(carrier.get(),afterMetadata,POINTER_FLAG_UP);
  check("the recovered real touch ends without capture or drag residue",!s->touchContact&&!s->drag.contact()&&GetCapture()!=s->inputWindow);
 
+ // Real native touch owns the bounded panel before a shell-like cancellation.
+ // Only the retiring conversion is faulted; all OS packets target owned windows.
+ carrier->refresh(s);pump(carrier.get(),30);POINT lostTransform{s->panel.left+30,s->panel.top+25};
+ touchFrame(carrier.get(),lostTransform,POINTER_FLAG_DOWN|POINTER_FLAG_INRANGE|POINTER_FLAG_INCONTACT);
+ need(s->touchContact&&s->drag.contact(),"Real touch must enter before capture cancellation");
+ const auto transformId=s->touchPointerId;failedLiveScreenConversion=s->inputWindow;
+ SendMessageW(s->inputWindow,WM_POINTERCAPTURECHANGED,transformId,0);failedLiveScreenConversion=nullptr;
+ check("real capture loss retires monitor touch without a live client transform",!s->touchContact&&!s->drag.contact()&&!s->radialContact&&!IsWindowVisible(s->inputWindow));
+ touchFrame(carrier.get(),lostTransform,POINTER_FLAG_UP);
+ probe("after transform loss the independent process receives outside mouse and touch",carrier.get());
+ carrier->stopInteraction(s);carrier->refresh(s);pump(carrier.get(),30);
  const auto mouseStart=s->panel;POINT mouseAt{mouseStart.left+35,mouseStart.top+25};mouseFrame(carrier.get(),mouseAt,MOUSEEVENTF_LEFTDOWN);
  check("actual mouse down enters the monitor without acquiring desktop capture",s->drag.contact()&&GetCapture()!=s->inputWindow);
  for(int i=1;i<=3;++i)mouseFrame(carrier.get(),{mouseAt.x+i*7,mouseAt.y+i*3},0);

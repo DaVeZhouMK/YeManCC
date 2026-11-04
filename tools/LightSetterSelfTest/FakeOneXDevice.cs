@@ -96,7 +96,7 @@ namespace HandheldCompanion.Utils
  }
  public sealed record SerialRow(string Name);
 }
-namespace HidLibrary { public sealed class HidDevice { public bool IsConnected {get;set;}=true; public bool FailWrite,ThrowWrite; public int DisposeCalls; public void Dispose()=>DisposeCalls++; } }
+namespace HidLibrary { public sealed partial class HidDevice { public bool IsConnected {get;set;}=true; public bool FailWrite,ThrowWrite; public int DisposeCalls; public void Dispose()=>DisposeCalls++; } }
 namespace System.IO.Ports
 {
  // Entirely in memory. No framework SerialPort assembly or native call exists.

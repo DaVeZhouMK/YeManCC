@@ -443,6 +443,11 @@ $RtssProfileHelper = Join-Path $WorkspaceRoot 'Build\App\Native\YMCCRtssProfileH
 $RtssOverlayBridge = Join-Path $WorkspaceRoot 'Build\App\Native\YMCCOverlayBridge.dll'
 $NativeInputHost = Join-Path $WorkspaceRoot 'Build\App\Native\InputHost'
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
+# BEGIN TDP_RUNTIME_MANIFEST_DEPLOY_PREFLIGHT
+. (Join-Path $ProjectRoot 'tools\lib\tdp-runtime-manifest.ps1')
+$tdpRuntimeManifestSourceRoot = Get-YmccTdpManifestSourcePayloadRoot $ProjectRoot $WorkspaceRoot
+$tdpRuntimeManifestPlan = Assert-YmccTdpRuntimeManifestPayload -ManifestPath (Join-Path $sourcePowerControl 'pawnio\tdp-runtime-manifest.json') -PayloadRoot $tdpRuntimeManifestSourceRoot -SourceFile (Join-Path $ProjectRoot 'PowerControl\pawnio\YeManTdpCtl.py') -RecipeFile (Join-Path $ProjectRoot 'PowerControl\pawnio\YeManTdpCtl.spec')
+# END TDP_RUNTIME_MANIFEST_DEPLOY_PREFLIGHT
 # Validate the complete appearance payload before any installed files are moved or copied.
 . (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
 Get-SteamAppearanceExportFiles $sourcePowerControl | Out-Null
@@ -692,6 +697,9 @@ Copy-MonitorHudDeckyExport $DeckyBuild $installedPowerControl
 $deckyManaged = New-YmccDeckyManifest (Join-Path $installedPowerControl 'decky') (Join-Path $ProjectRoot 'decky-plugin\vendor\decky-loader.lock.json')
 Update-InstalledDeckyReceipt (Join-Path $installedPowerControl 'decky') $BackupRoot $deckyManaged
 Copy-InstalledLockedPowerControlAssets $ProjectRoot $WorkspaceRoot $installedPowerControl $BackupRoot | Out-Null
+# BEGIN TDP_RUNTIME_MANIFEST_DEPLOY_COPY
+Copy-WithBackup $tdpRuntimeManifestPlan.ManifestPath (Join-Path $installedPowerControl 'pawnio\tdp-runtime-manifest.json') $BackupRoot
+# END TDP_RUNTIME_MANIFEST_DEPLOY_COPY
 $installedSharedRuntime = Join-Path $installedPowerControl 'ymcc-shared-runtime'
 Copy-YmccSharedRuntime $ProjectRoot $installedSharedRuntime (Join-Path $BackupRoot 'PowerControl\ymcc-shared-runtime')
 Assert-YmccBatteryHostCopies $ProjectRoot (Join-Path $installedPowerControl 'battery-host')
@@ -786,7 +794,7 @@ foreach ($relative in $CustomSteamLibraryFiles) {
 foreach ($item in Get-ChildItem -LiteralPath $WebBuild -Force) {
   $destination = Join-Path $InstallRoot $item.Name
   if ($item.PSIsContainer) {
-    Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -Force
+    Copy-Item -LiteralPath $item.FullName -Destination $InstallRoot -Recurse -Force
   } else {
     Copy-WithBackup $item.FullName $destination $BackupRoot
   }
@@ -842,8 +850,21 @@ foreach ($name in @('version.json', 'YeMan-Support.html')) {
 # stale installed manifests would otherwise restore an older Decky frontend.
 $completePackageRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
 Assert-ExportArchiveIdentity -Zip (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') -Root $completePackageRoot -BuildIdentity $exportBuildIdentity | Out-Null
-foreach ($relative in @('YeManCC/decky-package.json','YeManCC/module-package.json','YeManCC/update-manifest.json','PowerControl/redist/HIDMaestroSetup.dll','PowerControl/redist/HIDMaestroSetup.manifest.json')) {
+# BEGIN TDP_RUNTIME_MANIFEST_INSTALLED_IDENTITY
+$installedTdpManifest = Join-Path $installedPowerControl 'pawnio\tdp-runtime-manifest.json'
+$packagedTdpManifest = Join-Path $completePackageRoot 'PowerControl\pawnio\tdp-runtime-manifest.json'
+if ((Get-Sha256 $installedTdpManifest) -ine $tdpRuntimeManifestPlan.ManifestSha256 -or
+    (Get-Sha256 $packagedTdpManifest) -ine $tdpRuntimeManifestPlan.ManifestSha256) {
+  throw 'Installed TDP runtime manifest differs from source-bound verified package'
+}
+# END TDP_RUNTIME_MANIFEST_INSTALLED_IDENTITY
+foreach ($relative in @('YeManCC/decky-package.json','YeManCC/module-package.json','YeManCC/update-manifest.json','PowerControl/redist/HIDMaestroSetup.dll','PowerControl/redist/HIDMaestroSetup.manifest.json','PowerControl/redist/ymcc-input-payload-apply.ps1')) {
   Copy-WithBackup (Join-Path $completePackageRoot $relative) (Join-Path (Split-Path -Parent $InstallRoot) $relative) $BackupRoot
+}
+# The ordinary-export declaration is generated during packaging, after WebBuild.
+# Preserve its exact verified bytes as well as the other package manifests.
+if (Test-Path -LiteralPath $testExportMarker -PathType Leaf) {
+  Copy-WithBackup $testExportMarker (Join-Path $InstallRoot 'test-export.json') $BackupRoot
 }
 Assert-ExportStagedBuild (Split-Path -Parent $InstallRoot) $exportBuildIdentity | Out-Null
 Assert-MonitorHudWebExport $InstallRoot $WebBuild | Out-Null
@@ -1062,6 +1083,8 @@ $pawnioEntries = @(
     Where-Object component -eq 'PawnIO'
 )
 $pawnioExpected = @($pawnioEntries | ForEach-Object { ([string]$_.releasePath).Substring('pawnio/'.Length).Replace('/', '\') } | Sort-Object)
+# The validated runtime manifest ships beside the 21 locked binaries.
+$pawnioExpected = @($pawnioExpected + 'tdp-runtime-manifest.json' | Sort-Object)
 $pawnioInstalled = @(
   Get-ChildItem -LiteralPath (Join-Path $installedPowerControl 'pawnio') -Recurse -File -ErrorAction SilentlyContinue |
     ForEach-Object { $_.FullName.Substring((Join-Path $installedPowerControl 'pawnio').Length).TrimStart('\') } |

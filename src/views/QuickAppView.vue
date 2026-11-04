@@ -23,6 +23,7 @@ import {
   subscribeGameStatus,
   detectGame,
   refreshGameStatus,
+  isCurrentGameTarget,
   detectedGameName,
   type DetectedGame,
 } from '@/bridge/gamedetect';
@@ -566,7 +567,13 @@ async function onLaunchLs() {
   }
   busy.value = true;
   try {
-    const result = await setLosslessScalingEnabled(game.value.path, true, () => {}, game.value);
+    const target = { ...game.value };
+    const checkpoint = () => {
+      if (!isCurrentGameTarget(target)) throw new Error('游戏目标已变化或暂未确认，请刷新后重试。');
+    };
+    checkpoint();
+    const result = await setLosslessScalingEnabled(target.path, true, checkpoint, target);
+    checkpoint();
     statusMsg.value = result.notice;
   } catch (e) {
     errMsg.value = '插帧失败：' + (e as Error).message;

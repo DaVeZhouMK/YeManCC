@@ -868,5 +868,28 @@
       "ecMinor": 7
     },
     "min": 60
+  },
+  {
+    "route": "oxp3-wmi-ec",
+    "family": "OneXPlayer 3",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "systemProduct",
+      "values": [
+        "ONEXPLAYER 3",
+        "ONEXPLAYER-3"
+      ],
+      "deviceClass": "OneXPlayer3"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required",
+      "majorMin": 0,
+      "minorMin": 0
+    },
+    "min": 40
   }
 ]

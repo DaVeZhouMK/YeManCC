@@ -70,7 +70,8 @@ static void inputCaptureQueueSample(const json& row) { trace.push_back(row); }
 enum class PowerLifecycle { Ready, Suspending, Suspended, Resuming };
 enum class YmccFamily { Unknown, LenovoLegionGo, RogAlly, MsiClaw, Gpd };
 struct Machine { YmccFamily family = YmccFamily::LenovoLegionGo;
-    std::string deviceClass = "HandheldCompanion.Devices.LegionGoTablet"; };
+    std::string deviceClass = "HandheldCompanion.Devices.LegionGoTablet";
+    bool attempted = false, resolved = true; };
 static Machine g_machineIdentity;
 static std::atomic<std::uint64_t> g_powerGeneration{7}, g_hidResolveCacheGeneration{11}, g_legionMotionCaptureEpoch{1};
 static std::atomic<unsigned> g_legionMotionSensorIndex{0};
@@ -83,7 +84,12 @@ static std::atomic<bool> g_legionRawInputSubscribed{true};
 static bool g_rawInputRegistered = true;
 static std::atomic<bool> g_keyboardModifierRawSubscribed{true};
 static HWND g_hwnd = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(0x33330000));
-static bool vendorRegistrationResult = true, baseRegistrationResult = true;
+static bool vendorRegistrationResult = true, baseRegistrationResult = true, keyboardRegistrationResult = true;
+#define YMCC_ROG_FSE_EXPERIMENTS 0
+static void ymccResolveMachineIdentityOnce(){g_machineIdentity.attempted=true;}
+static bool machineIsRogAllyFamily(){return g_machineIdentity.family==YmccFamily::RogAlly;}
+static const char* ymccFamilyName(YmccFamily family){return family==YmccFamily::LenovoLegionGo?"lenovo-legion-go":"other";}
+static HWND ensureRawInputSinkWindow(DWORD*){CHECK(false);return nullptr;}
 static DWORD rawInputLastError = 0;
 static unsigned getLastErrorCalls = 0, existingTimerCalls = 0;
 struct RegistrationEffect {
@@ -97,11 +103,11 @@ static std::vector<json> lifecycle;
 static BOOL RegisterRawInputDevices(const RAWINPUTDEVICE* devices, UINT count, UINT size) {
     CHECK(devices != nullptr && size == sizeof(RAWINPUTDEVICE));
     const bool vendor = count == 1 && devices && devices[0].usUsagePage == 0xFFA0;
-    CHECK(vendor || count == 5);
+    CHECK(vendor || count == 3 || count == 2);
     registrations.push_back({std::vector<RAWINPUTDEVICE>(devices,devices+count),size,
         g_legionMotionCaptureEpoch.load(),g_legionRawInputSubscribed.load()});
-    const bool ok = vendor ? vendorRegistrationResult : baseRegistrationResult;
-    rawInputLastError = ok ? ERROR_SUCCESS : vendor ? DWORD{87} : DWORD{55};
+    const bool ok = vendor ? vendorRegistrationResult : count == 2 ? keyboardRegistrationResult : baseRegistrationResult;
+    rawInputLastError = ok ? ERROR_SUCCESS : vendor ? DWORD{87} : count == 2 ? DWORD{56} : DWORD{55};
     return ok ? 1 : 0;
 }
 static DWORD GetLastError() noexcept { ++getLastErrorCalls; return rawInputLastError; }
@@ -279,7 +285,7 @@ static void reset(unsigned n) {
     g_legionMotionCaptureEpoch.store(3000 + 100 * n); g_powerLifecycle.store(PowerLifecycle::Ready);
     g_inputCaptureStop.store(false); g_inputCaptureReady = true;
     g_legionRawInputSubscribed.store(true); g_rawInputRegistered = true; g_keyboardModifierRawSubscribed.store(true);
-    vendorRegistrationResult = baseRegistrationResult = true; rawInputLastError = 0;
+    vendorRegistrationResult = baseRegistrationResult = keyboardRegistrationResult = true; rawInputLastError = 0;
     getLastErrorCalls = existingTimerCalls = 0; registrations.clear(); lifecycle.clear(); g_gmSessionResetRequested.store(false);
     g_hidHidePhysicalIdentity = physical("USB\\ROOT-A"); g_realStickTest.motionInput = "local-space"; g_realStickTest.autoCalibrate = true;
     g_gmPlayer = &getPlayer; g_gmWorld = &getWorld; g_gm = windowsSentinel;
@@ -806,29 +812,33 @@ static void registrationRetirementAndRecovery() {
     }
 }
 static void registrationKeepsBaseChannelIndependent() {
-    for (const auto baseOk : {true,false}) for (const auto vendorOk : {true,false}) {
-        baseRegistrationResult = baseOk; vendorRegistrationResult = vendorOk;
+    for (const auto baseOk : {true,false}) for (const auto keyboardOk : {true,false}) for (const auto vendorOk : {true,false}) {
+        baseRegistrationResult = baseOk; keyboardRegistrationResult = keyboardOk; vendorRegistrationResult = vendorOk;
         registrations.clear(); lifecycle.clear(); existingTimerCalls = 0;
         CHECK(gamepadRegisterRawInput() == baseOk);
-        CHECK(g_rawInputRegistered == baseOk && g_keyboardModifierRawSubscribed.load() == baseOk);
+        CHECK(g_rawInputRegistered == baseOk && g_keyboardModifierRawSubscribed.load() == keyboardOk);
         CHECK(g_legionRawInputSubscribed.load() == vendorOk);
-        CHECK(registrations.size() == 2 && existingTimerCalls == 1);
-        if (registrations.size() == 2) {
-            const auto& base = registrations[0].devices;
-            const auto& vendor = registrations[1].devices;
-            CHECK(base.size() == 5 && vendor.size() == 1);
-            const unsigned usages[] = {5,4,6,2,8};
-            if (base.size() == 5) for (unsigned i=0;i<5;++i)
-                CHECK(base[i].usUsagePage == 1 && base[i].usUsage == usages[i] && base[i].hwndTarget == g_hwnd &&
-                      base[i].dwFlags == (RIDEV_INPUTSINK|RIDEV_DEVNOTIFY));
-            if (vendor.size() == 1) CHECK(vendor[0].usUsagePage == 0xFFA0 && vendor[0].usUsage == 1);
+        CHECK(registrations.size() == 3 && existingTimerCalls == 1);
+        if (registrations.size() == 3) {
+            const auto& pads = registrations[0].devices;
+            const auto& keyboard = registrations[1].devices;
+            const auto& vendor = registrations[2].devices;
+            CHECK(pads.size() == 3 && keyboard.size() == 2 && vendor.size() == 1);
+            const unsigned usages[] = {5,4,8};
+            if(pads.size()==3) for(unsigned i=0;i<3;++i)
+                CHECK(pads[i].usUsagePage==1 && pads[i].usUsage==usages[i] && pads[i].hwndTarget==g_hwnd && pads[i].dwFlags==(RIDEV_INPUTSINK|RIDEV_DEVNOTIFY));
+            if(keyboard.size()==2) for(unsigned i=0;i<2;++i)
+                CHECK(keyboard[i].usUsagePage==1 && keyboard[i].usUsage==(i==0?6:2) && keyboard[i].hwndTarget==g_hwnd && keyboard[i].dwFlags==(RIDEV_INPUTSINK|RIDEV_DEVNOTIFY));
+            if(vendor.size()==1)CHECK(vendor[0].usUsagePage==0xFFA0 && vendor[0].usUsage==1);
         }
-        bool baseReceipt = false;
-        for (const auto& row : lifecycle) if (row.at("event") == "gamepad-input-registration") {
-            const auto& value = row.at("value");
-            CHECK(value.contains("rawInputError") && value.at("rawInputError") == (baseOk ? 0 : 55));
-            CHECK(value.contains("rawInputRegistered") && value.at("rawInputRegistered") == baseOk);
-            baseReceipt = true;
+        bool baseReceipt=false;
+        for(const auto& row:lifecycle)if(row.at("event")=="gamepad-input-registration"){
+            const auto& value=row.at("value");
+            CHECK(value.at("rawInputError")== (baseOk?0:55));
+            CHECK(value.at("keyboardMouseRawInputError")== (keyboardOk?0:56));
+            CHECK(value.at("rawInputRegistered")==baseOk);
+            CHECK(value.at("keyboardMouseRawInputRegistered")==keyboardOk);
+            baseReceipt=true;
         }
         CHECK(baseReceipt);
     }

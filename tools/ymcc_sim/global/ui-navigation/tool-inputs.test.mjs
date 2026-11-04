@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import {createRequire} from 'node:module';
 import { resolveUiToolPackage, isUiProductBundleInput, getUiNavigationArtifactInputs, loadUiToolDeclaration, validateToolManifest, verifyUiToolDeclaration, verifyUiNodeAndCjs, checkUiBrowserTerminal } from './tool-inputs.mjs';
 const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 function fixture(t){
@@ -16,7 +17,7 @@ function fixture(t){
 }
 test('unrelated case enumeration reads metadata without touching selected runtimes or hashing',()=>{
  const methods=['existsSync','lstatSync','statSync','readdirSync','realpathSync'],originals=new Map(methods.map(k=>[k,fs[k]])),read=fs.readFileSync,createHash=crypto.createHash;let reads=0;
- try{for(const name of methods)fs[name]=()=>{throw Error('RUNTIME_ACCESS_DURING_ENUMERATION');};crypto.createHash=()=>{throw Error('HASH_DURING_ENUMERATION');};fs.readFileSync=(file,...args)=>{assert.equal(path.basename(String(file)),'toolchain-inputs.json');reads++;return read(file,...args);};const inputs=getUiNavigationArtifactInputs();assert.equal(inputs.length,2304);assert.equal(reads,1);assert.equal(new Set(inputs.map(p=>p.toLowerCase())).size,2304);}finally{for(const [k,v]of originals)fs[k]=v;fs.readFileSync=read;crypto.createHash=createHash;}
+ try{for(const name of methods)fs[name]=()=>{throw Error('RUNTIME_ACCESS_DURING_ENUMERATION');};crypto.createHash=()=>{throw Error('HASH_DURING_ENUMERATION');};fs.readFileSync=(file,...args)=>{assert.equal(path.basename(String(file)),'toolchain-inputs.json');reads++;return read(file,...args);};const inputs=getUiNavigationArtifactInputs();assert.equal(inputs.length,2743);assert.equal(reads,1);assert.equal(new Set(inputs.map(p=>p.toLowerCase())).size,2743);}finally{for(const [k,v]of originals)fs[k]=v;fs.readFileSync=read;crypto.createHash=createHash;}
 });
 test('runtime verification rejects changed bytes including the final declared member',t=>{
  const {declaration,manifest}=fixture(t);assert.equal(verifyUiToolDeclaration(declaration).verifiedFiles,6);const last=manifest.files.at(-1);fs.appendFileSync(last.path,'changed');assert.throws(()=>verifyUiToolDeclaration(declaration),/UI_TOOL_FILE_CHANGED/);
@@ -67,13 +68,50 @@ test('fixed source resolves only an exact declared package, entry and bytes with
 });
 
 
+
+
+test('resolver admits an exact junction member, rejects undeclared identical bytes and detects drift',t=>{
+ const {root,manifest}=fixture(t),physical=path.join(root,'physical-tools','ymcc-pinned-tool'),linked=path.join(root,'node_modules','ymcc-pinned-tool');
+ fs.mkdirSync(physical,{recursive:true});fs.mkdirSync(path.dirname(linked),{recursive:true});
+ fs.writeFileSync(path.join(physical,'package.json'),JSON.stringify({name:'ymcc-pinned-tool',exports:'./entry.cjs'}));
+ fs.writeFileSync(path.join(physical,'entry.cjs'),'module.exports={};');
+ fs.symlinkSync(physical,linked,process.platform==='win32'?'junction':'dir');
+ const json=path.join(linked,'package.json'),entry=path.join(linked,'entry.cjs'),entryRow={path:entry,sha256:hash(entry)},manifestPath=path.join(root,'tool-manifest.json');
+ manifest.files.push({path:json,sha256:hash(json)},entryRow);
+ const save=()=>fs.writeFileSync(manifestPath,JSON.stringify(manifest));save();
+ assert.equal(createRequire(json).resolve('ymcc-pinned-tool'),fs.realpathSync(entry),'Node returns the physical entry behind this package junction');
+ assert.equal(resolveUiToolPackage({name:'ymcc-pinned-tool',repoRoot:root,manifestPath}),fs.realpathSync(entry));
+ const identical=path.join(linked,'same-bytes.cjs');fs.copyFileSync(entry,identical);
+ manifest.files[manifest.files.indexOf(entryRow)]={path:identical,sha256:hash(identical)};save();
+ assert.throws(()=>resolveUiToolPackage({name:'ymcc-pinned-tool',repoRoot:root,manifestPath}),/UI_TOOL_PACKAGE_ENTRY_UNDECLARED/,'identical bytes at a different declared physical file cannot admit this entry');
+ manifest.files[manifest.files.length-1]=entryRow;save();
+ fs.appendFileSync(entry,'changed');assert.throws(()=>resolveUiToolPackage({name:'ymcc-pinned-tool',repoRoot:root,manifestPath}),/UI_TOOL_FILE_CHANGED/);
+});
+
+test('resolver refuses entries escaping the selected physical package even when declared',t=>{
+ const {root,manifest}=fixture(t),physical=path.join(root,'selected-package'),outside=path.join(root,'outside-package'),linked=path.join(root,'node_modules','ymcc-pinned-tool');
+ fs.mkdirSync(physical);fs.mkdirSync(outside);fs.mkdirSync(path.dirname(linked),{recursive:true});
+ fs.writeFileSync(path.join(physical,'package.json'),JSON.stringify({name:'ymcc-pinned-tool',exports:'./escape/entry.cjs'}));
+ const externalEntry=path.join(outside,'entry.cjs');fs.writeFileSync(externalEntry,'module.exports={};');
+ fs.symlinkSync(outside,path.join(physical,'escape'),process.platform==='win32'?'junction':'dir');
+ fs.symlinkSync(physical,linked,process.platform==='win32'?'junction':'dir');
+ const json=path.join(linked,'package.json'),escaped=path.join(linked,'escape','entry.cjs'),manifestPath=path.join(root,'tool-manifest.json');
+ manifest.files.push({path:json,sha256:hash(json)},{path:escaped,sha256:hash(escaped)});
+ assert.equal(createRequire(json).resolve('ymcc-pinned-tool'),fs.realpathSync(externalEntry),'this is a valid Node export to an actual outside physical file');
+ for(const separatelyDeclared of [false,true]){
+  if(separatelyDeclared)manifest.files.push({path:externalEntry,sha256:hash(externalEntry)});
+  fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+  assert.throws(()=>resolveUiToolPackage({name:'ymcc-pinned-tool',repoRoot:root,manifestPath}),/UI_TOOL_PACKAGE_ENTRY_UNDECLARED/,'selected logical or global declaration cannot authorize escape from the physical package');
+ }
+});
+
 test('shared tools remain fixed when the selected source root changes',()=>{
  const a=getUiNavigationArtifactInputs(),b=getUiNavigationArtifactInputs(path.resolve('absent-captured-ui-source'));
  assert.deepEqual(b,a,'captured source roots must not redirect the pinned shared tool files');
- assert.equal(a.length,2304);assert(a.every(p=>path.isAbsolute(p)));
+ assert.equal(a.length,2743);assert(a.every(p=>path.isAbsolute(p)));
  const selected=JSON.parse(fs.readFileSync(new URL('./toolchain-inputs.json',import.meta.url),'utf8'));
  assert(selected.files.every(p=>typeof p.path==='string'&&p.repoRelative===undefined));
  assert(selected.directories.every(p=>typeof p.path==='string'&&p.repoRelative===undefined));
- assert.equal(selected.directories.length,33);
+ assert.equal(selected.directories.length,54);
  for(const spec of Object.values(selected.executables))assert(spec.repoRelative===undefined&&path.isAbsolute(spec.path));
 });

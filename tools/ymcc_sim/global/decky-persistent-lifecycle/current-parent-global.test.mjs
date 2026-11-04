@@ -4,7 +4,111 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import vm from 'node:vm';
+import {OWNED_SOURCES} from './owned-adapter.mjs';
 import {validateCurrentEnvelope,validateBaselineReceipt,aggregateSeven,coverageMap,allocateBudget,sourceMap,naturalExit,verifyCurrentDisk,parentDeclaration,legacyMigration,EXACT_25,REQUIREMENTS,JS_REGRESSIONS,NATIVE_REGRESSIONS,BUDGETS,currentChildToolPins} from './current-parent-global.mjs';
+import {verifyDeferredResourceRevalidation,verifyDeferredResourceExecution,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
+import {validateOriginalResult as validateCurrentOriginal,ORIGINAL_CASES as originalCoreCases} from './owned-run.mjs';
+import {createRequiredStageGuard} from './current-parent-global.mjs';
+// Explicit finite factory controls only; the original history-bound suite stays in else.
+const requiredStageFilterText=process.env.YMCC_PARENT_GLOBAL_CASE_FILTER;
+if(requiredStageFilterText!==undefined){
+ const requested=JSON.parse(requiredStageFilterText);
+ if(!Array.isArray(requested)||requested.length===0||requested.some(name=>typeof name!=='string')||new Set(requested).size!==requested.length)throw Error('YMCC_PARENT_GLOBAL_CASE_FILTER_INVALID');
+ const directedControls=[
+
+  ['original typed source freeze includes every declared input before parent consumption',()=>{
+   const repo=path.resolve(import.meta.dirname,'../../../..'),entry=path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),text=fs.readFileSync(entry,'utf8');
+   const begin=text.indexOf('function freeze(file){'),boundary=text.indexOf('\nfreeze(path.join(repo,',begin),seedEnd=text.indexOf('\n// Explicit focused counterexample',boundary);
+   assert(begin>=0&&boundary>begin&&seedEnd>boundary,'ORIGINAL_FREEZE_FUNCTION_AND_SEEDS_REQUIRED');
+   const virtualRoot=path.join(repo,'__source_membership_readonly_memory__'),memory=new Map(),pins=[],seen=new Set();
+   const memoryFs={...fs,mkdirSync:()=>undefined,writeFileSync(file,value){const relative=path.relative(virtualRoot,path.resolve(file));assert(relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),'SOURCE_CONTROL_CANNOT_WRITE_OUTSIDE_MEMORY');memory.set(path.resolve(file).toLowerCase(),Buffer.isBuffer(value)?Buffer.from(value):Buffer.from(value));},
+    readFileSync(file,options){const bytes=memory.get(path.resolve(file).toLowerCase());if(!bytes)return fs.readFileSync(file,options);const encoding=typeof options==='string'?options:options?.encoding;return encoding?bytes.toString(encoding):Buffer.from(bytes);}};
+   const context={repo,source:virtualRoot,pins,seen,search:[path.join(repo,'native'),path.join(repo,'deps/json'),repo],fs:memoryFs,path,assert,sha:bytes=>crypto.createHash('sha256').update(bytes).digest('hex')};
+   vm.runInNewContext(text.slice(begin,boundary)+'\n'+text.slice(boundary+1,seedEnd),context,{timeout:2000});
+   // Production freezes main.cpp separately as attribution, without recursing its includes.
+   assert(text.includes("pins.push({path:'native/main.cpp'"),'ORIGINAL_MAIN_ATTRIBUTION_REQUIRED');const main=fs.readFileSync(path.join(repo,'native/main.cpp'));pins.push({path:'native/main.cpp',bytes:main.length,sha256:context.sha(main)});
+   const actual=pins.map(row=>row.path).sort(),declared=[...OWNED_SOURCES].sort();
+   assert.equal(new Set(actual).size,actual.length,'ORIGINAL_FREEZE_DUPLICATE_SOURCE');
+   assert.deepEqual(actual,declared,'ORIGINAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED');
+   for(const entry of actual){const without=declared.filter(name=>name!==entry);assert.throws(()=>assert.deepEqual(actual,without,'ORIGINAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED'));}
+   assert.throws(()=>assert.deepEqual(actual,[...declared,declared[0]].sort(),'ORIGINAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED'));
+   assert.equal(memory.size,pins.length-1,'ORIGINAL_FREEZE_CONTROL_WRITES_ARE_MEMORY_ONLY');
+  }],
+  ['required-stage guard preserves successful stage order and return values',async()=>{
+   const cases=[],failures=[],stops=[],trace=[],firstValue={stage:'first'},lastValue={stage:'last'};
+   const guard=createRequiredStageGuard({cases,recordFailure:(id,error)=>{failures.push({id,error});cases.push({id,passed:false});},recordStop:row=>stops.push(row)});
+   const first=await guard('first',async()=>{trace.push('first:enter');await Promise.resolve();cases.push({id:'first.ok',passed:true});trace.push('first:done');return firstValue;});
+   const second=await guard('second',()=>{trace.push('second');cases.push({id:'second.ok',passed:true});return false;});
+   const third=await guard('third',()=>{trace.push('third');cases.push({id:'third.ok',passed:true});});
+   const last=await guard('last',()=>{trace.push('last');cases.push({id:'last.ok',passed:true});return lastValue;});
+   assert.strictEqual(first,firstValue);assert.strictEqual(second,false);assert.strictEqual(third,undefined);assert.strictEqual(last,lastValue);
+   assert.deepEqual(trace,['first:enter','first:done','second','third','last']);
+   assert.deepEqual(cases,[{id:'first.ok',passed:true},{id:'second.ok',passed:true},{id:'third.ok',passed:true},{id:'last.ok',passed:true}]);
+   assert.deepEqual(failures,[]);assert.deepEqual(stops,[]);
+  }],
+  ['required-stage guard rethrows the original required exception before later stages',async()=>{
+   const cases=[],failures=[],stops=[],trace=[],originalError=new Error('required action failed');
+   const guard=createRequiredStageGuard({cases,recordFailure:(id,error)=>{failures.push({id,error});cases.push({id,passed:false});},recordStop:row=>stops.push(row)});
+   await assert.rejects(async()=>{
+    await guard('prepare',()=>{trace.push('prepare');cases.push({id:'prepare.ok',passed:true});});
+    await guard('required',async()=>{trace.push('required');throw originalError;});
+    await guard('later',()=>{trace.push('later');cases.push({id:'later.ok',passed:true});});
+   },error=>{assert.strictEqual(error,originalError);return true;});
+   assert.deepEqual(trace,['prepare','required']);assert.deepEqual(cases,[{id:'prepare.ok',passed:true},{id:'required',passed:false}]);
+   assert.equal(failures.length,1);assert.equal(failures[0].id,'required');assert.strictEqual(failures[0].error,originalError);
+   assert.equal(stops.length,1);assert.equal(stops[0].id,'required');assert.deepEqual(stops[0].caseIds,['required']);assert.strictEqual(stops[0].error,originalError);
+  }],
+  ['required-stage guard stops on a newly recorded false semantic case without an action throw',async()=>{
+   const cases=[],failures=[],stops=[],trace=[];let actionReturned=false,reportedError;
+   const guard=createRequiredStageGuard({cases,recordFailure:(id,error)=>{failures.push({id,error});cases.push({id,passed:false});},recordStop:row=>stops.push(row)});
+   await assert.rejects(async()=>{
+    await guard('semantic',()=>{trace.push('semantic');cases.push({id:'semantic.prepared',passed:true},{id:'semantic.failed',passed:false});actionReturned=true;return 'action returned normally';});
+    await guard('later',()=>{trace.push('later');cases.push({id:'later.ok',passed:true});});
+   },error=>{assert(error instanceof Error);assert.equal(error.message,'REQUIRED_STAGE_REPORTED_FAILURE semantic');reportedError=error;return true;});
+   assert.equal(actionReturned,true);assert.deepEqual(trace,['semantic']);assert.deepEqual(failures,[]);
+   assert.deepEqual(cases,[{id:'semantic.prepared',passed:true},{id:'semantic.failed',passed:false}]);
+   assert.equal(stops.length,1);assert.equal(stops[0].id,'semantic');assert.deepEqual(stops[0].caseIds,['semantic.failed']);assert.strictEqual(stops[0].error,reportedError);
+  }],
+  ['required-stage guard explicit collection retains failures and continues later stages',async()=>{
+   const cases=[],failures=[],stops=[],trace=[],originalError=new Error('collected required failure'),semanticValue={stage:'semantic'},laterValue={stage:'later'};
+   const guard=createRequiredStageGuard({cases,collectAfterFailure:true,recordFailure:(id,error)=>{failures.push({id,error});cases.push({id,passed:false});},recordStop:row=>stops.push(row)});
+   const thrown=await guard('throwing',()=>{trace.push('throwing');throw originalError;});
+   const semantic=await guard('semantic',()=>{trace.push('semantic');cases.push({id:'semantic.failed',passed:false});return semanticValue;});
+   const later=await guard('later',()=>{trace.push('later');cases.push({id:'later.ok',passed:true});return laterValue;});
+   assert.strictEqual(thrown,null);assert.strictEqual(semantic,semanticValue);assert.strictEqual(later,laterValue);
+   assert.deepEqual(trace,['throwing','semantic','later']);assert.deepEqual(cases,[{id:'throwing',passed:false},{id:'semantic.failed',passed:false},{id:'later.ok',passed:true}]);
+   assert.equal(failures.length,1);assert.equal(failures[0].id,'throwing');assert.strictEqual(failures[0].error,originalError);assert.deepEqual(stops,[]);
+  }],
+  ['required-stage guard continues after an expected negative handled inside the original action',async()=>{
+   const cases=[],failures=[],stops=[],trace=[],handledValue={handled:true},laterValue={stage:'later'},expectedNegative=new Error('expected negative rejection');
+   const guard=createRequiredStageGuard({cases,recordFailure:(id,error)=>{failures.push({id,error});cases.push({id,passed:false});},recordStop:row=>stops.push(row)});
+   const handled=await guard('expected-negative',async()=>{
+    trace.push('expected-negative');
+    naturalExit({exitCode:2,elapsedMs:1,timeoutMs:10,error:null,signal:null,launchError:null,timedOut:false,outputTruncated:false},2);
+    await assert.rejects(async()=>{throw expectedNegative;},error=>error===expectedNegative);
+    cases.push({id:'expected-negative.handled',passed:true,observedExitCode:2,negativeHandled:true});return handledValue;
+   });
+   const later=await guard('later',()=>{trace.push('later');cases.push({id:'later.ok',passed:true});return laterValue;});
+   assert.strictEqual(handled,handledValue);assert.strictEqual(later,laterValue);assert.deepEqual(trace,['expected-negative','later']);
+   assert.deepEqual(cases,[{id:'expected-negative.handled',passed:true,observedExitCode:2,negativeHandled:true},{id:'later.ok',passed:true}]);
+   assert.deepEqual(failures,[]);assert.deepEqual(stops,[]);
+  }]
+ ];
+ const availableNames=directedControls.map(([name])=>name);
+ if(requested.some(name=>!availableNames.includes(name)))throw Error('YMCC_PARENT_GLOBAL_CASE_FILTER_UNKNOWN');
+ const selected=directedControls.filter(([name])=>requested.includes(name)),selectedNames=selected.map(([name])=>name),actualNames=[],results=[];
+ assert.equal(selected.length,requested.length);
+ for(const [name,action]of selected)test(name,async()=>{
+  actualNames.push(name);
+  try{await action();results.push({name,passed:true});}
+  catch(error){results.push({name,passed:false,error:String(error?.message??error)});throw error;}
+ });
+ test.after(()=>{
+  console.log('YMCC_PARENT_GLOBAL_REQUIRED_STAGE_CONTROL_RAW '+JSON.stringify({schemaVersion:1,scope:'REQUIRED_STAGE_FACTORY_CONTROLS_ONLY',selectedNames,actualNames,selectedCount:selectedNames.length,actualCount:actualNames.length,controls:results,businessExecuted:false,parentExecuted:false,baselineExecuted:false}));
+  assert.deepEqual(actualNames,selectedNames);assert.equal(results.length,selectedNames.length);
+ });
+}else{
 const repo=path.resolve(import.meta.dirname,'../../../..');
 const core=path.resolve(repo,'../../../Testing/YMCC');
 const evidence=path.join(core,'Evidence/DeckyParentMigration-20261023/c3-e02b');
@@ -55,10 +159,12 @@ for(const [name,id,edit]of [
  ['late process can never become zero restarts','native.late-actual-recovery-callback-after-exit',m=>m.additionalStarts=1],
  ['connected-only cannot replace current health','consumer.sleep-rejects-write-and-automatically-publishes-current-ready',m=>m.healthObserved=false]
 ])check(name,()=>{const value=clone();edit(value.cases.find(r=>r.id===id).measurements);assert.throws(()=>aggregateSeven(value));});
-check('actual existing frozen raw/compile graphs/exes validate; no business reexecution',()=>{
+check('historical frozen raw retains its verdict but cannot authorize the current expanded producer',()=>{
  const toolMap=new Map(original.toolArtifacts.map(r=>[path.resolve(r.path).toLowerCase(),r]));const sources=sourceMap(original.sourceInputs);
  const root=path.dirname(seal.actualEvidence.run.path),work=path.dirname(path.dirname(original.currentProducer.raw.path));
- const proofs=verifyCurrentDisk(original,sources,toolMap,root,work);assert(proofs.length>=5);
+ const before=hash(seal.actualEvidence.run.path);
+ assert.throws(()=>verifyCurrentDisk(original,sources,toolMap,root,work),'Old frozen producer/tool receipts cannot fabricate the current mandatory boundary');
+ assert.equal(hash(seal.actualEvidence.run.path),before,'Historical verdict and bytes must remain unchanged');
 });
 check('child before-bind cannot be replaced by missing or post-hoc source digest',()=>{
  const map=sourceMap(original.sourceInputs);map.delete('native/decky_sidebar_runtime.h');
@@ -126,3 +232,61 @@ test('private mutation of the compiler manifest is refused before any compilatio
  fs.copyFileSync(modulePath,path.join(temp,'package-fixture-tools.mjs'));const value=JSON.parse(fs.readFileSync(manifest));value.scope+=' mutation-control';fs.writeFileSync(path.join(temp,'package-fixture-tools.json'),JSON.stringify(value));
  const {pathToFileURL}=await import('node:url');const copied=await import(pathToFileURL(path.join(temp,'package-fixture-tools.mjs')));assert.throws(()=>copied.verifyPackageFixtureTools(),/PACKAGE_FIXTURE_MANIFEST_CHANGED/);
 });
+
+// Targeted receipt controls; no additional business producer/parent is added.
+const zeroDeferredResource=()=>({fullyDestroyed:true,handles:0,pendingIo:0,activeCalls:0,jobActiveProcesses:0,childExited:true,ownerHandles:0,ownerPendingIo:0,readerHandles:0,readerPendingIo:0,clientHandles:0});
+const deferredResourceRow=(variant='recover')=>{
+ const heals=['recover','ready'].includes(variant);
+ return {id:'native.typed-history-resource-'+variant,afterDeferredBootstrap:{passed:true,variant,stage:'resource-revalidation-after-deferred-bootstrap',plansAtRejectedPreflight:2,resourcesAtRejectedPreflight:zeroDeferredResource(),atExit:zeroDeferredResource(),beforeHandles:174,afterHandles:174,cefUnaffected:true,originalStopDeadlineMs:3200,stopElapsedMs:1,recovered:heals,bindingPlans:heals?3:2,preflightReads:variant==='recover'?4:heals?3:2,loaderPid:heals?123:0,phase:heals?'loader-started':variant==='off'?'disabled':variant==='admission'?'waiting-manual-steam':'unavailable',reason:variant==='hash'?'resource-hash-mismatch':variant==='cleanup'?'resource-worker-cleanup-incomplete':'',elapsedFromFailureMs:3010}};
+};
+check('deferred resource receipt requires all original variant boundaries',()=>{for(const variant of ['recover','ready','off','hash','cleanup','admission'])assert.equal(verifyDeferredResourceRevalidation(deferredResourceRow(variant)).variant,variant);});
+for(const [name,edit]of [
+ ['missing second-preflight evidence',r=>delete r.afterDeferredBootstrap],
+ ['earlier successful resource read cannot replace deferred proof',r=>r.afterDeferredBootstrap.preflightReads=2],
+ ['retry-debt refill',r=>r.afterDeferredBootstrap.elapsedFromFailureMs=2000],
+ ['retained binding handles',r=>r.afterDeferredBootstrap.resourcesAtRejectedPreflight.handles=1],
+ ['stop deadline expansion',r=>r.afterDeferredBootstrap.originalStopDeadlineMs=3300],
+ ['stop elapsed over original budget',r=>r.afterDeferredBootstrap.stopElapsedMs=3201],
+ ['stale variant identity',r=>r.afterDeferredBootstrap.variant='hash'],
+ ['external CEF killed',r=>r.afterDeferredBootstrap.cefUnaffected=false],
+ ['owned resource remains at exit',r=>r.afterDeferredBootstrap.atExit.activeCalls=1]
+])check('deferred resource receipt rejects '+name,()=>{const row=deferredResourceRow();edit(row);assert.throws(()=>verifyDeferredResourceRevalidation(row));});
+for(const variant of ['off','hash','cleanup','admission'])check('deferred resource receipt refuses unsafe recovery '+variant,()=>{const row=deferredResourceRow(variant);row.afterDeferredBootstrap.recovered=true;assert.throws(()=>verifyDeferredResourceRevalidation(row));});
+
+check('deferred resource child execution remains same-budget and fully released',()=>{
+ const good={selected:true,childExecutions:1,pid:123,exitCode:0,jobActiveProcesses:0,ownedParentHandlesAfterClose:0,parentReaderThreads:0,originalSharedOuterBudgetMs:45000,cases:6,elapsedMs:10000,parentObservationElapsedMs:35000,image:'current-source-built-test.exe',raw:'owned/result.json'};
+ assert.equal(verifyDeferredResourceExecution(good),good);
+ for(const patch of [{selected:false},{childExecutions:2},{exitCode:1},{jobActiveProcesses:1},{ownedParentHandlesAfterClose:1},{parentReaderThreads:1},{originalSharedOuterBudgetMs:45001},{elapsedMs:45001},{parentObservationElapsedMs:45001},{cases:5},{pid:0},{raw:''}])assert.throws(()=>verifyDeferredResourceExecution({...good,...patch}));
+});
+
+// These are finite original-verifier controls, not a new business parent/ID.
+const jointDeferredEnvelope=()=>{
+ const nested=['recover','ready','off','hash','cleanup','admission'].map(variant=>({...deferredResourceRow(variant),passed:true}));
+ const cases=[...originalCoreCases.map(row=>({id:row.id,passed:true})),...nested];
+ return {schema:'ymcc.typed-binding-runtime-gate.v1',tests:cases.length,passedCount:cases.length,cases,passed:true,selection:'',deadlineMs:3200,productCallbackMode:'typed-only; legacy macro absent',realSteamOrDeviceActions:0,originalHistoricalFailurePreserved:true,fieldWakeOrS4Verified:false,hostPackagePassed:false,deferredResourceExecution:{selected:true,childExecutions:1,pid:123,exitCode:0,jobActiveProcesses:0,ownedParentHandlesAfterClose:0,parentReaderThreads:0,originalSharedOuterBudgetMs:45000,cases:6,elapsedMs:10000,parentObservationElapsedMs:35000,image:'test-current.exe',raw:'owned/result.json'}};
+};
+const jointDeferredRun=()=>({selection:null,runExit:0,error:null,compilerExit:0,changedOriginalInputs:[],status:'pass'});
+check('joint deferred boundary complete original aggregation consumes exact current six',()=>{assert.equal(validateCurrentOriginal(jointDeferredEnvelope(),jointDeferredRun()).completeCurrentProducer,true);});
+for(const [name,change]of [
+ ['whole group omitted',r=>{delete r.deferredResourceExecution;for(const row of r.cases)delete row.afterDeferredBootstrap;}],
+ ['one nested boundary omitted',r=>delete r.cases.find(row=>row.afterDeferredBootstrap).afterDeferredBootstrap],
+ ['invalid nested resource count',r=>r.cases.find(row=>row.afterDeferredBootstrap).afterDeferredBootstrap.atExit.handles=1],
+ ['child exit failure hidden by outerPASS',r=>r.deferredResourceExecution.exitCode=1],
+ ['incomplete childJob cleanup',r=>r.deferredResourceExecution.jobActiveProcesses=1],
+ ['a raw legacy flag cannot waive current proof',r=>{delete r.deferredResourceExecution;r.allowLegacy=true;r.sourcePredatesDeferredResource=true;}]
+])check('joint deferred boundary refuses '+name,()=>{const r=jointDeferredEnvelope();change(r);assert.throws(()=>validateCurrentOriginal(r,jointDeferredRun()));});
+check('joint deferred boundary retains original producerFAIL instead of forcing missing new success evidence',()=>{const r=jointDeferredEnvelope();r.cases[0].passed=false;r.passed=false;r.passedCount--;delete r.deferredResourceExecution;const summary=validateCurrentOriginal(r,{...jointDeferredRun(),runExit:1,status:'fail'});assert.equal(summary.failed,1);});
+check('joint deferred boundary proof reads original owned raw and rejects identities or nested edits',()=>{
+ const base=path.join(core,'Workspace/DeckyParentGlobal-20261023');fs.mkdirSync(base,{recursive:true});const dir=fs.mkdtempSync(path.join(base,'deferred-proof-control-')),file=path.join(dir,'runtime-fixtures/deferred-resource-branch/result.json');fs.mkdirSync(path.dirname(file),{recursive:true});
+ const r=jointDeferredEnvelope();r.deferredResourceExecution.image=path.join(dir,'FixtureSteam/steam.exe').replaceAll('\\','/').toLowerCase();r.deferredResourceExecution.raw=file;
+ const child={pid:123,sourceImage:r.deferredResourceExecution.image,elapsedMs:10000,cases:Object.fromEntries(r.cases.filter(row=>row.afterDeferredBootstrap).map(row=>[row.afterDeferredBootstrap.variant,row.afterDeferredBootstrap]))};
+ fs.writeFileSync(file,JSON.stringify(child));assert.equal(verifyDeferredResourceProof(r,dir).raw.sha256,hash(file));
+ for(const edit of [c=>c.pid++,c=>c.sourceImage+='foreign',c=>c.cases.recover.atExit.handles=1,c=>delete c.cases.cleanup]){const c=structuredClone(child);edit(c);fs.writeFileSync(file,JSON.stringify(c));assert.throws(()=>verifyDeferredResourceProof(r,dir));}
+ fs.writeFileSync(file,JSON.stringify(child));const wrong=structuredClone(r);wrong.deferredResourceExecution.raw=path.join(dir,'not-original.json');assert.throws(()=>verifyDeferredResourceProof(wrong,dir));
+});
+
+check('joint deferred historical older raw is not promoted to current acceptance or silently patched',()=>{
+ const historic=read(original.originalProducer.raw.path),run=read(original.originalProducer.result.path),before=hash(original.originalProducer.raw.path);
+ assert.throws(()=>validateCurrentOriginal(historic,run));assert.equal(hash(original.originalProducer.raw.path),before);
+});
+}

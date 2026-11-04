@@ -21,6 +21,7 @@ class Observation {
             && !closeOwner_ && !closePending_ && (!boundary_ || closed_==g);
     }
 public:
+    enum class CloseAdmission { Ignored, Queued, StartWorker };
     std::uint64_t generation(std::uint64_t shared) {std::lock_guard<std::mutex> l(mutex_);syncLocked(shared);return generation_;}
     std::uint64_t confirmedSuspend(std::uint64_t shared) {
         std::lock_guard<std::mutex> l(mutex_);
@@ -40,10 +41,12 @@ public:
         firstRaw_=false;boundary_=true;sharedAwake_=false;
         sleep_=lastFact_=at;wake_=published_=0;return generation_;
     }
-    bool recordWake(std::uint64_t shared,std::uint64_t at,bool retry,bool active) {
+    bool recordWake(std::uint64_t shared,std::uint64_t at,bool retry) {
         std::lock_guard<std::mutex> l(mutex_);
         if(retry){wake_=published_=0;sharedAwake_=false;return false;}
-        if(!active || !shared || shared!=shared_ || !sleep_ || at<=sleep_ || at<=lastFact_ || at<=cutoff_)return false;
+        // OS wake facts outlive a control intent; only publication/Host work
+        // is activity-gated. Otherwise idle sleep survives a real wake forever.
+        if(!shared || shared!=shared_ || !sleep_ || at<=sleep_ || at<=lastFact_ || at<=cutoff_)return false;
         wake_=lastFact_=at;return true;
     }
     std::uint64_t sharedResume(std::uint64_t shared) {
@@ -55,12 +58,16 @@ public:
         std::lock_guard<std::mutex> l(mutex_);if(shared!=shared_)return;
         if(at>cutoff_)cutoff_=at;wake_=published_=0;sharedAwake_=false;
     }
-    bool beginClose(std::uint64_t g) {
+    CloseAdmission admitClose(std::uint64_t g) {
         std::lock_guard<std::mutex> l(mutex_);
-        if(!g || g!=generation_ || closed_==g)return false;
-        if(closeOwner_){if(g>closeOwner_ && g>closePending_)closePending_=g;return false;}
-        closeOwner_=g;return true;
+        if(!g || g!=generation_ || closed_==g)return CloseAdmission::Ignored;
+        if(closeOwner_){
+            if(g>closeOwner_ && g>closePending_){closePending_=g;return CloseAdmission::Queued;}
+            return CloseAdmission::Ignored;
+        }
+        closeOwner_=g;return CloseAdmission::StartWorker;
     }
+    bool beginClose(std::uint64_t g) {return admitClose(g)==CloseAdmission::StartWorker;}
     std::uint64_t completeClose(std::uint64_t g) {
         std::lock_guard<std::mutex> l(mutex_);if(!g || closeOwner_!=g)return 0;
         if(g>closed_)closed_=g;

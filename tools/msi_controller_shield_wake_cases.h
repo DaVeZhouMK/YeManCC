@@ -60,8 +60,8 @@
  tasks[L"MSI_Center_M_Server"].running = true;
  processes = {L"MSI_Center_M_Server", L"MSI_Center_M_Launcher", L"MCMOSDInfo"};
  drain();
- check(!tasks[L"MSI_Center_M_Server"].enabled && !tasks[L"MSI_Center_M_Server"].running && taskMutations == taskWrites + 1,
-       "periodic pass disables a task re-enabled after wake");
+ check(!tasks.contains(L"MSI_Center_M_Server") && taskMutations == taskWrites + 1 && taskRemovals == 3,
+       "periodic pass removes a task recreated after wake");
  check(std::find(stoppedProcesses.begin(), stoppedProcesses.end(), L"MSI_Center_M_Launcher") != stoppedProcesses.end() &&
        std::find(stoppedProcesses.begin(), stoppedProcesses.end(), L"MCMOSDInfo") == stoppedProcesses.end(),
        "periodic pass stops relaunch of exact allowlisted processes and preserves telemetry");
@@ -89,8 +89,8 @@
  const auto callsAtStart = processCalls;
  drain();
  while (tick < cadenceUntil) { tick += 400; oemVendorStackSchedule(); if (!jobs.empty()) drain(); }
- check(processCalls - callsAtStart == 10 && !active() && jobs.empty(),
-       "fast healthy guard performs ten serial passes over twenty seconds then stops");
+ check(processCalls - callsAtStart == 10 && !active() && jobs.empty() && taskRemovalCalls==2 && taskImportCalls==0 && g_oemVendorTaskLeases.size()==2,
+       "fast healthy guard performs ten serial passes without repeated deletion or import then stops");
  check(oemVendorStackShieldRuntimeSnapshot()["applied"] == true,
        "natural expiry preserves the last confirmed successful shield result");
 
@@ -160,15 +160,18 @@
  prepareWake();
  tasks[L"MSI_Center_M_Server"].enabled = true;
  tasks[L"MSI_Center_M_Server"].running = true;
- tasks[L"MSI_Center_M_Server"].stuck = true;
+ taskXmlPorts[L"MSI_Center_M_Server"].removeStillPresent = true;
+ taskXmlPorts[L"MSI_Center_M_Server"].removeDelay = 50;
+ const auto slowAt = tick;
  sgHandheldResumeInputOnWake("fixture-slow-task");
  const auto slowUntil = g_oemVendorShieldWake.until;
  drain();
- check(tick >= 2001 && g_oemVendorShieldWake.next == tick + 2000 && jobs.empty(),
-       "slow task readback adds a full idle interval after completion without catch-up bursts");
+ check(tick == slowAt + 50 && g_oemVendorShieldWake.next == tick + 2000 && jobs.empty() &&
+       oemVendorStackShieldRuntimeSnapshot()["applied"] == false && tasks.contains(L"MSI_Center_M_Server"),
+       "failed deletion readback adds a full idle interval after completion without catch-up bursts");
  tick = slowUntil - 20; oemVendorStackSchedule(); drain();
  check(!active() && jobs.empty() && tick <= slowUntil + 50,
-       "stuck task poll notices window expiry and stops instead of exhausting repeated waits");
+       "failed deletion pass notices window expiry and stops without repeated waits");
 
  prepareWake();
  // Start a pass just as a settings change happens inside persistence.

@@ -89,6 +89,21 @@ inline StoreResult store(const std::wstring&rawPath,const Record&record){
     {fileDetail::Handle existing(CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
         if(existing.valid()){BY_HANDLE_FILE_INFORMATION info{};if(!fileDetail::info(existing.value,info,error)){r.win32Error=error;r.state=error==ERROR_INVALID_DATA?StoreState::Invalid:StoreState::RetryableIo;r.reason="destination-file-kind-invalid";return r;}}
         else{error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND){r.state=StoreState::RetryableIo;r.win32Error=error;r.reason="destination-open-failed";return r;}}}
+    const auto prior=load(path,record.machineBinding);
+    if(prior.state!=LoadState::Missing&&prior.state!=LoadState::Valid){
+        r.state=prior.state==LoadState::RetryableIo?StoreState::RetryableIo:StoreState::Invalid;
+        r.win32Error=prior.win32Error;r.reason="destination-record-unconfirmed:"+prior.reason;return r;
+    }
+    std::string priorBytes;
+    if(prior.record){
+        if(!encode(*prior.record,priorBytes,&r.reason))return r;
+        if(bytes!=priorBytes){Record basis;
+            if(record.sourceRecord.empty()||!decode(record.sourceRecord,basis)||record.sourceRecord!=priorBytes||
+                basis.revision==(std::numeric_limits<std::uint64_t>::max)()||record.revision!=basis.revision+1){
+                r.reason="stale-or-unbound-record-candidate";return r;
+            }
+        }
+    }
     static std::atomic<std::uint64_t> sequence{0};const auto suffix=sequence.fetch_add(1,std::memory_order_relaxed);
     const auto tmp=path+L".tmp."+std::to_wstring(GetCurrentProcessId())+L"."+std::to_wstring(GetTickCount64())+L"."+std::to_wstring(suffix);
     fileDetail::Handle h(CreateFileW(tmp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH|FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
@@ -97,6 +112,11 @@ inline StoreResult store(const std::wstring&rawPath,const Record&record){
     DWORD written=0;if(!WriteFile(h.value,bytes.data(),DWORD(bytes.size()),&written,nullptr)||written!=bytes.size())return fail("temporary-write-incomplete",GetLastError());
     if(!FlushFileBuffers(h.value))return fail("temporary-flush-failed",GetLastError());
     if(!h.close())return fail("temporary-close-failed",GetLastError());
+    // Recheck the serialized owner's snapshot at publication, under the
+    // caller's existing exclusion. This does not turn rename into global CAS.
+    const auto latest=load(path,record.machineBinding);std::string latestBytes;
+    if(latest.state!=prior.state||(latest.record&&(!encode(*latest.record,latestBytes)||latestBytes!=priorBytes)))
+        return fail("destination-record-changed-or-unreadable",latest.win32Error);
     if(!MoveFileExW(tmp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return fail("atomic-replace-failed",GetLastError());
     r.state=StoreState::Committed;r.reason="file-committed-not-ownership-cas";return r;
 }

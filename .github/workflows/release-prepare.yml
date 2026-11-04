@@ -1,4 +1,4 @@
-name: Prepare v0.0.37 release
+name: Prepare GitHub release (no publish)
 
 on:
   push:
@@ -6,9 +6,8 @@ on:
       - 'release-preparation/**'
   workflow_dispatch:
     inputs:
-      full_acceptance:
-        description: Execute full acceptance without publishing a Release
-        required: false
+      build_packages:
+        description: Also compile and package the complete candidate (no publish; no fixtures)
         type: boolean
         default: false
 
@@ -22,220 +21,44 @@ concurrency:
 jobs:
   prepare:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.build_packages && 60 || 10 }}
     env:
       pnpm_config_verify_deps_before_run: 'false'
-      # Preparation defaults to an environment check; full acceptance is explicit.
-      # Neither mode publishes a tag, Release, or client manifest.
-      YMCC_RELEASE_ENVIRONMENT_ONLY: '1'
-      YMCC_FORMAL_ACCEPTANCE_PREFLIGHT: ${{ github.event_name == 'workflow_dispatch' && inputs.full_acceptance && '1' || '0' }}
-      YMCC_CAPTURE_LIGHTING_ONLY: '0'
-      YMCC_CAPTURE_ROUTING_ONLY: '0'
-      # Build/evidence must remain outside the Git source root.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
-      - name: Checkout candidate source
+      - name: Checkout immutable preparation commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
-      - name: Normalize release workspace paths
-        shell: pwsh
-        run: |
-          $workspace = [IO.Path]::GetFullPath($env:YEMAN_WORKSPACE_ROOT).TrimEnd('\')
-          $project = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\')
-          if ($workspace -eq $project -or $workspace.StartsWith($project + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Build workspace must be outside product sources' }
-          "YEMAN_WORKSPACE_ROOT=$workspace" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Verify 037 candidate version and notes
-        shell: pwsh
-        run: |
-          $manifest = Get-Content version.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          $package = Get-Content package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($manifest.version -cne '0.0.37' -or $package.version -cne $manifest.version) { throw '037 candidate version mismatch' }
-          if (!(Test-Path -LiteralPath 'docs/release-notes/v0.0.37.md')) { throw '037 release notes are missing' }
-          if ($env:GITHUB_REF_TYPE -eq 'tag') { throw 'Preparation must run from a branch' }
-
-      - name: Setup Node 22
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Build and check immutable release candidate
+        id: candidate
+        uses: ./.github/actions/release-build
         with:
-          node-version: '22.14.0'
+          mode: prepare
+          check-only: ${{ github.event_name != 'workflow_dispatch' || !inputs.build_packages }}
 
-      - name: Setup locked pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: 11.16.0
-          run_install: false
-
-      - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: '10.0.400'
-
-      - name: Provide frozen-source Visual Studio compatibility entrypoints
-        shell: pwsh
-        run: |
-          # Only provision the disposable hosted runner. No tracked source is edited.
-          $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          # Reuse a selected installation or discover MSVC directly (including preview VS).
-          $installation = $env:VSINSTALLDIR
-          if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
-            $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-            $discoveryExit = $LASTEXITCODE
-            if ($discoveryExit -ne 0) { throw "Installed MSVC toolchain discovery failed: $discoveryExit" }
-            $installation = $locations | Select-Object -First 1
-          }
-          if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
-          # MSVC exports Platform=x64. MSBuild treats it as a project property and
-          # moves .NET outputs to bin/x64/Release, outside the frozen recipe's lane.
-          # Clear only that ambient property; project PlatformTarget/RID remain x64.
-          $env:Platform = $null
-          'Platform=' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $inputProperties = & dotnet msbuild InputHost/YeManInputHost.csproj -nologo -p:Configuration=Release -getProperty:Platform,PlatformTarget,OutputPath
-          if ($LASTEXITCODE -ne 0) { throw 'InputHost output-lane evaluation failed.' }
-          $inputProperties = ($inputProperties -join "`n") | ConvertFrom-Json
-          if ($inputProperties.Properties.PlatformTarget -ne 'x64' -or $inputProperties.Properties.OutputPath -ne 'bin\Release\net10.0-windows\') {
-            throw 'Frozen InputHost recipe no longer targets the approved x64 output lane.'
-          }
-          $actualRoot = Join-Path $installation 'VC\Auxiliary\Build'
-          $legacyRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build'
-          $entries = @()
-          foreach ($name in @('vcvars32.bat', 'vcvars64.bat')) {
-            $actual = Join-Path $actualRoot $name
-            $legacy = Join-Path $legacyRoot $name
-            if (-not (Test-Path -LiteralPath $actual -PathType Leaf)) { throw "Missing installed MSVC entrypoint: $actual" }
-            $created = $false
-            if (-not (Test-Path -LiteralPath $legacy -PathType Leaf)) {
-              New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
-              $shim = "@echo off`r`ncall `"$actual`" %*`r`nexit /b %errorlevel%`r`n"
-              [IO.File]::WriteAllText($legacy, $shim, [Text.Encoding]::ASCII)
-              $created = $true
-            }
-            $entries += [ordered]@{ legacy = $legacy; installed = $actual; shimCreated = $created }
-          }
-          $probe = Join-Path $env:RUNNER_TEMP 'probe-yemancc-x86.cmd'
-          $entry32 = Join-Path $legacyRoot 'vcvars32.bat'
-          [IO.File]::WriteAllText($probe, "@echo off`r`ncall `"$entry32`"`r`nif errorlevel 1 exit /b 1`r`nif /i not `"%VSCMD_ARG_TGT_ARCH%`"==`"x86`" exit /b 2`r`nwhere cl.exe`r`nexit /b %errorlevel%`r`n", [Text.Encoding]::ASCII)
-          & $env:ComSpec /d /c $probe
-          if ($LASTEXITCODE -ne 0) { throw 'Frozen-source x86 MSVC entrypoint probe failed.' }
-          git diff --exit-code
-          if ($LASTEXITCODE -ne 0) { throw 'Runner provisioning changed tracked frozen source.' }
-          $record = [ordered]@{ tag = '${{ github.ref_name }}'; tagCommit = (git rev-parse HEAD); tagTree = (git rev-parse 'HEAD^{tree}'); installedVisualStudio = $installation; compatibilityEntrypoints = $entries; trackedSourceChanged = $false; scope = 'Hosted runner toolchain provisioning only; tagged source unchanged.' }
-          $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'release-runner-compatibility.json') -Encoding utf8
-
-
-      - name: Activate x64 compiler and Windows SDK
-        shell: pwsh
-        run: |
-          $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 discovery failed' }
-          $installation = $locations | Select-Object -First 1
-          if (!$installation) { throw 'MSVC x64 toolchain is missing' }
-          $entry = Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
-          $batch = Join-Path $env:RUNNER_TEMP 'ymcc-x64-environment.cmd'
-          [IO.File]::WriteAllText($batch, "@echo off`r`ncall `"$entry`" >nul`r`nif errorlevel 1 exit /b 1`r`nset`r`n", [Text.Encoding]::ASCII)
-          $rows = & cmd.exe /d /c $batch
-          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 environment failed' }
-          foreach ($row in $rows) {
-            $i = $row.IndexOf('=')
-            if ($i -le 0) { continue }
-            $name = $row.Substring(0, $i)
-            if ($name -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion|VSINSTALLDIR|VSCMD_ARG_TGT_ARCH)$') { $row | Out-File $env:GITHUB_ENV -Encoding utf8 -Append }
-          }
-          'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Restore isolated release check tools
-        shell: pwsh
-        run: |
-          & tools/initialize-release-check-host.ps1
-      - name: Capture formal release gate host dependencies
-        if: env.YMCC_CAPTURE_ROUTING_ONLY != '1'
-        shell: pwsh
-        run: |
-          & tools/capture-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'release-gate-host-tools.json')
-          if ($LASTEXITCODE -ne 0) { throw 'Release gate environment capture failed' }
-
-      - name: Restore locked dependencies
-        shell: pwsh
-        run: |
-          pnpm install --frozen-lockfile
-          if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed' }
-
-      - name: Capture lighting host tool declarations
-        if: env.YMCC_CAPTURE_ROUTING_ONLY != '1'
-        shell: pwsh
-        run: |
-          & tools/capture-lighting-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'lighting-release-host-tools.json')
-
-      - name: Capture source-bound routing identities
-        if: env.YMCC_CAPTURE_ROUTING_ONLY == '1'
-        shell: pwsh
-        run: |
-          & tools/capture-release-routing.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'release-host-routing.json')
-      - name: Check original consumers as a standard hosted user
-        if: env.YMCC_CAPTURE_LIGHTING_ONLY != '1'
-        shell: pwsh
-        run: |
-          $mode = if ($env:YMCC_FORMAL_ACCEPTANCE_PREFLIGHT -eq '1') { 'FullAcceptance' } else { 'EnvironmentCheck' }
-          & tools/invoke-hosted-release-gate.ps1 -Mode $mode
-      - name: Type check candidate
-        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
-        shell: pwsh
-        run: |
-          node scripts/write-version.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Generated037 version files failed' }
-          pnpm run type-check
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate type check failed' }
-
-      - name: Check updater failure recovery before packaging
-        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
-        shell: pwsh
-        run: |
-          $evidence = Join-Path $env:RUNNER_TEMP 'UpdaterPreparation'
-          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
-          $pwshPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
-          node tools/ymcc_sim/global/update-download-signals/index.mjs --repo-root $env:GITHUB_WORKSPACE --evidence-dir (Join-Path $evidence 'signals') --pwsh-path $pwshPath
-          if ($LASTEXITCODE -ne 0) { throw 'Updater background recovery scenarios failed' }
-          & powershell -NoProfile -ExecutionPolicy Bypass -File tools/updater_resume_native_selftest.ps1 -OutputRoot (Join-Path $evidence 'native')
-          if ($LASTEXITCODE -ne 0) { throw 'Updater native download/cache scenarios failed' }
-
-      - name: Build complete candidate with original exporter
-        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
-        shell: pwsh
-        run: |
-          $env:Platform = $null
-          $env:YEMAN_RELEASE_ENVELOPE = 'full'
-          & powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -TestExport
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate export failed' }
-          $packageDir = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/Packages'
-          $package = Join-Path $packageDir 'YeManCC.zip'
-          if (!(Test-Path -LiteralPath $package)) { throw 'Complete candidate package missing' }
-          $sourcePath = Join-Path $packageDir 'YeManCC-source-v0.0.37.zip'
-          git archive --format=zip --prefix=YeManCC/ --output=$sourcePath HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate source archive failed' }
-          $rows = foreach ($name in @('YeManCC.zip', 'YeManCC-source-v0.0.37.zip')) { (Get-FileHash (Join-Path $packageDir $name) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $name }
-          $rows | Set-Content (Join-Path $packageDir 'SHA256SUMS.txt') -Encoding UTF8
-          [ordered]@{ version='0.0.37'; commit=(git rev-parse HEAD); fixtureValidation='NOT_RUN'; formalReleaseAccepted=$false; publicReleaseCreated=$false; mainManifestUpdated=$false } | ConvertTo-Json | Set-Content (Join-Path $packageDir 'PREPARATION.json') -Encoding UTF8
-
-      - name: Save release gate environment diagnostics
-        if: always()
+      - name: Save prepared attachments
+        if: ${{ steps.candidate.outputs.packages-built == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-gate-environment-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/release-gate-host-tools.json
-            ${{ runner.temp }}/lighting-release-host-tools.json
-            ${{ runner.temp }}/release-host-routing.json
-            ${{ runner.temp }}/release-runner-compatibility.json
-            ${{ runner.temp }}/yc/Evidence/**/*.json
-            ${{ runner.temp }}/yc/Evidence/**/*.log
-            ${{ runner.temp }}/yc/Evidence/**/*.jsonl
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.json
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.log
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.jsonl
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**/*.json
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**/*.log
+          name: release-preparation-${{ steps.candidate.outputs.tag }}-${{ github.run_id }}
+          path: ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/*
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Save preparation diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-preparation-diagnostics-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/release-runner-compatibility.json
+            ${{ runner.temp }}/release-preflight-*.json
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/ExportIdentity
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyUpdate/OfficialLoader
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/version.json
+          if-no-files-found: warn
           retention-days: 14

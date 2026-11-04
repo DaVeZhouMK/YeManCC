@@ -341,7 +341,8 @@ export function createMonitorDataHub(deps: MonitorHubDeps): MonitorDataHub {
 // copied for policy/control clients. This capability is not a public read API.
 function createMonitorDataHubOwner(deps: MonitorHubDeps,
   captureReadSource?: (copy: MonitorSnapshotView, source: MonitorReadSourceReceipt) => void,
-  bindDisplayFloor?: (floor: MonitorDisplayFloor) => void): MonitorDataHub {
+  bindDisplayFloor?: (floor: MonitorDisplayFloor) => void,
+  bindDisplayTakeover?: (acknowledge: () => void) => void): MonitorDataHub {
   const setTimer =
     deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms) as unknown);
   const clearTimer =
@@ -426,6 +427,12 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
   let takeoverState: MonitorTakeoverState = 'idle';
   let takeoverBudget = TAKEOVER_RETRY_BUDGET;
   let takeoverInFlight = false;
+  // A publication may prove the in-memory transport after the one initial read
+  // returned unavailable. Keep admission data-only; only the production owner
+  // can acknowledge this exact proof after display callbacks finish.
+  let displayTakeoverProof: { session: number | null; relayEpoch: number | null;
+    generation: number; seq: number; collectedAt: number; floorRevision: number; intent: number } | null = null;
+  let displayTakeoverNextAt = 0;
 
   function desired(): MonitorFlagState {
     const want = { top: false, fps: false };
@@ -510,6 +517,7 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
     pending.fps = false;
     takeoverState = 'idle';
     takeoverBudget = TAKEOVER_RETRY_BUDGET;
+    displayTakeoverProof = null; displayTakeoverNextAt = 0;
     startBudget = START_RETRY_BUDGET;
     stopBudget = STOP_RETRY_BUDGET;
     startRetryNextAt = 0;
@@ -679,6 +687,7 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
     if (transport === 'files' || takeoverState === 'done' || takeoverInFlight) return;
     if (takeoverBudget <= 0) return;
     takeoverInFlight = true;
+    displayTakeoverNextAt = deps.now() + 1000; // Push retries also respect a request issued by read().
     attempts.takeover += 1;
     takeoverBudget -= 1;
     takeoverState = 'pending'; // 已发起未确认：不得当作 idle（更不得当作 done）
@@ -1038,13 +1047,40 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
   }
 
   function admitDisplayPublication(raw:unknown):MonitorSnapshotView|null|undefined {
+    displayTakeoverProof = null;
     if(!raw||typeof raw!=='object'||Number((raw as Record<string,unknown>).schema)!==SNAPSHOT_SCHEMA)return undefined;
     const value=raw as Record<string,unknown>;
     // Authenticated native cache events reuse the exact lifecycle/payload
     // admission. They do not pump commands or acknowledge in-flight writes.
     if(value.available===false)return acceptLifecycle(value)==='stale'?undefined:null;
-    const view=normalizeSnapshot(raw);return view?applyStaleFloor(view):undefined;
+    const view=normalizeSnapshot(raw);
+    if (!view) return undefined;
+    // Display compatibility may omit identity fields; it cannot borrow cached
+    // identity to grant control. This exact packet must carry native numbers.
+    if (bindDisplayTakeover && typeof value.session === 'number' &&
+        Number.isSafeInteger(value.session) && value.session > 0 &&
+        typeof value.relayEpoch === 'number' && Number.isSafeInteger(value.relayEpoch) && value.relayEpoch >= 0 &&
+        typeof value.generation === 'number' && typeof value.seq === 'number') displayTakeoverProof = {
+      session: value.session, relayEpoch: value.relayEpoch,
+      generation: view.generation, seq: view.seq, collectedAt: view.collectedAt,
+      floorRevision: stopFloorRevision, intent: intentEpoch,
+    };
+    return applyStaleFloor(view);
   }
+  bindDisplayTakeover?.(() => {
+    const proof = displayTakeoverProof; displayTakeoverProof = null;
+    const want = desired(), now = deps.now();
+    if (!proof || (!want.top && !want.fps) || transport === 'files' ||
+        proof.session === null || proof.relayEpoch === null || proof.seq <= 0 ||
+        !Number.isSafeInteger(proof.session) || proof.session <= 0 ||
+        !Number.isSafeInteger(proof.relayEpoch) || proof.relayEpoch < 0 ||
+        proof.session !== expectedSession || proof.relayEpoch !== expectedRelayEpoch ||
+        proof.generation !== expectedGeneration || proof.seq !== expectedSeq ||
+        proof.floorRevision !== stopFloorRevision || proof.intent !== intentEpoch ||
+        !Number.isFinite(now) || now < proof.collectedAt || now - proof.collectedAt >= 6000 ||
+        now < displayTakeoverNextAt) return;
+    maybeTakeover(); // Same five-attempt budget and single in-flight request.
+  });
   bindDisplayFloor?.({
     revision: () => stopFloorRevision,
     refresh: view => view ? applyStaleFloor(Object.isFrozen(view) ? structuredClone(view) : view) : null,
@@ -1104,12 +1140,14 @@ function displaySnapshotHasFreshData(view: MonitorSnapshotView | null, now: numb
 // Only the production owner can create them; native pushes need no receipts.
 const readDisplaySources = new WeakMap<MonitorSnapshotView, MonitorReadSourceReceipt>();
 let productionDisplayFloor: MonitorDisplayFloor | null = null;
+let productionDisplayTakeover: (() => void) | null = null;
 // ── 生产单例（touch/autofloat 共用同一在途请求）──
 const productionHub = createMonitorDataHubOwner({
   invoke: (cmd, args, options) => invoke(cmd, args, options),
   readTextFile: (path, maxBytes) => fs.readTextFile(path, maxBytes),
   now: () => Date.now(),
-}, (copy, source) => { readDisplaySources.set(copy, source); }, floor => { productionDisplayFloor = floor; });
+}, (copy, source) => { readDisplaySources.set(copy, source); }, floor => { productionDisplayFloor = floor; },
+  acknowledge => { productionDisplayTakeover = acknowledge; });
 
 // Passive display subscribers share snapshots already read by TopMonitor/autofloat.
 // A preview subscriber does not start a second polling loop or hardware collector.
@@ -1155,7 +1193,10 @@ function publishDisplaySnapshot(view: MonitorSnapshotView | null, version: numbe
 }
 export function acceptPublishedMonitorSnapshot(raw:unknown):void {
   const view=productionHub.admitDisplayPublication(raw);
-  if(view!==undefined){++publicationVersion;publishDisplaySnapshot(view,publicationVersion);}
+  if(view!==undefined){
+    ++publicationVersion;publishDisplaySnapshot(view,publicationVersion);
+    if (view) productionDisplayTakeover?.();
+  }
   displayFeed.advance();hudDisplayFeed.advance();advanceMonitorTdpDisplay();
 }
 export const readMonitorSnapshot = async (): Promise<MonitorSnapshotView | null> => {

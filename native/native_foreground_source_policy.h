@@ -67,6 +67,23 @@ inline bool gameNodeRefreshMutationAllowed(Profile profile,const std::string& ro
     return !(profile==Profile::Rog && upper(root).compare(0,22,"USB\\VID_0B05&PID_1B4C\\")==0 &&
         upper(instance).compare(0,4,"HID\\")==0);
 }
+// Multiple game collections can belong to one physical ROG controller. This
+// remains an identity test, not permission to combine two physical roots.
+inline bool uniqueSourceRoot(Profile profile,const std::vector<std::string>& roots) {
+    if(roots.empty())return false;
+    if(profile!=Profile::Rog)return roots.size()==1;
+    const auto root=ymcc::msi::nativeForegroundUpperInstance(roots.front());
+    return rootCandidate(profile,root) && std::all_of(roots.begin(),roots.end(),[&](const auto& item){
+        return ymcc::msi::nativeForegroundUpperInstance(item)==root;
+    });
+}
+// The existing parent-bound helper can cycle this exact physical USB port.
+// This is separate from, and does not permit, the quarantined HID-node
+// disable/enable path. Runtime still requires board, location, owner and
+// current gaming/XUSB ancestry proof before launching the one-shot.
+inline bool nativeRootPortCycleAllowed(Profile profile,const std::string& root) {
+    return profile==Profile::Rog && rootCandidate(profile,root);
+}
 inline bool xusbTargetAdmitted(Profile profile,const std::string& root,const ymcc::msi::NativeForegroundXusbInterface& item) {
     if(!item.activeInterface || !item.ancestorMatched || item.virtualDevice || !rootCandidate(profile,root) ||
         !rootCandidate(profile,item.ancestorRoot) || upper(root)!=upper(item.ancestorRoot))return false;

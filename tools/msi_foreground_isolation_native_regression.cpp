@@ -357,7 +357,8 @@ static std::pair<unsigned,unsigned> pauseMaskOnlyLogRegression() {
 }
 
 int wmain(int argc,wchar_t** argv) {
-    if(argc!=2) return 2;
+    if(argc!=2 && !(argc==3 && std::wstring(argv[2])==L"--shield-mutation-probes")) return 2;
+    const bool mutationProbesOnly=argc==3;
     g_yemanccDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);
     // The real logger uses app_data_dir(), not the input-data root. Keep every
     // offline receipt inside this fixture; never initialize a user app-data path.
@@ -430,6 +431,55 @@ int wmain(int argc,wchar_t** argv) {
     g_msiForegroundTestIo.queue=[&](const std::string& reason){queue.push_back(reason);};
     auto prepare=[&](){msiForegroundIsolationRememberMain(mainRoot);msiForegroundIsolationObserveNative(source());msiForegroundIsolationSetUiOwned(true);};
     auto run=[&](){for(const auto& job:queue)msiForegroundIsolationHandleWork(job);};
+    // Reuse the original journal prerequisites and checks in the full suite and
+    // all three bounded mutation probes. Never rerun unrelated normal cases per mutation.
+    auto journalProbeChecks=[&](){
+    reset();prepare();g_hidHideVisibilityJournal.active=false;run();
+    check("missing journal retains only the current job without controller I/O",g_msiForegroundIsolation.journalWait.has_value()&&writes.empty()&&inventoryReads+xusbReads+snapshotReads==0);
+    g_hidHideVisibilityJournal.active=true;msiForegroundIsolationJournalReady();msiForegroundIsolationJournalReady();
+    check("successful primary hide queues one continuation on the same token",queue.size()==2&&g_msiForegroundIsolation.pendingToken!=0);
+    run();
+    check("journal continuation executes the actual sibling hide with original ownership",writes.size()==4&&g_hidHideVisibilityJournal.hiddenByUs.size()==6&&!g_msiForegroundIsolation.journalWait);
+    const auto afterJournalIo=locationReads+inventoryReads+snapshotReads+discoveryReads+xusbReads;
+    msiForegroundIsolationJournalReady();run();
+    check("journal ready duplicates cannot repeat hide or PnP work",queue.size()==2&&writes.size()==4&&afterJournalIo==locationReads+inventoryReads+snapshotReads+discoveryReads+xusbReads);
+    for(unsigned cancellation=0;cancellation<9;++cancellation){
+        reset();prepare();g_hidHideVisibilityJournal.active=false;run();
+        if(cancellation==0)msiForegroundIsolationSetUiOwned(false);
+        if(cancellation==1)g_inputHostEpochMirror=5;
+        if(cancellation==2)g_powerGeneration=4;
+        if(cancellation==3)g_msiForegroundAnchorRevision.fetch_add(1);
+        if(cancellation==4)g_inputHostExitFence=true;
+        if(cancellation==5 && g_msiForegroundIsolation.journalWait)g_msiForegroundIsolation.journalWait->observedTick=GetTickCount64()-3000;
+        if(cancellation==6)g_realStickTest.virtualTargetEnabled=false;
+        if(cancellation==7)ui=false;
+        if(cancellation==8)g_msiDinputReturnOwed=false;
+        g_hidHideVisibilityJournal.active=true;msiForegroundIsolationJournalReady();run();
+        check("late journal callback cannot revive OFF, stale, background or exiting work",writes.empty()&&inventoryReads+xusbReads+snapshotReads==0&&!g_msiForegroundIsolation.journalWait);
+    }
+    reset();prepare();g_hidHideVisibilityJournal.active=false;run();
+    g_hidHideVisibilityJournal.active=true;msiForegroundIsolationJournalReady();g_hidHideVisibilityJournal.active=false;run();
+    msiForegroundIsolationJournalReady();
+    check("journal continuation losing readiness cannot park or retry a second time",queue.size()==2&&writes.empty()&&!g_msiForegroundIsolation.journalWait&&g_msiForegroundIsolation.pendingToken==0);
+    };
+    auto finish=[&](){
+        g_inputHostProcess=nullptr;
+        std::cout<<"MSI_FOREGROUND_NATIVE cases="<<cases<<" failures="<<failures<<" realHardwareAccess=false\n";
+        std::ofstream report(fspath::path(g_yemanccDataDir)/L"msi-foreground-native-summary.json");
+        report<<json({{"cases",cases},{"failures",failures},{"actualProductionTu",true},{"realHardwareAccess",false},{"testIoOnly",true},
+            {"scope",mutationProbesOnly?"shield-mutation-probes":"full-normal"}}).dump(2);
+        return failures?3:0;
+    };
+    if(mutationProbesOnly){
+        journalProbeChecks();
+        const auto probes=msiNativeForegroundRegression(true);cases+=probes.first;failures+=probes.second;
+        return finish();
+    }
+    reset();prepare();g_controllerFrontendIsolationEnabled=false;msiForegroundIsolationSetUiOwned(false);run();
+    check("summon isolation off invalidates a queued managed MSI hide",
+        writes.empty() && inventoryReads+xusbReads+snapshotReads==0 && !g_msiForegroundIsolation.pendingToken);
+    reset();prepare();g_controllerFrontendIsolationEnabled=true;run();
+    check("summon isolation re-enable preserves managed MSI original hide",writes.size()==4);
     reset();prepare();check("one MSI foreground job is queued",queue.size()==1);run();
     check("same physical port across serial/PID changes hides root plus all three game inputs",writes.size()==4);
     check("all own paths enter existing cleanup journal",g_hidHideVisibilityJournal.hiddenByUs.size()==6);
@@ -615,33 +665,7 @@ int wmain(int argc,wchar_t** argv) {
     check("diagnostic metadata never silently requeues a now-ready consumed job",writes.empty() && afterPendingIo==locationReads+inventoryReads+snapshotReads+discoveryReads+xusbReads && queue.size()==1);
     msiForegroundIsolationSetUiOwned(false);msiForegroundIsolationSetUiOwned(true);run();
     check("a real new ownership boundary retains the original successful hide behavior",writes.size()==4);
-    reset();prepare();g_hidHideVisibilityJournal.active=false;run();
-    check("missing journal retains only the current job without controller I/O",g_msiForegroundIsolation.journalWait.has_value()&&writes.empty()&&inventoryReads+xusbReads+snapshotReads==0);
-    g_hidHideVisibilityJournal.active=true;msiForegroundIsolationJournalReady();msiForegroundIsolationJournalReady();
-    check("successful primary hide queues one continuation on the same token",queue.size()==2&&g_msiForegroundIsolation.pendingToken!=0);
-    run();
-    check("journal continuation executes the actual sibling hide with original ownership",writes.size()==4&&g_hidHideVisibilityJournal.hiddenByUs.size()==6&&!g_msiForegroundIsolation.journalWait);
-    const auto afterJournalIo=locationReads+inventoryReads+snapshotReads+discoveryReads+xusbReads;
-    msiForegroundIsolationJournalReady();run();
-    check("journal ready duplicates cannot repeat hide or PnP work",queue.size()==2&&writes.size()==4&&afterJournalIo==locationReads+inventoryReads+snapshotReads+discoveryReads+xusbReads);
-    for(unsigned cancellation=0;cancellation<9;++cancellation){
-        reset();prepare();g_hidHideVisibilityJournal.active=false;run();
-        if(cancellation==0)msiForegroundIsolationSetUiOwned(false);
-        if(cancellation==1)g_inputHostEpochMirror=5;
-        if(cancellation==2)g_powerGeneration=4;
-        if(cancellation==3)g_msiForegroundAnchorRevision.fetch_add(1);
-        if(cancellation==4)g_inputHostExitFence=true;
-        if(cancellation==5 && g_msiForegroundIsolation.journalWait)g_msiForegroundIsolation.journalWait->observedTick=GetTickCount64()-3000;
-        if(cancellation==6)g_realStickTest.virtualTargetEnabled=false;
-        if(cancellation==7)ui=false;
-        if(cancellation==8)g_msiDinputReturnOwed=false;
-        g_hidHideVisibilityJournal.active=true;msiForegroundIsolationJournalReady();run();
-        check("late journal callback cannot revive OFF, stale, background or exiting work",writes.empty()&&inventoryReads+xusbReads+snapshotReads==0&&!g_msiForegroundIsolation.journalWait);
-    }
-    reset();prepare();g_hidHideVisibilityJournal.active=false;run();
-    g_hidHideVisibilityJournal.active=true;msiForegroundIsolationJournalReady();g_hidHideVisibilityJournal.active=false;run();
-    msiForegroundIsolationJournalReady();
-    check("journal continuation losing readiness cannot park or retry a second time",queue.size()==2&&writes.empty()&&!g_msiForegroundIsolation.journalWait&&g_msiForegroundIsolation.pendingToken==0);
+    journalProbeChecks();
     reset();prepare();job=currentJob();g_msiForegroundAnchorRevision.fetch_add(1);facts=Facts{};
     (void)msiForegroundIsolationJobCurrent(job,facts);receipt=msiForegroundIsolationGateFacts(facts);
     check("anchor revision mismatch has its own diagnostic not a fabricated foreground loss",hasFailure(receipt,"anchor-revision-mismatch") && !hasFailure(receipt,"ui-not-owned-or-not-eligible"));
@@ -738,14 +762,53 @@ int wmain(int argc,wchar_t** argv) {
     g_msiVisibilityObserverActiveForTest=savedObserverActive;g_msiVisibilityObserverLaunchForTest=savedObserverLaunch;
     g_msiVisibilityObserverMetadataForTest=savedObserverMetadata;g_domainLogEnabled[1]=savedObserverDetail;
 
+    // Actual production policies; runtime paths for both PIDs run below.
+    {
+        using ymcc::nativeForeground::Profile;
+        for(const std::string pid:{"1ABE","1B4C"}){
+            const auto rogRoot="USB\\VID_0B05&PID_"+pid+"\\PHYSICAL";
+            const auto rogHid="HID\\VID_0B05&PID_"+pid+"&MI_05&IG_00\\PHYSICAL";
+            const auto otherRoot="USB\\VID_0B05&PID_"+std::string(pid=="1ABE"?"1B4C":"1ABE")+"\\OTHER";
+            auto policyCheck=[&](const char* name,bool ok){const auto label="ROG PID"+pid+": "+name;check(label.c_str(),ok);};
+            policyCheck("same-root repeated collections are grouped case-insensitively",
+                ymcc::nativeForeground::uniqueSourceRoot(Profile::Rog,{rogRoot,ascii_lower(rogRoot),rogRoot}));
+            policyCheck("same-PID different roots and mixed-PID roots are rejected",
+                !ymcc::nativeForeground::uniqueSourceRoot(Profile::Rog,{rogRoot,rogRoot+"-OTHER"}) &&
+                !ymcc::nativeForeground::uniqueSourceRoot(Profile::Rog,{rogRoot,otherRoot}));
+            policyCheck("registered physical root admits only the ROG root-cycle profile",
+                ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Rog,ascii_lower(rogRoot)) &&
+                !ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Msi,rogRoot) &&
+                !ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Gpd,rogRoot) &&
+                !ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Unsupported,rogRoot));
+            policyCheck("HID identity cannot substitute for a physical USB root",
+                !ymcc::nativeForeground::uniqueSourceRoot(Profile::Rog,{rogHid,rogHid}) &&
+                !ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Rog,rogHid) &&
+                !ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Rog,rogRoot+"\\EXTRA"));
+            ymcc::msi::NativeForegroundXusbInterface endpoint;
+            endpoint.activeInterface=endpoint.ancestorMatched=true;endpoint.ancestorRoot=rogRoot;
+            endpoint.instanceId=rogHid;
+            const bool hidAdmitted=ymcc::nativeForeground::xusbTargetAdmitted(Profile::Rog,rogRoot,endpoint);
+            endpoint.instanceId="USB\\VID_0B05&PID_"+pid+"&MI_05\\PHYSICAL";
+            policyCheck("current same-root XUSB identity accepts both HID and USB buses",
+                hidAdmitted && ymcc::nativeForeground::xusbTargetAdmitted(Profile::Rog,rogRoot,endpoint));
+        }
+        check("ROG empty evidence or unknown PID cannot authorize grouping or root cycling",
+            !ymcc::nativeForeground::uniqueSourceRoot(Profile::Rog,{}) &&
+            !ymcc::nativeForeground::uniqueSourceRoot(Profile::Rog,{"USB\\VID_0B05&PID_FFFF\\PHYSICAL","USB\\VID_0B05&PID_FFFF\\PHYSICAL"}) &&
+            !ymcc::nativeForeground::nativeRootPortCycleAllowed(Profile::Rog,"USB\\VID_0B05&PID_FFFF\\PHYSICAL"));
+        check("MSI and GPD retain their existing unique-source count gate",
+            ymcc::nativeForeground::uniqueSourceRoot(Profile::Msi,{"USB\\VID_0DB0&PID_1901\\PHYSICAL"}) &&
+            !ymcc::nativeForeground::uniqueSourceRoot(Profile::Msi,{"USB\\VID_0DB0&PID_1901\\PHYSICAL","USB\\VID_0DB0&PID_1901\\PHYSICAL"}) &&
+            ymcc::nativeForeground::uniqueSourceRoot(Profile::Gpd,{"USB\\VID_045E&PID_028E\\PHYSICAL"}) &&
+            !ymcc::nativeForeground::uniqueSourceRoot(Profile::Gpd,{"USB\\VID_045E&PID_028E\\PHYSICAL","USB\\VID_045E&PID_028E\\PHYSICAL"}));
+        check("Unsupported family retains its original source-count policy",
+            ymcc::nativeForeground::uniqueSourceRoot(Profile::Unsupported,{"USB\\VID_0B05&PID_1ABE\\PHYSICAL"}) &&
+            !ymcc::nativeForeground::uniqueSourceRoot(Profile::Unsupported,{"USB\\VID_0B05&PID_1ABE\\PHYSICAL","USB\\VID_0B05&PID_1ABE\\PHYSICAL"}));
+    }
     const auto nativeOnly=msiNativeForegroundRegression();cases+=nativeOnly.first;failures+=nativeOnly.second;
     const auto rearmBoundary=msiExplicitRearmForegroundBoundaryRegression();cases+=rearmBoundary.first;failures+=rearmBoundary.second;
     const auto helperFacts=msiHelperDiagnosticAttributionRegression();cases+=helperFacts.first;failures+=helperFacts.second;
     const auto cleanupColdOff=msiCleanupColdOffRegression();cases+=cleanupColdOff.first;failures+=cleanupColdOff.second;
     const auto pauseLogCap=pauseMaskOnlyLogRegression();cases+=pauseLogCap.first;failures+=pauseLogCap.second;
-    g_inputHostProcess=nullptr;
-    std::cout<<"MSI_FOREGROUND_NATIVE cases="<<cases<<" failures="<<failures<<" realHardwareAccess=false\n";
-    std::ofstream report(fspath::path(g_yemanccDataDir)/L"msi-foreground-native-summary.json");
-    report<<json({{"cases",cases},{"failures",failures},{"actualProductionTu",true},{"realHardwareAccess",false},{"testIoOnly",true}}).dump(2);
-    return failures?3:0;
+    return finish();
 }

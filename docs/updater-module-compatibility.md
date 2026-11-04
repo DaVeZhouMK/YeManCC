@@ -6,7 +6,7 @@
 
 `tools/package-release.ps1` 在完整 InputHost/HIDM 与共享运行库装配后调用 `Write-YmccInputCompatibilityPayload`，生成 `YeManCC/module-package.json`。发布构建的原有 InputHost、HIDM 锁与运行库校验仍须通过。
 
-公开 0.0.35 的旧更新器会跳过 `feature-assets/virtual-gamepad` 和 `gyro-motion`。为处理首次升级，包内额外携带已绑定 SHA256 的输入资源 ZIP 与文件补齐脚本。HIDMaestroSetup 在后台等待旧更新事务提交，再补齐文件；随后检查实际驱动状态。此步骤本身只写模块文件，不执行驱动卸载或重启。等待、解压、文件处理都有预算，失败保留诊断和恢复数据。输入目标在文件身份匹配前不启动；延后意图由既有生命周期队列接续，界面握手不等待这个任务。
+公开 0.0.35 的旧更新器会跳过 `feature-assets/virtual-gamepad` 和 `gyro-motion`。为处理首次升级，完整包仅保存一份输入资源，另携带已绑定 SHA256 的文件补齐脚本。新 HIDMaestroSetup 从旧更新器已校验并保留的 package.zip（离线安装则用 Packages/YeManCC.zip）补齐被旧助手跳过的文件；不生成 ymcc-input-payload.zip，不重复携带 HIDMaestro.Core.dll。HIDMaestroSetup 在后台等待旧更新事务提交，再补齐文件；随后检查实际驱动状态。此步骤本身只写模块文件，不执行驱动卸载或重启。等待、解压、文件处理都有预算，失败保留诊断和恢复数据。输入目标在文件身份匹配前不启动；延后意图由既有生命周期队列接续，界面握手不等待这个任务。
 
 安装忙会直接反馈“等待完成后重试”，保留已校验的更新包。前端不会把模块忙误作缓存损坏，立即重发一次安装请求。正式安装助手持有模块锁直到提交或回滚完成；新进程的启动准备对提交与释放作有限等待。
 
@@ -71,3 +71,10 @@ HC 从普通 PowerControl 增量复制与普通文件回滚中排除。独立同
 2026-10-23 的进程身份读取已经改为 QueryFullProcessImageName + GetProcessTimes，避免把对方 DLL 模块枚举当成路径读取。安装助手的 Process 对象先绑定句柄，再核对路径和出生时间；外部同名进程先用有限权限只读查询筛选，再绑定和重核，不按 PID 或名称单独强退。Windows PS5 源 PS1 使用 UTF-8 BOM；生成的 C++ 脚本内容与编码修正前一致。新助手优先使用自身 PSHOME 的模块目录，恢复从 PowerShell 7 环境继承后 Get-FileHash 等命令不可用的问题；只修改助手自己的环境。
 
 运行中夹具必须收到自身消息循环的 ready 回执后才开始升级。ready 绑定 PID、创建时间及实际 HWND；新进程启动握手也从消息循环发出。正常模式须得到 graceful，挂起模式须得到 forced-owned-parent，不能只凭进程消失宣称正常退出。测试仍使用隐藏启动、屏幕外 1px、不抢前台的自有窗口；不操作安装版。
+
+
+## 2026-11-03 公开037升级后的旧电池apphost退休
+
+037对普通PowerControl文件使用增量复制，不会删除新版不再携带的YeManBatteryHost.exe。新版复用现有模块补齐助手的post-commit阶段，在输入文件、FanHost/HC及进程内电池组件身份核对后，只退休037公开包的162304字节、SHA256为6c3fd282b1dbe117c05a9164098085ada4c51b918d60860f595fdb3aa4d5ab67的单个apphost。
+
+核验和删除使用同一文件句柄，持有父目录且拒绝跳转；占用、只读、权限异常保留文件和未完成阶段，后续启动复用原流程重试，不循环等待、不杀进程、不递归删除。未知内容保持不动。清理只在整包committed后执行，因此不会删除回滚中的037文件。DLL、配置、驱动、用户文件及旧前端哈希资源不参与这项单文件退休。此次未执行夹具或真实安装，行为回归仍为NOT_RUN。

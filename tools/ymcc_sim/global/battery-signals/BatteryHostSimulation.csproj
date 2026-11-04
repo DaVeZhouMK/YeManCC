@@ -13,5 +13,6 @@
     <ProjectReference Include="../../../../native/BatteryHost/YeManBatteryHost.csproj" />
     <Compile Include="../../../../native/BatteryHostTests/Program.cs" Link="OriginalTests.cs" />
     <Compile Include="../../../../native/BatteryHostTests/MsiFixture.cs" Link="OriginalMsiFixtures.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/InProcessFixture.cs" Link="OriginalInProcessFixtures.cs" />
   </ItemGroup>
 </Project>

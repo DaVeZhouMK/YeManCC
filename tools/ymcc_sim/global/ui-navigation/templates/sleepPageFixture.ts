@@ -1,4 +1,4 @@
-const state={enabled:true,mode:'custom',suspended:0,pauseGameOnSleep:true,retryOnEntryFailure:true,retryOnNonUserWake:true,joyXoffAutoClose:true,wakePasswordEnabled:false,plan:true,staticWakeAutoScanEnabled:true,acButton:0,dcButton:1,hibernate:true,size:50,scheme:'1cb8b882-a900-4b9f-9bac-99d151e64441',timeouts:{acScreen:10,dcScreen:5,acSleep:30,dcSleep:15,acHibernate:0,dcHibernate:60}};
+const state={enabled:true,mode:'custom',suspended:0,pauseGameOnSleep:true,retryOnEntryFailure:true,retryOnSleepTimeout:false,retryOnNonUserWake:true,joyXoffAutoClose:true,wakePasswordEnabled:false,plan:true,staticWakeAutoScanEnabled:true,acButton:0,dcButton:1,hibernate:true,size:50,scheme:'1cb8b882-a900-4b9f-9bac-99d151e64441',timeouts:{acScreen:10,dcScreen:5,acSleep:30,dcSleep:15,acHibernate:0,dcHibernate:60}};
 (window as any).__sleepFixture=state;
 const idleStaticWake={enabled:false,phase:'idle',lastScanEpoch:0,devices:0,software:0,timers:0,protectedDevices:0,failed:0,restorePending:0,diagnosticSourceReady:false,lastError:''};
 type StaticWakeOperation={requestId:string;action:'scan'|'restore';state:'pending'|'completed';ok:boolean};

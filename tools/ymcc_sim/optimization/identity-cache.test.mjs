@@ -304,3 +304,80 @@ test('unproven identities, borrowed fingerprints and names suggesting parent/chi
   fs.appendFileSync(f.tool, 'tool drift');
   assert.equal(deduplicateCases([first, { ...f.adapter, id: 'synthetic.stale', cacheIdentity: f.identity }]).canonical.length, 2);
 });
+
+// Observe actual byte reads, while keeping every independently declared role.
+test('fingerprint byte reads share unchanged inputs only within one call', t => {
+  const f = fixture(), file = path.join(f.repoRoot, 'dep.mjs');
+  t.after(() => {
+    assert.equal(path.dirname(fs.realpathSync(f.root)), fs.realpathSync(EVIDENCE));
+    fs.rmSync(f.root, { recursive: true });
+  });
+  const payload = Buffer.alloc(5 * 1024 * 1024, 0x61);
+  fs.writeFileSync(file, payload);
+  const originalTimes = fs.statSync(file);
+  const originalHash = hash(file);
+  const open = fs.openSync, read = fs.readSync, close = fs.closeSync;
+  const tracked = new Map(), passes = new Set();
+  let serial = 0, bytes = 0;
+  t.mock.method(fs, 'openSync', (name, ...args) => {
+    const fd = open(name, ...args);
+    if (typeof name === 'string' && path.resolve(name) === file && args[0] === 'r') tracked.set(fd, ++serial);
+    return fd;
+  });
+  t.mock.method(fs, 'readSync', (fd, ...args) => {
+    const count = read(fd, ...args);
+    if (tracked.has(fd) && count > 0) { passes.add(tracked.get(fd)); bytes += count; }
+    return count;
+  });
+  t.mock.method(fs, 'closeSync', fd => { tracked.delete(fd); return close(fd); });
+  const iterations = 6, started = process.hrtime.bigint();
+  let first;
+  for (let i = 0; i < iterations; ++i) {
+    const value = f.fingerprint();
+    assert.equal(value.cacheable, true);
+    if (first) assert.equal(value.identity, first.identity); else first = value;
+    assert.deepEqual(value.manifest.inputs.filter(row => row.realPath === file).map(row => row.role).sort(),
+      ['dependency-input', 'resolved-input']);
+  }
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  t.diagnostic('identityReadProbe=' + JSON.stringify({ iterations, payloadBytes: payload.length,
+    actualByteReadPasses: passes.size, actualBytesRead: bytes, elapsedMs }));
+  assert.equal(passes.size, iterations);
+  assert.equal(bytes, payload.length * iterations);
+  // A later role cannot inherit approval of a different declared digest.
+  const mismatch = f.fingerprint({ options: { ...f.options, resolvedInputs: [{ path: 'dep.mjs', sha256: '0'.repeat(64) }] } });
+  assert.equal(mismatch.cacheable, false);
+  assert(codes(mismatch).includes('INPUT_SHA256_MISMATCH'));
+  // Another call always reads bytes, even when size and mtime are preserved.
+  fs.writeFileSync(file, Buffer.alloc(payload.length, 0x62));
+  fs.utimesSync(file, originalTimes.atime, originalTimes.mtime);
+  const changed = f.fingerprint();
+  assert.notEqual(changed.identity, first.identity);
+  assert(changed.manifest.inputs.filter(row => row.realPath === file).every(row => row.sha256 !== originalHash));
+});
+
+test('fingerprint rechecks metadata before sharing a repeated role read', t => {
+  const f = fixture(), file = path.join(f.repoRoot, 'dep.mjs'), originalHash = hash(file);
+  t.after(() => {
+    assert.equal(path.dirname(fs.realpathSync(f.root)), fs.realpathSync(EVIDENCE));
+    fs.rmSync(f.root, { recursive: true });
+  });
+  const open = fs.openSync, close = fs.closeSync, tracked = new Set();
+  let changed = false;
+  t.mock.method(fs, 'openSync', (name, ...args) => {
+    const fd = open(name, ...args);
+    if (typeof name === 'string' && path.resolve(name) === file && args[0] === 'r') tracked.add(fd);
+    return fd;
+  });
+  t.mock.method(fs, 'closeSync', fd => {
+    const target = tracked.delete(fd), result = close(fd);
+    if (target && !changed) { changed = true; fs.appendFileSync(file, '\nchanged between independently declared roles'); }
+    return result;
+  });
+  const value = f.fingerprint();
+  assert(changed);
+  assert.equal(value.cacheable, true);
+  assert.equal(value.manifest.inputs.find(row => row.role === 'dependency-input').sha256, originalHash);
+  assert.equal(value.manifest.inputs.find(row => row.role === 'resolved-input').sha256, hash(file));
+  assert.notEqual(value.manifest.inputs.find(row => row.role === 'resolved-input').sha256, originalHash);
+});

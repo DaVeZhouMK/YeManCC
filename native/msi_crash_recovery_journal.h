@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,7 @@ struct Record {
     std::string ownerCreationTime;
     std::string transactionId;
     bool modeReturnPending = false;
+    bool nativeLegacyImported = false;
     // Last durably consumed mode1 attempt: pid:decimal64 creation time, or empty.
     std::string modeAttemptOwner;
     std::string rootInstance;
@@ -178,6 +180,16 @@ inline bool sameDeviceRoot(const Record& record, std::string_view currentRoot,
 inline bool validHiddenPath(std::string_view path) noexcept {
     if (validRootInstance(path)) return true;
     if (path.size() > maxPathBytes) return false;
+    constexpr std::string_view xusb = "USB\\VID_0DB0&PID_1901&MI_00\\";
+    if (detail::startsAscii(path, xusb)) return detail::instanceTail(path.substr(xusb.size()));
+    constexpr std::string_view translated = "HID\\VID_0DB0&PID_1901&IG_";
+    if (detail::startsAscii(path, translated)) {
+        const auto tail = path.substr(translated.size());
+        const auto hex = [](char value) { return (value >= '0' && value <= '9') ||
+            (value >= 'A' && value <= 'F') || (value >= 'a' && value <= 'f'); };
+        return tail.size() > 3 && hex(tail[0]) && hex(tail[1]) && tail[2] == '\\' &&
+            detail::instanceTail(tail.substr(3));
+    }
     constexpr std::string_view prefix = "HID\\VID_0DB0&PID_190";
     if (!detail::startsAscii(path, prefix) || path.size() <= prefix.size()) return false;
     const char mode = path[prefix.size()];
@@ -221,7 +233,7 @@ namespace detail {
 // Decoded keys are checked before assignment, including escaped duplicates.
 class RecordSax final : public nlohmann::json_sax<nlohmann::json> {
     enum Field : std::size_t { Schema, BoardKey, OwnerPid, Creation, Transaction,
-                             Pending, AttemptOwner, Root, Paths, Locations, Count };
+                             Pending, AttemptOwner, Root, Paths, Locations, NativeLegacyImported, Count };
     std::array<bool, Count> seen_{};
     Field field_ = Schema;
     bool started_ = false, awaiting_ = false, paths_ = false, locations_ = false, completed_ = false;
@@ -231,8 +243,10 @@ public:
     bool completed() const noexcept { return completed_; }
     bool null() override { return false; }
     bool boolean(bool v) override {
-        if (!value(Pending)) return false;
-        record.modeReturnPending = v; awaiting_ = false; return true;
+        if (value(Pending)) record.modeReturnPending = v;
+        else if (value(NativeLegacyImported)) record.nativeLegacyImported = v;
+        else return false;
+        awaiting_ = false; return true;
     }
     bool number_integer(number_integer_t) override { return false; }
     bool number_unsigned(number_unsigned_t v) override {
@@ -274,7 +288,7 @@ public:
         if (!started_ || completed_ || paths_ || locations_ || awaiting_) return false;
         constexpr std::array<std::string_view, Count> names{{"schema", "boardKey", "ownerPid",
             "ownerCreationTime", "transactionId", "modeReturnPending", "modeAttemptOwner",
-            "rootInstance", "hiddenPaths", "locationPaths"}};
+            "rootInstance", "hiddenPaths", "locationPaths", "nativeLegacyImported"}};
         for (std::size_t i = 0; i < names.size(); ++i) {
             if (v != names[i]) continue;
             if (seen_[i]) return false;
@@ -284,7 +298,7 @@ public:
     }
     bool end_object() override {
         if (!started_ || completed_ || awaiting_ || paths_ || locations_) return false;
-        for (bool seen : seen_) if (!seen) return false;
+        for (std::size_t index = 0; index < NativeLegacyImported; ++index) if (!seen_[index]) return false;
         completed_ = validateRecord(record); return completed_;
     }
     bool start_array(std::size_t) override {
@@ -321,6 +335,7 @@ inline bool encode(const Record& r, std::string& out) {
             {"ownerCreationTime", r.ownerCreationTime}, {"transactionId", r.transactionId},
             {"modeReturnPending", r.modeReturnPending}, {"modeAttemptOwner", r.modeAttemptOwner},
             {"rootInstance", r.rootInstance}, {"hiddenPaths", r.hiddenPaths}, {"locationPaths", r.locationPaths}};
+        if (r.nativeLegacyImported) j["nativeLegacyImported"] = true;
         auto bytes = j.dump();
         if (bytes.size() > maxJournalBytes) return false;
         out = std::move(bytes); return true;
@@ -335,6 +350,47 @@ struct DecodeResult {
 };
 inline bool validRecord(const Record& r) noexcept { return validateRecord(r); }
 inline bool validOwnedPath(std::string_view path) noexcept { return validHiddenPath(path); }
+inline bool nativeForegroundLegacyClaim(const nlohmann::json& row, const Record& reference,
+        const std::string& creation, Record& out) {
+    try {
+        if (!validRecord(reference) || row.at("event") != "msi-native-foreground-isolation" ||
+            row.at("family") != "msi" || row.at("modeWrite") != false || row.at("virtualTargetCreated") != false)
+            return false;
+        const auto& before = row.at("beforeConfigurationEvidence");
+        if (before.at("snapshotRead") != true || before.at("selectedPathsComplete") != true ||
+            before.at("selectedHiddenCount") != 0 || before.at("unownedSelectedHiddenCount") != 0)
+            return false;
+        const auto root = row.at("sourceRoot").get<std::string>();
+        const auto locations = row.at("locationPaths").get<std::vector<std::string>>();
+        if (locations.empty() || reference.locationPaths.empty() || !detail::equalAscii(reference.rootInstance,root) ||
+            !sameDeviceRoot(reference, root, locations) ||
+            !detail::startsAscii(root, "USB\\VID_0DB0&PID_1901\\")) return false;
+        auto normalized=[](std::vector<std::string> paths){
+            for(auto& path:paths)for(auto& ch:path)if(ch>='a' && ch<='z')ch=static_cast<char>(ch-'a'+'A');
+            std::sort(paths.begin(),paths.end());return paths;
+        };
+        if(normalized(locations)!=normalized(reference.locationPaths))return false;
+        Record next = reference;
+        next.ownerPid = row.at("pid").get<std::uint32_t>();
+        next.ownerCreationTime = creation;
+        next.transactionId = "native-legacy:" + std::to_string(next.ownerPid) + ":" +
+            std::to_string(row.at("powerGeneration").get<std::uint64_t>()) + ":" +
+            std::to_string(row.at("edge").get<std::uint64_t>());
+        next.modeReturnPending = false;
+        next.modeAttemptOwner.clear();
+        next.hiddenPaths = row.at("ownedPaths").get<std::vector<std::string>>();
+        if (next.hiddenPaths.empty() || !validRecord(next)) return false;
+        for (const auto& path : next.hiddenPaths) {
+            if (detail::equalAscii(path, root)) continue;
+            if (!detail::startsAscii(path, "HID\\VID_0DB0&PID_1901&IG_") &&
+                !detail::startsAscii(path, "USB\\VID_0DB0&PID_1901&MI_00\\")) return false;
+        }
+        if (row.at("configurationReturned").get<bool>()) next.hiddenPaths.clear();
+        next.nativeLegacyImported = true;
+        out = std::move(next);
+        return true;
+    } catch (const nlohmann::json::exception&) { return false; }
+}
 // Empty text is the failure sentinel; a valid encoding is always a JSON object.
 inline std::string encodeRecord(const Record& r) {
     std::string bytes;

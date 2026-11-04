@@ -617,7 +617,7 @@
     {
       "id": "model.secondary-display",
       "domain": "remaining-model-methods",
-      "kind": "domain-action",
+      "kind": "unconnected-model-capability",
       "names": [
         "CEcControl_SetSecDispBrightness",
         "CEcControl_GetSecDispBrightnessRaw",
@@ -645,7 +645,7 @@
           "role": "existing-domain-implementation"
         }
       ],
-      "note": "Exact Flip DS and explicitly source-inherited Flip 1S DS ACPI EC secondary-display consumers are connected in this source candidate. No OverlayQuickTools/keyboard/trackpad UI import; runtime readiness, one-use read fences and source-pinned two-model registration remain authoritative. Mainline promotion, global software acceptance, package and physical effects are separate.",
+      "note": "Not connected to the admitted product scope: ACTIVE-INTEGRATION-SCOPE.json retains these candidate sources without activation or D15R2 promotion. This is a model hardware capability gap, distinct from the excluded wake-password UI. Exact Flip DS and explicitly source-inherited Flip 1S DS ACPI EC secondary-display consumers are connected in this source candidate. No OverlayQuickTools/keyboard/trackpad UI import; runtime readiness, one-use read fences and source-pinned two-model registration remain authoritative. Mainline promotion, global software acceptance, package and physical effects are separate.",
       "sideEffects": [
         "ACPI EC byte-register latch0x4F=0 then brightness0x4E with readback; no SuperIO ports",
         "Persistent display preference only after verified explicit operation; no automatic startup/resume/release brightness write"
@@ -734,5 +734,269 @@
       "source": "Devices/MSI/ClawA1M.cs",
       "meaning": "MsiDCVarData UEFI access used by OverBoost; retain only as user-scoped performance source metadata."
     }
-  ]
+  ],
+  "upstreamGroups": [
+    {
+      "id": "upstream.superjoy",
+      "domain": "lighting",
+      "kind": "required-internal-dependency",
+      "names": [
+        "TryBindSuperJoy",
+        "ApplySuperJoyLeds"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "LIGHTING-HC-LIFECYCLE",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "AYANEO3/NEXT2 SuperJoy stick interface and transactions require a new exact consumer/owner review; they are not admitted by an existing domain link.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "lighting"
+      ]
+    },
+    {
+      "id": "upstream.onex-light-apply",
+      "domain": "lighting",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ApplyLeds"
+      ],
+      "consumerReferences": [
+        {
+          "file": "FanLab/LightSetter/Oxp3LightingWriter.cs",
+          "anchor": "internal sealed class Oxp3LightingWriter",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "OXP3 ApplyLeds is represented by the existing source-only writer; parent, lease and live acceptance remain separate.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "lighting"
+      ]
+    },
+    {
+      "id": "upstream.power-line",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "required-lifecycle-dependency",
+      "names": [
+        "SystemManager_PowerLineStatusChanged"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Class-specific power-line callbacks require current-owner/generation reconciliation; a fan watchdog is not proof for every override.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan",
+        "lighting",
+        "battery",
+        "motion",
+        "controller",
+        "oem-input",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "upstream.hid-transport",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "required-internal-dependency",
+      "names": [
+        "WriteReport",
+        "WriteFeatureReport",
+        "DisposeHidDevices",
+        "GetVendorHidDevice",
+        "WriteVendorHidCommand"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Shared HID report/feature/disposal dependencies need exact vendor protocol and owned-handle review; no new provider is activated.",
+      "sideEffects": [
+        "hardware-or-firmware-access"
+      ],
+      "affectedDomains": [
+        "lifecycle-and-dependencies",
+        "fan",
+        "lighting",
+        "battery",
+        "motion",
+        "controller",
+        "oem-input"
+      ]
+    },
+    {
+      "id": "upstream.physical-controller",
+      "domain": "controller",
+      "kind": "required-internal-dependency",
+      "names": [
+        "CreateController",
+        "ApplyGamepadMode",
+        "SetPhysicalXInputEnabled"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "anchor": "runtimeBindings",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "Controller factory/mode/physical XInput availability remains provider-owned; no unimplemented source or hide path is enabled.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "upstream.oem-remap",
+      "domain": "oem-input",
+      "kind": "domain-action",
+      "names": [
+        "SetTurboButtonTakeover",
+        "SetDefaultTurboButtonTakeover",
+        "BuildRemapPage3",
+        "BuildRemapPage1",
+        "BuildRemapPage2",
+        "BuildIntercept",
+        "HandleStatusReport"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemBackMappingRefreshGate",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcOemInputCapabilityBinding.h",
+          "anchor": "namespace",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "OneX takeover/remap/status obligations retain exact packet/model and actual press/release/single-reader ownership. OXP3 acceptance is not all-model method execution.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "oem-input"
+      ]
+    },
+    {
+      "id": "upstream.motion-config",
+      "domain": "motion",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ApplyDeviceConfiguration",
+        "ConvertToIMUMatrix",
+        "UpdateIMUMatrix",
+        "SetWindowsSensorFields",
+        "SaveDeviceConfiguration",
+        "ConvertToIMUMatrixData"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCapturePrivateHcMotionSelectorRecipe",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcControllerMotionCapabilityCatalog.h",
+          "anchor": "class ModelBindingCache",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Motion matrix/configuration conversion, Windows fields and persistence require actual calibrated-sample/transaction consumers; unrelated settings UI is excluded.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "motion"
+      ]
+    },
+    {
+      "id": "upstream.thermal-metadata",
+      "domain": "performance",
+      "kind": "metadata-only-by-user",
+      "names": [
+        "ApplyTctlLimit",
+        "ApplySkinTemperatureLimit",
+        "ApplyTemperatureLimits"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/hc-performance-metadata.json",
+          "anchor": "takeOverDispatch",
+          "role": "consumer-contract"
+        },
+        {
+          "file": "capabilities/USER-SCOPE-DECISIONS.json",
+          "anchor": "CPU/GPU",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "HC thermal-limit declarations remain source metadata; this review does not activate thermal/UV/GPU controls or change the separate TDP owner.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "performance"
+      ]
+    },
+    {
+      "id": "upstream.fan-terminals",
+      "domain": "fan",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ReadCPUTemperature",
+        "TryWriteEcByte",
+        "WriteFanRegister"
+      ],
+      "consumerReferences": [
+        {
+          "file": "FanLab/real-host/Program.cs",
+          "anchor": "CapabilityRoutes.CreateTypeCache()",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/FAN-RETURN-CONSUMPTION.json",
+          "anchor": "registeredRoutes",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "New OneX CPU-temperature and EC-register fan dependencies require precise model/firmware/owner reconciliation; existing HWiNFO/inherited EC paths do not certify them.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan"
+      ]
+    },
+    {
+      "id": "upstream.model-string",
+      "domain": "oem-input",
+      "kind": "model-metadata-reference",
+      "names": [
+        "ToString"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemBackMappingRefreshGate",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcOemInputCapabilityBinding.h",
+          "anchor": "namespace",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Device string representation is model/presentation metadata, never hardware capability or activation proof.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "oem-input"
+      ]
+    }
+  ],
+  "upstreamScope": "Pinned source obligations in this same offline policy. Frozen397 classification is distinct; domain references do not establish exact-method execution or runtime admission."
 }

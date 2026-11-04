@@ -52,7 +52,7 @@ internal static partial class Program
             var (s,_)=MotorReady();s.ObservedController!.Emit(0,2,MotorPacket(0,213,true),7);MotorEquals(MotorFrame(s,4),0,213,1,7,2);
         }));
         cases.Add(Group("lighting after zero cannot erase pending motor stop",()=>{
-            var (s,_)=MotorReady();var c=s.ObservedController!;c.Emit(0,2,MotorPacket(121,6),1);c.Emit(0,2,MotorPacket(0,0),2);
+            var (s,_)=MotorReady();SetFrameRawLoggingForFixture(s,true);var c=s.ObservedController!;c.Emit(0,2,MotorPacket(121,6),1);c.Emit(0,2,MotorPacket(0,0),2);
             var led=new byte[63];led[1]=4;led[2]=255;led[3]=255;led[44]=231;c.Emit(0,2,led,3);
             var r=MotorFrame(s,4);MotorEquals(r,0,0,2,2);Check(r.GetProperty("gameOutputObservation").GetProperty("sdkSequence").GetUInt32()==3);
         }));

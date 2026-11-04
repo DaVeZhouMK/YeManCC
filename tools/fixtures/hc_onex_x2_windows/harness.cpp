@@ -95,11 +95,50 @@ static void filtering() {
         oneDevice();mock::w.devices[0].pid=pid;p::WindowsTransport t;boot(t,model);eq(mock::w.dataOpens,1u,"exact allowed VID/PID/usage accepted");drain(t);}
 }
 static void multiCollection(){
-    test::section="filtering";mock::reset();auto game=mock::device(L"gamepad");game.page=1;game.usage=5;
-    auto key=mock::device(L"keyboard");key.page=1;key.usage=6;
-    mock::w.devices={game,key,mock::device(L"vendor"),mock::device(L"unvisited")};p::WindowsTransport t;boot(t);tick(t,4100);
-    eq(mock::w.probes,3u,"probes stop at first exact vendor");eq(mock::w.dataOpens,1u,"only one selected vendor IO open");
-    for(const auto& s:mock::w.submissions)eq(mock::object(s.device)->index,std::size_t{2},"both read and write target vendor collection only");drain(t);
+    test::section="filtering";
+    // Two independently source-matching collections cannot choose an owner,
+    // even with different allowed PIDs or observed report lengths/layouts.
+    for(const auto model:{p::Model::X2,p::Model::X2MiniPro,p::Model::OneXPlayer3})
+    for(const auto layout:{p::InputLayout::ReportIdThenFrame,p::InputLayout::ZeroReportIdThenFrame})
+    for(bool mixedPid:{false,true}){
+        if(mixedPid&&model==p::Model::OneXPlayer3)continue;
+        mock::reset();auto first=mock::device(L"vendor-first"),second=mock::device(L"vendor-second");
+        if(mixedPid)second.pid=0x1305;second.input=129;second.output=65;
+        auto ignored=mock::device(L"keyboard");ignored.page=1;ignored.usage=6;
+        mock::w.devices={first,ignored,second};p::WindowsTransport t;
+        t.request(model,initialContext,layout,100);tick(t,100);
+        eq(t.snapshot().phase,p::Phase::Detached,"ambiguous source-matching collections remain detached");
+        eq(mock::w.probes,3u,"uniqueness examines every candidate");eq(mock::w.interfaces,4u,"enumeration reaches actual end");
+        eq(mock::w.dataOpens,0u,"ambiguity opens no IO owner");eq(mock::w.createEvents,0u,"ambiguity allocates no events");
+        eq(mock::w.readsCalled,0u,"ambiguity submits no read");eq(mock::w.writesCalled,0u,"ambiguity submits no write");
+        check(!t.hasDevice()&&t.devicePath().empty(),"ambiguity publishes no bound device path");eq(t.lastError(),DWORD{ERROR_INVALID_DATA},"ambiguous collection explicitly refused");drain(t);
+    }
+    // A source mismatch after the selected candidate cannot replace its PID or
+    // independent contract view. The original model allowlist is unchanged.
+    for(const auto model:{p::Model::X2,p::Model::X2MiniPro,p::Model::OneXPlayer3})
+    for(USHORT pid:{USHORT{0xfe00},USHORT{0x1305}}){
+        if(model==p::Model::OneXPlayer3&&pid==0x1305)continue;
+        mock::reset();auto game=mock::device(L"gamepad");game.page=1;game.usage=5;
+        auto key=mock::device(L"keyboard");key.page=1;key.usage=6;
+        auto vendor=mock::device(L"vendor");vendor.pid=pid;vendor.input=33;vendor.output=65;
+        auto tail=mock::device(L"unmatched-tail");tail.pid=0xfe01;tail.input=512;
+        mock::w.devices={game,key,vendor,tail};p::WindowsTransport t;boot(t,model);tick(t,4099);
+        eq(mock::w.writesCalled,0u,"unique bind preserves initial4000 wait");tick(t,4100);
+        eq(mock::w.probes,4u,"unique selection scans beyond first exact vendor");eq(mock::w.dataOpens,1u,"only one selected vendor IO open");
+        eq(t.snapshot().inputBytes,std::size_t{33},"selected candidate input view preserved");eq(t.snapshot().outputBytes,std::size_t{65},"selected candidate output view preserved");
+        eq(t.snapshot().inputLayout,reportLayout,"original requested layout preserved");eq(t.snapshot().bound,model,"original exact model preserved");
+        eq(t.devicePath(),vendor.path,"only unique candidate path published");
+        for(const auto& submission:mock::w.submissions)eq(mock::object(submission.device)->index,std::size_t{2},"both read and write target vendor collection only");drain(t);
+    }
+    // 1305 remains excluded for OXP3 even beside an admitted FE00 endpoint.
+    mock::reset();auto excluded=mock::device(L"oxp3-excluded-pid");excluded.pid=0x1305;
+    mock::w.devices={excluded,mock::device(L"oxp3-allowed")};p::WindowsTransport oxp3;boot(oxp3,p::Model::OneXPlayer3);
+    eq(mock::w.probes,2u,"excluded PID examined without broadening OXP3");eq(mock::object(mock::pending(false).device)->index,std::size_t{1},"excluded PID never becomes selected owner");drain(oxp3);
+    // An interrupted enumeration cannot prove uniqueness from a prefix.
+    oneDevice();mock::w.failInterfaceAt=1;p::WindowsTransport interrupted;
+    interrupted.request(p::Model::X2,initialContext,reportLayout,100);tick(interrupted,100);
+    eq(mock::w.dataOpens,0u,"incomplete enumeration opens no IO owner");eq(mock::w.createEvents,0u,"incomplete enumeration allocates no events");
+    eq(interrupted.lastError(),DWORD{ERROR_ACCESS_DENIED},"enumeration error retained");check(!interrupted.hasDevice(),"partial candidate is not bound");drain(interrupted);
 }
 static std::vector<unsigned char> expectedPage(p::Model model,std::size_t index,std::size_t size){
     // Independent fixed HC payload oracle; do not call production initStep/encodeReport.
@@ -108,7 +147,7 @@ static std::vector<unsigned char> expectedPage(p::Model model,std::size_t index,
     else if(index==1){payload={2,0x38,0x20,2,1};for(unsigned id=10;id<=16;++id)payload.insert(payload.end(),{static_cast<unsigned char>(id),1,static_cast<unsigned char>(id),0,0,0});
         payload.insert(payload.end(),{0x22,2,1,0x67,0,0,0x23,2,1,0x66,0,0});
         if(model==p::Model::X2MiniPro){payload[50]=0x68;payload[56]=0x69;}}
-    else if(index==2)payload={2,0x38,0x20,3,1,0x24,2,2,5,0,0,0x25,1,0x21,0,0,0};
+    else if(index==2){payload={2,0x38,0x20,3,1,0x24,2,2,5,0,0,0x25,1,0x21,0,0,0};if(model==p::Model::OneXPlayer3){payload[12]=2;payload[13]=1;payload[14]=0x68;}}
     else payload={0,1,2};
     if(model==p::Model::X2MiniPro&&index<3)payload[2]=2;
     std::vector<unsigned char> report(size,0);const auto offset=size==65?1u:0u;const auto command=index==3?0xB2u:0xB4u;
@@ -256,13 +295,18 @@ static void readerEvents(){
         const std::vector<unsigned> ids={0x22,0x23,0x22,0x23,0x20,0x21,0x24};
         const std::vector<unsigned> bits={1,3,2,0,0,0,0};
         for(std::size_t i=0;i<ids.size();++i){auto& io=mock::pending(false);const bool pressed=i<2||i>=4;auto bytes=frame(ids[i],pressed,io.size,prefix,strictZero?0:0xB3);
-            mock::complete(io,true,io.size,ERROR_SUCCESS,bytes);tick(t,now);auto e=t.popEvent();check(e.has_value(),"same-generation button frame creates expected event");
+            mock::complete(io,true,io.size,ERROR_SUCCESS,bytes);tick(t,now);auto e=t.popEvent();if(model==p::Model::OneXPlayer3&&i==6){check(!e,"alternate held Home DOWN is redundant and cannot duplicate an event");++now;continue;}check(e.has_value(),"same-generation button frame creates expected event");
             eq(e->generation,generation,"reader event belongs to current generation");eq(e->context,initialContext,"reader event belongs to current context");eq(e->capturedAt,now,"event uses completion timestamp");
-            eq(static_cast<unsigned>(e->rearBits),bits[i],"L4/R4 state semantic left=1 right=2");
+            eq(static_cast<unsigned>(e->rearBits),model==p::Model::OneXPlayer3&&i>=5?4u:bits[i],"per-model actual held bits preserve independent Home");
             const auto expected=i<4?(ids[i]==0x22?p::Button::L4:p::Button::R4):ids[i]==0x20?p::Button::Turbo:ids[i]==0x21?(model==p::Model::X2MiniPro?p::Button::Keyboard:p::Button::Home):(model==p::Model::X2?p::Button::Keyboard:p::Button::Home);
-            eq(e->button,expected,"exact model-specific vendor ID mapping");eq(e->kind,i<4?p::EventKind::RearChanged:p::EventKind::Click,"click and held-state event distinct");check(!t.popEvent(),"no duplicate event per frame");++now;
+            eq(e->button,expected,"exact model-specific vendor ID mapping");eq(e->kind,i<4?p::EventKind::RearChanged:model==p::Model::OneXPlayer3&&i>=5?(i==5?p::EventKind::RearChanged:p::EventKind::RearObserved):p::EventKind::Click,"per-model click, changed held and redundant held observations remain distinct");check(!t.popEvent(),"no duplicate event per frame");++now;
         }
-        auto& same=mock::pending(false);mock::complete(same,true,same.size,ERROR_SUCCESS,frame(0x22,false,same.size,prefix,strictZero?0:0xB3));tick(t,now++);auto observed=t.popEvent();check(observed.has_value(),"actual redundant UP retained for cross-generation release fence");eq(observed->kind,p::EventKind::RearObserved,"redundant UP is observation, not changed state");eq(observed->rearBits,std::uint8_t{0},"redundant UP remains neutral");check(!t.popEvent(),"single redundant UP observation");
+        auto& same=mock::pending(false);mock::complete(same,true,same.size,ERROR_SUCCESS,frame(0x22,false,same.size,prefix,strictZero?0:0xB3));tick(t,now++);auto observed=t.popEvent();check(observed.has_value(),"actual redundant UP retained for cross-generation release fence");eq(observed->kind,p::EventKind::RearObserved,"redundant UP is observation, not changed state");eq(observed->rearBits,static_cast<std::uint8_t>(model==p::Model::OneXPlayer3?4:0),"redundant rear UP preserves independently held OXP3 Home");check(!t.popEvent(),"single redundant UP observation");
+        if(model==p::Model::OneXPlayer3){
+            for(const auto [id,pressed,held]:std::array<std::tuple<unsigned,bool,unsigned>,3>{{{0x25,true,12},{0x24,false,8},{0x25,false,0}}}){
+                auto& io=mock::pending(false);mock::complete(io,true,io.size,ERROR_SUCCESS,frame(id,pressed,io.size,prefix,strictZero?0:0xB3));tick(t,now++);const auto e=t.popEvent();check(e.has_value(),"OXP3 true held key edge survives real Windows reader");eq(e->kind,p::EventKind::RearChanged,"OXP3 physical change remains held event");eq(static_cast<unsigned>(e->rearBits),held,"OXP3 Home/G-Key release independently through Windows transport");eq(e->button,id==0x25?p::Button::GKey:p::Button::Home,"OXP3 Windows reader preserves exact key identity");check(!t.popEvent(),"OXP3 held edge emits once");
+            }
+        }
         auto& unknown=mock::pending(false);mock::complete(unknown,true,unknown.size,ERROR_SUCCESS,frame(0x99,true,unknown.size,prefix,strictZero?0:0xB3));tick(t,now++);check(!t.popEvent(),"unknown vendor ID does not fabricate key");
         auto& shortRead=mock::pending(false);mock::complete(shortRead,true,shortRead.size-1,ERROR_SUCCESS,frame(0x22,true,shortRead.size,prefix,strictZero?0:0xB3));tick(t,now++);check(!t.popEvent(),"short read cannot publish");eq(t.snapshot().invalidFrames,std::uint64_t{1},"short read recorded invalid");drain(t);
     }
@@ -289,6 +333,29 @@ static void reopenedIdentity(){
         check(!t.hasDevice()&&t.snapshot().phase==p::Phase::Detached,"reopen mismatch cannot bind session");
         eq(t.lastError(),DWORD{ERROR_INVALID_DATA},"reopen mismatch explicitly reported");drain(t);
     }
+    for(const auto model:{p::Model::X2,p::Model::X2MiniPro,p::Model::OneXPlayer3})
+    for(USHORT pid:{USHORT{0xfe00},USHORT{0x1305}})
+    for(bool drift:{true,false}){
+        if(model==p::Model::OneXPlayer3&&pid==0x1305)continue;
+        oneDevice();mock::w.devices[0].pid=pid;mock::w.devices[0].input=33;mock::w.devices[0].output=65;
+        auto replacement=std::make_shared<mock::Device>(mock::w.devices[0]);
+        if(drift)replacement->pid=pid==0xfe00?USHORT{0x1305}:USHORT{0xfe00};
+        mock::w.devices[0].reopened=replacement;p::WindowsTransport t;
+        t.request(model,initialContext,reportLayout,100);tick(t,100);
+        eq(mock::w.dataOpens,1u,"PID identity checked on reopened owner handle");
+        if(drift){
+            eq(t.snapshot().phase,p::Phase::Detached,"allowed-PID drift is still a different source identity");
+            eq(mock::w.closeDevices,1u,"PID drift closes actual owner");eq(mock::w.createEvents,0u,"PID drift allocates no events");
+            eq(mock::w.readsCalled,0u,"PID drift submits no read");eq(mock::w.writesCalled,0u,"PID drift submits no write");
+            check(!t.hasDevice()&&t.devicePath().empty(),"PID drift publishes no path");eq(t.lastError(),DWORD{ERROR_INVALID_DATA},"PID drift explicitly reported");
+        }else{
+            eq(t.snapshot().phase,p::Phase::Live,"same original PID reopens normally");eq(t.snapshot().bound,model,"reopen preserves exact old model");
+            eq(t.snapshot().inputBytes,std::size_t{33},"same-PID reopened input view preserved");eq(t.snapshot().outputBytes,std::size_t{65},"same-PID reopened output view preserved");
+            eq(t.snapshot().inputLayout,reportLayout,"same-PID layout unchanged");eq(mock::w.writesCalled,0u,"normal reopen retains initial wait");
+        }
+        drain(t);
+    }
+
 }
 static void rawFraming(){
     test::section="raw-framing";
@@ -628,6 +695,17 @@ static void completionProbeClose() {
     retirementPoll(t,10000);completionIs(t,false);mock::w.failProbeClose=false;
     retirementPoll(t,10001);completionIs(t,true);eq(mock::w.probes,1u,"retry releases original probe without enumeration");
     t.stop(10002);staysStopped(t,10003);
+    mock::reset();auto ignored=mock::device(L"later-keyboard");ignored.page=1;ignored.usage=6;
+    mock::w.devices={mock::device(L"selected-before-failed-close"),ignored};mock::w.failProbeCloseIndex=1;p::WindowsTransport later;
+    later.request(p::Model::X2,initialContext,reportLayout,100);tick(later,100);
+    completionIs(later,false);check(later.hasDevice()&&later.devicePath().empty(),"later failed probe close retains probe ownership without binding earlier candidate");
+    eq(mock::w.probes,2u,"later probe was visited");eq(mock::w.dataOpens,0u,"retained later probe blocks IO open");eq(mock::w.createEvents,0u,"retained later probe allocates no events");
+    mock::Object* retainedProbe=nullptr;for(auto& object:mock::w.objects)if(object->kind==mock::Kind::Probe&&!object->closed)retainedProbe=object.get();
+    check(retainedProbe&&retainedProbe->index==1,"exact failed probe object remains owned");
+    retirementPoll(later,10000);completionIs(later,false);mock::w.failProbeCloseIndex=(std::numeric_limits<unsigned>::max)();
+    retirementPoll(later,10001);completionIs(later,true);check(retainedProbe->closed,"same retained probe closes on retry");eq(mock::w.probes,2u,"probe close retry performs no enumeration");
+    later.stop(10002);staysStopped(later,10003);
+
 }
 static void completionBlocksRebind() {
     test::section="completion-rebind";oneDevice();mock::Plan immediate;immediate.mode=mock::Mode::Immediate;

@@ -1,4 +1,4 @@
-import { detectedGameName, type DetectedGame } from './gamedetect';
+import { detectedGameName, isGameStatusCurrent, isCurrentGameTarget, subscribeGameTargetReadiness, type DetectedGame } from './gamedetect';
 import { getPolicyGame, subscribePolicyGameStatus } from './gamePolicyTarget';
 import { canAutoPrepareTrainer, getGameTrainerState, getReadyGameTrainer, restoreReadyGameTrainer, subscribeGameTrainerState, trainerTaskKey } from './gameTrainer';
 import { getSettingsGeneration } from './settingsRepository';
@@ -13,19 +13,22 @@ function identity(game: DetectedGame | null): string {
 // Decky requests a one-off consistency check from the resident owner. It owns no timer.
 export function refreshGameTrainerRecovery(): void { refreshShared?.(); }
 // The existing preparation owner pushes state changes. Only an unresolved result
-// needs local receipt polling, and confirmed readiness stops it completely.
+// needs local receipt polling. Read faults wait for an explicit/owned event.
 export function startGameTrainerRecovery(): () => void {
   if (leases++ === 0) {
-    let stopped = false, epoch = 0, misses = 0, recoveryKey = '';
+    let stopped = false, epoch = 0, misses = 0, recoveryKey = '', cacheFaulted = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let checking: { identity: string; generation: number } | null = null;
     const recover = () => {
       if (timer !== null) clearTimeout(timer);
       timer = null;
+      // Display may retain a game while discovery is unknown. Do not turn that
+      // state into a local restore or discard an already confirmed receipt.
+      if (stopped || !isGameStatusCurrent()) { ++epoch; checking = null; return; }
       const target = getPolicyGame(), generation = getSettingsGeneration();
       if (stopped || !target || !Number.isSafeInteger(target.pid) || target.pid <= 0 || !/^[1-9][0-9]*$/.test(target.processCreated)
-        || !canAutoPrepareTrainer(detectedGameName(target), target.path) || getReadyGameTrainer(detectedGameName(target), target.path, target)) {
-        ++epoch; checking = null; misses = 0; recoveryKey = ''; return;
+        || !isCurrentGameTarget(target) || !canAutoPrepareTrainer(detectedGameName(target), target.path) || getReadyGameTrainer(detectedGameName(target), target.path, target)) {
+        ++epoch; checking = null; misses = 0; recoveryKey = ''; cacheFaulted = false; return;
       }
       // Preparation already owns its request polling and will push every state.
       const preparation = getGameTrainerState(detectedGameName(target), target.path);
@@ -33,16 +36,20 @@ export function startGameTrainerRecovery(): () => void {
         ++epoch; checking = null; return;
       }
       const selected = identity(target), key = JSON.stringify([selected, generation]);
-      if (key !== recoveryKey) { recoveryKey = key; misses = 0; }
+      if (key !== recoveryKey) { recoveryKey = key; misses = 0; cacheFaulted = false; }
+      if (cacheFaulted) return;
       if (checking?.identity === selected && checking.generation === generation) return;
       const observed = ++epoch;
       checking = { identity: selected, generation };
       const isCurrent = () => !stopped && epoch === observed && generation === getSettingsGeneration()
-        && identity(getPolicyGame()) === selected;
-      void restoreReadyGameTrainer(detectedGameName(target), target.path, { processTarget: target, isTargetCurrent: isCurrent })
-        .catch(() => null).finally(() => {
-          if (stopped || epoch !== observed) return;
+        && isGameStatusCurrent() && isCurrentGameTarget(target) && identity(getPolicyGame()) === selected;
+      void restoreReadyGameTrainer(detectedGameName(target), target.path, {
+        processTarget: target, isTargetCurrent: isCurrent,
+        onCacheFault: () => { if (isCurrent()) cacheFaulted = true; },
+      }).catch(() => { if (isCurrent()) cacheFaulted = true; }).finally(() => {
+          if (stopped || epoch !== observed || !isGameStatusCurrent() || !isCurrentGameTarget(target)) return;
           checking = null;
+          if (cacheFaulted) return;
           const current = getPolicyGame();
           const state = current && getGameTrainerState(detectedGameName(current), current.path);
           // A known terminal answer waits for an owner event or a Decky recheck.
@@ -53,18 +60,19 @@ export function startGameTrainerRecovery(): () => void {
           }
         });
     };
-    const refresh = () => { misses = 0; recover(); };
+    const refresh = () => { misses = 0; cacheFaulted = false; recover(); };
     refreshShared = refresh;
     let receivedInitial = false;
     const stopGame = subscribePolicyGameStatus(() => { receivedInitial = true; recover(); });
     const stopTrainer = subscribeGameTrainerState(recover);
+    const stopReadiness = subscribeGameTargetReadiness(recover);
     window.addEventListener('ui-settings:changed', refresh);
     window.addEventListener('ipc:power.resumed', refresh);
     if (!receivedInitial) recover();
     stopShared = () => {
       stopped = true; ++epoch; refreshShared = null;
       if (timer !== null) clearTimeout(timer);
-      stopGame(); stopTrainer();
+      stopGame(); stopTrainer(); stopReadiness();
       window.removeEventListener('ui-settings:changed', refresh);
       window.removeEventListener('ipc:power.resumed', refresh);
     };

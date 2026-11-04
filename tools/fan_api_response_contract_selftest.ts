@@ -34,14 +34,62 @@ const routes: Array<[string, () => Promise<FanState>]> = [
   ['resume',()=>adapter.resume({generation:1,source:'fixture'})], ['close',()=>adapter.close()],
 ];
 try {
-  await check('handshake supported',async()=>{setReply({ok:true,supported:true,protocolVersion:2});assert.equal((await adapter.handshake()).supported,true);});
+  await check('handshake supported',async()=>{
+    setReply({ok:true,supported:true,protocolVersion:2});assert.equal((await adapter.handshake()).supported,true);
+    const source={ok:true,supported:true,protocolVersion:2,deviceClass:null,fanRoute:'GenericDuty',fanRouteWriteReady:true,
+      sourceModelClass:'HandheldCompanion.Devices.FixtureSource',sourceCommit:'f'.repeat(40),deviceIdentity:{
+        identityKind:'fixed-source-dmi',runtimeFactory:'not-constructed',manufacturer:'fixture',product:'source',
+        capabilityModelClass:'HandheldCompanion.Devices.FixtureSource',capabilitySourceCommit:'f'.repeat(40),
+        capabilityDeviceId:'fixture-source',capabilitySourceSha256:'a'.repeat(64)}};
+    setReply(source);assert.equal((await adapter.handshake()).sourceModelClass,source.sourceModelClass);
+    for(const delta of [{sourceModelClass:'different'},{sourceModelClass:null},{sourceCommit:'bad'},
+      {sourceCommit:'e'.repeat(40)},{deviceClass:'HandheldCompanion.Devices.UnrelatedRuntime'},
+      {deviceIdentity:{...source.deviceIdentity,capabilitySourceSha256:''}},
+      {deviceIdentity:{...source.deviceIdentity,identityKind:'runtime'}},
+      {deviceIdentity:{...source.deviceIdentity,runtimeFactory:'constructed'}},
+      {deviceIdentity:{...source.deviceIdentity,manufacturer:''}},
+      {deviceIdentity:{...source.deviceIdentity,product:''}}]) {
+      setReply({...source,...delta});await invalid(()=>adapter.handshake(),'FAN_API_RESPONSE_INVALID');
+    }
+    for(const field of ['sourceModelClass','sourceCommit','deviceIdentity']) {
+      const missing:Record<string,unknown>={...source};delete missing[field];setReply(missing);await invalid(()=>adapter.handshake(),'FAN_API_RESPONSE_INVALID');
+    }
+    setReply({...source,supported:false,fanRouteWriteReady:false});assert.equal((await adapter.handshake()).supported,false);
+  });
   await check('handshake honest unsupported',async()=>{setReply({ok:true,supported:false});assert.equal((await adapter.handshake()).supported,false);});
   for (const [name,call] of routes) {
     await check(`${name} valid receipt`,async()=>{setReply({ok:true,state});assert.deepEqual(await call(),state);});
     await check(`${name} missing receipt`,async()=>{setReply({ok:true});await invalid(call,'FAN_HTTP_RESULT_UNKNOWN');});
   }
   await check('state valid receipt',async()=>{setReply({ok:true,state});assert.deepEqual(await adapter.getState(),state);});
-  await check('state future optional fields allowed',async()=>{setReply({ok:true,state:{state:'FutureFamilyState',lease:null,futureField:{value:true}}});assert.equal((await adapter.getState()).state,'FutureFamilyState');});
+  await check('state future optional fields allowed',async()=>{
+    setReply({ok:true,state:{state:'FutureFamilyState',lease:null,futureField:{value:true}}});assert.equal((await adapter.getState()).state,'FutureFamilyState');
+    const source = {state:'Stopped',hardwareWrites:false,hardwareWritesEnabled:false,hardwareWritesObserved:true,
+      sourceFanMode:true,sourceFanOwnerEntered:true,sourceFanClosePending:false,sourceFanClosed:true,
+      sourceFanAutomaticReturned:true,sourceFanGeneration:7,
+      recoveryClaimEvidence:{sourceFanGeneration:7,oemReleaseActionKind:'proven-by-source-auto-register-and-terminal-close',oemReleaseActionClass:'release-action-proven'}};
+    setReply({ok:true,state:source});assert.deepEqual(await adapter.getState(),source);
+    for(const field of ['sourceFanOwnerEntered','sourceFanClosePending','sourceFanClosed','sourceFanAutomaticReturned','sourceFanGeneration','recoveryClaimEvidence']) {
+      const missing:Record<string,unknown>={...source};delete missing[field];setReply({ok:true,state:missing});await invalid(()=>adapter.getState(),'FAN_API_RESPONSE_INVALID');
+    }
+    for(const delta of [{sourceFanMode:'true'},{sourceFanOwnerEntered:'true'},{sourceFanGeneration:0},{sourceFanGeneration:1.5},
+      {sourceFanGeneration:8},{sourceFanGeneration:null},{sourceFanClosed:true,sourceFanClosePending:true},
+      {sourceFanMode:false},{sourceFanOwnerEntered:false,sourceFanGeneration:null},
+      {recoveryClaimEvidence:{sourceFanGeneration:'7'}}]) {
+      setReply({ok:true,state:{...source,...delta}});await invalid(()=>adapter.getState(),'FAN_API_RESPONSE_INVALID');
+    }
+    const unopened={...source,sourceFanOwnerEntered:false,sourceFanGeneration:null,sourceFanAutomaticReturned:false,hardwareWritesObserved:false,recoveryClaimEvidence:{sourceFanGeneration:null}};
+    setReply({ok:true,state:unopened});assert.deepEqual(await adapter.getState(),unopened);
+    setReply({ok:true,state:source});assert.equal((await adapter.getState()).sourceFanGeneration,7);
+    // Optional actual original Host fixture outputs, injected by the evidence runner before this suite.
+    const actual=(globalThis as {ymccSourceFanWireReceipts?:Record<string,unknown>[]}).ymccSourceFanWireReceipts;
+    if(actual) for(const receipt of actual) {
+      setReply(receipt);assert.deepEqual(await adapter.getState(),receipt.state);
+      const bound=receipt.state as Record<string,unknown>;
+      const bad={...bound,sourceFanGeneration:typeof bound.sourceFanGeneration==='number'?bound.sourceFanGeneration+1:1};
+      setReply({...receipt,state:bad});await invalid(()=>adapter.getState(),'FAN_API_RESPONSE_INVALID');
+    }
+  });
   await check('legacy root lifecycle state remains compatible',async()=>{setReply(state);assert.equal((await adapter.open()).state,'Ready');});
   await check('legacy missing ok with valid state remains compatible',async()=>{setReply({state});assert.equal((await adapter.getState()).state,'Ready');});
   for (const badState of [null, [], 'Ready', {}, {state:''}, {state:7}, {...state,hardwareWritesEnabled:'true'}, {...state,lease:{leaseId:''}}]) {

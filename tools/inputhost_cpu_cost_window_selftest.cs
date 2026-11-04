@@ -244,3 +244,181 @@ internal static class HostCpuCostFixture
         return 0;
     }
 }
+
+#if INPUTHOST_FLAG_READER_STORM
+// FLAG_READER_FIXTURE_BEGIN
+using System;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+using System.Linq;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using File = InputHostFlagReaderPorts;
+using RealFile = System.IO.File;
+
+internal static class InputHostFlagReaderPorts
+{
+    internal static string Root = "";
+    internal static string StateDirectory = "";
+    internal static string? Fault;
+    internal static readonly List<object> Calls = new();
+    internal static string Checked(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (!full.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("FORBIDDEN_NON_OWNED_FLAG_PATH");
+        if (!full.Equals(Path.GetFullPath(Path.Combine(StateDirectory, "input-host-cost-enabled.flag")), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("FORBIDDEN_NON_FLAG_FILE");
+        return full;
+    }
+    internal static bool Exists(string path)
+    {
+        path = Checked(path); Calls.Add(new { operation = "File.Exists", path });
+        if (Fault == "exists-denied") throw new UnauthorizedAccessException("OWNED_EXISTS_DENIED");
+        return RealFile.Exists(path);
+    }
+    internal static string ReadAllText(string path)
+    {
+        path = Checked(path);
+        Calls.Add(new { operation = "File.ReadAllText", path, length = new FileInfo(path).Length, bounded = false });
+        if (Fault == "read-denied") throw new IOException("OWNED_READ_DENIED");
+        return RealFile.ReadAllText(path);
+    }
+}
+internal static class ActualInputHostFlagReader
+{
+    private static string CostStateDir => InputHostFlagReaderPorts.StateDirectory;
+    // ACTUAL_FLAG_READER_INSERTED_BY_RUNNER
+    internal static bool Read() => CostLoggingRequestedByFlag();
+}
+internal static class InputHostFlagReaderStorm
+{
+    private const int ProposedMaxFlagBytes = 4096;
+    private static readonly List<object> Cases = new();
+    private static List<string> Errors = new();
+    private static readonly List<object> Probes = new();
+    private static int Assertions;
+    private static int Passed;
+    private static int FixtureErrors;
+    private static string Root = "";
+    private static string Selection = "";
+    private static string CurrentDirectory = "";
+    private static string FlagPath => Path.Combine(InputHostFlagReaderPorts.StateDirectory, "input-host-cost-enabled.flag");
+    private static void Check(bool ok, string message)
+    { Assertions++; if (!ok) Errors.Add(message); }
+    private static string Digest(string path) => !RealFile.Exists(path) ? "<missing>" : Convert.ToHexString(SHA256.HashData(RealFile.ReadAllBytes(path))).ToLowerInvariant();
+    private static void Write(byte[] data)
+    { InputHostFlagReaderPorts.Checked(FlagPath); RealFile.WriteAllBytes(FlagPath, data); }
+    private static void Write(string text) => Write(new UTF8Encoding(false).GetBytes(text));
+    private static void Probe(bool expected, string phase)
+    {
+        InputHostFlagReaderPorts.Calls.Clear();
+        bool actual = ActualInputHostFlagReader.Read();
+        Check(actual == expected, phase + ": expected " + expected + " but actual " + actual);
+        Probes.Add(new { phase, expected, actual, calls = InputHostFlagReaderPorts.Calls.ToArray() });
+    }
+    private static void Case(string name, string oracle, Action action)
+    {
+        if (Selection.Length != 0 && Selection != name) return;
+        CurrentDirectory = Path.Combine(Root, name);
+        Directory.CreateDirectory(CurrentDirectory);
+        InputHostFlagReaderPorts.StateDirectory = CurrentDirectory;
+        InputHostFlagReaderPorts.Fault = null; InputHostFlagReaderPorts.Calls.Clear();
+        Errors = new(); Probes.Clear(); int start = Assertions; bool fixtureError = false;
+        try { action(); }
+        catch (Exception error) { fixtureError = true; FixtureErrors++; Errors.Add("FIXTURE_ERROR:" + error); }
+        bool pass = Errors.Count == 0;
+        if (pass) Passed++;
+        Cases.Add(new { name, oracle, pass, fixtureError, assertions = Assertions - start, errors = Errors.ToArray(), probes = Probes.ToArray() });
+        Console.WriteLine((pass ? "PASS " : "FAIL ") + name);
+    }
+    private static void BytesCase(string name, byte[] bytes, bool expected, string oracle = "existing token and safe inactive contract")
+    {
+        Case(name, oracle, () => {
+            Write(bytes); var original = Digest(FlagPath); Probe(expected, "actual-reader");
+            Check(Digest(FlagPath) == original, "reader must preserve original bytes");
+        });
+    }
+    private static void TextCase(string name, string text, bool expected, string oracle = "existing token and safe inactive contract") =>
+        BytesCase(name, new UTF8Encoding(false).GetBytes(text), expected, oracle);
+    internal static int Main(string[] args)
+    {
+        if (args.Length < 1 || !Path.IsPathFullyQualified(args[0])) throw new ArgumentException("absolute owned root required");
+        Root = Path.GetFullPath(args[0]).TrimEnd(Path.DirectorySeparatorChar);
+        if (!Directory.Exists(Root) || !RealFile.Exists(Path.Combine(Root, "OWNED.json")) || (RealFile.GetAttributes(Root) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("owned root/marker required; no reparse root");
+        InputHostFlagReaderPorts.Root = Root; Selection = args.Length > 1 ? args[1] : "";
+        Case("missing-inactive", "existing reader contract", () => {
+            Probe(false, "missing"); Check(InputHostFlagReaderPorts.Calls.Count == 1, "missing must not read content");
+            Check(!RealFile.Exists(FlagPath), "missing read must not create file");
+        });
+        TextCase("empty-inactive", "", false);
+        TextCase("whitespace-inactive", " \t\r\n", false);
+        TextCase("enabled-token", "enabled", true);
+        TextCase("case-insensitive-enabled", "EnAbLeD", true);
+        TextCase("one-token", "1", true);
+        TextCase("trimmed-enabled", " \t enabled\r\n", true);
+        TextCase("disabled-token", "disabled", false);
+        TextCase("zero-token", "0", false);
+        TextCase("bool-token-not-authority", "true", false);
+        TextCase("json-not-authority", "{\"enabled\":true}", false);
+        TextCase("duplicate-tokens-inactive", "enabled\nenabled", false);
+        TextCase("unknown-token-inactive", "schema=999;owner=other", false);
+        TextCase("embedded-nul-inactive", "enabled\0", false);
+        TextCase("binary-control-inactive", "enabled\u0007", false);
+        BytesCase("utf8-bom-enabled", Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes("enabled")).ToArray(), true, "preserve existing BOM decoding");
+        BytesCase("utf16le-bom-enabled", Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("enabled")).ToArray(), true, "preserve existing BOM decoding");
+        BytesCase("utf16be-bom-one", Encoding.BigEndianUnicode.GetPreamble().Concat(Encoding.BigEndianUnicode.GetBytes("1")).ToArray(), true, "preserve existing BOM decoding");
+        BytesCase("invalid-utf8-inactive", new byte[] { 0xff, 0xfe, 0x61 }, false);
+        BytesCase("truncated-utf8-inactive", Encoding.UTF8.GetBytes("enabled").Concat(new byte[] { 0xe4, 0xb8 }).ToArray(), false);
+        BytesCase("truncated-utf16-inactive", Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("enabled")).Concat(new byte[] { 0x61 }).ToArray(), false);
+        TextCase("at-proposed-small-file-bound", new string(' ', ProposedMaxFlagBytes - 7) + "enabled", true, "proposed 4096-byte guard positive control; current product has no size limit");
+        TextCase("over-proposed-small-file-bound", new string(' ', ProposedMaxFlagBytes - 6) + "enabled", false, "proposed 4096-byte guard; current product has no declared bound");
+        TextCase("oversize-invalid-token", new string('x', 131072), false, "inactive token result; does not prove bounded allocation");
+        Case("partial-write-explicit-repair", "existing token and explicit reread", () => {
+            Write("enab"); var before = Digest(FlagPath); Probe(false, "partial-publication");
+            Check(Digest(FlagPath) == before, "partial original preserved"); Write("enabled"); Probe(true, "explicit-reread-after-repair");
+        });
+        foreach (var fault in new[] { "exists-denied", "read-denied" })
+            Case(fault + "-explicit-release", "rejection ports and explicit reread", () => {
+                Write("enabled"); var before = Digest(FlagPath); InputHostFlagReaderPorts.Fault = fault;
+                Probe(false, "injected-rejection"); InputHostFlagReaderPorts.Fault = null;
+                Check(Digest(FlagPath) == before, "IO rejection preserves bytes"); Probe(true, "explicit-reread-after-release");
+            });
+        Case("real-sharing-lock-release", "actual owned FileShare.None denial", () => {
+            Write("enabled"); var before = Digest(FlagPath);
+            using (var held = new FileStream(FlagPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) Probe(false, "actual-exclusive-lock");
+            Check(Digest(FlagPath) == before, "sharing denial preserves bytes"); Probe(true, "explicit-reread-after-release");
+        });
+        Case("directory-instead-of-flag", "existing inactive file-kind admission", () => {
+            Directory.CreateDirectory(FlagPath); Probe(false, "directory"); Check(Directory.Exists(FlagPath), "directory original preserved");
+        });
+        Case("non-directory-parent-explicit-repair", "actual owned parent-file path and explicit reread", () => {
+            var parent = Path.Combine(CurrentDirectory, "state-parent"); var preserved = Path.Combine(CurrentDirectory, "parent-original.preserved");
+            RealFile.WriteAllText(parent, "external-owned-parent"); var before = Digest(parent); InputHostFlagReaderPorts.StateDirectory = parent;
+            Probe(false, "non-directory-parent"); Check(Digest(parent) == before, "parent-file original preserved");
+            RealFile.Move(parent, preserved); Directory.CreateDirectory(parent); Write("enabled");
+            Probe(true, "explicit-reread-after-repair"); Check(Digest(preserved) == before, "repair retains original parent file");
+        });
+        Case("reread-no-sticky-enabled", "existing stateless reader contract", () => {
+            Write("enabled"); Probe(true, "enabled"); Write("unknown"); Probe(false, "changed-invalid");
+            Write("1"); Probe(true, "explicit-reread-valid"); RealFile.Move(FlagPath, Path.Combine(CurrentDirectory, "flag-original.preserved")); Probe(false, "removed");
+        });
+        if (Cases.Count == 0) throw new ArgumentException("unknown case selection");
+        var result = new {
+            status = Passed == Cases.Count ? "PASS_LIMITED_ACTUAL_FLAG_READER" : "FAIL_CURRENT_FLAG_READER",
+            consumer = "tools/inputhost_cpu_cost_window_selftest.mjs --flag-reader-storm",
+            source = "InputHost/Program.cs:CostLoggingRequestedByFlag", cases = Cases.Count, passed = Passed, failed = Cases.Count - Passed,
+            assertions = Assertions, fixtureErrors = FixtureErrors, selected = Selection.Length == 0 ? "flag-reader-only" : Selection,
+            proposedMaxFlagBytes = ProposedMaxFlagBytes, productCurrentMaxBytes = (int?)null, details = Cases,
+            realActions = new { ownedFileIO = true, hostConstructed = 0, profileConstructed = 0, sdkConstructed = 0, device = 0, lighting = 0, registry = 0, network = 0 },
+            boundary = "Direct actual reader only. Real caller HostSession/window/lifecycle not constructed. Positive reread is explicit; not whole Host configuration recovery."
+        };
+        RealFile.WriteAllText(Path.Combine(Root, "RESULT.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine($"Actual flag reader: {Passed}/{Cases.Count}, {Assertions} assertions, fixtureErrors={FixtureErrors}");
+        return Passed == Cases.Count ? 0 : 1;
+    }
+}
+// FLAG_READER_FIXTURE_END
+#endif

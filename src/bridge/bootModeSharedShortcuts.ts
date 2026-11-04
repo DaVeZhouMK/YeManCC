@@ -10,32 +10,48 @@ export function globalShortcutContainer(settings: RecordValue): RecordValue {
 
 export function hasStoredGlobalShortcuts(settings: RecordValue): boolean {
     const rules = globalShortcutContainer(settings);
-    return Array.isArray(rules.shortcutRules) && (rules.shortcutRulesInitialized === true || rules.shortcutRules.length > 0);
+    // An explicit ownership marker survives a damaged/missing array.
+    // Do not heal it by silently re-enabling factory shortcuts.
+    return rules.shortcutRulesInitialized === true || (Array.isArray(rules.shortcutRules) && rules.shortcutRules.length > 0);
 }
 
-export function hasModeShortcutOverride(settings: RecordValue): boolean {
-    const input = object(settings.input), own = object(input.bootModeShortcuts);
-    return own.schema === 1 && ['xbox', 'steam', 'xbox-steam'].includes(own.mode) &&
-        Array.isArray(own.rules) && own.boot === String(input.startupObservedBoot || '');
-}
+/** Compatibility for existing editor/card callers after mode shortcuts retired.
+ * This never reactivates the retired mode document. */
+export function hasModeShortcutOverride(_settings: RecordValue): boolean { return false; }
 
-/** A mode's applied output is separate from the durable global rule list. */
+/** Retired mode records never compete with ordinary global shortcuts. */
 export function effectiveShortcutContainer(settings: RecordValue): RecordValue {
-    const global = globalShortcutContainer(settings);
-    return hasModeShortcutOverride(settings)
-        ? { ...global, shortcutRules: snapshotSettingsData(settings.input.bootModeShortcuts.rules) } : global;
+    return globalShortcutContainer(settings);
 }
 
-/** Retire the old competing global source, retaining exactly one inert backup.
- * Called at the normal settings boundary, never from a live-device capture. */
-export function retireBootGlobalShortcuts(settings: RecordValue): void {
-    const extensions = object(settings.extensions), modes = object(extensions.bootModes), global = object(modes.global);
-    if (modes.schema !== 1 || !Object.prototype.hasOwnProperty.call(global, 'controller')) return;
-    if (!Object.prototype.hasOwnProperty.call(extensions, 'bootModeGlobalShortcutsBackup')) {
-        extensions.bootModeGlobalShortcutsBackup = { schema: 1, revision: modes.revision ?? 0,
-            controller: snapshotSettingsData(global.controller) };
+/** Remove controller editing/calibration from a mode document only.
+ * The ordinary input.buttonMapping and input.axisCalibration are untouched. */
+export function retireBootControllerSnapshots(document: RecordValue): void {
+    const strip = (snapshot: RecordValue) => {
+        for (const key of ['controller', 'buttonMapping', 'axisCalibration', 'controllerCalibration', 'calibration']) delete snapshot[key];
+        const input = object(snapshot.input);
+        for (const key of ['controller', 'buttonMapping', 'axisCalibration', 'controllerCalibration', 'calibration', 'bootModeShortcuts', 'shortcutRules']) delete input[key];
+        const target = object(input.outputTarget);
+        for (const key of ['controller', 'buttonMapping', 'axisCalibration', 'controllerCalibration', 'calibration', 'shortcutRules']) delete target[key];
+    };
+    strip(document); strip(object(document.global)); strip(object(document.activeSnapshot));
+    for (const scene of Object.values(object(document.scenes))) {
+        strip(object(object(scene).overrides)); strip(object(object(scene).rememberedOverrides));
     }
-    delete global.controller;
+    for (const presets of Object.values(object(document.presets)))
+        for (const scene of Object.values(object(presets))) {
+            strip(object(object(scene).overrides)); strip(object(object(scene).rememberedOverrides));
+        }
+    delete document.controllerTemplates;
+}
+
+/** Settings read/save migration; deleting mode data must not rewrite global input. */
+export function retireBootGlobalShortcuts(settings: RecordValue): void {
+    const input = object(settings.input);
+    if (Object.prototype.hasOwnProperty.call(input, 'bootModeShortcuts')) input.bootModeShortcuts = null;
+    const extensions = object(settings.extensions), modes = object(extensions.bootModes);
+    if (modes.schema === 1) retireBootControllerSnapshots(modes);
+    delete extensions.bootModeGlobalShortcutsBackup;
 }
 
 /** Shortcut-array writes are ordinary global edits, including an empty list. */

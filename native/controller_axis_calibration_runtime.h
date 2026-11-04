@@ -472,7 +472,7 @@ static json apply(const json& request) {
     const auto result=snapshot(true);
     appendNativeLifecycleLog("controller-axis-calibration-apply",{{"requestId",request["requestId"]},
         {"inputRevision",expected+1},{"inputConfigHash",result["inputConfigHash"]},{"saved",true},{"outputAccepted",false}});
-    ipc_emit("controller.axisCalibration.changed",result);
+    gamepadSerialPostOwnedEvent("controller.axisCalibration.changed",result);
     return {{"ok",true},{"saved",true},{"requestId",request["requestId"]},{"snapshot",result}};
 }
 static json startCenter(const json& request) {
@@ -527,6 +527,8 @@ static json observe(const json& request) {
     if(request.value("watchId",std::string{})==watchId){watchActive.store(false,std::memory_order_release);watchId.clear();}
     return {{"ok",true}};
 }
+// Capture and Apply run off the WebView2 apartment. Reuse the existing posted
+// controller-event lane; only its UI-thread consumer may deliver to WebView2.
 static void tick(const InputCaptureGamepadSnapshot& sample) noexcept {
     if(!centerActive.load(std::memory_order_acquire)&&!watchActive.load(std::memory_order_acquire))return;
     try {
@@ -564,7 +566,7 @@ static void tick(const InputCaptureGamepadSnapshot& sample) noexcept {
         }
         if(!receipt.is_null()){
             appendNativeLifecycleLog("controller-axis-calibration-center",receipt);
-            ipc_emit("controller.axisCalibration.changed",receipt);
+            gamepadSerialPostOwnedEvent("controller.axisCalibration.changed",std::move(receipt));
         }
         if(publish){
             auto output=snapshot();
@@ -574,7 +576,7 @@ static void tick(const InputCaptureGamepadSnapshot& sample) noexcept {
                 output["observerId"]=observedWatch;
                 // The exact token travels with queued delivery; the bridge also
                 // rejects a delayed old-view event after unmount/new subscription.
-                ipc_emit("controller.axisCalibration.changed",output);
+                gamepadSerialPostOwnedEvent("controller.axisCalibration.changed",std::move(output));
             }
         }
     }catch(...){/* Inspection is passive; it cannot skip normal input publication. */}

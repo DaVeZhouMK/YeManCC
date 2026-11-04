@@ -6,6 +6,8 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -52,12 +54,45 @@ static bool hidHideRun(const std::wstring& command,std::string* output=nullptr,D
 @@PATH_PARSER@@
 @@LEGACY_SNAPSHOT@@
 @@SNAPSHOT@@
-namespace ymcc::nativeForeground {enum class Profile {Msi,Rog,Gpd,Unsupported};}
+// This fixture exercises snapshot/async transport, not admission or writer IO.
+// Dependencies of other branches in the extracted functions stay lazy; any
+// unexpected use is counted even when the production consumer catches it.
+static unsigned unexpectedDependencyCalls=0;
+template<class T> [[noreturn]] static T unexercisedDependency(const char* name){
+    ++unexpectedDependencyCalls;throw std::logic_error(name);
+}
+namespace ymcc::nativeForeground {
+enum class Profile {Msi,Rog,Gpd,Unsupported};
+static bool gameNodeRefreshMutationAllowed(Profile,const std::string&,const std::string&){return true;}
+static bool nativeRootPortCycleAllowed(Profile,const std::string&){return unexercisedDependency<bool>("root-cycle admission");}
+}
+struct InertTrackedJob {
+    bool prepareTracked(STARTUPINFOW&,const std::wstring&,const std::vector<HANDLE>&){return unexercisedDependency<bool>("tracked job prepare");}
+    DWORD error()const{return unexercisedDependency<DWORD>("tracked job error");}
+    DWORD flags()const{return unexercisedDependency<DWORD>("tracked job flags");}
+    STARTUPINFOW* startup(){return unexercisedDependency<STARTUPINFOW*>("tracked job startup");}
+};
+namespace ymcc::nativeRefreshWriter {
+struct Session {};
+struct LaunchScope {
+    template<class... Args> explicit LaunchScope(Args&&...){unexercisedDependency<void>("writer construction");}
+    bool ready()const{return unexercisedDependency<bool>("writer ready");}
+    DWORD error()const{return unexercisedDependency<DWORD>("writer error");}
+    std::string reason()const{return unexercisedDependency<std::string>("writer reason");}
+    HANDLE inheritedLease()const{return unexercisedDependency<HANDLE>("writer lease");}
+    InertTrackedJob& job(){return unexercisedDependency<InertTrackedJob&>("writer job");}
+    std::wstring jobName()const{return unexercisedDependency<std::wstring>("writer job name");}
+    bool reserve(){return unexercisedDependency<bool>("writer reserve");}
+    bool creationReturned(HANDLE){return unexercisedDependency<bool>("writer creation receipt");}
+    bool retire(HANDLE){return unexercisedDependency<bool>("writer retirement");}
+};
+}
 namespace ymcc::input {
 struct OneShotHelperDiagnostic {
     bool prepare(){return false;}
     void started(){}
     STARTUPINFOW* startup(){return nullptr;}
+    bool prepareTrackedLaunch(InertTrackedJob&,const std::wstring&,const std::vector<HANDLE>&){return unexercisedDependency<bool>("diagnostic tracked launch");}
 };
 }
 struct NativeForegroundRefreshTarget {HidHidePhysicalIdentity source;bool xusb=false;};
@@ -86,6 +121,20 @@ static bool createProcess(const wchar_t*,wchar_t*,void*,void*,BOOL,DWORD flags,v
 }
 static void msiNativeForegroundSettleHelperDiagnosticLocked(DWORD){++settles;}
 static void msiNativeForegroundReceipt(const char*,const char*){++receipts;}
+static bool msiNativeForegroundLeaseCurrent(){return unexercisedDependency<bool>("foreground lease admission");}
+static bool msiPostHideContextCurrentLocked(){return unexercisedDependency<bool>("post-hide admission");}
+static std::shared_ptr<ymcc::nativeRefreshWriter::Session> g_postHideSharedWriterSession;
+static std::wstring nativeRefreshWriterRecordPath(){return unexercisedDependency<std::wstring>("writer record path");}
+static std::string inputHostTargetReturnMachineBinding(){return unexercisedDependency<std::string>("writer machine binding");}
+static json nativeRefreshWriterEvidence(const ymcc::nativeRefreshWriter::LaunchScope&,const char*){return unexercisedDependency<json>("writer evidence");}
+namespace ymcc::targetReturn::process {
+struct Identity {DWORD pid;std::string creationTime;};
+static std::optional<Identity> capture(HANDLE){return unexercisedDependency<std::optional<Identity>>("parent capture");}
+}
+struct SECURITY_ATTRIBUTES {DWORD nLength;void* lpSecurityDescriptor;BOOL bInheritHandle;};
+static HANDLE GetCurrentProcess(){return unexercisedDependency<HANDLE>("parent handle");}
+static HANDLE CreateEventW(SECURITY_ATTRIBUTES*,BOOL,BOOL,const wchar_t*){return unexercisedDependency<HANDLE>("cancellation event");}
+static int msiNativeForegroundPollCycleLocked();
 @@CYCLE@@
 @@POLL@@
 int main(int argc,char** argv){
@@ -141,6 +190,7 @@ int main(int argc,char** argv){
     check("gpd-root-rejected",msiNativeForegroundCycleLocked(false)==2&&launches==0);
     reset();g_msiNativeForegroundLease.profile=ymcc::nativeForeground::Profile::Rog;
     check("game-interface-keeps-same-async-owner",msiNativeForegroundCycleLocked(false,&game)==1&&g_msiNativeForegroundLease.helperGameTarget==game.deviceInstanceId&&waits==std::vector<DWORD>{0});
+    check("unexercised-dependencies-remain-inert",unexpectedDependencyCalls==0);
     const json report={{"passed",failures.empty()},{"cases",cases},{"failures",failures},{"hardwareAccess",false},{"realProcessesLaunched",false}};
     if(argc>1){std::ofstream file(argv[1]);file<<report.dump(2)<<"\n";}
     std::cout<<report.dump()<<"\n";

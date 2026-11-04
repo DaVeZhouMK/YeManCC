@@ -45,6 +45,7 @@ def main() -> int:
     source_path = ROOT / "native/main.cpp"
     source_bytes = source_path.read_bytes()
     source = source_bytes.decode("utf-8-sig").replace("\r\n", "\n")
+    identity_observer = extract(source, "static void hidHideObserveRawInputDevice(HANDLE rawDevice) {")
     header = ROOT / "native/log_frequency_policy.h"
     header_bytes = header.read_bytes()
     (run / "bound-main.cpp").write_bytes(source_bytes)
@@ -67,6 +68,7 @@ def main() -> int:
         "static void inputCaptureDrainQueuedSamples() {",
         "static void sgRecordFact(const char* event, const json& details) {",
         "static void record_gpu_dedicated_memory_capability(const json& result) {",
+        "static void hidHideLogPhysicalIdentityObservation(const HidHidePhysicalIdentity& resolved, std::uint64_t sourceGeneration, bool selectedChanged = true) {",
     )]
     # rotateOneLogFile has a forward declaration with a default argument. Select
     # its definition explicitly to avoid extracting the next unrelated function.
@@ -106,6 +108,8 @@ def main() -> int:
 #include "sleep_fact_log_record.h"
 #include "log_jsonl_boundary.h"
 using json = nlohmann::json;
+// Sleep activity sampling is outside this isolated journal/writer fixture.
+static void sgSleepActivityOnFact(const char*,const json&) {}
 static void flushTdpObservationLogs(bool = false) {}
 // Detailed monitor sink is tested by monitor_detail_bounds_selftest; this fixture owns only legacy writer lanes.
 static void monitorDetailGateChanged(bool) {}
@@ -134,6 +138,11 @@ static std::atomic<unsigned long long> g_powerGeneration{0};
 static HWND g_hwnd = nullptr;
 static const char* powerLifecycleName(int) { return "offline-fixture"; }
 static std::string nativeLifecycleTimestamp() { return "2000-01-01T00:00:00.000"; }
+struct HidHidePhysicalIdentity {
+    bool resolved=true;
+    std::string sourcePath,deviceInstanceId,baseContainerDeviceInstanceId;
+    unsigned short vendorId=0x17ef,productId=0x61ed,usagePage=1,usage=5;
+};
 static std::mutex g_nativeLifecycleLogMx;
 static std::ofstream g_nativeLifecycleLog;
 static uint32_t g_nativeLifecycleFrameWrites = 0;
@@ -549,6 +558,94 @@ int wmain(int argc, wchar_t** argv) {
     check("screen-off-fast-producer-emits-only-first",readRows(L"native-lifecycle.log").size()==1);
     logScreenTouchpadObservation("screenTouchpads.set","steamdeck",borrowed);logScreenTouchpadObservation("screenTouchpads.set","steamdeck",borrowed);
     check("screen-fast-path-preserves-both-settings-actions",readRows(L"native-lifecycle.log").size()==3);
+
+    for(bool detailed:{false,true}){
+        reset(root,detailed?L"raw-identity-on":L"raw-identity-off");kLogMaxBytes=5*1024*1024;
+        g_domainLogEnabled[1]=detailed;++g_powerGeneration;
+        HidHidePhysicalIdentity first,second;
+        first.sourcePath="collection-one";first.deviceInstanceId="instance-one";first.baseContainerDeviceInstanceId="shared-container";
+        second=first;second.sourcePath="collection-two";second.deviceInstanceId="instance-two";
+        for(int i=0;i<100;++i){hidHideLogPhysicalIdentityObservation(first,1);hidHideLogPhysicalIdentityObservation(second,1);}
+        check("alternating-collections-are-two-identity-observations-not-200-resident-edges",readRows(L"native-lifecycle.log").size()==2);
+        check("alternating-collection-trajectory-follows-detail-gate",readRows(L"native-detail.log").size()==(detailed?198u:0u));
+        auto count=readRows(L"native-lifecycle.log").size();
+        first.baseContainerDeviceInstanceId="new-container";hidHideLogPhysicalIdentityObservation(first,1);
+        hidHideLogPhysicalIdentityObservation(first,2);++g_powerGeneration;hidHideLogPhysicalIdentityObservation(first,2);
+        first.resolved=false;hidHideLogPhysicalIdentityObservation(first,2);hidHideLogPhysicalIdentityObservation(first,2);
+        first.resolved=true;hidHideLogPhysicalIdentityObservation(first,2);
+        appendNativeLifecycleLog("physical-controller-identity",{{"resolved",true},{"sourcePath","legacy-without-label"}});
+        check("identity-fields-topology-power-failures-and-legacy-records-stay-resident",readRows(L"native-lifecycle.log").size()==count+7);
+        const auto beforeStable=readRows(L"native-lifecycle.log").size(),beforeDetail=readRows(L"native-detail.log").size();
+        for(int i=0;i<64;++i)hidHideLogPhysicalIdentityObservation(first,2,false);
+        check("unchanged-selected-source-does-not-add-packet-level-diagnostics",readRows(L"native-lifecycle.log").size()==beforeStable&&readRows(L"native-detail.log").size()==beforeDetail);
+        hidHideLogPhysicalIdentityObservation(first,3,false);
+        check("new-topology-is-logged-even-without-selected-source-change",readRows(L"native-lifecycle.log").size()==beforeStable+1);
+
+    }
+
+        // Field traces interleave consuming/dequeue/countdown/coalesced receipts.
+        // A dequeue is an observation of the same queued request, not a new one.
+        for(bool detailed : {false,true}) {
+            reset(root,detailed?L"queued-wait-detail-on":L"queued-wait-detail-off");kLogMaxBytes=5*1024*1024;
+            g_domainLogEnabled[1]=detailed;++g_powerGeneration;
+            json consuming={{"action","consuming"},{"requestId",3},{"originalDeadline",10000},{"persona","steamdeck"}};
+            json dequeue={{"beat","dequeue"},{"reason","initial-target-admission"},{"requestedAtDequeue","steamdeck"},{"waitedMs",4000},{"deferCount",1}};
+            json settle={{"reason","initial-target-admission"},{"policy","queue-not-reject-coalesce-on-next-round"},{"deferMs",1000},{"settleMs",1000}};
+            json merged={{"outcome","coalesced"},{"coalesced",true},{"queueToken",4},{"runId","field-run"},{"hostGen",2},{"sourceGen",390},{"recordGen",7}};
+            for(int i=0;i<32;++i){
+                dequeue["waitedMs"]=4000+i*8;dequeue["deferCount"]=i+1;settle["deferMs"]=1000-i*8;
+                appendNativeLifecycleLog("input-host-player-start-work",consuming);
+                appendNativeLifecycleLog("input-host-switch-audit",dequeue);
+                appendNativeLifecycleLog("input-host-switch-settle",settle);
+                appendNativeLifecycleLog("late-hide-enqueue",merged);
+            }
+            flushNativeLifecycleLogs(true);
+            check("interleaved-queue-wait-only-four-first-observations-resident",readRows(L"native-lifecycle.log").size()==4);
+            check("interleaved-queue-wait-full-repeats-follow-detail-gate",readRows(L"native-detail.log").size()==(detailed?124u:0u));
+            auto count=readRows(L"native-lifecycle.log").size();
+            consuming["requestId"]=4;appendNativeLifecycleLog("input-host-player-start-work",consuming);
+            merged["queueToken"]=5;appendNativeLifecycleLog("late-hide-enqueue",merged);
+            dequeue["requestedAtDequeue"]="elite";appendNativeLifecycleLog("input-host-switch-audit",dequeue);
+            settle["deferMs"]=999;appendNativeLifecycleLog("input-host-switch-settle",settle);
+            check("request-token-target-and-new-countdown-window-remain-resident",readRows(L"native-lifecycle.log").size()==count+4);
+            appendNativeLifecycleLog("input-host-switch-audit",{{"beat","request"},{"requestId",5}});
+            count=readRows(L"native-lifecycle.log").size();
+            appendNativeLifecycleLog("input-host-player-start-work",consuming);
+            appendNativeLifecycleLog("input-host-switch-audit",dequeue);
+            appendNativeLifecycleLog("input-host-switch-settle",settle);
+            check("real-request-resets-wait-evidence",readRows(L"native-lifecycle.log").size()==count+3);
+            ++g_powerGeneration;count=readRows(L"native-lifecycle.log").size();
+            appendNativeLifecycleLog("input-host-player-start-work",consuming);
+            appendNativeLifecycleLog("input-host-switch-audit",dequeue);
+            appendNativeLifecycleLog("input-host-switch-settle",settle);
+            appendNativeLifecycleLog("late-hide-enqueue",merged);
+            check("power-generation-resets-all-wait-evidence",readRows(L"native-lifecycle.log").size()==count+4);
+            count=readRows(L"native-lifecycle.log").size();
+            auto rejected=consuming;rejected["action"]="rejected";
+            auto accepted=merged;accepted["outcome"]="accepted";accepted["coalesced"]=false;
+            auto refused=merged;refused["outcome"]="refused";refused["coalesced"]=false;
+            for(int i=0;i<2;++i){
+                appendNativeLifecycleLog("input-host-player-start-work",rejected);
+                appendNativeLifecycleLog("late-hide-enqueue",accepted);
+                appendNativeLifecycleLog("late-hide-enqueue",refused);
+                appendNativeLifecycleLog("input-host-switch-audit",{{"beat","settled"},{"result","ok"}});
+                appendNativeLifecycleLog("late-hide-complete",{{"queueToken",5},{"outcome","completed"}});
+            }
+            check("rejection-acceptance-refusal-and-terminal-actions-always-resident",readRows(L"native-lifecycle.log").size()==count+10);
+            settle["deferMs"]="unavailable";count=readRows(L"native-lifecycle.log").size();
+            appendNativeLifecycleLog("input-host-switch-settle",settle);
+            appendNativeLifecycleLog("input-host-switch-settle",settle);
+            check("invalid-countdown-never-suppressed-as-telemetry",readRows(L"native-lifecycle.log").size()==count+2);
+            dequeue["waitedMs"]=-1;count=readRows(L"native-lifecycle.log").size();
+            appendNativeLifecycleLog("input-host-switch-audit",dequeue);
+            appendNativeLifecycleLog("input-host-switch-audit",dequeue);
+            check("invalid-dequeue-counter-never-suppressed-as-telemetry",readRows(L"native-lifecycle.log").size()==count+2);
+            settle["deferMs"]=500;appendNativeLifecycleLog("input-host-switch-settle",settle);
+            settle["futureUnknownField"]=true;count=readRows(L"native-lifecycle.log").size();
+            appendNativeLifecycleLog("input-host-switch-settle",settle);
+            check("unknown-wait-fields-remain-semantic",readRows(L"native-lifecycle.log").size()==count+1);
+        }
+
     for (bool detailed : {false,true}) {
         reset(root,detailed?L"new-observation-on":L"new-observation-off");
         kLogMaxBytes=5*1024*1024; ++g_powerGeneration;
@@ -596,6 +693,7 @@ int wmain(int argc, wchar_t** argv) {
         appendNativeLifecycleLog("input-host-switch-audit",{{"beat","request"},{"requestId",8}});
         appendNativeLifecycleLog("input-host-switch-audit",throttle);
         check("new-request-restores-first-throttle-evidence",readRows(L"native-lifecycle.log").size()==beforeThrottle+3);
+
         json facts={{"generation",static_cast<unsigned long long>(g_powerGeneration.load())},{"pid",27},{"status","current"},
             {"foregroundRole","original-game"},{"nativePrimary",{{"status","matched"},{"log",{{"copiedBytes",1},{"originalBytes",1}}}}}};
         recordInspection(g_powerGeneration.load(),"observation",facts);
@@ -670,6 +768,9 @@ int wmain(int argc, wchar_t** argv) {
     current_family = extract(current_source, "        if (controllerMotion) {")
     stable_family = extract(current_family, "if (g_sensorDetailLogging.load(std::memory_order_acquire)) {") == family_log
     static_checks = {
+        "identity-observation-helper-called-after-selected-update": identity_observer.index("g_hidHidePhysicalIdentity = resolved;") < identity_observer.index("hidHideLogPhysicalIdentityObservation(resolved, resolvedGeneration, changed);"),
+        "identity-observer-stable-during-selftest": extract(current_source, "static void hidHideObserveRawInputDevice(HANDLE rawDevice) {") == identity_observer,
+        "identity-detail-off-gates-before-json": functions[-1].index('if (!changed && (!selectedChanged || !domainLogEnabled("virtual"))) return;') < functions[-1].index('appendNativeLifecycleLog('),
         "wake-truth-gated-before-json-construction": wake.index('if (!domainLogEnabled("virtual")) return;') < wake.index('appendDomainLog('),
         "mirror-gated-before-string-allocation": mirror.index('if (!domainLogEnabled("gyro") && !domainLogEnabled("virtual")) return;') < mirror.index('std::string name'),
         "detail-export-includes-active-and-rotated": 'addRotated(appDir + L"\\\\native-detail.log");' in source,

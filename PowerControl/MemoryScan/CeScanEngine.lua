@@ -1,11 +1,14 @@
 -- YMCC is a UI/IPC adapter. Scans, pause/resume and result storage belong to CE.
 -- Do not assign any scan preferences, write registry settings or call pause/unpause.
 local C=YMCC_CE_SESSION
+-- Unknown bootstrap stays inactive; it is never permission to choose a PID/root.
+if type(C)~='table' or type(C.root)~='string' or not (C.root:match('^%a:[/\\]') or C.root:match('^[/\\][/\\]')) or type(C.token)~='string' or #C.token~=64 or not C.token:match('^[a-f0-9]+$') or type(C.pid)~='number' or C.pid~=math.floor(C.pid) or C.pid<=4 or C.pid>2147483647 then return end
 local f=getMainForm()
 local function encode(v)
  local kind=type(v)
  if kind=='string' then return '"'..v:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'):gsub('\t','\\t')..'"' end
- if kind=='number' or kind=='boolean' then return tostring(v) end
+ if kind=='number' then if v~=v or v==math.huge or v==-math.huge then error('CE state contains a nonfinite number') end;return tostring(v) end
+ if kind=='boolean' then return tostring(v) end
  if kind~='table' then return 'null' end
  local parts={}
  if v.__array then for i=1,#v do parts[#parts+1]=encode(v[i]) end;return '['..table.concat(parts,',')..']' end
@@ -13,17 +16,43 @@ local function encode(v)
  return '{'..table.concat(parts,',')..'}'
 end
 local function exists(p)local h=io.open(p,'rb');if h then h:close();return true end;return false end
-local function read(p)local h=io.open(p,'rb');if not h then return nil end;local v=h:read('*a');h:close();return v end
-local state={token=C.token,engine='cheat-engine',stage='idle',message='输入当前数字',count=0,rows={__array=true},scanRound=0,searchValue='',lastWriteCount=0,lastWriteValue='',scannedBytes=0,totalBytes=0,scanElapsedMs=0,temporarilyPaused=false,pauseRestored=true,dataType='int32',commandId=''}
+local function read(p,limit)
+ local h,err,code=io.open(p,'rb')
+ if not h then if code==2 then return nil end;error(err or 'CE session read failed') end
+ local maximum=limit or 131072;local value=h:read(maximum+1) or '';h:close()
+ if #value>maximum then error('CE session file exceeds read limit') end
+ return value
+end
+local state={schemaVersion=1,token=C.token,engine='cheat-engine',stage='idle',message='输入当前数字',count=0,rows={__array=true},scanRound=0,searchValue='',lastWriteCount=0,lastWriteValue='',scannedBytes=0,totalBytes=0,scanElapsedMs=0,temporarilyPaused=false,pauseRestored=true,dataType='int32',commandId=''}
+local lastPublished,publication=nil,0
 local function publish()
- local path=C.root..'\\ce-state.json';local temp=path..'.tmp'
- local h=assert(io.open(temp,'wb'));h:write(encode(state));h:close()
- -- Readers allow missing files during replacement, never a truncated JSON receipt.
- os.remove(path);assert(os.rename(temp,path))
+ local path=C.root..'\\ce-state.json';local text=encode(state)
+ if #text>131072 then error('CE state exceeds write limit') end
+ local previous=read(path)
+ if previous~=nil and previous~=lastPublished then error('CE state preimage is unknown; preserved') end
+ publication=publication+1
+ local temp=path..'.'..C.token..'.'..publication..'.tmp';local backup=temp..'.previous'
+ if read(temp)~=nil or read(backup)~=nil then error('CE state staging path is not owned') end
+ local h=assert(io.open(temp,'wb'));local wrote,writeError=pcall(function()assert(h:write(text));assert(h:flush())end);local closed=h:close()
+ if not wrote or not closed then os.remove(temp);error(writeError or 'CE state flush failed') end
+ local moved=false
+ local ok,failure=pcall(function()
+  if read(path)~=previous then error('CE state changed before commit') end
+  if previous~=nil then assert(os.rename(path,backup));moved=true;if read(backup)~=previous then error('CE state source changed') end end
+  if read(path)~=nil then error('CE state was concurrently replaced') end
+  assert(os.rename(temp,path))
+  if read(path)~=text then error('CE state write was not acknowledged') end
+ end)
+ if not ok then
+  if moved and not exists(path) then os.rename(backup,path) end
+  os.remove(temp);error(failure)
+ end
+ lastPublished=text
+ if moved then os.remove(backup) end
 end
 local active,started,cancelled,closing=false,0,false,false
 local fatalError=nil
-local lastLease,leaseAt='',getTickCount()
+local lastLease,lastLeaseNumber,leaseAt='',0,getTickCount()
 local function scanner()
  local ms=getCurrentMemscan()
  if not ms or not ms.FoundList then error('CE扫描器未完成初始化，请重新打开简单改数值') end
@@ -97,8 +126,9 @@ local ok,err=pcall(function()
  local timer=createTimer(nil,false);timer.Interval=150
  timer.OnTimer=function()
   local success,failure=pcall(function()
-   local lease=read(C.root..'\\ce-lease.txt') or ''
-   if lease~=lastLease and lease:sub(1,#C.token)==C.token then lastLease=lease;leaseAt=getTickCount() end
+   local lease=read(C.root..'\\ce-lease.txt',4096) or ''
+   local sequence=lease:match('^'..C.token..'\n([1-9]%d*)$')
+   if sequence and #sequence<=16 then local number=tonumber(sequence);if number and number>lastLeaseNumber and number<=9007199254740991 then lastLease=lease;lastLeaseNumber=number;leaseAt=getTickCount() end end
    if getTickCount()-leaseAt>8000 then closing=true end
    if exists(C.root..'\\stop') or exists(C.root..'\\ce-stop') then closing=true end
    if exists(C.root..'\\cancel') or closing then cancel() end
@@ -107,10 +137,18 @@ local ok,err=pcall(function()
      local progress=scanner().getProgress();if type(progress)=='table' then state.scannedBytes=progress.CurrentlyScanned or 0;state.totalBytes=progress.TotalAddressesToScan or 0 end;state.scanElapsedMs=getTickCount()-started;state.temporarilyPaused=state.pauseByCE;state.pauseRestored=not state.pauseByCE;publish()
     end
    end
-   if closing and not active then state.stage='closed';state.message='CE会话已结束';publish();timer.destroy();closeCE();return end
+   if closing and not active then state.stage='closed';state.message='CE会话已结束';pcall(publish);timer.destroy();closeCE();return end
    if not active and not closing then
-    local request=read(C.root..'\\ce-command.txt')
-    if request then os.remove(C.root..'\\ce-command.txt');local lines={};for line in (request..'\n'):gmatch('(.-)\n') do lines[#lines+1]=line:gsub('\r$','') end;command(lines);publish() end
+    local path=C.root..'\\ce-command.txt';local request=read(path,4096)
+    if request then
+     local claimed=path..'.'..C.token..'.claim'
+     if read(claimed,4096)~=nil then error('CE command claim is unknown') end
+     assert(os.rename(path,claimed))
+     if read(claimed,4096)~=request then error('CE command changed while claiming') end
+     local lines={};for line in (request..'\n'):gmatch('(.-)\n') do lines[#lines+1]=line:gsub('\r$','') end
+     if #lines~=5 or lines[5]~='' then error('CE command frame is unsupported') end
+     command(lines);os.remove(claimed);publish()
+    end
    end
   end)
   if not success then
@@ -120,9 +158,10 @@ local ok,err=pcall(function()
    closing=true
    if active and f.btnNewScan.Enabled then active=false end
    if active then pcall(cancel);state.stage='scanning' else state.stage='closed' end
-   publish()
+   local saved=pcall(publish)
+   if not saved and not active then timer.destroy();closeCE() end
   end
  end
  timer.Enabled=true
 end)
-if not ok then state.stage='closed';state.message=tostring(err);publish();closeCE() end
+if not ok then state.stage='closed';state.message=tostring(err);pcall(publish);closeCE() end

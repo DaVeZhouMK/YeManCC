@@ -55,5 +55,105 @@
   "consumer": "legionMotionDecodeReport -> source lease/banks -> controller motion session -> final submission guard",
   "physicalAcceptance": false,
   "allControllerMotionConnected": false,
-  "protocolSourceSha256": "9c305a12013eec8af4ede8d1c5292e5288460ee91911edf99c6dcdc50668dba6"
+  "protocolSourceSha256": "9c305a12013eec8af4ede8d1c5292e5288460ee91911edf99c6dcdc50668dba6",
+  "activation": {
+    "scope": "Existing four Lenovo models; immutable activation plans, explicit live source intent and owner required",
+    "recipes": [
+      {
+        "scope": "Tablet/Tablet2 selected vendor capture source only; no reset, RGB or SteamOS command",
+        "source": "Devices/Lenovo/LegionGoTablet.cs",
+        "method": "EnableControllerGyro",
+        "models": [
+          "LegionGoTablet",
+          "LegionGoTablet2"
+        ],
+        "commands": [
+          [
+            5,
+            6,
+            106,
+            2,
+            3,
+            1,
+            1
+          ],
+          [
+            5,
+            6,
+            106,
+            7,
+            3,
+            2,
+            1
+          ],
+          [
+            5,
+            6,
+            106,
+            2,
+            4,
+            1,
+            1
+          ],
+          [
+            5,
+            6,
+            106,
+            7,
+            4,
+            2,
+            1
+          ]
+        ],
+        "physicalAcceptance": false,
+        "id": "tablet",
+        "minReportBytes": 7,
+        "maxReportBytes": 64,
+        "inputReportBytes": 0
+      },
+      {
+        "id": "go-s",
+        "scope": "GO S SZ1/SZ2 controller IMU enable only; no mapping reset, hibernation, polling or RGB command",
+        "source": "Devices/Lenovo/LegionGoSZ1.cs",
+        "method": "ControllerFactoryReset:IMU-only-subset",
+        "models": [
+          "LegionGoSZ1",
+          "LegionGoSZ2"
+        ],
+        "logicalCommands": [
+          [
+            4,
+            7,
+            1
+          ],
+          [
+            4,
+            5,
+            1
+          ]
+        ],
+        "commands": [
+          [
+            0,
+            4,
+            7,
+            1
+          ],
+          [
+            0,
+            4,
+            5,
+            1
+          ]
+        ],
+        "framingSource": "Devices/IDevice.cs",
+        "framingMethod": "WithReportID",
+        "minReportBytes": 65,
+        "maxReportBytes": 65,
+        "inputReportBytes": 65,
+        "physicalAcceptance": false
+      }
+    ],
+    "physicalAcceptance": false
+  }
 }

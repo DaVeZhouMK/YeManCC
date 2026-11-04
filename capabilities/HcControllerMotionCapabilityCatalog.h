@@ -16,6 +16,11 @@ public:
     bool known() const noexcept { return descriptor_ != nullptr; }
     std::uint16_t token() const noexcept { return descriptor_ ? descriptor_->token : 0; }
     unsigned bankCount() const noexcept { return descriptor_ ? descriptor_->bankCount : 0; }
+    bool activationSupported() const noexcept { return activationCommands().count != 0; }
+    const ActivationRecipe& activationCommands() const noexcept {
+        if (!descriptor_) return noActivationRecipe;
+        return descriptor_->protocol == ProtocolKind::Tablet ? tabletActivationRecipe : goSActivationRecipe;
+    }
     const Descriptor* descriptor() const noexcept { return descriptor_; }
     template<class TabletPid, class GoSPid>
     bool hardwareAdmitted(std::uint16_t vendorId, std::uint16_t productId,

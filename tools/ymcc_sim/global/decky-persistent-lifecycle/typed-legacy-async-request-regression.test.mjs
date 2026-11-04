@@ -1,6 +1,6 @@
 // Copied receipt controls, bound to one actual positive/FAIL run by SHA.
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import test from 'node:test';
-import {inspect,validate,originalContract,ORIGINAL_ROW_IDS} from './typed-legacy-async-request-regression.mjs';
+import {inspect,validate,originalContract,ORIGINAL_ROW_IDS,selectV1OwnedAuditCandidate} from './typed-legacy-async-request-regression.mjs';
 const file=process.env.YMCC_TYPED_ASYNC_RECEIPT,digest=process.env.YMCC_TYPED_ASYNC_RECEIPT_SHA256;assert(file&&/^[a-f0-9]{64}$/.test(digest??''),'ACTUAL_RECEIPT_IDENTITY_REQUIRED');const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');assert.equal(sha(file),digest);const raw=JSON.parse(fs.readFileSync(file,'utf8')),pins=JSON.parse(fs.readFileSync(path.join(path.dirname(file),'SOURCE-PINS.json'),'utf8')),repo=path.resolve(import.meta.dirname,'../../../..'),legacy='tools/decky_binding_cancel_selftest.cpp';assert.equal(sha(path.join(repo,legacy)),pins.find(r=>r.path===legacy)?.sha256);originalContract(fs.readFileSync(path.join(repo,legacy),'utf8'));
 const reject=(label,mutate)=>test(label,()=>{const copy=structuredClone(raw);mutate(copy);assert.throws(()=>inspect(copy));});
 test('actual verdict is derived from all original conditions, not process exit alone',()=>{const summary=inspect(raw);assert.equal(summary.typedRows,6);if(raw.passed)assert.equal(validate(raw).typedFailed,0);else{assert(summary.typedFailed>0||summary.calibrationPassed!==true||summary.strictParentHandlesEqual!==true||summary.strictParentThreadsEqual!==true,'FAIL must retain an actual failed requirement');assert.throws(()=>validate(raw));}});
@@ -26,3 +26,29 @@ reject('retained callback negative requires actual original closed=false',r=>{r.
 reject('actual new request must survive old canceled-token callbacks',r=>{r.negativeControls.find(x=>x.id.includes('old-cancel')).lateOldCallbacksDidNotAffectActualNewRequest=false;});
 reject('real HANDLE_CLOSING callbacks are required',r=>r.directAsyncRequestConsumers[0].atExit.handleClosingCallbacks=0);
 reject('legacy branch cannot be classified as typed',r=>r.productCallbackMode='legacy');
+
+// Optional intake controls reuse the exact frozen before/after files, without a native run.
+const auditRoot=process.env.YMCC_V1_AUDIT_CANDIDATE_ROOT,beforeRoot=process.env.YMCC_V1_AUDIT_BEFORE_ROOT;
+if(auditRoot){
+ assert(beforeRoot,'V1_AUDIT_CONTROL_BEFORE_ROOT_REQUIRED');
+ test('V1 audit intake selects exactly nine replacements and the added header',()=>{
+  const selected=selectV1OwnedAuditCandidate(repo,auditRoot),receipt=selected.receipt;
+  assert.equal(receipt.fullSourceRoot,false);assert.equal(receipt.observationOnly,true);assert.equal(receipt.files.length,10);assert.equal(receipt.files.filter(row=>row.before).length,9);
+  for(const row of receipt.files){assert.equal(path.resolve(selected.file(row.path)),path.resolve(auditRoot,row.path));assert.equal(sha(selected.file(row.path)),row.selected.sha256);}
+  assert.equal(selected.file(legacy),path.join(repo,legacy));assert.equal(selected.verify().length,10);
+ });
+ test('V1 audit intake rejects original before files as selected candidates',()=>{
+  assert.throws(()=>selectV1OwnedAuditCandidate(repo,beforeRoot),/V1_AUDIT_CANDIDATE_SELECTED_PIN:.*:SHA256/);
+ });
+ test('V1 audit intake rejects changed original before pins',()=>{
+  assert.throws(()=>selectV1OwnedAuditCandidate(auditRoot,beforeRoot),/V1_AUDIT_CANDIDATE_BASE_PIN:.*:SHA256/);
+ });
+ test('V1 audit intake rejects a missing overlay before any native launch',()=>{
+  const missing=path.join(auditRoot,'not-an-audit-overlay');assert.equal(fs.existsSync(missing),false);
+  assert.throws(()=>selectV1OwnedAuditCandidate(repo,missing),/V1_AUDIT_CANDIDATE_ROOT_MISSING/);
+ });
+ test('V1 audit intake rejects a source path outside the original graph scope',()=>{
+  const selected=selectV1OwnedAuditCandidate(repo,auditRoot);
+  assert.throws(()=>selected.file('../outside.cpp'),/V1_AUDIT_CANDIDATE_SOURCE_SCOPE/);
+ });
+}

@@ -10,7 +10,15 @@ internal sealed class WindowsHidTransport : ILightingHidTransport
 {
     private readonly FileStream stream;
     private bool disposed;
-    private WindowsHidTransport(FileStream stream) => this.stream = stream;
+    private readonly CancellationToken cancellationToken;
+    private readonly Action? ensureOwnerCurrent;
+    private WindowsHidTransport(FileStream stream, CancellationToken cancellationToken = default,
+        Action? ensureOwnerCurrent = null)
+    {
+        this.stream = stream;
+        this.cancellationToken = cancellationToken;
+        this.ensureOwnerCurrent = ensureOwnerCurrent;
+    }
     public bool IsConnected => !disposed && !stream.SafeFileHandle.IsInvalid && !stream.SafeFileHandle.IsClosed;
 
     internal static ILightingHidTransport OpenX1Mini()
@@ -60,21 +68,65 @@ internal sealed class WindowsHidTransport : ILightingHidTransport
         catch { handle.Dispose(); throw; }
     }
 
-    private static bool IsX1Mini(SafeFileHandle handle)
+    internal static ILightingHidTransport OpenX2MiniPro(string interfacePath,
+        CancellationToken cancellationToken, Action ensureOwnerCurrent)
     {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("HID lighting requires Windows");
+        ArgumentNullException.ThrowIfNull(ensureOwnerCurrent);
+        cancellationToken.ThrowIfCancellationRequested();
+        ensureOwnerCurrent();
+        // The parent owner selected this exact endpoint. Never enumerate another
+        // collection or fall back to X1Mini/OXP3 when the selection is missing.
+        if (string.IsNullOrWhiteSpace(interfacePath) ||
+            !interfacePath.StartsWith(@"\\?\hid#", StringComparison.OrdinalIgnoreCase) ||
+            !(interfacePath.Contains("vid_1a86&pid_fe00", StringComparison.OrdinalIgnoreCase) ||
+              interfacePath.Contains("vid_1a86&pid_1305", StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("X2 Mini Pro requires the native owner's exact vendor HID path");
+        ushort expectedProductId;
+        using (var probe = Native.CreateFile(interfacePath, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero))
+        {
+            if (probe.IsInvalid) throw Failure("inspect X2 Mini Pro HID");
+            if (!IsVendorHid(probe, true, out expectedProductId)) throw new IOException("X2 Mini Pro HID identity mismatch");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        ensureOwnerCurrent();
+        var handle = File.OpenHandle(interfacePath, FileMode.Open, FileAccess.ReadWrite,
+            FileShare.ReadWrite, FileOptions.Asynchronous);
+        try
+        {
+            if (!IsVendorHid(handle, true, out var reopenedProductId) || reopenedProductId != expectedProductId)
+                throw new IOException("X2 Mini Pro HID identity changed while opening");
+            cancellationToken.ThrowIfCancellationRequested();
+            ensureOwnerCurrent();
+            return new WindowsHidTransport(new FileStream(handle, FileAccess.ReadWrite, 65, true),
+                cancellationToken, ensureOwnerCurrent);
+        }
+        catch { handle.Dispose(); throw; }
+    }
+
+    private static bool IsX1Mini(SafeFileHandle handle) => IsVendorHid(handle, false);
+
+    private static bool IsVendorHid(SafeFileHandle handle, bool x2MiniPro) =>
+        IsVendorHid(handle, x2MiniPro, out _);
+
+    private static bool IsVendorHid(SafeFileHandle handle, bool x2MiniPro, out ushort productId)
+    {
+        productId = 0;
         var attributes = new Native.HidAttributes { Size = Marshal.SizeOf<Native.HidAttributes>() };
         if (!Native.HidD_GetAttributes(handle, ref attributes)) throw Failure("read HID attributes");
-        if (attributes.VendorId != 0x1A86 || attributes.ProductId != 0xFE00) return false;
+        if (attributes.VendorId != 0x1A86 ||
+            !(attributes.ProductId == 0xFE00 || x2MiniPro && attributes.ProductId == 0x1305)) return false;
         if (!Native.HidD_GetPreparsedData(handle, out var preparsed)) throw Failure("read HID preparsed data");
         try
         {
             if (Native.HidP_GetCaps(preparsed, out var caps) != 0x00110000)
-                throw new IOException("cannot read X1 Mini HID capabilities");
+                throw new IOException("cannot read OneX vendor HID capabilities");
             if (caps.UsagePage != 0xFF00 || caps.Usage != 1) return false;
             // Source emits report ID + 64 bytes. Never silently truncate or
             // repad a report against an unreviewed descriptor.
             if (caps.OutputReportByteLength != 65)
-                throw new IOException($"X1 Mini HID output length {caps.OutputReportByteLength} is not 65");
+                throw new IOException($"OneX vendor HID output length {caps.OutputReportByteLength} is not 65");
+            productId = attributes.ProductId;
             return true;
         }
         finally { Native.HidD_FreePreparsedData(preparsed); }
@@ -84,11 +136,16 @@ internal sealed class WindowsHidTransport : ILightingHidTransport
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (report.Length != 65 || report[0] != 0)
-            throw new ArgumentException("X1 Mini requires report ID 0 plus 64 payload bytes");
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            throw new ArgumentException("OneX V1 requires report ID 0 plus 64 payload bytes");
+        cancellationToken.ThrowIfCancellationRequested();
+        ensureOwnerCurrent?.Invoke();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
         // The async handle permits cancellation of a stuck write. No automatic
         // retries or alternate endpoints: failures must not duplicate a write.
         stream.WriteAsync(report.AsMemory(), timeout.Token).AsTask().GetAwaiter().GetResult();
+        cancellationToken.ThrowIfCancellationRequested();
+        ensureOwnerCurrent?.Invoke();
         return true;
     }
 

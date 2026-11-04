@@ -489,9 +489,9 @@ static bool focusIsolationTaskAllowed(bool externalInjection, unsigned long long
         capturedEpoch, g_focusIsolationEpoch.load(std::memory_order_acquire));
 }
 // 外部注入的**发送边界**复检：不只靠入队时的一次 epoch 检查。
-// nativeKeyboardShortcutSend requests down/up in one SendInput batch. A return
-// count below the request does not prove the pair was fully inserted; R2 logs
-// the actual count. Dropping an unexecuted task creates no input. This gate only
+// Keyboard shortcut sequences send delayed, separately observed down/up edges.
+// Their owner retains failed releases; send return counts alone do not prove
+// downstream application handling. Dropping an unexecuted task creates no input. This gate only
 // blocks new injection during the ownership/release barrier.
 static bool focusIsolationExternalInjectionBlocked() {
     return g_focusIsolationInjectionBlocked.load(std::memory_order_acquire);
@@ -794,7 +794,7 @@ static bool radialHasInputOwner(){return g_radialUiOwnsInput.load(std::memory_or
 static bool virtualUiOwnsInput(const FocusPlan& plan) {
     if (!plan.virtualUiPersona[0] || !g_realStickTest.enabled ||
         !g_realStickTest.virtualTargetEnabled) return false;
-    return gamepadUiInputEligible();
+    return gamepadUiOutputIsolationEligible();
 }
 
 static void dsuUiOutputNote(bool uiOwnsInput, bool submitNeutral) {
@@ -845,7 +845,7 @@ static void virtualUiOutputNote(const FocusPlan& plan, bool neutral, bool submit
 static bool steamDeckUiOwnsInput(const FocusPlan& plan) {
     if (!plan.steamDeckTarget || !g_realStickTest.enabled ||
         !g_realStickTest.virtualTargetEnabled) return false;
-    return gamepadUiInputEligible();
+    return gamepadUiOutputIsolationEligible();
 }
 
 // Transition-only receipt. These flags observe output and never gate input.
@@ -880,7 +880,7 @@ static void steamDeckUiOutputNote(bool neutral, bool submitNeutral, const json& 
 static bool ps5UiOwnsInput(const FocusPlan& plan) {
     if (!plan.ps5Target || !g_realStickTest.enabled ||
         !g_realStickTest.virtualTargetEnabled) return false;
-    return gamepadUiInputEligible();
+    return gamepadUiOutputIsolationEligible();
 }
 
 // MSI-only addition: share the exact foreground/parent-owned-child UI boundary.
@@ -888,7 +888,7 @@ static bool ps5UiOwnsInput(const FocusPlan& plan) {
 static bool msiUiOwnsInput(const FocusPlan& plan) {
     if (!plan.msiTarget || !g_realStickTest.enabled ||
         !g_realStickTest.virtualTargetEnabled) return false;
-    return gamepadUiInputEligible();
+    return gamepadUiOutputIsolationEligible();
 }
 
 // Transition-only MSI receipt distinguishes input-source health from output

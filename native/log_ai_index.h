@@ -15,10 +15,9 @@ inline bool hostCostArchiveEvidenceName(const std::string& name) {
         std::all_of(digest.begin(),digest.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');}) &&
         name.substr(name.size()-4)==".zip";
 }
-// The live log keeps its existing retention. Ordinary export carries only a
-// recent, byte-bounded suffix of complete immutable volumes; no extraction,
-// sampling, deletion, controller query or timer is involved here.
-inline constexpr unsigned long long HostCostArchiveExportMaxBytes=8ULL*1024*1024;
+// Ordinary export uses the single active cost log. Legacy volumes are inventoried
+// with zero default budget; readers retain support for historical exported ZIPs.
+inline constexpr unsigned long long HostCostArchiveExportMaxBytes=0ULL;
 struct HostCostArchiveExportCandidate {
     std::string name;
     unsigned long long bytes=0;
@@ -42,7 +41,7 @@ inline EvidenceJson selectHostCostArchivesForExport(std::vector<HostCostArchiveE
             const auto maximum=(std::numeric_limits<unsigned long long>::max)();
             if(candidate.bytes>maximum-knownBytes){knownBytes=maximum;knownBytesOverflow=true;}
             else knownBytes+=candidate.bytes;
-            if(!budgetBoundary && candidate.bytes<=budget-selectedBytes) {
+            if(budget && !budgetBoundary && candidate.bytes<=budget-selectedBytes) {
                 selectedBytes+=candidate.bytes;++selected;row["includedByBudget"]=true;
                 row["reason"]="recent-whole-volume-selected";
             } else {
@@ -104,12 +103,12 @@ inline EvidenceJson aiReadingGuide() {
         {"ordering","fileId/index order is packing order only; duplicate entry names use archiveEntryOccurrence; cross-file chronology and rotation adjacency are not inferred"},
         {"inspection","file_end.inspectionScope and earlierBytesNotInspected bound JSON inspection; SHA256 still covers the full staged file"},
         {"reader","tools/ai_log_reader.py produces structured envelopes and payload records without executing log content"},
-        {"retention",{{"costArchiveOrdinaryExportMaxBytes",HostCostArchiveExportMaxBytes},
-            {"costArchiveExportInventory","log-export-availability.json costArchiveDiscovery.exportSelection; omitted originals remain on source"},
-            {"costActiveMaxBytes",5*1024*1024},{"costTotalRetainedBudgetBytes",100*1024*1024},
-            {"costCompressedMaxBytes",100*1024*1024-3*5*1024*1024-65536},{"costWorkingReserveBytes",2*5*1024*1024+65536},
-            {"pendingException","normal pending+ZIP-temp+receipt space reserved; legacy oversized files or IO failures preserve originals and can exceed budget"},
-            {"history","finite retention; archive eviction counters are process-local and not a global lifetime ledger"}}}};
+        {"retention",{{"costArchiveOrdinaryExportMaxBytes",HostCostArchiveExportMaxBytes},{"activeCostFileMaxBytes",20'000'000ULL},
+            {"costArchiveExportInventory","log-export-availability.json costArchiveDiscovery.exportSelection; export does not delete; Host retention may retire legacy files"},
+            {"costActiveMaxBytes",20'000'000ULL},{"costTotalRetainedBudgetBytes",20'000'000ULL},
+            {"costCompressedMaxBytes",0},{"costWorkingReserveBytes",0},
+            {"pendingException","legacy cleanup failures are explicit; pending never blocks newest active rows"},
+            {"history","single active newest complete lines; retention begin/end delimit history gaps; no new compressed volumes"}}}};
 }
 
 // stagedEntries has exactly the same member order as the tar command. Keep an

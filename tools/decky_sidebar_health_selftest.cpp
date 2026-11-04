@@ -11,6 +11,21 @@ int main(){unsigned checks=0;auto check=[&](bool ok,const char* label){if(!ok)th
  for(const std::string url:{"http://127.0.0.1:1337/plugins/p/index.js","decky://decky/plugin/p/index.js","http://localhost:1337/frontend/index.jsEvil","http://127.0.0.1:1337/frontend/catalog.js","http://localhost:13370/frontend/index.js","http://evil.invalid/frontend/index.js","http://localhost:1337/frontend/../index.js"}){auto p=base;p["params"]["exceptionDetails"]["stackTrace"]["callFrames"][0]["url"]=url;check(exception(p,101).empty(),"nonboot/plugin/foreign source is never fatal");}
  for(const std::string message:{"TypeError: Failed to fetch","Error: HTTP 403","Error: Steam updated","Error: connection closed","TypeError: Cannot read properties of undefined\nat decky://decky/plugin/p/index.js"}){auto p=base;p["params"]["exceptionDetails"]["exception"]["description"]=message;check(exception(p,101).empty(),"network and plugin noise ignored");}
  auto p=base;p["params"]["exceptionDetails"]["exception"]["description"]=std::string(8193,'x');check(exception(p,101).empty(),"oversize description bounded");p=base;p["params"]["exceptionDetails"]["stackTrace"]["callFrames"].push_back({{"url","http://localhost:1337/plugins/p/index.js"}});check(exception(p,101).empty(),"plugin caller excludes core frame");
+ // Extend the original plugin-caller negative across the full admitted stack.
+ // A CDP description need not contain its separately supplied callFrames.
+ for(const size_t at:{size_t(7),size_t(8),size_t(63)})
+  for(const std::string url:{"http://127.0.0.1:1337/plugins/p/index.js","http://localhost:1337/plugins/p/index.js","decky://decky/plugin/p/index.js","decky://decky/legacy_plugin/p/index.js"}){
+   auto deep=base;auto& details=deep["params"]["exceptionDetails"];
+   details["exceptionId"]=1;details["text"]="Uncaught";details["lineNumber"]=0;details["columnNumber"]=0;details["exception"]["type"]="object";
+   auto& frames=details["stackTrace"]["callFrames"];frames=Json::array();
+   for(size_t n=0;n<64;++n)frames.push_back({{"functionName","callback"},{"scriptId","1"},{"url",n==0?"http://127.0.0.1:1337/frontend/index.js":"http://127.0.0.1:1337/frontend/chunk.js"},{"lineNumber",0},{"columnNumber",0}});
+   check(exception(deep,101)=="decky-frontend-incompatible","64-frame pure core error remains a candidate");
+   frames[at]["url"]=url;
+   check(exception(deep,101).empty(),"deep plugin caller excludes core frame");
+  }
+ auto oversized=base;auto& tooMany=oversized["params"]["exceptionDetails"]["stackTrace"]["callFrames"];
+ while(tooMany.size()<65)tooMany.push_back({{"url","http://127.0.0.1:1337/frontend/chunk.js"}});
+ check(exception(oversized,101).empty(),"65-frame stack remains outside the bounded classifier");
  Json signal={{"method","Runtime.bindingCalled"},{"params",{{"name","__YMCC_DECKY_HEALTH_V1"},{"executionContextId",101},{"payload",Json{{"runId",run},{"code","decky-render-failed"}}.dump()}}}};
  check(boundarySignal(signal,101,run),"scoped health marker admitted for live readback");check(!boundarySignal(signal,102,run)&&!boundarySignal(signal,101,std::string(32,'b')),"foreign context/session marker rejected");signal["params"]["payload"]="{}";check(!boundarySignal(signal,101,run),"incomplete marker rejected");signal["params"]["payload"]=std::string(161,'x');check(!boundarySignal(signal,101,run),"marker byte bound");
  Json state={{"enabled",true},{"phase","loader-started"},{"revision",7}},event={{"reason","decky-render-failed"},{"runId",run}};

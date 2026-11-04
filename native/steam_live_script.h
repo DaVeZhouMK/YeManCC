@@ -79,14 +79,15 @@ R"YMSTEAM(// Embedded in steam_live_script.h. Regenerate/check with tools/steam_
     // Approved bounded repair: a retained document with a dead old backend must
     // not trap the product behind the no-repeat launch gate. Only an explicit repair
     // click can rebuild UI; automatic callers fail closed before any side effect.
-    if (request.operation === 'decky.repairConnection' || request.operation === 'decky.recoverConnection') {
+    if (request.operation === 'decky.repairConnection' || request.operation === 'decky.recoverConnection' || request.operation === 'decky.cleanupConnection') {
       stage = 'decky-manual-repair';
       const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
       const automatic = request.operation === 'decky.recoverConnection';
+      const cleanup = request.operation === 'decky.cleanupConnection';
       // RestartJSContext recreates the Big Picture window and may steal foreground.
       // Fail before any mode read, timer, marker or UI mutation, including stale native callers.
       if (automatic) fail('steam-ui-refresh-requires-user');
-      if (Object.keys(request).length !== 5 || (automatic ? request.automatic !== true : request.userInitiated !== true) ||
+      if (Object.keys(request).length !== (cleanup ? 7 : 5) || (cleanup ? request.cleanupAuthorized !== true : automatic ? request.automatic !== true : request.userInitiated !== true) ||
           !(hex(request.expectedFrontendBuild) || request.expectedFrontendBuild === null) || !hex(request.installedFrontendBuild) ||
           !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(request.loaderVersion || '')) fail('invalid-decky-repair-request');
       const loader = window.DeckyPluginLoader, frontend = window.__YMCC_DECKY_FRONTEND__;
@@ -96,10 +97,16 @@ R"YMSTEAM(// Embedded in steam_live_script.h. Regenerate/check with tools/steam_
         window.__YMCC_DECKY_MIRROR__?.frontendBuildId === request.installedFrontendBuild &&
         /^[a-f0-9]{32}$/.test(window.__YMCC_DECKY_MIRROR__?.runId || '') &&
         /^[a-f0-9]{64}$/.test(window.__YMCC_DECKY_MIRROR__?.token || '') &&
-        new RegExp('^ws://127[.]0[.]0[.]1:[1-9][0-9]{0,4}/mirror$').test(window.__YMCC_DECKY_MIRROR__?.endpoint || '');
-      const current = () => window === window.top && location.origin === 'https://steamloopback.host' &&
-        window.DeckyPluginLoade)YMSTEAM"
-R"YMSTEAM(r === loader && window.__YMCC_DECKY_FRONTEND__ === frontend &&
+        new RegExp('^ws://127[.]0[.]0[.]1:[1-9][0-9]{0,4}/mirror$').tes)YMSTEAM"
+R"YMSTEAM(t(window.__YMCC_DECKY_MIRROR__?.endpoint || '');
+      const cleanupCurrent = () => !cleanup || (typeof request.expectedModeEpoch === 'string' &&
+        request.expectedModeEpoch.length <= 96 && Number.isInteger(request.expectedAccount) &&
+        request.expectedAccount > 0 && request.expectedAccount <= 0xffffffff &&
+        window.__YMCC_DECKY_ACCOUNT_WATCH__?.read?.(request.expectedAccount) === true &&
+        window.__ymccSteamUiModeWatch?.mode === 'bigpicture' &&
+        window.__ymccSteamUiModeWatch.id + ':' + window.__ymccSteamUiModeWatch.entries === request.expectedModeEpoch);
+      const current = () => cleanupCurrent() && window === window.top && location.origin === 'https://steamloopback.host' &&
+        window.DeckyPluginLoader === loader && window.__YMCC_DECKY_FRONTEND__ === frontend &&
         (missing ? ownEmpty() : frontend?.active === true && frontend.buildId === request.expectedFrontendBuild &&
           Array.isArray(loader?.plugins) && loader.plugins.some(item => item.name === 'ymcc-sidebar')) &&
         loader.deckyState?.publicState?.()?.versionInfo?.current === request.loaderVersion;
@@ -108,10 +115,26 @@ R"YMSTEAM(r === loader && window.__YMCC_DECKY_FRONTEND__ === frontend &&
       const mode = await bounded(SteamClient.UI.GetUIMode());
       if ((mode !== 1 && mode !== 4) || !current()) fail('decky-repair-context-changed');
       if (window.__ymccDeckyManualRepair) fail('decky-repair-already-requested');
-      window.__ymccDeckyManualRepair = true;
+      const repairReservation = {}; let restartEntered = false;
+      window.__ymccDeckyManualRepair = repairReservation;
       // A scheduled/uncertain dispatch is not a successful handshake. The native
       // owner and actual snapshot remain the only completion evidence.
-      setTimeout(() => { if (current()) SteamClient.Browser.RestartJSContext(); }, 0);
+      setTimeout(() => {
+        if (restartEntered || window.__ymccDeckyManualRepair !== repairReservation) return;
+        let stillCurrent = false;
+        try { stillCurrent = current(); } catch {} // The restart API has not been entered.
+        if (!stillCurrent) {
+          // A positively cancelled callback may release ONLY its own JS gate,
+          // so a fresh explicit repair can proceed. This never refunds native
+          // cleanup history or grants ordinary automatic UI-refresh authority.
+          if (window.__ymccDeckyManualRepair === repairReservation) delete window.__ymccDeckyManualRepair;
+          return;
+        }
+        // Keep the gate spent even when the call throws: a restart may already
+        // have reached Steam. A late/duplicate callback cannot invoke it twice.
+        restartEntered = true;
+        SteamClient.Browser.RestartJSContext();
+      }, 0);
       mutated = true;
       return { ok: true, requestDispatched: true, mutated: true, stage, phase: 'requested' };
     }
@@ -154,14 +177,78 @@ R"YMSTEAM(r === loader && window.__YMCC_DECKY_FRONTEND__ === frontend &&
       let deckyUpdateResidue, deckyEmptyFrontend;
       try {
         const prior=window.__YMCC_DECKY_FRONTEND__,bridge=window.__YMCC_DECKY_MIRROR__;
-        if(window===window.top&&location.origin==='https://steamloopback.host'&&window.DeckyPluginLoader&&prior?.active===true&&/^[a-f0-9]{64}$/.test(prior.buildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&/^[a-f0-9]{64}$/.test(bridge?.token||'')&&/^ws:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mirror$/.test(bridge?.endpoint||''))
+        // Revoked bridge keeps only build/run provenance, never credentials.
+        if(window===window.top&&location.origin==='https://steamloopback.host'&&window.DeckyPluginLoader&&prior?.active===true&&/^[a-f0-9]{64}$/.test(prior.buildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&((bridge?.revoked===true&&Object.keys(bridge).length===3&&bridge.frontendBuildId===prior.buildId)||(/^[a-f0-9]{64}$/.test(bridge?.token||'')&&/^ws:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mirror$/.test(bridge?.endpoint||''))))
           deckyUpdateResidue={protocol:1,active:true,bridgePresent:true,frontendBuildId:prior.buildId};
         const emptyLoader=window.DeckyPluginLoader, emptyVersion=emptyLoader?.deckyState?.publicState?.()?.versionInfo?.current;
         if(window===window.top&&location.origin==='https://steamloopback.host'&&prior==null&&Array.isArray(emptyLoader?.plugins)&&emptyLoader.plugins.length===0&&/^[a-f0-9]{64}$/.test(bridge?.frontendBuildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&/^[a-f0-9]{64}$/.test(bridge?.token||'')&&new RegExp('^ws://127[.]0[.]0[.]1:[1-9][0-9]{0,4}/mirror$').test(bridge?.endpoint||'')&&/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(emptyVersion||''))
           deckyEmptyFrontend={protocol:1,frontendBuildId:bridge.frontendBuildId,loaderVersion:emptyVersion};
         if(deckyUpdateResidue){try{const loaded=window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current;if(typeof loaded==='string'&&/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(loaded)&&loaded.length<=32)deckyUpdateResidue.loaderVersion=loaded;}catch{}}
       } catch {} // Recovery evidence is optional; a read failure never grants launch.
-      return { ok: true, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
+      // Reuse sleep.session.inspect's current UI identity read. Account discovery
+      // stays read-only and account-independent for mode/CSS; Decky alone may
+      // consume this proof when ActiveUser is zero in a logged-in offline session.
+      let observedAccount;
+      try {
+        const id=window.settingsStore?.m_CMInterface?.steamid;
+        if(typeof id?.GetAccountID==='function'){
+          const account=id.GetAccountID();
+          if(Number.isInteger(account)&&account>0&&account<=0xffffffff&&
+             window.settingsStore?.m_CMInterface?.steamid===id&&id.GetAccountID()===account)observedAccount=account;
+        }
+      } catch {} // Missing/racing identity never prevents a process-wide mode read.
+      // One native CurrentUser callback per document, shared by all rebinds.
+      // The public callback carries the actual SteamID even in offline mode.
+      // Its payload is only an identity witness, never an operation request.
+      let accountWatch=window.__YMCC_DECKY_ACCOUNT_WATCH__;
+      if(!accountWatch&&typeof globalThis.Steam)YMSTEAM"
+R"YMSTEAM(Client?.User?.RegisterForCurrentUserChanges==='function'&&typeof SteamClient.User.RegisterForLoginStateChange==='function'){
+        const listeners=new Set();let current=0,registered=false;
+        const read=expected=>{
+          if(!registered||!Number.isInteger(expected)||expected<=0||expected>0xffffffff||current!==expected)return false;
+          try {const id=window.settingsStore?.m_CMInterface?.steamid;
+            return typeof id?.GetAccountID==='function'&&id.GetAccountID()===expected&&
+              window.settingsStore?.m_CMInterface?.steamid===id&&id.GetAccountID()===expected;
+          }catch{return false;}
+        };
+        accountWatch={version:1,read,subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn);}};
+        // Publish the registration attempt once. If either Steam hook fails,
+        // later mode reads must not accumulate another native subscription.
+        Object.defineProperty(window,'__YMCC_DECKY_ACCOUNT_WATCH__',{value:accountWatch,configurable:true});
+        try{
+          SteamClient.User.RegisterForCurrentUserChanges(user=>{
+            let next=0;
+            try {const id=user?.strSteamID;
+              if(typeof id==='string'&&/^[1-9][0-9]{0,19}$/.test(id)){
+                const full=BigInt(id);if(full<=0xffffffffffffffffn&&((full>>52n)&15n)===1n)next=Number(full&0xffffffffn);
+              }
+            }catch{}
+            current=next;
+            // At most the current binding owns a listener. No timers, HTTP,
+            // filenames, account history, UI changes or business writes.
+            for(const fn of Array.from(listeners).slice(0,4)){try{fn();}catch{}}
+          });
+          // Login cancellation/logout can precede the CurrentUser clear. An
+          // empty login name is revocation, never proof of a replacement account.
+          SteamClient.User.RegisterForLoginStateChange(name=>{if(typeof name!=='string'||!name){current=0;for(const fn of Array.from(listeners).slice(0,4)){try{fn();}catch{}}}});
+          registered=true;
+        }catch{current=0;}
+      }
+      const deckyAccountWatchAvailable=accountWatch?.version===1&&!!observedAccount&&accountWatch.read(observedAccount);
+      // Reviewed official v3.3.1 fields. Unknown versions remain UNKNOWN;
+      // installed hooks are only a structural check, never visual acceptance.
+      let deckyBackendConnected,deckyHooksInstalled;
+      try {
+        if(window===window.top&&window.location.origin==='https://steamloopback.host'&&
+           window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current==='v3.3.1'){
+          const ws=window.DeckyBackend?.ws;
+          if(ws&&Number.isInteger(ws.readyState))deckyBackendConnected=ws.readyState===1;
+          const hooks=window.__TABS_HOOK_INSTANCE;
+          deckyHooksInstalled=!!(hooks&&hooks===window.DeckyPluginLoader.tabsHook&&hooks.qamBrowserViewPatch&&
+            Array.isArray(hooks.tabs)&&hooks.tabs.some(tab=>tab?.id===999));
+        }
+      }catch{} // Never emit credentials, router URL, source objects or exception text.
+      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
     }
     // Steam sleep captures bind the account only through this fixed read.
     // Native code pins the verified Steam PID/birth/root and never uses this to
@@ -205,8 +292,7 @@ R"YMSTEAM(r === loader && window.__YMCC_DECKY_FRONTEND__ === frontend &&
           surface('SteamClient.Apps', globalThis.SteamClient?.Apps, pattern),
           surface('SteamClient.System.UI', globalThis.SteamClient?.System?.UI, pattern),
           surface('SteamUIStore', window.SteamUIStore, pattern),
-          surface()YMSTEAM"
-R"YMSTEAM('FocusedAppWindowStore', window.FocusedAppWindowStore, pattern),
+          surface('FocusedAppWindowStore', window.FocusedAppWindowStore, pattern),
           surface('ControllerStore', window.ControllerStore, pattern),
         ],
         apiValuesNotRead:true,
@@ -237,7 +323,8 @@ R"YMSTEAM('FocusedAppWindowStore', window.FocusedAppWindowStore, pattern),
         const descriptor = found.descriptor;
         if (typeof descriptor.value !== 'function') { rows.push({ label, name, present:true, depth:found.depth, descriptorKind:descriptor.get || descriptor.set ? 'accessor' : typeof descriptor.value }); continue; }
         let source = '', length = null;
-        try { source = Function.prototype.toString.call(descriptor.value); length = descriptor.value.length; } catch { source = ''; }
+        try { sourc)YMSTEAM"
+R"YMSTEAM(e = Function.prototype.toString.call(descriptor.value); length = descriptor.value.length; } catch { source = ''; }
         rows.push({ label, name, present:true, depth:found.depth, descriptorKind:'function', arity:length, sourceLength:source.length, sourceFnv1a32:fnv1a(source), sourceHead:source.slice(0,160) });
       }
       return { ok:true, mutated:false, stage, apiValuesNotRead:true, methodsNotCalled:true, rows };
@@ -312,8 +399,7 @@ R"YMSTEAM('FocusedAppWindowStore', window.FocusedAppWindowStore, pattern),
         // an existing store; never create it or register Overlay callbacks.
         const desktop=probe(()=>active?.m_DesktopOverlay);
         const gameid=probe(()=>params?.gameid),pid=probe(()=>params?.browserInfo?.m_unPID);
-        return {authority:'diagnostic-only-no-admission',source:'valve-navigation-cac)YMSTEAM"
-R"YMSTEAM(he-and-browser-dom',
+        return {authority:'diagnostic-only-no-admission',source:'valve-navigation-cache-and-browser-dom',
           navigationContextObserved:nav!=null,rootMatchesBrowser:root!=null&&browser!=null?root===browser:null,
           navigationActive:bool(()=>nav?.BIsActive?.()),browserObserved:browser!=null,browserClosed:bool(()=>browser?.closed),
           documentVisibility:visibility==='visible'||visibility==='hidden'?visibility:'unknown',documentFocused:bool(()=>document?.hasFocus?.()),
@@ -337,7 +423,8 @@ R"YMSTEAM(he-and-browser-dom',
             let data=cache,wrapped=false,size;
             try{size=mapSize.call(data)}catch{
               // Current MobX maps expose an existing native data_ Map of value_
-              // wrappers. Read data descriptors, never computed map properties.
+    )YMSTEAM"
+R"YMSTEAM(          // wrappers. Read data descriptors, never computed map properties.
               data=dataField(cache,'data_');wrapped=true;
               try{size=mapSize.call(data)}catch{return {reason:'steam-passive-window-cache-unavailable'}}
             }
@@ -397,8 +484,7 @@ R"YMSTEAM(he-and-browser-dom',
                   const url=typeof info?.URL==='string'?info.URL:null;let hash=null;if(url!==null){hash=2166136261;for(let n=0;n<url.length;n++)hash=Math.imul(hash^url.charCodeAt(n),16777619)>>>0;}
                   return {appid:ids[0],index:c.index,status:info?'available':'unavailable',urlIdentity:hash,urlKind:url===null?'unknown':/(?:^|[\\/])empty\.vdf$/i.test(url)?'empty-or-passthrough':'configured',selectionType:num(info?.eSelectionType)};
                 }catch{return {appid:ids[0],index:c.index,status:'unavailable'}}
- )YMSTEAM"
-R"YMSTEAM(             });
+              });
               try{configQueries.push(...await bounded(Promise.all(queries)))}catch{configQueries.push({appid:ids[0],status:'timeout'})}
             }
           }
@@ -420,7 +506,8 @@ R"YMSTEAM(             });
       // Receives Valve's real native window feedback independently of UI stores.
       // A callback can be an initial cached snapshot: receipt age is NOT state age.
       const nativeFocusFeedbackRead=async()=>{
-        const started=performance.now(),accountObject=window.settingsStore?.m_CMInterface?.steamid;
+        const started=perform)YMSTEAM"
+R"YMSTEAM(ance.now(),accountObject=window.settingsStore?.m_CMInterface?.steamid;
         const result={implementation:'steam-native-focus-feedback-v1',source:'steam-native-focus-subscription',
           available:false,reason:'native-focus-unavailable',registrationAttempted:false,callbackReceived:false,
           ownSubscriptionUnregistered:false,nativeCacheFreshnessKnown:false,fullGameIdCarried:false,processBirthCarried:false,
@@ -500,8 +587,7 @@ R"YMSTEAM(             });
             const d=Object.getOwnPropertyDescriptor(owner,'GetOverlayInstances');
             if(d){if('value' in d&&typeof d.value==='function')method=d.value;break;}
           }
-          const expected='GetOverlayInstances(Zt){let Nt=Array.from(this.m_mapOverla)YMSTEAM"
-R"YMSTEAM(yPopupByPID.values()).reverse();return Nt=Nt.filter(Er=>Er.params.browserInfo.m_unAppID==Zt),Nt}';
+          const expected='GetOverlayInstances(Zt){let Nt=Array.from(this.m_mapOverlayPopupByPID.values()).reverse();return Nt=Nt.filter(Er=>Er.params.browserInfo.m_unAppID==Zt),Nt}';
           if(!method||Function.prototype.toString.call(method).trim()!==expected)return unknown('getter-source-unverified');
           result.sourceMatched=true;
           const cache=dataField(ws,'m_mapOverlayPopupByPID'),sizeGet=Object.getOwnPropertyDescriptor(Map.prototype,'size').get;
@@ -528,7 +614,8 @@ R"YMSTEAM(yPopupByPID.values()).reverse();return Nt=Nt.filter(Er=>Er.params.brow
             if(!Array.isArray(first)||first.length>64||first.some(instance=>!stored.has(instance)))return unknown('target-entry-unknown');
             const pids=first.map(instance=>instance.params?.browserInfo?.m_unPID);
             if(pids.some(pid=>!Number.isInteger(pid)||pid<0||pid>0xffffffff)||new Set(pids).size!==pids.length)return unknown('target-entry-unknown');
-            result.normalGetterCalls++;const last=Reflect.apply(method,ws,[row.appid]);
+            result.normalGetterCalls++;const last=Reflect.apply(method,w)YMSTEAM"
+R"YMSTEAM(s,[row.appid]);
             if(!Array.isArray(last)||last.length!==first.length||last.some((instance,i)=>instance!==first[i]||instance.params?.browserInfo?.m_unPID!==pids[i]))return unknown('cache-changed');
             Object.assign(row,{available:true,reason:'source-qualified-cache-read',popupCount:first.length,pidCandidates:pids});
           }
@@ -609,8 +696,7 @@ R"YMSTEAM(yPopupByPID.values()).reverse();return Nt=Nt.filter(Er=>Er.params.brow
               if(!d||!('value' in d)||!Object.is(d.value,target.raw[i]))reject('cache-changed');
             }
           };
-          const take)YMSTEAM"
-R"YMSTEAM(=()=>{
+          const take=()=>{
             limit();const entries=[],iterator=Map.prototype.entries.call(map);
             const next=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(iterator),'next')?.value;
             if(typeof next!=='function'||!Function.prototype.toString.call(next).includes('[native code]'))reject('map-brand-unqualified');
@@ -642,7 +728,8 @@ R"YMSTEAM(=()=>{
           tailCheck(last);
           const rows=last.map(entry=>({entryKey:entry.key,fields:entry.fields}));
           // Only locally created scalar tags are serialized, never target
-          // objects/toJSON. Raw rows are removed by the native log sanitizer.
+          // obje)YMSTEAM"
+R"YMSTEAM(cts/toJSON. Raw rows are removed by the native log sanitizer.
           Object.assign(result,{available:true,reason:'source-qualified-cache-read',mapEntryCount:size,passesComplete:[true,true],rows});
           let bytes=0;for(const character of JSON.stringify(result)){const code=character.codePointAt(0);bytes+=code<0x80?1:code<0x800?2:code<0x10000?3:4;}
           if(bytes>8192)return unknown('summary-budget');
@@ -720,8 +807,7 @@ R"YMSTEAM(=()=>{
         result.observerCreatedAtUnixMs=diagnosticCount(watch.createdAtUnixMs);
         result.diagnosticCountersAvailable=watch.diagnosticCountersVersion===1&&
           [watch.rawCallbacksEntered,watch.accountUnavailableCallbacks,watch.accountMismatchCallbacks,watch.schemaInvalidEvents].every(value=>diagnosticCount(value)!==null);
-  )YMSTEAM"
-R"YMSTEAM(      if(result.diagnosticCountersAvailable){
+        if(result.diagnosticCountersAvailable){
           result.rawCallbacksEntered=watch.rawCallbacksEntered;
           result.accountUnavailableCallbacks=watch.accountUnavailableCallbacks;
           result.accountMismatchCallbacks=watch.accountMismatchCallbacks;
@@ -748,7 +834,8 @@ R"YMSTEAM(      if(result.diagnosticCountersAvailable){
         const originalProof=['captured-original-tracker','current-association','captured-original-local-running'].includes(proof?.basis)&&proof.appid===ids[0]&&Number.isInteger(proof.pid)&&proof.pid>0&&proof.pid<=0xffffffff&&
           typeof proof.created==='string'&&/^[1-9]\d{0,19}$/.test(proof.created)&&BigInt(proof.created)<=0xffffffffffffffffn;
         const trackedOriginal=originalProof&&proof.basis==='captured-original-tracker';
-        const capturedLocalRunning=originalProof&&proof.basis==='captured-original-local-running';
+        const capturedLocalRunning=or)YMSTEAM"
+R"YMSTEAM(iginalProof&&proof.basis==='captured-original-local-running';
         if(request.originalWindowReturn!=null&&typeof request.originalWindowReturn!=='boolean')fail('invalid-steam-original-window-return');
         const originalWindowReturn=request.originalWindowReturn===true;
         if(request.preControllerOriginalWindow!=null&&typeof request.preControllerOriginalWindow!=='boolean')fail('invalid-steam-pre-controller-window');
@@ -804,8 +891,7 @@ R"YMSTEAM(      if(result.diagnosticCountersAvailable){
         const nativeBoolean=typeof nativeValue==='boolean';
         const nativeReturn=settledNativeReturn={source:'SteamClient.Apps.RaiseWindowForGame',kind:nativeNumber?'uint32':nativeBoolean?'boolean':typeof nativeValue==='undefined'?'undefined':'unsupported',
           observed:nativeNumber||nativeBoolean,code:nativeNumber?nativeValue:null,booleanValue:nativeBoolean?nativeValue:null,
-         )YMSTEAM"
-R"YMSTEAM( authority:'diagnostic-only-no-admission',nativeMeaningVerified:false,gameInputVerified:false,continueVerified:false};
+          authority:'diagnostic-only-no-admission',nativeMeaningVerified:false,gameInputVerified:false,continueVerified:false};
         // FocusedAppWindowStore is only a UI cache, not active Steam Input or
         // the original-PID contract. Do not delay native OS-PID postflight on
         // its 3s readback loop; take an auxiliary fresh snapshot immediately.
@@ -823,7 +909,8 @@ R"YMSTEAM( authority:'diagnostic-only-no-admission',nativeMeaningVerified:false,
         // Only native original-instance authority can request pending OS-PID
         // verification; a bare CDP request or another game's focus cannot.
         const windowPreparationPending=!!(windowPreparation&&stateCurrent&&[0,769,413080,ids[0]].includes(afterContext.focus.appid)&&after.overviews[0]?.localDisplayStatus===4&&after.overviews[0]?.inRunningList);
-        const verificationPending=windowPreparationPending||!!(originalProof&&stateCurrent&&!uiFocusMatched&&[0,769,413080].includes(afterContext.focus.appid));
+        const verificationPending=windowPreparationPending||!!(originalProof&&stateCurrent&&!uiFocusMatched&&[0,769,413080].includes(aft)YMSTEAM"
+R"YMSTEAM(erContext.focus.appid));
         return {ok:!!accepted,mutated,stage,runtimeAccepted:!!accepted,actionAcknowledged:true,nativeReturn,verificationPending,uiFocusMatched,uiFocusReadback:'auxiliary-cache-native-pid-postflight-required',
           reason:windowPreparationPending?'steam-original-window-prepared-input-unverified':accepted?'steam-input-context-refocused':verificationPending?'steam-input-ui-focus-readback-pending':'steam-input-context-not-confirmed',windowPreparation,controllerReconnectPending:windowPreparation&&afterContext.controllers.length===0,returnBasis:trackedOriginal?'captured-original-tracker':capturedLocalRunning?'captured-original-local-running':'current-association',originalWindowReturn,
           associationVerified:associationCurrent,before,inputContextBefore:context,after,inputContext:afterContext,gameInput:'not-tested',healthVerified:false};
@@ -881,8 +968,7 @@ R"YMSTEAM( authority:'diagnostic-only-no-admission',nativeMeaningVerified:false,
           refreshed:missing,runtimeAccepted:accepted,rescopeContract,contactRecovery:{requested:contactRequested,proofAccepted:contactTargetValid,accepted:contactAccepted,readOnly:true},before,after,gameInput:'unknown',healthVerified:false};
       }
       let overlayEnabled=null;try{const v=window.settingsStore?.GetClientSetting('enable_overlay')?.[0];overlayEnabled=typeof v==='boolean'?v:null}catch{}
-      // Persistent association re)YMSTEAM"
-R"YMSTEAM(ads do not spend their independent 2s lane on
+      // Persistent association reads do not spend their independent 2s lane on
       // controller configuration RPCs. Sleep/input inspection retains those RPCs.
       const inputContext=await inputSnapshot(request.runningLinkRead!==true,{passiveInspect:request.operation==='sleep.inspect'});const controllers=inputContext.controllers;
       // Install the lifecycle observer before the focus callback can yield; its
@@ -904,7 +990,8 @@ R"YMSTEAM(ads do not spend their independent 2s lane on
     // from an asynchronous JS callback. A lost receiver edge is not permission.
     const qamFollowup = (w, phase, ticket) => {
       const s=window.SteamUIStore, m=w?.MenuStore, now=Date.now();
-      const result=(status,terminal=true,extra={})=>({status,terminal,...extra});
+      const result=(status,terminal=true,extra={})=>({status,terminal,...extra})YMSTEAM"
+R"YMSTEAM();
       const read=()=>{try{const v=m?.GetOpenSideMenu?.();return [0,1,2].includes(v)?v:null;}catch{return null;}};
       if(!w||!m||typeof w.OnQuickAccessButtonPressed!=='function')return result('receiver-unavailable');
       let state=window.__ymccQamFollowup;
@@ -989,8 +1076,7 @@ R"YMSTEAM(ads do not spend their independent 2s lane on
       checkAccount();const after=read();
       return result(after===2?'menu-open':'supplement-sent',after===2||t.attempts===3,{menu:after,attempts:t.attempts,supplementSent:true});
     };
-    const passiv)YMSTEAM"
-R"YMSTEAM(eQamFollowup=(w,phase,ticket)=>{
+    const passiveQamFollowup=(w,phase,ticket)=>{
       try{return qamFollowup(w,phase,ticket);}catch{return {status:'recorder-unavailable',terminal:true};}
     };
     if(request.operation==='menu.qam.dispose'){
@@ -1020,7 +1106,8 @@ R"YMSTEAM(eQamFollowup=(w,phase,ticket)=>{
         windowType: Number.isInteger(w?.WindowType) ? w.WindowType : null, isGameOverlay: !!w?.IsOverlayWindow?.(),
         handler, keyboardFallback: false, runtimeAccepted: false };
       if (!s || !w || typeof w[handler] !== 'function') fail('live-api-unavailable');
-      // Keep Steam's lock/VR boundaries, but do not treat keyboard modifiers,
+      // Keep Steam's lock/VR boundaries, but )YMSTEAM"
+R"YMSTEAM(do not treat keyboard modifiers,
       // OS foreground ownership or a hidden main window as key-admission gates.
       if (s.GetShowingLockScreen?.() || w.IsAnyVRWindow?.()) fail('steam-menu-blocked');
       const readMenu = () => {
@@ -1103,8 +1190,7 @@ R"YMSTEAM(eQamFollowup=(w,phase,ticket)=>{
     const controllers = c.GetControllers();
     if (!Array.isArray(controllers)) fail('live-controller-not-connected');
     const matches = controllers.filter(x => c.GetControllerTypeString(x.eControllerType) === request.controllerType);
-    if (ma)YMSTEAM"
-R"YMSTEAM(tches.length !== 1) fail(matches.length ? 'live-controller-ambiguous' : 'live-controller-not-connected');
+    if (matches.length !== 1) fail(matches.length ? 'live-controller-ambiguous' : 'live-controller-not-connected');
     const controller = matches[0], index = controller.nControllerIndex;
     if (!Number.isInteger(index) || index < 0) fail('live-controller-ambiguous');
     const checkIdle = () => {
@@ -1129,7 +1215,8 @@ R"YMSTEAM(tches.length !== 1) fail(matches.length ? 'live-controller-ambiguous' 
       if (sets.length !== 1 || !Array.isArray(sets[0].source_bindings)) fail('live-binding-mismatch');
       const sources = sets[0].source_bindings.filter(x => x.key === 12);
       const group = sources[0]?.active_group;
-      if (sources.length !== 1 || group?.mode !== 7 || group.mode_shift || !Array.isArray(group.settings)) fail('live-binding-mismatch');
+      if (sources.length !== 1 || group?.mode !== 7)YMSTEAM"
+R"YMSTEAM( || group.mode_shift || !Array.isArray(group.settings)) fail('live-binding-mismatch');
       const settings = group.settings.filter(x => x.key === 30);
       if (settings.length !== 1 || !Number.isInteger(settings[0].int_value)) fail('live-binding-mismatch');
       return { group, setting: settings[0] };
@@ -1274,14 +1361,77 @@ R"YMSTEAM(n to risk restarting Steam's UI.
       let deckyUpdateResidue, deckyEmptyFrontend;
       try {
         const prior=window.__YMCC_DECKY_FRONTEND__,bridge=window.__YMCC_DECKY_MIRROR__;
-        if(window===window.top&&location.origin==='https://steamloopback.host'&&window.DeckyPluginLoader&&prior?.active===true&&/^[a-f0-9]{64}$/.test(prior.buildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&/^[a-f0-9]{64}$/.test(bridge?.token||'')&&/^ws:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mirror$/.test(bridge?.endpoint||''))
+        // Revoked bridge keeps only build/run provenance, never credentials.
+        if(window===window.top&&location.origin==='https://steamloopback.host'&&window.DeckyPluginLoader&&prior?.active===true&&/^[a-f0-9]{64}$/.test(prior.buildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&((bridge?.revoked===true&&Object.keys(bridge).length===3&&bridge.frontendBuildId===prior.buildId)||(/^[a-f0-9]{64}$/.test(bridge?.token||'')&&/^ws:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mirror$/.test(bridge?.endpoint||''))))
           deckyUpdateResidue={protocol:1,active:true,bridgePresent:true,frontendBuildId:prior.buildId};
         const emptyLoader=window.DeckyPluginLoader, emptyVersion=emptyLoader?.deckyState?.publicState?.()?.versionInfo?.current;
         if(window===window.top&&location.origin==='https://steamloopback.host'&&prior==null&&Array.isArray(emptyLoader?.plugins)&&emptyLoader.plugins.length===0&&/^[a-f0-9]{64}$/.test(bridge?.frontendBuildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&/^[a-f0-9]{64}$/.test(bridge?.token||'')&&new RegExp('^ws://127[.]0[.]0[.]1:[1-9][0-9]{0,4}/mirror$').test(bridge?.endpoint||'')&&/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(emptyVersion||''))
           deckyEmptyFrontend={protocol:1,frontendBuildId:bridge.frontendBuildId,loaderVersion:emptyVersion};
         if(deckyUpdateResidue){try{const loaded=window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current;if(typeof loaded==='string'&&/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(loaded)&&loaded.length<=32)deckyUpdateResidue.loaderVersion=loaded;}catch{}}
       } catch {} // Recovery evidence is optional; a read failure never grants launch.
-      return { ok: true, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
+      // Reuse sleep.session.inspect's current UI identity read. Account discovery
+      // stays read-only and account-independent for mode/CSS; Decky alone may
+      // consume this proof when ActiveUser is zero in a logged-in offline session.
+      let observedAccount;
+      try {
+        const id=window.settingsStore?.m_CMInterface?.steamid;
+        if(typeof id?.GetAccountID==='function'){
+          const account=id.GetAccountID();
+          if(Number.isInteger(account)&&account>0&&account<=0xffffffff&&
+             window.settingsStore?.m_CMInterface?.steamid===id&&id.GetAccountID()===account)observedAccount=account;
+        }
+      } catch {} // Missing/racing identity never prevents a process-wide mode read.
+      // One native CurrentUser callback per document, shared by all rebinds.
+      // The public callback carries the actual SteamID even in offline mode.
+      // Its payload is only an identity witness, never an operation request.
+      let accountWatch=window.__YMCC_DECKY_ACCOUNT_WATCH__;
+      if(!accountWatch&&typeof globalThis.SteamClient?.User?.RegisterForCurrentUserChanges==='function'&&typeof SteamClient.User.RegisterForLoginStateChange==='function'){
+        const listeners=new Set();let current=0,registered=false;
+        const read=expected=>{
+          if(!registered||!Number.isInteger(expected)||expected<=0||expected>0xffffffff||current!==expected)return false;
+          try {const id=window.settingsStore?.m_CMInterface?.steamid;
+            return typeof id?.GetAccountID==='function'&&id.GetAccountID()===expected&&
+              window.settingsStore?.m_CMInterface?.steamid===id&&id.GetAccountID()===expected;
+          }catch{return false;}
+        };
+        accountWatch={version:1,read,subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn);}};
+        // Publish the registration attempt once. If either Steam hook fails,
+        // later mode reads must not accumulate another native subscription.
+        Object.defineProperty(window,'__YMCC_DECKY_ACCOUNT_WATCH__',{value:accountWatch,configurable:true});
+        try{
+          SteamClient.User.RegisterForCurrentUserChanges(user=>{
+            let next=0;
+            try {const id=user?.strSteamID;
+              if(typeof id==='string'&&/^[1-9][0-9]{0,19}$/.test(id)){
+                const full=BigInt(id);if(full<=0xffffffffffffffffn&&((full>>52n)&15n)===1n)next=Number(full&0xffffffffn);
+              }
+            }catch{}
+            current=next;
+            // At most the current binding owns a listener. No timers, HTTP,
+            // filenames, account history, UI changes or business writes.
+            for(const fn of Array.from(listeners).slice(0,4)){try{fn();}catch{}}
+          });
+          // Login cancellation/logout can precede the CurrentUser clear. An
+          // empty login name is revocation, never proof of a replacement account.
+          SteamClient.User.RegisterForLoginStateChange(name=>{if(typeof name!=='string'||!name){current=0;for(const fn of Array.from(listeners).slice(0,4)){try{fn();}catch{}}}});
+          registered=true;
+        }catch{current=0;}
+      }
+      const deckyAccountWatchAvailable=accountWatch?.version===1&&!!observedAccount&&accountWatch.read(observedAccount);
+      // Reviewed official v3.3.1 fields. Unknown versions remain UNKNOWN;
+      // installed hooks are only a structural check, never visual acceptance.
+      let deckyBackendConnected,deckyHooksInstalled;
+      try {
+        if(window===window.top&&window.location.origin==='https://steamloopback.host'&&
+           window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current==='v3.3.1'){
+          const ws=window.DeckyBackend?.ws;
+          if(ws&&Number.isInteger(ws.readyState))deckyBackendConnected=ws.readyState===1;
+          const hooks=window.__TABS_HOOK_INSTANCE;
+          deckyHooksInstalled=!!(hooks&&hooks===window.DeckyPluginLoader.tabsHook&&hooks.qamBrowserViewPatch&&
+            Array.isArray(hooks.tabs)&&hooks.tabs.some(tab=>tab?.id===999));
+        }
+      }catch{} // Never emit credentials, router URL, source objects or exception text.
+      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
     }
   } catch (error) {
     // A later account/interactive veto must retain a settled bounded native

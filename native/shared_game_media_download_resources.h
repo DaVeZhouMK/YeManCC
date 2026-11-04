@@ -3,6 +3,9 @@
 #include <atomic>
 #include <cmath>
 #include <functional>
+#include <filesystem>
+#include <string>
+#include <string_view>
 #include <optional>
 #include <windows.h>
 namespace ymcc::media::downloads {
@@ -82,6 +85,23 @@ public:
     return "";
   }
 };
+// Check the real native window only while work is pending. No polling owner,
+// renderer claim or controller ownership changes are needed for media priority.
+inline bool libraryForeground(const std::filesystem::path& executable) {
+  const auto window=GetForegroundWindow();
+  if(!window||!IsWindowVisible(window)||IsIconic(window))return false;
+  wchar_t className[64]{};
+  if(!GetClassNameW(window,className,64)||std::wstring_view(className)!=L"YeManSteamLibraryWorkspace")return false;
+  DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+  HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+  if(!process)return false;
+  wchar_t image[32768]{};DWORD size=32768;
+  const bool queried=QueryFullProcessImageNameW(process,0,image,&size)!=FALSE;
+  CloseHandle(process);
+  const auto expected=std::filesystem::absolute(executable).lexically_normal().make_preferred().wstring();
+  return queried&&_wcsicmp(expected.c_str(),image)==0&&
+      GetForegroundWindow()==window&&IsWindowVisible(window)&&!IsIconic(window);
+}
 struct ResourcePorts {
   std::function<int()> ac = []() {
     SYSTEM_POWER_STATUS power{};
@@ -90,5 +110,6 @@ struct ResourcePorts {
                : -1;
   };
   std::function<std::optional<double>(uint64_t)> cpu;
+  std::function<bool()> foreground;
 };
 } // namespace ymcc::media::downloads

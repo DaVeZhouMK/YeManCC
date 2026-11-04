@@ -3,6 +3,7 @@
 #include "steam_original_recovery_engine.h"
 #include "steam_original_recovery_wake_watch.h"
 #include "steam_original_recovery_file_hash.h"
+#include "steam_original_recovery_storage.h"
 #include "steam_original_recovery_source_diagnostic.h"
 #include "steam_original_recovery_semistatic_source.h"
 #include <windows.h>
@@ -41,7 +42,7 @@ using J=Json;using U64=std::uint64_t;namespace rw=ymcc::steamrecordwin;namespace
 // the executing engine, independently of the host's display version.
 // The revision includes the host identity lease and process-lifetime tracker fixes.
 // Ordinary build/package guards bind this marker to those actual host sources.
-constexpr const char* kEngineRevision="dual-route-precision-window-20261024-r11";
+constexpr const char* kEngineRevision="dual-route-config-v1-compat-20261102-r12";
 constexpr const char* kModuleQualification="content-contract-and-loaded-image";
 enum class RecoveryRoute { LegacyDynamic, SemiStatic };
 thread_local RecoveryRoute gRecoveryRoute=RecoveryRoute::SemiStatic;
@@ -54,6 +55,8 @@ thread_local bool gCleanupMode=false;thread_local std::function<bool()> gOrigina
 #ifdef YMCC_STEAM_ORIGINAL_ENGINE_TESTING
 // Faults run before scope/process opening, only in this offline build.
 thread_local std::function<void(J&)> gOfflineTypedReadFault;
+thread_local bool gOfflinePersistentConfigOnly=false;
+thread_local std::function<void(const fp::path&)> gOfflineBeforeStateCreate;
 #endif
 void need(bool value,const char* why){if(!value)throw std::runtime_error(why);}
 struct DiagnosticFailure:std::runtime_error {
@@ -175,8 +178,13 @@ std::string textHash(const std::string& s){return digest(s.data(),s.size());}
 std::string fileHash(const std::wstring& file){return ymcc::steamOriginalHash::hashFileFully(file).sha256;}
 std::string freshUuid(){std::array<unsigned char,16> b{};need(BCryptGenRandom(nullptr,b.data(),static_cast<ULONG>(b.size()),BCRYPT_USE_SYSTEM_PREFERRED_RNG)>=0,"nonce-rng");b[6]=static_cast<unsigned char>((b[6]&15)|64);b[8]=static_cast<unsigned char>((b[8]&63)|128);std::string out;for(std::size_t i=0;i<b.size();++i){if(i==4||i==6||i==8||i==10)out+='-';out+="0123456789abcdef"[b[i]>>4];out+="0123456789abcdef"[b[i]&15];}return out;}
 fp::path absolute(const J& j){const auto p=utf16(j.get<std::string>());need(p.size()>3&&p[1]==L':'&&(p[2]==L'\\'||p[2]==L'/'),"absolute-path-required");return fp::absolute(p).lexically_normal();}
-J readJson(const fp::path& file){std::ifstream f(file,std::ios::binary);need(f.good(),"reference-open");std::string s((std::istreambuf_iterator<char>(f)),{});need(s.size()<8*1024*1024,"reference-limit");if(s.starts_with("\xef\xbb\xbf"))s.erase(0,3);return J::parse(s);}
-void durableCreate(const fp::path& file,const std::string& text){fp::create_directories(file.parent_path());H h(CreateFileW(file.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr));need(h.good(),GetLastError()==ERROR_FILE_EXISTS?"event-already-consumed":"durable-create");DWORD written=0;need(text.size()<=MAXDWORD&&WriteFile(h.h,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()&&FlushFileBuffers(h.h),"durable-flush-no-refund");}
+bool statePresent(const fp::path& file){ymcc::steamOriginalStorage::detail::ancestry(file);return ymcc::steamOriginalStorage::detail::present(file);}
+J readJson(const fp::path& file){return ymcc::steamOriginalStorage::readState(file);}
+void durableCreate(const fp::path& file,const std::string& text){ymcc::steamOriginalStorage::detail::directory(file.parent_path());
+#ifdef YMCC_STEAM_ORIGINAL_ENGINE_TESTING
+if(gOfflineBeforeStateCreate)gOfflineBeforeStateCreate(file);
+#endif
+H h(CreateFileW(file.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr));need(h.good(),GetLastError()==ERROR_FILE_EXISTS?"event-already-consumed":"durable-create");DWORD written=0;need(text.size()<=MAXDWORD&&WriteFile(h.h,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()&&FlushFileBuffers(h.h),"durable-flush-no-refund");}
 void atomicJson(const fp::path& file,const J& value){fp::create_directories(file.parent_path());auto temp=file;temp+=L".next-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetCurrentThreadId());{std::ofstream f(temp,std::ios::binary|std::ios::trunc);need(f.good(),"status-open");f<<value.dump(2)<<'\n';need(f.good(),"status-write");}need(MoveFileExW(temp.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"status-atomic-replace");}
 
 struct LegacyFile {std::string sha256;};
@@ -470,41 +478,47 @@ std::string scopeKey(const Scope& s,U64 account){return textHash(J{{"scope",refe
 // below matches; a new, non-resettable mutation key records the actual attempt.
 std::optional<std::string> auditedPrepublicationSource(const Scope& s,const fp::path& data){
   try{
-    if(fp::exists(data/L"DISABLED.json"))return {};
+    if(statePresent(data/L"DISABLED.json"))return {};
     const auto identity=life(s);const auto key=textHash(identity.dump());
-    const auto path=data/L"audited-prepublication-transfer"/utf16(key+".json");if(!fp::exists(path))return {};
+    const auto path=data/L"audited-prepublication-transfer"/utf16(key+".json");if(!statePresent(path))return {};
     const auto audit=readJson(path);
     need(audit.at("schema")=="ymcc.steam-original-audited-prepublication-transfer.v1"&&
         audit.at("authorizedBy")=="explicit-operator-no-write-audit-20261023"&&
-        audit.at("targetRoute")=="legacy-dynamic"&&audit.at("life")==identity&&
+        audit.at("targetRoute")=="legacy-dynamic"&&audit.at("life").dump()==identity.dump()&&
         audit.at("sourceEngineRevision")=="dual-route-original-recovery-20261023-r7"&&
         audit.at("sourceNativeSha256")=="66d147da3511e33c0c349244cd81c158d7547489ce1a082865a8711cbe5e260e",
         "audit-transfer-contract");
     const auto eventId=audit.at("sourceEventId").get<std::string>();need(!eventId.empty(),"audit-source-event");
     const auto operation=textHash(J{{"life",identity},{"operation","startup-mutation-once"}}.dump());
     const auto sourceEvent=textHash(J{{"life",identity},{"eventId",eventId}}.dump());
-    const auto verify=[&](const fp::path& file,const J& expected){need(expected.is_string()&&
-        expected.get<std::string>().size()==64&&fileHash(file.wstring())==expected.get<std::string>(),"audit-source-bytes-changed");};
-    const auto disabled=data/L"disabled"/utf16(key+".json");verify(disabled,audit.at("disabledSha256"));
-    const auto blocked=readJson(disabled);need(blocked.at("consumed")==true&&blocked.at("noAutomaticRetry")==true&&
+    const auto verify=[&](const fp::path& file,const J& expected){
+      const auto bytes=ymcc::steamOriginalStorage::detail::read(file);
+      need(expected.is_string()&&expected.get<std::string>().size()==64&&textHash(bytes)==expected.get<std::string>(),"audit-source-bytes-changed");
+      return ymcc::steamOriginalStorage::detail::parseStateBytes(bytes);
+    };
+    const auto disabled=data/L"disabled"/utf16(key+".json");
+    const auto blocked=verify(disabled,audit.at("disabledSha256"));
+    need(blocked.is_object()&&!blocked.contains("schemaVersion")&&!blocked.contains("schema")&&
+        blocked.at("consumed")==true&&blocked.at("noAutomaticRetry")==true&&
         blocked.at("reason")=="recovery-cleanup-not-confirmed","audit-disabled-reason");
     for(const auto& pair:std::array<std::pair<std::string,const char*>,2>{{{operation,"operationSha256"},{sourceEvent,"eventSha256"}}}){
-      const auto file=data/L"consumed"/utf16(pair.first+".json");verify(file,audit.at(pair.second));const auto old=readJson(file);
-      need(old.at("schema")=="ymcc.steam-original-recovery-consumption.v1"&&old.at("life")==identity&&
+      const auto file=data/L"consumed"/utf16(pair.first+".json");const auto old=verify(file,audit.at(pair.second));
+      need(old.at("schema")=="ymcc.steam-original-recovery-consumption.v1"&&old.at("life").dump()==identity.dump()&&
           old.at("refunded")==false&&old.at("trigger").at("kind")=="startup"&&
           old.at("trigger").at("id")==eventId,"audit-source-ledger");
     }
-    const auto proofFile=data/L"audited-prepublication-transfer"/utf16(key+".source.json");verify(proofFile,audit.at("sourceSummarySha256"));
-    const auto proof=readJson(proofFile);const auto& driver=proof.at("driverResult");
+    const auto proofFile=data/L"audited-prepublication-transfer"/utf16(key+".source.json");
+    const auto proof=verify(proofFile,audit.at("sourceSummarySha256"));const auto& driver=proof.at("driverResult");
+    need(!proof.contains("schemaVersion")&&!proof.contains("schema"),"audit-source-schema-unknown");
     need(proof.at("engineRevision")==audit.at("sourceEngineRevision")&&proof.at("lifeKey")==key&&
         proof.at("trigger").at("kind")=="startup"&&proof.at("trigger").at("id")==eventId&&
         proof.at("status")=="refused"&&proof.at("consumed")==true&&
         proof.at("reason")=="recovery-cleanup-not-confirmed"&&proof.at("recoveryRoute")=="semi-static"&&
         proof.at("before").at("gameId")==std::to_string(s.gameId)&&
-        proof.at("before").at("gamePid")==s.roles[1].pid&&proof.at("before").at("originalPrimaryMatched")==true&&
+        dword(proof.at("before").at("gamePid"))==s.roles[1].pid&&proof.at("before").at("originalPrimaryMatched")==true&&
         driver.at("status")=="failed"&&driver.at("reason")=="loaded-client-ui-compatibility-contract"&&
         driver.at("openProcessAttempted")==true&&driver.at("writes")==J::array()&&
-        driver.at("sourceEntries")==J::array()&&driver.at("publisherCalls")==0&&
+        driver.at("sourceEntries")==J::array()&&driver.at("publisherCalls").is_number_integer()&&driver.at("publisherCalls")==0&&
         driver.at("entryEverExposed")==false&&driver.at("armAttempted")==false&&
         driver.at("controlOutcomeUnknown")==false&&driver.at("managementCallUnresolved")==false&&
         driver.at("trialDllMayRemainLoaded")==false&&driver.at("entryMayRemainPatched")==false&&
@@ -533,17 +547,17 @@ void consume(const J& event,const Scope& s,const fp::path& data,bool reserve=tru
   const auto operationKey=kind=="wake"?textHash(J{{"life",identity},{"operation","wake"},{"powerEventFileTime",episode}}.dump()):
       textHash(J{{"life",identity},{"operation","startup-mutation-once"}}.dump());
   const std::array<fp::path,2> keys{base/utf16(operationKey+".json"),base/utf16(eventKey+".json")};
-  if(fp::exists(keys[0])){
+  if(statePresent(keys[0])){
     const auto transfer=auditedLegacyTransfer(event,s,data);
     need(bool(transfer),"event-already-consumed");
     const auto transferKey=base/utf16(*transfer+".json");
-    need(!fp::exists(transferKey)&&!fp::exists(keys[1]),"event-already-consumed");
+    need(!statePresent(transferKey)&&!statePresent(keys[1]),"event-already-consumed");
     if(reserve){auto transferred=record;transferred["auditTransfer"]=true;
       transferred["oldKeysPreserved"]=true;transferred["refunded"]=false;
       durableCreate(transferKey,transferred.dump(2));durableCreate(keys[1],transferred.dump(2));}
     return;
   }
-  for(const auto& key:keys)need(!fp::exists(key),"event-already-consumed");
+  for(const auto& key:keys)need(!statePresent(key),"event-already-consumed");
   if(reserve)for(const auto& key:keys)durableCreate(key,record.dump(2));
 }
 // QueryActor already publishes completion with this manual-reset event.
@@ -789,26 +803,38 @@ J sourceGetterContext(Scope& scope,const Snapshot& snap,U64 account,QueryActor& 
   summary["source"]="full-capture";gSourceContextInit={};const auto context=captureGetterContext(scope,snap,account,query);
   requireCurrent();gSourceContextInit={steam.pid,steam.born,steam.path};return context;
 }
+bool referenceNonceValid(const std::string& nonce);
 J importReference(const J& seed,const Scope& s,U64 account){
-  const auto& b=seed.contains("baseline")?seed.at("baseline"):seed;
-  need(b.value("healthyOriginalObserved",false)&&b.value("sameCohort",false)&&b.value("sameAccountAtEnd",false)&&b.value("currentGameProcessCount",0)==1,"seed-not-healthy-original");
+  need(seed.is_object(),"seed-object");const auto& b=seed.contains("baseline")?seed.at("baseline"):seed;
+  need(b.is_object()&&(!seed.contains("baseline")||(!seed.contains("schema")&&!seed.contains("schemaVersion")))&&
+      !b.contains("schemaVersion")&&(!b.contains("schema")||(b.at("schema").is_string()&&b.at("schema")=="steam.wuxia.manual-sleep-observation.v1")),"seed-schema-unknown");
+  need(b.value("healthyOriginalObserved",false)&&b.value("sameCohort",false)&&b.value("sameAccountAtEnd",false)&&b.contains("currentGameProcessCount")&&b.at("currentGameProcessCount").is_number_integer()&&b.at("currentGameProcessCount")==1,"seed-not-healthy-original");
   need(b.at("errors").is_array()&&b.at("errors").empty(),"seed-capture-errors");
   need(b.at("accountFingerprint")==textHash(std::to_string(account)),"seed-account-mismatch");
   for(const auto* end:{"before","after"})for(const auto* role:{"steam","game","cef"}){const auto& p=b.at(end).at("roles").at(role);need(p.value("alive",false)&&p.value("available",false)&&normalizedIdentity(p)==s.identities.at(role),"seed-cohort-mismatch");}
-  need(b.at("target").at("gameid")==std::to_string(s.gameId)&&b.at("target").at("appid")==s.appid,"seed-target");
-  const auto& n=b.at("native");need(n.at("nativeUi").at("nativeAppFlags")==8196&&n.at("nativeUi").at("runningBitSet")==true&&n.at("record").at("originalPrimaryMatched")==true&&n.at("record").at("primaryLivenessPid")==s.roles[1].pid,"seed-native-health");
+  need(b.at("target").at("gameid")==std::to_string(s.gameId)&&dword(b.at("target").at("appid"))==s.appid,"seed-target");
+  const auto& n=b.at("native");need(n.at("nativeUi").at("nativeAppFlags").is_number_integer()&&n.at("nativeUi").at("nativeAppFlags")==8196&&n.at("nativeUi").at("runningBitSet")==true&&n.at("record").at("originalPrimaryMatched")==true&&dword(n.at("record").at("primaryLivenessPid"))==s.roles[1].pid,"seed-native-health");
   const auto clientSha=n.at("record").at("diskSha256").get<std::string>();
   const auto uiSha=n.at("nativeUi").at("diskSha256").get<std::string>();
   const auto digestShape=[](const std::string& value){return value.size()==64&&value.find_first_not_of("0123456789abcdef")==std::string::npos;};
   need(digestShape(clientSha)&&digestShape(uiSha),"seed-profile-shape"); // matchReference binds these actual hashes to the qualified current snapshot.
   const auto& binding=b.at("binding");need(binding.at("status")=="observed"&&binding.at("mode")=="read-only"&&binding.at("sameCohortAfter")==true&&binding.at("samples").size()>=3,"seed-binding-capture");
-  const auto nonce=b.at("bindingNonce").get<std::string>();need(nonce.size()==36&&binding.at("nonce")==nonce,"seed-pin-nonce");const auto p=binding.at("samples").at(0).at("pins");
-  for(const auto& sample:binding.at("samples")){need(sample.at("flags")==8196&&sample.at("running")==true&&sample.at("primary")==s.roles[1].pid&&sample.at("foregroundComparisonPid")==s.roles[1].pid&&sample.at("sameFingerprintsAsFirst")==true&&sample.at("pins")==p,"seed-pins-not-healthy-immutable");}
+  const auto nonce=b.at("bindingNonce").get<std::string>();need(referenceNonceValid(nonce)&&binding.at("nonce")==nonce,"seed-pin-nonce");const auto p=binding.at("samples").at(0).at("pins");
+  need(binding.at("samples").is_array(),"seed-binding-samples-type");
+  for(const auto& sample:binding.at("samples")){need(sample.at("flags").is_number_integer()&&sample.at("flags")==8196&&sample.at("running")==true&&dword(sample.at("primary"))==s.roles[1].pid&&dword(sample.at("foregroundComparisonPid"))==s.roles[1].pid&&sample.at("sameFingerprintsAsFirst")==true&&sample.at("pins")==p,"seed-pins-not-healthy-immutable");}
   return{{"schema","ymcc.steam-native-original-reference.v1"},{"scope",referenceScope(s)},{"captureParent",s.identities.at("ymcc")},{"accountFingerprint",textHash(std::to_string(account))},{"bindingNonce",nonce},{"pins",p},{"healthyFlags",8196},{"compatibilityContract","original-running-code-data-v2"},{"clientSha256",clientSha},{"uiSha256",uiSha},{"importedSeedSha256",textHash(b.dump())}};
 }
+J referenceFromSeed(const J& seed,const Scope& scope,const Snapshot& sample,U64 account){
+    need(seed.is_object(),"seed-object");const auto& baseline=seed.contains("baseline")?seed.at("baseline"):seed;
+    bool sameSeedScope=true;for(const auto* role:{"steam","game","cef"})
+        sameSeedScope=sameSeedScope&&normalizedIdentity(baseline.at("before").at("roles").at(role))==scope.identities.at(role);
+    if(!sameSeedScope){need(sample.flags==8196,"seed-prior-steam-game-cef-lifetime-not-reusable-while-lost");return {};}
+    return importReference(seed,scope,account);
+}
+
 void matchReference(const J& ref,const Scope& scope,const Snapshot& sample,U64 account){
-  need(ref.at("schema")=="ymcc.steam-native-original-reference.v1"&&ref.at("healthyFlags")==8196&&
-      ref.at("scope")==referenceScope(scope),"healthy-reference-scope");
+  need(ref.is_object()&&ref.at("schema")=="ymcc.steam-native-original-reference.v1"&&ref.at("healthyFlags").is_number_integer()&&ref.at("healthyFlags")==8196&&
+      ref.at("scope").dump()==referenceScope(scope).dump(),"healthy-reference-scope");
   // The current snapshot independently qualified disk+loaded contracts. File
   // digests remain diagnostic history; the same original instance is bound by
   // its Steam/game/CEF birth, complete GameID, account and exact heap pins.
@@ -816,7 +842,8 @@ void matchReference(const J& ref,const Scope& scope,const Snapshot& sample,U64 a
   const auto digestShape=[](const std::string& value){return value.size()==64&&value.find_first_not_of("0123456789abcdef")==std::string::npos;};
   const bool modern=ref.value("compatibilityContract",std::string())=="original-running-code-data-v2";
   const bool historical=bool(tr::profileForHashes(priorClient,priorUi));
-  need(digestShape(priorClient)&&digestShape(priorUi)&&(modern||historical)&&
+  need((!ref.contains("compatibilityContract")||modern)&&referenceNonceValid(ref.at("bindingNonce").get<std::string>())&&
+      digestShape(priorClient)&&digestShape(priorUi)&&(modern||historical)&&
       ref.at("accountFingerprint")==textHash(std::to_string(account)),"healthy-reference-profile-or-account");
   need(ref.at("pins")==pins(sample,scope.roles[0].born,account,ref.at("bindingNonce").get<std::string>()),"saved-healthy-pins-changed");
 }
@@ -828,6 +855,7 @@ J legacyReferenceScope(const Scope& scope){return {{"steam",scope.identities.at(
 std::string legacyReferenceKey(const Scope& scope,U64 account){return textHash(J{
     {"scope",legacyReferenceScope(scope)},{"accountFingerprint",textHash(std::to_string(account))}}.dump());}
 std::string readLegacyReferenceBytes(const fp::path& file){
+  ymcc::steamOriginalStorage::detail::ancestry(file);
   H input(CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,
       FILE_FLAG_OPEN_REPARSE_POINT,nullptr));need(input.good(),"legacy-reference-open");
   BY_HANDLE_FILE_INFORMATION info{};
@@ -848,17 +876,17 @@ bool referenceNonceValid(const std::string& nonce){
 }
 J loadCompatibleReference(const fp::path& data,const Scope& scope,const Snapshot& sample,U64 account){
   const auto referencePath=data/L"references"/utf16(scopeKey(scope,account)+".json");
-  if(fp::exists(referencePath)){auto reference=readJson(referencePath);
+  if(statePresent(referencePath)){auto reference=readJson(referencePath);
     matchReference(reference,scope,sample,account);return reference;}
   const auto legacyKey=legacyReferenceKey(scope,account);
   const auto legacyPath=data/L"references"/utf16(legacyKey+".json");
-  if(!fp::exists(legacyPath))return {};
+  if(!statePresent(legacyPath))return {};
   requireCurrent();const auto bytes=readLegacyReferenceBytes(legacyPath);auto text=bytes;
   if(text.starts_with("\xef\xbb\xbf"))text.erase(0,3);
-  const auto legacy=J::parse(text);
+  const auto legacy=ymcc::steamOriginalStorage::detail::parseStateBytes(text);
   need(legacy.at("schema")=="ymcc.steam-native-original-reference.v1"&&
       legacy.at("healthyFlags").is_number_integer()&&legacy.at("healthyFlags")==8196&&
-      legacy.at("scope")==legacyReferenceScope(scope),"legacy-healthy-reference-scope");
+      legacy.at("scope").dump()==legacyReferenceScope(scope).dump(),"legacy-healthy-reference-scope");
   need(legacy.at("clientSha256")==rc::kClientSha256&&legacy.at("uiSha256")==app::kUiSha256&&
       legacy.at("accountFingerprint")==textHash(std::to_string(account)),"legacy-healthy-reference-profile-or-account");
   const auto target=targetIdentity(J{{"gameId",std::to_string(scope.gameId)},{"appid",scope.appid}});
@@ -916,8 +944,8 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
     const auto jobStarted=GetTickCount64();summary["consumed"]=false; // Healthy observations never consume mutation budget.
     const auto sourceAudit=auditedPrepublicationSource(scope,*data);
     const auto disabledKey=textHash(life(scope).dump());
-    need(!fp::exists(*data/L"DISABLED.json")&&!fp::exists(*data/L"disabled"/utf16(disabledKey+".v2.json"))&&
-        (!fp::exists(*data/L"disabled"/utf16(disabledKey+".json"))||sourceAudit.has_value()),"engine-disabled-after-prior-failure");
+    need(!statePresent(*data/L"DISABLED.json")&&!statePresent(*data/L"disabled"/utf16(disabledKey+".v2.json"))&&
+        (!statePresent(*data/L"disabled"/utf16(disabledKey+".json"))||sourceAudit.has_value()),"engine-disabled-after-prior-failure");
     if(sourceAudit)summary["auditedPrepublicationSource"]={{"qualified",true},{"oldKeysPreserved",true},{"refunded",false},
         {"historicalReadOnlyFailureClassified",true},{"newMutationDisableStillAuthoritative",true}};
     summary["lifeKey"]=textHash(life(scope).dump());
@@ -927,11 +955,20 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
     summary["qualification"]["passed"]=true;summary["before"]=nativeState(scope,sample);publish({{"event","observed"},{"result",summary.at("before")}});
     const auto referencePath=*data/L"references"/utf16(scopeKey(scope,account)+".json");
     J reference=loadCompatibleReference(*data,scope,sample,account);
-    if(reference.is_null()&&(event.contains("seed")||fp::exists(*data/L"seed.json"))){
-      const auto seed=event.contains("seed")?event.at("seed"):readJson(*data/L"seed.json");const auto& baseline=seed.contains("baseline")?seed.at("baseline"):seed;
-      bool sameSeedScope=true;for(const auto* role:{"steam","game","cef"})sameSeedScope=sameSeedScope&&normalizedIdentity(baseline.at("before").at("roles").at(role))==scope.identities.at(role);
-      if(sameSeedScope){reference=importReference(seed,scope,account);matchReference(reference,scope,sample,account);requireCurrent();durableCreate(referencePath,reference.dump(2));}
-      else{need(sample.flags==8196,"seed-prior-steam-game-cef-lifetime-not-reusable-while-lost");publish({{"event","seed-not-applicable"},{"reason","prior-steam-game-cef-lifetime"}});}
+    if(reference.is_null()&&(event.contains("seed")||statePresent(*data/L"seed.json"))){
+      J candidate;
+      try{
+        const auto seed=event.contains("seed")?event.at("seed"):readJson(*data/L"seed.json");
+        candidate=referenceFromSeed(seed,scope,sample,account);
+        if(!candidate.is_null())matchReference(candidate,scope,sample,account);
+      }catch(const std::exception&){
+        candidate=nullptr;need(sample.flags==8196,"seed-unknown-while-lost");summary["seedAdmission"]="unknown-original-preserved";
+        publish({{"event","seed-not-applicable"},{"reason","unavailable-or-unverified-original-preserved"}});
+      }
+      if(!candidate.is_null()){
+        matchReference(candidate,scope,sample,account);requireCurrent();
+        durableCreate(referencePath,candidate.dump(2));reference=std::move(candidate);
+      }
     }
     if(sample.flags==8196){
       if(reference.is_null()){requireCurrent();const auto nonce=freshUuid();reference={{"schema","ymcc.steam-native-original-reference.v1"},{"scope",referenceScope(scope)},{"captureParent",scope.identities.at("ymcc")},{"accountFingerprint",textHash(std::to_string(account))},{"bindingNonce",nonce},{"pins",pins(sample,scope.roles[0].born,account,nonce)},{"healthyFlags",8196},{"compatibilityContract","original-running-code-data-v2"},{"clientSha256",sample.clientSha256},{"uiSha256",sample.uiSha256}};const auto after=snapshot(scope,account);need(after.flags==8196,"healthy-reference-changed-during-capture");matchReference(reference,scope,after,account);requireCurrent();durableCreate(referencePath,reference.dump(2));summary["referenceCaptured"]=true;}
@@ -1075,7 +1112,7 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
     },"native-engine-exception");
   }catch(const std::exception& e){gSourceContextInit={};summary["status"]="refused";summary["reason"]=e.what();summary["nativeRecovered"]=false;
     if(const auto* diagnostic=dynamic_cast<const DiagnosticFailure*>(&e))summary["failureDiagnostic"]=diagnostic->detail;
-    if(data&&summary.value("consumed",false)&&summary.contains("lifeKey")){try{const auto disabled=*data/L"disabled"/utf16(summary.at("lifeKey").get<std::string>()+".v2.json");if(!fp::exists(disabled))durableCreate(disabled,J{{"schema","ymcc.steam-original-mutation-disable.v2"},{"reason",e.what()},{"consumed",true},{"noAutomaticRetry",true}}.dump(2));}catch(...) {}}
+    if(data&&summary.value("consumed",false)&&summary.contains("lifeKey")){try{const auto disabled=*data/L"disabled"/utf16(summary.at("lifeKey").get<std::string>()+".v2.json");if(!statePresent(disabled))durableCreate(disabled,J{{"schema","ymcc.steam-original-mutation-disable.v2"},{"reason",e.what()},{"consumed",true},{"noAutomaticRetry",true}}.dump(2));}catch(...) {}}
   }
   // Only sanitized summary leaves the worker. Raw account/seed/request never do.
   if(evidence){try{atomicJson(*evidence/L"last-recovery-summary.json",summary);atomicJson(*evidence/L"monitor"/L"status.json",summary);}catch(const std::exception& e){summary["persistenceError"]=e.what();}}
@@ -1152,7 +1189,11 @@ Json offlineModulePairMicro(){
       {"sceneProcessOpens",0},{"steamGameMemoryReads",0},{"fieldLatencyClaim",false},{"fullImageHashCallsRemoved",0}};
 }
 Json offline_self_test(const std::string& directory){
-  Json cases=Json::array();const auto test=[&](const char* name,const auto& body){try{body();cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"passed",false},{"reason",e.what()}});}};
+  Json cases=Json::array();const auto test=[&](const char* name,const auto& body){
+    if(gOfflinePersistentConfigOnly){const std::string_view n=name;
+      const bool selected=n.starts_with("config-storm-")||n.starts_with("legacy-reference-")||n=="reference-file-hash-change-does-not-break-original-qualified-instance"||n=="parent-restart-preserves-reference-key"||n=="account-changes-reference"||n=="steam-birth-changes-reference"||n=="game-birth-changes-reference"||n=="cef-birth-changes-reference"||n=="first-real-wake-durably-consumed"||n=="same-physical-wake-no-gen-reset-replay"||n=="new-physical-wake-allows-reset-process-counter"||n=="startup-actual-attempt-consumed-once"||n=="startup-no-new-event-id-refund"||n=="durable-files-retained-after-refusal"||n=="clearable-evidence-does-not-reset-persistent-consumption";
+      if(!selected)return;
+    }try{body();cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"passed",false},{"reason",e.what()}});}};
   const auto rejected=[](const auto& body){bool refused=false;try{body();}catch(...){refused=true;}need(refused,"expected-refusal");};
   test("profile-old-pair-keeps-original-getter",[&]{const auto v=qualifiedProfile(rc::kClientSha256,app::kUiSha256);
     need(v.getterRva==0xcfdc0&&v.publisherRva==0x4e27e0,"legacy-profile-drift");});
@@ -1195,7 +1236,7 @@ Json offline_self_test(const std::string& directory){
       need(value&&value->getterRva==0xcfdc0&&value->publisherRva==(client==compat::Layout::Legacy?0x4e27e0ULL:0x4e27f0ULL),"layout-selector-needs-hash");}});
   test("compatibility-layout-selection-refuses-invalid-contract",[&]{need(!tr::profileForCompatibility(static_cast<compat::Layout>(99),compat::Layout::Legacy)&&
       !tr::profileForCompatibility(compat::Layout::Public,static_cast<compat::Layout>(99)),"invalid-layout-fallback");});
-  const auto root=absolute(directory)/utf16("offline-"+freshUuid());fp::create_directories(root);
+  const auto testRoot=absolute(directory);const auto root=(gOfflinePersistentConfigOnly?fp::path(L"\\\\?\\"+testRoot.wstring()):testRoot)/utf16("offline-"+freshUuid());fp::create_directories(root);
   Scope scope;scope.gameId=10307630032478011392ULL;scope.appid=2399932135u;scope.identities=J::object();const std::array<const char*,4> names{"steam","game","ymcc","cef"};
   for(std::size_t i=0;i<names.size();++i){scope.roles[i].pid=4000000000u+static_cast<DWORD>(i);scope.roles[i].born=100000000000000000ULL+i;scope.roles[i].session=1;scope.roles[i].path=L"D:\\offline-fixture\\"+std::to_wstring(i)+L".exe";scope.identities[names[i]]={{"pid",scope.roles[i].pid},{"birthFileTime",std::to_string(scope.roles[i].born)},{"session",1},{"path",utf8(scope.roles[i].path)}};}
   const U64 account=76561198000000001ULL;const auto originalKey=scopeKey(scope,account);
@@ -1241,6 +1282,78 @@ Json offline_self_test(const std::string& directory){
       {"captureParent",scope.identities.at("ymcc")},{"healthyFlags",8196},{"bindingNonce",nonce},
       {"pins",pins(sample,scope.roles[0].born,account,nonce)},{"accountFingerprint",textHash(std::to_string(account))},
       {"clientSha256",rc::kClientSha256},{"uiSha256",app::kUiSha256}};};
+
+  test("config-storm-current-reference-duplicate-refused",[&]{const auto data=root/L"storm-duplicate";const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);const auto path=data/L"references"/utf16(scopeKey(scope,account)+".json");auto bytes=ref.dump();bytes.pop_back();bytes+=",\"accountFingerprint\":\""+ref.at("accountFingerprint").get<std::string>()+"\"}";durableCreate(path,bytes);rejected([&]{loadCompatibleReference(data,scope,sample,account);});need(readLegacyReferenceBytes(path)==bytes,"duplicate-original-lost");});
+  test("config-storm-legacy-reference-duplicate-refused",[&]{const auto data=root/L"storm-legacy-duplicate";const auto sample=legacySample();auto ref=legacyValue(sample);auto bytes=ref.dump();bytes.pop_back();bytes+=",\"healthyFlags\":8196}";durableCreate(data/L"references"/utf16(legacyReferenceKey(scope,account)+".json"),bytes);rejected([&]{loadCompatibleReference(data,scope,sample,account);});need(!fp::exists(data/L"references"/utf16(scopeKey(scope,account)+".json")),"duplicate-legacy-upgraded");});
+  test("config-storm-reader-bounded-before-parse",[&]{const auto path=root/L"storm-large.json";const auto bytes=J{{"unknown",std::string(2u*1024*1024,'x')}}.dump();durableCreate(path,bytes);rejected([&]{readJson(path);});need(fp::file_size(path)==bytes.size(),"large-original-lost");});
+  test("config-storm-reader-depth-refused",[&]{const auto path=root/L"storm-depth.json";const auto bytes=std::string(80,'[')+"0"+std::string(80,']');durableCreate(path,bytes);rejected([&]{readJson(path);});});
+  test("config-storm-invalid-reference-never-refunds",[&]{const auto sample=legacySample();unsigned i=0;for(const auto& raw:std::vector<std::string>{"","{","null","[]",R"({"schema":"future"})"}){const auto data=root/utf16("storm-invalid-"+std::to_string(i++));const auto path=data/L"references"/utf16(scopeKey(scope,account)+".json");durableCreate(path,raw);rejected([&]{loadCompatibleReference(data,scope,sample,account);});std::ifstream input(path,std::ios::binary);const std::string kept((std::istreambuf_iterator<char>(input)),{});need(kept==raw&&!fp::exists(data/L"consumed"),"invalid-reference-created-authority");}});
+  test("config-storm-reference-sharing-denial-explicit-repair",[&]{const auto data=root/L"storm-sharing";const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);ref["extension"]={{"keep",7}};const auto path=data/L"references"/utf16(scopeKey(scope,account)+".json");durableCreate(path,ref.dump());H locked(CreateFileW(path.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr));need(locked.good(),"fixture-lock");rejected([&]{loadCompatibleReference(data,scope,sample,account);});CloseHandle(locked.h);locked.h=INVALID_HANDLE_VALUE;need(loadCompatibleReference(data,scope,sample,account)==ref,"valid-explicit-retry-failed");});
+  test("config-storm-empty-consumed-retains-debt",[&]{const auto data=root/L"storm-consumed";const auto key=textHash(J{{"life",life(scope)},{"operation","startup-mutation-once"}}.dump());const auto path=data/L"consumed"/utf16(key+".json");durableCreate(path,"");J e={{"trigger",{{"kind","startup"},{"generation",0},{"id","storm-retry"}}}};rejected([&]{consume(e,scope,data);});e["trigger"]["id"]="storm-retry-new-id";rejected([&]{consume(e,scope,data);});need(fp::file_size(path)==0&&!auditedPrepublicationSource(scope,data),"partial-debt-refunded");});
+
+  const auto validSeed=[&](const Scope& owner,const Snapshot& sample){
+    const std::string nonce="a7e60aaf-583a-486c-b709-808e25166756";J roles=J::object();
+    for(const auto* name:{"steam","game","cef"}){roles[name]=owner.identities.at(name);roles[name]["alive"]=true;roles[name]["available"]=true;}
+    const auto pin=pins(sample,owner.roles[0].born,account,nonce);
+    const J observation={{"flags",8196},{"running",true},{"primary",owner.roles[1].pid},{"foregroundComparisonPid",owner.roles[1].pid},{"sameFingerprintsAsFirst",true},{"pins",pin}};
+    return J{{"schema","steam.wuxia.manual-sleep-observation.v1"},{"healthyOriginalObserved",true},{"sameCohort",true},{"sameAccountAtEnd",true},{"currentGameProcessCount",1},{"errors",J::array()},
+      {"accountFingerprint",textHash(std::to_string(account))},{"before",{{"roles",roles}}},{"after",{{"roles",roles}}},
+      {"target",{{"gameid",std::to_string(owner.gameId)},{"appid",owner.appid}}},
+      {"native",{{"nativeUi",{{"nativeAppFlags",8196},{"runningBitSet",true},{"diskSha256",app::kUiSha256}}},{"record",{{"originalPrimaryMatched",true},{"primaryLivenessPid",owner.roles[1].pid},{"diskSha256",rc::kClientSha256}}}}},
+      {"bindingNonce",nonce},{"binding",{{"status","observed"},{"mode","read-only"},{"sameCohortAfter",true},{"nonce",nonce},{"samples",J::array({observation,observation,observation})}}}};
+  };
+  const auto seedTest=[&](const char* name,const auto& body){test(name,[&]{Scope owner;owner.gameId=scope.gameId;owner.appid=scope.appid;
+    for(std::size_t i=0;i<names.size();++i){owner.roles[i].pid=scope.roles[i].pid;owner.roles[i].born=scope.roles[i].born;owner.identities[names[i]]=normalizedIdentity(scope.identities.at(names[i]));}
+    auto sample=legacySample();auto seed=validSeed(owner,sample);body(owner,sample,seed);
+  });};
+  seedTest("config-storm-seed-valid-original-consumer",[&](const auto& owner,const auto& sample,auto& seed){seed["extension"]={{"keep",7}};const auto data=root/L"storm-valid-seed";const auto bytes=seed.dump();durableCreate(data/L"seed.json",bytes);const auto ref=importReference(readJson(data/L"seed.json"),owner,account);matchReference(ref,owner,sample,account);durableCreate(data/L"references"/utf16(scopeKey(owner,account)+".json"),ref.dump());need(loadCompatibleReference(data,owner,sample,account)==ref&&readJson(data/L"seed.json")==seed&&!fp::exists(data/L"consumed")&&!fp::exists(data/L"disabled"),"seed-roundtrip-or-budget-changed");need(ref.at("importedSeedSha256")==textHash(bytes),"seed-origin-hash-lost");});
+  seedTest("config-storm-seed-future-schema-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["schema"]="steam.wuxia.manual-sleep-observation.v99";rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-wrong-count-type-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["currentGameProcessCount"]=1.75;rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-wrong-flags-type-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["native"]["nativeUi"]["nativeAppFlags"]=8196.0;rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-wrong-target-type-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["target"]["appid"]=static_cast<double>(owner.appid);rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-old-owner-and-account-refused",[&](const auto& owner,const auto& sample,auto& seed){auto bad=seed;bad["before"]["roles"]["steam"]["birthFileTime"]="1";rejected([&]{importReference(bad,owner,account);});bad=seed;bad["accountFingerprint"]=textHash(std::to_string(account+1));rejected([&]{importReference(bad,owner,account);});bad=seed;bad["native"]["record"]["diskSha256"]="not-a-sha256";rejected([&]{importReference(bad,owner,account);});matchReference(importReference(seed,owner,account),owner,sample,account);});
+  test("config-storm-current-reference-future-contract-unknown",[&]{const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);ref["compatibilityContract"]="original-running-code-data-v99";rejected([&]{matchReference(ref,scope,sample,account);});});
+  test("config-storm-current-reference-wrong-health-type",[&]{const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);ref["healthyFlags"]=8196.0;rejected([&]{matchReference(ref,scope,sample,account);});});
+
+  test("config-storm-current-reference-wrong-scope-number-type",[&]{const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);ref["scope"]["game"]["pid"]=static_cast<double>(scope.roles[1].pid);rejected([&]{matchReference(ref,scope,sample,account);});});
+  test("config-storm-interrupted-second-ledger-never-refunds",[&]{
+    struct ClearFault{~ClearFault(){gOfflineBeforeStateCreate={};}} clear;
+    const auto data=root/L"storm-partial-second-key";J event={{"trigger",{{"kind","startup"},{"generation",0},{"id","interrupted-two-key-write"}}}};
+    unsigned calls=0;gOfflineBeforeStateCreate=[&](const fp::path&){if(++calls==2)throw std::runtime_error("offline-write-interrupted");};
+    rejected([&]{consume(event,scope,data);});gOfflineBeforeStateCreate={};
+    need(calls==2&&std::distance(fp::directory_iterator(data/L"consumed"),fp::directory_iterator{})==1,"interruption-did-not-keep-first-debt");
+    event["trigger"]["id"]="retry-after-interruption";rejected([&]{consume(event,scope,data);});
+    for(const auto& entry:fp::directory_iterator(data/L"consumed"))need(readJson(entry.path()).at("refunded")==false,"interrupted-key-refunded");
+  });
+  // A simulated, fully pinned historical operator audit. No external process is opened.
+  const auto auditTest=[&](const char* name,const auto& mutate,const auto& check){test(name,[&]{
+    const auto data=root/utf16(name);const auto identity=life(scope);const auto lifeKey=textHash(identity.dump());const std::string oldId="offline-r7-no-write";
+    const auto operation=textHash(J{{"life",identity},{"operation","startup-mutation-once"}}.dump());
+    const auto eventKey=textHash(J{{"life",identity},{"eventId",oldId}}.dump());
+    J old={{"schema","ymcc.steam-original-recovery-consumption.v1"},{"life",identity},{"refunded",false},{"trigger",{{"kind","startup"},{"id",oldId}}}};
+    J disabled={{"reason","recovery-cleanup-not-confirmed"},{"consumed",true},{"noAutomaticRetry",true}};
+    J driver={{"status","failed"},{"reason","loaded-client-ui-compatibility-contract"},{"openProcessAttempted",true},{"writes",J::array()},{"sourceEntries",J::array()},{"publisherCalls",0},{"entryEverExposed",false},{"armAttempted",false},{"controlOutcomeUnknown",false},{"managementCallUnresolved",false},{"trialDllMayRemainLoaded",false},{"entryMayRemainPatched",false},{"pathMemoryReleased",true},{"packetMemoryReleased",true}};
+    J proof={{"engineRevision","dual-route-original-recovery-20261023-r7"},{"lifeKey",lifeKey},{"trigger",{{"kind","startup"},{"id",oldId}}},{"status","refused"},{"consumed",true},{"reason","recovery-cleanup-not-confirmed"},{"recoveryRoute","semi-static"},{"before",{{"gameId",std::to_string(scope.gameId)},{"gamePid",scope.roles[1].pid},{"originalPrimaryMatched",true}}},{"driverResult",driver}};
+    J audit={{"schema","ymcc.steam-original-audited-prepublication-transfer.v1"},{"authorizedBy","explicit-operator-no-write-audit-20261023"},{"targetRoute","legacy-dynamic"},{"life",identity},{"sourceEngineRevision","dual-route-original-recovery-20261023-r7"},{"sourceNativeSha256","66d147da3511e33c0c349244cd81c158d7547489ce1a082865a8711cbe5e260e"},{"sourceEventId",oldId}};
+    mutate(audit,disabled,proof);const auto oldBytes=old.dump(),disabledBytes=disabled.dump(),proofBytes=proof.dump();
+    durableCreate(data/L"consumed"/utf16(operation+".json"),oldBytes);durableCreate(data/L"consumed"/utf16(eventKey+".json"),oldBytes);
+    durableCreate(data/L"disabled"/utf16(lifeKey+".json"),disabledBytes);durableCreate(data/L"audited-prepublication-transfer"/utf16(lifeKey+".source.json"),proofBytes);
+    audit["disabledSha256"]=textHash(disabledBytes);audit["operationSha256"]=textHash(oldBytes);audit["eventSha256"]=textHash(oldBytes);audit["sourceSummarySha256"]=textHash(proofBytes);
+    durableCreate(data/L"audited-prepublication-transfer"/utf16(lifeKey+".json"),audit.dump());
+    check(data,audit);need(readLegacyReferenceBytes(data/L"consumed"/utf16(operation+".json"))==oldBytes&&readLegacyReferenceBytes(data/L"disabled"/utf16(lifeKey+".json"))==disabledBytes,"audit-original-debt-changed");
+  });};
+  const auto noAuditMutation=[](J&,J&,J&){};
+  const auto auditRefused=[&](const fp::path& data,const J&){need(!auditedPrepublicationSource(scope,data),"unverified-audit-granted-transfer");J event={{"recoveryRoute","legacy-dynamic"},{"trigger",{{"kind","startup"},{"generation",1},{"id","new-audit-attempt"}}}};rejected([&]{consume(event,scope,data);});need(std::distance(fp::directory_iterator(data/L"consumed"),fp::directory_iterator{})==2,"audit-refunded-debt");};
+  auditTest("config-storm-audit-valid-transfer-keeps-old-debt",noAuditMutation,[&](const fp::path& data,const J&){need(bool(auditedPrepublicationSource(scope,data)),"valid-audit-not-qualified");J event={{"recoveryRoute","legacy-dynamic"},{"trigger",{{"kind","startup"},{"generation",1},{"id","new-audit-once"}}}};consume(event,scope,data);event["trigger"]["id"]="different-new-id";rejected([&]{consume(event,scope,data);});need(std::distance(fp::directory_iterator(data/L"consumed"),fp::directory_iterator{})==4,"transfer-budget-reset");});
+  auditTest("config-storm-audit-future-disabled-unknown",[](J&,J& d,J&){d["schema"]="future-disable.v99";},auditRefused);
+  auditTest("config-storm-audit-future-proof-unknown",[](J&,J&,J& proof){proof["schema"]="future-proof.v99";},auditRefused);
+  auditTest("config-storm-audit-future-schema-unknown",[](J& a,J&,J&){a["schema"]="future-transfer.v99";},auditRefused);
+  auditTest("config-storm-audit-wrong-owner-number-type",[](J& a,J&,J&){a["life"]["game"]["pid"]=4000000001.0;},auditRefused);
+  auditTest("config-storm-audit-wrong-publisher-count-type",[](J&,J&,J& proof){proof["driverResult"]["publisherCalls"]=0.0;},auditRefused);
+  auditTest("config-storm-audit-old-owner-unknown",[](J& a,J&,J&){a["life"]["steam"]["birthFileTime"]="1";},auditRefused);
+  auditTest("config-storm-audit-written-attempt-never-transfers",[](J&,J&,J& proof){proof["driverResult"]["writes"].push_back("any-write");},auditRefused);
+  auditTest("config-storm-audit-wrong-hash-preserves-debt",noAuditMutation,[&](const fp::path& data,J audit){audit["disabledSha256"]=std::string(64,'0');atomicJson(data/L"audited-prepublication-transfer"/utf16(textHash(life(scope).dump())+".json"),audit);auditRefused(data,audit);});
+  auditTest("config-storm-audit-io-denial-preserves-debt",noAuditMutation,[&](const fp::path& data,const J& audit){const auto file=data/L"disabled"/utf16(textHash(life(scope).dump())+".json");H lock(CreateFileW(file.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr));need(lock.good(),"audit-fixture-lock");auditRefused(data,audit);CloseHandle(lock.h);lock.h=INVALID_HANDLE_VALUE;need(bool(auditedPrepublicationSource(scope,data)),"audit-valid-explicit-retry-failed");});
   test("reference-file-hash-change-does-not-break-original-qualified-instance",[&]{auto sample=legacySample();
     sample.clientSha256=newClient;sample.uiSha256=newUi;sample.clientProfile=rc::ProfileId::Public1792618285;
     sample.uiProfile=app::ProfileId::Public1792618285;auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);
@@ -1454,8 +1567,8 @@ Json offline_self_test(const std::string& directory){
     const auto persistent=root/L"Runtime"/L"SteamOriginalRecovery",receipts=root/L"SteamOriginalRecovery";
     J ticket={{"trigger",{{"kind","startup"},{"generation",0},{"id","layout-original"}}}};
     consume(ticket,scope,persistent);
-    J event={{"dataRoot",utf8(persistent.wstring())},{"evidenceRoot",utf8(receipts.wstring())},
-      {"logRoot",utf8((root/L"layout-log").wstring())},{"account64",std::to_string(account)},
+    J event={{"dataRoot",utf8(persistent.wstring().substr(gOfflinePersistentConfigOnly?4:0))},{"evidenceRoot",utf8(receipts.wstring().substr(gOfflinePersistentConfigOnly?4:0))},
+      {"logRoot",utf8((root/L"layout-log").wstring().substr(gOfflinePersistentConfigOnly?4:0))},{"account64",std::to_string(account)},
       {"trigger",{{"kind","startup"},{"generation",0},{"id","layout-read-only"},{"rulesEpoch",1}}}};
     const auto first=handle(event,{},[]{return false;});
     need(first.at("status")=="refused"&&fp::exists(receipts/L"last-recovery-summary.json"),"evidence-root-not-used");

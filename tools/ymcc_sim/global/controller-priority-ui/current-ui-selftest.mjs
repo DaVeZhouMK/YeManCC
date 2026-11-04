@@ -21,7 +21,7 @@ const mocks = {
     const clone = v => structuredClone(v);
     export const shell = { open: async () => { throw new Error('External launch forbidden'); } };
     export const fs = {
-      exists: async () => false,
+      exists: async file => file.endsWith('yeman-settings.json'),
       readTextFile: async () => {
         const f = window.__fixture;
         if (f.throwRead) throw new Error('Read failed');
@@ -65,12 +65,14 @@ const mocks = {
       },
     };`,
   '@/bridge/ipc': `
+    export function isNativeRuntime() { return false; }
     export function on(name, cb) {
       const callbacks = window.__fixture.events[name] ??= new Set();
       callbacks.add(cb); return () => callbacks.delete(cb);
     }
     export async function invoke(method) {
       window.__fixture.requests.push(method);
+      if (method === 'oem.keys.status') return { schemaVersion: 1, deviceClass: 'unsupported', supported: false, keys: [] };
       if (method === 'input.shortcutRuntime.get') return window.__fixture.shortcut ?? { active: false };
       if (method === 'input.shortcutRuntime.clear') { window.__fixture.shortcut = null; return { ok: true }; }
       throw new Error('Unexpected Native request: ' + method);
@@ -82,7 +84,7 @@ const mocks = {
     export function notifyOverride() { for (const cb of callbacks) cb(getGameInputOverrideState()); }`,
   '@/bridge/gameproc': `export async function closeJoyxoffIfRunning() { throw new Error('Process control forbidden'); }`,
 };
-for (const component of ['SteamDeckMouseSensitivity', 'ScreenTouchpadsSettings', 'ControllerShortcutsCard', 'ControllerFeedbackCapabilitiesCard']) {
+for (const component of ['SteamDeckMouseSensitivity', 'ScreenTouchpadsSettings', 'ControllerShortcutsCard', 'ControllerFeedbackCapabilitiesCard', 'UsbipUpgradeStatus']) {
   mocks[`@/components/${component}.vue`] = 'export default { render() { return null; } };';
 }
 mocks['@/views/ControllerShortcutEditorView.vue'] = 'export default { render() { return null; } };';
@@ -105,11 +107,29 @@ mocks['@/bridge/gamedetect'] = 'export function detectedGameName(){return null;}
 mocks['@/bridge/gameInputOverride'] += '\nexport function buildGameInputOverlay(){throw Error("Per-game overlay outside this suite");}';
 mocks['@/bridge/gameInputOverride'] = mocks['@/bridge/gameInputOverride'].replace('for (const cb of callbacks) cb(getGameInputOverrideState());','for (const cb of callbacks) cb(getGameInputOverrideState()); for (const cb of window.__fixture.ownerListeners ?? []) cb();');
 
+// Execute the production entry-focus selection against this same real page.
+const controllerEngine = fs.readFileSync(path.join(root, 'src/gamepad/engine.ts'), 'utf8').replace(/\r\n/g, '\n');
+const focusDeclaration = signature => {
+  const start = controllerEngine.indexOf(signature), end = controllerEngine.indexOf('\n}\n', start);
+  assert(start >= 0 && end > start, 'Production focus declaration required: ' + signature);
+  return controllerEngine.slice(start, end + 2);
+};
+const focusSelector = controllerEngine.match(/const FOCUSABLE =\s*('[^']+');/);
+assert(focusSelector, 'Production focus selector required');
+const initialFocusSource = [
+  "import { focusGamepadElement } from './src/gamepad/focus';",
+  "import type { SpatialMeasurements } from './src/gamepad/spatial';",
+  'let sliderEditMode = false; const FOCUSABLE = ' + focusSelector[1] + ';',
+  focusDeclaration('function focusables('),
+  focusDeclaration('function focusFirst(): boolean {'),
+  'window.__controllerInitialFocus = focusFirst;',
+].join('\n');
+
 const entry = `
   import { createApp } from 'vue';
   import Page from './src/views/ButtonMappingView.vue';
   import { normalizeSettings, evaluateInputCas, evaluateInputCasWrite, compareAndSwapInputSettings,
-    setSettingsDirectory, loadSettings, onInputSettingsChanged } from './src/bridge/settingsRepository';
+    setSettingsDirectory, loadSettings, onInputSettingsChanged, clearSettingsCache } from './src/bridge/settingsRepository';
   import { externalControllerPriorityPresentation, virtualOutputPresentation } from './src/bridge/virtualOutputStatus';
   import { notifyOverride } from '@/bridge/gameInputOverride';
   const settings = normalizeSettings({ input: {
@@ -123,12 +143,13 @@ const entry = `
   window.__emit = (name, payload) => { if (name === 'input.shortcutRuntime') window.__fixture.shortcut = payload; for (const cb of window.__fixture.events[name] ?? []) cb(payload); };
   window.__audit = { normalizeSettings, evaluateInputCas, evaluateInputCasWrite, compareAndSwapInputSettings,
     externalControllerPriorityPresentation, virtualOutputPresentation, notifyOverride, loadSettings };
-  const app = createApp(Page); app.mount('#app');
+  let app = createApp(Page); app.mount('#app');
   window.__unmount = () => app.unmount();
+  window.__reload = () => { app.unmount(); clearSettingsCache(); app = createApp(Page); app.mount('#app'); };
 `;
 const built = await build({
-  stdin: { contents: entry, loader: 'ts', resolveDir: root },
-  bundle: true, write: false, platform: 'browser', format: 'iife',
+  stdin: { contents: entry + initialFocusSource, loader: 'ts', resolveDir: root },
+  bundle: true, write: false, platform: 'browser', format: 'iife', loader: { '.png': 'dataurl' },
   alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"production"' },
   plugins: [{ name: 'external-priority-memory-fixture', setup(builder) {
     builder.onResolve({ filter: /.*/ }, args => {
@@ -160,6 +181,7 @@ const server = createServer((request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const cases = [], errors = [];
+const frontendIsolationOnly = process.argv.includes('--frontend-isolation-only');
 let browser;
 try {
   browser = await chromium.launch({headless:true,executablePath:process.env.YMCC_UI_BROWSER_EXE||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
@@ -173,6 +195,7 @@ try {
   const emit=async value=>{await page.evaluate(value=>window.__emit('gamepad.state',value),value);await page.waitForTimeout(20);};
   const status=page.locator('.controller-channel').first().locator('strong');
   await ready();const baseline=await saved();
+  if (!frontendIsolationOnly) {
   await checked(false);assert.equal(await page.evaluate(()=>window.__fixture.writes.length),0);
   assert.match(await toggle.getAttribute('title'),/状态待确认/);
   cases.push('current header Toggle and real gameInputEditor hydrate without writes; missing native receipt remains pending');
@@ -230,9 +253,75 @@ try {
   cases.push('manual target selection serializes behind priority persistence through actual gameInputEditor and preserves ownership');
   const presentation=await page.evaluate(()=>{const f=window.__audit.virtualOutputPresentation,paused={state:'external-priority',requestedPersona:'steamdeck',steamRunning:false};return{paused:f(paused,true,'steamdeck'),busy:f(paused,true,'steamdeck',true),mismatch:f(paused,true,'elite')};});assert.equal(presentation.paused.text,'虚拟手柄-外接优先暂停');assert.equal(presentation.busy.tone,'pending');assert.equal(presentation.mismatch.tone,'pending');
   cases.push('real virtual output status retains busy and mismatched-target precedence before paused-source or Steam observations');
-  assert.deepEqual(errors,[]);assert((await page.evaluate(()=>window.__fixture.requests)).every(method=>['input.shortcutRuntime.get','input.shortcutRuntime.clear'].includes(method)));
+  }
+  const isolation = page.getByRole('switch', { name: '呼出隔离', exact: true });
+  const isolationIdle = () => page.waitForFunction(() => {
+    const control = document.querySelector('[role="switch"][aria-label="呼出隔离"]');
+    return control && !control.disabled;
+  });
+  await ready(); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'true');
+  assert.equal(await page.evaluate(() => window.__fixture.writes.length), 0);
+  assert.match(await isolation.getAttribute('title'), /呼出或最大化.*隔离后台手柄输入.*界面导航仍可用.*关闭时允许/);
+  for (const [width, height] of [[1280, 720], [1280, 800]]) {
+    await page.setViewportSize({ width, height });
+    const control = await isolation.boundingBox(), row = await page.locator('.persona-actions').boundingBox();
+    const buttons = await page.locator('.persona-btn').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().width));
+    assert(control && row && control.y + control.height <= row.y + 1 && control.x >= row.x && control.x < row.x + 160);
+    assert.equal(buttons.length, 4); assert(Math.max(...buttons) - Math.min(...buttons) <= 1);
+    assert.equal(await page.evaluate(() => window.__controllerInitialFocus()), true);
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent.trim()), '关闭虚拟手柄');
+  }
+  cases.push('isolation hydrates enabled without writes; compact control sits left above four equal-width persona buttons at both handheld sizes; production initial focus remains close virtual controller');
+  const beforeIsolation = await saved();
+  await isolation.click(); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'false');
+  const isolationOff = await saved();
+  assert.equal(isolationOff.ownership.frontendIsolationEnabled, false);
+  assert.deepEqual(isolationOff.ownership, { ...beforeIsolation.ownership, frontendIsolationEnabled: false });
+  for (const key of ['outputTarget', 'gyroMotion', 'gameOverride', 'buttonMapping']) assert.deepEqual(isolationOff[key], beforeIsolation[key]);
+  assert.equal(isolationOff.revision, beforeIsolation.revision + 1);
+  assert.deepEqual(await page.evaluate(() => window.__fixture.writes.map(write => write.expected)), [beforeIsolation.revision]);
+  await page.evaluate(() => window.__reload()); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'false');
+  assert.equal(await page.evaluate(() => window.__fixture.writes.length), 1);
+  cases.push('isolation OFF commits a narrow global ownership CAS, retains priority/extensions/active game target, and reloads false from storage without another write');
+  await ready(); await isolationIdle(); await page.evaluate(() => window.__fixture.failWrite = true);
+  await isolation.click(); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'true');
+  assert.equal((await saved()).revision, baseline.revision);
+  assert.match(await page.locator('#frontend-isolation-status').textContent(), /保存失败/);
+  await page.evaluate(() => window.__fixture.failWrite = false); await isolation.click(); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'false');
+  assert.equal(await page.locator('#frontend-isolation-status').count(), 0);
+  cases.push('isolation write failure reads back the confirmed enabled value, reports failure, releases busy state and permits explicit retry');
+  await ready(); await isolationIdle(); await page.evaluate(() => window.__fixture.conflicts = 1);
+  await isolation.click(); await isolationIdle();
+  const isolationRebased = await saved();
+  assert.equal(isolationRebased.ownership.frontendIsolationEnabled, false);
+  assert.equal(isolationRebased.outputTarget.persona, 'elite');
+  assert.deepEqual(isolationRebased.ownership.concurrentField, { preserved: true });
+  assert.equal(await page.evaluate(() => window.__fixture.writes.length), 2);
+  await ready(); await isolationIdle(); await page.evaluate(() => window.__fixture.conflicts = 2);
+  await isolation.click(); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'true');
+  assert.equal(await page.evaluate(() => window.__fixture.writes.length), 2);
+  assert.match(await page.locator('#frontend-isolation-status').textContent(), /其他操作更新/);
+  cases.push('isolation retries one real repository commit conflict with the same narrow intent, retains concurrent fields, and stops after a second conflict');
+  await ready(); await isolationIdle(); await page.evaluate(() => window.__fixture.delayWrite = true);
+  await isolation.click(); await page.waitForFunction(() => typeof window.__fixture.releaseWrite === 'function');
+  assert.equal(await isolation.isDisabled(), true); assert.equal(await toggle.isDisabled(), true);
+  assert.equal(await page.locator('.persona-btn:disabled').count(), 4);
+  await page.getByRole('button', { name: '校对', exact: true }).click();
+  assert.equal(await page.locator('[data-controller-section="calibration"]').getAttribute('aria-pressed'), 'true');
+  await page.getByRole('button', { name: '控制器', exact: true }).click();
+  await page.evaluate(() => { window.__fixture.delayWrite = false; window.__fixture.releaseWrite(); }); await isolationIdle();
+  assert.equal(await isolation.getAttribute('aria-checked'), 'false');
+  assert.equal(await page.evaluate(() => window.__fixture.writes.length), 1);
+  cases.push('pending isolation persistence locks priority and all persona buttons while controller section navigation remains usable');
+  assert.deepEqual(errors,[]);assert((await page.evaluate(()=>window.__fixture.requests)).every(method=>['input.shortcutRuntime.get','input.shortcutRuntime.clear','oem.keys.status'].includes(method)), 'Unexpected actual IPC: '+JSON.stringify(await page.evaluate(()=>window.__fixture.requests)));
   await page.evaluate(()=>window.__unmount());assert.equal(await page.evaluate(()=>Array.from(window.__fixture.events['gamepad.state']).length),0);
   cases.push('unmount removes actual native state listener and all observed IPC remains inside reviewed memory routes');
   const engine=fs.readFileSync(path.join(root,'src/gamepad/engine.ts'),'utf8');const focusFunction=engine.slice(engine.indexOf('function focusFirst(): boolean {'),engine.indexOf('// A custom dropdown menu'));const focusHookIntegrated=focusFunction.includes('gpInitialFocus')||focusFunction.includes('data-gp-initial-focus');
-  console.log(JSON.stringify({suite:'External controller priority UI',fixtureSchemaVersion:2,legacyLayoutCompatibility:'INCOMPATIBLE_UI_STRUCTURE_RETAINED_FAILURE',passed:cases.length,cases,focusHookIntegrated,scope:'Actual current ButtonMappingView, Toggle, ControllerChannelStatus, settingsRepository and gameInputEditor. Native transport, storage and external game provider are inert; full gamepad engine is not executed.'},null,2));
+  console.log(JSON.stringify({suite:'External controller priority and frontend isolation UI',fixtureSchemaVersion:2,subset:frontendIsolationOnly?'frontend-isolation':'all',legacyLayoutCompatibility:'INCOMPATIBLE_UI_STRUCTURE_RETAINED_FAILURE',passed:cases.length,cases,focusHookIntegrated,scope:'Actual current ButtonMappingView, Toggle, ControllerChannelStatus, settingsRepository and gameInputEditor. Native transport, storage and external game provider are inert; production initial-focus selection is executed, full gamepad engine is not executed.'},null,2));
 } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

@@ -66,19 +66,122 @@ function Test-YmccModuleFile([string]$Relative) {
   return $Relative -cmatch '^feature-assets/(virtual-gamepad|gyro-motion)/[A-Za-z0-9_-][A-Za-z0-9_./-]*$' -and
     $Relative -cnotmatch '(^|/)(\.\.?|logs?|cache|settings|user-data)(/|$)|\.(log|tmp|bak)$'
 }
+# Persistent module records are bounded proof, not defaults. Validate duplicate
+# keys before PowerShell's JSON conversion can discard them (including PS 5.1).
+function Initialize-YmccModuleJournalJson {
+  if('Ymcc.ModuleJournalJson' -as [type]){return}
+  Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+using System.Text;
+using System.Collections.Generic;
+using System.Globalization;
+namespace Ymcc {
+ public static class ModuleJournalJson {
+  sealed class Frame { internal bool Object; internal bool Key=true; internal HashSet<string> Keys=new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+  static string String(string text, ref int i) {
+   var value=new StringBuilder();
+   while(++i<text.Length) {
+    char c=text[i]; if(c=='"')return value.ToString();
+    if(c<32)throw new IOException("MODULE_JSON_CONTROL_CHARACTER");
+    if(c!='\\'){value.Append(c);continue;}
+    if(++i>=text.Length)break;c=text[i];
+    switch(c) {
+     case '"':case '\\':case '/':value.Append(c);break;
+     case 'b':value.Append('\b');break;case 'f':value.Append('\f');break;
+     case 'n':value.Append('\n');break;case 'r':value.Append('\r');break;case 't':value.Append('\t');break;
+     case 'u':
+      if(i+4>=text.Length)throw new IOException("MODULE_JSON_UNICODE_TRUNCATED");
+      value.Append((char)int.Parse(text.Substring(i+1,4),NumberStyles.HexNumber,CultureInfo.InvariantCulture));i+=4;break;
+     default:throw new IOException("MODULE_JSON_ESCAPE_INVALID");
+    }
+   }
+   throw new IOException("MODULE_JSON_STRING_TRUNCATED");
+  }
+  public static void AssertObject(string text) {
+   var stack=new Stack<Frame>();bool started=false;
+   for(int i=0;i<text.Length;i++) {
+    char c=text[i];if(char.IsWhiteSpace(c))continue;
+    if(started&&stack.Count==0)throw new IOException("MODULE_JSON_TRAILING_DATA");
+    if(!started){if(c!='{')throw new IOException("MODULE_JSON_ROOT_INVALID");started=true;}
+    if(c=='"') {
+     string key=String(text,ref i);
+     if(stack.Count>0&&stack.Peek().Object&&stack.Peek().Key) {
+      if(!stack.Peek().Keys.Add(key))throw new IOException("MODULE_JSON_DUPLICATE_FIELD");
+      stack.Peek().Key=false;
+     }
+    } else if(c=='{'||c=='[') {
+     if(stack.Count>=64)throw new IOException("MODULE_JSON_DEPTH_LIMIT");
+     stack.Push(new Frame{Object=c=='{'});
+    } else if(c=='}'||c==']') {
+     if(stack.Count==0||stack.Pop().Object!=(c=='}'))throw new IOException("MODULE_JSON_STRUCTURE_INVALID");
+    } else if(c==','&&stack.Count>0&&stack.Peek().Object)stack.Peek().Key=true;
+   }
+   if(!started||stack.Count!=0)throw new IOException("MODULE_JSON_INCOMPLETE");
+  }
+ }
+}
+"@
+}
+function Test-YmccModuleJournalExists([string]$Path){
+  try{$null=[IO.File]::GetAttributes($Path);return $true}
+  catch [IO.FileNotFoundException]{return $false}
+  catch [IO.DirectoryNotFoundException]{return $false}
+}
+function Read-YmccModuleJournalJson([string]$Path){
+  $safe=Resolve-YmccDeckyPath ([IO.Path]::GetDirectoryName($Path)) ([IO.Path]::GetFileName($Path))
+  if(([IO.File]::GetAttributes($safe) -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0){throw 'MODULE_JSON_NOT_REGULAR'}
+  $moduleJournalStream=[IO.File]::Open($safe,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+  try{
+    if($moduleJournalStream.Length -lt 1 -or $moduleJournalStream.Length -gt 4194304){throw 'MODULE_JSON_SIZE_INVALID'}
+    $moduleJournalReader=[IO.StreamReader]::new($moduleJournalStream,[Text.UTF8Encoding]::new($false,$true),$true)
+    try{$text=$moduleJournalReader.ReadToEnd()}finally{$moduleJournalReader.Dispose()}
+  }finally{$moduleJournalStream.Dispose()}
+  Initialize-YmccModuleJournalJson;[Ymcc.ModuleJournalJson]::AssertObject($text)
+  return ($text|ConvertFrom-Json -ErrorAction Stop)
+}
+function Test-YmccModuleInteger($Value){return $Value -is [byte] -or $Value -is [int16] -or $Value -is [int32] -or $Value -is [int64]}
+function Test-YmccModuleObject($Value){return $null -ne $Value -and ($Value -is [pscustomobject] -or $Value -is [Collections.IDictionary])}
 function Assert-YmccModuleManifest($Manifest, [string]$Version='') {
-  if ($Manifest.schemaVersion -ne 1 -or $Manifest.owner -cne 'YMCC' -or
-      ($Version -and $Manifest.packageVersion -cne $Version) -or @($Manifest.files).Count -lt 6 -or @($Manifest.files).Count -gt 10000) { throw 'MODULE_MANIFEST_INVALID' }
-  $seen=@{}
-  foreach ($file in @($Manifest.files)) {
-    if (!(Test-YmccModuleFile $file.path) -or $seen.ContainsKey($file.path) -or
-        $file.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $file.bytes -lt 0 -or $file.bytes -gt 2147483648) { throw 'MODULE_MANIFEST_FILE_INVALID' }
-    $seen[$file.path]=$true
+  if (!(Test-YmccModuleObject $Manifest) -or !(Test-YmccModuleInteger $Manifest.schemaVersion) -or $Manifest.schemaVersion -ne 1 -or
+      $Manifest.owner -isnot [string] -or $Manifest.owner -cne 'YMCC' -or $Manifest.packageVersion -isnot [string] -or [string]::IsNullOrWhiteSpace($Manifest.packageVersion) -or
+      ($Version -and $Manifest.packageVersion -cne $Version) -or $Manifest.files -isnot [array] -or $Manifest.files.Count -lt 6 -or $Manifest.files.Count -gt 10000) { throw 'MODULE_MANIFEST_INVALID' }
+  $seen=@{};$rows=New-Object 'System.Collections.Generic.List[string]'
+  foreach ($file in $Manifest.files) {
+    if (!(Test-YmccModuleObject $file) -or $file.path -isnot [string] -or !(Test-YmccModuleFile $file.path) -or $file.path.Contains('//') -or $seen.ContainsKey($file.path) -or
+        $file.sha256 -isnot [string] -or $file.sha256 -cnotmatch '^[a-fA-F0-9]{64}$' -or !(Test-YmccModuleInteger $file.bytes) -or $file.bytes -lt 0 -or $file.bytes -gt 2147483648) { throw 'MODULE_MANIFEST_FILE_INVALID' }
+    $seen[$file.path]=$true;$rows.Add($file.path+'|'+$file.bytes.ToString([Globalization.CultureInfo]::InvariantCulture)+'|'+$file.sha256)
   }
   foreach ($name in @('YeManInputHost.exe','YeManInputHost.dll','YeManInputHost.deps.json','YeManInputHost.runtimeconfig.json','HIDMaestro.Core.dll')) {
     if (!$seen.ContainsKey('feature-assets/virtual-gamepad/'+$name)) { throw ('MODULE_REQUIRED_FILE_MISSING '+$name) }
   }
   if (!@($Manifest.files | Where-Object { $_.path.StartsWith('feature-assets/gyro-motion/') }).Count) { throw 'MODULE_GYRO_PAYLOAD_MISSING' }
+  if($Manifest.PSObject.Properties['compatibility']){
+    $compat=$Manifest.compatibility
+    if(!(Test-YmccModuleObject $compat) -or $compat.sourceKind -isnot [string] -or $compat.sourceKind -cne 'full-package-v1' -or
+       $compat.payloadHashScope -isnot [string] -or $compat.payloadHashScope -cne 'manifest-files-v1' -or
+       $compat.payloadSha256 -isnot [string] -or $compat.payloadSha256 -cnotmatch '^[a-fA-F0-9]{64}$' -or
+       $compat.scriptSha256 -isnot [string] -or $compat.scriptSha256 -cnotmatch '^[a-fA-F0-9]{64}$' -or $compat.applyAfterYmccCommit -isnot [bool] -or !$compat.applyAfterYmccCommit){throw 'MODULE_COMPATIBILITY_INVALID'}
+    $ordered=$rows.ToArray();[Array]::Sort($ordered,[StringComparer]::Ordinal);$sha=[Security.Cryptography.SHA256]::Create()
+    try{$identity=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($ordered -join "`n"))))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+    if($identity -ine $compat.payloadSha256){throw 'MODULE_PAYLOAD_IDENTITY_INVALID'}
+  }
+}
+function Test-YmccModuleInventoryEqual($Left,$Right){
+  Assert-YmccModuleManifest $Left;Assert-YmccModuleManifest $Right
+  if($Left.files.Count -ne $Right.files.Count){return $false}
+  $known=@{};foreach($file in $Left.files){$known[$file.path]=$file}
+  foreach($file in $Right.files){if(!$known.ContainsKey($file.path) -or $known[$file.path].bytes -ne $file.bytes -or $known[$file.path].sha256 -ine $file.sha256){return $false}}
+  return $true
+}
+function Merge-YmccModuleManifestAnnotations($Manifest,$Previous){
+  $copy=$Manifest|ConvertTo-Json -Depth 64 -Compress|ConvertFrom-Json
+  if(!$Previous){return $copy}
+  foreach($property in $Previous.PSObject.Properties){if($property.Name -notin @('schemaVersion','owner','packageVersion','files','compatibility')){$copy|Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}}
+  $known=@{};foreach($file in $Previous.files){$known[$file.path]=$file}
+  foreach($file in $copy.files){if($known.ContainsKey($file.path)){foreach($property in $known[$file.path].PSObject.Properties){if($property.Name -notin @('path','bytes','sha256')){$file|Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}}}}
+  if($Previous.PSObject.Properties['compatibility'] -and $copy.PSObject.Properties['compatibility']){foreach($property in $Previous.compatibility.PSObject.Properties){if($property.Name -notin @('sourceKind','payloadHashScope','payloadSha256','scriptSha256','applyAfterYmccCommit')){$copy.compatibility|Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}}}
+  Assert-YmccModuleManifest $copy;return $copy
 }
 function New-YmccModuleManifest([string]$Source, [string]$Version) {
   $moduleFixtureRoot=Resolve-YmccDeckyPath $Source; $files=@()
@@ -118,9 +221,10 @@ function Get-YmccModulePlan([string]$Source, [string]$Target, $Manifest, [string
     if ($oldVersion -and $newVersion -and [version]$oldVersion -gt [version]$newVersion) { throw 'MODULE_NEWER_SDK_PRESERVED: 已保留自主安装的较新 HIDM，请使用兼容的 YMCC 包。' }
   }
   $receipt=Resolve-YmccDeckyPath $targetHome '.ymcc-input-managed.json'
-  if ([IO.File]::Exists($receipt)) {
-    if (([IO.FileInfo]$receipt).Length -gt 4194304) { throw 'MODULE_RECEIPT_TOO_LARGE' }
-    $previous=Get-Content -LiteralPath $receipt -Raw -Encoding UTF8 | ConvertFrom-Json
+  $previous=$null
+  $receiptExists=Test-YmccModuleJournalExists $receipt
+  if ($receiptExists) {
+    $previous=Read-YmccModuleJournalJson $receipt
     Assert-YmccModuleManifest $previous
     foreach ($file in $previous.files) {
       if ($incoming.ContainsKey($file.path)) { continue }
@@ -128,10 +232,12 @@ function Get-YmccModulePlan([string]$Source, [string]$Target, $Manifest, [string
       if ([IO.File]::Exists($dst) -and (Get-YmccDeckyHash $dst) -ceq $file.sha256) { $entries += [pscustomobject]@{path=$file.path;source=$null;before=$file.sha256;after=$null;remove=$true;bytes=$null} }
     }
   }
-  $receiptBytes=[Text.Encoding]::UTF8.GetBytes(($Manifest | ConvertTo-Json -Depth 8 -Compress))
+  $receiptManifest=Merge-YmccModuleManifestAnnotations $Manifest $previous
+  $receiptBytes=[Text.Encoding]::UTF8.GetBytes(($receiptManifest | ConvertTo-Json -Depth 64 -Compress))
+  if($receiptBytes.Length -gt 4194304){throw 'MODULE_RECEIPT_TOO_LARGE'}
   $sha=[Security.Cryptography.SHA256]::Create()
   try { $receiptHash=([BitConverter]::ToString($sha.ComputeHash($receiptBytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
-  $before=$null; if ([IO.File]::Exists($receipt)) { $before=Get-YmccDeckyHash $receipt }
+  $before=$null; if ($receiptExists) { $before=Get-YmccDeckyHash $receipt }
   if ($before -cne $receiptHash) { $entries += [pscustomobject]@{path='.ymcc-input-managed.json';source=$null;before=$before;after=$receiptHash;remove=$false;bytes=$receiptBytes} }
   foreach ($entry in $entries) { if ($entry.before) {
     $stream=[IO.File]::Open((Resolve-YmccDeckyPath $targetHome $entry.path),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $stream.Dispose()

@@ -20,19 +20,60 @@ static unsigned long long currentPowerGeneration() { return testPowerGeneration;
 static std::string sgFormatFactFileTime(unsigned long long) { return "fixture-original-event-time"; }
 static void (*runtimeFactObserver)(const char*,const json&)=nullptr;
 static void sgRecordFact(const char* event, const json& details) { captured.emplace_back(event, details);if(runtimeFactObserver)runtimeFactObserver(event,details); }
-static void productionCapture(bool leaving, const std::string& xml) {
-    const unsigned long long recordedFileTime = 123456789;
+#ifdef YMCC_SLEEP_TIMEOUT_NATIVE_SHARED
+static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long) noexcept {}
+#else
+static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long) noexcept;
+#endif
+static void productionCapture(bool leaving, const std::string& xml, unsigned long long eventFileTime=123456789) {
+    const unsigned long long recordedFileTime = eventFileTime;
 #include "production_capture_hook.inc"
 }
+#if !defined(YMCC_SLEEP_TIMEOUT_ONLY) && !defined(YMCC_SLEEP_LATE_WAKE_ONLY)
 #include "abnormal_native_harness.inc"
+#ifndef YMCC_SLEEP_ACTIVITY_NATIVE_SHARED
+#include "sleep_activity_native_harness.inc"
+#endif
 #ifndef YMCC_SLEEP_EXPORT_DIAGNOSTICS_SHARED
 #include "sleep_export_harness.inc"
 #endif
 #include "static_wake_harness.inc"
 #include "static_wake_schedule_harness.inc"
+#endif
+#ifndef YMCC_SLEEP_TIMEOUT_NATIVE_SHARED
+#include "sleep_timeout_native_harness.inc"
+#endif
+#ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
+#include "latewake_cases.inc"
+#endif
 int main(int argc, char** argv) {
     try {
         if (argc != 3) throw std::runtime_error("expected cases.json and result.json");
+#ifdef YMCC_SLEEP_LATE_WAKE_ONLY
+        std::ifstream payloadInput(argv[1]);json latePayload;payloadInput>>latePayload;
+        const auto lateWakeNativeChecks=lateWakeNativeTests(latePayload);
+        check(lateWakeNativeChecks>0,"late-wake exact group executes actual decisions and sender");
+        json result={{"status","passed"},{"componentScope","late-wake"},{"checks",sleepEvidenceChecks},
+            {"lateWakeNativeChecks",lateWakeNativeChecks},{"lateWakeNativeScenarios",sleep_timeout_fixture::lateScenarios},
+            {"cases",sleep_timeout_fixture::lateScenarios.size()},{"caseResults",sleep_timeout_fixture::lateScenarios},
+            {"sleepTimeoutNativeChecks",0},{"sleepTimeoutNativeScenarios",json::array()},
+            {"sleepActivityNativeChecks",0},{"sleepExportDiagnosticChecks",0},{"runtimeChecks",0},
+            {"conservativeProductionChecks",0},{"historicalStagedEngineChecks",0},{"staticWakeChecks",0},{"staticWakeScheduleChecks",0},
+            {"actualSleepCalls",0},{"hardwareCalls",0},{"realSleepStudyQuery",false},
+            {"scope","Exact late-wake native decision/S0 branch/manual callback/shared sender with inert Win32 boundaries; payload field replays are software evidence, not physical sleep or root-cause proof."}};
+        std::ofstream output(argv[2]);output<<result.dump(2)<<'\n';std::cout<<json{{"status","passed"},{"componentScope","late-wake"},{"checks",sleepEvidenceChecks},{"cases",sleep_timeout_fixture::lateScenarios.size()}}.dump()<<'\n';
+#elif defined(YMCC_SLEEP_TIMEOUT_ONLY)
+        const auto sleepTimeoutNativeChecks=sleepTimeoutNativeTests();
+        check(sleepTimeoutNativeChecks>0,"timeout exact group executed actual header/native/sender consumers");
+        json result={{"status","passed"},{"componentScope","timeout"},{"checks",sleepEvidenceChecks},
+            {"sleepTimeoutNativeChecks",sleepTimeoutNativeChecks},{"sleepTimeoutNativeScenarios",sleep_timeout_fixture::scenarios},
+            {"cases",sleep_timeout_fixture::scenarios.size()},{"caseResults",sleep_timeout_fixture::scenarios},
+            {"sleepActivityNativeChecks",0},{"sleepExportDiagnosticChecks",0},{"runtimeChecks",0},
+            {"conservativeProductionChecks",0},{"historicalStagedEngineChecks",0},{"staticWakeChecks",0},{"staticWakeScheduleChecks",0},
+            {"actualSleepCalls",0},{"hardwareCalls",0},{"realSleepStudyQuery",false},
+            {"scope","Exact timeout group: actual policy/native include, original507 hook, current-plan action reader, shared sender, scheduler, Start/Advance/dispatch; inert Windows power/timer/privilege ports. No physical sleep acceptance; other residency groups NOT_RUN."}};
+        std::ofstream output(argv[2]);output<<result.dump(2)<<'\n';std::cout<<json{{"status","passed"},{"componentScope","timeout"},{"checks",sleepEvidenceChecks},{"cases",sleep_timeout_fixture::scenarios.size()}}.dump()<<'\n';
+#else
         std::ifstream input(argv[1]); json fixture; input >> fixture;
         json outcomes = json::array();
         // Actual507 capture -> ordinary fact -> export selector. This producer
@@ -77,6 +118,27 @@ int main(int argc, char** argv) {
         const auto sleepExportDiagnosticChecks=sleepExportDiagnosticTests();
         check(sleepExportDiagnosticChecks>0,"export-only helper and actual native adapter execute nonzero checks");
 #endif
+#ifdef YMCC_SLEEP_ACTIVITY_NATIVE_SHARED
+        const unsigned sleepActivityNativeChecks=0; // Only the original none child compiles and executes this group.
+#else
+        const auto sleepActivityNativeChecks=sleepActivityNativeTests();
+        check(sleepActivityNativeChecks>0,"formal activity header and native observer execute nonzero checks");
+#endif
+#ifdef YMCC_SLEEP_TIMEOUT_NATIVE_SHARED
+        const unsigned sleepTimeoutNativeChecks=0;
+        const json sleepTimeoutNativeScenarios=json::array();
+#else
+        const auto sleepTimeoutNativeChecks=sleepTimeoutNativeTests();
+        const auto sleepTimeoutNativeScenarios=sleep_timeout_fixture::scenarios;
+        check(sleepTimeoutNativeChecks>0,"formal timeout policy/native include and shared sender execute nonzero checks");
+#endif
+#ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
+        std::ifstream latePayloadInput("amd_rog_late_spontaneous_ac.json");json latePayload;latePayloadInput>>latePayload;
+        const auto lateWakeNativeChecks=lateWakeNativeTests(latePayload);
+        const auto lateWakeNativeScenarios=sleep_timeout_fixture::lateScenarios;
+#else
+        const unsigned lateWakeNativeChecks=0;const json lateWakeNativeScenarios=json::array();
+#endif
         // Historical engine is explicitly isolated from the real production hooks.
         const auto runtimeChecks=abnormalRuntimeTests(fixture);
         const auto conservativeProductionChecks=abnormalConservativeProductionTests();
@@ -85,11 +147,20 @@ int main(int argc, char** argv) {
         check(staticWakeChecks>0,"static wake harness executes nonzero checks");
         const auto staticWakeScheduleChecks=staticWakeScheduleTests();
         check(staticWakeScheduleChecks>0,"static wake schedule harness executes nonzero checks");
-        json result = {{"sleepExportDiagnosticChecks",sleepExportDiagnosticChecks},{"realSleepStudyQuery",false},{"conservativeProductionChecks",conservativeProductionChecks},{"historicalStagedEngineChecks",runtimeChecks},{"staticWakeScheduleChecks",staticWakeScheduleChecks},{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()},
+        json result = {{"lateWakeNativeChecks",lateWakeNativeChecks},{"lateWakeNativeScenarios",lateWakeNativeScenarios},{"sleepTimeoutNativeChecks",sleepTimeoutNativeChecks},{"sleepTimeoutNativeScenarios",sleepTimeoutNativeScenarios},{"sleepActivityNativeChecks",sleepActivityNativeChecks},{"sleepExportDiagnosticChecks",sleepExportDiagnosticChecks},{"realSleepStudyQuery",false},{"conservativeProductionChecks",conservativeProductionChecks},{"historicalStagedEngineChecks",runtimeChecks},{"staticWakeScheduleChecks",staticWakeScheduleChecks},{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()},
             {"caseResults", outcomes}, {"actualSleepCalls", 0}, {"hardwareCalls", 0},
-            {"scope", "actual completed507 accounting and conservative production hooks; staged engine is historical-only explicit StartPhase regression; static companions separately scoped; Windows boundaries mocked; export-only WindowsSleepStudy adapter uses inert commands and owned local files"}};
+            {"scope", "actual completed507 accounting and conservative production hooks; UI event-driven activity header/native observer and fact dispatcher; staged engine is historical-only explicit StartPhase regression; static companions separately scoped; Windows boundaries mocked; export-only WindowsSleepStudy adapter uses inert commands and owned local files"}};
         std::ofstream output(argv[2]); output << result.dump(2) << '\n';
         std::cout << json{{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()}}.dump() << '\n';
+        #endif
         return 0;
-    } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+    } catch (const std::exception& error) {
+#ifdef YMCC_SLEEP_LATE_WAKE_ONLY
+        if(argc==3){const json failure={{"status","failed"},{"componentScope","late-wake"},{"checks",sleepEvidenceChecks},
+            {"lateWakeNativeScenarios",sleep_timeout_fixture::lateScenarios},{"cases",sleep_timeout_fixture::lateScenarios.size()},
+            {"caseResults",sleep_timeout_fixture::lateScenarios},{"failure",error.what()},{"actualSleepCalls",0},{"hardwareCalls",0}};
+            std::ofstream output(argv[2]);output<<failure.dump(2)<<'\n';}
+#endif
+        std::cerr<<error.what()<<'\n';return 1;
+    }
 }

@@ -718,14 +718,14 @@
   border-radius:50%;
   background-position:center 68%;
   background-size:108% 108%;
-  filter:blur(32px) saturate(1.32);
+  filter:blur(34px) saturate(1.28);
   opacity:.5;
   transform:translateY(8px) scale(.94);
   mix-blend-mode:screen;
   -webkit-mask-image:radial-gradient(ellipse 76% 70% at 50% 46%, rgba(0,0,0,.96) 0%, rgba(0,0,0,.78) 38%, rgba(0,0,0,.3) 70%, transparent 100%);
   mask-image:radial-gradient(ellipse 76% 70% at 50% 46%, rgba(0,0,0,.96) 0%, rgba(0,0,0,.78) 38%, rgba(0,0,0,.3) 70%, transparent 100%);
   pointer-events:none;
-  will-change:transform,opacity,filter;
+  will-change:transform,opacity;
 }
 .game-card:focus-visible {
   box-shadow:none!important;
@@ -755,8 +755,8 @@
 }
 .game-card.current-card .card-art-glow { display:block; animation:selected-artwork-breathe 3.2s ease-in-out infinite alternate; }
 @keyframes selected-artwork-breathe {
-  from { opacity:.34; transform:translateY(10px) scale(.9); filter:blur(30px) saturate(1.2); }
-  to { opacity:.62; transform:translateY(1px) scale(1.08); filter:blur(38px) saturate(1.42); }
+  from { opacity:.34; transform:translateY(10px) scale(.9); }
+  to { opacity:.62; transform:translateY(1px) scale(1.08); }
 }
 @media (prefers-reduced-motion:reduce) {
   .game-card.current-card .card-art-glow { animation:none; opacity:.46; transform:translateY(5px) scale(1); filter:blur(34px) saturate(1.28); }
@@ -1254,3 +1254,81 @@
 @media(max-width:600px){.media-download-progress{grid-template-columns:minmax(0,1fr) auto;gap:8px}.media-download-progress progress{grid-column:1/-1}}
 
 .video-download-quality:not(.hidden){display:flex;align-items:center;gap:10px;margin-left:auto;color:var(--muted,#9eafbe);font-size:12px}.video-download-quality .workspace-dropdown{width:190px}.video-download-quality .workspace-dropdown-trigger{min-height:38px}.video-download-quality .workspace-dropdown-menu{min-width:100%}
+
+/* Keep cached library effects still while this workspace has no foreground ownership. */
+html.workspace-background *,
+html.workspace-background *::before,
+html.workspace-background *::after { animation-play-state:paused !important; }
+
+/* YeMan library sidebar: keep this presentation separate from native data/write owners. */
+body.library-sidebar-shell{margin:0;overflow:hidden;background:#0d131c;color:#eaf2fa;font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;font-size:13px}
+.library-sidebar-shell .app-shell{width:100%;max-width:none;height:100vh;padding:0;margin:0;border:0}
+.library-sidebar-shell #library-view:not(.hidden){display:grid!important;grid-template-columns:236px minmax(0,1fr);gap:0;width:100%;height:100vh;padding:0;margin:0;overflow:hidden}
+.library-sidebar-shell #library-sidebar{display:flex;flex-direction:column;min-height:0;overflow:auto;scrollbar-width:thin;padding:23px 17px 13px;background:#141d28;border-right:1px solid #2b3b4e;gap:0}
+.library-sidebar-shell .sidebar-library-brand{font-size:17px;font-weight:650;white-space:nowrap;letter-spacing:0;line-height:1.5;padding:0 8px 27px;color:#eef7ff}
+.library-sidebar-shell .sidebar-caption{font-size:11px;color:#8198af;letter-spacing:1px;padding:0 11px 10px}
+.library-sidebar-shell .page-tabs{display:flex;flex-direction:column;flex:none;gap:5px;width:100%;padding:0;margin:0;border:0;background:none;position:static;overflow:visible}
+.library-sidebar-shell .page-tab{display:flex;align-items:center;justify-content:flex-start;gap:10px;min-height:44px;width:100%;padding:0 12px;font-size:13px;font-weight:500;text-align:left;border:1px solid transparent;background:transparent;color:#adbed0;border-radius:6px;white-space:nowrap}
+.library-sidebar-shell .page-tab strong{font-size:12px;font-weight:400;color:#8eacc7;margin-left:auto}
+.library-sidebar-shell .page-tab.active{background:#233e56;border-color:#355a79;color:#d5edff}.library-sidebar-shell .page-tab:hover{background:#253a50}
+.library-sidebar-shell .sidebar-tab-icon,.library-sidebar-shell .sidebar-steam-icon{display:inline-flex;flex:none;align-items:center;justify-content:center}.library-sidebar-shell .sidebar-tab-icon svg{width:18px;height:18px}.library-sidebar-shell .sidebar-steam-icon svg{width:18px;height:18px}
+.library-sidebar-shell .sidebar-management-actions{border-top:1px solid #2b3b4e;margin-top:18px;padding-top:17px;display:flex;flex-direction:column;gap:5px;flex:none}
+.library-sidebar-shell .sidebar-management-actions>.sidebar-caption{padding-bottom:4px}
+.library-sidebar-shell .menu-popover{position:static;border:0;width:100%;min-width:0;margin:0;padding:0;flex:none}
+.library-sidebar-shell .menu-toggle,.library-sidebar-shell #refresh-artwork-button{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;min-width:0;min-height:44px;padding:0 12px;border:1px solid transparent;border-radius:6px;background:none;color:#adbed0;font-size:13px;font-weight:500;line-height:1.4;text-align:left;box-shadow:none}
+.library-sidebar-shell .menu-toggle:hover,.library-sidebar-shell #refresh-artwork-button:hover{background:#23384d}.library-sidebar-shell .menu-toggle[aria-expanded=true]{background:#233e56;border-color:#355a79;color:#d5edff}
+.library-sidebar-shell .menu-toggle>span{margin-left:auto}.library-sidebar-shell .count-value{font-size:11px;font-weight:400;color:#8eacc7}.library-sidebar-shell .menu-toggle::after{display:none}
+.library-sidebar-shell .steam-bar{display:grid!important;grid-template-columns:1fr 1fr;gap:8px;align-items:stretch;margin:17px 0 0;padding:16px 0 0;border:0;border-top:1px solid #2b3b4e;background:none;border-radius:0;flex:none}
+.library-sidebar-shell .steam-bar .button{min-width:0;min-height:44px;width:100%;padding:0 9px;font-size:12px;font-weight:500;border:1px solid #39516a;border-radius:6px;display:flex;align-items:center;justify-content:center;gap:8px;background:#213246;color:#d4e4f3;white-space:normal;line-height:1.5}
+.library-sidebar-shell .steam-bar #commit-button,.library-sidebar-shell .steam-bar #delete-button,.library-sidebar-shell .steam-bar #update-steam-artwork-button{grid-column:1/-1}.library-sidebar-shell .steam-bar #commit-button{background:#91cfff;border-color:#91cfff;color:#102c43;font-weight:650}.library-sidebar-shell .steam-bar #commit-button .count-label{font-size:10px;margin-left:auto}
+.library-sidebar-shell #media-download-progress{margin:auto 0 0;padding:16px 0 0;border:0;border-radius:0;background:none;display:flex;align-items:stretch;flex-direction:column;gap:10px;flex:none;font-size:10px;color:#95afc7;line-height:1.6;min-height:0}
+.library-sidebar-shell #media-download-progress.hidden{display:none}.library-sidebar-shell #media-download-progress .button{min-height:40px;padding:0 9px;font-size:11px;width:100%}.library-sidebar-shell #media-download-bar{height:3px;width:100%;min-width:0}
+.library-sidebar-shell .library-sidebar-workspace{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.library-sidebar-shell .library-sidebar-page{padding:0 30px;min-width:0;min-height:0;flex:1;display:flex;flex-direction:column;overflow:hidden}
+.library-sidebar-shell .library-heading{display:flex;align-items:center;justify-content:space-between;gap:22px;margin:0;padding:25px 0 19px;border:0;min-height:100px;flex:none}
+.library-sidebar-shell .library-heading .eyebrow{font-size:10px;letter-spacing:1px;color:#819ab1;margin-bottom:8px;line-height:1.3}.library-sidebar-shell .library-heading h1{font-size:27px;line-height:1.2;margin:0;color:#e5f1fd;font-weight:650;letter-spacing:.3px}.library-sidebar-shell #library-subtitle{font-size:11px;line-height:1.5;margin:8px 0 0;color:#8ca5be}
+.library-sidebar-shell .library-heading-actions{display:flex;align-items:center;gap:12px;flex:none}.library-sidebar-shell .library-heading-actions .button{min-height:42px;padding:0 14px;font-size:12px;font-weight:500;border-radius:6px}.library-sidebar-shell #steam-runtime-state{border:0;background:none;color:#9ec8b0;padding:0;min-height:35px;font-size:11px}
+.library-sidebar-shell .library-sidebar-tools{display:flex;align-items:center;gap:16px;flex:none;justify-content:space-between;margin-bottom:12px}.library-sidebar-shell .library-sidebar-search{display:flex;align-items:center;gap:10px;border:1px solid #354a60;border-radius:6px;background:#152232;min-height:44px;padding:0 12px;width:min(430px,65%)}.library-sidebar-shell .library-sidebar-search svg{width:18px;height:18px;color:#83a1bc}.library-sidebar-shell #library-search{border:0;background:none;color:#d9e9f7;font-size:13px;height:42px;width:100%;min-width:0;outline:none}.library-sidebar-shell #library-search::placeholder{color:#7892ad}
+.library-sidebar-shell .library-sidebar-density{display:flex;border:1px solid #354b62;border-radius:7px;background:#152232;padding:3px;gap:3px}.library-sidebar-shell .library-sidebar-density button{min-height:36px;padding:0 13px;border:0;background:transparent;color:#8ba3bc;font-size:12px;border-radius:4px}.library-sidebar-shell .library-sidebar-density button.active{background:#304c68;color:#d9efff}
+.library-sidebar-shell .library-sidebar-meta{display:flex;align-items:center;justify-content:space-between;color:#91a7bd;font-size:11px;padding:0 0 12px;flex:none}.library-sidebar-shell #library-sidebar-scroll{overflow:auto;min-height:0;flex:1;scrollbar-width:thin;scrollbar-color:#3c536c transparent;padding:5px 6px 20px 4px;margin:0 -6px 0 -4px;scrollbar-gutter:stable;overscroll-behavior:contain}
+.library-sidebar-shell #library{display:grid;grid-template-columns:repeat(var(--library-columns,8),minmax(0,1fr));gap:18px 16px;margin:0;padding:0;align-content:start}
+.library-sidebar-shell .game-card{min-width:0;min-height:0;padding:0;border:0!important;box-shadow:none!important;background:transparent!important;transform:none!important;filter:none!important;opacity:1!important;border-radius:7px;overflow:visible;outline:none!important;transition:none}
+.library-sidebar-shell .game-card .game-main{display:block;padding:0;margin:0;gap:0;grid-template-columns:none;overflow:visible;position:relative;z-index:auto}
+.library-sidebar-shell .game-card .cover-placeholder{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:2/3;border-radius:7px;overflow:hidden;border:0;background:#24374a;color:#a5c7e3;font-size:24px;outline:1px solid #ffffff14;outline-offset:-1px}
+.library-sidebar-shell .game-card .cover-placeholder>img{width:100%;height:100%;position:absolute;inset:0;object-fit:cover;transition:filter .16s ease}
+.library-sidebar-shell .game-card .game-card-name{font-size:13px;font-weight:500;line-height:1.35;min-height:36px;margin:0;padding:10px 1px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:left;color:#e1edf8}
+.library-sidebar-shell .game-card.unselected-for-steam .cover-placeholder>img{filter:saturate(.62) brightness(.55)}.library-sidebar-shell .game-card.unselected-for-steam .game-card-name{color:#8da1b7}.library-sidebar-shell .game-card.unselected-for-steam:focus .cover-placeholder>img{filter:saturate(.85) brightness(.78)}
+.library-sidebar-shell .game-card.current-card .cover-placeholder,.library-sidebar-shell .game-card:focus .cover-placeholder{outline:3px solid #c2e8ff;outline-offset:3px;box-shadow:0 0 0 6px #66bfff2b}.library-sidebar-shell .game-card.selected-for-steam:not(:focus) .cover-placeholder{outline:2px solid #80c6ff;outline-offset:1px}
+.library-sidebar-shell .card-art-glow{display:none!important;animation:none!important}.library-sidebar-shell .game-card::before,.library-sidebar-shell .game-card::after{content:none!important;display:none!important}
+.library-sidebar-shell .sidebar-card-check{position:absolute;left:10px;top:10px;width:25px;height:25px;border:1px solid #b2cde081;background:#0e2031cc;border-radius:6px;display:grid;place-items:center;color:transparent;z-index:2;pointer-events:none}.library-sidebar-shell .sidebar-card-check svg{width:17px;height:17px;stroke-width:2.5}.library-sidebar-shell .selected-for-steam .sidebar-card-check{background:#91d0ff;color:#102f47;border-color:#b4e0ff}.library-sidebar-shell .game-card:not(.selection-enabled) .sidebar-card-check{display:none}
+.library-sidebar-shell .sidebar-card-edit{position:absolute;right:9px;top:10px;height:27px;padding:0 7px;display:none;align-items:center;justify-content:center;gap:6px;line-height:1;background:#102b44eb;border:1px solid #9ad2ff80;border-radius:5px;color:#d9f0ff;font-size:11px;pointer-events:none}.library-sidebar-shell .game-card:focus .sidebar-card-edit{display:inline-flex}.library-sidebar-shell .sidebar-card-edit b{width:18px;min-width:18px;height:18px;line-height:1;display:inline-grid;place-items:center;border-radius:50%;background:#9ac5eb;color:#153047;font-family:"Segoe UI",sans-serif;font-size:11px;font-weight:650}.library-sidebar-shell .small-library-cards .sidebar-card-edit>span{display:none}.library-sidebar-shell .small-library-cards .sidebar-card-edit{gap:0}
+.library-sidebar-shell .game-card-scrape-overlay{inset:auto 0 36px;z-index:3;min-height:44px;padding:10px 8px;border-radius:0 0 7px 7px;background:#10293ff5!important;border:0;align-content:center;justify-content:center;font-size:11px;color:#c5e5ff;backdrop-filter:none}
+.library-sidebar-shell #library-sidebar-dock{min-height:66px;padding:10px 30px;display:flex;align-items:center;justify-content:space-between;gap:15px;flex:none;background:#15202d;border-top:1px solid #32485f}.library-sidebar-shell #library-dock-name{max-width:42%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#bdd5e9;font-size:12px}.library-sidebar-shell .library-dock-actions{display:flex;gap:8px;align-items:center;margin-left:auto}.library-sidebar-shell .library-dock-actions .button{min-height:44px;padding:0 12px;font-size:12px;font-weight:500;display:flex;gap:8px;align-items:center;border-radius:6px}
+.library-sidebar-shell .sidebar-key{flex-shrink:0}
+.library-sidebar-shell #gamepad-hints{display:none}.library-sidebar-shell :is(button,input,.game-card):focus-visible{outline:3px solid #b4e2ff;outline-offset:3px}.library-sidebar-shell .game-card:focus-visible{outline:0!important}
+.library-sidebar-shell #library-management-page{padding-top:22px;padding-bottom:22px;overflow:auto}.library-sidebar-shell .library-management-heading{display:flex;align-items:center;gap:20px;padding-bottom:22px;flex:none}.library-sidebar-shell .library-management-heading h1{font-size:25px;line-height:1.3;margin:0;font-weight:650}.library-sidebar-shell .library-management-heading .eyebrow{font-size:10px;color:#819ab1;margin-bottom:8px}.library-sidebar-shell #library-management-back{display:flex;align-items:center;gap:9px;min-height:44px;padding:0 15px;font-size:13px}.library-sidebar-shell #library-management-description{font-size:13px;color:#9eb5c9;line-height:1.8;margin:0 0 22px}
+.library-sidebar-shell .library-management-panel{position:static;padding:0;border:0;background:none;max-height:none;overflow:visible;width:100%;box-shadow:none;min-width:0}.library-sidebar-shell .root-list,.library-sidebar-shell .manual-game-list{display:flex;flex-direction:column;gap:12px;margin-bottom:18px}.library-sidebar-shell .root-row{border:1px solid #354c64;background:#192839;padding:21px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:82px}.library-sidebar-shell .root-row code{font-size:14px;color:#d9ebfb;overflow-wrap:anywhere;font-family:inherit;line-height:1.6}.library-sidebar-shell .root-row button{min-height:44px;min-width:76px;font-size:12px;border-radius:6px}.library-sidebar-shell .menu-panel-action{min-height:48px;font-size:13px;padding:0 20px}.library-sidebar-shell .manual-game-empty{padding:25px;background:#192839;border:1px solid #354c64;border-radius:8px;color:#92abc3;font-size:14px}
+.library-sidebar-shell #edit-modal{background:#0d131cf5}.library-sidebar-shell .edit-modal-card .modal-heading .eyebrow{display:none}
+.library-sidebar-shell #library-view[data-library-density=compact] #library{gap:14px 12px}.library-sidebar-shell #library-view[data-library-density=compact] .game-card-name{font-size:11px;padding-top:8px;min-height:33px}.library-sidebar-shell #library-view[data-library-density=compact] .sidebar-card-check{width:21px;height:21px;left:8px;top:8px}.library-sidebar-shell #library-view[data-library-density=compact] .sidebar-card-check svg{width:14px;height:14px}
+@media(max-width:1400px){.library-sidebar-shell #library-view:not(.hidden){grid-template-columns:208px minmax(0,1fr)}.library-sidebar-shell #library-sidebar{padding:17px 12px 11px}.library-sidebar-shell .sidebar-library-brand{font-size:15px;padding:0 6px 20px}.library-sidebar-shell .page-tab,.library-sidebar-shell .menu-toggle,.library-sidebar-shell #refresh-artwork-button{font-size:12px;min-height:42px}.library-sidebar-shell .sidebar-management-actions{margin-top:13px;padding-top:12px}.library-sidebar-shell .steam-bar{margin-top:12px;padding-top:12px}.library-sidebar-shell .library-sidebar-page{padding-left:24px;padding-right:24px}.library-sidebar-shell .library-heading{min-height:92px;padding:18px 0 16px}.library-sidebar-shell .library-heading h1{font-size:24px}.library-sidebar-shell #library{column-gap:13px;row-gap:15px}.library-sidebar-shell .game-card-name{font-size:12px}.library-sidebar-shell #library-sidebar-dock{padding:9px 24px;min-height:64px}.library-sidebar-shell .library-dock-actions .button{font-size:11px;padding:0 10px}.library-sidebar-shell .sidebar-card-edit{right:7px;font-size:10px;padding:0 5px;gap:4px}}
+@media(max-height:760px){.library-sidebar-shell #library-sidebar{padding-top:13px}.library-sidebar-shell .sidebar-library-brand{padding-bottom:13px}.library-sidebar-shell .page-tabs{gap:3px}.library-sidebar-shell .page-tab{min-height:40px}.library-sidebar-shell .sidebar-management-actions{margin-top:10px;padding-top:10px}.library-sidebar-shell #media-download-progress{font-size:9px;gap:7px;padding-top:12px}.library-sidebar-shell .library-heading{padding-top:14px;padding-bottom:14px;min-height:83px}.library-sidebar-shell #library-subtitle{margin-top:5px}}
+@media(max-width:760px){.library-sidebar-shell #library-view:not(.hidden){grid-template-columns:158px minmax(0,1fr)}.library-sidebar-shell #library-sidebar{padding:16px 8px 10px}.library-sidebar-shell .sidebar-library-brand{white-space:normal;font-size:13px;padding:0 6px 18px}.library-sidebar-shell .page-tab{font-size:11px;padding:0 7px;gap:7px}.library-sidebar-shell .sidebar-tab-icon svg{width:15px;height:15px}.library-sidebar-shell .page-tab strong{font-size:10px}.library-sidebar-shell .menu-toggle,.library-sidebar-shell #refresh-artwork-button{font-size:11px;padding:0 7px;white-space:normal}.library-sidebar-shell .library-sidebar-page{padding-left:16px;padding-right:16px}.library-sidebar-shell .library-heading h1{font-size:20px}.library-sidebar-shell .library-heading{flex-wrap:wrap;gap:10px}.library-sidebar-shell #steam-runtime-state{display:none}.library-sidebar-shell .library-sidebar-search{width:100%;flex:1;min-width:100px}.library-sidebar-shell .library-sidebar-tools{flex-wrap:wrap;gap:9px}.library-sidebar-shell .library-sidebar-density button{font-size:11px;padding:0 10px}.library-sidebar-shell #library-subtitle{font-size:10px}.library-sidebar-shell .library-sidebar-meta{font-size:10px;gap:8px;flex-wrap:wrap}.library-sidebar-shell #library-sidebar-dock{padding:8px 12px}.library-sidebar-shell #library-dock-name{display:none}.library-sidebar-shell .library-dock-actions{gap:5px;width:100%}.library-sidebar-shell .library-dock-actions .button{padding:0 6px;font-size:10px;gap:4px;min-width:0;flex:1}.library-sidebar-shell .root-row{padding:15px;gap:12px;flex-wrap:wrap}.library-sidebar-shell .root-row code{font-size:12px}.library-sidebar-shell .root-row button{width:100%}.library-sidebar-shell .library-management-heading{gap:12px;flex-wrap:wrap}.library-sidebar-shell .library-management-heading h1{font-size:20px}}
+
+.library-sidebar-shell .library-heading .app-brand-subtitle{display:none}
+
+/* Steam actions keep the icon and label on the same visual baseline. */
+.library-sidebar-shell :is(#commit-button, #edit-add-to-steam) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.library-sidebar-shell .sidebar-steam-icon { width: 18px; height: 18px; line-height: 0; }
+.library-sidebar-shell .sidebar-steam-icon svg { display: block; flex: none; }
+
+/* Current wallpaper feedback consumes existing download events; no new polling. */
+.shared-wallpaper-download-status { display:flex; flex-direction:column; align-self:stretch; width:100%; box-sizing:border-box; gap:6px; padding:9px 11px; margin-top:8px; border:1px solid #34465b; border-radius:9px; color:#d7e4f3; background:#172331; font-size:12px; line-height:1.5; }
+.shared-wallpaper-download-status progress { display:block; width:100%; height:6px; accent-color:#2ea6ff; }
+.shared-wallpaper-download-status[data-status="error"] { border-color:#a7444a; color:#ffc1c4; }
+.shared-wallpaper-download-status[data-status="done"] { border-color:#387a50; color:#a9e7bb; }
+.shared-wallpaper-download-status .button { align-self:flex-start; min-height:30px; padding:4px 10px; font-size:12px; }

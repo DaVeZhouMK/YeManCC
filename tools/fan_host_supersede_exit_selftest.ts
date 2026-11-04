@@ -127,7 +127,7 @@ async function invoke(cmd: string, a: Record<string, any>): Promise<any> {
     case 'app.fanActivity':
       return null;
     case 'fs.exists':
-      return String(a.path).toLowerCase().endsWith('yemanfanhost.exe');
+      return /(?:yemanfanhost\.exe|yemanfanhost\.session)$/i.test(String(a.path));
     case 'fs.mkdir':
       return true;
     case 'fs.readTextRange':

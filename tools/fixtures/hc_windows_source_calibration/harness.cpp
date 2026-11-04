@@ -20,6 +20,7 @@ static ymcc::reviewed_calibration::Context g_reviewedCalibrationContext;
 static std::vector<json> fixtureEvents,fixtureUiEvents;
 static int fixtureStatus=-1,fixtureResubscribe=0;
 static bool fixtureFailFlush=false,fixtureRetireOnFlush=false;
+static unsigned fixtureFlushCalls=0,fixtureFailFlushAt=0;
 static std::function<void()> fixtureAfterMove;
 static std::function<void()> fixtureBeforeLoad,fixtureAfterLoad,fixtureBeforeFinish;
 static void inputCapturePostCalibStatus(int status){fixtureStatus=status;}
@@ -29,7 +30,7 @@ static void ymccMadgwickResetOrientation(){}
 enum class SensorThreadRequest{Resubscribe};
 static void inputCaptureSensorThreadPost(SensorThreadRequest){++fixtureResubscribe;}
 static BOOL FlushFileBuffers(HANDLE handle){
-    if(fixtureFailFlush){SetLastError(ERROR_WRITE_FAULT);return FALSE;}
+    if(fixtureFailFlush||++fixtureFlushCalls==fixtureFailFlushAt){SetLastError(ERROR_WRITE_FAULT);return FALSE;}
     const auto result=::FlushFileBuffers(handle);
     if(result&&fixtureRetireOnFlush){fixtureRetireOnFlush=false;mockSink.activeBindingGeneration.fetch_add(1);}
     return result;
@@ -96,17 +97,29 @@ int main(int argc,char**argv){try{
  std::map<std::string,json> targetRows;std::set<std::string> expectedModels=oracle["expectedSourceQualifiedModels"].get<std::set<std::string>>();
  for(const std::string group:{"identities","legacy-cases"}){const auto& cases=group=="identities"?oracle["identities"]:oracle["legacy"]["cases"];for(const auto& row:cases){candidate::setup(row);candidate::inputCaptureResolveHcMotionSelector();if(expectedModels.contains(candidate::g_machineIdentity.deviceClass)&&candidate::inputCaptureSourceQualifiedCalibrationRecipe()&&candidate::inputCaptureSourceQualifiedCalibrationBound())targetRows.emplace(candidate::g_machineIdentity.deviceClass,row);}}
  txCheck(targetRows.size()==expectedModels.size(),"all independent expected source-qualified classes found");
+ // Keep the original 18 source-derived reviewed models. The separately pinned
+ // HC upgrade moves only OneXPlayer3 from the extended frame to reviewed.
+ std::set<std::string> expectedReviewed;
+ for(const auto& row:oracle["reviewed"])expectedReviewed.insert(row["deviceClass"].get<std::string>());
+ txCheck(expectedReviewed.size()==18,"original independent reviewed18 retained");
+ if(oracle.contains("upstreamMotionOverride")){
+  const auto& upgrade=oracle["upstreamMotionOverride"];
+  txCheck(upgrade["commit"]=="f2e58468d9917189d4be7ccfc242385ce2c3035b"&&upgrade["model"]=="OneXPlayer3"&&upgrade["sha256"]=="5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a","reviewed cohort delta has exact independent HC source identity");
+  expectedReviewed.insert("HandheldCompanion.Devices.OneXPlayer3");
+ }
  unsigned extendedModels=0;
  for(const auto& [model,row]:targetRows){const json recipe={{"deviceClass",model}};
   // Successful commit and current record reload through actual DLL and file calls.
-  auto key=seed(row);const auto old=read();toApply();frame();auto event=lastResult();
+  auto key=seed(row);txCheck((candidate::inputCaptureReviewedCalibrationRecipe()!=nullptr)==expectedReviewed.contains(model),"each model retains its independently declared calibration frame");const auto old=read();toApply();frame();auto event=lastResult();
   txCheck(event["ok"]==true&&event["saved"]==true&&event["applied"]==true&&event["storageReadbackVerified"]==true,"saved and applied reflect separate successful receipts");
   txCheck(same(offset(),{0.25f,-0.5f,0.75f})&&candidate::g_autoCalibTrusted&&candidate::g_autoCalibFinished,"actual DLL applies committed offset");txCheck(read()["keep"]==old["keep"]&&read()[key]["xOffset"]==0.25f,"other records retained and target verified");frame();txCheck(candidate::fixtureResubscribe==1,"current successful exit resubscribes once");++scenarios;
   // Actual sharing violation after complete temp write preserves the target and rolls back live bias.
   key=seed(row);toApply();const auto original=bytes();HANDLE held=CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(held==INVALID_HANDLE_VALUE)throw std::runtime_error("Target lock failed");frame();CloseHandle(held);event=lastResult();
   txCheck(event["saved"]==false&&event["applied"]==false&&event["rolledBack"]==true&&event["storageReason"]=="replace-failed","sharing error is not reported saved");txCheck(bytes()==original&&same(offset(),{1,2,3}),"sharing failure keeps previous file and real bias");++scenarios;
   key=seed(row);toApply();const auto beforeFlush=bytes();candidate::fixtureFailFlush=true;frame();candidate::fixtureFailFlush=false;event=lastResult();txCheck(event["saved"]==false&&event["storageReason"]=="temporary-flush-failed"&&bytes()==beforeFlush&&same(offset(),{1,2,3}),"flush failure cannot replace original or apply bias");txCheck(noOwnedTemporary(),"failed flush closes handle before deleting owned temporary and lock");++scenarios;
-  key=seed(row);toApply();writeText("{ incomplete");frame();event=lastResult();txCheck(event["saved"]==false&&event["storageReason"]=="existing-json-invalid"&&bytes()=="{ incomplete"&&same(offset(),{1,2,3}),"invalid existing file not overwritten");++scenarios;
+  key=seed(row);toApply();writeText("{ incomplete");frame();event=lastResult();bool originalArchived=false;
+  for(const auto& entry:std::filesystem::directory_iterator(file.parent_path()))if(entry.path().filename().wstring().starts_with(L"calibration.json.before-calibration-recovery-")){std::ifstream input(entry.path(),std::ios::binary);if(std::string(std::istreambuf_iterator<char>(input),{})=="{ incomplete")originalArchived=true;}
+  txCheck(event["saved"]==true&&originalArchived&&read()[key]["xOffset"]==0.25f,"invalid existing file is exactly archived before current-source recovery");++scenarios;
   key=seed(row);toApply();const auto lockedBefore=bytes();const auto lockPath=file.wstring()+L".reviewed.lock";
   HANDLE sidecar=CreateFileW(lockPath.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,nullptr);if(sidecar==INVALID_HANDLE_VALUE)throw std::runtime_error("Fixture sidecar lock failed");
   frame();CloseHandle(sidecar);event=lastResult();txCheck(event["saved"]==false&&event["storageReason"]=="writer-busy-or-lock-failed"&&bytes()==lockedBefore&&same(offset(),{1,2,3})&&noOwnedTemporary(),"exclusive sidecar rejects second writer without file or bias loss");++scenarios;
@@ -191,7 +204,7 @@ int main(int argc,char**argv){try{
   }
   models.push_back(recipe["deviceClass"]);
  }
- txCheck(models.size()==51&&extendedModels==33,"exact independent cohort: reviewed18 and extended33");
+ txCheck(models.size()==51&&extendedModels==51-expectedReviewed.size(),"exact independent cohort: original51 with source-qualified reviewed membership");
  for(auto protectedFamily:{candidate::YmccFamily::MsiClaw,candidate::YmccFamily::AsusRogAllyX,candidate::YmccFamily::AsusRogAlly,candidate::YmccFamily::AsusRogAllyClassic,candidate::YmccFamily::AsusRogAllyXClassic,candidate::YmccFamily::LenovoLegionGo,candidate::YmccFamily::Gpd,candidate::YmccFamily::Unknown}){
   candidate::g_machineIdentity.family=protectedFamily;
   txCheck(candidate::inputCaptureReviewedCalibrationRecipe()==nullptr&&candidate::inputCaptureCalibrationStorageKey("protected-device")=="PROTECTED-DEVICE","protected families retain legacy calibration key and cannot enter reviewed transaction");

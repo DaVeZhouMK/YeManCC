@@ -12,6 +12,9 @@
 #include <wrl/client.h>
 #include "json.hpp"
 #include <array>
+#include <atomic>
+#include <limits>
+#include <set>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -558,51 +561,182 @@ inline Json optionJson(const Option& o) {
     return Json{{"id",o.id},{"raw",o.raw},{"capacityMiB",o.capacityMiB ? Json(*o.capacityMiB) : Json(nullptr)},
                 {"removeOverride",o.removeOverride}};
 }
-inline Option parseOption(const Json& j) {
-    Option o; o.id = j.at("id").get<std::string>(); o.raw = j.at("raw").get<std::uint32_t>();
-    if (!j.at("capacityMiB").is_null()) o.capacityMiB = j.at("capacityMiB").get<std::uint32_t>();
-    o.removeOverride = j.at("removeOverride").get<bool>(); return o;
+// Journal metadata never supplies a hardware value. Parse it independently of
+// the live probe, then let verification() compare its binding and offered target.
+inline bool journalUnsigned(const Json& value,std::uint64_t maximum) {
+    if (!value.is_number_integer()) return false;
+    if (value.is_number_unsigned()) return value.get<std::uint64_t>() <= maximum;
+    const auto n = value.get<std::int64_t>(); return n >= 0 && std::uint64_t(n) <= maximum;
+}
+inline bool journalText(const Json& value,std::size_t limit) {
+    if (!value.is_string()) return false;
+    const auto& s = value.get_ref<const std::string&>();
+    return !s.empty() && s.size() <= limit && std::none_of(s.begin(),s.end(),[](unsigned char c){ return c < 32; });
+}
+inline Json journalParse(const std::string& raw,bool* future = nullptr) noexcept {
+    struct Invalid {};
+    try {
+        std::array<std::set<std::string>,65> keys; std::string rootKey;
+        if (future) *future=false;
+        return Json::parse(raw,[&](int depth,Json::parse_event_t event,Json& value){
+            if (depth < 0 || depth > 64) throw Invalid{};
+            if (event == Json::parse_event_t::object_start) keys[depth].clear();
+            if (event == Json::parse_event_t::key && depth==1) rootKey=value.get<std::string>();
+            if (future && event==Json::parse_event_t::value && depth==1 && rootKey=="schema" && journalUnsigned(value,(std::numeric_limits<std::uint64_t>::max)()) && value>1) *future=true;
+            if (event == Json::parse_event_t::key && (depth == 0 || !keys[depth-1].insert(value.get<std::string>()).second)) throw Invalid{};
+            return true;
+        },false);
+    } catch (...) { return Json(Json::value_t::discarded); }
+}
+inline bool journalDocument(const Json& document,Journal* out = nullptr) noexcept {
+    try {
+        if (!document.is_object() || !document.contains("schema") || !journalUnsigned(document["schema"],1) || document["schema"] != 1) return false;
+        for (const auto* key : {"pnpId","driverVersion","provider","bootId","stage"})
+            if (!document.contains(key) || !journalText(document[key],std::string(key)=="pnpId" ? 4096 : 512)) return false;
+        Journal j; j.pnpId=document["pnpId"].get<std::string>(); j.driverVersion=document["driverVersion"].get<std::string>();
+        j.provider=document["provider"].get<std::string>(); j.bootId=document["bootId"].get<std::string>(); j.stage=document["stage"].get<std::string>();
+        if ((j.provider!="intel-gmm" && j.provider!="rog-apu" && j.provider!="rog-vram") || (j.stage!="prepared" && j.stage!="saved") ||
+            !document.contains("beforeBytes") || !journalUnsigned(document["beforeBytes"],(std::numeric_limits<std::uint64_t>::max)()) || !document.contains("originalRaw")) return false;
+        j.beforeBytes=document["beforeBytes"].get<std::uint64_t>();
+        if (!document["originalRaw"].is_null()) {
+            if (!journalUnsigned(document["originalRaw"],0xffffffffULL)) return false;
+            j.originalRaw=document["originalRaw"].get<std::uint32_t>();
+        } else if (j.provider!="intel-gmm") return false;
+        if (!document.contains("target") || !document["target"].is_object()) return false;
+        const auto& target=document["target"];
+        if (!target.contains("id") || !journalText(target["id"],64) || !target.contains("raw") || !journalUnsigned(target["raw"],0xffffffffULL) ||
+            !target.contains("capacityMiB") || !target.contains("removeOverride") || !target["removeOverride"].is_boolean()) return false;
+        j.target.id=target["id"].get<std::string>(); j.target.raw=target["raw"].get<std::uint32_t>(); j.target.removeOverride=target["removeOverride"].get<bool>();
+        if (!target["capacityMiB"].is_null()) {
+            if (!journalUnsigned(target["capacityMiB"],0xffffffffULL) || target["capacityMiB"]==0) return false;
+            j.target.capacityMiB=target["capacityMiB"].get<std::uint32_t>();
+            if (j.target.id!="mib:"+std::to_string(*j.target.capacityMiB) || j.target.removeOverride || j.target.raw==0 ||
+                (j.provider=="intel-gmm" && j.target.raw!=*j.target.capacityMiB)) return false;
+        } else if (j.target.id!="auto" || j.target.raw!=0 || j.target.removeOverride!=(j.provider=="intel-gmm")) return false;
+        if (j.provider=="rog-apu") {
+            const auto options=rogApuOptions((std::numeric_limits<std::uint64_t>::max)());
+            if (std::none_of(options.begin(),options.end(),[&](const Option& o){ return sameOption(o,j.target); }) ||
+                std::none_of(options.begin(),options.end(),[&](const Option& o){ return o.raw==j.originalRaw; })) return false;
+        }
+        if (j.provider=="rog-vram" && (j.target.raw>65535 || *j.originalRaw>65535 ||
+            (j.target.capacityMiB && *j.target.capacityMiB!=j.target.raw && std::uint64_t(*j.target.capacityMiB)!=std::uint64_t(j.target.raw)*512))) return false;
+        if (out) *out=std::move(j); return true;
+    } catch (...) { return false; }
 }
 class WindowsOps final : public Ops {
     std::wstring root_; std::string deviceClass_; Json* diagnostics_ = nullptr;
     Json* dispatch_ = nullptr; std::string writeBinding_;
+    enum class JournalKind { missing, valid, damaged, future, unreadable };
+    struct JournalImage {
+        JournalKind kind=JournalKind::unreadable;
+        Json document; std::optional<Journal> value; std::string raw;
+        BY_HANDLE_FILE_INFORMATION info{};
+    };
+    std::optional<JournalImage> observed_;
+    std::filesystem::path journalPath() const { return std::filesystem::path(root_)/L"gpu-dedicated-memory.json"; }
+    static bool sameInfo(const BY_HANDLE_FILE_INFORMATION& a,const BY_HANDLE_FILE_INFORMATION& b) {
+        return a.dwVolumeSerialNumber==b.dwVolumeSerialNumber && a.nFileIndexHigh==b.nFileIndexHigh && a.nFileIndexLow==b.nFileIndexLow &&
+            a.nFileSizeHigh==b.nFileSizeHigh && a.nFileSizeLow==b.nFileSizeLow && a.ftLastWriteTime.dwHighDateTime==b.ftLastWriteTime.dwHighDateTime &&
+            a.ftLastWriteTime.dwLowDateTime==b.ftLastWriteTime.dwLowDateTime;
+    }
+    static bool sameImage(const JournalImage& a,const JournalImage& b) {
+        return a.kind==b.kind && (a.kind==JournalKind::missing || (sameInfo(a.info,b.info) && a.raw==b.raw));
+    }
+    static JournalImage loadImage(const std::filesystem::path& path) noexcept {
+        JournalImage image;
+        try {
+            Handle file; file.value=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+            if (file.value==INVALID_HANDLE_VALUE) {
+                const auto error=GetLastError(); if (error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND) image.kind=JournalKind::missing;
+                return image;
+            }
+            if (GetFileType(file.value)!=FILE_TYPE_DISK || !GetFileInformationByHandle(file.value,&image.info) ||
+                (image.info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))) return image;
+            const bool oversized=image.info.nFileSizeHigh || image.info.nFileSizeLow>65536;
+            image.raw.resize(oversized ? 65536 : image.info.nFileSizeLow); DWORD readBytes=0;
+            if (!ReadFile(file.value,image.raw.data(),static_cast<DWORD>(image.raw.size()),&readBytes,nullptr) || readBytes!=image.raw.size()) return image;
+            BY_HANDLE_FILE_INFORMATION after{};
+            if (!GetFileInformationByHandle(file.value,&after) || !sameInfo(image.info,after)) return image;
+            bool future=false; image.document=journalParse(image.raw,&future);
+            // Retain a future marker seen before a later syntax/depth/size fault.
+            if (future) { image.kind=JournalKind::future; return image; }
+            if (oversized) { image.kind=JournalKind::damaged; return image; }
+            Journal value;
+            if (!journalDocument(image.document,&value)) { image.kind=JournalKind::damaged; return image; }
+            image.kind=JournalKind::valid; image.value=std::move(value); return image;
+        } catch (...) { return image; }
+    }
+    static std::wstring uniqueSuffix() {
+        static std::atomic<unsigned long long> serial{0};
+        return std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++serial);
+    }
+    struct JournalLock {
+        Handle handle; bool held=false;
+        explicit JournalLock(const std::filesystem::path& path) {
+            auto text=std::filesystem::absolute(path).lexically_normal().wstring();
+            std::wstring folded(text.size(),L'\0');
+            if (LCMapStringEx(LOCALE_NAME_INVARIANT,LCMAP_LOWERCASE,text.data(),static_cast<int>(text.size()),folded.data(),static_cast<int>(folded.size()),nullptr,nullptr,0)!=static_cast<int>(text.size())) return;
+            text.swap(folded);
+            std::uint64_t hash=14695981039346656037ULL;
+            for (const auto c:text) { hash^=static_cast<std::uint16_t>(c); hash*=1099511628211ULL; }
+            const auto name=L"Local\\YMCCGpuJournal-v1-"+std::to_wstring(hash);
+            handle.value=CreateMutexW(nullptr,FALSE,name.c_str());
+            if (!handle.value) { handle.value=INVALID_HANDLE_VALUE; return; }
+            const auto waited=WaitForSingleObject(handle.value,2000); held=waited==WAIT_OBJECT_0 || waited==WAIT_ABANDONED;
+        }
+        ~JournalLock() { if (held) ReleaseMutex(handle.value); }
+    };
 public:
     WindowsOps(std::wstring root,std::string deviceClass,Json* diagnostics = nullptr,Json* dispatch = nullptr)
         : root_(std::move(root)),deviceClass_(std::move(deviceClass)),diagnostics_(diagnostics),dispatch_(dispatch) {}
     bool matchesWriteBinding(const Probe& p) const { return !writeBinding_.empty() && writeBinding_ == bindingFence(p); }
     Probe probe() override { return probeWindows(deviceClass_,diagnostics_); }
     JournalRead journal() override {
+        observed_=loadImage(journalPath());
+        return {observed_->kind==JournalKind::missing || observed_->kind==JournalKind::valid,observed_->value,observed_->kind==JournalKind::damaged};
+    }
+    bool recoverJournal(const Probe& expected) override {
         try {
-            const auto path = std::filesystem::path(root_) / L"gpu-dedicated-memory.json";
-            if (!std::filesystem::exists(path)) return {};
-            if (std::filesystem::file_size(path) > 65536) return {false,std::nullopt};
-            std::ifstream input(path,std::ios::binary); if (!input) return {false,std::nullopt};
-            const auto json = Json::parse(input);
-            if (json.at("schema") != 1) return {false,std::nullopt};
-            Journal j; j.pnpId = json.at("pnpId").get<std::string>(); j.driverVersion = json.at("driverVersion").get<std::string>();
-            j.provider = json.at("provider").get<std::string>(); j.bootId = json.at("bootId").get<std::string>();
-            j.stage = json.at("stage").get<std::string>(); j.beforeBytes = json.at("beforeBytes").get<std::uint64_t>();
-            if (!json.at("originalRaw").is_null()) j.originalRaw = json.at("originalRaw").get<std::uint32_t>();
-            j.target = parseOption(json.at("target"));
-            if (j.pnpId.empty() || j.bootId.empty() || (j.stage != "saved" && j.stage != "prepared")) return {false,std::nullopt};
-            return {true,j};
-        } catch (...) { return {false,std::nullopt}; }
+            if (!observed_ || observed_->kind!=JournalKind::damaged || !admitted(expected)) return false;
+            const auto now=probe(); if (!admitted(now) || fence(now)!=fence(expected)) return false;
+            const auto path=journalPath(); JournalLock lock(path); if (!lock.held) return false;
+            const auto current=loadImage(path); if (!sameImage(current,*observed_)) return false;
+            const auto archive=std::filesystem::path(path.wstring()+L".invalid-"+uniqueSuffix());
+            if (!MoveFileExW(path.c_str(),archive.c_str(),MOVEFILE_WRITE_THROUGH)) return false;
+            const auto preserved=loadImage(archive), remaining=loadImage(path);
+            if (!sameImage(current,preserved) || remaining.kind!=JournalKind::missing) return false;
+            observed_=remaining; return true;
+        } catch (...) { return false; }
     }
     bool save(const Journal& j) override {
+        struct Temporary {
+            std::filesystem::path path; bool owned=false;
+            ~Temporary() { if (owned) { std::error_code ec; std::filesystem::remove(path,ec); } }
+        } temporary;
         try {
-            const auto path = std::filesystem::path(root_) / L"gpu-dedicated-memory.json";
-            const auto temp = path.wstring() + L".tmp";
-            const Json json{{"schema",1},{"pnpId",j.pnpId},{"driverVersion",j.driverVersion},{"provider",j.provider},
+            const auto path=journalPath(); JournalLock lock(path); if (!lock.held || !observed_) return false;
+            const auto current=loadImage(path);
+            if (!sameImage(current,*observed_) || (current.kind!=JournalKind::missing && current.kind!=JournalKind::valid)) return false;
+            Json document=current.kind==JournalKind::valid ? current.document : Json::object();
+            Json target=document.contains("target") ? document["target"] : Json::object(); target.update(optionJson(j.target));
+            document.update(Json{{"schema",1},{"pnpId",j.pnpId},{"driverVersion",j.driverVersion},{"provider",j.provider},
                 {"bootId",j.bootId},{"stage",j.stage},{"originalRaw",j.originalRaw ? Json(*j.originalRaw) : Json(nullptr)},
-                {"beforeBytes",j.beforeBytes},{"target",optionJson(j.target)}};
-            const auto text = json.dump(2);
-            Handle file; file.value = CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-            if (file.value == INVALID_HANDLE_VALUE) return false;
-            DWORD written = 0;
-            if (!WriteFile(file.value,text.data(),static_cast<DWORD>(text.size()),&written,nullptr) || written != text.size() ||
-                !FlushFileBuffers(file.value)) return false;
-            CloseHandle(file.value); file.value = INVALID_HANDLE_VALUE;
-            return MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH) != 0;
+                {"beforeBytes",j.beforeBytes},{"target",std::move(target)}});
+            if (!journalDocument(document)) return false;
+            const auto text=document.dump(2); if (text.size()>65536) return false;
+            temporary.path=path.wstring()+L".tmp-"+uniqueSuffix();
+            Handle file; file.value=CreateFileW(temporary.path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+            if (file.value==INVALID_HANDLE_VALUE) return false;
+            temporary.owned=true; DWORD written=0;
+            if (!WriteFile(file.value,text.data(),static_cast<DWORD>(text.size()),&written,nullptr) || written!=text.size() || !FlushFileBuffers(file.value)) return false;
+            CloseHandle(file.value); file.value=INVALID_HANDLE_VALUE;
+            if (!sameImage(current,loadImage(path))) return false;
+            if (!MoveFileExW(temporary.path.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) return false;
+            temporary.owned=false;
+            const auto published=loadImage(path);
+            if (published.kind!=JournalKind::valid || published.raw!=text) return false;
+            observed_=published; return true;
         } catch (...) { return false; }
     }
     bool write(const Probe& expected, const Option& option) override {
@@ -617,7 +751,9 @@ inline Json resultJson(const Result& r) {
     const auto& p = r.snapshot;
     const bool ready = admitted(p);
     Json out{{"schema",1},{"readerRevision",readerRevision},{"ok",r.ok},{"available",ready},{"reason",r.reason}};
-    // An invalid journal is a failed read and must not expose the controls.
+    out["journalRecoveryRequired"] = r.journalRecoveryRequired;
+    out["journalRecovered"] = r.journalRecovered;
+    // Unreadable/future metadata stays protected; damaged metadata supplies no proof.
     if (!ready || (!r.ok && r.reason == "显存设置记录无法读取")) { out["available"] = false; return out; }
     Json choices = Json::array(); std::string selected;
     for (const auto& o : p.options) { choices.push_back(optionJson(o)); if (configuredAs(p,o)) selected = o.id; }

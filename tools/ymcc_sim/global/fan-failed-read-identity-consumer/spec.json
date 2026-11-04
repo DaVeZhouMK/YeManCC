@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "original": "tools/fan_failed_state_read_identity_selftest.ts",
-  "originalSha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06",
+  "originalSha256": "249a0d063168d0fec9f263a3440b389fcaab4826df97ab09d0fa491ab942f709",
   "sources": [
     "PowerControl/GameTitlePolicy.json",
     "package.json",
@@ -227,7 +227,7 @@
     "heartbeat: current failure still synchronizes a really closed session"
   ],
   "originalChecks": 45,
-  "originalAssertCallSites": 11,
+  "originalAssertCallSites": 20,
   "originalScope": "real public mutation/preset/heartbeat with inert Host/native/launcher; delayed readback identity, no hardware/CPU benchmark",
   "fault": {
     "id": "retired-failure-starts-readback",
@@ -323,5 +323,91 @@
   },
   "noOriginalFilterAllowed": "YMCC_FAN_FAILED_READ_CASE",
   "productChanges": 0,
-  "fullGoalComplete": false
+  "fullGoalComplete": false,
+  "sourceRetirementRegression": {
+    "caseName": "apply: current failure still synchronizes a really closed session",
+    "boundaries": [
+      "current",
+      "acknowledged",
+      "source-pending",
+      "written-without-return",
+      "other-pid",
+      "other-source",
+      "unknown-state",
+      "lease-present"
+    ],
+    "publicReopenOrder": [
+      "open",
+      "open",
+      "events",
+      "acquire",
+      "enable"
+    ],
+    "writes": 1,
+    "sourceOfScenario": "2026-11-02 failed cold Open/stale-zero-power-receipt loop; X2MiniPro R2 real-device success is separate evidence",
+    "runtimeValidation": "NOT_RUN",
+    "fault": {
+      "id": "failed-original-source-open-placeholder-retained",
+      "path": "src/bridge/fanHost.ts",
+      "before": "      if (origin && !origin.acknowledged && origin.sessionGeneration === session\n          && origin.powerGeneration === generation && origin.processId > 0\n          && origin.processId === hostProcess?.pid && isNoPowerOperationReceipt(remote)\n          && remote.state === 'AwaitingControl' && remote.lease === null\n          && hasSafeSourceFanRelease(remote, this.sourceSessionGeneration)) {\n        this.opened = false;\n        this.eventsOpened = false;\n        this.explicitOpenBinding = null;\n        this.explicitOpenOrigin = null;\n        this.coldOpenAdmission = null;\n      }\n",
+      "after": "      // Private source fault: retain the failed original Open placeholder.\n",
+      "caseName": "apply: current failure still synchronizes a really closed session",
+      "expectedFailure": "AssertionError [ERR_ASSERTION]: Only exact unacknowledged failed source Open can withdraw its placeholder\n\ntrue !== false\n",
+      "expectedChecks": 1,
+      "predictionMadeBeforeExecution": true,
+      "runtimeValidation": "NOT_RUN"
+    },
+    "inUseRecovery": {
+      "order": [
+        "open",
+        "events",
+        "acquire",
+        "enable"
+      ],
+      "writes": 1,
+      "sleepResumeRequests": 0,
+      "boundaries": [
+        "current",
+        "pending",
+        "unknown",
+        "no-return",
+        "wrong-source",
+        "missing-source",
+        "lease",
+        "real-power-operation",
+        "wrong-state"
+      ],
+      "nativeAwaitEdges": [
+        "refused",
+        "generation",
+        "off",
+        "close",
+        "sleep",
+        "process",
+        "session",
+        "epoch",
+        "source"
+      ],
+      "scenario": "Current same-owner source session safely retired after active mode failure while Host has no sleep receipt; only fresh native-admitted Open may precede replay",
+      "manualOrder": [
+        "open",
+        "events",
+        "acquire",
+        "enable"
+      ],
+      "manualWrites": 1,
+      "manualNativeAwaitEdges": [
+        "refused",
+        "generation",
+        "off",
+        "close",
+        "sleep",
+        "process",
+        "session",
+        "epoch",
+        "source"
+      ],
+      "failedManualOpenRetiredMirrors": true
+    }
+  }
 }

@@ -23,6 +23,7 @@
     <BaseOutputPath>bin\TestRunner\</BaseOutputPath>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="..\..\capabilities\upstream\xmax-6d728795\SuperXFan.source-facts.json" Link="SourceFacts/SuperXFan.source-facts.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     <Content Include="YeManFanHost.json" CopyToOutputDirectory="PreserveNewest" />
     <!--
       HC-SLIM-01 R3 §4.2：ASUS 风扇叶组件（曲线/传输/收据）。该工程以 net10.0 独立构建，

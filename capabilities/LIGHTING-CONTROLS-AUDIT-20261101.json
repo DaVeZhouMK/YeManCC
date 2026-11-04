@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "role": "documentation-navigation-only",
+  "runtimeConsumer": false,
+  "date": "2026-11-01",
+  "status": "SOURCE_REPAIRED_SOFTWARE_VERIFIED_PHYSICAL_UNKNOWN",
+  "canonicalCatalog": "capabilities/hc-device-catalog.json#/domains/lighting",
+  "canonicalPolicy": "capabilities/hc-lighting-policy.json",
+  "report": "capabilities/LIGHTING-CONTROLS-AUDIT-20261101.md",
+  "countsSnapshot": {
+    "frozenSourceClasses": 92,
+    "frozenLightingRows": 47,
+    "reviewedExtensionLightingRows": 1,
+    "totalLightingRows": 48,
+    "brightnessRoutes": 43,
+    "twoZoneEffects": 8,
+    "enabledPresetModels": 6,
+    "distinctImplementedEffectNames": [
+      "ambilight",
+      "breathing",
+      "gradient",
+      "preset",
+      "rainbow",
+      "solid",
+      "wheel"
+    ],
+    "perModelEffectCombinations": 100
+  },
+  "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Lgt1101",
+  "finalAudit": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Lgt1101\\completion-audit.json",
+  "issues": [
+    {
+      "id": "LIGHTING-AMBIENT-RIGHT-COLOR-HIDDEN",
+      "affected": "All eight ambient-capable MSI and ROG catalog rows",
+      "cause": "UI gated the secondary color only by the regular second-color flag. Both actual native ambient writers consume it, while all eight rows lack that flag.",
+      "repair": "Use the advertised effect to expose both colors and label static split-color behavior",
+      "before": "before-ui/catalog-color-controls.json",
+      "hardwareStatus": "UNKNOWN"
+    },
+    {
+      "id": "LIGHTING-OXP3-PRESET-LIST",
+      "affected": "OneXPlayer3 reviewed extension",
+      "cause": "Native capabilities advertised the global legacy eleven presets although the exact model admits ten, excluding preset 08.",
+      "repair": "Filter the advertised stable IDs through the existing exact-model validPreset admission",
+      "before": "before-native-feedback/capabilities/execute.log",
+      "hardwareStatus": "UNKNOWN"
+    },
+    {
+      "id": "LIGHTING-OXP3-FIXED-SPEED",
+      "affected": "OneXPlayer3 reviewed extension",
+      "cause": "Existing catalog fixedSpeed fact did not reach the renderer",
+      "repair": "Carry fixed-speed metadata in the generated existing route and native capabilities",
+      "hardwareStatus": "UNKNOWN"
+    },
+    {
+      "id": "LIGHTING-OXP3-PRESET-SECONDARY-COLOR",
+      "affected": "OneXPlayer3 reviewed extension",
+      "cause": "Preset UI hid colors even though the writer consumes the secondary color for G-Key/logo",
+      "repair": "Declare the reviewed preset-secondary usage in the existing lighting policy and expose its control",
+      "hardwareStatus": "UNKNOWN"
+    }
+  ],
+  "physicalAcceptance": "UNKNOWN",
+  "physicalEffectVerified": false,
+  "newHcDll": false,
+  "ambientBehavior": "fixed independent left/right colors; no screen/time sampling",
+  "existingTestIds": [
+    "lighting.unified-capability-dispatch",
+    "lighting.signal-consumer",
+    "lighting.ui-feedback-ordering-consumer"
+  ],
+  "currentConsumerIdentityProof": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Lgt1101\\current-consumer-identity.json",
+  "fullFileIdentityReuse": false
+}

@@ -28,7 +28,7 @@ def mask(text):
 extracted = []
 def function(name, text=source, origin='native/main.cpp'):
     masked = mask(text)
-    matches = list(re.finditer(r'\bstatic\s+[^;{}]*?\b' + re.escape(name) + r'\s*\([^;{}]*?\)\s*\{', masked))
+    matches = list(re.finditer(r'\bstatic\s+[^;{}]*?\b' + re.escape(name) + r'\s*\([^;{}]*?\)\s*(?:noexcept(?:\s*\([^;{}]*?\))?\s*)?\{', masked))
     assert len(matches) == 1, f'native function must be unique: {origin}:{name}'
     opening = masked.index('{', matches[0].start())
     depth, end = 1, opening + 1
@@ -56,6 +56,17 @@ assert 'existing.powerGeneration == generation' in pause
 single_pid = function('sgSuspendGameByPidUnlocked')
 assert 'const std::vector<DWORD> targets{rootPid};' in single_pid
 assert 'nativeProcessCreatedFromHandle(h) == valveTarget.processCreated' in single_pid
+# The NT helper remains source-only: the existing execution terminal is a
+# deterministic memory function. Never label injected invocation fields as a
+# runtime test of the bottom-level NT implementation or the Windows API.
+for field in ['ntApiAttempted', 'ntStatus', 'processOpenError', 'identityMatches',
+              'existingMarkerReused', 'pauseReason', 'apiDispatchTickMs', 'apiReturnTickMs']:
+    assert '"'+field+'"' in single_pid, f'NT diagnostic source contract missing: {field}'
+receipt_helper = function('sgRecordSleepPauseReceipt')
+assert 'noexcept' in receipt_helper
+assert receipt_helper.index('if (!sensorDetailLoggingGate()) return;') < receipt_helper.index('OpenProcess(')
+assert receipt_helper.count('WakeGameResume::queryThreads(candidate.pid)') == 1
+assert 'sleep-game-pause-receipt' in receipt_helper
 worker_pause = section('            if (item.kind == SgWork::Suspend)', '} else if (item.kind == SgWork::WakeAutomatic)')
 worker_pause_gate = worker_pause[worker_pause.index('// S4/hibernate'):worker_pause.index('// The cycle remains active')]
 
@@ -115,24 +126,34 @@ preamble = r'''
 #include "json.hpp"
 using json = nlohmann::json;
 using DWORD = unsigned long; using ULONGLONG = unsigned long long;
-using HANDLE = unsigned long;
+using HANDLE = void*; using WPARAM = unsigned long long;
+constexpr int WM_POWER_RESUME_READY=8;
+unsigned long long g_resumeWatchdogGeneration=0;
+std::vector<unsigned long long> readyMessages;
+bool PostMessageW(int,int,WPARAM generation,int){readyMessages.push_back(generation);return true;}
 constexpr bool FALSE = false;
 constexpr int PROCESS_SUSPEND_RESUME = 1, PROCESS_QUERY_LIMITED_INFORMATION = 2;
 constexpr DWORD GENERIC_READ=0x80000000ul, FILE_SHARE_READ=1, FILE_SHARE_WRITE=2, FILE_SHARE_DELETE=4;
 constexpr DWORD OPEN_EXISTING=3, FILE_ATTRIBUTE_NORMAL=128, STILL_ACTIVE=259, ERROR_INVALID_PARAMETER=87;
-constexpr HANDLE INVALID_HANDLE_VALUE=~HANDLE(0);
+const HANDLE INVALID_HANDLE_VALUE=reinterpret_cast<HANDLE>(~uintptr_t(0));
 enum class PowerLifecycle { Ready, Suspending, Suspended, Resuming };
 enum class YmccFamily { Unknown, Handheld };
 enum class SgSleepMode { Unknown, S3, S4 };
-enum class SgRetryKind { None, EntryFailure, UnexpectedWake };
+enum class SgRetryKind { None, EntryFailure, UnexpectedWake, SleepTimeout };
+static void sgCancelEntryFailureRetry(const char*,SgRetryKind=SgRetryKind::EntryFailure);
+static void sgSleepTimeoutStop(const char*) noexcept {}
+const char* sgRetryKindName(SgRetryKind kind){return kind==SgRetryKind::EntryFailure?"entry-failure":kind==SgRetryKind::UnexpectedWake?"unexpected-wake":kind==SgRetryKind::SleepTimeout?"sleep-timeout":"none";}
 enum class SgWork { Suspend, WakeAutomatic, WakeSuspend, WakeHibernate };
-struct NativeDetectedGame { DWORD pid=100; ULONGLONG processCreated=1234; };
+struct NativeDetectedGame { DWORD pid=100; ULONGLONG processCreated=1234; uint64_t workingSet=768ULL*1024*1024; };
 struct SgSleepTarget { DWORD pid=0; ULONGLONG processCreated=0, valveGeneration=0, powerGeneration=0; bool captured=false, markerOwned=false; };
 struct SgSuspendResult { DWORD pid=0; uint64_t ws=0; bool frozen=false; };
 struct SgResumeResult { int count=0; std::string names; std::vector<DWORD> pids; };
 struct Task { ULONGLONG generation=7; SgSleepMode mode=SgSleepMode::S3; SgRetryKind retryKind=SgRetryKind::None; unsigned retryAttempt=0; bool unexpectedWakeConsumed=false; } g_sgTask;
 struct { YmccFamily family=YmccFamily::Handheld; } g_machineIdentity;
 std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Suspending};
+std::atomic<bool> g_hardwareWriteGate{true};
+std::atomic<unsigned> g_hardwareWriteInFlight{0};
+struct { bool isolated=false; } g_aiFanMockSession;
 std::atomic<bool> g_sensorSuspendCallbackActive{false};
 std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0},g_sgLastKernel507EventFileTime{0};
 std::atomic<ymcc::sleeprequest::Mode> g_sgAutomaticSleepTarget{ymcc::sleeprequest::Mode::None};
@@ -143,7 +164,7 @@ std::atomic<bool> g_inputReady{true}, g_inputHostPowerAdmissionRevoked{false}, g
 bool g_guardEnabled=true, g_sgPauseResume=true, g_sgRepairEligible=true, g_sgRetryInProgress=false;
 bool g_sgModernStandbyActive=true, g_sgModernWakeClassified=false, g_sgSleepIntentArmed=false;
 bool g_sgSleepQueryGateClosed=false, g_sgSleepQueryOwnsGeneration=false, g_sgPowerButtonSleepConfigured=true;
-bool g_sgRetryEntryFailure=true;
+bool g_sgRetryEntryFailure=true, g_sgRetrySleepTimeout=false;
 ULONGLONG g_sgModernWakeClassifiedTick=0, g_sgModernStandbyGeneration=7, g_sgLastModernStandbyIntentTick=0;
 ULONGLONG g_sgSleepQueryGeneration=0, g_sgRetryDueTick=0, g_lastResumeNotifyTick=0, g_sgSleepTriggerTick=0;
 double g_sgSleepTriggerEpoch=0;
@@ -160,6 +181,26 @@ std::string markerReadBody;size_t markerReadOffset=0;
 int freezeDepth=0, suspendCalls=0, resumeCalls=0, powerReleaseCalls=0, resetCalls=0, sensorCalls=0, rescanCalls=0, abortCalls=0;
 std::vector<std::pair<SgWork,ULONGLONG>> queue;
 std::function<void()> pauseHook;
+// Explicit detail/probe ports for the extracted pause receipt. All state is
+// memory-only; the single read counts calls and can revoke context mid-probe.
+bool pauseDetailLogging=false;
+unsigned pauseThreadQueries=0;
+std::function<void()> pauseThreadProbeHook;
+json pauseInvocationOverride=json::object();
+namespace WakeGameResume {
+struct ThreadState {
+ bool known=false;unsigned total=0,suspended=0;
+ bool allSuspended()const{return known&&total&&suspended==total;}
+ bool allRunning()const{return known&&total&&suspended==0;}
+};
+ThreadState pauseThreadState{true,3,3};
+ThreadState queryThreads(DWORD pid){
+ assert(pid==100);++pauseThreadQueries;
+ if(pauseThreadProbeHook)pauseThreadProbeHook();
+ return pauseThreadState;
+}
+}
+bool sensorDetailLoggingGate(){return pauseDetailLogging;}
 std::atomic<bool> cancelEntered{false};
 std::vector<std::pair<std::string,json>> facts;
 ULONGLONG currentPowerGeneration(){return g_powerGeneration.load();}
@@ -172,13 +213,14 @@ void sgRecordFact(const char* event,const json& details=json::object()){facts.em
 void appendNativeLifecycleLog(const char*,const json&){}
 void appendFanLifecycleLog(const char*,const json&){}
 void fanHostScheduleEmergencyResume(ULONGLONG){}
+void deckySidebarResumeAfterIntent(ULONGLONG){} // transport memory port; Decky recovery is separately tested
 std::vector<std::pair<std::string,json>> emittedEvents;
 void ipc_emit(const char* name,const json& details){emittedEvents.emplace_back(name,details);}
 bool sgPlatformIsAlwaysOnAlwaysConnected(){return aoac;}
 // This PID-only fixture supplies S0 intent explicitly; capability routing is
 // tested with real production handlers in the S3/non-user companion replay.
 bool sgModernStandbyRepairSupported(){return true;}
-bool nativeValveReadCurrentTarget(NativeDetectedGame* target,ULONGLONG* generation){*target=detected; *generation=11; return targetAvailable;}
+bool nativeValveReadCurrentTarget(NativeDetectedGame* target,ULONGLONG* generation){if(!targetAvailable)return false;*target=detected;*generation=11;return true;}
 bool nativeValveValidateOwnedSuspendedTarget(const std::wstring& dir,DWORD pid,ULONGLONG created){
  if(dir==SG_MANUAL_DIR)return manualLease;
  return markerExists && pid==100 && created==markerCreated && created==actualCreated;
@@ -195,7 +237,7 @@ void sgWriteFile(const std::wstring&,const std::string&){}
 double sgNowEpoch(){return 1;}
 void sgInitNt(){}
 bool focusQueryProcessIdentity(DWORD,void*,ULONGLONG* created){*created=actualCreated; return processAlive;}
-HANDLE OpenProcess(int,bool,DWORD pid){if(swapOnOpen){actualCreated++;swapOnOpen=false;}return processAlive?pid:0;}
+HANDLE OpenProcess(int,bool,DWORD pid){if(swapOnOpen){actualCreated++;swapOnOpen=false;}return processAlive?reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid)):nullptr;}
 ULONGLONG nativeProcessCreatedFromHandle(HANDLE){return actualCreated;}
 void CloseHandle(HANDLE){}
 DWORD GetCurrentProcessId(){return 901;}
@@ -209,23 +251,31 @@ HANDLE CreateFileW(const wchar_t* path,DWORD access,DWORD share,void*,DWORD crea
     share!=(FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE)||creation!=OPEN_EXISTING||flags!=FILE_ATTRIBUTE_NORMAL)
    return INVALID_HANDLE_VALUE;
  markerReadBody="pid=100|created="+std::to_string(markerCreated)+"|generation="+std::to_string(markerGeneration)+"|state=suspended";
- markerReadOffset=0;return 900;
+ markerReadOffset=0;return reinterpret_cast<HANDLE>(900);
 }
 bool ReadFile(HANDLE file,void* buffer,DWORD bytes,DWORD* count,void*){
- if(file!=900||!count)return false;
+ if(file!=reinterpret_cast<HANDLE>(900)||!count)return false;
  const size_t available=markerReadBody.size()-markerReadOffset;
  *count=static_cast<DWORD>(std::min<size_t>(bytes,available));
  markerReadBody.copy(static_cast<char*>(buffer),*count,markerReadOffset);markerReadOffset+=*count;return true;
 }
-bool sgDrainProcessSuspendCount(HANDLE h){assert(h==100); if(resumeFails)return false; ++resumeCalls; freezeDepth=0; return true;}
+bool sgDrainProcessSuspendCount(HANDLE h){assert(h==reinterpret_cast<HANDLE>(100)); if(resumeFails)return false; ++resumeCalls; freezeDepth=0; return true;}
 void focusSingleResumedGame(const std::vector<DWORD>&,ULONGLONG=0,unsigned long long=0){}
 namespace fspath { bool exists(const std::wstring&,std::error_code&){return markerExists;} void remove(const std::wstring&,std::error_code&){markerExists=false;} }
 SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring& dir,bool){assert(dir==SG_SLEEP_LEASE_DIR); if(markerExists && !resumeFails){markerExists=false;freezeDepth=0;}return {};}
 json sgSuspendGameByPidUnlocked(DWORD pid,const std::wstring& dir,ULONGLONG created,const NativeDetectedGame*,bool,ULONGLONG gen){
  assert(pid==100 && dir==SG_SLEEP_LEASE_DIR && created==actualCreated);
- ++suspendCalls; ++freezeDepth; markerExists=true; markerCreated=created; markerGeneration=gen;
+ ++suspendCalls;
+ json invocation={{"paused",true},{"okCount",1},{"failCount",0},
+  {"ntApiAttempted",true},{"ntStatus",0},{"identityMatches",true},
+  {"processOpenError",0},{"existingMarkerReused",false},{"pauseReason","nt-suspend-accepted"},
+  {"apiDispatchTickMs",nowTick},{"apiReturnTickMs",nowTick}};
+ for(auto it=pauseInvocationOverride.begin();it!=pauseInvocationOverride.end();++it)invocation[it.key()]=it.value();
+ if(invocation.value("paused",false)){
+  ++freezeDepth;markerExists=true;markerCreated=created;markerGeneration=gen;
+ }
  if(pauseHook)pauseHook();
- return {{"paused",true},{"okCount",1},{"failCount",0}};
+ return invocation;
 }
 void sgStopSleepRetry(){g_sgRetryInProgress=false;g_sgRetryDueTick=0;g_sgSleepTriggerTick=0;g_sgTask.retryKind=SgRetryKind::None;g_sgTask.retryAttempt=0;cancelEntered=true;}
 bool sgSleepRetryActive(){return g_sgRetryInProgress && g_sgTask.retryKind!=SgRetryKind::None;}
@@ -238,8 +288,8 @@ void armPowerResumeWatchdog(ULONGLONG){}
 void sgClearInternalSleepRequest(const char*){}
 void hidHideInvalidateRawInputIdentityCache(){}
 void xinputSlotsMarkDiscoveryDirty(){}
-void openHardwareWriteGate(){}
-void closeHardwareWriteGate(const char*){}
+void openHardwareWriteGate(){g_hardwareWriteGate=true;}
+void closeHardwareWriteGate(const char*){g_hardwareWriteGate=false;}
 void inputCaptureResumeSensorsForPower(bool){++sensorCalls;}
 void inputHostRequestWakeRescan(ULONGLONG){++rescanCalls;}
 void inputHostRequestPowerRelease(ULONGLONG,const char*){++powerReleaseCalls;}
@@ -257,9 +307,11 @@ bool sgS0EntryFailureEligible(int reason,ULONGLONG){return reason==7 || reason==
 void sgAdvanceSleepRetry(const char*){}
 void sgStartSleepRetry(SgRetryKind kind,const char*){g_sgTask.retryKind=kind;g_sgRetryInProgress=true;}
 '''
-names = ['sgShouldKeepInputDuringStandby','sgVirtualWriterAllowedNow',
+names = ['initialPowerGeneration','hardwareWriteAllowed','beginHardwareWriteLease','endHardwareWriteLease',
+         'powerLifecycleMatches','publishPowerResumeReady','reconcilePowerResumeReady',
+         'sgShouldKeepInputDuringStandby','sgVirtualWriterAllowedNow',
          'sgReadResumeMarkerChecked','sgResumeMarkerDefinitelyStale',
-         'sgResumeSleepTargetUnlocked','sgResumeSleepTarget','sgPauseSleepTarget',
+         'sgResumeSleepTargetUnlocked','sgResumeSleepTarget','sgRecordManualGameControlReceipt','sgRecordSleepPauseReceipt','sgPauseSleepTarget',
          'sgRealWake','sgAbortSleepIntent','sgCancelEntryFailureRetry','sgHandheldResumeInputOnWake','handlePowerResumeNotification',
          'sgBeginModernStandbyIntent','sgHandleModernStandbyWake']
 functions = '\n\n'.join(function(name) for name in names)
@@ -303,6 +355,7 @@ static void sgPrepareWakeRecoveryForSleep(unsigned long long){
 checks = r'''
 void reset(){
  g_powerLifecycle=PowerLifecycle::Suspending;g_powerGeneration=7;g_resumeReadyGeneration=0;
+ g_hardwareWriteGate=true;g_hardwareWriteInFlight=0;g_aiFanMockSession.isolated=false;g_resumeWatchdogGeneration=0;readyMessages.clear();
  g_sensorSuspendCallbackActive=false;g_sgLastKernel506EventFileTime=0;g_sgLastKernel507EventFileTime=0;g_sgInternalSleepRequest={};g_sgAutomaticSleepTarget=ymcc::sleeprequest::Mode::None;
  g_sgTask={};g_sgInSuspend=false;g_sgGameActuallySuspended=false;g_sgSleepCycleActive=true;
  g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_wakeHoldPhysicalUnhide=false;
@@ -314,6 +367,8 @@ void reset(){
  markerExists=false;resumeFails=false;swapOnOpen=false;processAlive=true;actualCreated=1234;markerCreated=1234;markerReadBody.clear();markerReadOffset=0;
  markerGeneration=7;nowTick=10000;g_sgSleepTarget={};detected={};queue.clear();facts.clear();pauseHook={};cancelEntered=false;
  emittedEvents.clear();oemWakePortCalls.clear();
+ pauseDetailLogging=false;pauseThreadQueries=0;pauseThreadProbeHook={};
+ pauseInvocationOverride=json::object();WakeGameResume::pauseThreadState={true,3,3};
  g_fanPhysicalWake.~Observation();new (&g_fanPhysicalWake) ymcc::fan_wake::Observation();
  SleepSteamRecovery::repeatedSuspendGeneration=0;SleepSteamRecovery::repeatedSuspendEpoch=0;
  queuedGameRecovery=0;freezeDepth=suspendCalls=resumeCalls=powerReleaseCalls=resetCalls=sensorCalls=rescanCalls=abortCalls=0;
@@ -376,9 +431,51 @@ int main(){
  sgRealWake("resume_suspend",7);assert(queuedGameRecovery==1&&resumeCalls==0);sgResumeSleepTarget(7,false);assert(resumeCalls==1&&freezeDepth==0&&!markerExists);
  pass("background wake keeps writer and PID lease; user wake 60s later recovers same generation");
  reset();freeze();handlePowerResumeNotification(SgWork::WakeAutomatic,"auto");sgRealWake("resume_auto",7);
- g_powerLifecycle=PowerLifecycle::Ready;g_resumeReadyGeneration=7;sgHandleModernStandbyWake(true);
+ g_powerLifecycle=PowerLifecycle::Ready;g_resumeReadyGeneration=7;
+ for(bool user:{true,false,true}){
+  nowTick+=60000;const auto events=emittedEvents.size();const auto rescans=rescanCalls;
+  sgHandleModernStandbyWake(user);
+  assert(g_powerLifecycle==PowerLifecycle::Ready&&currentPowerGeneration()==7&&g_resumeReadyGeneration==7);
+  assert(emittedEvents.size()==events&&rescanCalls==rescans&&powerReleaseCalls==0&&resetCalls==0);
+  for(const char* consumer:{"registry.writePowerBatch","power.setActiveScheme","tdpDaemon.set"}){
+   assert(beginHardwareWriteLease(consumer));assert(g_hardwareWriteInFlight==1);endHardwareWriteLease();
+  }
+  assert(g_hardwareWriteInFlight==0&&queue.back().second==7);
+ }
  assert(queue.back().first==SgWork::WakeSuspend&&queue.back().second==7);sgRealWake("resume_suspend",7);assert(queuedGameRecovery==1&&resumeCalls==0);sgResumeSleepTarget(7,false);
  assert(resumeCalls==1&&freezeDepth==0);
+ // A genuine next sleep still enters Resuming and rejects both CPU/TDP;
+ // duplicate classification reuses that transaction, and Ready alone cannot
+ // override a closed write gate or an isolated mock session.
+ for(auto phase:{PowerLifecycle::Suspending,PowerLifecycle::Suspended}){
+  reset();g_powerGeneration=8;g_powerLifecycle=phase;g_hardwareWriteGate=false;
+  sgHandleModernStandbyWake(true);
+  assert(g_powerLifecycle==PowerLifecycle::Resuming&&currentPowerGeneration()==8&&g_resumeReadyGeneration==0);
+  assert(!beginHardwareWriteLease("registry.writePowerBatch")&&!beginHardwareWriteLease("tdpDaemon.set")&&g_hardwareWriteInFlight==0);
+  g_sgInSuspend=true;const auto events=emittedEvents.size();nowTick+=60000;sgHandleModernStandbyWake(true);
+  assert(g_powerLifecycle==PowerLifecycle::Resuming&&emittedEvents.size()==events&&!hardwareWriteAllowed());
+ }
+ reset();g_powerLifecycle=PowerLifecycle::Ready;g_hardwareWriteGate=false;sgHandleModernStandbyWake(true);assert(!hardwareWriteAllowed());
+ g_hardwareWriteGate=true;g_aiFanMockSession.isolated=true;assert(!beginHardwareWriteLease("tdpDaemon.set"));
+ // A completed worker may republish after a lost Ready message; old
+ // generations and genuine sleep never receive an admission signal.
+ reset();g_powerLifecycle=PowerLifecycle::Resuming;g_resumeReadyGeneration=7;
+ publishPowerResumeReady(7);publishPowerResumeReady(7);assert(readyMessages.size()==2&&readyMessages.back()==7);
+ publishPowerResumeReady(6);assert(readyMessages.size()==2);
+ for(auto phase:{PowerLifecycle::Suspending,PowerLifecycle::Suspended,PowerLifecycle::Ready}){
+  g_powerLifecycle=phase;publishPowerResumeReady(7);assert(readyMessages.size()==2);
+ }
+ g_powerGeneration=8;g_powerLifecycle=PowerLifecycle::Resuming;g_resumeReadyGeneration=0;publishPowerResumeReady(7);assert(readyMessages.size()==2&&g_resumeReadyGeneration==0);
+ publishPowerResumeReady(8);assert(readyMessages.size()==3&&readyMessages.back()==8&&g_resumeReadyGeneration==8);
+ reset();g_powerLifecycle=PowerLifecycle::Resuming;g_resumeWatchdogGeneration=7;
+ reconcilePowerResumeReady(7);assert(readyMessages.empty()); // Timeout alone proves nothing.
+ g_resumeReadyGeneration=7;g_sgRetryInProgress=true;g_sgTask.retryKind=SgRetryKind::EntryFailure;
+ reconcilePowerResumeReady(7);assert(readyMessages.empty()); // Do not cancel a re-sleep owner.
+ g_sgRetryInProgress=false;g_sgTask.retryKind=SgRetryKind::None;
+ reconcilePowerResumeReady(7);assert(readyMessages.size()==1&&readyMessages.back()==7);
+ g_powerGeneration=8;reconcilePowerResumeReady(7);reconcilePowerResumeReady(8);assert(readyMessages.size()==1);
+ nowTick=10000;const auto previousProcessGeneration=initialPowerGeneration()+5;
+ nowTick=20000;assert(initialPowerGeneration()>previousProcessGeneration&&initialPowerGeneration()>0);
  pass("Kernel-Power 507 user evidence releases held lease after input Ready");
  reset();freeze();g_sgRetryInProgress=true;g_sgTask.retryKind=SgRetryKind::EntryFailure;
  handlePowerResumeNotification(SgWork::WakeAutomatic,"auto");assert(queue.empty()&&freezeDepth==1&&resumeCalls==0&&sgSleepRetryActive());
@@ -464,12 +561,92 @@ checks=checks.replace(' std::cout<<"native sleep-game pause selftest:',r'''
  reset();g_fanPhysicalWake.recordSleep(7,100);g_fanPhysicalWake.recordSleep(7,200);
  const auto fanGeneration=currentFanPowerGeneration();assert(fanGeneration!=currentPowerGeneration());
  sgAbortSleepIntent("fan-generation-context");
- assert(currentPowerGeneration()==7&&emittedEvents.size()==1&&emittedEvents[0].first=="fan.resume-ready"&&emittedEvents[0].second.at("generation").get<unsigned long long>()==fanGeneration);
+ // Both actual Ready notifications are required exactly once, with separate
+ // Fan and shared-power generations; an unrelated event cannot hide a duplicate.
+ assert(currentPowerGeneration()==7&&emittedEvents.size()==2);
+ assert(emittedEvents[0].first=="fan.resume-ready"&&emittedEvents[0].second.at("generation").get<unsigned long long>()==fanGeneration&&emittedEvents[0].second.at("source")=="sleep-intent-canceled");
+ assert(emittedEvents[1].first=="gameMedia.resume-ready"&&emittedEvents[1].second.at("generation").get<unsigned long long>()==7&&emittedEvents[1].second.at("source")=="sleep-intent-canceled");
  pass("cancel emits the actual pure fan generation without a second shared transaction");
  reset();sgHandheldResumeInputOnWake("oem-memory-port");
  assert(oemWakePortCalls.size()==1&&oemWakePortCalls[0].generation==7&&oemWakePortCalls[0].reason=="oem-memory-port"&&oemWakePortCalls[0].sensorsBefore==0&&sensorCalls==1&&resumeCalls==0);
  pass("input wake supplies generation and reason to counted OEM boundary before sensors");
  std::cout<<"native sleep-game pause selftest:''')
+receipt_checks = r'''
+unsigned pauseReceiptCount(){
+ unsigned count=0;for(const auto& fact:facts)if(fact.first=="sleep-game-pause-receipt")++count;return count;
+}
+const json& pauseReceipt(){
+ assert(pauseReceiptCount()==1);
+ for(const auto& fact:facts)if(fact.first=="sleep-game-pause-receipt")return fact.second;
+ std::abort();
+}
+const json& ordinaryPause(){
+ unsigned count=0;const json* result=nullptr;
+ for(const auto& fact:facts)if(fact.first=="sleep-game-pause"){++count;result=&fact.second;}
+ assert(count==1&&result);return *result;
+}
+void runPauseReceiptChecks(){
+ unsigned checked=0;
+ // OFF retains the original ordinary result and performs no new probe/event.
+ reset();runProductionSuspendPause(7);
+ assert(suspendCalls==1&&freezeDepth==1&&ordinaryPause().at("paused")==true);
+ assert(pauseThreadQueries==0&&pauseReceiptCount()==0);
+ sgRecordSleepPauseReceipt(7,{100,0,true},detected,11,"direct-gate-check",json::object());
+ assert(pauseThreadQueries==0&&pauseReceiptCount()==0);++checked;
+ // Actual receipt + wrapper, with an explicitly mocked NT invocation terminal.
+ reset();pauseDetailLogging=true;runProductionSuspendPause(7);
+ const auto success=pauseReceipt();const auto verified=success.at("threadVerification");
+ assert(suspendCalls==1&&freezeDepth==1&&ordinaryPause().at("paused")==true&&pauseThreadQueries==1);
+ assert(success.at("ntApiAttempted")==true&&success.at("ntStatusKnown")==true&&success.at("ntApiAccepted")==true);
+ assert(success.at("existingLeaseReused")==false&&success.at("reason")=="nt-suspend-accepted");
+ assert(success.at("invocation").at("ntStatus")==0&&verified.at("attempted")==true&&verified.at("known")==true);
+ assert(verified.at("threads")==3&&verified.at("suspendedThreads")==3&&verified.at("allSuspended")==true);
+ assert(verified.at("snapshotKnown")==true&&verified.at("snapshotAllSuspended")==true);
+ assert(verified.at("status")=="all-threads-suspended");++checked;
+ for(bool known:{false,true}){
+  reset();pauseDetailLogging=true;WakeGameResume::pauseThreadState={known,147,known?146u:0u};
+  runProductionSuspendPause(7);const auto& v=pauseReceipt().at("threadVerification");
+  assert(suspendCalls==1&&freezeDepth==1&&pauseThreadQueries==1&&v.at("attempted")==true);
+  assert(v.at("threads")==147&&v.at("known")==known);
+  if(known){assert(v.at("allSuspended")==false&&v.at("status")=="not-all-threads-suspended");
+    assert(v.at("snapshotKnown")==true&&v.at("snapshotAllSuspended")==false);}
+  else{assert(v.at("allSuspended").is_null()&&v.at("status")=="thread-state-unknown");
+    assert(v.at("snapshotKnown")==false&&v.at("snapshotAllSuspended").is_null());}
+  ++checked;
+ }
+ reset();freeze();pauseDetailLogging=true;const auto duplicate=sgPauseSleepTarget(7);
+ assert(duplicate.frozen&&suspendCalls==1&&freezeDepth==1&&pauseThreadQueries==1);
+ assert(pauseReceipt().at("reason")=="existing-sleep-lease"&&pauseReceipt().at("existingLeaseReused")==true);
+ assert(pauseReceipt().at("ntApiAttempted")==false&&pauseReceipt().at("ntStatusKnown")==false&&pauseReceipt().at("ntApiAccepted").is_null());++checked;
+ reset();pauseDetailLogging=true;targetAvailable=false;runProductionSuspendPause(7);
+ assert(suspendCalls==0&&freezeDepth==0&&ordinaryPause().at("pid")==0&&pauseThreadQueries==0);
+ assert(pauseReceipt().at("reason")=="no-current-valve-target"&&pauseReceipt().at("paused")==false);
+ assert(pauseReceipt().at("threadVerification").at("allSuspended").is_null());++checked;
+ // Revoke each factual guard during the one read; no stale sample is confirmed.
+ for(unsigned change=0;change<3;++change){
+  reset();pauseDetailLogging=true;
+  pauseThreadProbeHook=[change]{if(change==0)++actualCreated;else if(change==1)++g_powerGeneration;else g_powerLifecycle=PowerLifecycle::Resuming;};
+  const auto result=sgPauseSleepTarget(7);const auto& v=pauseReceipt().at("threadVerification");
+  assert(result.frozen&&suspendCalls==1&&freezeDepth==1&&pauseThreadQueries==1);
+  assert(v.at("attempted")==true&&v.at("known")==false&&v.at("allSuspended").is_null());
+  assert(v.at("snapshotKnown")==true&&v.at("snapshotAllSuspended")==true);
+  assert(v.at("status")=="context-or-identity-changed");++checked;
+ }
+ reset();pauseDetailLogging=true;
+ pauseInvocationOverride={{"paused",false},{"okCount",0},{"failCount",1},{"ntStatus",-1073741790LL},{"pauseReason","nt-suspend-rejected"}};
+ runProductionSuspendPause(7);const auto failure=pauseReceipt();
+ assert(suspendCalls==1&&freezeDepth==0&&!markerExists&&pauseThreadQueries==0&&ordinaryPause().at("paused")==false);
+ assert(failure.at("ntApiAttempted")==true&&failure.at("ntStatusKnown")==true&&failure.at("ntApiAccepted")==false);
+ assert(failure.at("invocation").at("ntStatus")==-1073741790LL&&failure.at("reason")=="nt-suspend-rejected");
+ assert(failure.at("threadVerification").at("allSuspended").is_null());++checked;
+ assert(checked==10);
+ std::cout<<"pause receipt detail checks: "<<checked<<" PASS (actual helper/wrapper; NT invocation and thread OS ports mocked)\n";
+}
+'''
+assert checks.count('int main(){') == 1
+checks = checks.replace('int main(){', receipt_checks + '\nint main(){', 1)
+assert checks.count(' std::cout<<"native sleep-game pause selftest:') == 1
+checks = checks.replace(' std::cout<<"native sleep-game pause selftest:', ' runPauseReceiptChecks();\n std::cout<<"native sleep-game pause selftest:', 1)
 (out/'source-bindings.json').write_text(report_json.dumps({
  'sourceSha256':hashlib.sha256(args.source.read_bytes()).hexdigest(),
  'scriptSha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -478,6 +655,10 @@ checks=checks.replace(' std::cout<<"native sleep-game pause selftest:',r'''
  'additionalPureMainFunction':'currentFanPowerGeneration',
  'additionalPureHeaderFunctions':['SleepSteamRecovery::closeSuspendEpisode','sleepRecoveryAutoCloseSuspendEpisode'],
  'sourceOnlySuspendHelper':'sgSuspendGameByPidUnlocked',
+ 'pauseReceiptExecution':{'helper':'sgRecordSleepPauseReceipt','wrapper':'sgPauseSleepTarget',
+  'supplementaryChecks':10,'detailOff':'no new event or thread query',
+  'threadQuery':'counted memory port; no Windows thread enumeration',
+  'ntInvocation':'injected memory receipt; actual bottom helper not executed'},
  'originalNativeAssertionStatements':48,'originalPassGroups':24,
  'newFamilySeparated':True,'previousFamilyNames':previous_family_names,'newDesktopFamily':'ValveSteamMachine',
  'ownCancellationThread':{'waitMs':25,'joined':True},

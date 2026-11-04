@@ -4,7 +4,8 @@ import path from 'node:path';
 
 // Real Y menu + trainer component + production navigation; native actions stay
 // behind the memory IPC boundary. No trainer/manager/CE action is launched.
-export async function trainerMenuCases({height,open,command,press,actionCase,state,page,task}) {
+export async function trainerMenuCases({height,open,command,press,actionCase,state,page,task,scope="all"}) {
+  assert.ok(["all","lossless"].includes(scope),"Unknown trainer case scope");
   const geometry = f => f.evaluate(() => {
     const menu=document.querySelector('[data-trainer-menu]'),list=menu.querySelector('.trainer-menu-items'),anchor=document.querySelector('[data-gp-game-control="trainer-menu"]');
     const box=el=>{const r=el.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
@@ -17,26 +18,45 @@ export async function trainerMenuCases({height,open,command,press,actionCase,sta
     await command(f,'edit-game');await f.locator('[data-gp-game-quick-menu]').waitFor();
     const button=f.locator('[data-gp-game-control="lossless-scaling"]');
     await f.waitForFunction(()=>!document.querySelector('[data-gp-game-control="lossless-scaling"]')?.disabled);
-    await actionCase('Lossless one-click keeps original EXE quiet mechanism; lamp is process-only and second click never turns it off',height,async()=>{
+    await actionCase('Lossless one-click toggle preserves parameters and unbinds only the current EXE; lamp is process-only',height,async()=>{
       assert.equal(await button.getAttribute('role'),null);assert.equal(await button.getAttribute('aria-checked'),null);
-      assert.match(await button.innerText(),/一键缩放/);assert.match(await button.innerText(),/小黄鸭未运行/);
+      assert.match(await button.innerText(),/一键开启小黄鸭/);assert.match(await button.innerText(),/小黄鸭未运行/);
+      const remove=f.locator('[data-gp-game-control="lossless-remove"]');assert.equal(await remove.isDisabled(),true);
       await state(f,'top-game-menu/lossless-button',height,'[data-gp-game-quick-menu]');
       await press(f,button);
       await f.waitForFunction(()=>!document.querySelector('[data-gp-game-control="lossless-scaling"]')?.disabled&&document.querySelector('.quick-lossless')?.innerText.includes('小黄鸭已运行'));
       const afterOn=await f.evaluate(()=>({xml:window.__losslessMemory.read(),launches:window.__losslessMemory.launches,focus:window.__losslessMemory.focus}));
       assert.match(afterOn.xml,/Cyberpunk2077/);assert.equal(afterOn.launches,1);assert.equal(afterOn.focus.length,0);
+      assert.match(await button.innerText(),/一键关闭小黄鸭/);assert.equal(await remove.isDisabled(),false);
+      await button.evaluate(el=>window.__gamepadAudit.focus(el));await command(f,'nav-right');assert.equal(await remove.evaluate(el=>document.activeElement===el),true);
+      await command(f,'nav-left');assert.equal(await button.evaluate(el=>document.activeElement===el),true);
+      await command(f,'nav-down');assert.equal(await f.locator('[data-gp-game-control="trainer-menu"]').evaluate(el=>document.activeElement===el),true);
+      await command(f,'nav-up');assert.equal(await button.evaluate(el=>document.activeElement===el),true);
+      await state(f,'top-game-menu/lossless-button',height,'[data-gp-game-quick-menu]');
       await f.locator('.app-root').screenshot({path:path.join(task,'evidence','lossless-on-xbox-'+height+'.png')});
       await press(f,button);
       await f.waitForFunction(()=>!document.querySelector('[data-gp-game-control="lossless-scaling"]')?.disabled);
       const again=await f.evaluate(()=>({xml:window.__losslessMemory.read(),running:window.__losslessMemory.running,launches:window.__losslessMemory.launches,closes:window.__losslessMemory.closes,focus:window.__losslessMemory.focus}));
-      assert.equal(again.running,true);assert.equal(again.launches,1);assert.equal(again.closes,0);assert.equal(again.xml,afterOn.xml);assert.match(again.xml,/Other.exe/);assert.match(again.xml,/<Unknown>retained<\/Unknown>/);assert.equal(again.focus.length,0);
+      assert.equal(again.running,false);assert.equal(again.launches,1);assert.equal(again.closes,1);
+      const disabledXml=afterOn.xml.replace(/(<Path>C:\/Games\/Cyberpunk2077\.exe<\/Path>\s*<AutoScale>)true(<\/AutoScale>)/,'$1false$2');
+      assert.notEqual(disabledXml,afterOn.xml,'The exact current EXE profile must be found independently of its display title');assert.equal(again.xml,disabledXml);
+      assert.match(again.xml,/Other.exe/);assert.match(again.xml,/<Unknown>retained<\/Unknown>/);assert.equal(again.focus.length,0);assert.match(await button.innerText(),/一键开启小黄鸭/);
+      await press(f,button);await f.waitForFunction(()=>!document.querySelector('[data-gp-game-control="lossless-scaling"]')?.disabled);
+      assert.match(await button.innerText(),/一键关闭小黄鸭/);assert.equal(await f.evaluate(()=>window.__losslessMemory.launches),2);
+      await press(f,remove);await f.waitForFunction(()=>document.querySelector('[data-gp-game-control="lossless-remove"]')?.disabled===true);
+      const removed=await f.evaluate(()=>({xml:window.__losslessMemory.read(),running:window.__losslessMemory.running,closes:window.__losslessMemory.closes,focus:window.__losslessMemory.focus}));
+      assert.equal(removed.running,false);assert.equal(removed.closes,2);assert(!removed.xml.includes('Cyberpunk2077'));assert.match(removed.xml,/Other.exe/);assert.match(removed.xml,/<Unknown>retained<\/Unknown>/);assert.equal(removed.focus.length,0);
+      assert.match(await button.innerText(),/一键开启小黄鸭/);await f.locator('.app-root').screenshot({path:path.join(task,'evidence','lossless-unbound-xbox-'+height+'.png')});
+      await press(f,button);await f.waitForFunction(()=>!document.querySelector('[data-gp-game-control="lossless-scaling"]')?.disabled);
+      assert.equal(await f.evaluate(()=>window.__losslessMemory.launches),3);assert.match(await f.evaluate(()=>window.__losslessMemory.read()),/Cyberpunk2077/);
       await f.evaluate(()=>{window.__losslessMemory.running=false;});
       await command(f,'back');await command(f,'edit-game');
       await f.waitForFunction(()=>document.querySelector('.quick-lossless')?.innerText.includes('小黄鸭未运行'));
-      assert.equal(await f.evaluate(()=>window.__losslessMemory.launches),1);
+      assert.equal(await f.evaluate(()=>window.__losslessMemory.launches),3);
       await command(f,'back');assert.equal(await f.locator('[data-gp-game-quick-menu]').count(),0);
     });
   }
+  if(scope==='lossless')return; // Optional exact original subgroup; default trainer coverage remains intact.
   for(const seed of ['no-scan','delayed-scan']){
     const f=await open('/settings',height,{trainerMenu:seed});
     await command(f,'edit-game');await f.locator('[data-gp-game-quick-menu]').waitFor();

@@ -10,6 +10,9 @@
     <!-- Production functions/API/orchestration; only the HID terminal differs. -->
     <Compile Include="../../../FanLab/LightSetter/DeviceCore/LightingDeviceCore.cs" Link="LightingDeviceCore.cs" />
     <Compile Include="../../../FanLab/LightSetter/DeviceCore/PinnedOneXHidV1.g.cs" Link="PinnedOneXHidV1.g.cs" />
+    <Compile Include="../../../FanLab/LightSetter/DeviceCore/PinnedX2MiniProProtocol.cs" Link="PinnedX2MiniProProtocol.cs" Condition="'$(ReplayX2ProtocolSource)' == ''" />
+    <Compile Include="$(ReplayX2ProtocolSource)" Link="PinnedX2MiniProProtocol.cs" Condition="'$(ReplayX2ProtocolSource)' != ''" />
+    <Compile Include="../../../FanLab/LightSetter/DeviceCore/X2MiniProDeviceCore.cs" Link="X2MiniProDeviceCore.cs" />
     <Compile Include="ReplayHidTransport.cs" />
   </ItemGroup>
 </Project>

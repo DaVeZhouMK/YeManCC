@@ -52,8 +52,10 @@ const ledAvailable = computed(() => caps.value.ledAvailable);
 const vibrationAvailable = computed(() => caps.value.vibrationAvailable);
 // 卡片与两个 bubble 始终可见；HC DevicePage 能力门（IsDynamicLightingSupported）
 // 决定灯光控件是否可用，而非整卡隐藏。加载中显示"加载中"。
-// HC DeviceCapabilities.DynamicLightingSecondLEDColor：ROG 无此位 → 隐藏副颜色下拉。
-const supportsSecondColor = computed(() => caps.value.supportsSecondColor === true);
+// 常规副色能力位与效果的分区颜色分别判断。总库授予 ambilight 时，
+// ROG/MSI 实际 writer 都消费左右两色；不能因缺少常规副色位藏掉右侧设置。
+const splitColorEffect = computed(() => settings.value.lighting.mode === 'ambilight' && caps.value.ledEffects.includes('ambilight'));
+const supportsSecondColor = computed(() => caps.value.supportsSecondColor === true || splitColorEffect.value);
 const ledReasonText = computed(() => {
   if (caps.value.ledReason === 'machine-unsupported') return '当前机型在机型库中无灯光能力（HC 无 DynamicLighting），灯光功能已隐藏。';
   if (caps.value.ledReason === 'backend-not-implemented') return '机型库支持本机灯光，但 YMCC 尚未实现该机型灯光后端，选项已禁用。';
@@ -71,7 +73,7 @@ const effectLabels: Record<string, string> = {
   breathing: '呼吸',
   rainbow: '彩虹',
   wheel: 'Wheel',
-  ambilight: '氛围',
+  ambilight: '氛围（分区配色）',
   gradient: '渐变',
   preset: '预设',
 };
@@ -80,9 +82,10 @@ const effectOptions = computed(() =>
   caps.value.ledEffects
     .filter((effect) => effectLabels[effect] && (effect !== 'preset' || presetOptions.value.length > 0))
     .map((effect) => ({ value: effect, label: effectLabels[effect]! })));
-const speedRelevant = computed(() => !['solid', 'ambilight', 'preset'].includes(settings.value.lighting.mode));
+const speedRelevant = computed(() => caps.value.lightingFixedSpeed !== true && !['solid', 'ambilight', 'preset'].includes(settings.value.lighting.mode));
+const presetSecondColor = computed(() => settings.value.lighting.mode === 'preset' && caps.value.presetSupportsSecondColor === true);
 // 颜色预设：HC 用开放式 ColorPicker（任意色），YMCC 以常用色下拉近似。
-// 主/副颜色均由 native 能力过滤（supportsSecondColor 才显示副颜色）。
+// 主/副颜色由 native 能力与当前效果共同判定；氛围分区可分别设置左右颜色。
 const lightColors = [
   { name: '青蓝', value: '#2ea6ff' },
   { name: '天蓝', value: '#1c7ed6' },
@@ -408,7 +411,7 @@ onBeforeUnmount(deactivateFeedback);
           </div>
           <p v-if="caps.presetDeclared && caps.presetImplemented === false" class="unavailable-hint">此机型的灯光预设暂不可用。</p>
           <div v-if="settings.lighting.mode !== 'preset'" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
-            <span class="field-label">主颜色</span>
+            <span class="field-label">{{ splitColorEffect ? '左侧颜色' : '主颜色' }}</span>
             <Dropdown
               :model-value="settings.lighting.color"
               :options="colorOptions"
@@ -417,8 +420,8 @@ onBeforeUnmount(deactivateFeedback);
               @update:model-value="onColor"
             />
           </div>
-          <div v-if="supportsSecondColor && settings.lighting.mode !== 'preset'" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
-            <span class="field-label">副颜色</span>
+          <div v-if="(supportsSecondColor && settings.lighting.mode !== 'preset') || presetSecondColor" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
+            <span class="field-label">{{ splitColorEffect ? '右侧颜色' : presetSecondColor ? '标志与功能键颜色' : '副颜色' }}</span>
             <Dropdown
               :model-value="settings.lighting.color2"
               :options="colorOptions"
@@ -427,6 +430,8 @@ onBeforeUnmount(deactivateFeedback);
               @update:model-value="onColor2"
             />
           </div>
+          <p v-if="splitColorEffect" class="unavailable-hint lighting-effect-hint">当前氛围为左右分区固定配色，可分别调整；不会随屏幕或时间自动变色。</p>
+          <p v-if="caps.lightingFixedSpeed" class="unavailable-hint">本机灯效速度由固件固定。</p>
           <div class="light-slider-grid">
             <Slider
               v-if="caps.brightnessAvailable"

@@ -20,7 +20,7 @@ struct Child {HANDLE p=nullptr;~Child(){if(p){if(live(p)){TerminateProcess(p,0);
 static std::atomic<bool>g_exitRequested=false;static struct{bool isolated=false;}g_aiFanMockSession;
 enum class PowerLifecycle{Ready,Suspended};static std::atomic<PowerLifecycle>g_powerLifecycle=PowerLifecycle::Ready;
 static struct{Session value;Session sessionSnapshot(){return value;}}g_steamSettingsObserver;
-static struct{std::function<bool(const Session&)> port;bool invalidateForResume(const Session&s){return port&&port(s);}}g_steamCssUse;
+static struct{std::function<bool(const Session&)> port;bool invalidateForResume(const Session&s,bool=true){return port&&port(s);}}g_steamCssUse;
 static struct{std::function<bool(const Session&)> port;bool requestRefresh(const Session&s){return port&&port(s);}}g_steamModeObserver;
 #include "production-css-exit.h"
 struct Scene {
@@ -42,14 +42,14 @@ struct Scene {
  steamcss::Result probe(){if(blocked)return{nullptr,0,"blocked","fixture-port-conflict"};const auto p=active.load();if(live(p))return{copy(p,true),GetProcessId(p),"running",{},false};return{nullptr,0,"missing",{},false};}
  void start(bool fakeHandle=false){
   if(fakeHandle){eventBackend.value=CreateEventW(nullptr,TRUE,FALSE,nullptr);active=eventBackend.value;}else launch();
-  steamcss::Config c;c.linkFile=link.wstring();c.delays={2,5,8};c.modeDelays={2,10,20};c.crashDelayMs=delay;
+  steamcss::Config c;c.linkFile=link.wstring();c.delays={2,5,8};c.modeDelays={2,10,20};c.crashDelayMs=delay;c.resumeDelays={2,10,20}; // Only this isolated fixture compresses the Ready settle delay.
   c.mayLaunch=[] {return !g_exitRequested&&!g_aiFanMockSession.isolated&&g_powerLifecycle==PowerLifecycle::Ready;};
   c.readMode=[this](const auto&){return steamcss::ModeSample{mode.load(),"same-document:1"};};
   c.invalidateBackend=productionExitInvalidation;c.refreshMode=productionExitRefresh;
   c.ensure=[this,fakeHandle](const auto&,const auto&,const auto&){++reads;if(mode!=steamcss::UiMode::BigPicture||g_powerLifecycle!=PowerLifecycle::Ready)return steamcss::Result{nullptr,0,"waiting-steam-ui","unconfirmed-mode"};if(fakeHandle&&active==eventBackend.value)return steamcss::Result{copy(eventBackend.value,false),900,"running",{},false};return probe();};
   c.confirmIdle=[this](const auto&,bool missing,bool){++uses;ResetEvent(helper.value);if(editing){SetEvent(helper.value);return copy(helper.value,false);}if(missing){if(blocked||live(active))throw std::runtime_error("duplicate fixture start");++starts;launch();}confirmed=true;SetEvent(helper.value);return copy(helper.value,false);};
   c.probeExisting=[this,fakeHandle]{++rebinds;if(fakeHandle&&active==eventBackend.value)return steamcss::Result{copy(eventBackend.value,false),900,"running",{},false};return probe();};
-  c.isResidentConfirmed=[this](const auto&){return confirmed.load();};
+  c.isResidentConfirmed=[this](const auto&){return confirmed.load()&&g_powerLifecycle==PowerLifecycle::Ready;};
   check(runtime.initialize(c),"actual CSS Runtime initialized");runtime.observeSteam(session);check(until([&]{return runtime.snapshot().phase=="ready";}),"initial actual resident confirmation is ready");
  }
  void stop(DWORD code=0xc0000005UL){auto p=active.load();if(!p||!live(p)||!TerminateProcess(p,code)||WaitForSingleObject(p,2000)!=WAIT_OBJECT_0)throw std::runtime_error("owned inert exit");}
@@ -106,6 +106,11 @@ int wmain(int argc,wchar_t**argv){try{
  }
  {
   Scene f(root,L"mode-refresh-failure");f.start();f.refreshAccepted=false;f.stop();check(until([&]{return f.runtime.snapshot().reason=="loader-crash-mode-refresh-unavailable";}),"failed shared refresh parks instead of accepting old Big Picture cache");f.fresh();f.runtime.requestResumeRecovery(f.session,1);Sleep(250);check(f.starts==0&&f.refreshes==1,"uncertain mode refresh cannot replay on later hints");
+ }
+ {
+  Scene f(root,L"post-wake-receipt-revoked");f.start();f.confirmed=false;f.stop();
+  check(until([&]{return f.runtime.snapshot().phase=="recovering";}),"revoking pre-sleep DOM readiness retains the exact confirmed backend crash receipt");
+  f.recover(1);check(f.starts==1,"post-wake CSS crash recovers only after a fresh mode and one bounded restart");
  }
  check(ownedRemaining==0&&ownedCreated==ownedClosed,"all owned inert child processes are observed exited and their handles released");
  const json result={{"ok",true},{"checks",checks},{"automaticCrashStartsBeforeManual",crashStarts},{"stormHints",50000},{"idleCpuMs",idleCpu},{"idleSampleMs",200},{"realSteamOperations",0},{"realCssOperations",0},{"ownedInertProcesses",true},{"ownedCreated",ownedCreated.load()},{"ownedClosed",ownedClosed.load()},{"ownedRemaining",ownedRemaining.load()},{"physicalSleep",false},{"scope","Actual guard and exact production invalidation/refresh lambdas; real owned process HANDLE exits; external Steam/CSS process discovery and helper IO remain inert fixture boundaries"}};std::ofstream(root/L"result.json")<<result.dump(2);std::cout<<result.dump()<<std::endl;return 0;

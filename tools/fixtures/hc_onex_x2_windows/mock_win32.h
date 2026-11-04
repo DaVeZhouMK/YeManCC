@@ -80,6 +80,7 @@ struct World {
     unsigned closeCalls = 0, failedCloses = 0, errorsRead = 0;
     bool failSet = false, cancelSucceeds = true, failProbeClose = false;
     unsigned failEventAt = 0, failResetAt = 0;
+    unsigned failInterfaceAt = (std::numeric_limits<unsigned>::max)(), failProbeCloseIndex = (std::numeric_limits<unsigned>::max)();
 };
 inline World w;
 inline Object* object(HANDLE h) {
@@ -135,6 +136,7 @@ inline HDEVINFO WINAPI getClassDevs(const GUID*, PCWSTR enumerator, HWND parent,
 }
 inline BOOL WINAPI enumInterfaces(HDEVINFO set, PSP_DEVINFO_DATA info, const GUID*, DWORD index, PSP_DEVICE_INTERFACE_DATA data) {
     live(set, Kind::Set); ++w.interfaces; test::check(!info && data && data->cbSize == sizeof(*data), "interface enumeration structure");
+    if (index == w.failInterfaceAt) { w.error = ERROR_ACCESS_DENIED; return FALSE; }
     if (index >= w.devices.size()) { w.error = ERROR_NO_MORE_ITEMS; return FALSE; }
     data->Reserved = static_cast<ULONG_PTR>(index); return TRUE;
 }
@@ -193,7 +195,7 @@ inline BOOL WINAPI close(HANDLE h) {
     auto* o = object(h); test::check(!o->closed, "no double-close");
     for (const auto& io : w.ios) if (!io->observed) test::check(io->device != h && io->event != h, "never close unobserved IO handle/event");
     ++w.closeCalls; ++o->closeAttempts;
-    if (o->failClose || o->closeFailures || (o->kind == Kind::Probe && w.failProbeClose)) {
+    if (o->failClose || o->closeFailures || (o->kind == Kind::Probe && (w.failProbeClose || o->index == w.failProbeCloseIndex))) {
         if (o->closeFailures) --o->closeFailures;
         ++w.failedCloses; w.error = o->closeError; return FALSE;
     }

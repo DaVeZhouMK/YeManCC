@@ -327,6 +327,7 @@ int main(int argc,char** argv) { try {
  reset();disk.erase(path);disk.erase(selection);const std::wstring genericDir=L"S:\\Steam\\steamapps\\common\\Steam Controller Configs\\42\\config\\";disk[genericDir+L"configset_controller_generic.vdf"]="\"controller_config\" { \"413080\" { \"autosave\" \"1\" } }";disk[genericDir+L"413080\\controller_generic.vdf"]=fixture;
  expect(steamDeckMouseGet()["available"]==false&&steamDeckMouseSet({{"percent",137}})["ok"]==false&&liveMutations==0&&writes==0,"generic test controller can never substitute for an absent SteamDeck layout");
 
+ //__RECEIPT_STORM__
  std::cout<<"STEAMDECK_MOUSE_NATIVE_OK (production runtime mocked, hardware operations 0)\n";return 0;
  } catch(const std::exception& e) {std::cerr<<"FAILED: "<<e.what()<<"\n";return 1;}}
 

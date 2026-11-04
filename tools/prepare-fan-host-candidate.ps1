@@ -63,10 +63,13 @@ foreach($relative in @($compiled.Keys|Sort-Object)){
  $from=Join-Path $repo $relative;Input $from;$h=Copy-Checked $from (Join-Path $bundle ('source/'+$relative));$pins[$relative]=$h
  $sourceRows+= [ordered]@{path=$relative;archivePath='source/'+$relative;sha256=$h;roles=@($(if($relative-like'*.csproj'){'project'}else{'Compile'}))}
 }
-$contentRelative='FanLab/real-host/YeManFanHost.json'
-Input (Join-Path $repo $contentRelative)
-$contentHash=Copy-Checked (Join-Path $repo $contentRelative) (Join-Path $bundle ('source/'+$contentRelative))
-$sourceRows+=[ordered]@{path=$contentRelative;archivePath='source/'+$contentRelative;sha256=$contentHash;roles=@('Content')}
+foreach($contentRelative in @('FanLab/real-host/YeManFanHost.json','capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json')){
+ Input (Join-Path $repo $contentRelative)
+ $contentHash=Copy-Checked (Join-Path $repo $contentRelative) (Join-Path $bundle ('source/'+$contentRelative))
+ $sourceRows+=[ordered]@{path=$contentRelative;archivePath='source/'+$contentRelative;sha256=$contentHash;roles=@('Content')}
+}
+# The payload config check remains bound to Host JSON, not the last archived facts file.
+$contentHash=Hash (Join-Path $repo 'FanLab/real-host/YeManFanHost.json')
 $modules=@()
 foreach($module in $inspection.modules){
  $name=[string]$module.name

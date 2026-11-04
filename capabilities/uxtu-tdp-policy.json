@@ -1,0 +1,1236 @@
+{
+  "schemaVersion": 1,
+  "libraryId": "ymcc.uxtu.tdp",
+  "version": "26.3.1",
+  "source": {
+    "kind": "user-specified-local-archive",
+    "workspacePath": "Archives/Universal-x86-Tuning-Utility/Universal-x86-Tuning-Utility-26.3.1",
+    "upstreamFiles": [
+      {
+        "path": "Universal x86 Tuning Utility.csproj",
+        "bytes": 21328,
+        "sha256": "693c55b7dcbc612f4f15335e7b4464f326a5a96b58d4aeca5e3a4889d6213428"
+      },
+      {
+        "path": "Scripts/Family.cs",
+        "bytes": 6520,
+        "sha256": "f7382abc881434c7c586dd7c25f1bdc54faea999e422c913d3ed2561ddd4665b"
+      },
+      {
+        "path": "Scripts/AMD Backend/RyzenSmu.cs",
+        "bytes": 46203,
+        "sha256": "93141b2250bac12d3092a8623e2d634b982cd02eff3a86847bb2581d38c3141a"
+      },
+      {
+        "path": "Scripts/AMD Backend/AMDPawnIO.cs",
+        "bytes": 11760,
+        "sha256": "05f27dbe2b6f0b18d880224b0b449f54166534bf1d3200125fced43f786cebc7"
+      },
+      {
+        "path": "Scripts/Intel Backend/Intel_Management.cs",
+        "bytes": 9765,
+        "sha256": "e951b8e06da0d477352bde6ede30d44ee2dabb537eb812581149b9f24376c437"
+      },
+      {
+        "path": "Scripts/Intel Backend/IntelPawnIO.cs",
+        "bytes": 14181,
+        "sha256": "53d6bc2eb1fc58dae26e6d14000570790309639282803a30ca6c8fd80476dcb7"
+      },
+      {
+        "path": "Services/CpuAffinityUtility.cs",
+        "bytes": 3378,
+        "sha256": "76dafb5261d5cd137a51024689eb19c876b3cf88aa3078dcdbb41ac30ae5beff"
+      },
+      {
+        "path": "Views/Windows/MainWindow.xaml.cs",
+        "bytes": 35291,
+        "sha256": "a0ea3ea8b3ecead29f8bba725b15d5fa0e8abeae045f9482d2177e00e24d3a2c"
+      },
+      {
+        "path": "Views/Pages/CustomPresets.xaml.cs",
+        "bytes": 91887,
+        "sha256": "bf76b13455d7be2747aff3c1385c296cc0287b5a8bc26133b1a80a106e887a2e"
+      },
+      {
+        "path": "Scripts/RyzenAdj_To_UXTU.cs",
+        "bytes": 19625,
+        "sha256": "1168eb83eb3c32d2322ebb923dd22294036deac61c540747e64dc035fd1b80ed"
+      }
+    ]
+  },
+  "activation": {
+    "tdp": true,
+    "coreSwitch": false,
+    "voltageScheduling": false
+  },
+  "dispatchContract": {
+    "engine": "existing-YeManTdpCtl-and-existing-native-MSI-provider",
+    "replaceScheduler": false,
+    "hardwareAcceptanceFromCatalog": false,
+    "applyHcDeclaredLimits": false,
+    "unknownModel": "existing-CPU-resolved-provider-no-model-limit-inference",
+    "intelSingleTargetPl2Offset": 1,
+    "preserveWorkingRoutes": true,
+    "newModuleActivation": false
+  },
+  "applicationRequestDomain": {
+    "minimumW": 2,
+    "maximumW": 200,
+    "machineMaximumKnown": false
+  },
+  "ccdControl": {
+    "operation": "process_affinity",
+    "effectScope": "global_process_affinity_by_l3_domain",
+    "mechanism": "SetProcessAffinityMask",
+    "topologySource": "windows_relation_cache_l3",
+    "minimumDomains": 2,
+    "physicalCcdPowerOff": false,
+    "activation": true,
+    "semantics": "OS process affinity grouped by Windows L3 cache domains; not a firmware or physical CCD power-off."
+  },
+  "voltageOffset": {
+    "operation": "static_offset",
+    "activation": true,
+    "amd": {
+      "unit": "co_step",
+      "minimum": -60,
+      "maximum": 60,
+      "step": 1,
+      "scope": "all_core",
+      "readback": false,
+      "encodingSource": "familyRecipes.co_enc",
+      "semantics": "Signed all-core Curve Optimizer steps; no verified current-value readback.",
+      "encodingProducer": {
+        "nonHsmp": "u20",
+        "hsmp": "u16",
+        "source": "Views/Windows/MainWindow.xaml.cs::EncodeCurveOptimiserOffset",
+        "staticAllCoreSource": "Views/Pages/CustomPresets.xaml.cs",
+        "translatorSource": "Scripts/RyzenAdj_To_UXTU.cs",
+        "scope": "YMCC static all-core CPU offset only"
+      },
+      "candidateSelection": {
+        "recipeField": "co_commands",
+        "primaryFields": [
+          "co_transport",
+          "coall"
+        ],
+        "order": "existing-primary-then-upstream",
+        "retryOnly": {
+          "origin": "firmware_response",
+          "mailboxStatuses": [
+            254,
+            255
+          ]
+        },
+        "stopOnSuccess": true,
+        "retryOnTransportFailure": false,
+        "retryOnUnknownResult": false,
+        "eachCandidateAtMostOnce": true,
+        "originalArgumentsPerAttempt": true,
+        "hardwareAcceptanceFromDeclaration": false
+      }
+    },
+    "intel": {
+      "unit": "mv",
+      "minimum": -150,
+      "maximum": 0,
+      "step": 1,
+      "scope": "fivr_plane",
+      "planes": [
+        "core",
+        "cache"
+      ],
+      "readback": true,
+      "encoding": "msr_0x150_offset_bits_31_21_signed11_scale1.024",
+      "command": "set_vf_direct",
+      "semantics": "Signed FIVR offset per verified plane; direct write has no mailbox readback.",
+      "protocol": {
+        "msr": 336,
+        "planeDomains": {
+          "core": 0,
+          "cache": 2
+        },
+        "setCommand": 17,
+        "offsetScale": 1.024,
+        "offsetBits": 11,
+        "offsetShift": 21,
+        "settleMs": 100
+      }
+    },
+    "requestDomainSemantics": "YMCC bounded signed user request domain, not a manufacturer silicon safety limit or automatic tuning range."
+  },
+  "oemProviders": [
+    {
+      "id": "msi-g3e-wmi",
+      "exactNormalizedBoard": "MS-1T91",
+      "cpuPredicate": "existing-tdpIsG3eCpu",
+      "minimumW": 8,
+      "maximumW": 200,
+      "readiness": "existing-identity-generation-deadline-gates",
+      "firmwareMaximumKnown": false
+    }
+  ],
+  "familyRecipes": {
+    "FAM_DESKTOP_AM5": {
+      "name": "Desktop-AM5",
+      "tag": "desktop",
+      "power_feature": "desktop_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932848,
+      "rsp": 61932924,
+      "arg": 61934020,
+      "psmu_msg": 61932836,
+      "psmu_rsp": 61932912,
+      "psmu_arg": 61934144,
+      "stapm": 79,
+      "fast": 62,
+      "slow": 95,
+      "pbo_ppt_mp1": 62,
+      "pbo_tdc_mp1": 60,
+      "pbo_edc_mp1": 61,
+      "pbo_ppt_rsmu": 86,
+      "pbo_tdc_rsmu": 87,
+      "pbo_edc_rsmu": 88,
+      "pbo_supported": true,
+      "pbo_transport_verified": true,
+      "pbo_ops": [
+        [
+          "PPT",
+          "mp1",
+          62
+        ],
+        [
+          "PPT",
+          "rsmu",
+          86
+        ],
+        [
+          "TDC",
+          "mp1",
+          60
+        ],
+        [
+          "TDC",
+          "rsmu",
+          87
+        ],
+        [
+          "EDC",
+          "mp1",
+          61
+        ],
+        [
+          "EDC",
+          "rsmu",
+          88
+        ]
+      ],
+      "coall": 54,
+      "coper": 53,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": false,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 54
+        },
+        {
+          "transport": "rsmu",
+          "command": 7
+        }
+      ]
+    },
+    "FAM_APU_FT6_NEW": {
+      "name": "APU-FT6-New(Strix)",
+      "tag": "apu_ft6_new",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61933864,
+      "rsp": 61933944,
+      "arg": 61933976,
+      "stapm": 20,
+      "fast": 21,
+      "slow": 22,
+      "psmu_msg": 61934112,
+      "psmu_rsp": 61934208,
+      "psmu_arg": 61934216,
+      "mirror_transport": "rsmu",
+      "mirror_stapm": 49,
+      "mirror_fast": 50,
+      "mirror_slow": 51,
+      "coall": 76,
+      "coper": 75,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": true,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 76
+        },
+        {
+          "transport": "rsmu",
+          "command": 93
+        }
+      ]
+    },
+    "FAM_APU_FT6_NEW_GENERIC": {
+      "name": "APU-FT6-New(Strix/Krackan)",
+      "tag": "apu_ft6_new_generic",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61933864,
+      "rsp": 61933944,
+      "arg": 61933976,
+      "stapm": 20,
+      "fast": 21,
+      "slow": 22,
+      "psmu_msg": 61934112,
+      "psmu_rsp": 61934208,
+      "psmu_arg": 61934216,
+      "mirror_transport": "rsmu",
+      "mirror_stapm": 49,
+      "mirror_fast": 50,
+      "mirror_slow": 51,
+      "coall": 76,
+      "coper": 75,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": false,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 76
+        },
+        {
+          "transport": "rsmu",
+          "command": 93
+        }
+      ]
+    },
+    "FAM_APU_FT6_OLD": {
+      "name": "APU-FT6-Old(Phoenix/Rembrandt)",
+      "tag": "apu_ft6_old",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932840,
+      "rsp": 61932920,
+      "arg": 61933976,
+      "psmu_msg": 61934112,
+      "psmu_rsp": 61934208,
+      "psmu_arg": 61934216,
+      "stapm": 20,
+      "fast": 21,
+      "slow": 22,
+      "mirror_transport": "rsmu",
+      "mirror_stapm": 49,
+      "mirror_fast": 50,
+      "mirror_slow": 51,
+      "coall": 76,
+      "coper": 75,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": true,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 76
+        },
+        {
+          "transport": "rsmu",
+          "command": 93
+        }
+      ]
+    },
+    "FAM_APU_FP6": {
+      "name": "APU-FP6(Renoir/Cezanne)",
+      "tag": "apu_fp6",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932840,
+      "rsp": 61932900,
+      "arg": 61933976,
+      "psmu_msg": 61934112,
+      "psmu_rsp": 61934208,
+      "psmu_arg": 61934216,
+      "stapm": 20,
+      "fast": 21,
+      "slow": 22,
+      "mirror_transport": "rsmu",
+      "mirror_stapm": 49,
+      "mirror_fast": null,
+      "mirror_slow": null,
+      "coall": 85,
+      "coper": 84,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": true,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 85
+        }
+      ]
+    },
+    "FAM_APU_FT5_FP5": {
+      "name": "APU-FT5/FP5(Raven/Picasso/Dali)",
+      "tag": "apu_ft5_fp5",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932840,
+      "rsp": 61932900,
+      "arg": 61933976,
+      "psmu_msg": 61934112,
+      "psmu_rsp": 61934208,
+      "psmu_arg": 61934216,
+      "stapm": 26,
+      "fast": 27,
+      "slow": 28,
+      "mirror_transport": "rsmu",
+      "mirror_stapm": 46,
+      "mirror_fast": null,
+      "mirror_slow": null,
+      "coall": 89,
+      "coper": null,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": true,
+      "co_transport": "rsmu",
+      "co_commands": [
+        {
+          "transport": "rsmu",
+          "command": 89
+        }
+      ]
+    },
+    "FAM_APU_VANGOGH": {
+      "name": "APU-FF3(VanGogh)",
+      "tag": "apu_ff3",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932840,
+      "rsp": 61932920,
+      "arg": 61933976,
+      "psmu_msg": 61934112,
+      "psmu_rsp": 61934208,
+      "psmu_arg": 61934216,
+      "stapm": 20,
+      "fast": 21,
+      "slow": 22,
+      "mirror_transport": "rsmu",
+      "mirror_stapm": 49,
+      "mirror_fast": null,
+      "mirror_slow": null,
+      "coall": 76,
+      "coper": 75,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": true,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 76
+        }
+      ]
+    },
+    "FAM_DESKTOP_AM4_V1": {
+      "name": "Desktop-AM4-V1(Summit/Pinnacle)",
+      "tag": "desktop_am4_v1",
+      "power_feature": "desktop_ppt",
+      "tdp_mode": "ppt",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932840,
+      "rsp": 61932900,
+      "arg": 61932952,
+      "psmu_msg": 61932828,
+      "psmu_rsp": 61932904,
+      "psmu_arg": 61932944,
+      "pbo_supported": true,
+      "pbo_transport_verified": true,
+      "pbo_ops": [
+        [
+          "PPT",
+          "mp1",
+          49
+        ],
+        [
+          "PPT",
+          "rsmu",
+          100
+        ],
+        [
+          "TDC",
+          "rsmu",
+          101
+        ],
+        [
+          "EDC",
+          "rsmu",
+          102
+        ]
+      ],
+      "stapm": null,
+      "fast": null,
+      "slow": null,
+      "coall": null,
+      "coper": null,
+      "co_enc": "u32",
+      "co_supported": false,
+      "co_scopes": [],
+      "pm_readback": false,
+      "co_commands": []
+    },
+    "FAM_DESKTOP_AM4_V2": {
+      "name": "Desktop-AM4-V2(Matisse/Vermeer)",
+      "tag": "desktop_am4_v2",
+      "power_feature": "desktop_ppt",
+      "tdp_mode": "ppt",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932848,
+      "rsp": 61932924,
+      "arg": 61934020,
+      "psmu_msg": 61932836,
+      "psmu_rsp": 61932912,
+      "psmu_arg": 61934144,
+      "pbo_supported": true,
+      "pbo_transport_verified": true,
+      "pbo_ops": [
+        [
+          "PPT",
+          "mp1",
+          61
+        ],
+        [
+          "PPT",
+          "rsmu",
+          83
+        ],
+        [
+          "TDC",
+          "mp1",
+          59
+        ],
+        [
+          "TDC",
+          "rsmu",
+          84
+        ],
+        [
+          "EDC",
+          "mp1",
+          60
+        ],
+        [
+          "EDC",
+          "rsmu",
+          85
+        ]
+      ],
+      "stapm": null,
+      "fast": null,
+      "slow": null,
+      "coall": 54,
+      "coper": 53,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": false,
+      "co_transport": "mp1",
+      "co_commands": [
+        {
+          "transport": "mp1",
+          "command": 54
+        },
+        {
+          "transport": "rsmu",
+          "command": 11
+        }
+      ]
+    },
+    "FAM_DRAGON_FIRE": {
+      "name": "Dragon/Fire-Range(HX)",
+      "tag": "hx",
+      "power_feature": "desktop_ppt",
+      "tdp_mode": "stapm",
+      "transport": "mp1",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "msg": 61932848,
+      "rsp": 61932924,
+      "arg": 61934020,
+      "psmu_msg": 61932836,
+      "psmu_rsp": 61932912,
+      "psmu_arg": 61934144,
+      "stapm": 79,
+      "fast": 62,
+      "slow": 95,
+      "pbo_ppt_mp1": 62,
+      "pbo_tdc_mp1": 60,
+      "pbo_edc_mp1": 61,
+      "pbo_ppt_rsmu": 86,
+      "pbo_tdc_rsmu": 87,
+      "pbo_edc_rsmu": 88,
+      "pbo_supported": true,
+      "pbo_transport_verified": true,
+      "pbo_ops": [
+        [
+          "PPT",
+          "mp1",
+          62
+        ],
+        [
+          "PPT",
+          "rsmu",
+          86
+        ],
+        [
+          "TDC",
+          "mp1",
+          60
+        ],
+        [
+          "TDC",
+          "rsmu",
+          87
+        ],
+        [
+          "EDC",
+          "mp1",
+          61
+        ],
+        [
+          "EDC",
+          "rsmu",
+          88
+        ]
+      ],
+      "coall": 7,
+      "coper": 53,
+      "co_enc": "u20",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pm_readback": false,
+      "co_transport": "rsmu",
+      "co_commands": [
+        {
+          "transport": "rsmu",
+          "command": 7
+        }
+      ]
+    },
+    "FAM_ZEN2_DESKTOP": {
+      "name": "Desktop-17h(Zen~Zen2)",
+      "tag": "zen2_desktop",
+      "power_feature": "pbo_ppt_tdc_edc",
+      "transport": "unsupported",
+      "allow_legacy_fallback": false,
+      "verified_transport": false,
+      "tdp_supported": false,
+      "msg": null,
+      "rsp": null,
+      "arg": null,
+      "stapm": null,
+      "fast": null,
+      "slow": null,
+      "coall": null,
+      "coper": null,
+      "co_enc": "u32",
+      "co_supported": false,
+      "co_scopes": [],
+      "pm_readback": false,
+      "co_commands": []
+    },
+    "FAM_NO_CO": {
+      "name": "APU-NoCO(Raven/Dali)",
+      "tag": "no_co",
+      "power_feature": "unsupported",
+      "transport": "unsupported",
+      "allow_legacy_fallback": false,
+      "verified_transport": false,
+      "tdp_supported": false,
+      "msg": null,
+      "rsp": null,
+      "arg": null,
+      "stapm": null,
+      "fast": null,
+      "slow": null,
+      "co_supported": false,
+      "co_scopes": [],
+      "pm_readback": false,
+      "co_commands": []
+    },
+    "FAM_UNKNOWN": {
+      "name": "Unknown",
+      "tag": "unknown",
+      "power_feature": "unknown",
+      "transport": "unsupported",
+      "allow_legacy_fallback": false,
+      "verified_transport": false,
+      "tdp_supported": false,
+      "msg": null,
+      "rsp": null,
+      "arg": null,
+      "stapm": null,
+      "fast": null,
+      "slow": null,
+      "coall": null,
+      "coper": null,
+      "co_enc": "u20",
+      "co_supported": false,
+      "co_scopes": [],
+      "pm_readback": false,
+      "co_commands": []
+    },
+    "FAM_HSMP_FP10_AM5": {
+      "name": "FP10-AM5(Medusa/OlympicRidge)",
+      "tag": "hsmp_fp10_am5",
+      "power_feature": "stapm_ppt",
+      "tdp_mode": "stapm",
+      "transport": "hsmp",
+      "allow_legacy_fallback": false,
+      "verified_transport": true,
+      "tdp_supported": true,
+      "hsmp_msg": 61934220,
+      "hsmp_rsp": 61934224,
+      "hsmp_arg": 61934228,
+      "stapm": 21,
+      "fast": 9,
+      "slow": 22,
+      "coall": 8,
+      "coper": 7,
+      "co_enc": "u16",
+      "co_transport": "hsmp",
+      "co_supported": true,
+      "co_scopes": [
+        "all_core"
+      ],
+      "pbo_supported": false,
+      "pbo_transport_verified": false,
+      "capabilityEvidence": "Fixed UXTU26.3.1 Socket_FP10_AM5 and ConvertHsmpPsmMargin; source verified, actual runtime readiness requires module/channel, no hardware acceptance inferred",
+      "co_commands": [
+        {
+          "transport": "hsmp",
+          "command": 8
+        }
+      ]
+    }
+  },
+  "familyAliases": {
+    "FAM_APU": "FAM_APU_FT6_NEW",
+    "FAM_APU_GENERIC": "FAM_APU_FT6_NEW_GENERIC",
+    "FAM_APU_OLD": "FAM_APU_FP6"
+  },
+  "moduleCandidates": [
+    {
+      "name": "RyzenSMU.bin",
+      "bytes": 50764,
+      "sha256": "301d9ca397108e09f31bfbd5ac4c9bb4f352a5de68532c32db3ba7ddcde93450",
+      "requiredExistingPublics": [
+        "ioctl_get_code_name",
+        "ioctl_get_smu_version",
+        "ioctl_read_pm_table",
+        "ioctl_read_smu_register",
+        "ioctl_resolve_pm_table",
+        "ioctl_send_smu_command",
+        "ioctl_update_pm_table",
+        "ioctl_write_smu_register",
+        "unload"
+      ],
+      "newImportsComparedWithCurrent": [
+        "virtual_read_dword",
+        "virtual_write_dword"
+      ],
+      "action": "source-only-candidate-preserve-existing-runtime",
+      "previousSha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0",
+      "previousBytes": 39652,
+      "sourceOnlyCandidatePath": "capabilities/upstream/uxtu-26.3.1/modules/RyzenSMU.bin",
+      "runtimeActivation": "DEFERRED_USER_SCOPE",
+      "runtimeSha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0"
+    },
+    {
+      "name": "IntelMSR.bin",
+      "bytes": 5324,
+      "sha256": "d6ed85d65ab17a22f813ef98207d6d537155ee2ded5976a21cb48413c9b92e5f",
+      "requiredExistingPublics": [
+        "ioctl_read_msr",
+        "ioctl_write_msr"
+      ],
+      "newImportsComparedWithCurrent": [],
+      "action": "source-only-candidate-preserve-existing-runtime",
+      "previousSha256": "5bfda87500160076158befc77300f81a388d72b11df2c794a3939ebe66777098",
+      "previousBytes": 5292,
+      "sourceOnlyCandidatePath": "capabilities/upstream/uxtu-26.3.1/modules/IntelMSR.bin",
+      "runtimeActivation": "DEFERRED_USER_SCOPE",
+      "runtimeSha256": "5bfda87500160076158befc77300f81a388d72b11df2c794a3939ebe66777098"
+    },
+    {
+      "name": "AMDFamily17.bin",
+      "bytes": 10652,
+      "sha256": "dae74615761b78bdf064dfb3e136252ddcc6fc727d88f14738d0e5800d427a91",
+      "requiredExistingPublics": [
+        "ioctl_read_msr",
+        "ioctl_read_smn",
+        "ioctl_write_msr"
+      ],
+      "newImportsComparedWithCurrent": [],
+      "action": "hold-unused-by-current-TDP-helper",
+      "previousSha256": "099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50",
+      "previousBytes": 9300,
+      "runtimeActivation": "UNCHANGED_NOT_CONSUMED_BY_TDP",
+      "runtimeSha256": "099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50"
+    }
+  ],
+  "scope": "Common CPU capability declarations and source-verified mailbox recipes from fixed UXTU26.3.1. Manual CCD/CPU-offset settings explicitly enabled by current human request; legacy autostart/automatic voltage scheduling remains off. Runtime readiness, hardware effects and stability require independent evidence; no GPU/SA voltage consumer.",
+  "familyOrder": [
+    "FAM_DESKTOP_AM5",
+    "FAM_DESKTOP_AM4_V1",
+    "FAM_DESKTOP_AM4_V2",
+    "FAM_APU_FT6_NEW",
+    "FAM_APU_FT6_NEW_GENERIC",
+    "FAM_APU_FT6_OLD",
+    "FAM_APU_FP6",
+    "FAM_APU_FT5_FP5",
+    "FAM_APU_VANGOGH",
+    "FAM_DRAGON_FIRE",
+    "FAM_ZEN2_DESKTOP",
+    "FAM_NO_CO",
+    "FAM_HSMP_FP10_AM5",
+    "FAM_UNKNOWN"
+  ],
+  "deferredCapabilities": [
+    {
+      "id": "am5-desktop-slow-rsmu-cb",
+      "familyRecipe": "FAM_DESKTOP_AM5",
+      "operation": "slow-limit",
+      "transport": "rsmu",
+      "command": 203,
+      "upstreamDeclared": true,
+      "runtimeApplied": false,
+      "reason": "User confirms working 9950 path; capability difference only. Preserve original three MP1 writes; future effect-logic upgrade is out of current scope."
+    }
+  ],
+  "manualControls": {
+    "mode": "explicit_settings_apply",
+    "restoreSavedOnStartup": false,
+    "automaticReapply": false,
+    "voltageConsumerPlanes": [
+      "core",
+      "cache"
+    ],
+    "physicalCcdPowerOff": false
+  },
+  "amdCpuIdentification": [
+    {
+      "family": 23,
+      "models": [
+        1
+      ],
+      "upstreamFamily": "SummitRidge",
+      "recipe": "FAM_DESKTOP_AM4_V1"
+    },
+    {
+      "family": 23,
+      "models": [
+        8
+      ],
+      "upstreamFamily": "PinnacleRidge",
+      "recipe": "FAM_DESKTOP_AM4_V1"
+    },
+    {
+      "family": 23,
+      "models": [
+        17,
+        18
+      ],
+      "upstreamFamily": "RavenRidge",
+      "recipe": "FAM_APU_FT5_FP5"
+    },
+    {
+      "family": 23,
+      "models": [
+        24
+      ],
+      "upstreamFamily": "Picasso",
+      "recipe": "FAM_APU_FT5_FP5"
+    },
+    {
+      "family": 23,
+      "models": [
+        32
+      ],
+      "upstreamFamily": "Pollock",
+      "recipe": "FAM_APU_FT5_FP5",
+      "nameContainsAny": [
+        "15e",
+        "15Ce",
+        "20e"
+      ]
+    },
+    {
+      "family": 23,
+      "models": [
+        32
+      ],
+      "upstreamFamily": "Dali",
+      "recipe": "FAM_APU_FT5_FP5"
+    },
+    {
+      "family": 23,
+      "models": [
+        80
+      ],
+      "upstreamFamily": "FireFlight",
+      "recipe": "FAM_APU_FT5_FP5"
+    },
+    {
+      "family": 23,
+      "models": [
+        96
+      ],
+      "upstreamFamily": "Renoir",
+      "recipe": "FAM_APU_FP6"
+    },
+    {
+      "family": 23,
+      "models": [
+        104
+      ],
+      "upstreamFamily": "Lucienne",
+      "recipe": "FAM_APU_FP6"
+    },
+    {
+      "family": 23,
+      "models": [
+        113
+      ],
+      "upstreamFamily": "Matisse",
+      "recipe": "FAM_DESKTOP_AM4_V2"
+    },
+    {
+      "family": 23,
+      "models": [
+        144,
+        145
+      ],
+      "upstreamFamily": "VanGogh",
+      "recipe": "FAM_APU_VANGOGH"
+    },
+    {
+      "family": 23,
+      "models": [
+        160
+      ],
+      "upstreamFamily": "Mendocino",
+      "recipe": "FAM_APU_FT6_OLD"
+    },
+    {
+      "family": 25,
+      "models": [
+        33
+      ],
+      "upstreamFamily": "Vermeer",
+      "recipe": "FAM_DESKTOP_AM4_V2"
+    },
+    {
+      "family": 25,
+      "models": [
+        63,
+        68
+      ],
+      "upstreamFamily": "Rembrandt",
+      "recipe": "FAM_APU_FT6_OLD"
+    },
+    {
+      "family": 25,
+      "models": [
+        80
+      ],
+      "upstreamFamily": "Cezanne_Barcelo",
+      "recipe": "FAM_APU_FP6"
+    },
+    {
+      "family": 25,
+      "models": [
+        97
+      ],
+      "upstreamFamily": "DragonRange",
+      "recipe": "FAM_DRAGON_FIRE",
+      "nameContainsAny": [
+        "HX"
+      ]
+    },
+    {
+      "family": 25,
+      "models": [
+        97
+      ],
+      "upstreamFamily": "Raphael",
+      "recipe": "FAM_DESKTOP_AM5"
+    },
+    {
+      "family": 25,
+      "models": [
+        116
+      ],
+      "upstreamFamily": "PhoenixPoint",
+      "recipe": "FAM_APU_FT6_OLD"
+    },
+    {
+      "family": 25,
+      "models": [
+        120
+      ],
+      "upstreamFamily": "PhoenixPoint2",
+      "recipe": "FAM_APU_FT6_OLD"
+    },
+    {
+      "family": 25,
+      "models": [
+        117
+      ],
+      "upstreamFamily": "HawkPoint",
+      "recipe": "FAM_APU_FT6_OLD"
+    },
+    {
+      "family": 25,
+      "models": [
+        124
+      ],
+      "upstreamFamily": "HawkPoint2",
+      "recipe": "FAM_APU_FT6_OLD"
+    },
+    {
+      "family": 26,
+      "models": [
+        68
+      ],
+      "upstreamFamily": "FireRange",
+      "recipe": "FAM_DRAGON_FIRE",
+      "nameContainsAny": [
+        "HX"
+      ]
+    },
+    {
+      "family": 26,
+      "models": [
+        68
+      ],
+      "upstreamFamily": "GraniteRidge",
+      "recipe": "FAM_DESKTOP_AM5"
+    },
+    {
+      "family": 26,
+      "models": [
+        96
+      ],
+      "upstreamFamily": "KrackanPoint",
+      "recipe": "FAM_APU_FT6_NEW_GENERIC"
+    },
+    {
+      "family": 26,
+      "models": [
+        104
+      ],
+      "upstreamFamily": "KrackanPoint2",
+      "recipe": "FAM_APU_FT6_NEW_GENERIC"
+    },
+    {
+      "family": 26,
+      "models": [
+        32,
+        36
+      ],
+      "upstreamFamily": "StrixPoint",
+      "recipe": "FAM_APU_FT6_NEW_GENERIC"
+    },
+    {
+      "family": 26,
+      "models": [
+        112
+      ],
+      "upstreamFamily": "StrixHalo",
+      "recipe": "FAM_APU_FT6_NEW"
+    },
+    {
+      "family": 26,
+      "models": [
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135
+      ],
+      "upstreamFamily": "Medusa1",
+      "recipe": "FAM_HSMP_FP10_AM5"
+    },
+    {
+      "family": 26,
+      "models": [
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143
+      ],
+      "upstreamFamily": "OlympicRidge",
+      "recipe": "FAM_HSMP_FP10_AM5"
+    },
+    {
+      "family": 26,
+      "models": [
+        224,
+        225,
+        226,
+        227
+      ],
+      "upstreamFamily": "Medusa2",
+      "recipe": "FAM_HSMP_FP10_AM5"
+    }
+  ],
+  "intelCpuCapabilities": {
+    "admission": "cpu_identity_and_runtime_channel",
+    "vendor": "Intel",
+    "familyModelRequired": true,
+    "modelNames": "diagnostics_only",
+    "tdp": {
+      "candidate": true,
+      "mechanism": "package_rapl_msr_0x610",
+      "runtimeChecks": [
+        "msr_0x606_unit",
+        "msr_0x610_lock",
+        "original_write_receipt"
+      ]
+    },
+    "voltage": {
+      "candidate": true,
+      "planes": [
+        "core",
+        "cache"
+      ],
+      "mechanism": "fivr_msr_0x150",
+      "probe": "readonly_get_mailbox_completion_checked",
+      "write": "existing_set_vf_direct_no_mailbox_readback"
+    },
+    "hardwareAcceptance": false,
+    "diagnosticModelLabels": [
+      {
+        "family": 6,
+        "model": 151,
+        "name": "AlderLake-S"
+      },
+      {
+        "family": 6,
+        "model": 183,
+        "name": "RaptorLake-S"
+      },
+      {
+        "family": 6,
+        "model": 154,
+        "name": "AlderLake-P"
+      },
+      {
+        "family": 6,
+        "model": 186,
+        "name": "RaptorLake-P"
+      },
+      {
+        "family": 6,
+        "model": 170,
+        "name": "MeteorLake-H"
+      },
+      {
+        "family": 6,
+        "model": 189,
+        "name": "LunarLake-H"
+      },
+      {
+        "family": 6,
+        "model": 198,
+        "name": "ArrowLake-S"
+      },
+      {
+        "family": 6,
+        "model": 205,
+        "name": "ArrowLake-H"
+      },
+      {
+        "family": 6,
+        "model": 207,
+        "name": "ArrowLake-U"
+      }
+    ]
+  }
+}

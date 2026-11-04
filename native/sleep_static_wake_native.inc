@@ -7,6 +7,7 @@
 // Evidence source configuration/lifetime belongs exclusively to the parent source owner.
 #include "sleep_static_wake_policy.h"
 #include "sleep_static_wake_receipt.h"
+#include "sleep_static_wake_schedule.h"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <winsvc.h>
@@ -186,6 +187,24 @@ struct Native {
     SoftwareSnapshotCircuit softwareCircuit; // reset ONLY at independent operation boundary
     ObservationCache<DeviceObservation> deviceObservation;
     void invalidateObservations() {softwareObservation.invalidate();deviceObservation.invalidate();}
+    CollectionReadPace collectionReadPace;
+    bool pacingCollection=false;
+    bool paceCollectionRead(std::string& e) {
+        if(!pacingCollection)return time(e);
+        return collectionReadPace.before([](){
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        },[this,&e](){return time(e);},[](std::uint64_t slice){
+            // <=4-ms waits recheck original cancellation and the 180-s deadline;
+            // no UI wait, new worker, timer, catch-up or deadline extension.
+            Sleep(static_cast<DWORD>(slice));
+        });
+    }
+    bool inventoryProperty(HDEVINFO list,SP_DEVINFO_DATA& dev,DWORD prop,std::wstring& out,std::string& e) {
+        if(!paceCollectionRead(e))return false;
+        out=property(list,dev,prop);return time(e);
+    }
+
     std::uint64_t deadline=GetTickCount64()+180000;
     std::function<bool()> canceled;
     std::wstring directory,path;
@@ -268,18 +287,24 @@ struct Native {
         return overrideCallerNames(callers,e)&&command({L"/requestsoverride"},text,e)&&parseOverrides(text,map,e,&callers);
     }
     bool inventory(Inventory& out,std::string& e) {
-        if(!time(e))return false;
+        if(!paceCollectionRead(e))return false;
         const HDEVINFO list=SetupDiGetClassDevsW(nullptr,nullptr,nullptr,DIGCF_ALLCLASSES|DIGCF_PRESENT);
         if(list==INVALID_HANDLE_VALUE){e=winError("pnp-enumeration");return false;}
         bool ok=true;std::set<DEVINST> seeds;
         for(DWORD index=0;;++index) {
-            if(!time(e)){ok=false;break;}
+            if(!paceCollectionRead(e)){ok=false;break;}
             SP_DEVINFO_DATA d{};d.cbSize=sizeof(d);
             if(!SetupDiEnumDeviceInfo(list,index,&d)){if(GetLastError()!=ERROR_NO_MORE_ITEMS){ok=false;e=winError("pnp-next");}break;}
             wchar_t id[MAX_DEVICE_ID_LEN]{};
+            if(!paceCollectionRead(e)){ok=false;break;}
             if(CM_Get_Device_IDW(d.DevInst,id,MAX_DEVICE_ID_LEN,0)!=CR_SUCCESS){ok=false;e="pnp-instance-id-unavailable";break;}
-            Node node;node.dn=d.DevInst;node.id=id;node.service=property(list,d,SPDRP_SERVICE);node.hardware=property(list,d,SPDRP_HARDWAREID);
-            for(const auto prop:{SPDRP_FRIENDLYNAME,SPDRP_DEVICEDESC}) {auto name=property(list,d,prop);if(!name.empty())node.labels.insert(lower(name));}
+            Node node;node.dn=d.DevInst;node.id=id;
+            if(!inventoryProperty(list,d,SPDRP_SERVICE,node.service,e)||!inventoryProperty(list,d,SPDRP_HARDWAREID,node.hardware,e)){ok=false;break;}
+            for(const auto prop:{SPDRP_FRIENDLYNAME,SPDRP_DEVICEDESC}) {
+                std::wstring name;if(!inventoryProperty(list,d,prop,name,e)){ok=false;break;}
+                if(!name.empty())node.labels.insert(lower(name));
+            }
+            if(!ok)break;
             const auto hardware=lower(node.hardware);
             if(hardware.find(L"pnp0c0c")!=std::wstring::npos||hardware.find(L"pnp0c0e")!=std::wstring::npos)seeds.insert(node.dn);
             out.nodes.push_back(std::move(node));
@@ -292,13 +317,14 @@ struct Native {
         if(buttons==INVALID_HANDLE_VALUE){e=winError("system-button-interfaces");return true;}
         bool buttonsOk=true;
         for(DWORD index=0;;++index) {
-            if(!time(e)){buttonsOk=false;break;}
+            if(!paceCollectionRead(e)){buttonsOk=false;break;}
             SP_DEVICE_INTERFACE_DATA iface{};iface.cbSize=sizeof(iface);
             if(!SetupDiEnumDeviceInterfaces(buttons,nullptr,&systemButton,index,&iface)){if(GetLastError()!=ERROR_NO_MORE_ITEMS){buttonsOk=false;e=winError("system-button-next");}break;}
             DWORD bytes=0;SetupDiGetDeviceInterfaceDetailW(buttons,&iface,nullptr,0,&bytes,nullptr);
             if(!bytes||bytes>131072){buttonsOk=false;e="system-button-detail-size";break;}
             std::vector<BYTE> storage(bytes,0);auto* detail=reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(storage.data());detail->cbSize=sizeof(*detail);
             SP_DEVINFO_DATA d{};d.cbSize=sizeof(d);
+            if(!paceCollectionRead(e)){buttonsOk=false;break;}
             if(!SetupDiGetDeviceInterfaceDetailW(buttons,&iface,detail,bytes,nullptr,&d)){buttonsOk=false;e=winError("system-button-detail");break;}
             seeds.insert(d.DevInst);
         }
@@ -310,7 +336,7 @@ struct Native {
         for(const auto seed:seeds) {
             DEVINST current=seed;std::set<DEVINST> chain;bool rooted=false;
             for(unsigned depth=0;depth<128;++depth) {
-                if(!time(e))return false;
+                if(!paceCollectionRead(e))return false;
                 if(!chain.insert(current).second)break;
                 out.protectedNodes.insert(current);
                 if(current==root){rooted=true;break;}
@@ -353,6 +379,13 @@ struct Native {
     static std::string guidText(const GUID& guid) {wchar_t value[40]{};return StringFromGUID2(guid,value,40)?W2U(value):std::string{};}
     static bool guidParse(const std::string& text,GUID& guid) {return text.size()==38&&SUCCEEDED(CLSIDFromString(U2W(text).c_str(),&guid));}
     bool collect(Json& items,Json& protect,Json& failures,std::string& e) {
+        // Only discovery collection is deliberately slower. Fresh reads before
+        // and after writes, including OFF/restore, keep their original timing.
+        struct CollectionScope {
+            Native& owner;bool previous;
+            explicit CollectionScope(Native& value):owner(value),previous(value.pacingCollection){owner.collectionReadPace.reset();owner.pacingCollection=true;}
+            ~CollectionScope(){owner.pacingCollection=previous;}
+        } collectionScope(*this);
         const auto problem=[&](const char* kind,const std::string& why){failures.push_back({{"kind",kind},{"error",why}});};
         // Running process snapshot plus ALL installed service names (including stopped).
         // This cannot enumerate arbitrary future executable names.
@@ -589,6 +622,9 @@ inline Json run(bool restore,std::function<bool()> canceled) {
             {"elapsedMs",GetTickCount64()-started},
             {"elapsedScope","operation-uptime;may-include-suspension;not-CPU-time"},
             {"softwareSnapshot",native.softwareCircuit.evidence()},
+            {"collectionReadPacing",{{"minimumGapMs",ymcc::staticwake::CollectionReadPace::gapMs},
+                {"admittedReads",native.collectionReadPace.admitted},{"requestedWaitMs",native.collectionReadPace.requestedWaitMs},
+                {"scope","initial-collection-only;not-CPU-time;strict-readback-and-restore-unpaced"}}},
             {"diagnosticOnly",true},{"mandatoryEvidence",true},{"detailLogsRequired",false}};
         return result;
     };

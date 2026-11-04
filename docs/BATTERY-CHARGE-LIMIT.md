@@ -38,7 +38,7 @@
 
 ## 生命周期与异常处理
 
-`BatteryChargeSettings.vue` → `battery.charge.get/refresh/set/release` → 原生命名管道 → `YeManBatteryHost.exe`。硬件访问单线程串行化；请求携带会话、设备身份、修订号与原始值组成的摘要，拒绝旧页面和外部修改后的旧请求。EC 使用共享互斥量和有限超时；不调用完整 HC `Open()`，不初始化 TDP、风扇、灯光、手柄。
+`BatteryChargeSettings.vue` → `battery.charge.get/refresh/set/release` → YMCC 原生主进程 → hostfxr 直接加载 `YeManBatteryHost.dll` 的 `InProcessEntry.cs` 入口。硬件访问单线程串行化；请求携带会话、设备身份、修订号与原始值组成的摘要，拒绝旧页面和外部修改后的旧请求。EC 使用共享互斥量和有限超时；不调用完整 HC `Open()`，不初始化 TDP、风扇、灯光、手柄。
 
 偏好与恢复记录保存在原生宿主选定的数据目录（通常 `%LOCALAPPDATA%\YeManCC`）：
 
@@ -47,9 +47,9 @@
 
 固件阈值只在明确应用和启动恢复时按需写入；有回读的接口若已经是目标值则不重复写入。后台刷新和睡眠恢复不定时重推固件阈值。写入/回读/保存失败后保留未确认记录，阻止重放；内部 `refresh` 确认操作在读取成功后解除未确认状态，并停用旧目标的自动重放；页面由显式应用调用它，不再单设“重新读取”按钮。
 
-软件限充每两秒检查电量和 AC/DC：到达目标暂停，降至目标减 3% 恢复；电量未知或离开交流电时恢复。仅接管原始为正常充电的旁路。正常退出、父进程结束和睡眠时尝试恢复；睡眠恢复后仅重新建立已保存的软件策略。离开设置页面不会停止策略。检测到其他软件修改状态时停止接管，不覆盖无法确认归属的状态。
+软件限充每 60 秒检查电量和 AC/DC：到达目标暂停，降至目标减 3% 恢复；电量未知或离开交流电时恢复。仅接管原始为正常充电的旁路。YMCC 正常退出和睡眠时尝试恢复；睡眠恢复后仅重新建立已保存的软件策略。离开设置页面不会停止策略。检测到其他软件修改状态时停止接管，不覆盖无法确认归属的状态。
 
-恢复记录先于旁路写入落盘。若电池宿主本身被强杀，不能保证当时立即恢复；下一次启动会先按记录恢复，再处理保存的意图。读不到硬件或记录与机型/固件不符时不猜测写入，页面报告失败并保留停止入口。损坏或跨设备记录需要先在厂商软件核对正常充电状态，再处理对应的本地记录，不能强行套用。
+恢复记录先于旁路写入落盘。若 YMCC 主进程被强杀，不能保证当时立即恢复；下一次启动会先按记录恢复，再处理保存的意图。读不到硬件或记录与机型/固件不符时不猜测写入，页面报告失败并保留停止入口。损坏或跨设备记录需要先在厂商软件核对正常充电状态，再处理对应的本地记录，不能强行套用。
 
 ## 源码、构建与打包
 
@@ -143,3 +143,12 @@ Set_AP 使用写入前刚读到的 32 字节包，仅替换选择器和阈值，
 49 组后端回归覆盖新旧机型分流、现场旧路径 raw=128、AP 编码、100% 保留高位、非充电字段保留、过期状态、无效回执、裸确认、回读不一致和丢失回执。YMCC 尚未在用户的 .105 固件上实测新协议，结果以复测为准。
 
 CG3EM AP 修复交付：`G:\YeManCC-Work\Mainline\Release\Deliveries\YeManCC-MSI-CG3EM-AP-20261014-39a4ec38.zip`。Build ID `39a4ec3850b1e1d4b59f552f66806edc2049dac0d6da26a256a77c3ef9618059`；ZIP SHA256 `cf9ccb78abed8f880a16df5997a7a8d7e41033197936e5ff01d2514a6cbd439a`。49/15 组后端/界面回归、完整发布和最终包只读通信已通过，修复文件与主线一致，现场 `.105` 固件仍待复测。详细记录：`G:\YeManCC-Work\Build\Validation\BatteryCharge-20261014-MsiRaw128\mainline-delivery-result.json`。
+
+
+## 2026-11-02 进程内电池载荷构建合同
+
+电池托管项目改为 Library，继续使用 .NET 10 framework-dependent，配置 `GenerateRuntimeConfigurationFiles=true`、`EnableDynamicLoading=true`、`UseAppHost=false` 并允许 unsafe 入口。DLL、deps、runtimeconfig 的 `YeManBatteryHost` 名称保持不变。原生主线程通过 hostfxr 直接加载 DLL；metadata component 仍为 `YeManBatteryHost`，执行模式为 `in-process`。
+
+`payload-files.json` 不再交付 `YeManBatteryHost.exe`；DLL、runtimeconfig、deps、共享硬件依赖及第三方许可继续保留。后续运行构建脚本时，仅清理其 `Build/App/BatteryHost/YeManBatteryHost.exe` 与 `PowerControl/battery-host/YeManBatteryHost.exe` 两个精确旧文件；校验完整路径后使用 `Remove-Item -LiteralPath`，不递归删除目录，不清理用户设置或恢复状态。发布重新产生 EXE 时拒绝继续，包白名单也拒绝旧 EXE。
+
+源码身份合同必须包含 `InProcessEntry.cs` 和 `native/battery_managed_runtime.h`。并行托管与原生修改稳定后，由主线程统一重新生成 runtime contract/header 和 payload manifest。本次只修改源码，未发布至主线 PowerControl 或当前安装；`battery_charge_packaging_selftest.ps1 -WorkspaceRoot <工作区> -StaticOnly` 仅验证静态包白名单及隔离的旧文件清理/拒绝残留，不代表完整发布或硬件验收。

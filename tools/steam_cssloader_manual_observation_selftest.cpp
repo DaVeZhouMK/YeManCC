@@ -49,7 +49,7 @@ static ULONGLONG cpu(){FILETIME b,e,k,u;GetProcessTimes(GetCurrentProcess(),&b,&
 static unsigned ownedCreated=0,ownedClosed=0;
 struct Child{HANDLE p=nullptr;~Child(){if(p){if(live(p))TerminateProcess(p,0);WaitForSingleObject(p,2000);if(!live(p))++ownedClosed;CloseHandle(p);}}};
 static HANDLE launch(const std::wstring&exe){auto cmd=L"\""+exe+L"\" --inert";STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION pi{};if(!CreateProcessW(exe.c_str(),cmd.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))throw std::runtime_error("owned child launch");CloseHandle(pi.hThread);++ownedCreated;return pi.hProcess;}
-static std::atomic<bool>g_exitRequested=false;static struct{bool isolated=false;}g_aiFanMockSession;
+static std::atomic<ULONGLONG>g_cssPower=1;static std::atomic<bool>g_exitRequested=false;static struct{bool isolated=false;}g_aiFanMockSession;
 enum class PowerLifecycle{Ready,Suspended};static std::atomic<PowerLifecycle>g_powerLifecycle=PowerLifecycle::Ready;
 static struct{Session value;Session sessionSnapshot(){return value;}}g_steamSettingsObserver;
 static struct{std::function<HANDLE(const Session&)>port;HANDLE confirmExisting(const Session&s){return port?port(s):nullptr;}}g_steamCssUse;
@@ -59,7 +59,7 @@ static void deckySidebarDiagnostic(const std::string&,const json&,bool){}static 
 #include "production-css-manual.h"
 static const char*helper=R"PS(param([string]$Action,[uint32]$SessionPid,[string]$SessionBirth,[string]$BackendPath,[string]$ReadyEvent,[string]$IdleEvent,[int]$GateTimeoutMs,[switch]$StartBackend,[switch]$VerifyOnly)
 $ErrorActionPreference='Stop'
-# ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1
+# SharedProcessQueryProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1
 $elevated=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if($Action -eq 'Ensure'){
  if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'permit-initialize'))){throw 'unexpected initialization'}
@@ -93,17 +93,17 @@ struct Scene{
  std::atomic<unsigned>epoch=1;bool guardStarted=false;
  Scene(const std::filesystem::path&root,const wchar_t*name,DWORD lifetime=5000,DWORD minimumHold=0):dir(root/name),link(dir/L"steam-appearance/backend.path"),entry(dir/L"steam-appearance.ps1"),use(false,1,[this]{return editor?steamcsseditor::State::Active:steamcsseditor::State::Absent;}){
   std::filesystem::create_directories(link.parent_path());const auto steamImage=dir/L"steam.exe",backend=dir/L"CssLoader-Standalone-Headless.exe";std::filesystem::copy_file(self(),steamImage);std::filesystem::copy_file(self(),backend);steam.p=launch(steamImage.wstring());css.p=launch(backend.wstring());session={dir.wstring(),GetProcessId(steam.p),0,birth(steam.p)};
-  write(link,backend.string());write(entry,helper);write(dir/L"steam-appearance/resident.ps1","function Start-ResidentAppearanceBackend");write(dir/L"steam-appearance/idle.ps1","AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults");
-  g_steamSettingsObserver.value=session;g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;g_aiFanMockSession.isolated=false;
+  write(link,backend.string());write(entry,helper);write(dir/L"steam-appearance/resident.ps1","AppearanceProcessQueryProtocol=2 function Start-ResidentAppearanceBackend");write(dir/L"steam-appearance/idle.ps1","AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults");
+  g_steamSettingsObserver.value=session;g_cssPower=1;g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;g_aiFanMockSession.isolated=false;
   g_steamCssGuard.port=[this](const auto&s,auto g){++manualEnds;return guardStarted?guard.requestReadOnlyRebind(s,g):true;};
   g_steamCssUse.port=[this](const auto&s){++readonly;auto h=permitConfirmation?use.confirmExisting(s):nullptr;if(h){if(lastCompletion.value)CloseHandle(lastCompletion.value);lastCompletion.value=nullptr;if(!DuplicateHandle(GetCurrentProcess(),h,GetCurrentProcess(),&lastCompletion.value,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("owned completion duplicate");}return h;};
-  check(use.initialize(entry.wstring(),link.wstring(),lifetime,0,[this](const auto&stage,const auto&s,const auto&b,const auto&r){if(stage=="automatic-helper-start")++helpers;if(stage=="automatic-helper-ready")++readySignals;productionManualChanged(stage,s,b,r);},minimumHold),"owned use runtime initializes");use.observeSteam(session);
+  check(use.initialize(entry.wstring(),link.wstring(),lifetime,0,[this](const auto&stage,const auto&s,const auto&b,const auto&r){if(stage=="automatic-helper-start")++helpers;if(stage=="automatic-helper-ready")++readySignals;productionManualChanged(stage,s,b,r);},minimumHold,[]{return !g_exitRequested&&g_powerLifecycle==PowerLifecycle::Ready;},[]{return g_cssPower.load();}),"owned use runtime initializes");use.observeSteam(session);
  }
  ~Scene(){guard.shutdown();guardStarted=false;g_steamCssGuard.port={};g_steamCssUse.port={};use.shutdown();}
  steamcss::ModeSample sample(){return{mode.load(),"doc/owned:mode/"+std::to_string(epoch.load())};}
  void startGuard(){steamcss::Config c;c.linkFile=link.wstring();c.delays={2,5,9};c.modeDelays={2,5,15};c.crashDelayMs=60;
   c.ensure=[this](const auto&,const auto&,const auto&){++ensures;return steamcss::Result{copy(css.p),GetProcessId(css.p),"running",{},false};};c.probeExisting=[this]{++rebinds;return steamcss::Result{copy(css.p),GetProcessId(css.p),"running",{},false};};
-  c.confirmIdle=[this](const auto&s,bool start,bool renew){++initialUses;if(start)throw std::runtime_error("existing owned CSS received a create grant");return use.confirmAndIdle(s,false,renew);};c.invalidateBackend=[this](const auto&s){return use.invalidateForResume(s);};c.confirmExisting=productionManualConfirm;c.readMode=[this](const auto&){return sample();};c.isResidentConfirmed=[this](const auto&s){return use.residentConfirmed(s);};c.mayLaunch=[this]{return !blocked&&!g_exitRequested&&g_powerLifecycle==PowerLifecycle::Ready;};
+  c.confirmIdle=[this](const auto&s,bool start,bool renew){++initialUses;if(start)throw std::runtime_error("existing owned CSS received a create grant");return use.confirmAndIdle(s,false,renew);};c.invalidateBackend=[this](const auto&s){return use.invalidateForResume(s,false);};c.confirmExisting=productionManualConfirm;c.readMode=[this](const auto&){return sample();};c.isResidentConfirmed=[this](const auto&s){return use.residentConfirmed(s);};c.mayLaunch=[this]{return !blocked&&!g_exitRequested&&g_powerLifecycle==PowerLifecycle::Ready;};
   check(guard.initialize(c),"owned guard initializes");guardStarted=true;guard.observeSteam(session);check(until([this]{return guard.snapshot().phase=="ready";}),"initial owned automatic confirmation completes");
  }
  void manual(){auto ticket=use.begin(session);auto result=use.release(ticket.token);check(result.ok()||(result.editorProtected&&!result.error),"manual completion retains the existing backend");}
@@ -174,6 +174,13 @@ int wmain(int argc,wchar_t**argv){try{
  }
  {
   Scene s(out,L"initialization-manual-takeover");write(s.dir/L"permit-initialize","");auto event=s.use.confirmAndIdle(s.session,true);check(event&&until([&]{return std::filesystem::exists(s.dir/L"token-order.txt");}),"initialization is in flight before a manual takeover");auto ticket=s.use.begin(s.session);check(WaitForSingleObject(event,1000)==WAIT_OBJECT_0,"manual takeover retires the previous automatic completion");CloseHandle(event);s.use.release(ticket.token);Sleep(800);check(s.helpers==0&&live(s.css.p),"cancelled initialization cannot later launch an automatic helper");
+ }
+ {
+  Scene s(out,L"power-bound-receipt");s.startGuard();
+  check(s.use.residentConfirmed(s.session),"current-power helper result is a real resident confirmation");
+  ++g_cssPower;
+  check(!s.use.residentConfirmed(s.session),"previous-power resident success is revoked even when Steam PID and mode stay unchanged");
+  check(s.use.invalidateForResume(s.session)&&live(s.css.p),"new power recovery clears only old bounded work and retains resident CSS");
  }
  check(ownedCreated==ownedClosed,"all owned inert Steam/CSS processes exited; no fixture process remains");std::ofstream(out/L"result.json")<<json{{"ok",true},{"passed",checks},{"ownedCreated",ownedCreated},{"ownedClosed",ownedClosed},{"boundedNativeHelperLaunches",nativeBoundedLaunches.load()},{"boundedInitialDelayMs",500},{"boundedAfterIdleDelayMs",1700},{"boundedLeaseMs",1800},{"boundedReadyDeadlineMs",1700},{"realSteamOperations",0},{"realCssOperations",0},{"scope","Production use/guard and exact main callbacks with private inert Steam/CSS and handshake helper"}}.dump(2);return 0;
  }catch(const std::exception&e){std::cerr<<e.what()<<std::endl;return 1;}}

@@ -224,13 +224,20 @@ int wmain(int argc,wchar_t** argv) {
         const auto invalid=buildArchiveCommand((root/L"control-never-created.zip").wstring(),planRoot.wstring(),{{(planRoot/L"entry-0").wstring(),unsafeNames[i]}});
         check(("unsafe-top-level-member-rejected-"+std::to_string(i)).c_str(),!invalid.ok&&invalid.error==ERROR_INVALID_NAME);
     }
-    check("every-tar-attempt-keeps-120s-budget",std::all_of(tarInvocations.begin(),tarInvocations.end(),[](const TarInvocation& call){return call.budget==120000;}));
+    check("every-tar-attempt-has-five-minute-budget",LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS==300000&&std::all_of(tarInvocations.begin(),tarInvocations.end(),[](const TarInvocation& call){return call.budget==LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS;}));
     check("launch-failure-keeps-previous-final-archive",oldLaunchText=="preserve-on-launch-failure");
-    std::string large(9u<<20,'\0');unsigned random=0x79a2135u;
+    std::string large(22u<<20,'\0');unsigned random=0x79a2135u;
     for(auto& byte:large){random^=random<<13;random^=random>>17;random^=random<<5;byte=static_cast<char>(random);}
     const auto largeSource=root/L"large.bin";put(largeSource,large);
     const auto largePacked=createTarArchiveWithRetry((root/L"large.zip").wstring(),{largeSource.wstring()});
-    check("production-capture-streams-zip-beyond-8MiB",largePacked.ok&&fspath::file_size(root/L"large.zip")>(8u<<20));
+    check("production-capture-streams-zip-beyond-20MB-without-total-size-cap",largePacked.ok&&fspath::file_size(root/L"large.zip")>20'000'000ULL);
+    const auto costActiveRoot=root/L"single-cost-active";fspath::create_directories(costActiveRoot);
+    const auto costActive=costActiveRoot/L"input-host-cost.log";
+    const std::string costRow="{\"kind\":\"cost-window\",\"payload\":\""+std::string(4096,'x')+"\"}\n";
+    const std::string costLast="{\"kind\":\"cost-window\",\"newest\":true}\n";
+    {std::ofstream out(costActive,std::ios::binary);while(static_cast<unsigned long long>(out.tellp())+costRow.size()+costLast.size()<=20'000'000ULL)out<<costRow;out<<costLast;}
+    const auto costActivePacked=createTarArchiveWithRetry((root/L"single-cost-active.zip").wstring(),{costActive.wstring()},root.wstring(),L"manifest.txt",&missing);
+    check("single-near-20MB-active-cost-file-copies-and-exports",costActivePacked.ok&&fspath::file_size(costActive)<=20'000'000ULL&&fspath::file_size(costActive)>19'990'000ULL);
     const auto previous=root/L"previous.zip";put(previous,"retained-old-archive");const unsigned before=tarCalls;
     const auto failed=createTarArchiveWithRetry(previous.wstring(),{(root/L"does-not-exist.log").wstring()});
     std::ifstream retained(previous);std::string retainedText;std::getline(retained,retainedText);retained.close();
@@ -299,6 +306,10 @@ def main() -> int:
     with zipfile.ZipFile(fixture/'export-all.zip') as z:
         check('unlocked-originals-preserved-full-export',z.read('steam/logs/locked.txt')==b'locked-content\n')
         check('nested-steam-leading-dash-basename-retained',z.read('steam/logs/-leading-name.txt')==b'leading\n')
+    with zipfile.ZipFile(fixture/'single-cost-active.zip') as z:
+        original=(fixture/'single-cost-active/input-host-cost.log').read_bytes()
+        check('single-20MB-cost-file-export-preserves-all-newest-bytes',z.read('input-host-cost.log')==original and b'"newest":true' in original.splitlines()[-1])
+        check('single-cost-export-produces-no-nested-volumes',not any(n.endswith('.zip') or n.endswith('.pending') for n in z.namelist()))
     current=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig')
     check('bound-archive-helper-stable',current[current.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS'):current.index('// 进程内实时检测 SMT',current.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS'))].replace('#include "sleep_export_diagnostics_native.inc"','// Unrelated sleep IPC is outside this archive consumer.')==helper)
     check('archive-extraction-has-no-sleep-globals', '#include "sleep_export_diagnostics_native.inc"' not in helper)
@@ -314,7 +325,7 @@ def main() -> int:
     handler=extract(current,'ipc_on("logs.exportAll", [](const json& exportArgs) -> json {')
     check('production-export-wired-to-shared-snapshot', 'collectSteamLogs(g_steamSettingsObserver.sessionSnapshot().pid)' in handler and 'createTarArchiveWithRetry(zipPath, files, dataDir, manifestName, &steamLogs)' in handler)
     from ai_log_reader import iter_ai_records
-    for archive_name in ('export.zip','export-all.zip','not-installed.zip','many.zip','many-ymcc.zip',pathlib.Path('中文 导出 😀')/'mixed-中文.zip'):
+    for archive_name in ('export.zip','export-all.zip','not-installed.zip','many.zip','many-ymcc.zip','single-cost-active.zip',pathlib.Path('中文 导出 😀')/'mixed-中文.zip'):
         records=list(iter_ai_records(fixture/archive_name,index_only=True))
         check('ai-reader-consumes-real-native-export:'+str(archive_name),records[-1]['coverageComplete'])
     check('ai-index-and-evidence-headers-stable',all((ROOT/'native'/n).read_bytes()==b for n,b in ai_headers.items()))

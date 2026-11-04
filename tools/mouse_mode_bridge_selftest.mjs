@@ -22,8 +22,11 @@ export async function verifyMouseBridge(root) {
  for(const mode of ['auto','on','off']){await bridge.setMouseModePolicy(mode);assert.equal(calls.at(-1).command,'mouseMode.setPolicy');assert.equal(calls.at(-1).args.mode,mode);}
  const real=await build({stdin:{contents:"import {setMouseBackend} from './src/bridge/gameproc';import {steamDeckMouseGet,steamDeckMouseSet} from './src/bridge/steamDeckMouse';globalThis.__timed={setMouseBackend,steamDeckMouseGet,steamDeckMouseSet};",resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'browser',format:'iife'});
  let message,posted,timerId=0;const timers=new Map();
- const timedContext=vm.createContext({console,window:{chrome:{webview:{postMessage(value){posted=value;},addEventListener(name,fn){message=fn;}}}},setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout(id){timers.delete(id);}});
+ const document=new EventTarget();Object.assign(document,{visibilityState:"visible",hidden:false});
+ const window=new EventTarget();Object.assign(window,{chrome:{webview:{postMessage(value){posted=value;},addEventListener(name,fn){message=fn;}}}});
+ const timedContext=vm.createContext({console,window,document,Event,CustomEvent,setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout(id){timers.delete(id);}});
  vm.runInContext(real.outputFiles[0].text,timedContext);
+ document.dispatchEvent(new Event("visibilitychange"));window.dispatchEvent(new CustomEvent("ipc:window.hidden"));window.dispatchEvent(new CustomEvent("ipc:window.shown"));assert.equal(timers.size,0,"visibility environment must not fabricate a native timeout");
  for(const call of [()=>timedContext.__timed.setMouseBackend('gamebar'),()=>timedContext.__timed.steamDeckMouseGet(),()=>timedContext.__timed.steamDeckMouseSet(100)]){
   const pending=call(),expired=posted.id;assert.equal(timers.size,1);const [id,timer]=[...timers][0];assert.equal(timer.ms,30000);timers.delete(id);timer.fn();
   await assert.rejects(pending,/timed out/);message({data:{id:expired,result:{ok:true,backend:'steam'}}});assert.equal(timers.size,0);

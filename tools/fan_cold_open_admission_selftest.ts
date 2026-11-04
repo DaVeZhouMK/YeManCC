@@ -2,8 +2,8 @@
  * Adapter/native/process fixtures only. No device, real Host, filesystem or hardware writes. */
 import assert from 'node:assert/strict';
 import { FanHostLifecycle } from '../src/bridge/fanHost';
-import { FanApiError, type FanApiAdapter, type FanState, type FanLease, type FanNode, type FanHandshake } from '../src/bridge/fanApi';
-import type { PowerLifecycleState } from '../src/bridge/api';
+import { FanApiError, HttpFanApiAdapter, type FanApiAdapter, type FanState, type FanLease, type FanNode, type FanHandshake } from '../src/bridge/fanApi';
+import { http, type PowerLifecycleState } from '../src/bridge/api';
 const curve:FanNode[]=[{tempC:0,dutyPercent:100},{tempC:40,dutyPercent:100},{tempC:70,dutyPercent:100},{tempC:100,dutyPercent:100}];
 const native=(g:number,phase:PowerLifecycleState['phase']='ready'):PowerLifecycleState=>({generation:g,phase,resumeReady:phase==='ready',hardwareWritesAllowed:phase==='ready',inputReady:true,hibernateAvailable:true});
 class ColdAdapter implements FanApiAdapter {
@@ -31,29 +31,77 @@ class ColdAdapter implements FanApiAdapter {
  async releaseControl():Promise<FanState>{this.writes=false;this.lease=null;return {...this.snapshot(),oemRestoreConfirmed:true};}
  async restoreOem():Promise<FanState>{this.writes=false;return {...this.snapshot(),oemRestoreConfirmed:true};}
  async suspend():Promise<FanState>{this.opened=false;this.events=false;return {...this.snapshot(),state:'Suspended',powerState:'Suspended'};}
- async resume():Promise<FanState>{this.calls.push('resume');throw new FanApiError('HC_RESUME_RESULT_EXPIRED',409,'cold Host has no earlier resume receipt');}
+ async resume():Promise<FanState>{this.calls.push('resume');throw new FanApiError('cold Host has no earlier resume receipt',409,'HC_RESUME_RESULT_EXPIRED');}
  async close():Promise<FanState>{this.calls.push('close');this.opened=false;this.events=false;this.closed=true;this.writes=false;this.lease=null;
   return {...this.snapshot(),hcVirtualCloseReturned:true,hcDeviceManagerStopCompleted:true,oemRestoreConfirmed:true};}
  async shutdown():Promise<void>{this.calls.push('shutdown');}
 }
 let checks=0;const failures:string[]=[];const check=(name:string,ok:boolean)=>{checks++;if(!ok)failures.push(name);console.log((ok?'PASS ':'FAIL ')+name);};
-async function make(adapter:ColdAdapter,g=2){let current=native(g);let starts=0;const lifecycle=new FanHostLifecycle({enabled:true,adapter,
- launcher:{async start(){starts++;return {pid:30000+starts,executable:'fixture.exe'};},async stop(){}},
+async function make(adapter:FanApiAdapter,g=2,initializeReady=true){let current=native(g);let starts=0,stops=0;const lifecycle=new FanHostLifecycle({enabled:true,adapter,
+ launcher:{async start(){starts++;return {pid:30000+starts,executable:'fixture.exe'};},async stop(){stops++;}},
  readNativeActivity:async()=>null,readNativePowerState:async()=>({...current}),heartbeatIntervalMs:60000,resumeWaitDeadlineMs:500,
  requestManualWake:async generation=>({ok:current.phase==='ready',generation,phase:current.phase})});
- lifecycle.setPowerGeneration(g);lifecycle.observePowerBoundary('resume-ready',g);
- return {lifecycle,setNative:(v:PowerLifecycleState)=>{current=v;},starts:()=>starts};}
+ if(initializeReady){lifecycle.setPowerGeneration(g);lifecycle.observePowerBoundary('resume-ready',g);}
+ return {lifecycle,setNative:(v:PowerLifecycleState)=>{current=v;},starts:()=>starts,stops:()=>stops};}
 async function run(){
  for(const family of ['HandheldCompanion.Devices.MSI.ClawCG3EM','HandheldCompanion.Devices.MSI.ClawA2VM','HandheldCompanion.Devices.ROGAlly','HandheldCompanion.Devices.GPD.GPDWin5']){
   const a=new ColdAdapter(family),fx=await make(a);let error='';
-  try{await fx.lifecycle.start({manualRecovery:true,reason:'after-s4-first-click'});
-   await fx.lifecycle.start({manualRecovery:true,reason:'before-current-write'});
-   await fx.lifecycle.apply(curve);}catch(e){error=String(e);}
+  try{const first=await fx.lifecycle.start({manualRecovery:true,reason:'after-s4-first-click'});
+   check(family+' first start independently returns an allowed gate',first.allowed);
+   if(!first.allowed)throw new Error('first manual start was not admitted');
+   await fx.lifecycle.apply(curve);
+   const written=a.calls.slice(),again=await fx.lifecycle.start({manualRecovery:true,reason:'already-controlled-idempotent-start'});
+   check(family+' start after the first write is idempotent',again.allowed&&a.calls.filter(x=>['open','open-events','acquire','enable','resume','close'].includes(x)).join(',')===written.filter(x=>['open','open-events','acquire','enable','resume','close'].includes(x)).join(','));
+  }catch(e){error=String(e);}
   check(family+' first click crosses cold Stopped to actual Open/Events/lease/enable',!error&&a.calls.filter(x=>x==='enable').length===1);
   check(family+' cold Host does not require a fictitious resume receipt',!a.calls.includes('resume'));
   check(family+' exactly one process owner',fx.starts()===1);
   if(error)console.log('ERROR '+error);
   await fx.lifecycle.close().catch(()=>{});
+ }
+ // One real HTTP adapter consumes inert JSON envelopes after the exact idle
+ // power history. No resume-ready is seeded before these public event entries.
+ {
+  const family='HandheldCompanion.Devices.XboxROGAllyX',a=new ColdAdapter(family),request=http.request,paths:string[]=[];let error='';
+  http.request=async(url,options={})=>{const path=new URL(url).pathname,body=options.body?JSON.parse(options.body):{};paths.push(path);let value:unknown;
+   try{
+    if(path==='/api/handshake')value={...await a.handshake(),protocolVersion:2,hostMode:'real-hc-authorized',hardwareCapable:true,hardwareWritesEnabled:false,hardwareWritesObserved:false};
+    else if(path==='/api/state')value={ok:true,state:await a.getState()};
+    else if(path==='/api/open')value={ok:true,state:await a.open()};
+    else if(path==='/api/open-events')value={ok:true,state:await a.openEvents()};
+    else if(path==='/api/acquire-control')value={ok:true,lease:await a.acquireControl()};
+    else if(path==='/api/enable')value={ok:true,state:await a.enable(body.nodes,body.leaseId)};
+    else if(path==='/api/resume')value={ok:true,state:await a.resume()};
+    else if(path==='/api/close')value={ok:true,state:await a.close()};
+    else if(path==='/api/release-control')value={ok:true,state:await a.releaseControl()};
+    else if(path==='/api/restore')value={ok:true,state:await a.restoreOem()};
+    else if(path==='/api/shutdown'){await a.shutdown();value={ok:true};}
+    else throw new Error('unexpected inert Fan HTTP route: '+path);
+    // Host's null policy omits nullable optional fields but explicitly retains
+    // the lease:null receipt. Keep false values and the nested State envelope.
+    return {status:200,headers:'',body:JSON.stringify(value,(key,item)=>item===null&&key!=='lease'?undefined:item),bodyComplete:true};
+   }catch(failure){if(!(failure instanceof FanApiError))throw failure;return {status:failure.status,headers:'',body:JSON.stringify({ok:false,error:{code:failure.errorCode,message:failure.message},state:a.snapshot()}),bodyComplete:true};}
+  };
+  const fx=await make(new HttpFanApiAdapter('http://127.0.0.1:8765'),37594165,false);
+  try{
+   for(const generation of [37594163,37594164,37594165]){
+    fx.setNative(native(generation,'suspending'));fx.lifecycle.setPowerGeneration(generation);fx.lifecycle.observePowerBoundary('suspending',generation);
+    fx.setNative(native(generation,'resuming'));fx.lifecycle.observePowerBoundary('resuming',generation);
+    fx.setNative(native(generation));fx.lifecycle.observePowerBoundary('resume-ready',generation);await fx.lifecycle.resume();
+    fx.lifecycle.observePowerBoundary('resumed',generation);await fx.lifecycle.resumeAfterCommittedPowerWake(generation);
+   }
+   check('XboxROGAllyX idle sleep history invokes real resume no-work without a Host or active intent',fx.starts()===0&&paths.length===0&&!fx.lifecycle.hasControlIntent&&fx.lifecycle.state==='stopped');
+   const first=await fx.lifecycle.start({manualRecovery:true,reason:'20261104-idle-sleep-first-enable'});
+   check('XboxROGAllyX first start after idle sleep independently returns an allowed gate',first.allowed);
+   if(!first.allowed)throw new Error('ROG Xbox first start was not admitted');
+   await fx.lifecycle.apply(curve);
+   check('XboxROGAllyX idle sleep first action reaches one original Open Events acquire and enable',['open','open-events','acquire','enable'].every(call=>a.calls.filter(value=>value===call).length===1));
+   check('XboxROGAllyX idle sleep cold Host never receives resume or Close',!a.calls.includes('resume')&&!a.calls.includes('close')&&!paths.includes('/api/resume'));
+   check('XboxROGAllyX idle sleep first action retains one process without replacement',fx.starts()===1&&fx.stops()===0&&fx.lifecycle.state==='ready');
+   check('XboxROGAllyX idle sleep control uses real HTTP JSON response parsing',paths.includes('/api/handshake')&&paths.includes('/api/state')&&paths.filter(path=>path==='/api/enable').length===1);
+  }catch(failure){error=String(failure);check('XboxROGAllyX idle sleep first action must complete without a second start',false);}
+  finally{await fx.lifecycle.close().catch(()=>{});http.request=request;}
+  if(error)console.log('ERROR '+error);
  }
  // A native sleep or newer generation after deferred cold admission invalidates it.
  for(const invalid of ['suspending','new-generation'] as const){const a=new ColdAdapter('HandheldCompanion.Devices.MSI.ClawCG3EM'),fx=await make(a);

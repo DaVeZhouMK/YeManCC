@@ -6,14 +6,17 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Win32;
 
-// Version maintenance is a startup one-shot. It never repairs an unknown or
-// same-version driver, constructs a controller, or downloads a different SDK.
+// Installation/version maintenance is a startup one-shot under GateName.
+// Verified absence -> safety/absence -> journal -> stock SDK install -> verify.
+// Legacy product -> official uninstall -> confirmed Windows reboot -> the same
+// install endpoint. Status reads never mutate; unknown/same/newer installs are
+// preserved. The attempt/pending records prevent same-boot mutation loops.
 internal static class UsbipUpgrade
 {
     internal const string GateName = @"Global\YeManCC.UsbipVersionMaintenance";
     internal const string AppKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{199505b0-b93d-4521-a8c7-897818e0205a}_is1";
     internal sealed record Snapshot(int schemaVersion, string phase, string installedVersion,
-        string targetVersion, string detail, int sequence);
+        string targetVersion, string detail, int sequence, bool udeDiskMatchConfirmed = false);
     internal sealed record Inventory(Version Target, Version? Installed, bool Present, bool Verified,
         bool DriverCurrent, string Reason = "");
     internal interface Runtime
@@ -34,13 +37,18 @@ internal static class UsbipUpgrade
         bool Verify(Inventory inventory);
         void Publish(Snapshot snapshot);
     }
+    // Current refers to the service-selected UDE file on disk, not the product
+    // label, filter, loaded kernel image or actual controller consumption.
+    private static string CurrentDetail(Inventory inventory) => inventory.Installed == inventory.Target
+        ? "USB/IP 产品版本与 UDE 驱动文件均匹配 HIDM 配套；这不代表内核已加载该文件或虚拟手柄已经可用。"
+        : $"USB/IP 的 UDE 驱动文件已匹配 HIDM 配套 {inventory.Target}，系统应用仍登记 {inventory.Installed}。已保留旧程序，未执行卸载；这不证明内核已加载该文件或虚拟手柄可用。";
     // Live status is a separate read-only operation. It cannot acknowledge or
     // repeat a previous maintenance attempt, and never invokes the SDK backend.
     internal static Snapshot Observe(Runtime runtime)
     {
         Inventory? inventory = null;
         Snapshot State(string phase, string detail) => new(1, phase,
-            inventory?.Installed?.ToString() ?? "", inventory?.Target.ToString() ?? "", detail, 0);
+            inventory?.Installed?.ToString() ?? "", inventory?.Target.ToString() ?? "", detail, 0, inventory?.DriverCurrent == true);
         try {
             inventory = runtime.Inspect();
             if (runtime.RebootPending) return State("reboot-required", "USB/IP 维护仍要求重启 Windows，当前读取未解除维护限制。");
@@ -48,9 +56,11 @@ internal static class UsbipUpgrade
             if (!inventory.Present) return State("not-installed", "当前未发现完整 USB/IP 安装；本次只读检查未安装驱动。");
             if (inventory.Installed is null) return State("unverified", "当前安装版本尚未确认，已保留原安装。");
             if (inventory.Installed.CompareTo(inventory.Target) > 0) return State("newer-preserved", "已重新核对，保留当前较新版本，不降级。");
-            if (inventory.DriverCurrent) return State("current", "已重新核对当前配套版本；未重试上次升级，也不代表虚拟手柄已经启动。");
+            if (inventory.DriverCurrent && inventory.Installed == inventory.Target) return State("current", CurrentDetail(inventory));
             if (inventory.Installed == inventory.Target) return State("unverified", "产品版本与配套相同，但驱动文件尚未核验一致；未自动修复。");
-            return State("update-found", "当前版本低于配套版本，已保留现有安装；未自动重试升级。");
+            return State("update-found", inventory.DriverCurrent
+                ? "UDE 驱动文件已匹配配套，但 USB/IP 产品仍为旧版，需要先卸载旧程序；本次只读检查未启动维护。"
+                : "当前版本低于配套版本，已保留现有安装；未自动重试升级。");
         } catch (Exception ex) {
             var message = ex.GetBaseException().Message;
             return State("unverified", "当前 USB/IP 只读检查未完成：" + message[..Math.Min(message.Length, 240)]);
@@ -63,21 +73,49 @@ internal static class UsbipUpgrade
         Snapshot Send(string phase, string detail)
         {
             var value = new Snapshot(1, phase, inventory?.Installed?.ToString() ?? "",
-                inventory?.Target.ToString() ?? "", detail, ++sequence);
+                inventory?.Target.ToString() ?? "", detail, ++sequence, inventory?.DriverCurrent == true);
             runtime.Publish(value); return value;
         }
         Snapshot InstallAndVerify(bool requireRestart)
         {
-            inventory = inventory! with { Installed = null };
+            if (!runtime.OwnerAlive) return Send("failed", "YMCC 已退出，未开始 USB/IP 配套安装。");
+            inventory = inventory! with { Installed = null, DriverCurrent = false };
             Send("installing", "正在由 HIDM 安装随包 USB/IP，请等待安装结束。");
-            runtime.Install(_ => { });
+            if (!runtime.OwnerAlive) return Send("failed", "YMCC 已退出，未调用 USB/IP 安装入口。");
+            // Forward bounded SDK progress without allowing a diagnostic sink
+            // failure to interrupt a system installer already in progress.
+            object progressGate = new();
+            int progressCount = 0;
+            string lastProgress = "";
+            bool acceptingProgress = true;
+            try {
+                runtime.Install(message => {
+                    if (string.IsNullOrWhiteSpace(message)) return;
+                    string detail = message.Trim();
+                    detail = detail[..Math.Min(detail.Length, 240)];
+                    lock (progressGate) {
+                        if (!acceptingProgress || progressCount >= 16 || detail == lastProgress) return;
+                        lastProgress = detail; ++progressCount;
+                        try { Send("installing", "HIDM 安装进度：" + detail); } catch { }
+                    }
+                });
+            } finally { lock (progressGate) acceptingProgress = false; }
             if (!runtime.OwnerAlive) return Send("failed", "HIDM 安装入口已返回，但 YMCC 已退出。下次启动会重新核对实际版本。");
             Send("verifying", "安装入口已返回，正在核对实际驱动版本与后端。");
             if (!runtime.Verify(inventory)) return Send("reboot-required", "尚未确认新驱动可用。请重启 Windows 后重新检查。");
-            inventory = inventory with { Installed = inventory.Target, DriverCurrent = true };
+            var target = inventory.Target;
+            // Backend availability does not prove that Inno product registration
+            // completed. Keep the actual inventory; never synthesize its version.
+            inventory = runtime.Inspect();
+            if (!inventory.Present || !inventory.Verified || inventory.Target != target ||
+                inventory.Installed != target || !inventory.DriverCurrent)
+                return Send(runtime.RebootPending ? "reboot-required" : "unverified",
+                    "USB/IP 后端已通过检查，但产品登记或驱动文件尚未确认配套版本。未宣告安装完成，请重启 Windows 后检查或导出日志。");
+            if (!runtime.OwnerAlive) return Send("failed", "安装检查已返回，但 YMCC 已退出。已保留维护记录，下次启动会重新核对。");
+            runtime.ConfirmCurrent(inventory);
             return requireRestart
                 ? Send("reboot-required", "USB/IP 配套版本已安装，原卸载流程要求重启，请先重启 Windows。")
-                : Send("complete", "USB/IP 配套升级完成；如虚拟手柄尚未开启，请重新启用所需模式。");
+                : Send("complete", "USB/IP 配套安装已通过驱动文件与后端检查；如虚拟手柄尚未开启，请重新启用所需模式。");
         }
         try
         {
@@ -86,24 +124,33 @@ internal static class UsbipUpgrade
             if (runtime.RebootPending) return Send("reboot-required", "上次 USB/IP 版本维护要求重启。请先重启 Windows，再启用虚拟手柄。");
             if (!inventory.Verified) return Send("unverified", inventory.Reason);
             if (!inventory.Present) {
-                if (!runtime.ShouldResumeInstall(inventory)) return Send("not-installed", "尚未安装 USB/IP；需要时由 HIDM 安装随包版本。");
-                if (!prepare) return Send("update-found", "已识别重启前的配套升级，检查模式未安装驱动。");
-                if (!runtime.Administrator) return Send("admin-required", "请以管理员身份重新打开 YMCC，接续 USB/IP 配套安装。");
-                if (!runtime.OwnerAlive) return Send("failed", "YMCC 已退出，未开始接续安装。");
+                bool resume = runtime.ShouldResumeInstall(inventory);
+                if (!prepare) return resume
+                    ? Send("update-found", "已识别重启前的配套升级，检查模式未安装驱动。")
+                    : Send("not-installed", "尚未安装 USB/IP；检查模式未安装驱动，启动准备时由 HIDM 安装随包版本。");
+                if (!runtime.Administrator) return Send("admin-required", "请以管理员身份重新打开 YMCC，完成 USB/IP 配套安装。");
+                if (!runtime.OwnerAlive) return Send("failed", "YMCC 已退出，未开始 USB/IP 配套安装。");
                 if (!runtime.SafeToChange(false, out var installReason)) return Send("busy", installReason);
                 if (runtime.AlreadyAttempted(inventory)) return Send("failed", "本次开机的配套安装未完成，已停止重复安装。请重启 Windows 后检查或导出日志。");
-                if (!runtime.Removed()) return Send("unverified", "重启后仍发现旧版 USB/IP 驱动包或后端残留，未开始安装。请检查系统应用中的 USB/IP 或导出日志。");
+                if (!runtime.Removed()) return Send("unverified", "仍发现 USB/IP 驱动包或后端残留，未开始安装。请重启 Windows 后检查或导出日志。");
+                if (!runtime.OwnerAlive) return Send("failed", "YMCC 已退出，未开始 USB/IP 配套安装。");
                 runtime.RecordAttempt(inventory);
                 return InstallAndVerify(false);
             }
             if (inventory.Installed is null) return Send("unverified", "无法确认已装版本，已保留原安装。请导出日志。");
             if (inventory.Installed > inventory.Target)
                 return Send("newer-preserved", "已装版本高于 HIDM 配套版本，保留现有版本，不降级。");
-            if (inventory.DriverCurrent || inventory.Installed == inventory.Target) {
-                if (prepare && inventory.DriverCurrent) runtime.ConfirmCurrent(inventory);
-                return Send("current", "USB/IP 无需版本升级；这不代表虚拟手柄已经启动。");
+            if (inventory.DriverCurrent && inventory.Installed == inventory.Target) {
+                if (prepare) runtime.ConfirmCurrent(inventory);
+                return Send("current", CurrentDetail(inventory));
             }
-            Send("update-found", "发现较旧的 USB/IP，准备升级到当前 HIDM 的配套版本。");
+            // Registration alone cannot confirm a current driver. Preserve it,
+            // consistently with the read-only observation; do not start repair.
+            if (inventory.Installed == inventory.Target)
+                return Send("unverified", "产品版本与配套相同，但驱动文件尚未核验一致；未自动修复。");
+            Send("update-found", inventory.DriverCurrent
+                ? "UDE 驱动文件已匹配配套，但 USB/IP 产品仍为旧版，准备核验并卸载旧程序。"
+                : "发现较旧的 USB/IP，准备升级到当前 HIDM 的配套版本。");
             if (!prepare) return Send("update-found", "检查模式未修改设备；下次启动准备时处理配套升级。");
             if (!runtime.Administrator) return Send("admin-required", "请以管理员身份重新打开 YMCC，完成 USB/IP 配套升级。");
             if (!runtime.OwnerAlive) return Send("failed", "YMCC 已退出，未开始卸载。");
@@ -129,7 +176,7 @@ internal static class UsbipUpgrade
         catch (Exception ex)
         {
             var value = new Snapshot(1, "failed", inventory?.Installed?.ToString() ?? "", inventory?.Target.ToString() ?? "",
-                "USB/IP 升级已停止：" + ex.GetBaseException().Message[..Math.Min(ex.GetBaseException().Message.Length, 240)] + "。请导出日志。", ++sequence);
+                "USB/IP 安装或升级已停止：" + ex.GetBaseException().Message[..Math.Min(ex.GetBaseException().Message.Length, 240)] + "。请导出日志。", ++sequence);
             try { runtime.Publish(value); } catch { /* A broken status sink must not trap the maintenance owner. */ }
             return value;
         }
@@ -143,9 +190,12 @@ internal static class UsbipUpgrade
         private readonly bool admin;
         private Assembly? sdk;
         private string uninstaller = "", installedImage = "", targetDriverHash = "";
-        private string coreHash = "", uninstallHash = "";
+        private string coreHash = "", uninstallHash = "", installedClient = "", clientHash = "";
         private readonly string journal;
         private Inventory? plannedInventory;
+        private readonly object lifecycleGate = new();
+        private readonly List<object> lifecycle = new();
+        public object[] LifecycleEvidence { get { lock (lifecycleGate) return lifecycle.ToArray(); } }
         private string PendingPath => YeManCC.UsbipMaintenanceState.PendingPath;
         internal WindowsRuntime(string root, string report, string session, int ownerPid, bool admin, Func<bool> ownerAlive)
         {
@@ -177,6 +227,15 @@ internal static class UsbipUpgrade
             ["db9d6a97a043deab8e34122dcf429eaabb4af0d10279c8fea1248976a368c1d4"] = "0.9.7.5",
             ["2a969ba59b3ffe33227ca1de17759a189d085d51c4f4e0f34df0b244ee558ab8"] = "0.9.7.5",
         };
+        // A target UDE may have been installed by HIDM's raw-driver migration
+        // while the old Inno product/filter remains. That is still an old
+        // product to remove, provided its product and executable identity pass.
+        internal static bool LegacyProductMatchesDriver(Version installed, Version target, string driverHash, string targetHash)
+        {
+            if (installed >= target || !Legacy.Values.Any(v => Version.Parse(v) == installed)) return false;
+            return driverHash.Equals(targetHash, StringComparison.OrdinalIgnoreCase) ||
+                (Legacy.TryGetValue(driverHash, out var known) && Version.Parse(known) == installed);
+        }
         public Inventory Inspect()
         {
             string file = Path.Combine(root, "PowerControl", "feature-assets", "virtual-gamepad", "HIDMaestro.Core.dll");
@@ -207,9 +266,9 @@ internal static class UsbipUpgrade
             installedImage = ResolveImage(image);
             if (!File.Exists(installedImage)) return new(target, installed, true, false, false, "无法核验当前驱动文件，未自动卸载。");
             string hash = Sha(installedImage);
-            if (hash.Equals(targetDriverHash, StringComparison.OrdinalIgnoreCase)) return new(target, installed, true, true, true);
-            if (installed == target) return new(target, installed, true, true, false);
-            if (!Legacy.TryGetValue(hash, out var known) || Version.Parse(known) != installed)
+            bool driverCurrent = hash.Equals(targetDriverHash, StringComparison.OrdinalIgnoreCase);
+            if (installed == target) return new(target, installed, true, true, driverCurrent);
+            if (!LegacyProductMatchesDriver(installed, target, hash, targetDriverHash))
                 return new(target, installed, true, false, false, "当前驱动不属于已核验的 HIDM 旧版，保留原安装。请导出日志。");
             string command = entry.GetValue("UninstallString") as string ?? "";
             uninstaller = UninstallerPath(command);
@@ -220,8 +279,10 @@ internal static class UsbipUpgrade
             string client = Path.Combine(location, "usbip.exe");
             if (!File.Exists(client) || !Version.TryParse(FileVersionInfo.GetVersionInfo(client).FileVersion, out var clientVersion) || clientVersion != installed)
                 return new(target, installed, true, false, false, "USB/IP 产品登记与程序版本不一致，保留原安装。");
+            installedClient = client;
+            clientHash = Sha(client);
             uninstallHash = Sha(uninstaller);
-            return new(target, installed, true, true, false);
+            return new(target, installed, true, true, driverCurrent);
         }
         internal sealed record SdkContract(Assembly Assembly, Version Target, string DriverHash, string Resource);
         internal static SdkContract ReadSdkContract(string file)
@@ -305,29 +366,84 @@ internal static class UsbipUpgrade
             }
             return true;
         }
-        public bool ShouldResumeInstall(Inventory inventory)
+        public bool ShouldResumeInstall(Inventory inventory) => PreviousBootMatches(PendingPath + ".previous-boot", coreHash, inventory.Target,
+            YeManCC.UsbipMaintenanceState.CurrentBootIdentifier, YeManCC.UsbipMaintenanceState.CurrentBootSequence, YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity);
+        internal static bool PreviousBootMatches(string previous, string core, Version target, Guid? boot, uint? sequence, string? bootSession)
         {
-            string previous = PendingPath + ".previous-boot";
-            if (!File.Exists(previous)) return false;
-            try {
-                if (new FileInfo(previous).Length > 4096) return false;
-                using var doc = JsonDocument.Parse(File.ReadAllText(previous));
-                return ContinuationMatches(doc.RootElement, coreHash, inventory.Target, YeManCC.UsbipMaintenanceState.CurrentBootIdentifier, YeManCC.UsbipMaintenanceState.CurrentBootSequence, YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity);
-            } catch { return false; }
+            var saved = YeManCC.UsbipMaintenanceState.ReadRecord(previous, pending: true);
+            if (saved.Kind == YeManCC.UsbipMaintenanceState.RecordKind.Missing) return false;
+            if (saved.Kind == YeManCC.UsbipMaintenanceState.RecordKind.Unavailable) throw new IOException("USB/IP 前次维护记录不可读，未开始安装");
+            if (saved.Kind != YeManCC.UsbipMaintenanceState.RecordKind.Ready) throw new InvalidDataException("USB/IP 前次维护记录未知或不支持，未开始安装");
+            return ContinuationMatches(saved.Value, core, target, boot, sequence, bootSession);
         }
         public void ConfirmCurrent(Inventory inventory)
         {
-            string previous = PendingPath + ".previous-boot";
-            if (!File.Exists(previous)) return;
+            // Only a complete, freshly inspected product/UDE pair may retire
+            // this session's install fence. A backend-only result is insufficient.
+            if (!inventory.Present || !inventory.Verified || inventory.Installed != inventory.Target || !inventory.DriverCurrent)
+                throw new InvalidDataException("USB/IP 完整安装身份尚未确认");
+            CompleteOwnedInstallRecord(PendingPath, coreHash, inventory.Target, session,
+                YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity);
+            CompletePreviousBootRecord(PendingPath, coreHash, inventory.Target,
+                YeManCC.UsbipMaintenanceState.CurrentBootIdentifier, YeManCC.UsbipMaintenanceState.CurrentBootSequence, YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity);
+        }
+        // File-only completion seam: a coincident session string cannot clear
+        // another SDK/version/boot transaction, nor can it imply completion.
+        internal static bool CompleteOwnedInstallRecord(string pendingPath, string core, Version target, string ownerSession, string? bootSession)
+        {
+            var saved = YeManCC.UsbipMaintenanceState.ReadRecord(pendingPath, pending: true);
+            if (saved.Kind == YeManCC.UsbipMaintenanceState.RecordKind.Missing) return false;
+            if (saved.Kind == YeManCC.UsbipMaintenanceState.RecordKind.Unavailable) throw new IOException("USB/IP 安装维护记录不可读，已保留");
+            if (saved.Kind != YeManCC.UsbipMaintenanceState.RecordKind.Ready) throw new InvalidDataException("USB/IP 安装维护记录无法核验，已保留");
+            using var pending = JsonDocument.Parse(saved.Value.GetRawText());
+            var row = pending.RootElement;
+            if (row.GetProperty("schemaVersion").GetInt32() != 3 ||
+                row.GetProperty("operation").GetString() != "usbip-install" ||
+                row.GetProperty("session").GetString() != ownerSession ||
+                !string.Equals(row.GetProperty("coreSha256").GetString(), core, StringComparison.OrdinalIgnoreCase) ||
+                row.GetProperty("targetVersion").GetString() != target.ToString() ||
+                !YeManCC.UsbipMaintenanceState.ValidBootSession(bootSession) ||
+                !string.Equals(row.GetProperty("bootSessionIdentity").GetString(), bootSession, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("USB/IP 维护记录不属于本次完整安装，已保留，请重新检查或导出日志");
+            YeManCC.UsbipMaintenanceState.PreserveRecord(pendingPath, pendingPath + ".owned-completed-" + Convert.ToHexString(SHA256.HashData(saved.Raw)).ToLowerInvariant() + ".json", saved, removeSource: true);
+            return true;
+        }
+        // Actual terminal preflight. The SDK may be reached only while the
+        // observed absence and owner/consumer admission are still current.
+        internal static bool RecheckInstall(Inventory planned, Func<Inventory> inspect,
+            Func<bool> ownerAlive, Func<(bool Safe, string Reason)> safety)
+        {
+            if (!ownerAlive()) throw new InvalidOperationException("YMCC 已退出，未开始 USB/IP 安装");
+            var now = inspect();
+            if (now.Target != planned.Target || !now.Verified)
+                throw new InvalidDataException("USB/IP 安装前状态已改变，未调用安装器");
+            if (now.Present && now.Installed == now.Target && now.DriverCurrent) return false;
+            if (now.Present || now.Installed is not null)
+                throw new InvalidDataException("USB/IP 安装前出现其他产品或不完整登记，未调用安装器");
+            var allowed = safety();
+            if (!allowed.Safe) throw new InvalidOperationException(allowed.Reason);
+            if (!ownerAlive()) throw new InvalidOperationException("YMCC 已退出，未开始 USB/IP 安装");
+            return true;
+        }
+        // Internal file-only seam: callers supply the existing protected path
+        // and boot evidence. This does not query Windows or retire pending.json.
+        internal static bool CompletePreviousBootRecord(string pendingPath, string core, Version target, Guid? boot, uint? sequence, string? bootSession)
+        {
+            string previous = pendingPath + ".previous-boot";
+            if (!File.Exists(previous)) return false;
             try {
-                using var doc = JsonDocument.Parse(File.ReadAllText(previous));
-                if (ContinuationMatches(doc.RootElement, coreHash, inventory.Target, YeManCC.UsbipMaintenanceState.CurrentBootIdentifier, YeManCC.UsbipMaintenanceState.CurrentBootSequence, YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity))
-                    File.Move(previous, previous + ".completed", true);
-            } catch { /* Diagnostic cleanup cannot change the installed driver verdict. */ }
+                var saved = YeManCC.UsbipMaintenanceState.ReadRecord(previous, pending: true);
+                if (saved.Kind != YeManCC.UsbipMaintenanceState.RecordKind.Ready) return false;
+                using var doc = JsonDocument.Parse(saved.Value.GetRawText());
+                if (!ContinuationMatches(doc.RootElement, core, target, boot, sequence, bootSession)) return false;
+                YeManCC.UsbipMaintenanceState.PreserveRecord(previous, previous + ".completed", saved, removeSource: true);
+                return true;
+            } catch { return false; /* Diagnostic cleanup cannot change the installed driver verdict. */ }
         }
         internal static bool ContinuationMatches(JsonElement record, string core, Version target, Guid? boot, uint? sequence=null, string? bootSession=null)
         {
             try {
+                if (!YeManCC.UsbipMaintenanceState.RecordStructure(record)) return false;
                 string? operation = record.GetProperty("operation").GetString();
                 return (operation == "usbip-uninstall" || operation == "usbip-install") &&
                     record.GetProperty("coreSha256").GetString() == core &&
@@ -344,10 +460,12 @@ internal static class UsbipUpgrade
         }
         public bool AlreadyAttempted(Inventory inventory)
         {
-            if (!File.Exists(journal)) return false;
+            var saved = YeManCC.UsbipMaintenanceState.ReadRecord(journal);
+            if (saved.Kind == YeManCC.UsbipMaintenanceState.RecordKind.Missing) return false;
+            if (saved.Kind != YeManCC.UsbipMaintenanceState.RecordKind.Ready) return true;
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(journal));
+                using var doc = JsonDocument.Parse(saved.Value.GetRawText());
                 return AttemptStillBlocks(doc.RootElement, coreHash, inventory.Installed, inventory.Target, YeManCC.UsbipMaintenanceState.CurrentBootIdentifier, YeManCC.UsbipMaintenanceState.CurrentBootSequence, YeManCC.UsbipMaintenanceState.CurrentBootSessionIdentity);
             }
             catch { return true; } // A corrupt interrupted-attempt record does not authorize a repeat.
@@ -355,6 +473,7 @@ internal static class UsbipUpgrade
         internal static bool AttemptStillBlocks(JsonElement record, string core, Version? installed, Version target, Guid? boot, uint? sequence=null, string? bootSession=null)
         {
             try {
+                if (!YeManCC.UsbipMaintenanceState.RecordStructure(record)) return true;
                 if (record.GetProperty("coreSha256").GetString() != core ||
                     record.GetProperty("installedVersion").GetString() != (installed?.ToString() ?? "absent") ||
                     record.GetProperty("targetVersion").GetString() != target.ToString()) return false;
@@ -391,9 +510,17 @@ internal static class UsbipUpgrade
                 catch (AbandonedMutexException) { held = true; throw new InvalidOperationException("前次传输操作中断，未卸载"); }
                 if (!held) throw new InvalidOperationException("HIDM 正在处理 USB/IP，请稍后重新打开 YMCC");
                 if (!OwnerAlive || !SafeToChange(true, out var reason)) throw new InvalidOperationException("USB/IP 占用状态发生变化，未卸载");
-                using (var key = Registry.LocalMachine.OpenSubKey(AppKey)) {
-                    if (!Version.TryParse(key?.GetValue("DisplayVersion") as string, out var now) || !Legacy.TryGetValue(Sha(installedImage), out var expected) || now != Version.Parse(expected))
-                        throw new InvalidDataException("USB/IP 版本或驱动身份已改变，未卸载");
+                using (var hive = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+                using (var key = hive.OpenSubKey(AppKey))
+                using (var service = hive.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\usbip2_ude")) {
+                    if (plannedInventory is null || !Version.TryParse(key?.GetValue("DisplayVersion") as string, out var now) ||
+                        now != plannedInventory.Installed ||
+                        !ResolveImage(service?.GetValue("ImagePath") as string ?? "").Equals(installedImage, StringComparison.OrdinalIgnoreCase) ||
+                        !LegacyProductMatchesDriver(now, plannedInventory.Target, Sha(installedImage), targetDriverHash) ||
+                        !UninstallerPath(key?.GetValue("UninstallString") as string ?? "").Equals(uninstaller, StringComparison.OrdinalIgnoreCase) ||
+                        !Path.GetFullPath(key?.GetValue("InstallLocation") as string ?? "").TrimEnd(Path.DirectorySeparatorChar).Equals(Path.GetDirectoryName(uninstaller), StringComparison.OrdinalIgnoreCase) ||
+                        !File.Exists(installedClient) || !Sha(installedClient).Equals(clientHash, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("USB/IP 产品、程序或驱动身份已改变，未卸载");
                 }
                 if (!TrustedUninstaller(uninstaller) || !Sha(uninstaller).Equals(uninstallHash, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("卸载程序已改变");
@@ -457,6 +584,12 @@ internal static class UsbipUpgrade
         }
         public void Install(Action<string> progress)
         {
+            var planned = plannedInventory ?? throw new InvalidOperationException("Missing USB/IP install transaction");
+            if (!RecheckInstall(planned, Inspect, () => OwnerAlive,
+                () => { bool safe = SafeToChange(false, out var reason); return (safe, reason); })) {
+                progress("安装前已确认配套产品和驱动文件，未重复运行安装器。");
+                return;
+            }
             string file = sdk!.Location;
             if (!Sha(file).Equals(coreHash, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("HIDM 在升级途中改变");
             WriteAttempt(true);
@@ -469,12 +602,8 @@ internal static class UsbipUpgrade
             string file = ResolveImage(key?.GetValue("ImagePath") as string ?? "");
             bool verified = File.Exists(file) && Sha(file).Equals(targetDriverHash, StringComparison.OrdinalIgnoreCase) &&
                 sdk!.GetType("HIDMaestro.HMContext", true)!.GetProperty("IsUsbipBackendAvailable", BindingFlags.Public | BindingFlags.Static)!.GetValue(null) is true;
-            if (verified && File.Exists(PendingPath)) {
-                using var pending = JsonDocument.Parse(File.ReadAllText(PendingPath));
-                if (pending.RootElement.GetProperty("operation").GetString() == "usbip-install" &&
-                    pending.RootElement.GetProperty("session").GetString() == session) File.Delete(PendingPath);
-            }
-            if (verified) ConfirmCurrent(inventory);
+            // Execute re-inspects product registration before ConfirmCurrent
+            // retires the fence; backend readiness alone must not retire it.
             return verified;
         }
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
@@ -482,20 +611,19 @@ internal static class UsbipUpgrade
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool PostMessageW(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
         public void Publish(Snapshot snapshot) {
-            AtomicWrite(report + ".usbip.json", new { batch = "GP-USBIP-UPGRADE-1", installRoot = root, ownerPid, session, usbipUpgrade = snapshot });
+            lock (lifecycleGate) {
+                lifecycle.Add(new { observedAt = DateTimeOffset.UtcNow, state = snapshot });
+                if (lifecycle.Count > 48) lifecycle.RemoveAt(0);
+                AtomicWrite(report + ".usbip.json", new { batch = "GP-USBIP-UPGRADE-1", installRoot = root,
+                    ownerPid, session, usbipUpgrade = snapshot, usbipLifecycle = lifecycle.ToArray() });
+            }
             // Finite stage notifications only; no worker, timer, polling or UI command.
             uint message = RegisterWindowMessageW("YeManCC.UsbipUpgrade.Changed");
             if (message != 0 && ownerPid > 0) PostMessageW(new IntPtr(0xffff), message, (UIntPtr)(uint)ownerPid, IntPtr.Zero);
         }
         private static void AtomicWrite(string file, object value, bool omitNull=false)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            string temp = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try {
-                using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    JsonSerializer.Serialize(stream, value, omitNull ? new JsonSerializerOptions { DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull } : null);
-                File.Move(temp, file, true);
-            } finally { if (File.Exists(temp)) File.Delete(temp); }
+            YeManCC.UsbipMaintenanceState.WriteRecord(file, value, omitNull, maximum: file.EndsWith(".usbip.json", StringComparison.OrdinalIgnoreCase) ? 262144 : 4096);
         }
     }
 }

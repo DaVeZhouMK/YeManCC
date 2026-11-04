@@ -7,6 +7,7 @@ using System.IO.Pipes;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using YeManInputHost.Diagnostics;
 
 internal static partial class Program
 {
@@ -18,6 +19,8 @@ internal static partial class Program
     private static bool _managedFaultConsumed;
     private static string? _managedLastCommand;
     private static ulong _managedLastSequence;
+    private static HostTerminalCleanup.Receipt? _managedTerminalReceipt;
+    private static readonly List<object> _managedTerminalReleaseAttempts = new();
 
     // Extends the pre-existing no-op diagnostic declaration, never Handle.
     private sealed partial class Stage
@@ -121,6 +124,11 @@ internal static partial class Program
     // Replaces only fatal diagnostic IO; records the production loop's cause.
     private static void LogFatalExit(string reason, string detail)
     {
+        if (reason is "terminal-cleanup-complete" or "terminal-cleanup-failed") {
+            _managedTerminalReceipt = JsonSerializer.Deserialize<HostTerminalCleanup.Receipt>(detail);
+            ManagedObserve("terminal-resource-settlement", _managedTerminalReceipt);
+            return;
+        }
         _managedExitReasons.Add(new
         {
             index = _managedExitReasons.Count,
@@ -275,10 +283,18 @@ internal static partial class Program
             Fixture.OnObserve = ManagedPnpObservation;
             _msiHostStageEvidence = new Stage();
             ManagedObserve("child-ready", new { options.Pipe, options.ParentPid, options.Fault });
-            pipeLoopExitCode = await RunPipeClientAsync(options.Pipe, options.ParentPid, session).ConfigureAwait(false);
-            pipeLoopReturned = true;
-            requestedExitCode = pipeLoopExitCode.Value;
-            stateAfterLoop = session.ManagedSnapshot();
+            requestedExitCode = await HostTerminalCleanup.RunAsync(async () => {
+                var loop = await RunPipeClientAsync(options.Pipe, options.ParentPid, session).ConfigureAwait(false);
+                pipeLoopExitCode = loop.ExitCode;
+                pipeLoopReturned = true;
+                stateAfterLoop = session.ManagedSnapshot();
+                return loop;
+            }, (out string detail) => {
+                var before = session.ManagedSnapshot();
+                var ok = session.ReleaseLocal(out detail);
+                _managedTerminalReleaseAttempts.Add(new { ok, detail, before, after = session.ManagedSnapshot() });
+                return ok;
+            }, LogFatalExit).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -289,20 +305,16 @@ internal static partial class Program
         finally
         {
             stateAfterLoop ??= session.ManagedSnapshot();
-            // Match production Main's final cleanup using the real ReleaseLocal.
-            // The first failed stop on pipe break can be retried here, just as
-            // in the product; stateAfterLoop preserves the retained objects.
-            try
-            {
-                finalCleanupAttempted = true;
-                finalCleanupOk = session.ReleaseLocal(out var detail);
-                finalCleanupDetail = detail;
+            // Match the current product's unique terminal settlement; never
+            // erase a failed terminal receipt with a second no-op release.
+            if (_managedTerminalReceipt is null) {
+                _managedTerminalReceipt = HostTerminalCleanup.Settle(
+                    new HostTerminalCleanup.LoopResult(requestedExitCode, "fixture-before-loop"), (out string detail) => session.ReleaseLocal(out detail));
+                requestedExitCode = _managedTerminalReceipt.ExitCode;
             }
-            catch (Exception ex)
-            {
-                failure ??= "final-cleanup:" + ex.GetType().Name + ":" + ex.Message;
-                requestedExitCode = 3;
-            }
+            finalCleanupAttempted = _managedTerminalReceipt.ReleaseAttempts > 0;
+            finalCleanupOk = _managedTerminalReceipt.ManagedReleaseComplete;
+            finalCleanupDetail = _managedTerminalReceipt.FinalDetail;
             stateAfterFinalCleanup = session.ManagedSnapshot();
             _msiHostStageEvidence = null;
             try
@@ -353,6 +365,8 @@ internal static partial class Program
                 hasController = session.HasController,
                 hasContext = session.HasContext,
                 phase = session.PhaseName,
+                terminalReceipt = _managedTerminalReceipt,
+                terminalReleaseAttempts = _managedTerminalReleaseAttempts,
                 finalCleanupAttempted,
                 finalCleanupOk,
                 finalCleanupDetail,

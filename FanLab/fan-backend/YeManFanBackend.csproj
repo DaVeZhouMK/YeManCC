@@ -19,6 +19,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\..\capabilities\PinnedFanSourceCatalog.cs" Link="Capabilities\PinnedFanSourceCatalog.cs" />
     <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.cs" Link="Capabilities\HcDeviceCapabilityCatalog.cs" />
     <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities\HcDeviceCapabilityCatalog.generated.cs" />
     <Compile Include="..\..\capabilities\FanCapabilityCatalog.cs" Link="Capabilities\FanCapabilityCatalog.cs" />

@@ -37,6 +37,7 @@ export function reset() {
 reset();
 export async function loadSettings(){await hooks.settingsRead?.();return copy(settings);}
 export async function updateSettings(update:any){record('settings.update');const draft=copy(settings);await update(draft);if(draft.extensions?.bootModesStartupResult&&faults['startup.result.write']){faults['startup.result.write']--;throw Error('injected:startup.result.write');}settings=draft;return copy(settings);}
+export function getSettingsRecoveryState(){return {status:'ready',persisted:true,message:'',...hooks.recoveryState};}
 export function getSettingsGeneration(){return generation;}
 export function assertSettingsGeneration(expected:number){if(expected!==generation)throw new Error('stale generation');}
 export function invalidate(){generation++;}
@@ -94,7 +95,7 @@ export async function writeGamingHomeStartup(enabled:boolean,repairHandheld=enab
  },enabled,repairHandheld,selection);
 }
 export async function steamMasterOn(){return state.steam;}
-export async function steamMasterSet(enabled:boolean,repairCommand=false){record('startup.steam',enabled);state.steam=enabled;state.earlyCommand=enabled?'"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat"':'';if(repairCommand)record('startup.commandRepair',true);}
+export async function steamMasterSet(enabled:boolean,repairCommand=false){record('startup.steam',enabled);await hooks.steamStartupWrite?.();state.steam=enabled;state.earlyCommand=enabled?'"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat"':'';if(repairCommand)record('startup.commandRepair',true);}
 export async function steamRunning(){return false;}
 export async function steamAddonExists(_id:string){return state.addon;}
 export async function steamAddonSet(id:string,enabled:boolean){record('addon.set',{id,enabled});state.addon=enabled;}
@@ -117,6 +118,12 @@ export const bootPlatform={async read(){return state.platform?copy(state.platfor
 export async function readBootDisplay(){return {brightness:50,resolution:'1280x800',hz:'60'};}
 export async function applyBootBrightness(percent:number){record('brightness.set',percent);}
 export async function savePerformanceSchedule(config:any){record('performance.save',config);settings.performanceSchedule=copy(config);return copy(config);}
+/** Compatibility port: retain the existing three terminal operations and counters. */
+export async function applyPerformanceConfiguration(config:any,frameRates:any){
+ await savePerformanceSchedule(config);
+ await updateSettings((draft:any)=>{draft.rtss={...draft.rtss,frameRates:copy(frameRates),templateDefaults:false};});
+ return restorePerformanceScheduleIfConfigured();
+}
 export async function saveFanPresetSelection(preset:string,expected:any){
  record('fan.save',preset);
  const fingerprint=(value:any)=>JSON.stringify([value.preset,value.nodes,value.presetCurves]);

@@ -10,19 +10,23 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include "json.hpp"
 #include "fan_keepalive_process_selection.h"
 using json=nlohmann::json;
-struct Process { DWORD pid; std::wstring name=L"YeManFanHost.exe", image; bool live=true, query=true, waitFailed=false; };
+unsigned long long birthSequence=1000;
+struct Process { DWORD pid; std::wstring name=L"YeManFanHost.exe", image; bool live=true, query=true, waitFailed=false, timeQuery=true; unsigned long long birthMs=++birthSequence; };
 struct Handle { std::shared_ptr<Process> process; };
 struct Snapshot { std::vector<std::shared_ptr<Process>> rows; std::size_t index=0; };
 std::map<DWORD,std::shared_ptr<Process>> processes;
 std::wstring POWER_CONTROL_DIR=L"C:\\fixture";
 bool listener=true,allowOpen=true,pathAllowed=true,faultOverride=false,throwPath=false,exitDuringPort=false;
 DWORD portOwner=4; int inventories=0,snapshotCloses=0,opens=0,closes=0,imageChecks=0,pathChecks=0,portChecks=0,notes=0;
+int diagnosticOpens=0,diagnosticCloses=0,timeReads=0;json lastInstanceNote;
 struct FixtureApi {
  using Handle=HANDLE;
  static HANDLE open(DWORD pid) noexcept {auto it=processes.find(pid);if(!allowOpen||it==processes.end())return nullptr;++opens;return static_cast<HANDLE>(new ::Handle{it->second});}
@@ -33,7 +37,7 @@ struct MockSession {bool enabled=false;}g_aiFanMockSession;
 struct MockHost {DWORD pid=0;bool owns(DWORD value){return value==pid;}}g_aiFanMockHost;
 struct FanHostIdentityProbe {bool processFound=false,imageMatched=false,portFound=false;DWORD matchedPid=0;};
 ymcc::fan_process::KeepaliveSelection<FixtureApi>& fanKeepaliveProcessSelection(){static thread_local ymcc::fan_process::KeepaliveSelection<FixtureApi> selected;return selected;}
-void reset(){fanKeepaliveProcessSelection().reset();processes.clear();listener=allowOpen=pathAllowed=true;faultOverride=throwPath=exitDuringPort=false;portOwner=4;inventories=snapshotCloses=opens=closes=imageChecks=pathChecks=portChecks=notes=0;g_aiFanMockSession.enabled=false;g_aiFanMockHost.pid=0;POWER_CONTROL_DIR=L"C:\\fixture";}
+void reset(){diagnosticOpens=diagnosticCloses=timeReads=0;lastInstanceNote=json::object();fanKeepaliveProcessSelection().reset();processes.clear();listener=allowOpen=pathAllowed=true;faultOverride=throwPath=exitDuringPort=false;portOwner=4;inventories=snapshotCloses=opens=closes=imageChecks=pathChecks=portChecks=notes=0;g_aiFanMockSession.enabled=false;g_aiFanMockHost.pid=0;POWER_CONTROL_DIR=L"C:\\fixture";}
 std::shared_ptr<Process> add(DWORD pid,const std::wstring& image=L"C:\\fixture\\fan-host-v2\\YeManFanHost.exe"){auto p=std::make_shared<Process>();p->pid=pid;p->image=image;processes[pid]=p;return p;}
 HANDLE fakeSnapshot(DWORD,DWORD){++inventories;auto* s=new Snapshot;for(const auto& [_,p]:processes)if(p->live)s->rows.push_back(p);return s;}
 bool fakeEntry(HANDLE h,PROCESSENTRY32W* e,bool next){auto* s=static_cast<Snapshot*>(h);if(next)++s->index;if(s->index>=s->rows.size())return false;const auto& p=s->rows[s->index];e->th32ProcessID=p->pid;wcsncpy_s(e->szExeFile,p->name.c_str(),_TRUNCATE);return true;}
@@ -44,7 +48,22 @@ std::wstring processImagePath(DWORD pid){++imageChecks;auto it=processes.find(pi
 bool sameFinalPath(const std::wstring& a,const std::wstring& b){++pathChecks;if(throwPath)throw std::runtime_error("fixture path failure");return pathAllowed&&_wcsicmp(a.c_str(),b.c_str())==0;}
 bool fanHostOwnsLoopbackPort(DWORD pid,unsigned short=8765){++portChecks;if(exitDuringPort){auto it=processes.find(pid);if(it!=processes.end())it->second->live=false;}return listener&&(portOwner==pid||portOwner==4);}
 BOOL fakeQueryImage(HANDLE h,DWORD,wchar_t* buffer,DWORD* size){++imageChecks;const auto& p=static_cast<::Handle*>(h)->process;if(!p->query||p->image.size()>=*size)return FALSE;std::copy(p->image.begin(),p->image.end(),buffer);*size=static_cast<DWORD>(p->image.size());return TRUE;}
-void fanHostNoteInstanceObserved(const FanHostIdentityProbe&){++notes;}
+unsigned long long focusFileTimeTicks(const FILETIME& value){return (static_cast<unsigned long long>(value.dwHighDateTime)<<32)|value.dwLowDateTime;}
+HANDLE fakeDiagnosticOpen(DWORD,BOOL,DWORD pid){auto it=processes.find(pid);if(!allowOpen||it==processes.end())return nullptr;++diagnosticOpens;return static_cast<HANDLE>(new Handle{it->second});}
+BOOL fakeDiagnosticClose(HANDLE h){++diagnosticCloses;delete static_cast<Handle*>(h);return TRUE;}
+BOOL fakeProcessTimes(HANDLE h,FILETIME* creation,FILETIME*,FILETIME*,FILETIME*){++timeReads;const auto& p=static_cast<Handle*>(h)->process;if(!p->timeQuery)return FALSE;const auto ticks=116444736000000000ULL+p->birthMs*10000ULL;creation->dwLowDateTime=static_cast<DWORD>(ticks);creation->dwHighDateTime=static_cast<DWORD>(ticks>>32);return TRUE;}
+std::string fanHostReadSessionToken(){return "fixture-not-a-secret";}
+json fanCredentialVersionDetail(const std::string&){return {{"fixture",true}};}
+void appendFanLifecycleLog(const char*,const json& detail){++notes;lastInstanceNote=detail;}
+#define OpenProcess fakeDiagnosticOpen
+#define CloseHandle fakeDiagnosticClose
+#define GetProcessTimes fakeProcessTimes
+#include "ProcessStartExtract.inc"
+#undef OpenProcess
+#undef CloseHandle
+#undef GetProcessTimes
+#include "InstanceSplitExtract.inc"
+#include "InstanceNoteExtract.inc"
 void fiExitHandoffApplyGateOverride(FanHostIdentityProbe* probe){if(faultOverride)*probe={};}
 #define CreateToolhelp32Snapshot fakeSnapshot
 #define Process32FirstW fakeFirst
@@ -62,7 +81,7 @@ void fiExitHandoffApplyGateOverride(FanHostIdentityProbe* probe){if(faultOverrid
 
 static int checks=0;static std::vector<std::string> failures;
 void require(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
-template<class F>void check(const char* name,F action){++checks;try{reset();action();fanKeepaliveProcessSelection().reset();require(closes==opens,"retained fixture handles not released");require(snapshotCloses==inventories,"snapshot handles not released");}catch(const std::exception& e){failures.push_back(std::string(name)+": "+e.what());fanKeepaliveProcessSelection().reset();}}
+template<class F>void check(const char* name,F action){++checks;try{reset();action();fanKeepaliveProcessSelection().reset();require(closes==opens,"retained fixture handles not released");require(snapshotCloses==inventories,"snapshot handles not released");require(diagnosticOpens==diagnosticCloses,"temporary diagnostic handle leaked");}catch(const std::exception& e){failures.push_back(std::string(name)+": "+e.what());fanKeepaliveProcessSelection().reset();}}
 int main(int argc,char** argv){
  if(argc==2&&std::string(argv[1])=="--child"){Sleep(1500);return 0;}
 #ifdef YMCC_FAULT_INJECT
@@ -90,6 +109,12 @@ int main(int argc,char** argv){
  check("process exit during validation cannot use positive port evidence",[]{auto p=add(71);require(fanHostExactProcessRunningForKeepalive(),"initial failed");exitDuringPort=true;require(!fanHostExactProcessRunningForKeepalive(),"exit after validation not detected");});
  check("idle reset releases selection and next arm discovers current host",[]{add(71);require(fanHostExactProcessRunningForKeepalive(),"initial failed");fanKeepaliveProcessSelection().reset();require(closes==1,"idle retained handle");require(fanHostExactProcessRunningForKeepalive()&&inventories==2,"rearm not freshly discovered");});
  check("one retained handle is replaced and closed exactly once",[]{auto& c=fanKeepaliveProcessSelection();add(71);add(72);c.remember(71);c.remember(72);require(closes==1&&opens==2,"replacement handle leak");c.reset();require(closes==2,"last handle leak");});
+ check("warm instance observations reuse held handle with fresh creation reads",[]{auto p=add(81);require(fanHostExactProcessRunningForKeepalive(),"initial failed");const auto before=diagnosticOpens;const auto reads=timeReads;for(int n=0;n<3;++n)require(fanHostExactProcessRunningForKeepalive(),"warm failed");require(diagnosticOpens==before,"warm note reopened process despite retained handle");require(timeReads==reads+3,"creation observation became a stale cache");require(lastInstanceNote["hostProcessStartMs"]==p->birthMs,"wrong instance birth");});
+ check("cold instance event reuses its one creation-time observation",[]{auto p=add(82);require(fanHostExactProcessRunningForKeepalive(),"initial failed");require(diagnosticOpens==1&&timeReads==1,"event queried creation time twice");require(lastInstanceNote["hostProcessStartMs"]==p->birthMs,"cold log changed birth");});
+ check("legacy observation still opens fresh without a retained handle",[]{add(83);require(fanHostExactProcessRunning()&&fanHostExactProcessRunning(),"legacy failed");require(diagnosticOpens==2&&diagnosticCloses==2,"legacy changed ownership or repeated event read");require(inventories==2,"legacy inventory lost");});
+ check("unavailable creation time cannot block valid current control",[]{auto p=add(84);require(fanHostExactProcessRunningForKeepalive(),"initial failed");p->timeQuery=false;const auto before=diagnosticOpens;require(fanHostExactProcessRunningForKeepalive(),"diagnostic failure blocked control");require(diagnosticOpens==before,"failed time read opened another process");require(lastInstanceNote["hostProcessStartMs"]==0,"unknown birth falsely retained");});
+ check("creation observation recovers without replacing control owner",[]{auto p=add(85);p->timeQuery=false;require(fanHostExactProcessRunningForKeepalive(),"initial failed");p->timeQuery=true;const auto before=diagnosticOpens;require(fanHostExactProcessRunningForKeepalive(),"recovery failed");require(diagnosticOpens==before,"recovery reopened held process");require(lastInstanceNote["hostProcessStartMs"]==p->birthMs,"recovered birth missing");});
+ check("instance evidence remains tied to held process if PID is reused",[]{auto old=add(86);auto held=FixtureApi::open(86);add(86);FanHostIdentityProbe probe{true,true,true,86};fanHostNoteInstanceObserved(probe,held);FixtureApi::close(held);require(diagnosticOpens==0&&timeReads==1,"held event reopened recycled PID");require(lastInstanceNote["hostProcessStartMs"]==old->birthMs,"evidence described successor instead of observed object");});
  // This case uses the real kernel adapter with an inert same-test executable.
  ++checks;
  try{
@@ -100,6 +125,8 @@ int main(int argc,char** argv){
   const DWORD ended=WaitForSingleObject(pi.hProcess,5000);if(ended!=WAIT_OBJECT_0){TerminateProcess(pi.hProcess,9);WaitForSingleObject(pi.hProcess,1000);}CloseHandle(pi.hProcess);
   require(matched,"real process handle/query not admitted");require(ended==WAIT_OBJECT_0,"inert child did not exit normally");require(!actual.matches([](DWORD,HANDLE){return true;}),"real exited process remained selected");
  }catch(const std::exception& e){failures.push_back(std::string("real kernel process-handle lifetime: ")+e.what());}
+ check("transport revision follows exact retained process object only",[]{add(71);require(fanHostExactProcessRunningForKeepalive(),"initial failed");const auto first=fanKeepaliveProcessSelection().revision();require(first!=0,"retained owner has no revision");require(fanHostExactProcessRunningForKeepalive()&&fanKeepaliveProcessSelection().revision()==first,"warm revision changed");auto old=processes[71];old->live=false;add(71);require(fanHostExactProcessRunningForKeepalive(),"new process not found");require(fanKeepaliveProcessSelection().revision()!=0&&fanKeepaliveProcessSelection().revision()!=first,"reused PID retained old binding");fanKeepaliveProcessSelection().reset();require(fanKeepaliveProcessSelection().revision()==0,"idle retains transport identity");});
+ check("failed handle capture exposes no reusable transport binding",[]{add(71);allowOpen=false;require(fanHostExactProcessRunningForKeepalive(),"legacy valid probe blocked");require(fanKeepaliveProcessSelection().revision()==0,"unknown held object reused");});
 #endif
  std::cout<<json{{"ok",failures.empty()},{"checks",checks},{"failures",failures},{"scope","production selection header and native probe/wrapper extracts; fixture discovery + inert child kernel lifetime; no FanHost/HC/device/CPU benchmark"}}.dump()<<"\n";return failures.empty()?0:1;
 }

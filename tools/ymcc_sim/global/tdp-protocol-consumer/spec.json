@@ -5,7 +5,8 @@
     "check_amd_routes",
     "check_intel_encoding",
     "check_intel_single_targets",
-    "check_daemon_client_allowlist"
+    "check_daemon_client_allowlist",
+    "check_uv_receipts"
   ],
   "expectedFailedGroup": "check_intel_single_targets",
   "expectedAssertText": "calls[-1]",

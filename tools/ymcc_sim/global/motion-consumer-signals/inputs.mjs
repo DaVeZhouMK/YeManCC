@@ -15,8 +15,10 @@ const fixedSources=[
  'tools/fixtures/hc_model_motion_consumer/README.md','tools/fixtures/hc_model_motion_consumer/harness.cpp','tools/fixtures/hc_model_motion_consumer/mocks.cpp','tools/fixtures/hc_model_motion_consumer/bridge.cpp',
  'tools/fixtures/hc_remaining_model_capabilities/expectations.mjs','tools/fixtures/hc_remaining_model_capabilities/source-pins.json',
  'tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/lib/hc_motion_matrix_guard.mjs',
+ 'tools/fixtures/hc_legacy_motion_catalog/axis-parser-legacy-reference.cpp',
  'tools/fixtures/hc_legacy_motion_catalog/catalog.json','deps/handheldcompanion-runtime/HC-BASELINE.json','deps/handheldcompanion-runtime/source-files.sha256',
  'tools/fixtures/hc_model_motion_consumer/private-binding-contract.json','native/hc_oem_windows_motion_catalog.h','capabilities/hc-motion-policy.json','capabilities/HcMotionCapabilityCatalog.h','capabilities/HcMotionCapabilityCatalog.generated.h','tools/lib/hc_motion_catalog.mjs','tools/fixtures/hc_model_motion_consumer/unified-binding-contract.json','tools/fixtures/hc_model_motion_consumer/unified_binding.cpp',
+ 'capabilities/upstream/f2e58468/OneXPlayer3.json','capabilities/upstream/f2e58468/OneXPlayer3.cs',
  'native/main.cpp','native/hc_model_motion_catalog.h','native/hc_legacy_motion_catalog.h','native/hc_generic_motion_catalog.h','native/hc_default_motion_catalog.h','native/msi_motion_capabilities.h','deps/json/json.hpp',
  ...['adapter.mjs','contracts.mjs','inputs.mjs','validation.mjs','evidence.mjs','run.mjs','Run-MotionConsumers.ps1','matrix-evidence.mjs','matrix-runner.mjs','owner-evidence.mjs','owner-runner.mjs','owner-fault-scheduler.mjs','owner-child-trace.mjs'].map(name=>MODULE_ROOT+name),
 ];

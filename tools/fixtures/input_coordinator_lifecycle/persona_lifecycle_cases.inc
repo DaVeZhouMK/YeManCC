@@ -18,21 +18,40 @@ static void observeSource(int family,const std::string& persona){
  } // MSI source eligibility is observed after actual Start arms its canonical DInput route.
 }
 // Fixture display labels: new families must not be reported as GPD.
-static const char* familyName(int family){switch(family){case 0:return "MSI";case 1:return "ROG";case 2:return "GPD";case 3:return "OneXPlayer";case 4:return "Ayanero";default:throw std::logic_error("unknown persona fixture family");}}
-struct ControlledDmi {const char* manufacturer;const char* product;const char* declaredDeviceClass;const char* supportPointer;};
+static const char* familyName(int family){switch(family){case 0:return "MSI";case 1:return "ROG";case 2:return "GPD";case 3:return "OneXPlayer";case 4:return "Ayanero";case 5:return "Lenovo";default:throw std::logic_error("unknown persona fixture family");}}
+struct ControlledDmi {const char* manufacturer;const char* product;const char* declaredDeviceClass;const char* supportPointer;const char* systemProduct=nullptr;const char* declaredDeviceId=nullptr;};
 static void prepare(int family,const std::string& name,const ControlledDmi* dmi=nullptr){
- if(family>=3)require(family<=4&&dmi,"new family variants require declared controlled DMI leaves");
+ if(family>=3&&family!=5)require(family<=4&&dmi,"new family variants require declared controlled DMI leaves");
+ if(family==5)require(dmi,"Lenovo family requires its declared controlled DMI leaf");
  require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"new independent lifecycle case starts with no residual owned child");
  seed();fixtureFullPipe=true;fullPipeFault="none";fixtureXinputSourceLive=true;fixturePsSameInstanceNames=false;fixturePsReturnManualTopology=false;
  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_shortcutRecordingActive=false;g_inputCaptureStop=false;
  g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;
- if(family){g_machineIdentity.family=family==1?YmccFamily::AsusRogAllyX:family==3?YmccFamily::OneXPlayer:family==4?YmccFamily::Ayanero:YmccFamily::Gpd;g_machineIdentity.manufacturer=family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
+ if(family&&family!=5){g_machineIdentity.family=family==1?YmccFamily::AsusRogAllyX:family==3?YmccFamily::OneXPlayer:family==4?YmccFamily::Ayanero:YmccFamily::Gpd;g_machineIdentity.manufacturer=family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
  // Default 0/1/2 inputs remain MSI/ROG/G1617. Only explicit variants
  // replace DMI at this fixture leaf; no catalog/deviceClass resolution is forged.
  if(dmi){g_machineIdentity.manufacturer=dmi->manufacturer;g_machineIdentity.product=dmi->product;}
+ const ymcc::capabilities::Device* catalogDevice=nullptr;
+ if(family==5){
+  require(dmi->systemProduct&&dmi->declaredDeviceId,"Lenovo controlled DMI declares a system model and expected catalog deviceId");
+  g_msiDinput.enabled=false;g_msiDinputSourceValid=false;
+  // product is the baseboard; only systemProduct supplies the Lenovo model.
+  // Feed the actual resolver, then find its output in the existing total catalog.
+  g_machineIdentity.systemProduct=dmi->systemProduct;ymccResolveFamily(g_machineIdentity);
+  require(g_machineIdentity.resolved&&g_machineIdentity.family==YmccFamily::LenovoLegionGo,"actual DMI resolver admits this registered Lenovo system model");
+  require(g_machineIdentity.deviceClass==dmi->declaredDeviceClass,"actual Lenovo DMI resolution matches the expected canonical consumer class");
+  catalogDevice=ymcc::capabilities::find(g_machineIdentity.deviceClass);
+  require(catalogDevice&&catalogDevice->factoryInstantiable&&catalogDevice->consumerClass==g_machineIdentity.deviceClass&&catalogDevice->deviceId==dmi->declaredDeviceId,"existing total catalog find binds the resolved Lenovo class to its registered concrete deviceId");
+  require(ymccFamilyInterfacePolicy(g_machineIdentity.family)==YmccInterfacePolicy::None&&!g_msiDinputRouteDinputArmed.load(),"resolved Lenovo starts on the existing standard source without MSI mode authority");
+  require(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Unsupported&&!g_msiNativeForegroundLease.active,"resolved Lenovo retains unsupported native-OFF foreground isolation and no native write lease");
+ }
  reg_fs();cases.push_back({{"name",name},{"controlledFamily",familyName(family)},{"realManagedPipe",true},{"sourceDiscoveries",json::array()},{"periods",json::array()},{"managedReceipts",json::array()}});
- if(dmi)cases.back()["controlledDmi"]={{"boundary","fixture-leaf; not catalog resolution or hardware acceptance"},{"manufacturer",dmi->manufacturer},{"product",dmi->product},{"declaredDeviceClass",dmi->declaredDeviceClass},{"runtimeDeviceClass",g_machineIdentity.deviceClass},{"source","capabilities/CONTROLLER-REPAIR-SUPPORT.json"},{"jsonPointer",dmi->supportPointer}};
+ if(dmi&&family!=5)cases.back()["controlledDmi"]={{"boundary","fixture-leaf; not catalog resolution or hardware acceptance"},{"manufacturer",dmi->manufacturer},{"product",dmi->product},{"declaredDeviceClass",dmi->declaredDeviceClass},{"runtimeDeviceClass",g_machineIdentity.deviceClass},{"source","capabilities/CONTROLLER-REPAIR-SUPPORT.json"},{"jsonPointer",dmi->supportPointer}};
+ if(family==5){
+  cases.back()["controlledDmi"]={{"boundary","controlled DMI leaf; actual family/catalog resolution; not hardware acceptance"},{"manufacturer",g_machineIdentity.manufacturer},{"product",g_machineIdentity.product},{"systemProduct",g_machineIdentity.systemProduct},{"declaredDeviceClass",dmi->declaredDeviceClass},{"runtimeDeviceClass",g_machineIdentity.deviceClass},{"canonicalClass",std::string(catalogDevice->consumerClass)},{"deviceId",std::string(catalogDevice->deviceId)},{"resolver","ymccResolveFamily"},{"source","deps/handheldcompanion-runtime/source/Devices/IDevice.cs"},{"catalog","capabilities/hc-device-catalog.generated.h"}};
+  cases.back()["nativeForegroundUnsupported"]=true;
+ }
 }
 static json receipt(HANDLE child,const std::wstring& file,const std::string& persona,unsigned expectedCreates=1){
  const auto result=fullPipeChildOutcome(child,file);
@@ -80,7 +99,7 @@ static void close(int family,const std::string& persona,unsigned expectedCreates
  fullPipeDrainQueuedLifecycle();require(fullPipeSpawnCount==spawns&&fullPipeChildObservers.empty()&&!g_inputHostProcess,"queued late work cannot resurrect OFF and no fixture child remains");
  cases.back()["periods"].push_back({{"requestId",ticket},{"persona","disabled"},{"outcome",done.phase},{"finalCount",finalCount(ticket,"success")}});
 }
-static void first(int family,const std::string& persona,const ControlledDmi* dmi=nullptr){prepare(family,std::string(familyName(family))+"/persona-first/"+persona,dmi);const auto spawns=fullPipeSpawnCount;startFirst(family,persona);close(family,persona);require(fullPipeSpawnCount==spawns+1,"first-ON-to-OFF lifecycle has exactly one Host without fallback replacement");cases.back()["passed"]=true;fixtureFullPipe=false;}
+static void first(int family,const std::string& persona,const ControlledDmi* dmi=nullptr){prepare(family,std::string(familyName(family))+(family==5&&dmi&&dmi->systemProduct?std::string("/")+dmi->systemProduct:std::string{})+"/persona-first/"+persona,dmi);const auto spawns=fullPipeSpawnCount;startFirst(family,persona);close(family,persona);require(fullPipeSpawnCount==spawns+1,"first-ON-to-OFF lifecycle has exactly one Host without fallback replacement");cases.back()["passed"]=true;fixtureFullPipe=false;}
 static void transfer(const std::string& from,const std::string& to){
  prepare(1,"ROG/persona-transfer/"+from+"-to-"+to);const auto caseSpawns=fullPipeSpawnCount;startFirst(1,from);
  auto oldSource=fresh(1);oldSource.pad.wButtons=XINPUT_GAMEPAD_B;oldSource.pad.sThumbLX=29000;
@@ -173,7 +192,7 @@ static void personaLifecycleCases140(){
 static void familyLifecycleCases140(){
  using namespace personaLifecycle140;
  if(!fspath::is_regular_file(fixtureManagedDll))throw std::runtime_error("explicit managed fixture missing");
- // Exact support declarations used as DMI leaves; deviceClass stays unbound.
+ // Original support-declaration leaves remain unbound; Lenovo below resolves DMI.
  static const ControlledDmi dmi[]={
  {"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"},
  {"ONE-NETBOOK TECHNOLOGY CO., LTD.","ONEXPLAYER X2","HandheldCompanion.Devices.OneXPlayerX2","/physicalModels/2"},
@@ -187,6 +206,24 @@ static void familyLifecycleCases140(){
  }
  require(cases.size()==firstCase+9,"family selector executes exactly nine original first variants");
  require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"nine family variants leave no owned child or active native Host");
+ // Seven HC SystemModel keys, four registered concrete classes, three existing
+ // personas. Every row reuses first/actual Start/fresh source/Host pipe/final/OFF.
+ static const ControlledDmi lenovoDmi[]={
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoTablet",nullptr,"83E1","hc.device.LegionGoTablet"},
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoTablet2",nullptr,"83N0","hc.device.LegionGoTablet2"},
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoTablet2",nullptr,"83N1","hc.device.LegionGoTablet2"},
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoSZ2",nullptr,"83L3","hc.device.LegionGoSZ2"},
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoSZ1",nullptr,"83N6","hc.device.LegionGoSZ1"},
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoSZ1",nullptr,"83Q2","hc.device.LegionGoSZ1"},
+ {"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoSZ1",nullptr,"83Q3","hc.device.LegionGoSZ1"}
+ };
+ for(const auto& model:lenovoDmi)for(const std::string persona:{"steamdeck","dualsense-edge","elite"}){
+  first(5,persona,&model);
+  require(ymccFamilyInterfacePolicy(g_machineIdentity.family)==YmccInterfacePolicy::None&&!g_msiDinputRouteDinputArmed.load(),"Lenovo standard virtual lifecycle never acquires MSI mode authority");
+  require(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Unsupported&&!g_msiNativeForegroundLease.active,"Lenovo virtual output and OFF return do not grant unsupported native foreground writes");
+ }
+ require(cases.size()==firstCase+30,"family selector retains nine original variants and adds exactly twenty-one Lenovo variants");
+ require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"original and Lenovo family variants leave no owned child or active native Host");
  // Negative: only the controlled physical-family enum, no Deck DMI claim.
  // Both existing settings admission and actual Start execute the real policy.
  prepare(2,"SteamDeck/physical-self-output-blocked");
@@ -201,4 +238,5 @@ static void familyLifecycleCases140(){
  require(rejected,"actual Start reports the original physical SteamDeck self-output boundary");
  require(fullPipeSpawnCount==spawns&&fullPipeReceipts.size()==receipts&&fullPipeChildObservers.empty()&&!g_inputHostProcess&&!g_inputHostPrepared,"physical Deck negative creates no managed Host or target");
  cases.back()["passed"]=true;fixtureFullPipe=false;
+ require(cases.size()==firstCase+31,"family selector retains physical Deck refusal after thirty standard virtual lifecycles");
 }

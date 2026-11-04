@@ -171,6 +171,9 @@ int main(int argc,char** argv){
     Json report={{"schema","ymcc.typed-legacy-async-request.v1"},{"productCallbackMode","typed-only; legacy macro absent"},{"fullPersistentAcceptance",false},{"officialLoaderExecuted",false},{"realSteamActions",0},{"physicalSleepPerformed",false},{"externalNetwork",false},{"originalNativeBudgetMs",20000},
         {"telemetryBoundary","Read-only real callback forwarding and shared owned measurement mapping. No callback is invoked synthetically. No stop policy, deadline, Job kill or callback owner is waived."}};
     const auto started=GetTickCount64();bool okay=false,calibrationPassed=true;
+    Json observedHandlesAfterBaselineTable=nullptr;
+    Json observedHandlesAfterDirectAndNegatives=nullptr;
+    Json observedHandlesAfterTypedGroup=nullptr;
     try{
         report["sharedCryptoCalibration"]=initializeSharedCryptoForMeasurement();
         // Calibrate an independent exact production AsyncRequest before strict
@@ -182,7 +185,7 @@ int main(int argc,char** argv){
             // WinHTTP session's independent close notifications. Observe their
             // actual count within the unchanged1500ms release window.
             const auto until=GetTickCount64()+1500;DWORD last=handles();unsigned stable=0;Json samples=Json::array();
-            while(GetTickCount64()<until&&stable<10){Sleep(10);const auto count=handles();samples.push_back(count);stable=count==last?stable+1:0;last=count;}
+            while(GetTickCount64()<until&&(stable<10||(i==1&&last!=before))){Sleep(10);const auto count=handles();samples.push_back(count);stable=count==last?stable+1:0;last=count;}
             report["coldAsyncCalibration"].push_back({{"index",i},{"beforeHandles",before},{"afterHandles",handles()},{"stableSamples",stable},{"samples",samples},{"probes",probes},{"table",handleTable()}});
             if(stable<10||(i==1&&before!=handles()))calibrationPassed=false; // Preserve FAIL, continue actual scenario measurements.
         }
@@ -190,19 +193,25 @@ int main(int argc,char** argv){
         // resource measurements; own children leave naturally.
         for(unsigned i=0;i<2;++i){const auto before=handles();{Controls controls(L"success");Context context;}report["coldContextCalibration"].push_back({{"index",i},{"beforeHandles",before},{"afterHandles",handles()}});if(i==1)need(before==handles(),"cold-context-not-stable");}
         const auto handlesBefore=handles();const auto threadsBefore=threadCount();report["parentHandlesBefore"]=handlesBefore;report["parentThreadsBefore"]=threadsBefore;report["parentHandleSnapshotBefore"]=handleTable();
+        observedHandlesAfterBaselineTable=handles();
         for(const auto& kind:{std::string("http-silent"),std::string("ws-silent")}){
             direct.push_back(directConsumer(kind,false,false));negatives.push_back(directConsumer(kind,true,false));negatives.push_back(directConsumer(kind,false,true));
         }
+        observedHandlesAfterDirectAndNegatives=handles();
         unsigned serial=0;
         for(const auto& stop:{std::string("shutdown"),std::string("fatal"),std::string("client-harvest")})for(const auto& kind:{std::string("http-silent"),std::string("ws-silent")}){
             try{rows.push_back(typed(output/(stop+"-"+kind),kind,stop,++serial));}catch(const std::exception& error){rows.push_back({{"id",stop+"."+kind},{"kind",kind},{"stop",stop},{"passed",false},{"error",error.what()}});}
         }
+        observedHandlesAfterTypedGroup=handles();
         report["parentHandlesAfter"]=handles();report["parentThreadsAfter"]=threadCount();report["parentHandleSnapshotAfter"]=handleTable();
         report["strictParentHandlesEqual"]=handles()==handlesBefore;report["strictParentThreadsEqual"]=threadCount()==threadsBefore;
         okay=calibrationPassed&&rows.size()==6&&direct.size()==2&&negatives.size()==4&&handles()==handlesBefore&&threadCount()==threadsBefore;
         for(const auto& row:rows)if(row.at("passed")!=true)okay=false;for(const auto& row:direct)if(row.at("passed")!=true)okay=false;for(const auto& row:negatives)if(row.at("passed")!=true)okay=false;
     }catch(const std::exception& error){measure::active=nullptr;report["error"]=error.what();}
     report["calibrationPassed"]=calibrationPassed;report["passed"]=okay;report["originalTypedRows"]=rows;report["directAsyncRequestConsumers"]=direct;report["negativeControls"]=negatives;report["elapsedMs"]=GetTickCount64()-started;report["noStopPolicyInterposition"]=true;
+    report["metadataParentHandlesAfterBaselineTable"]=std::move(observedHandlesAfterBaselineTable);
+    report["metadataParentHandlesAfterDirectAndNegativeGroup"]=std::move(observedHandlesAfterDirectAndNegatives);
+    report["metadataParentHandlesAfterTypedGroup"]=std::move(observedHandlesAfterTypedGroup);
     std::ofstream(output.parent_path()/L"native-result.json")<<report.dump(2)<<"\n";std::cout<<report.dump()<<std::endl;WSACleanup();return okay?0:1;
 }
 

@@ -1526,7 +1526,7 @@
   },
   "added": {
     "source": "tools/fixtures/xinput_identity_feedback_lifecycle_fixture.cpp",
-    "sourceSha256": "356797b38b95793532a6be12c6590b747061e63e22f08eb6a4fc4805fe9d9e90",
+    "sourceSha256": "cc854e4060f65457890523c56a3ca7a1af37c51b4fa1bfe1a37743bbfb6bd072",
     "names": [
       "touch-output-episode-baseline-is-not-per-move",
       "touch-output-resume-api-success-is-not-motor-proof",
@@ -1551,7 +1551,267 @@
     ]
   },
   "current": {
-    "cases": 73,
-    "checks": 322
+    "cases": 76,
+    "checks": 381
+  },
+  "manual": {
+    "source": "tools/fixtures/xinput_identity_feedback_lifecycle_fixture.cpp",
+    "sourceSha256": "cc854e4060f65457890523c56a3ca7a1af37c51b4fa1bfe1a37743bbfb6bd072",
+    "cases": 3,
+    "checks": 59,
+    "shape": [
+      {
+        "name": "manual-source-replacement-zero-failure-xinput-slot",
+        "checks": [
+          {
+            "name": "manual/xinput-slot/starts with live manual A",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/B has its independent physical proof",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/A remains current when B is selected",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/failed A zero refuses replacement receipt",
+            "expected": false
+          },
+          {
+            "name": "manual/xinput-slot/failed A zero attempts no B pulse",
+            "expected": false
+          },
+          {
+            "name": "manual/xinput-slot/failed A zero reports stop unavailable",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/exactly one API attempt targets A zero",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/B XInput nonzero API attempts are zero",
+            "expected": 0
+          },
+          {
+            "name": "manual/xinput-slot/B MSI writer calls are zero",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/failed API has no accepted write",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/failure retains active A",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/failure retains A generation",
+            "expected": 1
+          },
+          {
+            "name": "manual/xinput-slot/failure retains A identity and capability",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/failure retains A power topology and flags",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/A remains physically nonzero in memory",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/failed replacement schedules immediate A stop",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/actual scheduler drains the retained A stop",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/A stop has a second accepted zero attempt",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/B is admitted only after A settles",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/only admitted B advances the generation",
+            "expected": 2
+          },
+          {
+            "name": "manual/xinput-slot/B owns the intended backend",
+            "expected": false
+          },
+          {
+            "name": "manual/xinput-slot/B retains manual arbitration",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/independent B actuator gets its pulse",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/late A stop does not write to B",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/late A stop preserves B owner and deadline",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-slot/B is returned by its own actual scheduler",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "manual-source-replacement-zero-failure-xinput-to-msi",
+        "checks": [
+          {
+            "name": "manual/xinput-to-msi/starts with live manual A",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/B has the actual current MSI record",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/A remains current when B is selected",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/failed A zero refuses replacement receipt",
+            "expected": false
+          },
+          {
+            "name": "manual/xinput-to-msi/failed A zero attempts no B pulse",
+            "expected": false
+          },
+          {
+            "name": "manual/xinput-to-msi/failed A zero reports stop unavailable",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/exactly one API attempt targets A zero",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/B XInput nonzero API attempts are zero",
+            "expected": 0
+          },
+          {
+            "name": "manual/xinput-to-msi/B MSI writer calls are zero",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/failed API has no accepted write",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/failure retains active A",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/failure retains A generation",
+            "expected": 1
+          },
+          {
+            "name": "manual/xinput-to-msi/failure retains A identity and capability",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/failure retains A power topology and flags",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/A remains physically nonzero in memory",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/failed replacement schedules immediate A stop",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/actual scheduler drains the retained A stop",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/A stop has a second accepted zero attempt",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/B is admitted only after A settles",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/only admitted B advances the generation",
+            "expected": 2
+          },
+          {
+            "name": "manual/xinput-to-msi/B owns the intended backend",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/B retains manual arbitration",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/B MSI gets exactly its selected pulse",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/late A stop does not write to B",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/late A stop preserves B owner and deadline",
+            "expected": true
+          },
+          {
+            "name": "manual/xinput-to-msi/B is returned by its own actual scheduler",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "manual-source-replacement-preserves-same-source-and-touch-arbitration",
+        "checks": [
+          {
+            "name": "manual/control/same-source manual overwrite stays admitted",
+            "expected": true
+          },
+          {
+            "name": "manual/control/same-source manual overwrite advances once",
+            "expected": 2
+          },
+          {
+            "name": "manual/control/same-source overwrite adds no safety zero",
+            "expected": 1
+          },
+          {
+            "name": "manual/control/same-source overwrite only attempts pulses",
+            "expected": true
+          },
+          {
+            "name": "manual/control/touch still defers to manual owner",
+            "expected": true
+          },
+          {
+            "name": "manual/control/denied touch preserves manual generation",
+            "expected": 2
+          },
+          {
+            "name": "manual/control/same-source overwrite keeps its normal stop",
+            "expected": true
+          }
+        ]
+      }
+    ],
+    "scope": "Independent physical A/B, pre-failure API attempts, actual scheduler/finish return, selected B admission and late-A/manual-touch boundaries; no synthetic MSI-current contradiction."
   }
 }

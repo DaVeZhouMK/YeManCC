@@ -59,7 +59,13 @@ public:
         if (!QueryFullProcessImageNameW(entry.process, 0, image, &length) || WaitForSingleObject(entry.process, 0) != WAIT_TIMEOUT) {
             CloseHandle(entry.process); entry.process = nullptr; return 0;
         }
-        entry.kind = classifyPath(std::wstring(image, length));
+        try {
+            entry.kind = classifyPath(std::wstring(image, length));
+        } catch (...) {
+            // Do not pin a failed classification to this entire process lifetime.
+            entries_.erase(pid);
+            throw;
+        }
         return entry.kind;
     }
 };

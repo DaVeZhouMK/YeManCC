@@ -1,0 +1,43 @@
+/* Controller instructions only; comparison labels and keyboard output keep their own UI. */
+:root {
+  --ymcc-key-a: #3fb950;
+  --ymcc-key-b: #e5484d;
+  --ymcc-key-x: #2ea6ff;
+  --ymcc-key-y: #f5b942;
+}
+:root .controller-key[data-controller-key] {
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 var(--controller-key-size, 20px);
+  width: var(--controller-key-size, 20px);
+  min-width: var(--controller-key-size, 20px);
+  height: var(--controller-key-size, 20px);
+  padding: 0;
+  margin: 0 .35em 0 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--controller-key-color);
+  color: #08131d;
+  font-family: inherit;
+  font-size: calc(var(--controller-key-size, 20px) * .58);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  vertical-align: middle;
+  white-space: nowrap;
+  text-transform: none;
+  opacity: 1;
+}
+:root .controller-key[data-controller-key="A"] { --controller-key-color: var(--ymcc-key-a); }
+:root .controller-key[data-controller-key="B"] { --controller-key-color: var(--ymcc-key-b); }
+:root .controller-key[data-controller-key="X"] { --controller-key-color: var(--ymcc-key-x); }
+:root .controller-key[data-controller-key="Y"] { --controller-key-color: var(--ymcc-key-y); }
+:root .controller-key--small { --controller-key-size: 16px; }
+:root button:has(> .controller-key[data-controller-key]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  column-gap: 6px;
+}
+:root button > .controller-key[data-controller-key] { margin: 0; }

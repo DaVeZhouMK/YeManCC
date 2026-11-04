@@ -11,7 +11,7 @@ function fixture(){
  f.api=createSteamAppearance({location:async()=>({directory:'C:/fixture/PowerControl'}),exists:async()=>true,hidden:async()=>{throw Error('detached launches forbidden')},delay:async ms=>{clock+=ms},idlePolicy:async()=>f.policy,
  beginUse:async()=>{f.begin++;f.group=true;return {ok:true,token:String(++f.token),pid:42,birth:'100',backendPath:'C:\\fixture\\CssLoader-Standalone-Headless.exe'}},ensureUse:async()=>{f.ensure++;if(f.failEnsure)throw Error('fixture Ensure failed');Object.assign(snap,{backendReady:!f.slowReady,backendProcessCount:2,backendIdle:false,configuredMatchesBackend:true});return {ok:true}},
  endUse:async token=>{f.end++;assert.equal(token,String(f.token));f.onEnd?.();if(f.holdRelease)await f.holdRelease;if(f.holdEnd)return {ok:true,minimumHoldPending:true};f.group=false;if(f.failEnd){Object.assign(snap,{backendReady:true,backendProcessCount:1,backendIdle:false});return {ok:false};}return {ok:true}},
- run:async(program,args,timeoutMs)=>{const action=args[args.indexOf('-Action')+1];f.calls.push(action);if(action==='Status'&&f.failStatus)throw Error('status transport failed');if(action==='Status'&&f.statusFailure)return {exitCode:1,stdout:JSON.stringify({ok:false,message:'status rejected'}),stderr:''};if(action==='Status'){f.statusReads.push({at:clock,timeoutMs});if(f.ensure){clock+=Math.min(f.statusMs,timeoutMs);if(f.statusMs>timeoutMs)throw Error('fixture timeout');}}if(f.wait)await f.wait;let result;
+ run:async(program,args,timeoutMs)=>{const action=args[args.indexOf('-Action')+1];f.lastArgs=[...args];f.calls.push(action);if(action==='Status'&&f.failStatus)throw Error('status transport failed');if(action==='Status'&&f.statusFailure)return {exitCode:1,stdout:JSON.stringify({ok:false,message:'status rejected'}),stderr:''};if(action==='Status'){f.statusReads.push({at:clock,timeoutMs});if(f.ensure){clock+=Math.min(f.statusMs,timeoutMs);if(f.statusMs>timeoutMs)throw Error('fixture timeout');}}if(f.wait)await f.wait;let result;
   if(action==='Status'&&f.ensure&&f.slowReady&&++f.readyReads>=f.slowReady)snap.backendReady=true;
   if(action==='Reconcile')result={ok:true,snapshot:structuredClone(snap)};
   if(action==='Apply'){if(f.failApply)throw Error('fixture Apply failure');snap.revision='c'.repeat(64);result={ok:true,saved:true,snapshot:structuredClone(snap)}}
@@ -57,5 +57,13 @@ await check('idle cannot report old success after final Status transport failure
 await check('idle cannot report old success after final Status rejection',async()=>{const f=fixture();f.statusFailure=true;const result=await f.api.idle(f.snap);assert.equal(result.ok,false);assert.equal(result.message,'status rejected');assert.equal(f.begin+f.ensure+f.end,0)});
 await check('typed render v4 refuses old plans and missing, unsafe or duplicate content identities',async()=>{
  for(const mutation of ['old','missing','unsafe','duplicate']){const f=fixture();const file={path:'shared.css',property:'--ymcc-file-0123456789abcdef',contentProperty:'--ymcc-content-abcdef0123456789',enabled:true};const plan={protocol:4,variables:[],files:[file]};if(mutation==='old')plan.protocol=3;if(mutation==='missing')delete file.contentProperty;if(mutation==='unsafe')file.contentProperty='--ymcc-content-<invalid>';if(mutation==='duplicate')plan.files.push({...file,path:'other.css',property:'--ymcc-file-0000000000000000'});f.snap.themes[0].renderPlan=plan;assert(!validAppearanceSnapshot(f.snap));}
+});
+await check('appearance requests carry the native owner channel and exact Steam identity as discrete arguments',async()=>{
+ const f=fixture();f.policy.processQuery='Local\\YMCC.CssInventory.'+'a'.repeat(32);await f.api.read();
+ assert.equal(f.lastArgs[f.lastArgs.indexOf('-ProcessQuery')+1],f.policy.processQuery);
+ assert.equal(f.lastArgs[f.lastArgs.indexOf('-SessionPid')+1],'42');assert.equal(f.lastArgs[f.lastArgs.indexOf('-SessionBirth')+1],'100');assert.equal(f.begin+f.ensure,0);
+});
+await check('malformed owner channel cannot be forwarded to PowerShell',async()=>{
+ const f=fixture();f.policy.processQuery='Local\\YMCC.CssInventory.invalid" -Action Ensure';await f.api.read();assert(!f.lastArgs.includes('-ProcessQuery'));assert.equal(f.begin+f.ensure,0);
 });
 const result={ok:true,passed:cases.length,cases,actualSteamOperations:0,actualCssOperations:0};if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));

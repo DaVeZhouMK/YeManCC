@@ -1,5 +1,6 @@
 // Dedicated-profile intents use the existing game command, mutex and store owners.
 import {gamePolicyKey} from './gamePolicyHysteresis';
+import {captureGameCustomProfileTarget} from './gameCustomProfileTarget';
 import {gameMirrorIdentity,makeGameMirrorEntry,rememberGameMirrorInput,type GameMirrorGyroDefaults} from './deckyGameActions';
 import {requireVirtualTargetAllowed,type VirtualTargetPolicy} from './virtualTargetPolicy';
 import type {DetectedGame} from './gamedetect';
@@ -11,6 +12,7 @@ export const gameProfileRevision=(config:GameCustomConfig,key:string)=>JSON.stri
 export const gameProfileImportSource=(s:ContinuousPerformanceSnapshot)=>JSON.stringify([s.identity,s.controls,s.frameRates]);
 export interface ProfileMirrorDeps {
   allowed:()=>boolean;game:()=>DetectedGame|null;label:(game:DetectedGame)=>string;
+  settingsGeneration:()=>number;
   power:()=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;
   acquire:(label:string)=>(()=>void)|null;load:()=>Promise<GameCustomConfig>;
   schedule:()=>Promise<PerformanceScheduleConfig>;currentSchedule:()=>PerformanceScheduleConfig|null;
@@ -27,8 +29,8 @@ export function createProfileMirrorActions(deps:ProfileMirrorDeps) {
   if(!admission||typeof admission.profile!=='string'||args.value==='dedicated'&&typeof admission.profileSource!=='string'||!context.gameIdentity)throw Error('GAME_PROFILE_ADMISSION_REQUIRED');
   const captured=deps.game();
   if(!captured||!gamePolicyKey(captured)||captured.pid<=0||!captured.processCreated||gameMirrorIdentity(captured)!==context.gameIdentity)throw Error('GAME_PROFILE_TARGET_CHANGED');
-  const game=structuredClone(captured),key=gamePolicyKey(game),target={exe:key,pid:game.pid,processCreated:String(game.processCreated),generation:context.generation};
-  const checkpoint=()=>{context.checkpoint();if(!deps.allowed()||gameMirrorIdentity(deps.game())!==context.gameIdentity)throw Error('GAME_PROFILE_TARGET_CHANGED');};
+  const game=structuredClone(captured),key=gamePolicyKey(game),target=captureGameCustomProfileTarget(game,deps.settingsGeneration());
+  const checkpoint=()=>{context.checkpoint();if(!deps.allowed()||gameMirrorIdentity(deps.game())!==context.gameIdentity||deps.settingsGeneration()!==target.generation)throw Error('GAME_PROFILE_TARGET_CHANGED');};
   const gate=async()=>{checkpoint();const p=await deps.power();checkpoint();if(p.phase!=='ready'||p.hardwareWritesAllowed!==true||p.generation!==context.generation)throw Error('GAME_PROFILE_POWER_NOT_READY');};
   await gate();const release=deps.acquire('decky-game-profile');if(!release)throw Error('GAME_PROFILE_BUSY');
   try {

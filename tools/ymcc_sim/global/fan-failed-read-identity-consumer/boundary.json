@@ -4,8 +4,10 @@
   "reviewedAt": "2026-10-20T18:28:26.843Z",
   "original": {
     "path": "tools/fan_failed_state_read_identity_selftest.ts",
-    "sha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06",
-    "all85LinesUnchanged": true
+    "sha256": "069a889d5dce6f26d8b2b299c5e113c3355329d031d0cdfdc4ef58e92b761795",
+    "all85LinesUnchanged": false,
+    "original45CasesRetained": true,
+    "originalAssertion49Unchanged": true
   },
   "originalMatrix": {
     "retiredWritesAndStates": 36,
@@ -285,7 +287,7 @@
     },
     {
       "path": "tools/fan_failed_state_read_identity_selftest.ts",
-      "sha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06"
+      "sha256": "069a889d5dce6f26d8b2b299c5e113c3355329d031d0cdfdc4ef58e92b761795"
     },
     {
       "path": "tools/fixtures/fan_no_io_host.ts",
@@ -1001,6 +1003,10 @@
       "exactReconstructionVerified": true,
       "originalNoIoTerminalsAndAssertionsPreserved": true,
       "physicalAcceptance": false
+    },
+    {
+      "atUtc": "2026-11-02T13:15:57.673049+00:00",
+      "scope": "Same original45 scenario identities retained; extend current-failure apply case with eight exact source-retirement boundaries and one public cold-Open reentry; original assertion49 and exact12 historical fault predictions retained. Runtime NOT_RUN; unrelated reviewed product-source pins stay unchanged."
     }
   ]
 }

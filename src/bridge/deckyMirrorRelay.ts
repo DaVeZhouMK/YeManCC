@@ -5,9 +5,9 @@ import type { MirrorSnapshot } from '../../decky-plugin/src/mirrorClient';
 import type { GameMirrorAdmission } from './deckyGameActions';
 export interface MirrorControlAdmission {audioOptimization?:string;performance?:string;frames?:string;touchpads?:string;global?:string;monitor?:string;trainer?:string;}
 export type RelayReadSnapshot = Omit<MirrorSnapshot,'runId'|'revision'> & {gameAdmission?:GameMirrorAdmission;controlAdmission?:MirrorControlAdmission};
-export interface MirrorPeer { connection: string; runId: string; connected?: boolean; revision?: number; }
+export interface MirrorPeer { connection: string; runId: string; connected?: boolean; revision?: number; connectionRevision?:number; }
 export interface MirrorRequest extends MirrorPeer { request: { command: string; runId: string; id?: string; clientId?: string; [key: string]: unknown }; }
-export interface RelayMutationContext { generation:number; revision:number; gameIdentity?:string; gameAdmission?:GameMirrorAdmission; controlAdmission?:MirrorControlAdmission; checkpoint:() => void; }
+export interface RelayMutationContext { nativePeer?:{connection:string;runId:string;connectionRevision:number}; generation:number; revision:number; gameIdentity?:string; gameAdmission?:GameMirrorAdmission; controlAdmission?:MirrorControlAdmission; checkpoint:() => void; }
 export type MirrorReadStage = 'power'|'powerSource'|'schedule'|'performance'|'topology'|'gyro'|'frames'|'touchpads'|'global'|'monitor'|'input';
 export interface MirrorReadTrace { measure<T>(stage: MirrorReadStage, read: () => Promise<T>): Promise<T>; }
 export interface RelayDeps {
@@ -39,13 +39,18 @@ export class ReadOnlyMirrorRelay {
   private controlAdmissions = new WeakMap<MirrorSnapshot,MirrorControlAdmission>();
   private gameAdmissions = new WeakMap<MirrorSnapshot,GameMirrorAdmission>();
   private recoveryTimer:ReturnType<typeof setTimeout>|null=null;
-  private recoveryRemaining=2;
+  private recoveryLease:object|null=null;
+  private recoveryAttempt=0;
+  private readFault=false;
+  private freshReadRequested=false;
+  private deferredSnapshot:MirrorSnapshot|null=null;
   private readTask: Promise<MirrorSnapshot | null> | null = null;
   private deliveries = new Map<string,Promise<void>>();
   private disposed = false;
   private mutationBusy = false;
   private clients = new Map<string,{highest:number;receipts:Map<number,{signature:string;response:Promise<Record<string,unknown>>}>}>();
   private clientRun = '';
+  private transportRevision = -1;
   private readSequence = 0;
   private firstDemandRead = true;
   private lastReadDiagnostic = -Infinity;
@@ -57,20 +62,41 @@ export class ReadOnlyMirrorRelay {
     return typeof peer.connection === 'string' && /^\d{1,20}$/.test(peer.connection) && typeof peer.runId === 'string' && /^[a-f0-9]{32}$/.test(peer.runId);
   }
   private matches(peer: MirrorPeer): boolean { return !!this.peer && peer.connection === this.peer.connection && peer.runId === this.peer.runId; }
-  connected(peer: MirrorPeer): void {
-    if (this.disposed || !this.validPeer(peer)) return;
-    if (peer.connected === false) { if (this.matches(peer)) this.detach(); return; }
-    if (this.matches(peer)) {
+  connected(peer: MirrorPeer): boolean {
+    if (this.disposed || !peer || !this.validPeer(peer)) return false;
+    const serial=peer.connectionRevision,typed=serial!==undefined,same=this.matches(peer);
+    // Legacy traffic may retain a typed peer, never replace or revive it.
+    if(!typed&&this.transportRevision>=0&&!same)return false;
+    if(typed){
+      if(!Number.isSafeInteger(serial)||serial!<0||serial!<this.transportRevision || serial===this.transportRevision&&(!same||peer.connected===false))return false;
+      this.transportRevision=serial!;
+    }
+    if (peer.connected === false) {
+      // A newer native disconnect is global transport truth even if its ON
+      // event was lost. Untyped legacy events keep the original identity fence.
+      if(same||typed){this.detach();return true;}return false;
+    }
+    if (same) {
       if (Number.isSafeInteger(peer.revision) && peer.revision! > this.revision) {
         this.revision = peer.revision!; this.cache = null; this.dirty = true; this.sourceEpoch++;
       }
-      return;
+      return true;
     }
     if (this.clientRun !== peer.runId) { this.clients.clear(); this.clientRun = peer.runId; }
     this.detach(); this.peer = { connection: peer.connection, runId: peer.runId };
     this.revision = Number.isSafeInteger(peer.revision) && peer.revision! > 0 ? peer.revision! : 0;
     // A healthy HUD-only peer does not need any business-store observers.
     // Install them when an authenticated sidebar snapshot is requested.
+    return true;
+  }
+  // Only the private native dispatcher may assert this receipt, after its
+  // current-Broker check. It repairs a missed peer event; it grants no write.
+  observeAuthenticatedRequestPeer(event:MirrorRequest):boolean {
+    if(this.disposed||!event||!this.validPeer(event)||event.connected===false||!event.request||event.request.runId!==event.runId)return false;
+    // Old native versions lack this envelope field. Keep an already matching
+    // peer usable, but missing metadata cannot replace newer confirmed truth.
+    if(event.connectionRevision===undefined&&this.transportRevision>=0&&!this.matches(event))return false;
+    return this.connected(event)&&this.matches(event);
   }
   // Native attach may complete after this same peer explicitly hid its sidebar.
   // Respect that authenticated pause; only unknown/visible demand needs the
@@ -98,6 +124,12 @@ export class ReadOnlyMirrorRelay {
     }
     this.stopRecovery();
   }
+  // Only a verified context edge or completed explicit owner action may bypass
+  // the fault read's wait. Ordinary demand/events cannot renew that budget.
+  invalidateFresh(contextChanged=false):void {
+    if(contextChanged){this.stopRecovery();this.recoveryAttempt=0;this.deferredSnapshot=null;}
+    this.freshReadRequested=true;this.invalidate();
+  }
   invalidate(): void {
     if (this.disposed || !this.peer) return;
     this.dirty = true; this.sourceEpoch++;
@@ -108,16 +140,29 @@ export class ReadOnlyMirrorRelay {
     this.queued = true;
     queueMicrotask(() => { this.queued = false; if (this.peer && this.requested && !this.disposed && !this.mutationBusy) void this.push(); });
   }
-  private stopRecovery():void {if(this.recoveryTimer!==null){(this.deps.cancel??clearTimeout)(this.recoveryTimer);this.recoveryTimer=null;}}
+  private stopRecovery():void {
+    this.recoveryLease=null;
+    if(this.recoveryTimer!==null){(this.deps.cancel??clearTimeout)(this.recoveryTimer);this.recoveryTimer=null;}
+  }
   private recoverRead():void {
-    if(this.disposed||!this.peer||!this.requested||this.mutationBusy||this.recoveryTimer!==null||this.recoveryRemaining===0)return;
-    const epoch=this.epoch,delay=this.recoveryRemaining===2?250:1000;this.recoveryRemaining--;
-    this.recoveryTimer=(this.deps.schedule??setTimeout)(()=>{this.recoveryTimer=null;if(epoch===this.epoch&&this.requested&&!this.disposed&&!this.mutationBusy)void this.push();},delay);
+    if(this.disposed||!this.peer||!this.requested||this.mutationBusy||this.recoveryTimer!==null)return;
+    // Same capped delays as the existing mirror transport. Only an incomplete
+    // requested read owns this lease; healthy/hidden HUD has no business polling.
+    // A long outage must not strand a field after just two fast observations.
+    const delays=[250,1000,3000,10000,30000];
+    const delay=delays[Math.min(this.recoveryAttempt,delays.length-1)];
+    this.recoveryAttempt=Math.min(this.recoveryAttempt+1,delays.length);
+    const epoch=this.epoch,demandEpoch=this.demandEpoch,lease={};this.recoveryLease=lease;
+    this.recoveryTimer=(this.deps.schedule??setTimeout)(()=>{
+      if(this.recoveryLease!==lease||epoch!==this.epoch||demandEpoch!==this.demandEpoch)return;
+      this.recoveryTimer=null;this.recoveryLease=null;
+      if(this.requested&&!this.disposed&&!this.mutationBusy){this.dirty=true;void this.push();}
+    },delay);
   }
   private detach(): void {
-    this.stopRecovery();this.recoveryRemaining=2;
+    this.stopRecovery();this.recoveryAttempt=0;this.readFault=false;
     this.epoch++; this.sourceEpoch++; this.demandEpoch++; this.stopObserving(); this.deliveries.clear(); this.offeredSnapshots.clear();
-    this.firstDemandRead=true;this.peer = null; this.cache = null; this.readTask = null; this.dirty = true; this.requested = false; this.snapshotDemandPaused = false; this.revision = 0;
+    this.firstDemandRead=true;this.freshReadRequested=false;this.deferredSnapshot=null;this.peer = null; this.cache = null; this.readTask = null; this.dirty = true; this.requested = false; this.snapshotDemandPaused = false; this.revision = 0;
   }
   private snapshot(): Promise<MirrorSnapshot | null> {
     if (!this.peer || this.disposed) return Promise.resolve(null);
@@ -137,29 +182,32 @@ export class ReadOnlyMirrorRelay {
         try { data = await this.deps.read(trace); }
         catch { failed=true;data = { generation: 0, ready: false, game: null, fan: { supported: false, enabled: false, preset: '', choices: [] }, notice: 'YMCC 状态读取失败；未修改任何配置' }; }
         const finished=(this.deps.now??Date.now)(),elapsedMs=Math.max(0,finished-started);
-        if(first || (failed||partial||elapsedMs>=250) && finished-this.lastReadDiagnostic>=10000){
+        const fault=failed||partial||!data.ready;
+        const current=!this.disposed&&epoch===this.epoch&&readDemandEpoch===this.demandEpoch&&sourceEpoch===this.sourceEpoch;
+        if(first || current&&fault!==this.readFault || (failed||partial||elapsedMs>=250) && finished-this.lastReadDiagnostic>=10000){
           this.lastReadDiagnostic=finished;
           this.diagnostic('snapshot-read-finished',{readId,demandEpoch:readDemandEpoch,elapsedMs,ok:!failed&&!partial,
-            stage:failed?'failed':partial?'partial':'settled',discarded:this.disposed||epoch!==this.epoch||readDemandEpoch!==this.demandEpoch||sourceEpoch!==this.sourceEpoch,...timings});
+            stage:failed?'failed':partial?'partial':'settled',ready:data.ready,discarded:this.disposed||epoch!==this.epoch||readDemandEpoch!==this.demandEpoch||sourceEpoch!==this.sourceEpoch,...timings});
         }
         if (this.disposed || epoch !== this.epoch || !this.matches(peer)) return null;
         if (sourceEpoch !== this.sourceEpoch) { if (!this.requested) return null; continue; }
+        this.readFault=fault;
         const {gameAdmission,controlAdmission,...publicData}=data;
+        this.deferredSnapshot=null;
         this.cache = { ...structuredClone(publicData), runId: peer.runId, revision: ++this.revision };
         if(controlAdmission)this.controlAdmissions.set(this.cache,structuredClone(controlAdmission));
         if(gameAdmission)this.gameAdmissions.set(this.cache,structuredClone(gameAdmission));
-        // A read exception is an unavailable snapshot, not a settled cache.
-        // Reuse the same bounded recovery as source churn; only a successful
-        // current read replenishes the two-attempt budget.
+        // Keep a returned partial view usable for unaffected controls. The one
+        // recovery lease, not each mutation, forces its next fresh observation.
+        // An error or native-not-ready result is not recovery completion.
         this.dirty = failed;
-        if(failed)unstable=true;
-        else {this.stopRecovery();this.recoveryRemaining=2;}
+        if(failed||partial||!publicData.ready)unstable=true;
+        else {this.stopRecovery();this.recoveryAttempt=0;}
         return this.cache;
       }
       if (epoch !== this.epoch) return null;
       unstable=true;
-      return {...(this.cache?structuredClone(this.cache):{generation:0,game:null,fan:{supported:false,enabled:false,preset:'',choices:[]}}),
-        runId:peer.runId,revision:++this.revision,ready:false,notice:'YMCC 状态正在更新；侧栏会自动恢复'};
+      return this.deferredView();
     })().finally(() => { if (this.readTask === task) {this.readTask = null;if(unstable)this.recoverRead();} });
     this.readTask = task; return task;
   }
@@ -176,10 +224,28 @@ export class ReadOnlyMirrorRelay {
     // Each original owner still validates its exact private source before save.
     return true;
   }
+  // This is an explicit unavailable view, never an admitted/healthy cache.
+  // Churning reads may not have produced this.cache at all; repeated demand
+  // must still wait on the same recovery lease instead of starting 3 more reads.
+  private deferredView():MirrorSnapshot|null {
+    if(!this.peer)return null;
+    if(!this.deferredSnapshot){
+      const previous=this.cache??{generation:0,game:null,fan:{supported:false,enabled:false,preset:'',choices:[]}};
+      this.deferredSnapshot={...previous,runId:this.peer.runId,revision:++this.revision,ready:false,
+        actions:{fan:false,game:false,performance:false,frames:false,touchpads:false,global:false,audioOptimization:false,monitor:false},
+        fan:{...previous.fan,canToggle:false},notice:'YMCC 状态正在更新；侧栏会自动恢复'};
+    }
+    return this.deferredSnapshot;
+  }
   private async push(probeId?:string): Promise<void> {
     const peer = this.peer; const epoch = this.epoch, demandEpoch = this.demandEpoch;
     if (!peer || !this.requested) return;
-    const snapshot = await this.snapshot();
+    const fresh=this.freshReadRequested;this.freshReadRequested=false;
+    let snapshot:MirrorSnapshot|null;
+    if(this.recoveryTimer!==null&&!fresh){
+      // Both cached and never-stable sources share the one fault observation.
+      snapshot=this.cache&&!this.dirty?this.cache:this.deferredView();
+    }else snapshot=await this.snapshot();
     if (!snapshot || !this.requested || demandEpoch !== this.demandEpoch || epoch !== this.epoch || !this.matches(peer)) return;
     const key = epoch + ':' + snapshot.revision + ':' + (probeId??'');
     const prior = this.deliveries.get(key);
@@ -222,12 +288,13 @@ export class ReadOnlyMirrorRelay {
       this.snapshotDemandPaused = false;
       const resumed=!this.requested;
       if(resumed){this.firstDemandRead=true;this.diagnostic('snapshot-demand',{subscribe:true,demandEpoch:this.demandEpoch});}
-      this.requested = true;this.recoveryRemaining=2;
+      this.requested = true;
+      if(resumed){this.stopRecovery();this.recoveryAttempt=0;}
       // Ordinary overlapping requests share the current source read. Refreshing
       // demand again would discard it and repeat every business-owner read.
       // Reopen/probe/later explicit demand stays fresh; source events invalidate
       // independently, including a game/power change during the shared read.
-      if(resumed || probeId || !this.readTask)this.deps.snapshotDemand?.();
+      if((resumed || probeId || !this.readTask)&&this.recoveryTimer===null)this.deps.snapshotDemand?.();
       await this.push(probeId as string|undefined); return;
     }
     if (typeof event.request.id !== 'string' || event.request.id.length > 128) return;
@@ -271,7 +338,8 @@ export class ReadOnlyMirrorRelay {
     // Refresh authoritative data, then compare against this peer's bounded delivered receipts.
     // Only unchanged slider sources can survive an unrelated revision race; the original
     // owner still validates the fresh private source, identity, power and shared action lock.
-    const epoch = this.epoch; const snapshot = await this.snapshot();
+    if(this.recoveryTimer!==null&&this.dirty&&!this.freshReadRequested){await failure('当前状态正在恢复，请等待新状态后操作；未重放');return;}
+    const peerRevision=this.transportRevision; const epoch = this.epoch; const snapshot = await this.snapshot();
     if (!snapshot || !this.matches(event) || epoch !== this.epoch) return;
     const independentFan = (command === 'fan.setEnabled' || command === 'fan.setPreset' || command === 'fan.setChoice')
       && snapshot.actions?.fan === true && snapshot.fan.canToggle === true;
@@ -300,22 +368,23 @@ export class ReadOnlyMirrorRelay {
     }
     if (this.mutationBusy) { await failure('已有镜像操作正在执行，请稍候'); return; }
     client ??= {highest:0,receipts:new Map()}; this.clients.set(clientId,client);
+    const nativePeer=peerRevision>=0?{connection:event.connection,runId:event.runId,connectionRevision:peerRevision}:undefined;
     const checkpoint = () => {
-      if (this.disposed || epoch !== this.epoch || !this.matches(event)) throw new Error('MIRROR_CONTEXT_EXPIRED');
+      if (this.disposed || epoch !== this.epoch || peerRevision!==this.transportRevision || !this.matches(event)) throw new Error('MIRROR_CONTEXT_EXPIRED');
     };
     this.mutationBusy = true; client.highest = sequence;
     const receipt = Promise.resolve().then(async () => {
       try {
         checkpoint();
         const result = await this.deps.execute!(command,structuredClone(args) as Record<string,unknown>,
-          {generation:snapshot.generation,revision:snapshot.revision,gameIdentity:command === 'performance.setControls'||command === 'game.setField'||command === 'frame.setField'||command === 'global.setField' ? snapshot.game?.identity??'' : undefined,gameAdmission:command === 'game.setField' ? this.gameAdmissions.get(snapshot) : undefined,controlAdmission:this.controlAdmissions.get(snapshot),checkpoint});
+          {generation:snapshot.generation,revision:snapshot.revision,gameIdentity:command === 'performance.setControls'||command === 'game.setField'||command === 'frame.setField'||command === 'global.setField' ? snapshot.game?.identity??'' : undefined,gameAdmission:command === 'game.setField' ? this.gameAdmissions.get(snapshot) : undefined,controlAdmission:this.controlAdmissions.get(snapshot),nativePeer,checkpoint});
         return {type:'reply',runId:event.runId,id:request.id,ok:true,result,notice:result.notice};
       } catch(error) {
         const sourceChanged=['GAME_MIRROR_SOURCE_CHANGED','PERFORMANCE_MIRROR_SOURCE_CHANGED'].includes(String((error as {message?:unknown})?.message));
         return {type:'reply',runId:event.runId,id:request.id,ok:false,error:sourceChanged
           ? 'YMCC 原方案已变化；未保存，请查看更新后的侧栏再选择，不自动重试'
           : '镜像操作未确认；请查看 YMCC 当前状态，不自动重放'};
-      } finally { this.mutationBusy = false; if (this.matches(event)) this.invalidate(); }
+      } finally { this.mutationBusy = false; if (this.matches(event)) this.invalidateFresh(); }
     });
     client.receipts.set(sequence,{signature,response:receipt});
     // Keep a high-water mark after evicting old completed outcomes, so they cannot replay.

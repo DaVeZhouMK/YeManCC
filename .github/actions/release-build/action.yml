@@ -1,0 +1,335 @@
+name: Build and verify immutable YMCC release
+description: One fast build and all pre-publication checks shared by preparation and formal publishing. No release, tag push, manifest write or fixtures.
+inputs:
+  mode:
+    description: formal requires an immutable version tag; prepare uses its immutable branch commit
+    required: true
+  check-only:
+    description: Run read-only source, runner and remote checks without installing dependencies, compiling or packaging (prepare only)
+    default: 'false'
+outputs:
+  packages-built:
+    description: Whether the complete build/package path and its final preflight succeeded
+    value: ${{ steps.complete.outcome == 'success' }}
+  version:
+    description: Verified version
+    value: ${{ steps.identity.outputs.version }}
+  tag:
+    description: Expected version tag
+    value: ${{ steps.identity.outputs.tag }}
+  commit:
+    description: Verified source commit
+    value: ${{ steps.identity.outputs.commit }}
+  notes-path:
+    description: Verified release notes
+    value: ${{ steps.identity.outputs.notes-path }}
+runs:
+  using: composite
+  steps:
+  - name: Normalize release workspace paths
+    shell: pwsh
+    run: |
+      $workspace = [IO.Path]::GetFullPath($env:YEMAN_WORKSPACE_ROOT).TrimEnd('\')
+      $project = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\')
+      if ($workspace -eq $project -or $workspace.StartsWith($project + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Build workspace must be outside product sources' }
+      "YEMAN_WORKSPACE_ROOT=$workspace" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+  - name: Verify immutable source version and release mode
+    id: identity
+    shell: pwsh
+    env:
+      YMCC_GIT_RELEASE_MODE: ${{ inputs.mode }}
+      YMCC_RELEASE_CHECK_ONLY: ${{ inputs.check-only }}
+    run: |
+      if ($env:YMCC_RELEASE_CHECK_ONLY -cnotin @('true','false')) { throw 'check-only must be true or false.' }
+      if ($env:YMCC_GIT_RELEASE_MODE -eq 'formal' -and $env:YMCC_RELEASE_CHECK_ONLY -eq 'true') { throw 'Formal publishing cannot skip the build/package path.' }
+      $manifest = Get-Content version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+      $package = Get-Content package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+      $version = [string]$manifest.version
+      if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "Invalid release version: $version" }
+      if (@($version.Split('.') | Where-Object { [int64]$_ -gt [int]::MaxValue }).Count) { throw 'Release version is out of range.' }
+      if ([string]$package.version -cne $version) { throw 'package.json and version.json differ.' }
+      $tag = "v$version"
+      $notesPath = "docs/release-notes/$tag.md"
+      if (!(Test-Path -LiteralPath $notesPath -PathType Leaf)) { throw "Release notes missing: $notesPath" }
+      $commit = (git rev-parse HEAD).Trim()
+      if ($LASTEXITCODE -ne 0 -or ($env:GITHUB_SHA -and $commit -cne $env:GITHUB_SHA)) { throw 'Checkout does not match the triggering immutable commit.' }
+      if ($env:YMCC_GIT_RELEASE_MODE -eq 'formal') {
+        if ($env:GITHUB_REF_TYPE -cne 'tag' -or $env:GITHUB_REF_NAME -cne $tag) { throw 'Formal release requires the matching version tag.' }
+        $tagCommit = (git rev-parse "$tag^{commit}").Trim()
+        if ($LASTEXITCODE -ne 0 -or $tagCommit -cne $commit) { throw 'Release tag and checked-out commit differ.' }
+      } elseif ($env:YMCC_GIT_RELEASE_MODE -eq 'prepare') {
+        if ($env:GITHUB_REF_TYPE -eq 'tag') { throw 'Preparation must run from a branch commit.' }
+      } else { throw 'Unknown release build mode.' }
+      "YMCC_RELEASE_TAG=$tag" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      "YMCC_RELEASE_COMMIT=$commit" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      "YMCC_GIT_RELEASE_MODE=$env:YMCC_GIT_RELEASE_MODE" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      "RELEASE_NOTES_PATH=$notesPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      "version=$version" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      "commit=$commit" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      "notes-path=$notesPath" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+  - name: Check GitHub publication conditions before build
+    shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+    run: |
+      & tools/github-release-preflight.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Mode $env:YMCC_GIT_RELEASE_MODE -ExpectedCommit $env:YMCC_RELEASE_COMMIT -EvidencePath (Join-Path $env:RUNNER_TEMP 'release-preflight-early.json')
+  - name: Verify clean Git release inputs
+    shell: pwsh
+    run: |
+      & powershell -NoProfile -ExecutionPolicy Bypass -File tools/verify-source-release-inputs.ps1
+      if ($LASTEXITCODE -ne 0) { throw 'Clean Git release inputs are missing or changed.' }
+  - name: Check official Decky source before build
+    shell: pwsh
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    run: |
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky-loader-upgrade.ps1 -Action ReleaseGate -EvidenceDir (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Build/Validation/DeckyUpdate/OfficialLoader')
+      if ($LASTEXITCODE -ne 0) { throw 'Official Decky Loader is stale or unverified before build.' }
+  - name: Setup pnpm 11.16.0
+    if: ${{ inputs.check-only != 'true' }}
+    uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+    with:
+      version: 11.16.0
+  - name: Setup Node 22
+    if: ${{ inputs.check-only != 'true' }}
+    uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+    with:
+      node-version: 22.14.0
+      cache: pnpm
+  - name: Setup .NET 10 SDK
+    if: ${{ inputs.check-only != 'true' }}
+    uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+    with:
+      dotnet-version: 10.0.400
+  - name: Verify .NET output lane before build
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      # MSVC exports Platform=x64. MSBuild treats it as a project property and
+      # moves .NET outputs to bin/x64/Release, outside the frozen recipe's lane.
+      # Clear only that ambient property; project PlatformTarget/RID remain x64.
+      $env:Platform = $null
+      'Platform=' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      $inputProperties = & dotnet msbuild InputHost/YeManInputHost.csproj -nologo -p:Configuration=Release -getProperty:Platform,PlatformTarget,OutputPath
+      if ($LASTEXITCODE -ne 0) { throw 'InputHost output-lane evaluation failed.' }
+      $inputProperties = ($inputProperties -join "`n") | ConvertFrom-Json
+      if ($inputProperties.Properties.PlatformTarget -ne 'x64' -or $inputProperties.Properties.OutputPath -ne 'bin\Release\net10.0-windows\') {
+        throw 'Frozen InputHost recipe no longer targets the approved x64 output lane.'
+      }
+  - name: Provide frozen-source Visual Studio compatibility entrypoints
+    shell: pwsh
+    run: |
+      # Only provision the disposable hosted runner. No tracked source is edited.
+      $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+      # Reuse a selected installation or discover MSVC directly (including preview VS).
+      $installation = $env:VSINSTALLDIR
+      if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
+        $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+        $discoveryExit = $LASTEXITCODE
+        if ($discoveryExit -ne 0) { throw "Installed MSVC toolchain discovery failed: $discoveryExit" }
+        $installation = $locations | Select-Object -First 1
+      }
+      if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
+      $actualRoot = Join-Path $installation 'VC\Auxiliary\Build'
+      $legacyRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build'
+      $entries = @()
+      foreach ($name in @('vcvars32.bat', 'vcvars64.bat')) {
+        $actual = Join-Path $actualRoot $name
+        $legacy = Join-Path $legacyRoot $name
+        if (-not (Test-Path -LiteralPath $actual -PathType Leaf)) { throw "Missing installed MSVC entrypoint: $actual" }
+        $created = $false
+        if (-not (Test-Path -LiteralPath $legacy -PathType Leaf)) {
+          New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+          $shim = "@echo off`r`ncall `"$actual`" %*`r`nexit /b %errorlevel%`r`n"
+          [IO.File]::WriteAllText($legacy, $shim, [Text.Encoding]::ASCII)
+          $created = $true
+        }
+        $entries += [ordered]@{ legacy = $legacy; installed = $actual; shimCreated = $created }
+      }
+      $probe = Join-Path $env:RUNNER_TEMP 'probe-yemancc-x86.cmd'
+      $entry32 = Join-Path $legacyRoot 'vcvars32.bat'
+      [IO.File]::WriteAllText($probe, "@echo off`r`ncall `"$entry32`"`r`nif errorlevel 1 exit /b 1`r`nif /i not `"%VSCMD_ARG_TGT_ARCH%`"==`"x86`" exit /b 2`r`nwhere cl.exe`r`nexit /b %errorlevel%`r`n", [Text.Encoding]::ASCII)
+      & $env:ComSpec /d /c $probe
+      if ($LASTEXITCODE -ne 0) { throw 'Frozen-source x86 MSVC entrypoint probe failed.' }
+      git diff --exit-code
+      if ($LASTEXITCODE -ne 0) { throw 'Runner provisioning changed tracked frozen source.' }
+      $record = [ordered]@{ tag = $env:YMCC_RELEASE_TAG; tagCommit = (git rev-parse HEAD); tagTree = (git rev-parse 'HEAD^{tree}'); installedVisualStudio = $installation; compatibilityEntrypoints = $entries; trackedSourceChanged = $false; scope = 'Hosted runner toolchain provisioning only; tagged source unchanged.' }
+      $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'release-runner-compatibility.json') -Encoding utf8
+  - name: Activate x64 compiler and Windows SDK
+    shell: pwsh
+    run: |
+      $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+      $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+      if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 discovery failed' }
+      $installation = $locations | Select-Object -First 1
+      if (!$installation) { throw 'MSVC x64 toolchain is missing' }
+      $entry = Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
+      $batch = Join-Path $env:RUNNER_TEMP 'ymcc-x64-environment.cmd'
+      [IO.File]::WriteAllText($batch, "@echo off`r`ncall `"$entry`" >nul`r`nif errorlevel 1 exit /b 1`r`nset`r`n", [Text.Encoding]::ASCII)
+      $rows = & cmd.exe /d /c $batch
+      if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 environment failed' }
+      foreach ($row in $rows) {
+        $i = $row.IndexOf('=')
+        if ($i -le 0) { continue }
+        $name = $row.Substring(0, $i)
+        if ($name -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion|VSINSTALLDIR|VSCMD_ARG_TGT_ARCH)$') { $row | Out-File $env:GITHUB_ENV -Encoding utf8 -Append }
+      }
+      'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+  - name: Install dependencies
+    if: ${{ inputs.check-only != 'true' }}
+    run: |
+      pnpm install --frozen-lockfile
+      if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed.' }
+    shell: pwsh
+  - name: Generate version sources and type check
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      node scripts/write-version.mjs
+      if ($LASTEXITCODE -ne 0) { throw 'Version source generation failed.' }
+      pnpm run type-check
+      if ($LASTEXITCODE -ne 0) { throw 'Release type check failed.' }
+  - name: Build and assemble Release
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      # Formal Git releases default to fast mode; complete fixtures run separately on request.
+      & tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease
+      if ($LASTEXITCODE -ne 0) { throw 'Fast release build/package failed.' }
+  - name: Verify release outputs
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      $root = $env:YEMAN_WORKSPACE_ROOT
+      $required = @(
+        'Release\YeManCC\YeManCC.exe',
+        'Release\YeManCC\index.html',
+        'Release\PowerControl\pawnio\YeManTdpCtl.exe',
+        'Release\PowerControl\pawnio\_internal\python313.dll',
+        'Release\YeManCC\update-manifest.json',
+        'Release\Packages\YeManCC.zip',
+        'Release\version.json'
+      )
+      foreach ($relative in $required) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $relative))) {
+          throw "Release output missing: $relative"
+        }
+      }
+      $releaseManifest = (Get-Content -LiteralPath (Join-Path $root 'Release\version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+      $layoutManifestText = Get-Content -LiteralPath (Join-Path $root 'Release\YeManCC\update-manifest.json') -Raw -Encoding UTF8
+      $layoutManifest = $layoutManifestText.TrimStart([char]0xFEFF) | ConvertFrom-Json
+      if ([int]$layoutManifest.schemaVersion -ne 1 -or [string]$layoutManifest.packageVersion -ne [string]$releaseManifest.version) {
+        throw 'Release update-manifest.json has an invalid schema or package version.'
+      }
+      $declaredRoots = @($layoutManifest.roots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
+      $requiredRoots = @($layoutManifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+      $missingRoots = @($requiredRoots | Where-Object { $_ -notin $declaredRoots })
+      if ($missingRoots.Count -gt 0) { throw "update-manifest.json misses required roots: $($missingRoots -join ', ')" }
+      foreach ($definition in @($layoutManifest.roots)) {
+        $rootPath = Join-Path $root (Join-Path 'Release' ([string]$definition.source))
+        if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { throw "Release root missing: $($definition.source)" }
+        if ($definition.packageManifest -and -not (Test-Path -LiteralPath (Join-Path $rootPath ([string]$definition.packageManifest)) -PathType Leaf)) {
+          throw "Release package manifest missing: $($definition.source)/$($definition.packageManifest)"
+        }
+      }
+      $localHash = (Get-FileHash -LiteralPath (Join-Path $root 'Release\Packages\YeManCC.zip') -Algorithm SHA256).Hash
+      if ($localHash -ne [string]$releaseManifest.sha256) {
+        throw "Release manifest SHA-256 mismatch: expected $($releaseManifest.sha256), got $localHash"
+      }
+      if (Test-Path -LiteralPath (Join-Path $root 'Release\Packages\YeManCC-Complete.zip')) {
+        throw 'Release\Packages must not contain the incorrect package name YeManCC-Complete.zip.'
+      }
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $root 'Release\Packages\YeManCC.zip'))
+      try {
+        $roots = @($zip.Entries | ForEach-Object {
+          $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
+          if ($normalized) { ($normalized -split '/')[0] }
+        } | Sort-Object -Unique)
+        $missingZipRoots = @($requiredRoots | Where-Object { $_ -notin $roots })
+        $unexpectedZipRoots = @($roots | Where-Object { $_ -notin $declaredRoots })
+        if ($missingZipRoots.Count -gt 0 -or $unexpectedZipRoots.Count -gt 0) {
+          throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($roots -join ', ')"
+        }
+        $layoutManifestEntries = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' })
+        if ($layoutManifestEntries.Count -ne 1) {
+          throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
+        }
+        $flat = @($zip.Entries | Where-Object {
+          $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
+          $normalized -and ($normalized -split '/').Count -eq 1 -and -not $normalized.EndsWith('/')
+        })
+        if ($flat.Count -gt 0) { throw 'YeManCC.zip contains flattened YeManCC entries.' }
+      } finally {
+        $zip.Dispose()
+      }
+  - name: Verify local Fan Host V2 lane before publishing
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release\Packages\YeManCC.zip')
+      if ($LASTEXITCODE -ne 0) { throw 'Local Fan Host V2 path/identity gate failed.' }
+  - name: Assemble attachments from the verified immutable source
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      $tag = $env:YMCC_RELEASE_TAG
+      $commit = (git rev-parse HEAD).Trim()
+      if ($LASTEXITCODE -ne 0 -or $commit -cne $env:YMCC_RELEASE_COMMIT) { throw 'Source commit changed during build.' }
+      $archiveRef = $commit
+      if ($env:YMCC_GIT_RELEASE_MODE -eq 'formal') {
+        $tagCommit = (git rev-parse "$tag^{commit}").Trim()
+        if ($LASTEXITCODE -ne 0 -or $tagCommit -cne $commit) { throw 'Source archive does not match the release tag.' }
+        $archiveRef = $tag
+      }
+      $packageDir = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/Packages'
+      $sourceName = "YeManCC-source-$tag.zip"
+      $sourcePath = Join-Path $packageDir $sourceName
+      git archive --format=zip --prefix=YeManCC/ --output=$sourcePath $archiveRef
+      if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'Immutable source archive creation failed.' }
+      Copy-Item -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Destination (Join-Path $packageDir 'version.json') -Force
+      $rows = foreach ($name in @('YeManCC.zip', $sourceName, 'version.json')) {
+        (Get-FileHash -LiteralPath (Join-Path $packageDir $name) -Algorithm SHA256).Hash + '  ' + $name
+      }
+      [IO.File]::WriteAllText((Join-Path $packageDir 'SHA256SUMS.txt'), (($rows -join "`n") + "`n"), [Text.Encoding]::ASCII)
+  - name: Verify fast-release declaration (fixtures NOT_RUN)
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    run: |
+      # Inspect this release's manifest and bytes; no historical fixture receipts are consumed.
+      $releaseRoot = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release'
+      $manifest = (Get-Content -LiteralPath (Join-Path $releaseRoot 'version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+      $expectedVersion = $env:YMCC_RELEASE_TAG.Substring(1)
+      if ([string]$manifest.version -cne $expectedVersion) { throw 'Fast release manifest does not match the current tag.' }
+      if ([string]$manifest.releaseMode -cne 'fast' -or [string]$manifest.fixtureValidation -cne 'NOT_RUN') {
+        throw 'Formal fast release requires releaseMode=fast and fixtureValidation=NOT_RUN.'
+      }
+      $markers = @(Get-ChildItem -LiteralPath $releaseRoot -Filter 'test-export.json' -File -Recurse -Force -ErrorAction Stop)
+      if ($markers.Count -gt 0) { throw 'Formal release tree must not contain test-export.json.' }
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $releaseRoot 'Packages/YeManCC.zip'))
+      try {
+        $zipMarkers = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -match '(^|/)test-export\.json$' })
+        if ($zipMarkers.Count -gt 0) { throw 'Formal release ZIP must not contain test-export.json.' }
+      } finally {
+        $zip.Dispose()
+      }
+      Write-Output 'FAST_RELEASE_DECLARATION_OK releaseMode=fast fixtureValidation=NOT_RUN; complete fixtures were not executed.'
+  - name: Required official Decky latest-stable gate
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    run: |
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky-loader-upgrade.ps1 -Action ReleaseGate -EvidenceDir (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Build/Validation/DeckyUpdate/OfficialLoader')
+      if ($LASTEXITCODE -ne 0) { throw 'Official Decky Loader is stale or unverified; refusing to publish.' }
+  - name: Check advertised main version before publication
+    id: complete
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+    run: |
+      # Re-read current tag/release/main state after a potentially long build.
+      & tools/github-release-preflight.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Mode $env:YMCC_GIT_RELEASE_MODE -ExpectedCommit $env:YMCC_RELEASE_COMMIT -EvidencePath (Join-Path $env:RUNNER_TEMP 'release-preflight-final.json')

@@ -1,11 +1,11 @@
 /** FAN-943: parameterize the production common lifecycle across the frozen HC route domain.
  * These are software contracts using inert adapters, NOT physical device tests. */
 import { readFileSync } from 'node:fs';
-import { FanHostLifecycle, type FanHostLauncher } from '../src/bridge/fanHost';
-import { FanApiError, type FanState, type FanNode } from '../src/bridge/fanApi';
-import { resolveFanSnapshotGeneration, isColdUnopenedFanHost, isCompleteAdmissibleHcSession } from '../src/bridge/fanSessionEvidence';
+import { FanHostLifecycle, resolveFanHostConfig, type FanHostLauncher } from '../src/bridge/fanHost';
+import { FanApiError, HttpFanApiAdapter, type FanState, type FanNode } from '../src/bridge/fanApi';
+import { hasRetiredSourceFanResources, hasSafeSourceFanRelease, resolveFanSnapshotGeneration, isColdUnopenedFanHost, isCompleteAdmissibleHcSession } from '../src/bridge/fanSessionEvidence';
 import { NoIoHost } from './fixtures/fan_no_io_host';
-import type { PowerLifecycleState } from '../src/bridge/api';
+import { http, type PowerLifecycleState, type HttpResponse } from '../src/bridge/api';
 let assertions = 0;
 function check(value: unknown, message: string): asserts value { ++assertions; if (!value) throw new Error(message); }
 const curve: FanNode[] = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 25 }, { tempC: 70, dutyPercent: 65 }, { tempC: 100, dutyPercent: 90 }];
@@ -23,6 +23,38 @@ const current = (generation: number): FanState => ({ state: 'Ready', resumePhase
 const zero = (): FanState => ({ ...current(0), powerState: 'Unknown', powerOperationAttempt: 0, powerOperationStatus: undefined });
 async function main() {
   check(families.length === 70 && unsupported.length === 10, 'frozen route domain stays 70 mapped / 10 unsupported');
+  const source:FanState={...current(1),state:'Stopped',hardwareWrites:false,hardwareWritesEnabled:false,hardwareWritesObserved:true,
+    openCalled:false,openEventsCalled:false,controlAccepting:false,lease:null,sourceFanMode:true,sourceFanOwnerEntered:true,
+    sourceFanClosePending:false,sourceFanClosed:true,sourceFanAutomaticReturned:true,sourceFanGeneration:7,
+    hcVirtualCloseReturned:false,hcDeviceManagerStopCompleted:false,oemRestoreConfirmed:false,oemPhysicalOwnershipConfirmed:false,
+    recoveryClaimEvidence:{sourceFanGeneration:7,oemReleaseActionKind:'proven-by-source-auto-register-and-terminal-close',oemReleaseActionClass:'release-action-proven'}};
+  check(hasSafeSourceFanRelease(source,7),'source return consumes automatic readback plus exact terminal closure without fake HC flags');
+  check(!hasSafeSourceFanRelease(source,8),'source return cannot retire a successor generation');
+  for(const delta of [{sourceFanClosePending:true},{sourceFanClosed:false},{sourceFanGeneration:8},
+    {sourceFanAutomaticReturned:false},{hardwareWrites:true},{hardwareWritesEnabled:true},{openCalled:true},{openEventsCalled:true},
+    {hcCloseCleanupPending:true},{unknownState:true},{sourceFanMode:false},
+    {recoveryClaimEvidence:{sourceFanGeneration:7,oemReleaseActionKind:'proven-by-scope-receipts',oemReleaseActionClass:'release-action-proven'}}])
+    check(!hasSafeSourceFanRelease({...source,...delta}),'source incomplete or mismatched evidence refuses release');
+  check(hasRetiredSourceFanResources({...source,unknownState:true,sourceFanAutomaticReturned:false}), 'source retired resources can retain unproven release debt');
+  check(!hasSafeSourceFanRelease({...source,unknownState:true,sourceFanAutomaticReturned:false}), 'resource retirement cannot substitute for release');
+  const noWrite={...source,hardwareWritesObserved:false,sourceFanAutomaticReturned:false};
+  check(hasSafeSourceFanRelease(noWrite),'source no-write retirement does not invent an automatic-mode write');
+  for(const bad of [undefined,null,'true',1]) check(!hasSafeSourceFanRelease({...source,sourceFanClosed:bad} as FanState),'missing or malformed source closure fails closed');
+  {
+    const host=new NoIoHost(),life=make(host,async()=>native(1));
+    await life.start();await life.apply(curve);
+    const close=host.close.bind(host);host.close=async()=>{await close();return {...source,sourceFanGeneration:7};};
+    (life as any).sourceSessionGeneration=7;
+    await life.close();check(host.calls.includes('shutdown'),'actual bridge close consumes honest source return');
+  }
+  {
+    const host=new NoIoHost(),life=make(host,async()=>native(1));
+    await life.start();await life.apply(curve);
+    const close=host.close.bind(host);host.close=async()=>{await close();return source;};
+    (life as any).sourceSessionGeneration=8;
+    let rejected=false;try{await life.close();}catch(error){rejected=String(error).includes('SOURCE_FAN_GENERATION_MISMATCH');}
+    check(rejected&&!host.calls.includes('shutdown'),'actual bridge refuses old-generation source close before shutdown');
+  }
   let transitions = 0;
   for (const family of families) {
     const host = new NoIoHost(); host.factoryType = family === 'OneXPlayerApex'
@@ -175,6 +207,94 @@ async function main() {
     check(resolveFanSnapshotGeneration({ ...current(1), resumePhaseGeneration: value }, { powerGeneration: 1, initialAwakeGeneration: 1, explicitOpenGeneration: 1 }).freshness === 'invalid', 'malformed supplied generation cannot become missing legacy evidence');
   }
   check(isCompleteAdmissibleHcSession(zero()), 'zero itself can be a complete opened session, not a resume receipt');
+  const actualSourceChains=(globalThis as {ymccSourceFanBridgeReceipts?:Array<{deviceId:string;handshake:Record<string,unknown>;lease:Record<string,unknown>;frames:Record<string,{ok:true;state:FanState}>}>}).ymccSourceFanBridgeReceipts;
+  if(actualSourceChains) {
+    check(actualSourceChains.length===9,'actual engine transcript covers all nine source descriptors');
+    for(const chain of actualSourceChains) {
+      const original=http.request,requests:string[]=[],token='0123456789abcdef'.repeat(4);
+      let remote=chain.frames.cold,closed=false;
+      http.request=async(url,options):Promise<HttpResponse>=>{
+        const endpoint=new URL(url).pathname;requests.push(endpoint);
+        const body=typeof options?.body==='string'?JSON.parse(options.body):options?.body;
+        let reply:unknown;
+        if(endpoint==='/api/handshake') reply=chain.handshake;
+        else if(endpoint==='/api/state') reply=remote;
+        else if(endpoint==='/api/open') reply=remote=chain.frames.opened;
+        else if(endpoint==='/api/open-events') reply=remote=chain.frames.events;
+        else if(endpoint==='/api/acquire-control') {remote=chain.frames.acquired;reply=chain.lease;}
+        else if(endpoint==='/api/enable') {
+          check(JSON.stringify(body?.nodes)===JSON.stringify(chain.frames.armed.state.activeCurve),'actual source curve request matches original engine fixture input '+chain.deviceId);
+          check(body?.leaseId===(chain.lease.lease as {leaseId:string}).leaseId,'actual source enable keeps original exact lease '+chain.deviceId);
+          reply=remote=chain.frames.armed;
+        } else if(endpoint==='/api/restore') reply=remote=chain.frames.restored;
+        else if(endpoint==='/api/release-control') reply=remote=chain.frames.released;
+        else if(endpoint==='/api/close') {closed=true;reply=remote=chain.frames.closed;}
+        else if(endpoint==='/api/shutdown') reply={ok:true};
+        else throw new Error('UNEXPECTED_SOURCE_FIXTURE_ENDPOINT '+endpoint);
+        return {status:200,headers:'Content-Type: application/json\r\n',body:JSON.stringify(reply)};
+      };
+      const config={...resolveFanHostConfig('C:\\source-fixture'),sessionToken:token};
+      const adapter=new HttpFanApiAdapter(config.baseUrl,token);
+      const life=new FanHostLifecycle({enabled:true,config,adapter,launcher,heartbeatIntervalMs:0,resumeWaitDeadlineMs:800,readNativePowerState:async()=>native(1)});
+      try {
+        await life.start();await life.apply(chain.frames.armed.state.activeCurve as FanNode[]);
+        remote=chain.frames.active;
+        await life.disable();
+        check(requests.includes('/api/restore')&&requests.includes('/api/release-control'),'actual source restore/release consumed by original bridge '+chain.deviceId);
+        check(remote.state.sourceFanClosed===true&&remote.state.oemRestoreConfirmed===false,'source software return remains distinct from HC callback '+chain.deviceId);
+        await life.close();check(closed&&requests.includes('/api/shutdown'),'actual source bridge close reaches exact process shutdown boundary '+chain.deviceId);
+        check(!requests.includes('/api/resume'),'cold source route uses actual Open chain without invented wake '+chain.deviceId);
+      } finally {
+        if(!closed) await life.close().catch(()=>{});
+        http.request=original;
+      }
+      const power=(chain as typeof chain&{power:{handshake:Record<string,unknown>;lease:Record<string,unknown>;wakeLease:Record<string,unknown>;frames:Record<string,{ok:true;state:FanState}>}}).power;
+      check(!!power,'actual source power receipt chain present '+chain.deviceId);
+      const powerRequests:string[]=[];let powerRemote=power.frames.cold,woke=false,powerClosed=false;
+      let nativePower=native(1);
+      http.request=async(url,options):Promise<HttpResponse>=>{
+        const endpoint=new URL(url).pathname;powerRequests.push(endpoint);
+        const body=typeof options?.body==='string'?JSON.parse(options.body):options?.body;
+        let reply:unknown;
+        if(endpoint==='/api/handshake')reply=power.handshake;
+        else if(endpoint==='/api/state')reply=powerRemote;
+        else if(endpoint==='/api/open')reply=powerRemote=power.frames.opened;
+        else if(endpoint==='/api/open-events')reply=powerRemote=power.frames.events;
+        else if(endpoint==='/api/acquire-control'){powerRemote=woke?power.frames.reacquired:power.frames.acquired;reply=woke?power.wakeLease:power.lease;}
+        else if(endpoint==='/api/enable'){
+          const expected=woke?power.wakeLease:power.lease;
+          check(body?.leaseId===(expected.lease as {leaseId:string}).leaseId,'source wake enable uses exact current lease '+chain.deviceId);
+          reply=powerRemote=woke?power.frames.rearmed:power.frames.armed;
+        } else if(endpoint==='/api/close'){powerClosed=true;reply=powerRemote=power.frames.closed;}
+        else if(endpoint==='/api/shutdown')reply={ok:true};
+        else throw new Error('UNEXPECTED_SOURCE_POWER_ENDPOINT '+endpoint);
+        return{status:200,headers:'Content-Type: application/json\r\n',body:JSON.stringify(reply)};
+      };
+      const powerLife=new FanHostLifecycle({enabled:true,config,adapter:new HttpFanApiAdapter(config.baseUrl,token),launcher,
+        heartbeatIntervalMs:0,resumeWaitDeadlineMs:800,readNativePowerState:async()=>nativePower});
+      try{
+        await powerLife.start();await powerLife.apply(power.frames.armed.state.activeCurve as FanNode[]);
+        powerRemote=power.frames.active;
+        powerLife.setPowerGeneration(2);powerLife.observePowerBoundary('suspending',2);
+        nativePower={...native(2),phase:'suspending',hardwareWritesAllowed:false,resumeReady:false};
+        await powerLife.suspend();powerRemote=power.frames.suspended;
+        check(!powerRequests.includes('/api/suspend'),'source bridge suspend retains original zero-message boundary '+chain.deviceId);
+        woke=true;powerRemote=power.frames.resumed;nativePower=native(3);
+        powerLife.setPowerGeneration(3);powerLife.observePowerBoundary('resuming',3);powerLife.observePowerBoundary('resume-ready',3);
+        await powerLife.resume();
+        check(powerRequests.filter(x=>x==='/api/acquire-control').length===2&&powerRequests.filter(x=>x==='/api/enable').length===2,
+          'source wake reacquires once and submits retained curve once '+chain.deviceId);
+        check(!powerRequests.includes('/api/resume')&&powerRequests.filter(x=>x==='/api/open').length===1,
+          'source already-ready real Host wake is consumed without invented second rebuild '+chain.deviceId);
+        check(powerLife.currentLease?.leaseId===(power.wakeLease.lease as {leaseId:string}).leaseId,
+          'source bridge adopts actual post-wake lease '+chain.deviceId);
+        await powerLife.close();check(powerClosed,'source post-wake generation closes through real bridge '+chain.deviceId);
+      }finally{
+        if(!powerClosed)await powerLife.close().catch(()=>{});
+        http.request=original;
+      }
+    }
+  }
   console.log(JSON.stringify({ ok: true, assertions, mappedFamilies: families.length, unsupportedFamilies: unsupported.length, transitionCases: transitions,
     hardwareCalls: 0, HCAssemblyLoaded: false, scope: 'software lifecycle only; no physical control or OEM ownership claim' }));
 }

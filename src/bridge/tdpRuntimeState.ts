@@ -19,7 +19,7 @@ export interface TdpWriteReceipt {
   readonly watts: number;
 }
 export function createTdpRuntimeStore(now: () => number = Date.now) {
-  let epoch = 0, nextId = 0, owner = 0;
+  let epoch = 0, nextId = 0, owner = 0, sourceRevision = 0;
   let current: TdpRuntimeSnapshot = Object.freeze({ mode: null, status: 'unknown', watts: null, proof: null, revision: 0, confirmedAt: null });
   let nextObserverId = 0;
   const listeners = new Set<{ readonly id: number; readonly listener: (state: TdpRuntimeSnapshot) => void }>();
@@ -38,18 +38,21 @@ export function createTdpRuntimeStore(now: () => number = Date.now) {
   function invalidate() { ++epoch; owner = 0; publish('unknown'); }
   return {
     get: () => current,
+    powerRevision: () => sourceRevision,
     observe(listener: (state: TdpRuntimeSnapshot) => void) {
       const subscription = { id: ++nextObserverId, listener };
       listeners.add(subscription); try { listener(current); } catch { /* isolate display */ }
       return () => { listeners.delete(subscription); };
     },
     powerMode(mode: TdpPowerMode) {
+      ++sourceRevision; // Even a duplicate source event supersedes an older read.
       if (current.mode === mode) return;
       // There is one physical limit. Never resurrect an AC/DC historical cache.
       current = Object.freeze({ ...current, mode }); invalidate();
     },
     invalidate,
     invalidatePower() {
+      ++sourceRevision;
       // Previous power-side knowledge cannot survive a missed sleep/plug edge.
       current = Object.freeze({ ...current, mode: null }); invalidate();
     },

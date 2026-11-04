@@ -31,7 +31,7 @@ env['INCLUDE'] = ';'.join(map(str, [msvc / 'include', sdk / 'Include' / sdk_vers
 env['LIB'] = ';'.join(map(str, [msvc / 'lib/x64', sdk / 'Lib' / sdk_version / 'ucrt/x64', sdk / 'Lib' / sdk_version / 'um/x64']))
 exe = scratch / 'lighting-binding-test.exe'
 command = [str(bin_dir / 'cl.exe'), '/nologo', '/std:c++17', '/EHsc', '/W4', '/WX', '/utf-8', '/MT', '/O2',
-           str(fixture / 'native_binding_test.cpp'), '/Fo' + str(scratch / 'lighting-binding-test.obj'), '/Fe' + str(exe)]
+           str(fixture / 'native_binding_test.cpp'), '/Folighting-binding-test.obj', '/Felighting-binding-test.exe']
 built = subprocess.run(command, cwd=scratch, env=env, capture_output=True, timeout=60)
 (scratch / 'compile.log').write_bytes(built.stdout + built.stderr)
 if built.returncode:

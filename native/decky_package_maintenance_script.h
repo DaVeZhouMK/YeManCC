@@ -49,14 +49,63 @@ function Test-YmccDeckyOwnedFile([string]$Name) {
   # Never accept settings/logs, another plugin or a recursive directory request.
   return $Name -cin (Get-YmccDeckyFiles) -or $Name -cmatch '^plugins/ymcc-sidebar/dist/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(js|css|map)$'
 }
+
+# Decode only bounded, complete JSON objects. WinPS ConvertFrom-Json otherwise
+# accepts duplicate decoded keys and coerces identity/length property types.
+function Read-YmccDeckyDocument([string]$Path) {
+  $Path=Resolve-YmccDeckyPath ([IO.Path]::GetDirectoryName($Path)) ([IO.Path]::GetFileName($Path))
+  $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+  try {
+    if ($stream.Length -le 0 -or $stream.Length -gt 131072) { throw 'DECKY_DOCUMENT_INVALID_SIZE' }
+    $bytes=New-Object byte[] 131073;$used=0
+    do { $read=$stream.Read($bytes,$used,$bytes.Length-$used);$used+=$read } while($read -gt 0 -and $used -lt $bytes.Length)
+    if ($used -gt 131072) { throw 'DECKY_DOCUMENT_INVALID_SIZE' }
+    $utf8=New-Object Text.UTF8Encoding($false,$true)
+    $text=$utf8.GetString($bytes,0,$used).TrimStart([char]0xfeff)
+  } finally { $stream.Dispose() }
+  $pattern='"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|[{}\[\],:]|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null'
+  $stack=New-Object 'System.Collections.Generic.List[object]';$offset=0;$closed=$false
+  foreach($token in [regex]::Matches($text,$pattern)) {
+    if ($text.Substring($offset,$token.Index-$offset) -notmatch '^[ \t\r\n]*$' -or $closed) { throw 'DECKY_DOCUMENT_INVALID' }
+    $offset=$token.Index+$token.Length;$value=$token.Value
+    if ($stack.Count -eq 0 -and $value -cne '{') { throw 'DECKY_DOCUMENT_OBJECT_REQUIRED' }
+    if ($value -ceq '{' -or $value -ceq '[') {
+      if ($stack.Count -ge 32) { throw 'DECKY_DOCUMENT_DEPTH_LIMIT' }
+      $stack.Add(@{object=($value -ceq '{');key=$true;names=(New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))})
+    } elseif($value -ceq '}' -or $value -ceq ']') {
+      if (!$stack.Count -or ($stack[$stack.Count-1].object -ne ($value -ceq '}'))) { throw 'DECKY_DOCUMENT_INVALID' }
+      $stack.RemoveAt($stack.Count-1);if(!$stack.Count){$closed=$true}
+    } elseif($value -ceq ',') {
+      if(!$stack.Count){throw 'DECKY_DOCUMENT_INVALID'};$stack[$stack.Count-1].key=$true
+    } elseif($value.StartsWith('"') -and $stack.Count -and $stack[$stack.Count-1].object -and $stack[$stack.Count-1].key) {
+      $name=[regex]::Replace($value.Substring(1,$value.Length-2),'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})',[Text.RegularExpressions.MatchEvaluator]{param($escape)
+        switch -CaseSensitive ($escape.Value) {
+          '\"' {return '"'}; '\\' {return '\'}; '\/' {return '/'}
+          '\b' {return [string][char]8}; '\f' {return [string][char]12}; '\n' {return "`n"}; '\r' {return "`r"}; '\t' {return "`t"}
+          default {return [string][char][Convert]::ToInt32($escape.Value.Substring(2),16)}
+        }
+      })
+      if(!$stack[$stack.Count-1].names.Add($name)){throw 'DECKY_DOCUMENT_DUPLICATE_KEY'}
+      $stack[$stack.Count-1].key=$false
+    }
+  }
+  if(!$closed -or $stack.Count -or $text.Substring($offset) -notmatch '^[ \t\r\n]*$'){throw 'DECKY_DOCUMENT_INVALID'}
+  return ConvertFrom-Json -InputObject $text -ErrorAction Stop
+}
+function Test-YmccDeckyInteger($Value) {
+  return $Value -is [int] -or $Value -is [long] -or $Value -is [uint32] -or $Value -is [uint64]
+}
+
 function Assert-YmccDeckyManifest($Manifest, [switch]$Previous) {
-  if (!$Manifest -or $Manifest.schemaVersion -ne 1 -or $Manifest.owner -cne 'YMCC' -or
+  if (!$Manifest -or !($Manifest -is [Management.Automation.PSCustomObject] -or $Manifest -is [Collections.IDictionary]) -or
+      !(Test-YmccDeckyInteger $Manifest.schemaVersion) -or $Manifest.schemaVersion -ne 1 -or $Manifest.owner -isnot [string] -or $Manifest.owner -cne 'YMCC' -or
+      $Manifest.origin -isnot [string] -or $Manifest.loaderVersion -isnot [string] -or $Manifest.loaderSha256 -isnot [string] -or $Manifest.files -isnot [array] -or
       $Manifest.origin -cne 'official-release' -or $Manifest.loaderVersion -cnotmatch '^v\d+\.\d+\.\d+$' -or
       $Manifest.loaderSha256 -cnotmatch '^[a-f0-9]{64}$' -or @($Manifest.files).Count -lt 1 -or @($Manifest.files).Count -gt 64) { throw 'DECKY_MANIFEST_INVALID' }
   $names=@{}
   foreach ($file in @($Manifest.files)) {
-    $name=[string]$file.path
-    if (!(Test-YmccDeckyOwnedFile $name) -or $name.Contains('..') -or $name.Contains('//') -or
+    $name=$file.path
+    if ($name -isnot [string] -or $file.sha256 -isnot [string] -or !(Test-YmccDeckyInteger $file.bytes) -or !(Test-YmccDeckyOwnedFile $name) -or $name.Contains('..') -or $name.Contains('//') -or
         $names.ContainsKey($name) -or $file.sha256 -cnotmatch '^[a-f0-9]{64}$' -or [int64]$file.bytes -le 0 -or [int64]$file.bytes -gt 134217728) { throw 'DECKY_MANAGED_FILE_INVALID' }
     $names[$name]=$file
   }
@@ -64,8 +113,12 @@ function Assert-YmccDeckyManifest($Manifest, [switch]$Previous) {
   if (!$Previous -and (@($names.Keys).Count -ne 7 -or @((Get-YmccDeckyFiles) | Where-Object { !$names.ContainsKey($_) }).Count)) { throw 'DECKY_PACKAGE_FILESET_INVALID' }
 }
 function New-YmccDeckyManifest([string]$Source, [string]$LoaderLock) {
-  $lock=Get-Content -LiteralPath $LoaderLock -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($lock.origin -cne 'official-release' -or $lock.byteIdentical -ne $true -or $lock.loaderPatches -ne 0 -or $lock.repository -cne 'SteamDeckHomebrew/decky-loader') { throw 'DECKY_OFFICIAL_LOCK_INVALID' }
+  $lock=Read-YmccDeckyDocument $LoaderLock
+  if (!(Test-YmccDeckyInteger $lock.schemaVersion) -or $lock.schemaVersion -ne 1 -or $lock.origin -isnot [string] -or $lock.repository -isnot [string] -or $lock.byteIdentical -isnot [bool] -or
+)YMCCDECKYPKG"
+R"YMCCDECKYPKG(      !(Test-YmccDeckyInteger $lock.loaderPatches) -or !(Test-YmccDeckyInteger $lock.asset.size) -or $lock.asset.size -le 0 -or $lock.asset.size -gt 134217728 -or
+      $lock.asset.sha256 -isnot [string] -or $lock.asset.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $lock.version -isnot [string] -or
+      $lock.origin -cne 'official-release' -or $lock.byteIdentical -ne $true -or $lock.loaderPatches -ne 0 -or $lock.repository -cne 'SteamDeckHomebrew/decky-loader') { throw 'DECKY_OFFICIAL_LOCK_INVALID' }
   $files=@(foreach ($name in Get-YmccDeckyFiles) {
     $file=Resolve-YmccDeckyPath $Source $name
     if (![IO.File]::Exists($file)) { throw ('DECKY_PACKAGE_FILE_MISSING '+$name) }
@@ -96,7 +149,7 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   }
   if ([IO.File]::Exists($installedIdentity)) {
     if (([IO.FileInfo]$installedIdentity).Length -gt 131072) { throw 'DECKY_INSTALLED_RECEIPT_TOO_LARGE' }
-    $previous=Get-Content -LiteralPath $installedIdentity -Raw -Encoding UTF8 | ConvertFrom-Json
+    $previous=Read-YmccDeckyDocument $installedIdentity
     Assert-YmccDeckyManifest $previous -Previous
     if ([version]$previous.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
   }
@@ -105,7 +158,7 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   $legacyHash=$null
   if ([IO.File]::Exists($legacyReceipt)) {
     if (([IO.FileInfo]$legacyReceipt).Length -gt 131072) { throw 'DECKY_INSTALLED_RECEIPT_TOO_LARGE' }
-    $legacy=Get-Content -LiteralPath $legacyReceipt -Raw -Encoding UTF8 | ConvertFrom-Json
+    $legacy=Read-YmccDeckyDocument $legacyReceipt
     Assert-YmccDeckyManifest $legacy -Previous
     if ([version]$legacy.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
     $legacyHash=Get-YmccDeckyHash $legacyReceipt
@@ -114,8 +167,7 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
     $src=Resolve-YmccDeckyPath $sourceHome $file.path
     $dst=Resolve-YmccDeckyPath $targetHome $file.path
     if (![IO.File]::Exists($src) -or ([IO.FileInfo]$src).Length -ne $file.bytes -or (Get-YmccDeckyHash $src) -cne $file.sha256) { throw ('DECKY_PACKAGE_HASH_MISMATCH '+$file.path) }
-)YMCCDECKYPKG"
-R"YMCCDECKYPKG(    if ([IO.Directory]::Exists($dst)) { throw 'DECKY_TARGET_FILE_IS_DIRECTORY' }
+    if ([IO.Directory]::Exists($dst)) { throw 'DECKY_TARGET_FILE_IS_DIRECTORY' }
     $oldHash=$null
     if ([IO.File]::Exists($dst)) { $oldHash=Get-YmccDeckyHash $dst }
     $incoming[$file.path]=$true
@@ -174,7 +226,8 @@ function Undo-YmccDeckyTransaction($Transaction) {
     $entry=$Transaction.applied[$i]
     $destination=Resolve-YmccDeckyPath $Transaction.plan.target $entry.path
     $now=$null
-    if ([IO.File]::Exists($destination)) { $now=Get-YmccDeckyHash $destination }
+)YMCCDECKYPKG"
+R"YMCCDECKYPKG(    if ([IO.File]::Exists($destination)) { $now=Get-YmccDeckyHash $destination }
     if ($now -ceq $entry.before) { continue } # A failed atomic replacement may have left the original untouched.
     # Another updater can change a later file after the whole-list preflight.
     # Revalidate at its own restore step; never overwrite that late owner.
@@ -245,8 +298,7 @@ function Install-YmccDeckyPackage($Plan, [string]$BackupRoot, [ValidateRange(0,6
   $moduleLease=Enter-YmccModuleMaintenance
   $lease=$null
   try {
-)YMCCDECKYPKG"
-R"YMCCDECKYPKG(    if (@($Plan.entries).Count) { $lease=Open-YmccDeckyBackendLease $BackendPort }
+    if (@($Plan.entries).Count) { $lease=Open-YmccDeckyBackendLease $BackendPort }
     return Invoke-YmccDeckyInstall $Plan $BackupRoot
   } finally { try { if ($lease) { $lease.Stop() } } finally { Exit-YmccModuleMaintenance $moduleLease } }
 }

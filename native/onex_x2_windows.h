@@ -109,7 +109,7 @@ private:
     void finalize() noexcept {
         if (session_.snapshot().phase == Phase::Detached) closeQuiescent();
     }
-    bool contractFor(HANDLE handle, Model model, TransportContract& contract) const noexcept {
+    bool contractFor(HANDLE handle, Model model, TransportContract& contract, USHORT& pid) const noexcept {
         HIDD_ATTRIBUTES attributes{}; attributes.Size = sizeof(attributes);
         PHIDP_PREPARSED_DATA preparsed = nullptr; HIDP_CAPS caps{};
         const bool attributesOk = HidD_GetAttributes(handle, &attributes) != FALSE;
@@ -118,7 +118,10 @@ private:
         const bool matches = attributesOk && capsOk && matchesCollection(model, attributes.VendorID, attributes.ProductID, caps.UsagePage, caps.Usage) &&
             caps.InputReportByteLength >= 15 && caps.InputReportByteLength <= Session::maxInputBytes &&
             (caps.OutputReportByteLength == 64 || caps.OutputReportByteLength == 65);
-        if (matches) contract = {layout_, caps.InputReportByteLength, caps.OutputReportByteLength};
+        if (matches) {
+            contract = {layout_, caps.InputReportByteLength, caps.OutputReportByteLength};
+            pid = attributes.ProductID;
+        }
         if (preparsed) HidD_FreePreparsedData(preparsed);
         return matches;
     }
@@ -130,10 +133,16 @@ private:
         if (set == INVALID_HANDLE_VALUE) { lastError_ = GetLastError(); return; }
         std::wstring selected;
         TransportContract contract{};
+        USHORT selectedPid = 0;
+        bool ambiguous = false, enumerationFailed = false;
         const Model model = session_.snapshot().requested;
-        for (DWORD index = 0; selected.empty(); ++index) {
+        for (DWORD index = 0; ; ++index) {
             SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
-            if (!SetupDiEnumDeviceInterfaces(set, nullptr, &guid, index, &iface)) break;
+            if (!SetupDiEnumDeviceInterfaces(set, nullptr, &guid, index, &iface)) {
+                const DWORD error = GetLastError();
+                if (error != ERROR_NO_MORE_ITEMS) { lastError_ = error; enumerationFailed = true; }
+                break;
+            }
             DWORD bytes = 0;
             SetupDiGetDeviceInterfaceDetailW(set, &iface, nullptr, 0, &bytes, nullptr);
             if (bytes < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) || bytes > 65536) continue;
@@ -144,7 +153,14 @@ private:
             HANDLE probe = CreateFileW(detail->DevicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (probe == INVALID_HANDLE_VALUE) continue;
-            if (contractFor(probe, model, contract)) selected = detail->DevicePath;
+            TransportContract candidate{}; USHORT candidatePid = 0;
+            if (contractFor(probe, model, candidate, candidatePid)) {
+                if (selected.empty()) {
+                    selected = detail->DevicePath; contract = candidate; selectedPid = candidatePid;
+                } else {
+                    ambiguous = true;
+                }
+            }
             if (!CloseHandle(probe)) {
                 lastError_ = GetLastError();
                 device_ = probe; // Retain the failed probe close in the same owner slot.
@@ -152,7 +168,8 @@ private:
             }
         }
         SetupDiDestroyDeviceInfoList(set);
-        if (device_ != INVALID_HANDLE_VALUE || selected.empty()) return;
+        if (device_ != INVALID_HANDLE_VALUE || enumerationFailed || selected.empty()) return;
+        if (ambiguous) { lastError_ = ERROR_INVALID_DATA; return; }
         // Register the exact candidate before opening it. The application retains
         // relevant notifications observed while enumeration had no known path.
         if (bindPermission && !bindPermission(selected)) { lastError_ = ERROR_OPERATION_ABORTED; return; }
@@ -161,8 +178,9 @@ private:
         if (device_ == INVALID_HANDLE_VALUE) { lastError_ = GetLastError(); return; }
         // Probe identity can race removal/replacement. Check the actual owner
         // handle again before any input, initialization write or event allocation.
-        TransportContract reopened{};
-        if (!contractFor(device_, model, reopened) || reopened.inputBytes != contract.inputBytes || reopened.outputBytes != contract.outputBytes) {
+        TransportContract reopened{}; USHORT reopenedPid = 0;
+        if (!contractFor(device_, model, reopened, reopenedPid) || reopenedPid != selectedPid ||
+            reopened.inputBytes != contract.inputBytes || reopened.outputBytes != contract.outputBytes) {
             lastError_ = ERROR_INVALID_DATA; closeQuiescent(); return;
         }
         if (bindPermission && !bindPermission(selected)) { lastError_ = ERROR_OPERATION_ABORTED; closeQuiescent(); return; }

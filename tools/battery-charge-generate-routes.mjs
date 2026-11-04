@@ -19,6 +19,18 @@ for(const route of routes)if(route.route===msiAp.baseRoute&&route.identity.field
  route.route=msiAp.route;route.min=msiAp.min;replaced++;
 }
 assert.equal(replaced,1,'CG3EM override must match exactly one identity group');
+// Fixed-source OXP3 WMI EC route. The OneXPlayerX2 parent supplies the WMI EC transport
+// (root\WMI SuRwECRegInterface, ReadECReg/WriteECReg); OneXPlayer3 overrides only the
+// battery limit (0x4A3) and bypass mode (0x4A4) writes. The old research catalogue stays
+// byte-identical; this reviewed overlay is the only OXP3 runtime admission input.
+const oxp3=JSON.parse(fs.readFileSync(path.join(root,'native/BatteryHost/oxp3-battery-route.json'),'utf8'));
+assert.equal(oxp3.schema,1);assert.equal(oxp3.route,'oxp3-wmi-ec');assert.equal(oxp3.kind,'firmware-percent');assert.equal(oxp3.min,40);
+assert.deepEqual(oxp3.identity.manufacturers,['ONE-NETBOOK','ONE-NETBOOK TECHNOLOGY CO., LTD.']);assert.equal(oxp3.identity.field,'systemProduct');
+assert.deepEqual(oxp3.identity.values,['ONEXPLAYER 3','ONEXPLAYER-3']);assert.equal(oxp3.identity.deviceClass,'OneXPlayer3');
+assert.equal(oxp3.protocol.limitRegister,'0x04A3');assert.equal(oxp3.protocol.bypassRegister,'0x04A4');assert.equal(oxp3.limits.min,0);assert.equal(oxp3.limits.max,100);
+assert.ok(!routes.some(r=>r.route===oxp3.route),'OXP3 overlay route must not duplicate research routes');
+routes.push({route:oxp3.route,family:oxp3.family,kind:oxp3.kind,identity:oxp3.identity,firmwareGate:oxp3.firmwareGate,min:oxp3.min});
+assert.equal(routes.filter(r=>r.route===oxp3.route).length,1,'OXP3 overlay must add exactly one identity group');
 const target=path.join(root,'native/BatteryHost/battery-routes.json');
 if(process.argv.includes('--check'))assert.deepEqual(JSON.parse(fs.readFileSync(target,'utf8')),routes,'Runtime allowlist differs from reviewed catalogue');
 else fs.writeFileSync(target,JSON.stringify(routes,null,2)+'\n');

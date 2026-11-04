@@ -27,7 +27,9 @@
     "identity": "Validated enclosing Host response, plus local output generation and SDK sequence",
     "overload": "Latest raw observation replaces pending observation; coalesced count records loss. Must not act as a motor command or complete protocol transcript.",
     "oversize": "Reject whole packet; never truncate into a valid-looking report",
-    "idle": "One pending-state read, no observation serialization without new event",
+    "idle": "One selected pending-state read; raw-only pending cannot activate ordinary motor-only frame serialization",
+    "rawResponsePolicy": "Detailed logging or explicit TUPLE_SUBMIT_STATS only; ordinary SUBMIT_FRAME keeps classic motor feedback",
+    "rawMailbox": "Always bounded coalesced observation; excluding raw from an ACK preserves it for a later explicit diagnostic query",
     "messageBudgetBytes": 14336
   },
   "lockedSdk": {

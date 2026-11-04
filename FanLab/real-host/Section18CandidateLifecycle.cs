@@ -596,6 +596,40 @@ internal sealed partial class RealHcBackend
      * 生产路径恒为 null（`OpenCore`/`ApplyCurve`/`RestoreOem` 都不写入本字段）。
      */
     internal SelfTestHcBoundary? hcBoundaryForSelfTest;
+    /** r10 test seam: inject the primary OEM-release verdict without an HC receipt API. */
+    internal AsusWriteVerdict? AsusPrimaryReleaseVerdictForSelfTest = null;
+    /** r10 test seam: establish an existing duty obligation for conservative-recovery cases. */
+    internal void SetActiveCurveDutiesForSelfTest(double[]? duties) => activeCurveDuties = duties;
+    internal long ExternalProfileSessionGenerationForSelfTest => externalProfileQueue.CurrentGeneration;
+    internal bool ExternalProfileQueueHasPendingForSelfTest => externalProfileQueue.HasPendingForSelfTest;
+    /** r10 test-only: activate the existing profile queue so positive/next-generation paths are reachable. */
+    internal long ActivateExternalProfileSessionForSelfTest()
+    {
+        var generation = externalProfileQueue.BeginSession();
+        if (!externalProfileQueue.ActivateSession(generation))
+            throw new InvalidOperationException("external profile queue did not activate");
+        return generation;
+    }
+    internal static bool SuppressExternalProfileWatchdogForSelfTest = false;
+    /** r10 test seam: drive the actual queued Host ingress with a generation. */
+    internal void OnExternalProfileAppliedForSelfTest(long sessionGeneration, object? profile, object? source) =>
+        OnExternalProfileAppliedForSession(sessionGeneration, profile, source);
+    /**
+     * r11 test-only: invoke the existing real guarded consumer synchronously on
+     * this owning Host. Uses the normal production gates and queue/Complete
+     * path; it does not schedule or run the asynchronous watchdog timer.
+     */
+    internal bool RunPowerProfileWatchdogTickCoreForSelfTest() =>
+        PowerProfileWatchdogTickCore();
+    /** Existing timer/owner paths only; never installed by normal Host operation. */
+    internal void StartPowerProfileWatchdogForSelfTest() => EnsurePowerProfileWatchdog();
+    internal bool PowerProfileWatchdogActiveForSelfTest => powerProfileWatchdog is not null;
+    internal Action CapturePowerProfileWatchdogCallbackForSelfTest()
+    {
+        var owner = CaptureFanDispatchOwner();
+        return () => PowerProfileWatchdogTick(owner);
+    }
+
 
     internal sealed class SelfTestHcBoundary
     {
@@ -607,6 +641,8 @@ internal sealed partial class RealHcBackend
         public List<string> CallbackSources { get; } = new();
         /** 置位后模拟 HC 回调抛出；`ApplyPowerProfile` 会原样 rethrow（不洗成成功）。 */
         public Exception? CallbackFailure { get; set; }
+        /** r10 test-only: observe/mutate device state after a returned substitute callback. */
+        public Action? AfterApply { get; set; }
         /** false 时模拟 ManagerFactory 图不可读 ⇒ Close 清理判定必须 fail-closed。 */
         public bool ManagerObservationAvailable { get; set; } = true;
 
@@ -633,6 +669,7 @@ internal sealed partial class RealHcBackend
             CallbackInvocationCount++;
             CallbackSources.Add(sourceName);
             if (CallbackFailure is not null) throw CallbackFailure;
+            AfterApply?.Invoke();
         }
     }
 

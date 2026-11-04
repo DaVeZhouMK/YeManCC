@@ -111,6 +111,20 @@ inline bool child(int& code){int argc=0;auto** argv=CommandLineToArgvW(GetComman
 }
 namespace cdp {
 using namespace hc;
+// Native bootstrap adds guards between its typed JSON and side effects. Parse
+// the actual JSON object, never the later Object.defineProperty delimiter.
+inline Json bootstrapValue(const std::string& expression,std::size_t begin){
+    need(begin<expression.size()&&expression[begin]=='{',"cdp-bootstrap-json-start");
+    unsigned depth=0;bool quoted=false,escaped=false;
+    for(auto at=begin;at<expression.size();++at){const char c=expression[at];
+        if(quoted){if(escaped)escaped=false;else if(c=='\\')escaped=true;else if(c=='"')quoted=false;continue;}
+        if(c=='"'){quoted=true;continue;}
+        if(c=='{'||c=='[')++depth;
+        else if(c=='}'||c==']'){need(depth>0,"cdp-bootstrap-json-depth");if(--depth==0)return Json::parse(expression.substr(begin,at-begin+1));}
+    }
+    throw std::runtime_error("cdp-bootstrap-json-incomplete");
+}
+
 struct PeerDisconnected:std::runtime_error { int code;explicit PeerDisconnected(int value):std::runtime_error("owned CDP peer disconnected"),code(value){} };
 struct PeerSocket { SOCKET value=INVALID_SOCKET;~PeerSocket(){if(value!=INVALID_SOCKET)closesocket(value);} };
 inline bool sendAll(SOCKET socket,const std::string& bytes){size_t at=0;while(at<bytes.size()){const auto sent=send(socket,bytes.data()+at,static_cast<int>(bytes.size()-at),0);if(sent<=0){const int error=sent==0?0:WSAGetLastError();if(error==0||error==WSAECONNRESET||error==WSAECONNABORTED||error==WSAESHUTDOWN||error==WSAENOTCONN)throw PeerDisconnected(error);return false;}at+=static_cast<size_t>(sent);}return true;}
@@ -151,8 +165,16 @@ inline int server(const std::filesystem::path& directory,const std::wstring& rea
                     if(method=="Runtime.evaluate"){
                         Json value;
                         const auto valueAt=expression.find("const value = ");
-                        if(valueAt!=std::string::npos){const auto stopAt=expression.find("; Object.defineProperty",valueAt);need(stopAt!=std::string::npos,"cdp-bootstrap-parse");const auto bootstrap=Json::parse(expression.substr(valueAt+14,stopAt-valueAt-14));run=bootstrap.at("runId").get<std::string>();need(expression.find(ymcc::deckymirror::healthScript())!=std::string::npos,"production-health-expression-required");value=run;log["bootstraps"]=log["bootstraps"].get<unsigned>()+1;if(barrierPending){log["barriers"]=log["barriers"].get<unsigned>()+1;barrierPending=false;}}
-                        else if(expression=="window.__YMCC_DECKY_HEALTH__?.read() || ''"){value=step=="marker-without-dom"?std::string{}:std::string("decky-render-failed");log["readbacks"]=log["readbacks"].get<unsigned>()+1;}
+                        if(valueAt!=std::string::npos){const auto bootstrap=bootstrapValue(expression,valueAt+14);run=bootstrap.at("runId").get<std::string>();need(expression.find(ymcc::deckymirror::healthScript())!=std::string::npos,"production-health-expression-required");value=run;log["bootstraps"]=log["bootstraps"].get<unsigned>()+1;if(barrierPending){log["barriers"]=log["barriers"].get<unsigned>()+1;barrierPending=false;}}
+                        else if(expression=="window.__YMCC_DECKY_HEALTH__?.read() || ''"){
+                            if(step=="context-event-storm"){
+                                // Overflow the real watch's bounded command-event queue once.
+                                // A later validated binding sees an ordinary, healthy context.
+                                step="idle";log["contextEventStorms"]=log.value("contextEventStorms",0u)+1;save(stateFile,log);
+                                for(unsigned event=0;event<33;++event)need(text(peer,context()),"cdp-context-event-storm");
+                            }
+                            value=(step=="fatal"||step=="stale-document")?std::string("decky-render-failed"):std::string{};log["readbacks"]=log["readbacks"].get<unsigned>()+1;
+                        }
                         else if(expression.rfind("window.__YMCC_DECKY_MIRROR__?.runId === ",0)==0)value=step!="stale-document";
                         else if(expression.find("ymcc-decky-health-stop")!=std::string::npos){value=true;log["teardowns"]=log["teardowns"].get<unsigned>()+1;}
                         else if(expression=="!window.DeckyPluginLoader")value=false;
@@ -184,6 +206,16 @@ struct OwnedSessionInput {
     int steamPresence()const{return 1;} // Explicit owned-fixture observation; never starts the real observer.
 };
 inline OwnedSessionInput g_steamSettingsObserver;
+// External Steam mode IO is not exercised by this owner/health-close fixture.
+// Preserve a refused read rather than manufacturing UI identity evidence. The
+// real current-UI/registry acceptance has its independent original consumer.
+struct OwnedModeInput {
+    std::atomic<unsigned> requests{0};
+    Json snapshot(const ymcc::steamsession::Session& session)const{return {{"known",false},{"running",true},{"mode","unknown"},{"pid",session.pid},{"birth",std::to_string(session.created)}};}
+    bool requestRefresh(const ymcc::steamsession::Session&){++requests;return false;}
+};
+inline OwnedModeInput g_steamModeObserver;
+
 enum class PowerLifecycle {Ready};inline std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 inline Json ymSettingsSection(const char* section){if(!std::filesystem::is_regular_file(settingsPath))return Json::object();const auto all=load(settingsPath);return all.value(section,Json::object());}
 inline bool ymSettingsWriteSection(const char* section,const Json& value){++settingsWrites;try{Json all=Json::object();if(std::filesystem::is_regular_file(settingsPath))all=load(settingsPath);all[section]=value;save(settingsPath,all);return true;}catch(...){return false;}}
@@ -377,13 +409,35 @@ int wmain(int argc,wchar_t** argv){
                 const auto stressStart=GetTickCount64();const auto stressHandlesBefore=handles();const auto stressThreadsBefore=threadCount();Json stressRows=Json::array();bool stressOkay=true;
                 context.setStep("idle");deckySidebarSetEnabled(true);need(await([&]{return g_deckySidebarRuntime.snapshot().phase=="loader-started";},3000),"stress-initial-owned-loader");
                 for(unsigned iteration=0;iteration<20;++iteration){
+                    const auto brokerBefore=g_deckyMirrorBroker.bootstrap();
                     const auto before=client->snapshot();const auto beforeLoader=g_deckySidebarRuntime.snapshot().pid;const auto readbacks=context.state().value("bootstraps",0u);detail::Handle previous{OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,before.processId)};
                     const bool requested=g_deckySidebarRuntime.requestBindingRefresh(1000+iteration);
                     const bool readback=await([&]{return context.state().value("bootstraps",0u)>readbacks+1&&client->snapshot().processId!=before.processId&&client->snapshot().pendingIo>0;},1500);
                     const bool exited=previous.value&&WaitForSingleObject(previous.value,1000)==WAIT_OBJECT_0;const auto after=client->snapshot();
                     const bool passed=requested&&readback&&exited&&context.alive()&&g_deckySidebarRuntime.snapshot().enabled&&after.processId!=0&&beforeLoader!=0&&g_deckySidebarRuntime.snapshot().pid==beforeLoader;
-                    stressRows.push_back({{"iteration",iteration},{"passed",passed},{"refreshRequested",requested},{"actualBootstrapReply",readback},{"oldOwnedWorkerExited",exited},{"cefUnaffected",context.alive()},{"beforeLoader",beforeLoader},{"afterLoader",g_deckySidebarRuntime.snapshot().pid},{"beforeWorker",before.processId},{"afterWorker",after.processId},{"resources",resources()}});
-                    save(std::filesystem::path(argv[2]).parent_path()/L"stress-progress.json",stressRows);if(!passed){stressOkay=false;break;}
+                    const auto brokerAfter=g_deckyMirrorBroker.bootstrap();
+                    const bool runRotated=brokerBefore.value("runId",std::string{})!=brokerAfter.value("runId",std::string{})&&brokerAfter.value("runId",std::string{}).size()==32;
+                    const bool tokenRotated=brokerBefore.value("token",std::string{})!=brokerAfter.value("token",std::string{})&&brokerAfter.value("token",std::string{}).size()==64;
+                    Json storm=Json::object();
+                    if(passed&&iteration%5==0){
+                        const auto original=client->snapshot();const auto oldBroker=g_deckyMirrorBroker.bootstrap();
+                        const auto oldState=context.state();const auto oldBootstraps=oldState.value("bootstraps",0u),oldStorms=oldState.value("contextEventStorms",0u);
+                        const auto oldWrites=settingsWrites.load(),oldSafety=ownerSafetyCalls.load();
+                        detail::Handle failed{OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,original.processId)};
+                        context.setStep("context-event-storm");
+                        const bool recovered=await([&]{const auto observed=context.state();const auto live=client->snapshot();return observed.value("contextEventStorms",0u)>oldStorms&&observed.value("bootstraps",0u)>oldBootstraps+1&&live.processId!=0&&live.processId!=original.processId&&live.pendingIo>0&&g_deckySidebarRuntime.snapshot().phase=="loader-started";},2000);
+                        const bool workerExited=failed.value&&WaitForSingleObject(failed.value,500)==WAIT_OBJECT_0;
+                        const auto live=client->snapshot();const auto newBroker=g_deckyMirrorBroker.bootstrap();
+                        bool queueFailure=false;{std::lock_guard lock(ioMutex);for(const auto& item:diagnostics)if(item.value("detail",Json::object()).value("reason",std::string{})=="mirror-bootstrap-context-event-limit")queueFailure=true;}
+                        const bool newRun=oldBroker.value("runId",std::string{})!=newBroker.value("runId",std::string{})&&newBroker.value("runId",std::string{}).size()==32;
+                        const bool newToken=oldBroker.value("token",std::string{})!=newBroker.value("token",std::string{})&&newBroker.value("token",std::string{}).size()==64;
+                        const bool noOff=oldWrites==settingsWrites.load()&&oldSafety==ownerSafetyCalls.load()&&g_deckySidebarRuntime.snapshot().enabled;
+                        const bool stableLoader=g_deckySidebarRuntime.snapshot().pid==beforeLoader&&context.alive();
+                        storm={{"passed",recovered&&workerExited&&queueFailure&&newRun&&newToken&&noOff&&stableLoader},{"eventLimitObserved",queueFailure},{"actualHealthyBootstrap",recovered},{"failedOwnedWorkerExited",workerExited},{"brokerRunRotated",newRun},{"brokerTokenRotated",newToken},{"noSafetyOffOrSettingsWrite",noOff},{"originalLoaderAndCefRetained",stableLoader},{"beforeWorker",original.processId},{"afterWorker",live.processId}};
+                        context.setStep("idle");
+                    }
+                    stressRows.push_back({{"iteration",iteration},{"passed",passed&&runRotated&&tokenRotated&&storm.value("passed",true)},{"brokerRunRotated",runRotated},{"brokerTokenRotated",tokenRotated},{"storm",storm},{"refreshRequested",requested},{"actualBootstrapReply",readback},{"oldOwnedWorkerExited",exited},{"cefUnaffected",context.alive()},{"beforeLoader",beforeLoader},{"afterLoader",g_deckySidebarRuntime.snapshot().pid},{"beforeWorker",before.processId},{"afterWorker",after.processId},{"resources",resources()}});
+                    save(std::filesystem::path(argv[2]).parent_path()/L"stress-progress.json",stressRows);if(!passed||!runRotated||!tokenRotated||!storm.value("passed",true)){stressOkay=false;break;}
                 }
                 g_deckySidebarRuntime.shutdown();consumer::pump();const auto stressHandlesAfter=handles();const auto stressThreadsAfter=threadCount();stressOkay=stressOkay&&stressRows.size()==20&&zero(client->snapshot())&&stressHandlesAfter==stressHandlesBefore&&stressThreadsAfter==stressThreadsBefore;
                 report["actualWorkerStress"]={{"passed",stressOkay},{"rows",stressRows},{"beforeHandles",stressHandlesBefore},{"afterHandles",stressHandlesAfter},{"beforeThreads",stressThreadsBefore},{"afterThreads",stressThreadsAfter},{"elapsedMs",GetTickCount64()-stressStart},{"originalNativeBudgetMs",15000},{"formalAsyncGateWaived",false},{"stressIsFormalSupplementalConsumer",true}};

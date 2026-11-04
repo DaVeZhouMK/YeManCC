@@ -11,12 +11,12 @@ const args = process.argv.slice(2);
 const startedAt = performance.now();
 const positional = [];
 for (let index = 0; index < args.length; index++) {
-  if (args[index] === '--out' || args[index] === '--baseline-panel') { index++; continue; }
+  if (['--out', '--baseline-panel', '--candidate-panel', '--case'].includes(args[index])) { index++; continue; }
   if (args[index] === '--baseline-only') continue;
   assert(!args[index].startsWith('--'), 'Unknown option: ' + args[index]);
   positional.push(args[index]);
 }
-assert(positional.length <= 1, 'Usage: node tools/performance_slider_draft_browser_selftest.mjs [outDir] [--out outDir] [--baseline-panel file] [--baseline-only]');
+assert(positional.length <= 1, 'Usage: node tools/performance_slider_draft_browser_selftest.mjs [outDir] [--out outDir] [--baseline-panel file] [--baseline-only] [--case exactName] [--candidate-panel file]');
 function option(name, fallback) {
   const index = args.indexOf(name);
   if (index < 0) return fallback;
@@ -28,6 +28,11 @@ const out = path.resolve(option('--out', positional[0] || path.join(evidenceRoot
 const requestedBaseline = option('--baseline-panel', null);
 const baseline = requestedBaseline || path.join(out, 'negative-refresh-panel.vue');
 const baselineOnly = args.includes('--baseline-only');
+const selectedAt = args.indexOf('--case'), selectedCase = selectedAt < 0 ? null : args[selectedAt + 1];
+assert(args.filter(value => value === '--case').length <= 1 && (selectedAt < 0 || (selectedCase && !selectedCase.startsWith('--') && !selectedCase.includes('*'))), '--case requires one exact case name');
+const candidatePanel = option('--candidate-panel', null);
+assert(!selectedCase || (!baselineOnly && !requestedBaseline), 'Exact case selection is separate from baseline-only/historical baseline mode');
+assert(!candidatePanel || selectedCase, 'Explicit candidate source requires exact case selection');
 const require = createRequire(path.join(root, 'package.json'));
 let chromium;
 try { ({ chromium } = require('playwright')); }
@@ -35,11 +40,14 @@ catch { ({ chromium } = createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex
 fs.mkdirSync(out, { recursive: true });
 const digest = file => ({ path: file, sha256: createHash('sha256').update(fs.readFileSync(file)).digest('hex') });
 const report = {
-  pass: false, count: 0, mode: baselineOnly ? 'baseline-only' : 'candidate-regression', date: new Date().toISOString(),
+  pass: false, count: 0, mode: baselineOnly ? 'baseline-only' : selectedCase ? 'candidate-selected-scope' : 'candidate-regression', date: new Date().toISOString(),
   scope: '1280x720/800; actual ContinuousPerformancePanel.vue + Slider.vue and extracted production engine; browser memory only; stubbed native edit boundaries; no YMCC, Steam, real native IPC or hardware',
   sources: ['src/components/ContinuousPerformancePanel.vue', 'src/components/Slider.vue', 'src/gamepad/engine.ts', 'src/gamepad/sliderRepeat.ts', 'tools/lib/continuousPerformancePreview.mjs', 'tools/performance_slider_draft_browser_selftest.mjs'].map(file => digest(path.join(root, file))),
   baseline: null, cases: [], errors: [],
+  selection: { requestedCase: selectedCase, availableCount: 0, notRunCount: 0, selectedCount: 0 },
+  completeRegression: !selectedCase && !baselineOnly && !candidatePanel, fullProductAcceptance: false,
 };
+if (candidatePanel) { report.candidatePanel = digest(candidatePanel); report.sources.push(report.candidatePanel); }
 const tdpSelector = '.continuous-performance input[aria-label="TDP"]';
 const evidenceState = page => page.evaluate(() => ({
   editing: window.__readEdit?.(),
@@ -193,42 +201,49 @@ async function open(base, height, scope = 'global') {
   return page;
 }
 try {
-  if (!requestedBaseline) {
-    // Re-enable the exact stale-refresh defect in the actual consumer, so
-    // future repository runs need no external historical checkout/artifact.
-    let negative = fs.readFileSync(path.join(root, 'src/components/ContinuousPerformancePanel.vue'), 'utf8');
-    for (const [from, to] of [
-      ['if ((editingInput || saving.value) && !checkContext)', 'if (saving.value && !checkContext)'],
-      ['else if (editingInput || saving.value || revision !== draftRevision)', 'else if (saving.value)'],
-    ]) {
-      assert.equal(negative.split(from).length, 2, 'Negative-control anchor must match once: ' + from);
-      negative = negative.replace(from, to);
+  if (!selectedCase) {
+    if (!requestedBaseline) {
+      // Re-enable the exact stale-refresh defect in the actual consumer, so
+      // future repository runs need no external historical checkout/artifact.
+      let negative = fs.readFileSync(path.join(root, 'src/components/ContinuousPerformancePanel.vue'), 'utf8');
+      for (const [from, to] of [
+        ['if ((editingInput || saving.value) && !checkContext)', 'if (saving.value && !checkContext)'],
+        ['else if (editingInput || saving.value || revision !== draftRevision)', 'else if (saving.value)'],
+      ]) {
+        assert.equal(negative.split(from).length, 2, 'Negative-control anchor must match once: ' + from);
+        negative = negative.replace(from, to);
+      }
+      fs.writeFileSync(baseline, negative);
     }
-    fs.writeFileSync(baseline, negative);
+    report.baselineKind = requestedBaseline ? 'explicit-historical-source' : 'mutated-production-refresh-guards';
+    assert(fs.existsSync(baseline), 'Baseline Panel is required before candidate testing: ' + baseline);
+    browser = await chromium.launch({ channel: 'msedge', headless: true });
+    // This must run before candidate cases, using a source override with original import resolution.
+    const baselinePage = await open(await server({ panelSourceFile: baseline }), 720);
+    try {
+      const before = await draft(baselinePage);
+      await noWrites(baselinePage);
+      await baselinePage.evaluate(() => window.__refresh());
+      await settle(baselinePage);
+      const after = await value(baselinePage);
+      const originalRollback = after === before.initial && after !== before.edited;
+      report.baseline = { pass: false, failure: 'Unconfirmed draft reverted on same-context refresh', expectedFailure: originalRollback, assertion: 'Same-context refresh retains an unconfirmed draft', source: digest(baseline), before, after, state: await evidenceState(baselinePage) };
+      await baselinePage.screenshot({ path: path.join(out, 'baseline-rollback.png'), fullPage: true });
+      fs.writeFileSync(path.join(out, 'baseline-fail.json'), JSON.stringify(report.baseline, null, 2));
+      assert(originalRollback, 'Baseline must reproduce the original rollback before testing the candidate');
+      console.log('EXPECTED FAIL baseline: same-context refresh reverted ' + before.edited + ' to ' + after);
+    } finally { await baselinePage.close(); }
+  } else {
+    report.baseline = { status: 'NOT_RUN_OUTSIDE_EXACT_CASE', expectedFailure: null, actualProducerRuns: 0 };
+    browser = await chromium.launch({ channel: 'msedge', headless: true });
   }
-  report.baselineKind = requestedBaseline ? 'explicit-historical-source' : 'mutated-production-refresh-guards';
-  assert(fs.existsSync(baseline), 'Baseline Panel is required before candidate testing: ' + baseline);
-  browser = await chromium.launch({ channel: 'msedge', headless: true });
-  // This must run before candidate cases, using a source override with original import resolution.
-  const baselinePage = await open(await server({ panelSourceFile: baseline }), 720);
-  try {
-    const before = await draft(baselinePage);
-    await noWrites(baselinePage);
-    await baselinePage.evaluate(() => window.__refresh());
-    await settle(baselinePage);
-    const after = await value(baselinePage);
-    const originalRollback = after === before.initial && after !== before.edited;
-    report.baseline = { pass: false, failure: 'Unconfirmed draft reverted on same-context refresh', expectedFailure: originalRollback, assertion: 'Same-context refresh retains an unconfirmed draft', source: digest(baseline), before, after, state: await evidenceState(baselinePage) };
-    await baselinePage.screenshot({ path: path.join(out, 'baseline-rollback.png'), fullPage: true });
-    fs.writeFileSync(path.join(out, 'baseline-fail.json'), JSON.stringify(report.baseline, null, 2));
-    assert(originalRollback, 'Baseline must reproduce the original rollback before testing the candidate');
-    console.log('EXPECTED FAIL baseline: same-context refresh reverted ' + before.edited + ' to ' + after);
-  } finally { await baselinePage.close(); }
   if (!baselineOnly) {
-    const candidate = await server({});
+    const candidate = await server(candidatePanel ? { panelSourceFile: candidatePanel } : {});
     const simulationCandidate = await server({draftHarness:false,realNavigation:false});
     for (const height of [720, 800]) {
       async function test(name, callback, scope = 'global') {
+        report.selection.availableCount++;
+        if (selectedCase && name !== selectedCase) { report.selection.notRunCount++; return; }
         const caseStartedAt = performance.now();
         const entry = { name, viewport: { width: 1280, height }, scope, pass: false };
         let page;
@@ -253,18 +268,48 @@ try {
           console.log((entry.pass ? 'PASS ' : 'FAIL ') + height + ' ' + name + (entry.error ? ': ' + entry.error.split('\n')[0] : ''));
         }
       }
+      for (const scope of ['global','dedicated']) await test('smt-switch-'+scope+'-default-and-game-transition',async page=>{
+        const control=page.getByRole('switch',{name:'超线程',exact:true});
+        assert.equal(await control.count(),1);assert.equal(await control.getAttribute('aria-checked'),'true');
+        await page.evaluate(()=>{window.__fixture.hybrid=false;window.__refresh();});await settle(page);
+        assert.equal(await control.isEnabled(),true,'Uniform cores do not disable SMT');
+        await control.focus();await press(page,'confirm');assert.equal(await control.getAttribute('aria-checked'),'false');
+        assert.equal((await writes(page)).at(-1).patch.hyperThreadMode,'off');
+        await control.click();await settle(page);assert.equal(await control.getAttribute('aria-checked'),'true');
+        assert.equal((await writes(page)).at(-1).patch.hyperThreadMode,'default','ON restores system default');
+        if(scope==='global'){
+          await control.click();await settle(page);
+          for(const game of [null,{name:'new.exe',path:'C:/new.exe',pid:88,processCreated:'100088'}]){
+            await page.evaluate(game=>window.__setGame(game),game);await settle(page);
+            assert.equal(await control.isEnabled(),true);assert.equal(await control.getAttribute('aria-checked'),'false');
+          }
+        }
+        await control.focus();assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('role')),'switch');
+        const box=await control.boundingBox();assert(box.width>=48&&box.height>=30);
+        await page.screenshot({path:path.join(out,height+'-smt-'+scope+'.png'),fullPage:true,animations:'disabled'});
+      },scope);
       await test('core-range-uses-configured-watts-runtime-is-readonly',async page=>{
-        const core=page.locator('.core-slider input');
+        const core=page.locator('.core-slider input'), highRange=page.locator('.core-choice > small').nth(1);
+        // Only slider editing is capped at25W; the configured high-power range stays30W.
         await page.evaluate(()=>window.__externalTdp('global','ac',30));await settle(page);
-        assert.equal(Number(await core.getAttribute('max')),30);
+        assert.equal(Number(await page.locator(tdpSelector).inputValue()),30,'Configured TDP remains30W');
+        assert.equal(Number(await core.getAttribute('max')),25,'Core slider editing ceiling is25W');
         const initial=Number(await core.inputValue()),count=(await writes(page)).length;
+        assert.equal(await highRange.innerText(),initial+'–30 W','High-power interval must retain configured30W');
         await page.evaluate(()=>{for(const watts of [24,14,28,16])for(const fn of window.__tdpRuntimeListeners||[])fn({status:'applied',mode:'ac',watts});});await settle(page);
-        assert.equal(Number(await core.getAttribute('max')),30);assert.equal(Number(await core.inputValue()),initial);assert.equal((await writes(page)).length,count);
+        assert.equal(Number(await core.getAttribute('max')),25);assert.equal(Number(await core.inputValue()),initial);assert.equal((await writes(page)).length,count);
+        assert.equal(await highRange.innerText(),initial+'–30 W','Runtime feedback cannot shrink configured range');
+        // A stored boundary above the editing ceiling remains saved and effective.
+        await page.evaluate(()=>{window.__fixture.controls.ac.auto.coreSplit=28;window.__refresh();});await settle(page);
+        assert.equal(Number(await core.inputValue()),25);assert.equal(await page.evaluate(()=>window.__fixture.controls.ac.auto.coreSplit),28);
+        assert.equal(await highRange.innerText(),'28–30 W');assert.ok((await page.locator('.core-heading').innerText()).includes('范围外'));
+        assert.equal((await writes(page)).length,count,'Rendering the legacy boundary cannot write a clipped value');
+        await page.evaluate(value=>{window.__fixture.controls.ac.auto.coreSplit=value;window.__refresh();},initial);await settle(page);
         await page.evaluate(()=>window.__externalTdp('global','ac',10));await settle(page);
         assert.equal(Number(await core.getAttribute('max')),10);assert.equal(Number(await core.inputValue()),10);
         assert.equal(await page.evaluate(()=>window.__fixture.controls.ac.auto.coreSplit),initial);
         assert.ok((await page.locator('.core-heading').innerText()).includes('范围外'));
-        return {savedBoundary:initial,range:10,writes:(await writes(page)).length};
+        return {savedBoundary:initial,editingCeiling:25,configuredHighPower:30,legacyStoredBoundary:28,range:10,writes:(await writes(page)).length};
       });
       await test('simulation-reset-keeps-system-until-explicit-stop',async page=>{
         await page.goto(simulationCandidate+'/?simulation=1');
@@ -698,6 +743,7 @@ try {
       });
     }
   }
+  assert(!selectedCase || (report.cases.length === 2 && [720, 800].every(height => report.cases.some(test => test.viewport.height === height && test.name === selectedCase))), 'Exact case did not match both original viewports');
   assert.deepEqual(report.errors, [], 'Browser must not throw');
   assert(report.cases.every(test => test.pass), 'Candidate failures: ' + report.cases.filter(test => !test.pass).map(test => test.viewport.height + '/' + test.name).join(', '));
   for (const source of report.sources) assert.deepEqual(digest(source.path), source, 'Source changed during testing; rerun for exact evidence');
@@ -706,6 +752,7 @@ try {
 finally {
   report.elapsedMs = Math.round(performance.now() - startedAt);
   report.passedCount = report.cases.filter(test => test.pass).length;
+  report.selection.selectedCount = report.cases.length;
   fs.writeFileSync(path.join(out, baselineOnly ? 'baseline-results.json' : 'results.json'), JSON.stringify(report, null, 2));
   if (!baselineOnly && !report.pass) fs.writeFileSync(path.join(out, 'candidate-fail.json'), JSON.stringify(report, null, 2));
   if (browser) await browser.close();

@@ -1,5 +1,6 @@
-import fs from 'node:fs';import path from 'node:path';import {createRequire}from'node:module';import assert from'node:assert/strict';
+import crypto from 'node:crypto';import os from 'node:os';import fs from 'node:fs';import path from 'node:path';import {createRequire}from'node:module';import assert from'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'..'),out=process.argv[2];if(!out)throw Error('evidence lane required');fs.mkdirSync(out,{recursive:true});
+if(process.argv.includes('--library-process')||process.argv.includes('--library-idle')||process.argv.includes('--library-advisory')||process.argv.includes('--library-download-progress')||process.argv.includes('--library-editor-artwork')){await runLibraryProcess();process.exit(0);}
 const {build}=createRequire(root+'/package.json')('esbuild'),{chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json')('playwright');
 for(const variant of ['before','after'])for(const [file,globalName]of[['steamWallpaper.tsx','YMCCWallpaper'],['wallpaperPlayers.ts','YMCCPlayers']])await build({entryPoints:[root+'/decky-plugin/src/'+file],bundle:true,platform:'browser',format:'iife',globalName,outfile:out+'/'+variant+'-'+file.split('.')[0]+'.js',plugins:variant==='before'?[{name:'exact-before-source',setup(api){api.onLoad({filter:/decky-plugin[\\/]src[\\/](steamWallpaper\.tsx|wallpaperPlayers\.ts)$/},args=>({contents:fs.readFileSync(path.join(out,'before',path.relative(root,args.path)),'utf8'),loader:args.path.endsWith('.tsx')?'tsx':'ts'}));}}]:[]});
 const browser=await chromium.launch({channel:'msedge',headless:true}),rows=[],playerRows=[],libraryRows=[];let checks=0;const check=(value,label)=>{checks++;assert.ok(value,label)};
@@ -42,3 +43,338 @@ try{
  const median=values=>values.sort((a,b)=>a-b)[Math.floor(values.length/2)],summary=Object.fromEntries(['before','after'].map(v=>[v,{originalRendersPer120Messages:rows.find(x=>x.variant===v).originalRenders,medianScriptMs:median(rows.filter(x=>x.variant===v).map(x=>x.scriptMs)),medianRendererTaskMs:median(rows.filter(x=>x.variant===v).map(x=>x.rendererTaskMs)),medianHandlerMs:median(rows.filter(x=>x.variant===v).map(x=>x.handlerMs))}]));
  const result={ok:true,checks,rows,summary,playerRows,libraryRows,scope:'exact before snapshots and production code in real Edge/React with a 120-card native-page stand-in, 120 separate frame deliveries and actual browser CPU task metrics; unresolved media play is an explicit fixture; editor uses actual HTML/CSS/JS; not installed Steam CEF CPU acceptance'};fs.writeFileSync(out+'/performance-results.json',JSON.stringify(result,null,2));console.log(JSON.stringify({ok:true,checks,summary,playerRows,libraryRows}));
 }finally{await browser.close();}
+
+// Explicit library-only mode: the default Decky/player assertions above remain intact.
+// This measures owned Edge processes, with the same production HTML/CSS on both sides.
+async function runLibraryProcess() {
+  const args = process.argv.slice(3), idleMode = args.includes('--library-idle'), advisoryMode = args.includes('--library-advisory'), downloadMode = args.includes('--library-download-progress'), editorMode = args.includes('--library-editor-artwork'), allowed = new Set(['--library-process', '--library-idle', '--library-advisory', '--library-download-progress', '--library-editor-artwork', '--before-ui', '--before-sha256', '--before-css', '--before-css-sha256']);
+  let beforePath = '', expectedHash = '', beforeCss = '', expectedCssHash = '';
+  for (let i = 0; i < args.length; i++) {
+    assert.ok(allowed.has(args[i]), `unknown library-process argument: ${args[i]}`);
+    if (args[i] === '--before-ui') beforePath = args[++i];
+    else if (args[i] === '--before-sha256') expectedHash = args[++i];
+    else if (args[i] === '--before-css') beforeCss = args[++i];
+    else if (args[i] === '--before-css-sha256') expectedCssHash = args[++i];
+  }
+  assert.ok(Number(idleMode)+Number(advisoryMode)+Number(downloadMode)+Number(editorMode)<=1,'select one library workload');
+  assert.ok(beforePath && /^[a-f0-9]{64}$/i.test(expectedHash), 'explicit before source and SHA256 required');
+  const evidenceRoot = path.resolve(root, '../../../Testing/YMCC/Evidence'), relativeOut = path.relative(evidenceRoot, path.resolve(out));
+  assert.ok(relativeOut && !relativeOut.startsWith('..') && !path.isAbsolute(relativeOut), 'library-process output must be inside the shared evidence layer');
+  assert.equal(fs.readdirSync(out).length, 0, 'use a fresh evidence directory; prior FAIL/results must remain');
+  const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+  const ui = path.join(root, 'CustomSteamLibrary/workspace-ui');
+  const sourcePaths = {before: path.resolve(beforePath), after: path.join(ui, 'app.js'), html: path.join(ui, 'index.html'), css: path.join(ui, 'styles.css'), consumer: import.meta.filename};
+  if(idleMode){assert.ok(beforeCss && /^[a-f0-9]{64}$/i.test(expectedCssHash), 'idle comparison requires exact before CSS and SHA256');sourcePaths.beforeCss=path.resolve(beforeCss);}
+  const bytes = Object.fromEntries(Object.entries(sourcePaths).map(([key, file]) => [key, fs.readFileSync(file)]));
+  assert.equal(sha(bytes.before), expectedHash.toLowerCase(), 'before archive identity');
+  if(idleMode)assert.equal(sha(bytes.beforeCss),expectedCssHash.toLowerCase(),'before CSS identity');
+  const inputDir = path.join(out, 'inputs'); fs.mkdirSync(inputDir);
+  for (const [key, content] of Object.entries(bytes)) fs.writeFileSync(path.join(inputDir, key + (['before', 'after', 'consumer'].includes(key) ? '.js' : key === 'html' ? '.html' : '.css')), content);
+  const require = createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json');
+  const {chromium} = require('playwright'), edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+  const manifest = {
+    createdAt: new Date().toISOString(), sources: Object.fromEntries(Object.entries(sourcePaths).map(([key, file]) => [key, {file, sha256: sha(bytes[key])}])),
+    node: {path: process.execPath, version: process.version, sha256: sha(fs.readFileSync(process.execPath))},
+    edge: {path: edge, sha256: sha(fs.readFileSync(edge))},
+    playwright: {version: require('playwright/package.json').version, sha256: sha(fs.readFileSync(require.resolve('playwright/package.json')))},
+    logicalProcessors: os.availableParallelism(), budgetMs: Number(process.env.YMCC_LIBRARY_PROCESS_BUDGET_MS||180000),
+    workload: {games: 80, cachedMedia: 80, renders: 12, untouchedSaves: 6, order: ['before', 'after', 'after', 'before', 'before', 'after']},
+    scope: 'Owned headless Edge process CPU and renderer metrics; production library HTML/CSS/JS, memory native transport, static cached images. No video decoder, installed WebView/native worker, Steam write, energy or hardware acceptance.'
+  };
+  assert.ok(Number.isInteger(manifest.budgetMs)&&manifest.budgetMs>0&&manifest.budgetMs<=180000,'bounded original performance budget required');
+  if(idleMode){manifest.workload={games:80,cachedMedia:80,foregroundMs:1200,backgroundMs:2500,busyBackgroundMs:1800,order:manifest.workload.order};manifest.scope='Owned headless Edge process CPU and production UI; actual CSS timelines with a test focus-policy seam while the browser page remains visible. Native IPC is memory transport; this is not installed WebView/Windows occlusion/power acceptance.';manifest.focusPolicySeam=true;manifest.reducedMotion='no-preference';}
+  if(advisoryMode){manifest.workload={games:80,cachedMedia:80,eventsPerPhase:32,settleMs:700,order:manifest.workload.order};manifest.scope='Owned headless Edge CPU for production snapshot event handling and real library DOM.80 cached static cards,32 native-bridge event notifications per phase, then700ms settlement; explicit focus-policy seam and memory native state. No installed WebView/native worker/Steam write/energy acceptance.';manifest.focusPolicySeam=true;}
+  if(downloadMode){manifest.workload={games:80,cachedMedia:80,eventsPerPhase:256,settleMs:700,indeterminateIdleMs:1800,order:manifest.workload.order};manifest.scope='Owned headless Edge CPU for actual production download-progress bridge handling:80 cached static wallpaper cards,256 progress events then700ms settlement per focus phase, plus1800ms inactive indeterminate-control idle. Explicit focus-policy seam on a visible page, memory native transport; no timed DOM observer. No installed WebView/native worker, actual download/video/Steam/energy acceptance.';manifest.focusPolicySeam=true;}
+  if(editorMode){manifest.workload={games:80,cachedMedia:80,writesPerPhase:24,settleMs:400,order:manifest.workload.order};manifest.scope='Owned headless Edge CPU for24 sequential accepted playback write receipts per focus phase in the production editor,80 cached static wallpaper cards, then400ms settlement. Memory native revision/CAS transport, explicit visible-page focus seam, no timed diagnostic observer. No installed WebView/native worker, actual video decoder, Steam write or energy acceptance.';manifest.focusPolicySeam=true;}
+  const fixture = {dataRoot: 'G:/ProcessFixture', config: {roots: [], manualBuckets: {}}, manualOverrides: {items: {}}, resolvedIdentities: {}, library: {games: [], summary: {}}, steamPlan: {items: [], summary: {}}, gameMedia: {entries: {}}, mediaDownloads: {enabled: false, total: 80, completed: 80, remaining: 0, phase: 'completed'}, steamAccounts: {accounts: [{accountId:'1000',steamRoot:'G:/ProcessFixture/Steam',accountName:'Owned CPU fixture'}], steamStatus: 'ready'}};
+  for (let i = 0; i < 80; i++) {
+    const directory = `G:/ProcessFixture/Game${String(i).padStart(3, '0')}`, executable = directory + '/game.exe', appId = 100000 + i, name = `Cached game ${String(i).padStart(3, '0')}`;
+    const historical = executable.replaceAll('/', '\\').toUpperCase() + '\\';
+    fixture.library.games.push({gameDirectory: directory, primaryExecutable: executable, directoryName: name, primaryProductName: name, status: 'ready'});
+    fixture.steamPlan.items.push({gameDirectory: directory, primaryExecutable: executable, status: 'ready-to-add', appId, steamStoreAppId: appId, steamVerificationStatus: 'steam-verified', identityStatus: 'verified', suggestedName: name, artworkPreview: {tall: {url: '/asset.png', available: true}, long: {url: '/asset.png', available: true}, hero: {url: '/asset.png', available: true}}});
+    if (i % 2 === 0) fixture.manualOverrides.items[historical] = {name};
+    fixture.resolvedIdentities[historical] = {executable: historical, formalName: name};
+    fixture.config.manualBuckets[directory.toUpperCase() + '/'] = {bucket: 'not-in-steam'};
+    const asset = {id: `static-${appId}`, revision: '1', kind: 'image', extension: 'png', mime: 'image/png', bytes: 70};
+    fixture.gameMedia.entries[`steam-${appId}`] = {key: `steam-${appId}`, executable, name, appId, bindingRevision: 1, status: 'ready', wallpaperMode: 'static', staticReady: true, dynamicReady: false, assets: {static: asset}, asset, staticPreviewUrl: '/asset.png', previewUrl: '/asset.png', playback: {start: 8, end: 38, fit: 'cover'}};
+  }
+  if(editorMode)fixture.__editorArtworkWorkload=true;
+  const fixtureBytes = Buffer.from(JSON.stringify(fixture));
+  fs.writeFileSync(path.join(inputDir, 'fixture.json'), fixtureBytes); manifest.fixtureSha256 = sha(fixtureBytes);
+  fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  const rows = [], checkNames = [], started = performance.now(); let activeBrowser, timer;
+  const check = (value, label) => {assert.ok(value, label); checkNames.push(label);};
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64');
+  const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  try {
+    timer = setTimeout(() => {void activeBrowser?.close();}, manifest.budgetMs);
+    for (const variant of manifest.workload.order) {
+      assert.ok(performance.now() - started < manifest.budgetMs, 'common library-process budget exhausted');
+      activeBrowser = await chromium.launch({executablePath: edge, headless: true});
+      const browser = activeBrowser, page = await browser.newPage({viewport: {width: 1280, height: 800},reducedMotion:'no-preference'}), errors = [], network = [];
+      page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
+      manifest.edge.version = browser.version();
+      await page.addInitScript(seed => {
+        const listeners = new Set(); window.__cpuFixture = structuredClone(seed); window.__cpuCommands = [];
+        window.__cpuEmit=message=>{for(const listener of listeners)listener({data:message});};
+        const canonical = value => String(value || '').replaceAll('/', '\\').replace(/[\\]+$/, '').toLowerCase();
+        Object.defineProperty(window, 'chrome', {configurable: true, value: {webview: {
+          addEventListener(type, listener) {listeners.add(listener);},
+          postMessage(message) {
+            __cpuCommands.push(structuredClone(message)); if (message.command === 'uiError') return;
+            queueMicrotask(() => {
+              try {
+                const state = __cpuFixture, args = message.arguments || {}; let result;
+                if (message.command === 'steamAccounts') result = state.steamAccounts;
+                else if (message.command === 'steamCommitPreflight') result = {steamRunning:false};
+                else if (message.command === 'mediaCreate') result = Object.values(state.gameMedia.entries).find(entry => canonical(entry.executable) === canonical(args.executable) || String(entry.appId) === String(args.appId));
+                else if(message.command==='mediaEdit'&&state.__editorArtworkWorkload){
+                  const entry=state.gameMedia.entries[args.key];if(!entry||args.bindingRevision!==entry.bindingRevision||args.action!=='playback')throw Error('invalid editor benchmark write or stale revision');
+                  const next={...entry,bindingRevision:entry.bindingRevision+1,playback:{start:args.start,end:args.end,fit:args.fit}};state.gameMedia.entries[entry.key]=next;result=next;
+                }
+                else if (message.command === 'saveEditor') {
+                  for (const operation of args.operations || []) {
+                    const values = operation.arguments;
+                    if (operation.command === 'saveManualName') state.manualOverrides.items[canonical(values.executable)] = {...state.manualOverrides.items[canonical(values.executable)], name: values.name};
+                    else if (operation.command === 'setBucket') state.config.manualBuckets[canonical(values.gameDirectory)] = {bucket: values.bucket};
+                    else throw Error('unexpected benchmark write: ' + operation.command);
+                  }
+                  result = state;
+                } else if (['startup', 'openLibrary', 'state', 'mediaState'].includes(message.command)) result = state;
+                else if (message.command === 'mediaDownloadStatus') result = state.mediaDownloads;
+                else throw Error('unexpected benchmark command: ' + message.command);
+                if (!result) throw Error('missing fixture result for ' + message.command);
+                for (const listener of listeners) listener({data: {kind: 'response', id: message.id, ok: true, result: structuredClone(result)}});
+              } catch (error) {
+                for (const listener of listeners) listener({data: {kind: 'response', id: message.id, ok: false, error: error.message}});
+              }
+            });
+          }
+        }}});
+      }, fixture);
+      await page.route('**/*', route => {
+        const url = new URL(route.request().url()); network.push(url.href);
+        if (url.origin !== 'http://app.localhost') return route.abort();
+        const name = path.basename(url.pathname) || 'index.html';
+        if (name === 'asset.png') return route.fulfill({contentType: 'image/png', body: png});
+        const key = { 'index.html': 'html', 'styles.css': idleMode&&variant==='before'?'beforeCss':'css', 'app.js': variant }[name];
+        return key ? route.fulfill({contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html', body: bytes[key]}) : route.fulfill({status: 404, body: ''});
+      });
+      try {
+        await page.goto('http://app.localhost/index.html');
+        await page.waitForFunction(() => typeof renderLibrary === 'function' && snapshot?.library?.games?.length === 80);
+        await page.evaluate(async () => {activeTab = 'not-in-steam'; selectedGameDirectories = new Set(mergedGames().filter((_, i) => i % 3 === 0).map(keyFor)); renderLibrary(); await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); await new Promise(resolve => setTimeout(resolve, 700));});
+        const browserCDP = await browser.newBrowserCDPSession(), rendererCDP = await page.context().newCDPSession(page);
+        await rendererCDP.send('Performance.enable');
+        const processes = async () => (await browserCDP.send('SystemInfo.getProcessInfo')).processInfo;
+        const metrics = async () => Object.fromEntries((await rendererCDP.send('Performance.getMetrics')).metrics.map(metric => [metric.name, metric.value]));
+        const measure = async (name, workload) => {
+          const beforeProcesses = await processes(), a = await metrics(), t = performance.now();
+          const work = await workload();
+          const b = await metrics(), afterProcesses = await processes(), elapsedSec = (performance.now() - t) / 1000;
+          const prior = new Map(beforeProcesses.map(row => [row.id, row])), current = new Map(afterProcesses.map(row => [row.id, row]));
+          const cpuByType = {}, spawned = [], exited = [];
+          for (const row of afterProcesses) {
+            const old = prior.get(row.id);
+            if (old && old.type === row.type) cpuByType[row.type] = (cpuByType[row.type] || 0) + Math.max(0, row.cpuTime - old.cpuTime);
+            else spawned.push(row);
+          }
+          for (const row of beforeProcesses) if (!current.has(row.id)) exited.push(row);
+          const cpuSeconds = Object.values(cpuByType).reduce((a, b) => a + b, 0);
+          const result = {name, elapsedSec, cpuMs: cpuSeconds * 1000, cpuByType, oneCoreCpuPct: cpuSeconds / elapsedSec * 100, machineCpuPct: cpuSeconds / elapsedSec / manifest.logicalProcessors * 100, scriptMs: (b.ScriptDuration - a.ScriptDuration) * 1000, rendererTaskMs: (b.TaskDuration - a.TaskDuration) * 1000, layoutMs: (b.LayoutDuration - a.LayoutDuration) * 1000, heapBeforeBytes: a.JSHeapUsedSize, heapAfterBytes: b.JSHeapUsedSize, nodesBefore: a.Nodes, nodesAfter: b.Nodes, processSetStable: !spawned.length && !exited.length, spawned, exited, beforeProcesses, afterProcesses, work};
+          fs.writeFileSync(path.join(out, `raw-${rows.length + 1}-${variant}-${name}.json`), JSON.stringify(result, null, 2));
+          check(result.processSetStable, `${variant} ${name}: no unsampled spawned/exited process CPU`);
+          return result;
+        };
+
+        if(editorMode){
+          await page.evaluate(()=>{window.__cpuNativeFocus=document.hasFocus.bind(document);window.__cpuFocus=true;document.hasFocus=()=>__cpuFocus;window.dispatchEvent(new Event('focus'));openEdit(mergedGames()[0]);});
+          await page.waitForFunction(()=>selectedActionGame?.gameMedia?.key&&pending.size===0&&!sharedWallpaperBusy);await page.waitForTimeout(200);
+          const acceptedWrites=phase=>page.evaluate(async({phase,count,settleMs})=>{
+            const owner=captureSharedWallpaperWrite(),key=owner.entry.key,revision=Number(owner.entry.bindingRevision),startCommands=__cpuCommands.length;
+            const cover=document.querySelector('#artwork-cover-preview img'),wallpaper=document.querySelector('#artwork-wallpaper-preview img');let accepted=0;
+            const start=performance.now();for(let i=0;i<count;i++){const position=(i+(phase==='background'?2:0))%8;if(await updateSharedWallpaper('playback',{start:position,end:position+30,fit:'cover'},owner))accepted++;}
+            const handlerMs=performance.now()-start;await new Promise(resolve=>setTimeout(resolve,settleMs));const commands=__cpuCommands.slice(startCommands);
+            return {accepted,expected:count,expectedStart:phase==='background'?1:7,handlerMs,commands:commands.map(x=>x.command),key,backendRevision:__cpuFixture.gameMedia.entries[key].bindingRevision,uiRevision:snapshot.gameMedia.entries[key].bindingRevision,editorRevision:selectedActionGame.gameMedia.bindingRevision,expectedRevision:revision+count,lastStart:selectedActionGame.gameMedia.playback.start,coverRetained:cover===document.querySelector('#artwork-cover-preview img'),wallpaperRetained:wallpaper===document.querySelector('#artwork-wallpaper-preview img'),cards:libraryCards().length,selected:selectedPageCount(),policyFocused:document.hasFocus(),nativeFocused:__cpuNativeFocus(),visibility:document.visibilityState,modalCount:document.querySelectorAll('.modal:not(.hidden)').length,queuedPlayback:sharedWallpaperPendingPlayback.size,busy:sharedWallpaperBusy};
+          },{phase,count:manifest.workload.writesPerPhase,settleMs:manifest.workload.settleMs});
+          const foregroundWrites=await measure('foreground-editor-artwork-receipts',()=>acceptedWrites('foreground'));
+          await page.evaluate(()=>{__cpuFocus=false;window.dispatchEvent(new Event('blur'));});await page.waitForTimeout(120);
+          const backgroundWrites=await measure('background-editor-artwork-receipts',()=>acceptedWrites('background'));
+          await page.evaluate(()=>{__cpuFocus=true;window.dispatchEvent(new Event('focus'));});await page.waitForTimeout(120);
+          const restored=await page.evaluate(()=>({start:Number(document.getElementById('shared-wallpaper-skip').value),expected:selectedActionGame.gameMedia.playback.start,revision:selectedActionGame.gameMedia.bindingRevision,key:selectedActionGame.gameMedia.key,policyFocused:document.hasFocus(),cover:!!document.querySelector('#artwork-cover-preview img')}));
+          for(const phase of [foregroundWrites,backgroundWrites]){
+            const row=phase.work;check(row.accepted===row.expected&&row.commands.length===row.expected&&row.commands.every(x=>x==='mediaEdit'),`${variant}: all fixed accepted editor writes execute without extra state/create requests`);
+            check(row.backendRevision===row.expectedRevision&&row.uiRevision===row.expectedRevision&&row.editorRevision===row.expectedRevision&&row.lastStart===row.expectedStart,`${variant}: latest accepted editor model reaches backend/UI`);
+            check(row.cards===80&&row.selected===27&&row.modalCount===1&&row.visibility==='visible'&&!row.busy&&row.queuedPlayback===0,`${variant}: fixed editor/card/focus fixture and no stranded writes`);
+            if(variant==='after')check(row.coverRetained&&row.wallpaperRetained,'after: stable artwork resources survive playback receipts');
+            else check(!row.coverRetained&&!row.wallpaperRetained,'before: repeated artwork resource reconstruction reproduced');
+          }
+          check(foregroundWrites.work.policyFocused&&!backgroundWrites.work.policyFocused&&restored.policyFocused&&restored.start===restored.expected&&restored.start===1&&restored.cover,`${variant}: accepted current editor range resumes on focus`);
+          const sample={variant,foregroundWrites,backgroundWrites,restored,pageErrors:errors,nativeCommands:await page.evaluate(()=>__cpuCommands),network};rows.push(sample);fs.writeFileSync(path.join(out,`sample-${rows.length}-${variant}.json`),JSON.stringify(sample,null,2));
+          check(errors.length===0&&!sample.nativeCommands.some(x=>x.command==='uiError')&&network.every(url=>url.startsWith('http://app.localhost/')),`${variant}: editor workload has only owned transport/assets`);
+          console.log(JSON.stringify({sample:rows.length,variant,foregroundCpuMs:foregroundWrites.cpuMs,backgroundCpuMs:backgroundWrites.cpuMs,acceptedPerPhase:foregroundWrites.work.accepted}));continue;
+        }
+        if(downloadMode){
+          check(await page.evaluate(()=>document.querySelectorAll('.modal:not(.hidden)').length===0&&!document.querySelector('#library-view').classList.contains('hidden')),`${variant}: unobstructed cached progress consumer`);
+          await page.evaluate(()=>{
+            window.__cpuNativeFocus=document.hasFocus.bind(document);window.__cpuFocus=true;document.hasFocus=()=>__cpuFocus;window.dispatchEvent(new Event('focus'));libraryCards()[0].focus();
+            const completed=Number(snapshot.mediaDownloads?.completed||0);window.__cpuDownloadRevision=Number(lastMediaDownloadDisplay?.statusRevision||0)+100;
+            const state={enabled:true,total:completed+80,completed,remaining:80,phase:'downloading',activeCount:1,workerPid:12345,bytes:100,totalBytes:16777216,statusRevision:__cpuDownloadRevision,current:{name:'Initial download'},manualUntil:0};__cpuFixture.mediaDownloads=state;renderMediaDownloads(state);
+          });await page.waitForTimeout(300);
+          const eventWork=phase=>page.evaluate(async({phase,count,settleMs})=>{
+            const startCommands=__cpuCommands.length,start=performance.now();
+            for(let i=0;i<count;i++){const state={...snapshot.mediaDownloads,statusRevision:++__cpuDownloadRevision,bytes:5120+i*512,current:{name:'Download '+phase+' '+i}};__cpuFixture.mediaDownloads=state;__cpuEmit({kind:'event',event:'media-download-progress',mediaDownloads:state});}
+            const handlerMs=performance.now()-start;await new Promise(resolve=>setTimeout(resolve,settleMs));const commands=__cpuCommands.slice(startCommands),bar=document.getElementById('media-download-bar');
+            return {events:count,handlerMs,readRequests:commands.filter(x=>x.command==='state').length,commands:commands.map(x=>x.command),cards:libraryCards().length,selected:selectedPageCount(),current:snapshot.mediaDownloads.current.name,completed:snapshot.mediaDownloads.completed,revision:snapshot.mediaDownloads.statusRevision,label:document.getElementById('media-download-label').textContent,value:bar.value,hasValue:bar.hasAttribute('value'),policyFocused:document.hasFocus(),nativeFocused:__cpuNativeFocus(),visibility:document.visibilityState,modalCount:document.querySelectorAll('.modal:not(.hidden)').length,recoveryTimer:mediaRecoveryTimer};
+          },{phase,count:manifest.workload.eventsPerPhase,settleMs:manifest.workload.settleMs});
+          const foregroundEvents=await measure('foreground-download-progress',()=>eventWork('foreground'));
+          await page.evaluate(()=>{__cpuFocus=false;window.dispatchEvent(new Event('blur'));});await page.waitForTimeout(120);
+          const backgroundEvents=await measure('background-download-progress',()=>eventWork('background'));
+          await page.evaluate(()=>{const state={...snapshot.mediaDownloads,statusRevision:++__cpuDownloadRevision,totalBytes:0,bytes:0,phase:'identifying',current:{name:'Indeterminate background'}};__cpuFixture.mediaDownloads=state;renderMediaDownloads(state);});await page.waitForTimeout(100);
+          const indeterminateBackground=await measure('download-indeterminate-background-idle',()=>page.evaluate(async ms=>{
+            const start=__cpuCommands.length;await new Promise(resolve=>setTimeout(resolve,ms));const bar=document.getElementById('media-download-bar');return {waitedMs:ms,phase:snapshot.mediaDownloads.phase,hasValue:bar.hasAttribute('value'),policyFocused:document.hasFocus(),visibility:document.visibilityState,recoveryTimer:mediaRecoveryTimer,commands:__cpuCommands.slice(start).map(x=>x.command)};
+          },manifest.workload.indeterminateIdleMs));
+          await page.evaluate(()=>{__cpuFocus=true;window.dispatchEvent(new Event('focus'));});await page.waitForTimeout(120);
+          const restored=await page.evaluate(()=>({hasValue:document.getElementById('media-download-bar').hasAttribute('value'),phase:snapshot.mediaDownloads.phase,label:document.getElementById('media-download-label').textContent,current:snapshot.mediaDownloads.current.name}));
+          for(const phase of [foregroundEvents,backgroundEvents]){
+            check(phase.work.events===manifest.workload.eventsPerPhase&&phase.work.cards===80&&phase.work.selected===27,`${variant}: fixed progress event count and cached cards`);
+            check(phase.work.visibility==='visible'&&phase.work.modalCount===0,`${variant}: visible unobstructed focus-policy seam`);
+            check(phase.work.readRequests===0&&phase.work.commands.length===0,`${variant}: progress-only data does not request current library state`);
+          }
+          check(foregroundEvents.work.policyFocused&&!backgroundEvents.work.policyFocused&&foregroundEvents.work.label.includes('Download foreground 255')&&foregroundEvents.work.current==='Download foreground 255'&&backgroundEvents.work.current==='Download background 255',`${variant}: current progress data preserved across focus`);
+          check(indeterminateBackground.work.commands.length===0&&indeterminateBackground.work.recoveryTimer===0&&!indeterminateBackground.work.policyFocused&&indeterminateBackground.work.visibility==='visible',`${variant}: no inactive recovery polling`);
+          if(variant==='after')check(!backgroundEvents.work.label.includes('Download background')&&indeterminateBackground.work.hasValue,'after: inactive progress remains data-only with suspended indeterminate control');
+          else check(backgroundEvents.work.label.includes('Download background 255')&&!indeterminateBackground.work.hasValue,'before: repeated inactive status/indeterminate work reproduced');
+          check(!restored.hasValue&&restored.phase==='identifying'&&restored.label.includes('Indeterminate background')&&restored.current==='Indeterminate background',`${variant}: current indeterminate progress resumes without changing native data`);
+          check(errors.length===0,`${variant}: no page errors`);
+          const sample={variant,foregroundEvents,backgroundEvents,indeterminateBackground,restored,pageErrors:errors,nativeCommands:await page.evaluate(()=>__cpuCommands),network};rows.push(sample);fs.writeFileSync(path.join(out,`sample-${rows.length}-${variant}.json`),JSON.stringify(sample,null,2));
+          check(!sample.nativeCommands.some(x=>x.command==='uiError')&&network.every(url=>url.startsWith('http://app.localhost/')),`${variant}: owned progress transport only`);
+          console.log(JSON.stringify({sample:rows.length,variant,foregroundCpuMs:foregroundEvents.cpuMs,backgroundCpuMs:backgroundEvents.cpuMs,indeterminateCpuMs:indeterminateBackground.cpuMs}));continue;
+        }
+        if(advisoryMode){
+          check(await page.evaluate(()=>document.querySelectorAll('.modal:not(.hidden)').length===0&&!document.querySelector('#library-view').classList.contains('hidden')),`${variant}: unobstructed cached event consumer`);
+          await page.evaluate(()=>{
+            window.__cpuNativeFocus=document.hasFocus.bind(document);window.__cpuFocus=true;document.hasFocus=()=>__cpuFocus;window.dispatchEvent(new Event('focus'));libraryCards()[0].focus();
+            const render=renderLibrary;window.__cpuPaints=0;renderLibrary=(...args)=>{__cpuPaints++;return render(...args);};
+          });await page.waitForTimeout(300);
+          const eventWork=(phase)=>page.evaluate(async({phase,count,settleMs})=>{
+            const stale=structuredClone(snapshot),startCommands=__cpuCommands.length,startPaints=__cpuPaints,game=__cpuFixture.library.games[0];
+            const key=Object.keys(__cpuFixture.manualOverrides.items).find(value=>normalizedUiPath(value)===normalizedUiPath(game.primaryExecutable))||normalizedUiPath(game.primaryExecutable);
+            __cpuFixture.manualOverrides.items[key]={...__cpuFixture.manualOverrides.items[key],name:'Fresh '+phase};
+            const start=performance.now();for(let i=0;i<count;i++)__cpuEmit({event:i%2?'network-plan-refreshed':'library-plan-refreshed',snapshot:structuredClone(stale)});const handlerMs=performance.now()-start;
+            await new Promise(resolve=>setTimeout(resolve,settleMs));const commands=__cpuCommands.slice(startCommands);
+            return {events:count,handlerMs,readRequests:commands.filter(message=>message.command==='state').length,paints:__cpuPaints-startPaints,commands:commands.map(message=>message.command),cards:libraryCards().length,selected:selectedPageCount(),name:mergedGames().find(row=>normalizedUiPath(row.primaryExecutable)===normalizedUiPath(game.primaryExecutable))?.override?.name,policyFocused:document.hasFocus(),nativeFocused:__cpuNativeFocus(),visibility:document.visibilityState,modalCount:document.querySelectorAll('.modal:not(.hidden)').length,pending:silentRefreshPending,inFlight:Boolean(silentRefreshInFlight)};
+          },{phase,count:manifest.workload.eventsPerPhase,settleMs:manifest.workload.settleMs});
+          const foregroundEvents=await measure('foreground-advisory-events',()=>eventWork('foreground'));
+          await page.evaluate(()=>{__cpuFocus=false;window.dispatchEvent(new Event('blur'));});await page.waitForTimeout(120);
+          const backgroundEvents=await measure('background-advisory-events',()=>eventWork('background'));
+          const restoreStart=await page.evaluate(()=>({commands:__cpuCommands.length,paints:__cpuPaints}));await page.evaluate(()=>{__cpuFocus=true;window.dispatchEvent(new Event('focus'));});await page.waitForTimeout(700);
+          const restored=await page.evaluate(start=>({reads:__cpuCommands.slice(start.commands).filter(message=>message.command==='state').length,paints:__cpuPaints-start.paints,name:mergedGames().find(game=>normalizedUiPath(game.primaryExecutable)===normalizedUiPath(__cpuFixture.library.games[0].primaryExecutable))?.override?.name,pending:silentRefreshPending,inFlight:Boolean(silentRefreshInFlight)}),restoreStart);
+          for(const phase of [foregroundEvents,backgroundEvents]){
+            check(phase.work.events===manifest.workload.eventsPerPhase&&phase.work.cards===80&&phase.work.selected===27,`${variant}: event count cached cards and selection preserved`);
+            check(phase.work.visibility==='visible'&&phase.work.modalCount===0,`${variant}: event sample uses explicit focus seam on visible unobstructed page`);
+          }
+          check(foregroundEvents.work.policyFocused&&!backgroundEvents.work.policyFocused,`${variant}: event workload crosses intended focus policy`);
+          check(backgroundEvents.work.readRequests===0,`${variant}: no background state IPC`);
+          if(variant==='after'){
+            check(foregroundEvents.work.paints===1&&foregroundEvents.work.readRequests===1&&foregroundEvents.work.name==='Fresh foreground','after: foreground burst paints current state once');
+            check(backgroundEvents.work.paints===0&&backgroundEvents.work.pending&&!backgroundEvents.work.inFlight,'after: background burst leaves one dirty state without paint/read');
+            check(restored.reads===1&&restored.paints===1&&restored.name==='Fresh background'&&!restored.pending&&!restored.inFlight,'after: focus publishes the current deferred update once');
+          }else{
+            check(foregroundEvents.work.paints===manifest.workload.eventsPerPhase&&foregroundEvents.work.readRequests===0,'before: every foreground payload repaints without current read');
+            check(backgroundEvents.work.paints===manifest.workload.eventsPerPhase,'before: inactive payloads still repaint');
+          }
+          const sample={variant,foregroundEvents,backgroundEvents,restored,pageErrors:errors,nativeCommands:await page.evaluate(()=>__cpuCommands),network};rows.push(sample);fs.writeFileSync(path.join(out,`sample-${rows.length}-${variant}.json`),JSON.stringify(sample,null,2));
+          check(errors.length===0&&!sample.nativeCommands.some(message=>message.command==='uiError'),`${variant}: no event page/transport errors`);
+          check(network.every(url=>url.startsWith('http://app.localhost/')),`${variant}: event workload remains on owned fixture requests`);
+          console.log(JSON.stringify({sample:rows.length,variant,foregroundCpuMs:foregroundEvents.cpuMs,backgroundCpuMs:backgroundEvents.cpuMs,foregroundPaints:foregroundEvents.work.paints,backgroundPaints:backgroundEvents.work.paints}));
+          continue;
+        }
+        if(idleMode){
+          check(await page.evaluate(()=>document.querySelectorAll('.modal:not(.hidden)').length===0&&!document.querySelector('#library-view').classList.contains('hidden')),`${variant}: unobstructed normal cached library, no fixture prompt`);
+          await page.evaluate(()=>{window.__cpuNativeFocus=document.hasFocus.bind(document);window.__cpuFocus=true;document.hasFocus=()=>window.__cpuFocus;window.dispatchEvent(new Event('focus'));libraryCards()[0].focus();});
+          const settle=()=>page.waitForTimeout(120);
+          const idleWork=ms=>page.evaluate(async duration=>{
+            const observe=()=>({
+              commands:__cpuCommands.length,commandNames:__cpuCommands.map(message=>message.command),
+              policyFocused:document.hasFocus(),nativeFocused:__cpuNativeFocus(),visibility:document.visibilityState,
+              currentCard:document.querySelector('.game-card.current-card')?.dataset.directory||'',modalCount:document.querySelectorAll('.modal:not(.hidden)').length,
+              timers:{steam:steamRuntimeWatchTimer,media:mediaRecoveryTimer,cards:cardOperationFrame},
+              animations:document.getAnimations().map(animation=>{const target=animation.effect?.target;return {key:(target?.closest?.('.game-card')?.dataset.directory||'')+':'+String(target?.className||'')+':'+animation.animationName,name:animation.animationName,state:animation.playState,time:Number(animation.currentTime)};})
+            });
+            const before=observe();await new Promise(resolve=>setTimeout(resolve,duration));const after=observe();
+            const prior=new Map(before.animations.map(row=>[row.key,row]));
+            const advancing=after.animations.filter(row=>prior.has(row.key)&&row.time-prior.get(row.key).time>1).map(row=>({name:row.name,key:row.key,deltaMs:row.time-prior.get(row.key).time}));
+            return {duration,before,after,advancing,nativeCalls:after.commands-before.commands,cards:libraryCards().length,selected:selectedPageCount()};
+          },ms);
+          await settle();const foreground=await measure('cached-focused-idle',()=>idleWork(manifest.workload.foregroundMs));
+          await page.evaluate(()=>{__cpuFocus=false;window.dispatchEvent(new Event('blur'));});await settle();
+          const background=await measure('cached-unfocused-idle',()=>idleWork(manifest.workload.backgroundMs));
+          await page.evaluate(()=>{__cpuFocus=true;window.dispatchEvent(new Event('focus'));for(const game of mergedGames().slice(0,4))steamCommitTasks.set(keyFor(game),{phase:'running',label:'正在加入 Steam'});refreshCardOperationState();});await settle();
+          const activeQueue=await page.evaluate(()=>document.getAnimations().filter(animation=>animation.animationName==='spin'&&animation.playState==='running').length);
+          await page.evaluate(()=>{__cpuFocus=false;window.dispatchEvent(new Event('blur'));});await settle();
+          const busyBackground=await measure('queued-cached-unfocused-idle',()=>idleWork(manifest.workload.busyBackgroundMs));
+          await page.evaluate(()=>{__cpuFocus=true;window.dispatchEvent(new Event('focus'));});await settle();
+          const restored=await page.evaluate(async()=>{const animations=document.getAnimations(),before=animations.map(animation=>Number(animation.currentTime));await new Promise(resolve=>setTimeout(resolve,80));return {running:animations.filter(animation=>animation.playState==='running').length,advancing:animations.filter((animation,i)=>Number(animation.currentTime)-before[i]>1).length,policyFocused:document.hasFocus(),filterAnimated:animations.find(animation=>animation.animationName==='selected-artwork-breathe')?.effect.getKeyframes().some(frame=>Object.hasOwn(frame,'filter'))};});
+          const sample={variant,foreground,background,busyBackground,activeQueue,restored,pageErrors:errors,nativeCommands:await page.evaluate(()=>__cpuCommands),network};
+          rows.push(sample);fs.writeFileSync(path.join(out,`sample-${rows.length}-${variant}.json`),JSON.stringify(sample,null,2));
+          check(foreground.work.cards===80&&foreground.work.selected===27&&foreground.work.advancing.length>0,`${variant}: real cached foreground animation and selection`);
+          check(activeQueue===4&&restored.policyFocused&&restored.advancing>=5,`${variant}: queued spinners and glow resume on focus`);
+          if(variant==='after')check(restored.filterAnimated===false,'after: foreground glow retains motion without animated filter');
+          for(const [label,phase] of [['background',background],['busyBackground',busyBackground]]){
+            check(!phase.work.before.policyFocused&&phase.work.before.visibility==='visible'&&phase.work.after.visibility==='visible'&&phase.work.before.modalCount===0&&phase.work.after.modalCount===0,`${variant} ${label}: explicit focus-policy seam, visible browser`);
+            check(phase.work.nativeCalls===0&&Object.values(phase.work.after.timers).every(value=>value===0),`${variant} ${label}: no background polling or status native requests`);
+            if(variant==='after')check(phase.work.advancing.length===0&&phase.work.after.animations.every(animation=>animation.state==='paused'),`after ${label}: CSS animation timelines must stop while unfocused`);
+            else check(phase.work.advancing.length>0,`before ${label}: prior inactive-animation cost reproduced`);
+          }
+          check(errors.length===0&&!sample.nativeCommands.some(message=>message.command==='uiError'),`${variant}: no idle page/transport errors`);
+          check(network.every(url=>url.startsWith('http://app.localhost/')),`${variant}: idle requests remain owned fixture requests`);
+          if(rows.filter(row=>row.variant===variant).length===1){await page.evaluate(()=>{for(const animation of document.getAnimations()){animation.pause();animation.currentTime=1600;}});await page.screenshot({path:path.join(out,variant+'-library-fixed-animation-phase.png')});}
+          console.log(JSON.stringify({sample:rows.length,variant,backgroundCpuMs:background.cpuMs,busyBackgroundCpuMs:busyBackground.cpuMs,backgroundAdvancing:background.work.advancing.length,busyAdvancing:busyBackground.work.advancing.length}));
+          continue;
+        }
+        const render = await measure('twelve-cached-library-renders', () => page.evaluate(async () => {
+          const t = performance.now();
+          for (let i = 0; i < 12; i++) {renderLibrary(); await new Promise(requestAnimationFrame);}
+          const games = mergedGames();
+          return {wallMs: performance.now() - t, cards: document.querySelectorAll('.game-card').length, games: games.length, selected: selectedPageCount(), ownershipCorrect: games.every(game => !game.mediaOnly && normalizedUiPath(game.gameMedia?.executable) === normalizedUiPath(game.primaryExecutable)), commands: __cpuCommands.map(message => message.command)};
+        }));
+        check(render.work.cards === 80 && render.work.games === 80 && render.work.selected === 27 && render.work.ownershipCorrect, `${variant}: cached cards, selection and EXE media ownership`);
+        const saves = await measure('six-untouched-editor-saves', () => page.evaluate(async () => {
+          const calls = [], t = performance.now();
+          for (let i = 0; i < 6; i++) {
+            editDraft = null; const game = mergedGames()[i]; openEdit(game);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const begin = __cpuCommands.length, saved = await persistEditDraft();
+            calls.push({key: keyFor(game), saved, commands: __cpuCommands.slice(begin).map(message => ({command: message.command, arguments: message.arguments}))});
+            closeEdit(); await new Promise(requestAnimationFrame);
+          }
+          return {wallMs: performance.now() - t, calls, saveRequests: calls.reduce((sum, row) => sum + row.commands.filter(message => message.command === 'saveEditor').length, 0), allSaved: calls.every(row => row.saved), remainingPending: pending.size};
+        }));
+        check(saves.work.allSaved && saves.work.remainingPending === 0, `${variant}: all accepted saves settle`);
+        if (variant === 'after') check(saves.work.saveRequests === 0, 'after: unchanged editor saves use zero saveEditor requests');
+        else check(saves.work.saveRequests === 6, 'before: original unchanged-save request cost reproduced');
+        const sample = {variant, render, saves, pageErrors: errors, nativeCommands: await page.evaluate(() => __cpuCommands), network};
+        rows.push(sample); fs.writeFileSync(path.join(out, `sample-${rows.length}-${variant}.json`), JSON.stringify(sample, null, 2));
+        check(errors.length === 0 && !sample.nativeCommands.some(message => message.command === 'uiError'), `${variant}: no page/native transport errors`);
+        check(network.every(url => url.startsWith('http://app.localhost/')), `${variant}: all requests remain owned fixture requests`);
+        console.log(JSON.stringify({sample: rows.length, variant, renderCpuMs: render.cpuMs, renderTaskMs: render.rendererTaskMs, savesCpuMs: saves.cpuMs, saveRequests: saves.work.saveRequests}));
+      } catch (error) {
+        fs.writeFileSync(path.join(out, `failed-sample-${rows.length + 1}-${variant}.json`), JSON.stringify({error: String(error.stack || error), pageErrors: errors, network, browserState: await page.evaluate(() => ({commands: window.__cpuCommands, snapshotGames: snapshot?.library?.games?.length})).catch(() => null)}, null, 2));
+        throw error;
+      } finally {await browser.close(); activeBrowser = null;}
+    }
+    for (const [key, file] of Object.entries(sourcePaths)) check(sha(fs.readFileSync(file)) === sha(bytes[key]), `${key}: input did not drift during measurement`);
+    const summary = Object.fromEntries(['before', 'after'].map(variant => [variant, Object.fromEntries((editorMode?['foregroundWrites','backgroundWrites']:downloadMode?['foregroundEvents','backgroundEvents','indeterminateBackground']:advisoryMode?['foregroundEvents','backgroundEvents']:idleMode?['foreground','background','busyBackground']:['render','saves']).map(workload => {
+      const samples = rows.filter(row => row.variant === variant).map(row => row[workload]);
+      return [workload, {samples: samples.length, medianCpuMs: median(samples.map(row => row.cpuMs)), medianRendererCpuMs: median(samples.map(row => (row.cpuByType.renderer || 0) * 1000)), medianScriptMs: median(samples.map(row => row.scriptMs)), medianRendererTaskMs: median(samples.map(row => row.rendererTaskMs)), medianWallMs: median(samples.map(row => row.elapsedSec * 1000)), medianHeapAfterBytes: median(samples.map(row => row.heapAfterBytes)), medianNodesAfter: median(samples.map(row => row.nodesAfter)), saveRequests: workload === 'saves' ? samples.map(row => row.work.saveRequests) : undefined}];
+    }))]));
+    const result = {ok: true, checks: checkNames.length, checkNames, elapsedMs: performance.now() - started, summary, scope: manifest.scope, rows};
+    fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    fs.writeFileSync(path.join(out, 'library-process-results.json'), JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({ok: true, checks: result.checks, elapsedMs: result.elapsedMs, summary}));
+  } catch (error) {
+    fs.writeFileSync(path.join(out, 'library-process-results.json'), JSON.stringify({ok: false, error: String(error.stack || error), checks: checkNames, rows, elapsedMs: performance.now() - started, scope: manifest.scope}, null, 2));
+    throw error;
+  } finally {clearTimeout(timer); await activeBrowser?.close();}
+}

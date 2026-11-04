@@ -1,11 +1,12 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$ProjectRoot,[Parameter(Mandatory=$true)][string]$WorkspaceRoot,[string]$PayloadDestination='')
+param([Parameter(Mandatory=$true)][string]$ProjectRoot,[Parameter(Mandatory=$true)][string]$WorkspaceRoot,[string]$PayloadDestination='', [string]$PreparedCoreEvidence=$env:YMCC_LIGHTING_PREPARED_CORE_EVIDENCE)
 $ErrorActionPreference='Stop'
 $lightingTestExport=($env:YEMAN_TEST_EXPORT -eq '1')
 if($PSVersionTable.PSEdition -ne 'Core'){
  $core=Get-Command pwsh.exe -CommandType Application -ErrorAction Stop|Select-Object -First 1
  $lightingCoreArguments=@('-NoProfile','-File',$PSCommandPath,'-ProjectRoot',$ProjectRoot,'-WorkspaceRoot',$WorkspaceRoot)
  if($PayloadDestination){$lightingCoreArguments+=@('-PayloadDestination',$PayloadDestination)}
+ if($PreparedCoreEvidence){$lightingCoreArguments+=@('-PreparedCoreEvidence',$PreparedCoreEvidence)}
  & $core.Source @lightingCoreArguments
  if($LASTEXITCODE -ne 0){throw 'Lighting candidate Core build failed'};return
 }
@@ -21,6 +22,16 @@ function Save([string]$file,$object){[IO.File]::WriteAllText($file,($object|Conv
 function Relative([string]$file){$full=[IO.Path]::GetFullPath($file);if(-not $full.StartsWith($workspace+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'LIGHTING_CANDIDATE_OUTPUT_ESCAPE'};return $full.Substring($workspace.Length+1).Replace('\','/')}
 function Reference([string]$file){[pscustomobject]@{path=(Relative $file);sha256=(Get-YmccLightingFileHash $file)}}
 function Run([string]$name,[string]$exe,[string[]]$arguments){
+ # The full release's only lighting consumer uses the shared fixture quota.
+ # Compilation and the ordinary export branch retain their original behavior.
+ $fixtureBudgetRequest=$null
+ if($name -ceq 'global-consumers'){
+  $fixtureBudgetRequest=Join-Path $candidate 'fixture-budget-request.json'
+  Save $fixtureBudgetRequest ([ordered]@{schemaVersion=1;kind='ymcc-lighting-release-fixture-request';executable=$exe;workspaceRoot=$workspace;sessionFile=$env:YMCC_RELEASE_FIXTURE_SESSION;arguments=@($arguments)})
+  $exe=(Get-Command node.exe -CommandType Application -ErrorAction Stop|Select-Object -First 1).Source
+  $arguments=@((Join-Path $project 'tools/ymcc_sim/optimization/release-full-budget.mjs'),'--action','lighting-request','--request-file',$fixtureBudgetRequest)
+ }
+
  $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$exe;$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true;$info.WorkingDirectory=$project
  # The approved Core embeds its compiler-host runtime in its portable PDB.
  # Use the exact runtime requested by the pinned SDK for compilation only;
@@ -32,7 +43,7 @@ function Run([string]$name,[string]$exe,[string[]]$arguments){
   if(-not $process.Start()){throw 'LIGHTING_CANDIDATE_PROCESS_START'};$stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync();$timedOut=$false
   while(-not $process.WaitForExit(1000)){if(([DateTime]::UtcNow-$started).TotalSeconds -gt 240){$timedOut=$true;$process.Kill($true);$process.WaitForExit();break}}
   $text=$stdout.GetAwaiter().GetResult();$errorText=$stderr.GetAwaiter().GetResult();[IO.File]::WriteAllText((Join-Path $candidate ($name+'.stdout.log')),$text,[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText((Join-Path $candidate ($name+'.stderr.log')),$errorText,[Text.UTF8Encoding]::new($false))
-  $toolCalls.Add([pscustomobject]@{name=$name;compilerRuntimeRollForward=$info.Environment['DOTNET_ROLL_FORWARD'];executable=$exe;executableSha256=(Get-YmccLightingFileHash $exe);arguments=$arguments;pid=$process.Id;exitCode=$process.ExitCode;naturalExit=(-not $timedOut);startedUtc=$started.ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o')})
+  $toolCalls.Add([pscustomobject]@{name=$name;fixtureBudgetRequest=$fixtureBudgetRequest;compilerRuntimeRollForward=$info.Environment['DOTNET_ROLL_FORWARD'];executable=$exe;executableSha256=(Get-YmccLightingFileHash $exe);arguments=$arguments;pid=$process.Id;exitCode=$process.ExitCode;naturalExit=(-not $timedOut);startedUtc=$started.ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o')})
   if($timedOut -or $process.ExitCode -ne 0){throw ('LIGHTING_CANDIDATE_PROCESS_FAILED: '+$name)}
   return $text
  }finally{$process.Dispose()}
@@ -65,13 +76,29 @@ try{
  $coreEvaluation=$coreEvaluationText|ConvertFrom-Json;$coreEvaluationFile=Join-Path $candidate 'core-source-evaluation.json';[IO.File]::WriteAllText($coreEvaluationFile,$coreEvaluationText,[Text.UTF8Encoding]::new($false))
  $inputs+=@(Get-YmccLightingBuildSourceIdentity -ProjectRoot $project -Evaluation $coreEvaluation -ProjectRelative 'FanLab/LightSetter/DeviceCore/YeManLightDeviceCore.csproj' -RolePrefix 'Core');$inputs=@($inputs|Sort-Object path)
  Save (Join-Path $candidate 'source-inputs.json') $inputs
+ # An explicit prepared-core request is fail-closed before helper compilation. The ordinary default still publishes the core.
+ $pinText=Get-Content -LiteralPath (Join-Path $project 'FanLab/LightSetter/LightingAssemblyPins.cs') -Raw -Encoding UTF8;$pin=[regex]::Match($pinText,'StandaloneLightingSha256\s*=\s*"([a-f0-9]{64})"').Groups[1].Value
+ if($pin -notmatch '^[a-f0-9]{64}$'){throw 'LIGHTING_CANDIDATE_CORE_PIN'}
+ $coreReuse=$null
+ if($PreparedCoreEvidence){$phase='prepared-core-verification';$coreInputs=@(Get-YmccLightingBuildSourceIdentity -ProjectRoot $project -Evaluation $coreEvaluation -ProjectRelative 'FanLab/LightSetter/DeviceCore/YeManLightDeviceCore.csproj' -RolePrefix 'Core');$coreReuse=Assert-YmccLightingPreparedCore -ProjectRoot $project -EvidencePath $PreparedCoreEvidence -CoreSourceInputs $coreInputs -ExpectedSha256 $pin -DotnetPath $dotnet -EvaluatedSdkVersion $coreEvaluation.Properties.NETCoreSdkVersion}
  $phase='helper-publish';$payload=Join-Path $candidate 'payload'
  Run 'helper-publish' $dotnet @('publish',$projectFile,'-c','Release','--nologo','--artifacts-path',(Join-Path $candidate 'helper-artifacts'),'--output',$payload,'-p:UseSharedCompilation=false','-nodeReuse:false')|Out-Null
- $phase='independent-core-publish';$coreOutput=Join-Path $candidate 'independent-core'
+ if($coreReuse){
+  $phase='prepared-core-copy';$preparedDirectory=Join-Path $candidate 'prepared-core';New-Item -ItemType Directory -Force -Path $preparedDirectory|Out-Null
+  $coreEvidence=Get-Content -LiteralPath $coreReuse.evidencePath -Raw -Encoding UTF8|ConvertFrom-Json
+  foreach($item in @(@('evidence.json',$coreReuse.evidencePath,$coreReuse.evidenceSha256),@('PRODUCTION-SOURCE-IDENTITY.json',$coreReuse.sourceIdentityPath,$coreEvidence.sourceIdentity.sha256),@('PUBLISH-RECEIPT.json',$coreReuse.publishReceiptPath,$coreEvidence.publishReceipt.sha256),@('EMBEDDED-PDB-SOURCE-VERIFICATION.json',$coreReuse.embeddedPdbAuditPath,$coreEvidence.embeddedPdbAudit.sha256))){$to=Join-Path $preparedDirectory $item[0];if((Get-YmccLightingFileHash $item[1]) -cne $item[2]){throw 'LIGHTING_PREPARED_CORE_PROVENANCE_CHANGED'};Copy-Item -LiteralPath $item[1] -Destination $to;if((Get-YmccLightingFileHash $to) -cne $item[2]){throw 'LIGHTING_PREPARED_CORE_PROVENANCE_COPY'}}
+  if((Get-YmccLightingFileHash $coreReuse.evidencePath) -cne $coreReuse.evidenceSha256 -or (Get-YmccLightingFileHash $coreReuse.corePath) -cne $pin){throw 'LIGHTING_PREPARED_CORE_COPY_INPUT_DRIFT'}
+  Copy-Item -LiteralPath $coreReuse.corePath -Destination (Join-Path $payload 'YeManLightDeviceCore.dll')
+  if((Get-YmccLightingFileHash (Join-Path $payload 'YeManLightDeviceCore.dll')) -cne $pin){throw 'LIGHTING_PREPARED_CORE_COPY_READBACK'}
+  $coreReuse|Add-Member evidenceSnapshot (Reference (Join-Path $preparedDirectory 'evidence.json'))
+  $coreReuseFile=Join-Path $candidate 'core-reuse.json';Save $coreReuseFile $coreReuse
+  $toolCalls.Add([pscustomobject]@{name='core-reuse';processStarted=$false;publishedThisInvocation=$false;verification=(Reference $coreReuseFile);originalPublishExitCode=$coreReuse.originalPublishExitCode})
+ }else{
+  $phase='independent-core-publish';$coreOutput=Join-Path $candidate 'independent-core'
  Run 'core-publish' $dotnet @('publish',(Join-Path $project 'FanLab/LightSetter/DeviceCore/YeManLightDeviceCore.csproj'),'-c','Release','--nologo','--artifacts-path',(Join-Path $candidate 'core-artifacts'),'--output',$coreOutput,'-p:Platform=AnyCPU','-p:UseSharedCompilation=false','-nodeReuse:false')|Out-Null
- $pinText=Get-Content -LiteralPath (Join-Path $project 'FanLab/LightSetter/LightingAssemblyPins.cs') -Raw -Encoding UTF8;$pin=[regex]::Match($pinText,'StandaloneLightingSha256\s*=\s*"([a-f0-9]{64})"').Groups[1].Value
- if($pin -notmatch '^[a-f0-9]{64}$' -or (Get-YmccLightingFileHash (Join-Path $coreOutput 'YeManLightDeviceCore.dll')) -cne $pin){throw 'LIGHTING_CANDIDATE_CORE_PIN'}
- Copy-Item -LiteralPath (Join-Path $coreOutput 'YeManLightDeviceCore.dll') -Destination (Join-Path $payload 'YeManLightDeviceCore.dll')
+  if((Get-YmccLightingFileHash (Join-Path $coreOutput 'YeManLightDeviceCore.dll')) -cne $pin){throw 'LIGHTING_CANDIDATE_CORE_PIN'}
+  Copy-Item -LiteralPath (Join-Path $coreOutput 'YeManLightDeviceCore.dll') -Destination (Join-Path $payload 'YeManLightDeviceCore.dll')
+ }
  Assert-YmccLightingBuildSources -ProjectRoot $project -Inputs $inputs
  $phase='actual-source-pair';$helper=Join-Path $payload 'YeManLightSetter.dll';$pdb=Join-Path $payload 'YeManLightSetter.pdb';$sourceProofFile=Join-Path $candidate 'source-proof.json'
  $sourceProof=Write-YmccLightingCandidateSourceProof -ProjectRoot $project -WorkspaceRoot $workspace -HelperPath $helper -PdbPath $pdb -SourceInputs $inputs -OutputPath $sourceProofFile
@@ -89,6 +116,7 @@ try{
  $runtime=@(foreach($name in Get-YmccLightingRuntimeNames){$file=Join-Path $payload $name;[pscustomobject]@{name=$name;path=(Relative $file);sha256=(Get-YmccLightingFileHash $file);bytes=(Get-Item -LiteralPath $file).Length}})
  $record=[ordered]@{schemaVersion=1;kind='ymcc-lighting-build-candidate-v1';status='PASS';createdUtc=[DateTime]::UtcNow.ToString('o');helperSha256=$helperSha;coreSha256=$pin;sourceInputs=$inputs;toolInputs=$toolInputs;evaluation=(Reference $evaluationFile);coreEvaluation=(Reference $coreEvaluationFile);sourceProof=(Reference $sourceProofFile);globalResult=(Reference $globalFull);signalResult=(Reference $signalFile);runtimeFiles=$runtime;toolCalls=@($toolCalls);hardwareIo=$false;helperMainInvoked=$false;physicalAcceptance=$false;sourceApproval='This exact new build and actual candidate consumers; fixed7bf historical approval not reused.'}
  }
+ if($coreReuse){$record['coreReuse']=(Reference $coreReuseFile)}
  $candidateReceipt=Join-Path $candidate 'CANDIDATE-ACCEPTANCE.json';Save $candidateReceipt $record
  if($lightingTestExport){Assert-YmccLightingCompiledTestPayload -ProjectRoot $project -WorkspaceRoot $workspace -CandidateReceiptPath $candidateReceipt -PayloadRoot $payload|Out-Null}else{Assert-YmccLightingBuildCandidate -ProjectRoot $project -WorkspaceRoot $workspace -CandidateReceiptPath $candidateReceipt -PayloadRoot $payload|Out-Null}
  # PROMOTE

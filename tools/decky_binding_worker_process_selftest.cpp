@@ -38,6 +38,44 @@ int main(int argc,char** argv){
         const auto stopped=owner.stop();const auto after=owner.snapshot();need(stopped.fullyDestroyed&&after.handles==0&&after.pendingIo==0&&after.jobActiveProcesses==0&&after.childExited,"malformed-child-residual");
         return J{{"replyCode",static_cast<int>(reply.code)},{"atExit",state(after)}};
     });
+    test("loader-environment-and-exit-keep-only-bounded-facts",[]{
+        const J input{{"scope","loader-environment"},{"bootstrapStage","loader-temp-prepared"},{"tempPathUnits",154u},{"tempShortRoot",true},{"rawPath","private"},{"token","private"}};
+        const auto env=ymcc::deckydiag::record("bootstrap-watch",input);
+        need(env.value("tempPathUnits",0u)==154&&env.value("tempShortRoot",false),"loader-temp-facts-filtered-out");
+        need(!env.contains("rawPath")&&!env.contains("token"),"loader-temp-private-data-logged");
+        const auto exit=ymcc::deckydiag::record("bootstrap-watch",{{"scope","loader-exit"},{"bootstrapStage","loader-exited"},{"loaderUptimeMs",1720000ull},{"crashFailures",1u}});
+        need(exit.value("loaderUptimeMs",0ull)==1720000&&exit.value("crashFailures",0u)==1,"loader-exit-facts-filtered-out");
+        for(const auto& bad:J::array({nullptr,true,"123",-1,32768u}))
+            need(!ymcc::deckydiag::record("bootstrap-watch",{{"scope","loader-environment"},{"bootstrapStage","loader-temp-prepared"},{"tempPathUnits",bad}}).contains("tempPathUnits"),"unbounded-temp-fact-logged");
+        need(!ymcc::deckydiag::record("runtime",input).contains("tempPathUnits"),"loader-temp-wrong-event");
+        need(!ymcc::deckydiag::record("bootstrap-watch",{{"scope","private"},{"bootstrapStage","loader-temp-prepared"},{"tempPathUnits",154u}}).contains("tempPathUnits"),"loader-temp-wrong-scope");
+        return J{{"environment",env},{"exit",exit},{"onlyBoundedFacts",true}};
+    });
+    test("mode-signal-loader-versions-survive-only-bounded-log-fields",[]{
+        const auto record=ymcc::deckydiag::record("steam-mode-signal",{{"observedLoaderVersion","v3.3.0"},{"installedLoaderVersion","v3.3.1"},{"token","private"},{"endpoint","private"}});
+        need(record.value("observedLoaderVersion",std::string{})=="v3.3.0"&&record.value("installedLoaderVersion",std::string{})=="v3.3.1","loader-versions-were-filtered-out");
+        need(!record.contains("token")&&!record.contains("endpoint"),"untrusted-fields-entered-log");
+        need(!ymcc::deckydiag::record("runtime",{{"observedLoaderVersion","v3.3.0"}}).contains("observedLoaderVersion"),"loader-version-wrong-boundary");
+        for(const auto& bad:J::array({nullptr,true,42,"v3.3.1 private","v3..1","3.3.1",std::string(100,'9')}))
+            need(!ymcc::deckydiag::record("steam-mode-signal",{{"observedLoaderVersion",bad}}).contains("observedLoaderVersion"),"invalid-version-was-logged");
+        return J{{"record",record},{"onlyBoundedFacts",true}};
+    });
+    test("offline-ui-provenance-is-strict-and-cannot-be-smuggled-by-bootstrap",[]{
+        auto value=request(1);value["steam"]["accountSource"]="verified-steam-ui";
+        const auto parsed=worker::parse(value.dump());need(parsed.liveUiAccount&&parsed.steam.account!=0,"valid-offline-source-refused");
+        const auto log=ymcc::deckydiag::record("steam-session-check",{{"stage","binding-identity-verified"},{"uiAccountConfirmed",true},{"accountSource","verified-steam-ui"},{"observedAccount",123},{"token","private"}});
+        need(log.value("stage",std::string{})=="binding-identity-verified"&&log.value("uiAccountConfirmed",false)&&log.value("accountSource",std::string{})=="verified-steam-ui","offline-proof-diagnostic-lost");
+        need(!log.contains("observedAccount")&&!log.contains("token"),"private-account-or-token-logged");
+        for(const auto& bad:std::vector<J>{nullptr,true,42,"cached-last-user","registry"}){
+            auto invalid=value;invalid["steam"]["accountSource"]=bad;bool refused=false;
+            try{worker::parse(invalid.dump());}catch(...){refused=true;}need(refused,"untrusted-account-source-admitted");
+        }
+        auto zero=value;zero["steam"]["account"]=0;bool denied=false;try{worker::parse(zero.dump());}catch(...){denied=true;}need(denied,"anonymous-offline-account-admitted");
+        auto smuggled=request(1);smuggled["bootstrap"]["account"]=123;J failure;
+        const auto code=worker::run(smuggled.dump(),nullptr,[&](const J& packet){failure=packet;return true;});
+        need(code==2&&failure["detail"]["mutated"]==false&&failure["detail"]["reason"]=="mirror-bootstrap-worker-request-invalid","bootstrap-could-nominate-account");
+        return J{{"nonzeroTypedAccount",true},{"malformedSourcesRefused",true},{"bootstrapNominationRefusedBeforeMutation",true}};
+    });
     test("closed-generation-cannot-reopen-production-worker",[]{
         Owner owner;const auto generation=owner.snapshot().generation;need(owner.stop().fullyDestroyed,"initial-stop");need(!owner.start(),"stopped-owner-reopened");need(!owner.writeFrame(bytes(request(generation).dump()),100,generation),"late-request-accepted");const auto after=owner.snapshot();need(!after.started&&after.handles==0&&after.childExited,"late-operation-created-resources");return J{{"atExit",state(after)}};
     });

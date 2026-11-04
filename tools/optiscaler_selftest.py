@@ -15,9 +15,190 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("ymcc_optiscaler_test", ROOT / "PowerControl/pawnio/YeManTdpCtl.py")
-ctl = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ctl)
+# The narrow ledger mode compiles only original Opti functions. It never imports
+# the hardware module or executes top-level controller initialization.
+import ast
+import sys
+import types
+import builtins
+import ntpath
+import struct
+import re
+import time
+import argparse
+import shutil
+
+LEDGER_MODE = "--ledger-storm" in sys.argv
+LEDGER_PINS = []
+LEDGER_CASES = []
+LEDGER_PORT = None
+LEDGER_OUT = None
+
+
+class LedgerPorts:
+    def __init__(self, root):
+        self.root = Path(root).resolve()
+        self.case = self.root
+        self.events = []
+        self.fd_paths = {}
+        self.deny_read = self.fail_replace = self.silent_replace = self.fail_remove = None
+        self.short_write = self.fail_fsync = False
+        self.after_replace = self.before_replace = self.after_fsync = None
+        self.environ = {"APPDATA": str(self.root / "Roaming"), "LOCALAPPDATA": str(self.root / "Local")}
+        port = self
+
+        class PathPort:
+            def __getattr__(self, name):
+                original = getattr(os.path, name)
+                if name in ("exists", "lexists", "isfile", "isdir", "getsize", "islink"):
+                    def bound(path):
+                        port.guard(path, metadata=name in ("islink",))
+                        return original(path)
+                    return bound
+                return original
+
+        class OsPort:
+            path = PathPort()
+            name = os.name
+            environ = port.environ
+            def __getattr__(self, name):
+                if name == "replace": return port.replace
+                if name in ("remove", "unlink"):
+                    def remove(path):
+                        port.guard(path)
+                        if port.fail_remove and port.fail_remove(Path(path)):
+                            raise PermissionError("injected remove refusal")
+                        port.events.append({"api": "remove", "path": str(path), "nativeCalled": True})
+                        return os.remove(path)
+                    return remove
+                if name == "fsync":
+                    def sync(fd):
+                        os.fsync(fd)
+                        port.events.append({"api": "fsync", "nativeCalled": True, "injectedAckFailure": bool(port.fail_fsync)})
+                        if port.after_fsync: port.after_fsync()
+                        if port.fail_fsync: raise OSError("injected fsync acknowledgement failure")
+                    return sync
+                if name == "fdopen":
+                    return lambda fd, *args, **kwargs: port.wrap(os.fdopen(fd, *args, **kwargs), port.fd_paths[fd])
+                original = getattr(os, name)
+                if name in ("lstat", "stat", "scandir", "listdir", "walk", "makedirs", "mkdir", "rmdir"):
+                    def bound(path, *args, **kwargs):
+                        port.guard(path, metadata=name in ("lstat", "stat"))
+                        return original(path, *args, **kwargs)
+                    return bound
+                if name in ("close", "fstat", "fsdecode", "fspath", "sep", "pardir", "curdir"):
+                    return original
+                raise AssertionError("Unexpected OS capability " + name)
+
+        class ShutilPort:
+            def copy2(self, source, destination, **kwargs):
+                port.guard(source); port.guard(destination)
+                port.events.append({"api": "copy2", "source": str(source), "path": str(destination), "nativeCalled": True})
+                return shutil.copy2(source, destination, **kwargs)
+            def rmtree(self, path, **kwargs):
+                port.guard(path)
+                assert Path(path).resolve() != port.case
+                port.events.append({"api": "rmtree", "path": str(path), "nativeCalled": True})
+                return shutil.rmtree(path, **kwargs)
+
+        class TempPort:
+            def mkstemp(self, *args, **kwargs):
+                port.guard(kwargs.get("dir"))
+                fd, path = tempfile.mkstemp(*args, **kwargs)
+                port.fd_paths[fd] = path
+                port.events.append({"api": "mkstemp", "path": path, "nativeCalled": True})
+                return fd, path
+        self.os, self.shutil, self.tempfile = OsPort(), ShutilPort(), TempPort()
+
+    def guard(self, path, metadata=False):
+        assert path is not None, "No implicit temporary directory"
+        p = Path(path).absolute()
+        owned = p.is_relative_to(self.case)
+        ancestor = self.case.is_relative_to(p)
+        if not owned and not (metadata and ancestor):
+            self.events.append({"api": "fence", "path": str(p), "nativeCalled": False})
+            raise AssertionError("Unowned ledger path " + str(p))
+        return p
+
+    def wrap(self, handle, path):
+        port = self
+        class FilePort:
+            def __enter__(self): return self
+            def __exit__(self, *args): return handle.__exit__(*args)
+            def __getattr__(self, name): return getattr(handle, name)
+            def write(self, data):
+                payload = data[:max(1, len(data)//2)] if port.short_write else data
+                used = handle.write(payload)
+                port.events.append({"api": "write", "path": str(path), "requested": len(data), "transferred": used,
+                                    "nativeCalled": True, "injected": bool(port.short_write)})
+                return used
+        return FilePort()
+
+    def open(self, path, *args, **kwargs):
+        p = self.guard(path)
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self.deny_read and "r" in mode and self.deny_read(p):
+            self.events.append({"api": "open", "path": str(path), "nativeCalled": False, "injected": True})
+            raise PermissionError("injected read sharing refusal")
+        self.events.append({"api": "open", "path": str(path), "mode": mode, "nativeCalled": True})
+        return self.wrap(builtins.open(path, *args, **kwargs), p)
+
+    def replace(self, source, destination):
+        self.guard(source); p = self.guard(destination)
+        if self.before_replace: self.before_replace(Path(source), p)
+        if self.fail_replace and self.fail_replace(p):
+            self.events.append({"api": "replace", "path": str(p), "nativeCalled": False, "injected": True})
+            raise PermissionError("injected atomic replace refusal")
+        if self.silent_replace and self.silent_replace(p):
+            self.events.append({"api": "replace", "path": str(p), "nativeCalled": False, "silentAck": True})
+            return
+        self.events.append({"api": "replace", "path": str(p), "nativeCalled": True})
+        os.replace(source, destination)
+        if self.after_replace: self.after_replace(p)
+
+
+def ledger_extract(source, out, ports):
+    text = source.read_text(encoding="utf-8-sig")
+    tree = ast.parse(text, filename=str(source))
+    explicit = {"_sha256", "_write_json_file", "_safe_join", "_ini_set_section_values", "_canonical_game_dir", "optiscaler_cmd"}
+    selected = [node for node in tree.body if
+                (isinstance(node, ast.FunctionDef) and (node.name in explicit or node.name.startswith(("_opti", "_ymcc_backup", "_find_client_backup", "_find_ymcc_backup")))) or
+                (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id.startswith("OPTI_"))]
+    module = types.ModuleType("ymcc_opti_actual_ast")
+    safe_builtins = dict(vars(builtins), open=ports.open)
+    def imports(name, *args, **kwargs):
+        if name not in ("msvcrt", "fcntl"):
+            raise AssertionError("Unapproved import in extracted ledger function " + name)
+        return builtins.__import__(name, *args, **kwargs)
+    safe_builtins["__import__"] = imports
+    module.__dict__.update({"__builtins__": safe_builtins, "__file__": str(source), "os": ports.os,
+                           "shutil": ports.shutil, "tempfile": ports.tempfile, "json": json,
+                           "hashlib": hashlib, "time": time, "ntpath": ntpath, "struct": struct,
+                           "configparser": configparser, "re": re, "sys": types.SimpleNamespace(executable=str(out / "fake-python.exe")),
+                           "contextmanager": contextlib.contextmanager, "_olog": lambda *a: None})
+    for node in selected:
+        body = ast.get_source_segment(text, node)
+        LEDGER_PINS.append({"name": getattr(node, "name", getattr(node.targets[0], "id", "") if isinstance(node, ast.Assign) else ""),
+                            "line": node.lineno, "endLine": node.end_lineno,
+                            "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()})
+    assert not any(isinstance(node, (ast.Import, ast.ImportFrom, ast.Expr, ast.If, ast.Try)) for node in selected)
+    extracted = ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[]))
+    (out / "actual-opti-functions.py").write_text(ast.unparse(extracted), encoding="utf-8")
+    exec(compile(extracted, str(source), "exec"), module.__dict__)
+    return module
+
+
+if LEDGER_MODE:
+    LEDGER_OUT = Path(os.environ["YMCC_OPTI_LEDGER_OUT"]).resolve()
+    LEDGER_OUT.mkdir(parents=True, exist_ok=False)
+    (LEDGER_OUT / "owned").mkdir()
+    LEDGER_PORT = LedgerPorts(LEDGER_OUT / "owned")
+    LEDGER_SOURCE = Path(os.environ.get("YMCC_OPTI_LEDGER_SOURCE", ROOT / "PowerControl/pawnio/YeManTdpCtl.py")).resolve()
+    ctl = ledger_extract(LEDGER_SOURCE, LEDGER_OUT, LEDGER_PORT)
+else:
+    spec = importlib.util.spec_from_file_location("ymcc_optiscaler_test", ROOT / "PowerControl/pawnio/YeManTdpCtl.py")
+    ctl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ctl)
 
 
 def dll(path, marker=b"runtime"):
@@ -53,7 +234,18 @@ def package(root, version):
 
 class OptiScalerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="YMCC-opti-test-")
+        if LEDGER_MODE:
+            case = LEDGER_OUT / "owned" / ("case-" + str(len(LEDGER_CASES) + 1))
+            case.mkdir()
+            self.temp = types.SimpleNamespace(name=str(case), cleanup=lambda: None)
+            LEDGER_PORT.case = case
+            LEDGER_PORT.events = []
+            LEDGER_PORT.deny_read = LEDGER_PORT.fail_replace = LEDGER_PORT.silent_replace = LEDGER_PORT.fail_remove = None
+            LEDGER_PORT.short_write = LEDGER_PORT.fail_fsync = False
+            LEDGER_PORT.after_replace = LEDGER_PORT.before_replace = LEDGER_PORT.after_fsync = None
+            LEDGER_PORT.environ.update(APPDATA=str(case / "Roaming"), LOCALAPPDATA=str(case / "Local"))
+        else:
+            self.temp = tempfile.TemporaryDirectory(prefix="YMCC-opti-test-")
         self.root = Path(self.temp.name)
         self.cache = self.root / "Cache"
         self.backup = self.root / "Backups"
@@ -450,7 +642,7 @@ class OptiScalerTests(unittest.TestCase):
 
     def client_fixture(self):
         cdir = self.root / "ClientRecord"
-        (cdir / "files").mkdir(parents=True)
+        (cdir / "files").mkdir(parents=True, exist_ok=True)
         original, installed = b"original-client-game-dll", b"client-installed-dll"
         (cdir / "files/renamed-original.bin").write_bytes(original)
         (self.game / "dxgi.dll").write_bytes(installed)
@@ -466,6 +658,7 @@ class OptiScalerTests(unittest.TestCase):
             "PreInstallKeyFiles": [{"RelativePath": "dxgi.dll", "Existed": True, "Sha256": sha(original)},
                                    {"RelativePath": "OptiScaler.ini", "Existed": False}],
         }
+        (cdir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         return cdir, manifest, original
 
     def test_official_client_manifest_case_hash_and_backup_mapping(self):
@@ -653,6 +846,466 @@ class OptiScalerTests(unittest.TestCase):
         self.assertEqual(result['reason'], 'pending_transaction')
         self.assertTrue(result['recovery_required'])
 
+    def ledger_seed(self, recovery=False):
+        original, installed = b"ledger-original", b"ledger-installed"
+        (self.game / "dxgi.dll").write_bytes(installed)
+        root = Path(ctl._ymcc_backup_dir(str(self.game)) + (".pending" if recovery else ""))
+        (root / "files").mkdir(parents=True, exist_ok=True)
+        (root / "files/original.bin").write_bytes(original)
+        item = {"rel": "dxgi.dll", "had_original": True, "backup": "original.bin",
+                "original_sha256": hashlib.sha256(original).hexdigest(),
+                "source_sha256": hashlib.sha256(installed).hexdigest(),
+                "installed_sha256": hashlib.sha256(installed).hexdigest(), "touched": True}
+        manifest = {"schema_version": 2, "game_dir": str(self.game), "state": "pending" if recovery else "committed",
+                    "prepared": True, "items": [item], "created_directories": [], "FutureNote": {"keep": True}}
+        file = root / ("manifest.pending.json" if recovery else "manifest.json")
+        file.write_text(json.dumps(manifest), encoding="utf-8")
+        return root, file, manifest
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_bad_json_original_and_target_are_retained(self):
+        for bad in (b"", b"{", b"[]", b"null", b'{"items":null}', b'{"state":"bad","state":"committed"}'):
+            with self.subTest(bad=bad):
+                _, file, _ = self.ledger_seed()
+                file.write_bytes(bad)
+                before = self.snapshot()
+                result = ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)
+                self.assertFalse(result["ok"], result)
+                self.assertEqual(file.read_bytes(), bad)
+                self.assertEqual(self.snapshot(), before)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_duplicate_and_escaped_keys_never_authorize_restore(self):
+        for escaped in (False, True):
+            with self.subTest(escaped=escaped):
+                _, file, manifest = self.ledger_seed()
+                key = r'"\u0073tate"' if escaped else '"state"'
+                bad = json.dumps(manifest)[:-1] + ', ' + key + ':"committed"}'
+                file.write_text(bad, encoding="utf-8")
+                before = self.snapshot()
+                self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+                self.assertEqual(self.snapshot(), before)
+                self.assertEqual(file.read_text("utf-8"), bad)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_future_and_wrong_schema_types_preserve_debt(self):
+        for schema in (999, True, "2", None, 2.0):
+            with self.subTest(schema=schema):
+                _, file, manifest = self.ledger_seed()
+                manifest["schema_version"] = schema
+                file.write_text(json.dumps(manifest), encoding="utf-8")
+                before = self.snapshot()
+                self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+                self.assertEqual(self.snapshot(), before)
+                self.assertTrue(file.exists())
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_missing_original_hash_cannot_borrow_backup_identity(self):
+        _, file, manifest = self.ledger_seed()
+        manifest["items"][0].pop("original_sha256")
+        file.write_text(json.dumps(manifest), encoding="utf-8")
+        before = self.snapshot()
+        self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+        self.assertEqual(self.snapshot(), before)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_unknown_owner_and_wrong_target_cannot_be_defaulted(self):
+        for changes in ({"owner": "foreign"}, {"game_dir": str(self.root / "Elsewhere")}, {"game_dir": []}):
+            with self.subTest(changes=changes):
+                _, file, manifest = self.ledger_seed()
+                manifest.update(changes)
+                file.write_text(json.dumps(manifest), encoding="utf-8")
+                before = self.snapshot()
+                self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+                self.assertEqual(self.snapshot(), before)
+                self.assertTrue(file.exists())
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_pending_touched_must_be_a_real_boolean(self):
+        root, file, manifest = self.ledger_seed(recovery=True)
+        manifest["items"][0]["touched"] = "false"
+        file.write_text(json.dumps(manifest), encoding="utf-8")
+        before = self.snapshot()
+        self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(root.exists())
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_client_requires_explicit_status_supported_version_and_owner(self):
+        for changes in ({"OperationStatus": None}, {"ManifestVersion": 999}, {"ManifestVersion": True}, {"Owner": "foreign"}):
+            with self.subTest(changes=changes):
+                cdir, manifest, _ = self.client_fixture()
+                manifest.update(changes)
+                if changes.get("OperationStatus", "sentinel") is None: manifest.pop("OperationStatus")
+                before = self.snapshot()
+                with self.assertRaises(ValueError):
+                    ctl._opti_client_restore_plan(str(self.game), str(cdir), manifest)
+                self.assertEqual(self.snapshot(), before)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_client_conflicting_target_and_duplicate_lists_are_unknown(self):
+        for change in ("target", "duplicate", "original-hash"):
+            with self.subTest(change=change):
+                cdir, manifest, _ = self.client_fixture()
+                if change == "target": manifest["GameDirectory"] = str(self.root / "Other")
+                if change == "duplicate": manifest["InstalledFiles"].append("DXGI.DLL")
+                if change == "original-hash":
+                    manifest["FilesOverwritten"][0].pop("PreInstallSha256")
+                    manifest["PreInstallKeyFiles"][0].pop("Sha256")
+                with self.assertRaises(ValueError):
+                    ctl._opti_client_restore_plan(str(self.game), str(cdir), manifest)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_json_limit_and_strict_numeric_contract(self):
+        file = self.root / "manifest.json"
+        for text in ('{"v":' + '['*66 + '0' + ']'*66 + '}', '{"v":NaN}', '{"v":Infinity}', '{"v":1e999}', '{"v":"' + 'x'*(4*1024*1024) + '"}'):
+            with self.subTest(prefix=text[:30]):
+                file.write_text(text, encoding="utf-8")
+                with self.assertRaises((ValueError, OSError)):
+                    ctl._opti_load_json(str(file))
+                self.assertEqual(file.read_text("utf-8"), text)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_json_silent_publish_is_not_a_saved_receipt_and_retries(self):
+        file = self.root / "manifest.json"
+        file.write_text('{"Keep":1}', encoding="utf-8")
+        LEDGER_PORT.silent_replace = lambda p: p == file
+        with self.assertRaises((OSError, ValueError)):
+            ctl._write_json_file(str(file), {"Keep":2})
+        self.assertEqual(json.loads(file.read_text("utf-8")), {"Keep":1})
+        LEDGER_PORT.silent_replace = None
+        ctl._write_json_file(str(file), {"Keep":2})
+        self.assertEqual(ctl._opti_load_json(str(file)), {"Keep":2})
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_json_short_write_and_flush_failure_do_not_publish(self):
+        file = self.root / "manifest.json"
+        for mode in ("short", "flush"):
+            with self.subTest(mode=mode):
+                file.write_text('{"Keep":1}', encoding="utf-8")
+                LEDGER_PORT.short_write = mode == "short"
+                LEDGER_PORT.fail_fsync = mode == "flush"
+                with self.assertRaises((OSError, ValueError)):
+                    ctl._write_json_file(str(file), {"Keep":2})
+                self.assertEqual(file.read_text("utf-8"), '{"Keep":1}')
+                LEDGER_PORT.short_write = LEDGER_PORT.fail_fsync = False
+                ctl._write_json_file(str(file), {"Keep":2})
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_json_failed_replace_and_readback_denial_retry(self):
+        file = self.root / "manifest.json"
+        file.write_text('{"Keep":1}', encoding="utf-8")
+        LEDGER_PORT.fail_replace = lambda p: p == file
+        with self.assertRaises((OSError, ValueError)):
+            ctl._write_json_file(str(file), {"Keep":2})
+        self.assertEqual(file.read_text("utf-8"), '{"Keep":1}')
+        LEDGER_PORT.fail_replace = None
+        LEDGER_PORT.after_replace = lambda p: setattr(LEDGER_PORT, "deny_read", lambda q: q == file)
+        with self.assertRaises((OSError, ValueError)):
+            ctl._write_json_file(str(file), {"Keep":2})
+        LEDGER_PORT.after_replace = LEDGER_PORT.deny_read = None
+        ctl._write_json_file(str(file), {"Keep":2})
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_json_external_change_during_flush_is_preserved(self):
+        file = self.root / "manifest.json"
+        file.write_text('{"Keep":1}', encoding="utf-8")
+        LEDGER_PORT.after_fsync = lambda: file.write_text('{"External":9}', encoding="utf-8")
+        with self.assertRaises((OSError, ValueError)):
+            ctl._write_json_file(str(file), {"Keep":2})
+        self.assertEqual(json.loads(file.read_text("utf-8")), {"External":9})
+        LEDGER_PORT.after_fsync = None
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_json_future_and_corrupt_preimage_are_not_overwritten(self):
+        file = self.root / "manifest.json"
+        for original in ('{bad', '{"schema_version":999,"Debt":"KEEP"}'):
+            with self.subTest(original=original):
+                file.write_text(original, encoding="utf-8")
+                with self.assertRaises((OSError, ValueError)):
+                    ctl._write_json_file(str(file), {"schema_version":2,"items":[]})
+                self.assertEqual(file.read_text("utf-8"), original)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_ini_keeps_custom_fields_and_requires_final_readback(self):
+        path = self.game / "OptiScaler.ini"
+        original = '; keep\n[Upscalers]\nDx12Upscaler=auto\n[FrameGen]\nEnabled=auto\n[Custom]\nFuture=KEEP\n'
+        path.write_text(original, encoding="utf-8")
+        LEDGER_PORT.silent_replace = lambda p: p == path
+        result = ctl._optiscaler_configure_backend(str(self.game), "fsr", {"api":"dx12"}, self.cfg())
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(path.read_text("utf-8"), original)
+        LEDGER_PORT.silent_replace = None
+        result = ctl._optiscaler_configure_backend(str(self.game), "fsr", {"api":"dx12"}, self.cfg())
+        self.assertTrue(result["ok"], result)
+        self.assertIn('Future=KEEP', path.read_text("utf-8"))
+        self.assertIn('; keep', path.read_text("utf-8"))
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_ini_empty_duplicate_and_growth_limit_are_refused(self):
+        path = self.root / "OptiScaler.ini"
+        for content in ('', '[Upscalers]\nx=1\nx=2\n[FrameGen]\nEnabled=true', '[Upscalers]\nx='+'x'*(1<<20)+'\n[FrameGen]\nEnabled=true'):
+            with self.subTest(prefix=content[:30]):
+                path.write_text(content, encoding="utf-8")
+                with patch.object(ctl.os.path, "getsize", return_value=0):
+                    with self.assertRaises((ValueError, OSError, configparser.Error)):
+                        ctl._opti_read_ini(str(path))
+                self.assertEqual(path.read_text("utf-8"), content)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_restore_detects_target_change_during_copy(self):
+        root, _, manifest = self.ledger_seed()
+        source = root / "files/original.bin"
+        target = self.game / "dxgi.dll"
+        copy = ctl.shutil.copy2
+        def race(src, dst, **kwargs):
+            result = copy(src, dst, **kwargs)
+            if str(dst).endswith('.tmp'): target.write_bytes(b'EXTERNAL-NEW-ORIGINAL')
+            return result
+        with patch.object(ctl.shutil, "copy2", side_effect=race):
+            with self.assertRaises((ValueError, OSError)):
+                ctl._opti_atomic_restore(str(source), str(target), manifest["items"][0]["original_sha256"])
+        self.assertEqual(target.read_bytes(), b'EXTERNAL-NEW-ORIGINAL')
+        self.assertTrue(source.exists())
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_clear_failure_retains_debt_then_explicit_restore_retries(self):
+        root, file, _ = self.ledger_seed()
+        remove = ctl.shutil.rmtree
+        with patch.object(ctl.shutil, "rmtree", side_effect=PermissionError("owned cleanup denied")):
+            self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+        self.assertTrue(file.exists())
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'ledger-original')
+        self.assertTrue(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+        self.assertFalse(root.exists())
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_install_manifest_and_directory_publish_require_receipts(self):
+        for target in ("manifest", "directory"):
+            with self.subTest(target=target):
+                game = self.root / ("Game-"+target)
+                game.mkdir()
+                (game / 'dxgi.dll').write_bytes(b'ORIGINAL')
+                before = {p.name:p.read_bytes() for p in game.iterdir()}
+                bdir = Path(ctl._ymcc_backup_dir(str(game)))
+                LEDGER_PORT.silent_replace = (lambda p: p.name == 'manifest.json') if target == "manifest" else (lambda p: p == bdir)
+                result = ctl._optiscaler_install(str(game), self.cfg(), False, "fsr")
+                self.assertFalse(result["ok"], result)
+                self.assertEqual({p.name:p.read_bytes() for p in game.iterdir() if p.is_file()}, before)
+                LEDGER_PORT.silent_replace = None
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_actual_owned_win32_sharing_denial_and_release(self):
+        if os.name != 'nt': self.skipTest('Win32 only')
+        import ctypes
+        from ctypes import wintypes
+        _, file, _ = self.ledger_seed()
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        LEDGER_PORT.guard(file)
+        handle = kernel.CreateFileW(str(file),0x80000000,0,None,3,0x80,None)
+        self.assertNotEqual(handle, ctypes.c_void_p(-1).value)
+        try:
+            ctypes.set_last_error(0)
+            observer = kernel.CreateFileW(str(file),0x80000000,7,None,3,0x80,None)
+            winerror = ctypes.get_last_error()
+            if observer != ctypes.c_void_p(-1).value: kernel.CloseHandle(observer)
+            self.assertEqual(observer, ctypes.c_void_p(-1).value)
+            self.assertEqual(winerror, 32)
+            with self.assertRaises(OSError) as caught: ctl._opti_load_json(str(file))
+            self.assertEqual(caught.exception.errno, 13)
+            LEDGER_PORT.events.append({"api":"actual-Win32-share-denial","winerror":winerror,
+                                       "pythonErrno":caught.exception.errno,"nativeCalled":True})
+        finally: self.assertTrue(kernel.CloseHandle(handle))
+        self.assertEqual(ctl._opti_load_json(str(file))["schema_version"],2)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_writer_refuses_malformed_or_duplicate_existing_debt(self):
+        _, file, manifest = self.ledger_seed()
+        for change in ("type", "item-type", "duplicate", "case-alias", "bool", "hash"):
+            with self.subTest(change=change):
+                previous = json.loads(json.dumps(manifest))
+                if change == "type": previous["items"] = {}
+                if change == "item-type": previous["items"].append(None)
+                if change in ("duplicate", "case-alias"):
+                    alias = dict(previous["items"][0])
+                    if change == "case-alias": alias["rel"] = alias["rel"].upper()
+                    previous["items"].append(alias)
+                if change == "bool": previous["items"][0]["had_original"] = "false"
+                if change == "hash": previous["items"][0].pop("original_sha256")
+                raw = json.dumps(previous).encode()
+                file.write_bytes(raw)
+                with self.assertRaises((OSError, ValueError)):
+                    ctl._write_json_file(str(file), json.loads(json.dumps(manifest)))
+                self.assertEqual(file.read_bytes(), raw)
+        # A successful write keeps legal future/user fields at both levels.
+        previous = json.loads(json.dumps(manifest))
+        previous['items'][0]['FutureItem'] = {'user': 'KEEP'}
+        file.write_text(json.dumps(previous), encoding='utf-8')
+        candidate = json.loads(json.dumps(manifest))
+        candidate.pop('FutureNote')
+        ctl._write_json_file(str(file), candidate)
+        saved = ctl._opti_load_json(str(file))
+        self.assertEqual(saved.get('FutureNote'), previous['FutureNote'])
+        self.assertEqual(saved['items'][0].get('FutureItem'), {'user': 'KEEP'})
+        self.assertEqual(candidate, saved)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_install_rollback_keeps_externally_replaced_pending(self):
+        for raw in (b'{bad', b'{"schema_version":999,"Debt":"KEEP"}', b'{"schema_version":2,"owner":"foreign"}'):
+            with self.subTest(raw=raw):
+                game = self.root / ("Game-foreign-" + str(len(list(self.root.glob('Game-foreign-*')))))
+                game.mkdir()
+                (game / 'dxgi.dll').write_bytes(b'ORIGINAL')
+                pending = Path(ctl._ymcc_backup_dir(str(game)) + '.pending')
+                ledger = pending / 'manifest.pending.json'
+                original_writer = ctl._write_json_file
+                writes = []
+                def write_then_external(path, value):
+                    original_writer(path, value)
+                    writes.append(path)
+                    if len(writes) == 2:
+                        ledger.write_bytes(raw)
+                        raise OSError('external replacement after preparation acknowledgement')
+                with patch.object(ctl, '_write_json_file', side_effect=write_then_external):
+                    result = ctl._optiscaler_install(str(game), self.cfg(), False, 'fsr')
+                self.assertFalse(result['ok'], result)
+                self.assertTrue(ledger.exists(), 'failed install cleared unknown replacement ledger')
+                self.assertEqual(ledger.read_bytes(), raw)
+                self.assertTrue(any(p.read_bytes() == b'ORIGINAL' for p in (pending / 'files').iterdir()))
+                self.assertEqual((game / 'dxgi.dll').read_bytes(), b'ORIGINAL')
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_empty_preparation_read_denial_releases_for_explicit_retry(self):
+        (self.game / 'dxgi.dll').write_bytes(b'ORIGINAL')
+        pending = Path(ctl._ymcc_backup_dir(str(self.game)) + '.pending')
+        ledger = pending / 'manifest.pending.json'
+        def deny_receipt(path):
+            if path == ledger: LEDGER_PORT.deny_read = lambda p: p == ledger
+        LEDGER_PORT.after_replace = deny_receipt
+        result = ctl._optiscaler_install(str(self.game), self.cfg(), False, 'fsr')
+        self.assertFalse(result['ok'], result)
+        self.assertTrue(ledger.exists())
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'ORIGINAL')
+        LEDGER_PORT.after_replace = LEDGER_PORT.deny_read = None
+        self.assertTrue(ctl._optiscaler_install(str(self.game), self.cfg(), False, 'fsr')['ok'])
+        self.assertTrue(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'ORIGINAL')
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_client_named_unknown_slot_blocks_install(self):
+        with patch.object(ctl, '_find_client_backup', self.patches[2].temp_original):
+            for kind in ('missing', 'target-type', 'wrong-target', 'conflicting-target'):
+                with self.subTest(kind=kind):
+                    game = self.root / ('Game-unknown-' + kind)
+                    game.mkdir()
+                    (game / 'dxgi.dll').write_bytes(b'CLIENT-TARGET')
+                    key = hashlib.sha256(ctl._canonical_game_dir(str(game)).encode()).hexdigest()[:8]
+                    slot = Path(LEDGER_PORT.environ['APPDATA']) / 'OptiscalerClient' / 'Backups' / ('owned_' + key)
+                    (slot / 'files').mkdir(parents=True)
+                    (slot / 'files' / 'debt-original').write_bytes(b'EXTERNAL-DEBT')
+                    file = slot / 'manifest.json'
+                    if kind != 'missing':
+                        data = {'ManifestVersion':2,'InstalledGameDirectory':str(game),'OperationStatus':'committed'}
+                        if kind == 'target-type': data['InstalledGameDirectory'] = []
+                        if kind == 'wrong-target': data['InstalledGameDirectory'] = str(self.root / 'Other')
+                        if kind == 'conflicting-target': data['GameDirectory'] = str(self.root / 'Other')
+                        file.write_text(json.dumps(data),encoding='utf-8')
+                    before = {p.name:p.read_bytes() for p in game.iterdir()}
+                    slot_before = {str(p.relative_to(slot)):p.read_bytes() for p in slot.rglob('*') if p.is_file()}
+                    self.assertFalse(ctl._optiscaler_install(str(game), self.cfg(), False, 'fsr')['ok'])
+                    self.assertEqual({p.name:p.read_bytes() for p in game.iterdir()}, before)
+                    self.assertEqual({str(p.relative_to(slot)):p.read_bytes() for p in slot.rglob('*') if p.is_file()}, slot_before)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_legacy_directory_without_manifest_keeps_original_debt(self):
+        (self.game / 'dxgi.dll').write_bytes(b'ORIGINAL')
+        supplied = str(self.game).replace(chr(92), '/')
+        key = hashlib.md5(supplied.lower().encode('utf-8')).hexdigest()[:12]
+        legacy = self.backup / key
+        self.assertNotEqual(legacy, Path(ctl._ymcc_backup_dir(supplied)))
+        (legacy / 'files').mkdir(parents=True)
+        (legacy / 'files' / 'original-debt').write_bytes(b'KNOWN-ORIGINAL')
+        before = self.snapshot()
+        self.assertFalse(ctl._optiscaler_install(supplied, self.cfg(), False, 'fsr')['ok'])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((legacy / 'files' / 'original-debt').read_bytes(), b'KNOWN-ORIGINAL')
+
+    def ledger_physical_client(self):
+        cdir, manifest, original = self.client_fixture()
+        key = hashlib.sha256(ctl._canonical_game_dir(str(self.game)).encode()).hexdigest()[:8]
+        actual = Path(LEDGER_PORT.environ['APPDATA']) / 'OptiscalerClient' / 'Backups' / ('owned_' + key)
+        actual.parent.mkdir(parents=True, exist_ok=True)
+        cdir.rename(actual)
+        return actual, manifest, original
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_client_actual_lookup_denial_release_restore_keeps_external_store(self):
+        cdir, manifest, original = self.ledger_physical_client()
+        file = cdir / 'manifest.json'
+        saved = {str(p.relative_to(cdir)):p.read_bytes() for p in cdir.rglob('*') if p.is_file()}
+        game_before = self.snapshot()
+        with patch.object(ctl, '_find_client_backup', self.patches[2].temp_original):
+            for bad in (b'{bad', json.dumps(dict(manifest, ManifestVersion=999)).encode(), json.dumps(dict(manifest, Owner='foreign')).encode()):
+                with self.subTest(bad=bad[:40]):
+                    file.write_bytes(bad)
+                    self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+                    self.assertEqual(self.snapshot(), game_before)
+                    self.assertEqual(file.read_bytes(), bad)
+            file.write_bytes(saved['manifest.json'])
+            LEDGER_PORT.deny_read = lambda p: p == file
+            self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+            self.assertEqual(self.snapshot(), game_before)
+            LEDGER_PORT.deny_read = None
+            self.assertTrue(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), original)
+        self.assertEqual({str(p.relative_to(cdir)):p.read_bytes() for p in cdir.rglob('*') if p.is_file()}, saved)
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_client_late_manifest_change_never_authorizes_restore(self):
+        cdir, _, _ = self.ledger_physical_client()
+        file = cdir / 'manifest.json'
+        before = self.snapshot()
+        plan = ctl._opti_client_restore_plan
+        def changed(*args):
+            result = plan(*args)
+            file.write_bytes(b'{"ManifestVersion":999,"Debt":"KEEP"}')
+            return result
+        with patch.object(ctl, '_find_client_backup', self.patches[2].temp_original), patch.object(ctl, '_opti_client_restore_plan', side_effect=changed):
+            self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(file.read_bytes(), b'{"ManifestVersion":999,"Debt":"KEEP"}')
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_multiple_ymcc_owners_are_unconfirmed(self):
+        root, _, _ = self.ledger_seed()
+        duplicate = self.backup / 'legacy-other-owner'
+        shutil.copytree(root, duplicate)
+        before = self.snapshot()
+        self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue((root / 'manifest.json').exists())
+        self.assertTrue((duplicate / 'manifest.json').exists())
+
+    @unittest.skipUnless(LEDGER_MODE, "requires --ledger-storm owned AST mode")
+    def test_ledger_rollback_delete_ack_failure_retains_pending_and_retries(self):
+        (self.game / 'dxgi.dll').write_bytes(b'ORIGINAL')
+        pending = Path(ctl._ymcc_backup_dir(str(self.game)) + '.pending')
+        remove = ctl.os.remove
+        def silent(path):
+            if Path(path) != self.game / 'libxess.dll': return remove(path)
+            LEDGER_PORT.events.append({'api':'remove','path':str(path),'nativeCalled':False,'silentAck':True})
+        with patch.object(ctl, '_optiscaler_configure_backend', return_value={'ok':False,'msgs':['injected configuration failure']}), patch.object(ctl.os, 'remove', side_effect=silent):
+            self.assertFalse(ctl._optiscaler_install(str(self.game), self.cfg(), False, 'fsr')['ok'])
+        self.assertTrue((self.game / 'libxess.dll').exists())
+        self.assertTrue((pending / 'manifest.pending.json').exists(), 'unconfirmed deletion cleared recovery debt')
+        self.assertTrue(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)['ok'])
+        self.assertFalse((self.game / 'libxess.dll').exists())
+        self.assertFalse(pending.exists())
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'ORIGINAL')
+
     def test_ui_restores_entry_three_modes_and_no_process_toggle(self):
         for rel in ("src/components/GameQuickActions.vue", "src/views/QuickAppView.vue"):
             text = (ROOT / rel).read_text(encoding="utf-8")
@@ -669,4 +1322,56 @@ class OptiScalerTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    if LEDGER_MODE:
+        import platform
+        names = [name for name in dir(OptiScalerTests) if name.startswith("test_ledger_")]
+        names += ["test_both_modes_install_and_exact_uninstall_roundtrip", "test_failed_ini_write_rolls_back_every_file",
+                  "test_partial_rollback_retains_original_backups", "test_pending_recovery_is_retriable_after_failed_rollback",
+                  "test_missing_original_backup_refuses_uninstall_without_deleting", "test_legacy_ymcc_manifest_and_modified_ini_restore",
+                  "test_official_client_manifest_case_hash_and_backup_mapping", "test_client_missing_original_refuses_all_mutation",
+                  "test_client_updated_binary_is_preserved", "test_backup_traversal_record_refuses_all_deletion",
+                  "test_restore_post_preflight_binary_change_is_preserved", "test_lock_conflict_is_explicit_and_never_writes"]
+        if os.environ.get("YMCC_OPTI_LEDGER_CASE"):
+            names = [name for name in names if name == os.environ["YMCC_OPTI_LEDGER_CASE"]]
+        assert names
+        source_before = LEDGER_SOURCE.read_bytes()
+        test_before = Path(__file__).read_bytes()
+        class ReceiptResult(unittest.TextTestResult):
+            def startTest(self, test):
+                super().startTest(test)
+                self.case_failed = False
+            def addFailure(self, test, err): self.case_failed = True; super().addFailure(test, err)
+            def addError(self, test, err): self.case_failed = True; super().addError(test, err)
+            def addSubTest(self, test, subtest, err):
+                if err: self.case_failed = True
+                super().addSubTest(test, subtest, err)
+            def stopTest(self, test):
+                files = [{"path": str(p.relative_to(LEDGER_PORT.case)), "bytes": p.stat().st_size,
+                          "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
+                         for p in LEDGER_PORT.case.rglob("*") if p.is_file()]
+                LEDGER_CASES.append({"name": test._testMethodName, "pass": not self.case_failed,
+                                     "ownedRoot": str(LEDGER_PORT.case), "trace": list(LEDGER_PORT.events), "files": files})
+                super().stopTest(test)
+        suite = unittest.TestSuite(OptiScalerTests(name) for name in names)
+        result = unittest.TextTestRunner(verbosity=2, resultclass=ReceiptResult).run(suite)
+        changed = source_before != LEDGER_SOURCE.read_bytes() or test_before != Path(__file__).read_bytes()
+        runtime_modules = []
+        for module_name, module in sorted(sys.modules.copy().items()):
+            for role in ('__file__', '__cached__'):
+                path = getattr(module, role, None)
+                if isinstance(path, str) and Path(path).is_file():
+                    actual = Path(path).resolve()
+                    runtime_modules.append({'module': module_name, 'role': role, 'path': str(actual),
+                                            'sha256': hashlib.sha256(actual.read_bytes()).hexdigest()})
+        receipt = {"pass": result.wasSuccessful() and not changed, "selection": "original optiscaler consumer --ledger-storm",
+                   "cases": len(LEDGER_CASES), "failed": sum(not x["pass"] for x in LEDGER_CASES), "receipts": LEDGER_CASES,
+                   "source": str(LEDGER_SOURCE), "sourceSha256": hashlib.sha256(source_before).hexdigest(),
+                   "consumerSha256": hashlib.sha256(test_before).hexdigest(), "functionPins": LEDGER_PINS,
+                   "sourceDrift": changed, "runtimeModules": runtime_modules,
+                   "wholeScriptImported": False, "realHardwareProcessRegistryNetworkActions": 0,
+                   "python": {"path": sys.executable, "version": platform.python_version(),
+                              "sha256": hashlib.sha256((Path(sys.base_prefix) / "python.exe").read_bytes()).hexdigest()}}
+        (LEDGER_OUT / "RESULT.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+        sys.exit(0 if receipt["pass"] else 1)
+    else:
+        unittest.main(verbosity=2)

@@ -1,3 +1,37 @@
+<!-- DECKY-HEALTH-REVERSE-20261031 -->
+
+## 2026-10-31 Decky 反推复测：监视成本、漏检与重连接续
+
+本节是下方离线修复记录的后续，历史回执保持原样。本轮修复自有 health observer 与 bootstrap watch，官方Loader原字节不改，无新运行时EXE、无部署或Steam重启。
+
+真实Chromium中，1200个游戏子树、160次祖先主题样式更新，使旧observer额外向下查询160次。改为保留原上限4个官方错误页引用，普通属性变化只检查自身/包含关系；仅新插入子树做发现搜索，相同压力下查询0次。移除旧错误节点也会刷新缓存，补上“仅删除事件使可见错误页进入前4范围”的漏检。原21项及新增3项DOM回归24/24，网络/单插件/隐藏错误仍不能全局关闭。
+
+同一run的health保持一次性报告。旧通知若随CDP连接丢失，重新接入时原watch只等新事件，会漏掉已经存在的致命错误。现在每次已验证上下文接入后只读一次现状，复用原owner/run核验与terminal正常关闭；健康时零轮询。读回之后发生注销或新bootstrap时，关闭表达式会在实际页面内再次核对run/revoked；明确返回false不发送故障OFF，账号变化继续走原非致命传输恢复。原停止预算/退避/崩溃保护不变，不自动重建Steam界面。
+
+当前原生真实回环CDP69断言、精确原生注入/关闭表达式15项、原typed Runtime42项及原源码门通过，均有修前失败。原测试ID与发布消费者复用，无新增父门。未跑整包FullAcceptance、未链接完整产品EXE，上一轮完整main对象回执属于旧快照；本轮是当前原生消费者编译及功能回归。实际掌机CPU降幅、断网冷启动与睡眠唤醒仍未实测，不能将受控复现认定为某份历史日志的唯一根因。
+
+证据：Testing/YMCC/Evidence/Decky-Health-Reverse-20261031/REPORT.md、RESULT.json、SOURCE-CONFORMANCE.json。
+
+<!-- /DECKY-HEALTH-REVERSE-20261031 -->
+
+<!-- DECKY-OFFLINE-IDENTITY-20261031 -->
+
+## 2026-10-31 Decky 离线会话准入与社区问题的当前修复
+
+本节续接下方 DECKY-ROG-INCIDENTS-20261031 的历史快照，离线账号缺口已完成当前源码修复与定向消费者验证；下方“尚未修复”描述保留为当时结论，不代表当前源码。未部署、未链接完整安装 EXE，ROG 实机断网冷启动、睡眠唤醒仍待现场验证。
+
+群友包已证明 Steam Start offline/Success 后 YMCC 仍以 steam-session-unconfirmed 拒绝；联网才启动 Loader。当前 native/decky_sidebar_session.h 只在注册表 ActiveUser 为 0 时，从已验证 PID/birth 的共享 ui.mode.get 消费当前 Steam UI 账号，并要求原生 CurrentUser 回调与同一 UI SteamID 两次读取一致。账号仍必须是非零 uint32；没有从历史登录/目录猜账号。异步回调尚未到达时，复用原合并共享读取接续，不增加独立轮询。
+
+worker 严格解析可选 accountSource=verified-steam-ui；原五字段在线身份继续兼容。进程/出生时间/根目录/用户/Windows 会话的原校验保留。注册表为 0 的特例只接受该类型化来源；子进程在写入 mirror 凭据前独立核对当前页账号。切换账号或退出登录即时移除旧凭据，旧请求不重放，走原传输恢复重新核验；相同账号离线转在线保持连接。用户 OFF、已核实致命 OFF、五次崩溃保护、3200ms 归还和45秒原进程预算不变。
+
+社区 #615 的离线冷启动反馈仅作为交叉线索，Windows 当前账号准入缺口有独立日志与修前失败，不能声称所有 Linux 无网卡触发点已修复。#976 更新后旧 activePlugin 的当前消费者缺口已复现并修复：仅用户正在看 YMCC 时，在唯一正确新构建就绪后调用官方公开 setter 一次刷新该面板。#975/#983 Python 后台 EOF 自旋仍属于官方上游；YMCC 插件为 passive、无 main.py，不创建该后台。#985 先删旧版的风险复测了现有 YMCC 包暂存/哈希/备份/回滚；#984 第三方商店下载计数卡住仍未修补上游。官方公开 v3.3.1 原字节保留，只走 YMCC 整包更新，不新增运行时 EXE。
+
+当前原 Runtime 42/42 含精确提取 main.cpp 的离线准入、计划和诊断接线，原验收器及漏掉必需用例的反例有效；当前 main.cpp 完整优化对象编译通过。原生产 JS 116 项、实际 Chromium DOM 21 项、原生 bootstrap 表达式12项和前端更新37断言通过。禁外部 HTTP 的真实 Windows 回环 broker + 原生产 Client/Host/Relay 完成两次监控意图、回执与状态回传、同包重传去重和资源归还，业务 IO 为内存替身，不能当真实 Steam 断网验收。
+
+保留历史 FAIL/UNKNOWN：旧商店自测调用已移除的独立 Loader 更新 API，53/63；旧完整 Host 夹具仍断言已删除的大功耗核心/旧配置字段，未改断言以放行。它们不计全量通过，FullAcceptance=NOT_RUN。详细执行范围、当前源码哈希、社区处置及交付缺口见 Testing/YMCC/Evidence/Decky-Offline-Identity-20261031/REPORT.md、RESULT.json、COMPLETION-AUDIT.json。
+
+<!-- /DECKY-OFFLINE-IDENTITY-20261031 -->
+
 # Decky 持续能力生命周期候选（2026-10-22）
 
 独立 adapter ID：`plugins.decky-persistent-lifecycle`。导出函数是 `getDeckyPersistentLifecycleAdapters(repoRoot)`；不修改 runner、catalog、registry 或原 `decky-update-recovery` 目录。公共门依赖为同级 `../capability-lifecycle/index.mjs`，由主代理维护。
@@ -101,3 +135,36 @@ Evidence: `Testing/YMCC/Evidence/Decky-History-ROG-20261029/REPORT.md`. Targeted
 `finalAdmissionRecovery` adds four late permission cases: automatic recovery, exact retained frontend handoff, OFF, and nonretryable refusal. The final Loader-creation check schedules the original AdmissionWindow instead of leaving a waiting state without a timer. Re-entry rechecks admission and preflight. Retained never starts the Loader; OFF and nonretryable decisions do not restart.
 
 The existing `typed-binding-gate.mjs` requires all39 cases and original zero-resource/handle/3200ms predicates. Eight same-count case substitutions are rejected. Demand-only plan-started/plan-finished diagnostics carry controlled scope and elapsed time, not requests or credentials; no healthy polling is added. Existing original failures and older31/35-case receipts remain stage-specific evidence. Whole parent/package and installed sleep acceptance remain NOT_RUN. Evidence: `Testing/YMCC/Evidence/Decky-History-ROG-20261029/Reverse-Handoff/REPORT.md`.
+
+### 2026-10-31 loaded refusal to pending:40 required typed cases
+
+`native.typed-admission-park-resume-without-budget-refill` extends the existing Runtime producer and existing typed validator. It drives actual declined/loaded/pending admission, then recovers without another event. The same case uses deterministic original-window clock assertions for20,000 refusal/stable notifications, original1/3/8/20s offsets, no catch-up burst, initially terminal slow30s recovery and sticky explicit stop even through a later refusal. The old49-assertion historical admission consumer is also run unchanged; its legacy scope remains distinct.
+
+`AdmissionWindow.blocked` parks a transient nonretryable state without erasing its remaining schedule. Only independently revalidated pending admission resumes it; no attempt/window is replenished. Explicit stop clears parked eligibility, completed/new genuine epoch keeps its previous contract. A private source-built refill mutant must fail the exact original-clock assertion. Raw before failures and current compiled snapshots stay in core Evidence, not a new permanent parent or minimum ID.
+
+The existing real worker/diagnostics producer adds bounded observed/installed Loader-version filtering on steam-mode-signal; malformed values, wrong events and secret fields remain rejected. Whole-main drift is retained as strict current-source validation failure while actual compiled input equality and relevant source excerpts are recorded separately.40 typed cases or a frozen receipt never substitutes for whole release/installed sleep acceptance. Evidence: `Testing/YMCC/Evidence/Decky-Latest-Logs-20261031/REPORT.md`.
+
+
+<!-- DECKY-ROG-INCIDENTS-20261031 -->
+
+## 2026-10-31 两份独立 ROG 反馈：启动解包隐患修复；离线账号准入仍开放
+
+19:29:54包来自用户明确说明的037早期ROG手柄适配分叉；0.0.36/version.json-fallback不是源码版本证明。native12840/磁盘SHA55742c10…，Steam22288/CEF17340。18:56:27 Loader9404启动，19:25:18退出0xffffffff；自动重启19608、6328、28236、21252均同码退出，19:26:04保护OFF。focus-trace中这5个PID都有#32770/Error，弹窗正文缺失，不能认定Xbox前台限制或某个具体PyInstaller错误。
+
+当前主线按该深目录形状仍可产生264字符官方解包目标（home148、owned run205、最长官方相对名47）。已在原LoaderTemporaryRun补190 UTF-16单元独占run上限，深目录改用TEMP/YMCC-Decky/runtime-temp下128-bit随机run，另留68单元供_MEI和包内文件名；短根不可用/过长/重解析点则明确拒绝。原Job-empty、目录锁、不碰其他run/只读文件/业务配置的清理边界保留。未证明旧分叉实际TEMP规则或LongPathsEnabled状态，故这是当前可复现缺口修复，不能标现场唯一根因已消除。原官方CArchive消费门新增真实文件名长度契约；官方字节不改。
+
+原Runtime新增同一个深目录场景，包含真实creator+协议peer+惰性Loader、诊断接线、短根拒绝和清理负例，当前41/41及原typed验收器通过；worker诊断5/5、官方消费49/49通过。修前路径1/1失败、诊断4/5失败与同数量替换必需用例的拒绝回执保留。新增诊断仅在启动/退出记录路径长度、短根选择、真实uptime/退出码/失败计数，准备错误仅保留自有stage白名单；无原始TEMP或弹窗正文、无新健康timer。原3200ms、45秒进程预算和5次崩溃保护不改。
+
+19:12:25群友包是另一台native10360、0.0.37.0/EXE版本、SHA52eb6f0a…。历史native15356在18:39:50已有Steam Start offline/Success，YMCC仍steam-session-unconfirmed；18:41:56联网LogOnResponse OK后18:41:57.572启动Loader9568，18:41:59 WS Connected。当前主线仍在Decky准入要求session.account非零，账号取ActiveUser；这是尚未修复的离线账号确认兼容项，不能用已补准入定时器或深目录修复覆盖。没有猜测上次账号、忽略account0或改worker账户匹配。末尾native10360另属-silent桌面启动、一直读desktop且无Loader，不能并成崩溃事故或证明Decky所有功能需联网。
+
+未部署/导出/链接完整EXE、未操作真实Steam/游戏或睡眠，完整正式门NOT_RUN。主线只改自有temp消费和低频诊断；账号/Steam核心逻辑保持。证据：Testing/YMCC/Evidence/Decky-ROG-Exit-20261031-192954/REPORT.md；Testing/YMCC/Evidence/Decky-ROG-Intermittent-20261031-191225/REPORT.md。
+
+<!-- /DECKY-ROG-INCIDENTS-20261031 -->
+
+
+
+2026-10-31 包维护的同批共享：原 `decky-package-maintenance` 保留为发布要求，由 persistent 父门中原 baseline 执行同一完整生产者一次。普通32项与三个原故障注入负例保留，不以缩小范围替代去重。父门及全局最终通过后，原 `release-baseline-reference.mjs` 一次验证同时供 recovery 与 package-maintenance 两项引用；验证墙钟只记一次，包维护引用不启动第二个生产者、不计新增实际PASS。父门失败时两项保持 `NOT_RUN_DEFERRED_TO_PARENT`。
+
+包维护生产者另记录原 process/result/stdout/stderr、真实cwd、有限声明环境、编译authority文件列表和三份原负例FAIL的路径/大小/SHA256。共享核对精确原参数与30000/25000/5000ms预算、当前时间范围、源码/工具无漂移、完整普通项、三次语义拒绝及子Job回收；不能只凭外层PASS、同名脚本或工具数量共享。WinPS无选择参数的空串与null按同义处理，真正的筛选参数仍拒绝。原嵌套命令的NonInteractive及完整参数必须匹配；与旧外层不同的工作目录/ArtifactRoot只作已审自有输出与无关环境处理，不把旧记录缺失的身份补造成新证据。
+
+旧回执没有新增包绑定，不回填历史；父门INCOMPLETE也不能转PASS。此次去重仅减少一份重复的原包维护调用，不声称完成整链提速或全量30分钟通过。普通导出默认、HC/CPU专项、模块minimum及业务ID保持原规则。

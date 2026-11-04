@@ -125,6 +125,61 @@ internal static class LightingCatalogHarness
         Check("off-runtime-missing-writer-zero-io",Reject(()=>Execute(missing,"hc.device.ROGAlly","off"))&&missing.Calls.Count==0);
         var extra=(RecordingLightingState)Activator.CreateInstance(MemoryDevice(drift,HcLightingCapabilityCatalog.Resolve("hc.device.LokiZero")!,forceStatus:true))!;
         Check("off-runtime-extra-writer-zero-io",Reject(()=>Execute(extra,"hc.device.LokiZero","off"))&&extra.Calls.Count==0);
+        Check("reviewed-OXP3-extension-resolves",ActualId("HandheldCompanion.Devices.OneXPlayer3")=="ymcc.device.OneXPlayer3");
+        Check("frozen-bindings-remain-47",ActualCount()==47);
+        Check("OXP3-solid-allowed",!Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"color","solid",false,null);}));
+        Check("OXP3-breathing-allowed",!Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"color","breathing",false,null);}));
+        Check("OXP3-rainbow-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"color","rainbow",false,null);}));
+        Check("OXP3-brightness-allowed",!Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"brightness",null,true,null);}));
+        Check("OXP3-status-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"status",null,false,null);}));
+        Check("OXP3-preset09-allowed",!Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"preset",null,false,"LEDPreset_OneXPlayerX1_Preset09");}));
+        Check("OXP3-preset08-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"preset",null,false,"LEDPreset_OneXPlayerX1_Preset08");}));
+        Check("OXP3-identity-exact",(bool)InvokeTarget(Catalog,"IdentityMatches","HandheldCompanion.Devices.OneXPlayer3","HandheldCompanion.Devices.OneXPlayer3")!);
+        Check("OXP3-foreign-identity-denied",!(bool)InvokeTarget(Catalog,"IdentityMatches","HandheldCompanion.Devices.OneXPlayer3","HandheldCompanion.Devices.ROGAlly")!);
+        Check("OXP3-is-reviewed-extension",(bool)InvokeTarget(Catalog,"IsReviewedExtension","HandheldCompanion.Devices.OneXPlayer3")!);
+        Check("unknown-class-not-extension",!(bool)InvokeTarget(Catalog,"IsReviewedExtension","Unreviewed.Vendor.OneX")!);
+        var presetArgs=new object?[]{"ymcc.device.OneXPlayer3","LEDPreset_OneXPlayerX1_Preset09",0};
+        Check("OXP3-classic-preset-value",(bool)InvokeTarget(Catalog,"TryResolveExtensionPreset",presetArgs)!&&Convert.ToInt32(presetArgs[2])==1000);
+        var missingPresetArgs=new object?[]{"ymcc.device.OneXPlayer3","LEDPreset_OneXPlayerX1_Preset08",0};
+        Check("OXP3-missing-preset-denied",!(bool)InvokeTarget(Catalog,"TryResolveExtensionPreset",missingPresetArgs)!);
+        Check("OXP3-route-not-independent",((string?)Prop(InvokeTarget(Catalog,"Require","HandheldCompanion.Devices.OneXPlayer3",null,"color","solid",false,null),"PreferredProvider"))=="hc-device-core");
+        foreach(var model in new[]{"AYANEO3","AYANEONEXT2"})
+        {
+            var cls="HandheldCompanion.Devices."+model;
+            var operation=InvokeTarget(Catalog,"Require",cls,cls,"color","solid",true,null);
+            Check(model+"-typed-provider-authority",(string?)Prop(operation,"PreferredProvider")=="superjoy-cec-v1" &&
+                Prop(Prop(operation,"Capabilities"),"SourceAdapter")?.ToString()=="SuperJoyCec");
+            Check(model+"-reviewed-exact-source-identity",ActualId(cls)=="ymcc.device."+model && (bool)InvokeTarget(Catalog,"IsReviewedExtension",cls)!);
+            Check(model+"-brightness-available",!Reject(()=>{_=InvokeTarget(Catalog,"Require",cls,cls,"brightness",null,true,null);}));
+            Check(model+"-status-available",!Reject(()=>{_=InvokeTarget(Catalog,"Require",cls,cls,"status",null,false,null);}));
+            Check(model+"-rainbow-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require",cls,cls,"color","rainbow",true,null);}));
+            Check(model+"-preset-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require",cls,cls,"preset",null,false,"LEDPreset_OneXPlayerX1_Preset01");}));
+            Check(model+"-foreign-expectation-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require",cls,"HandheldCompanion.Devices.ROGAlly","color","solid",true,null);}));
+            Check(model+"-nearby-unreviewed-name-denied",Reject(()=>{_=InvokeTarget(Catalog,"Require",cls+"Unknown",cls+"Unknown","color","solid",true,null);}));
+        }
+        object FakeRows(params (string Id,string Class)[] items)
+        {
+            var hcType=Catalog.Assembly.GetType("YeManFanBackend.Capabilities.HcDeviceDescriptor",true)!;
+            var consumerType=Catalog.Assembly.GetType("YeManFanBackend.Capabilities.LightingCapabilityDescriptor",true)!;
+            var capabilityType=Catalog.Assembly.GetType("YeManFanBackend.Capabilities.HcSourceCapability",true)!;
+            var effectType=Catalog.Assembly.GetType("YeManFanBackend.Capabilities.HcSourceLedEffect",true)!;
+            var tupleType=typeof(ValueTuple<,>).MakeGenericType(hcType,consumerType);
+            var array=Array.CreateInstance(tupleType,items.Length);
+            foreach(var (index,item) in items.Select((value,index)=>(index,value)))
+            {
+                var capability=Enum.Parse(capabilityType,"DynamicLighting");
+                var effect=Enum.Parse(effectType,"SolidColor");
+                var device=Activator.CreateInstance(hcType,new object?[]{item.Id,item.Class,item.Class,"Fake","fake/source",new string('a',64),false,capability,capability,effect,effect});
+                var consumer=Activator.CreateInstance(consumerType,new object?[]{item.Id,true,false,effect,false,false,false,false,false});
+                array.SetValue(Activator.CreateInstance(tupleType,device,consumer),index);
+            }
+            return array;
+        }
+        var singleMap=InvokeTarget(Catalog,"BuildExtensionRoutes",FakeRows(("ymcc.device.FakeA","HandheldCompanion.Devices.FakeA")));
+        var containsKey=singleMap?.GetType().GetMethod("ContainsKey")!;
+        var count=singleMap?.GetType().GetProperty("Count")!.GetValue(singleMap) as int?;
+        Check("C01-same-device-alias-deduplicated",(bool)containsKey.Invoke(singleMap,new object[]{"ymcc.device.FakeA"})!&&(bool)containsKey.Invoke(singleMap,new object[]{"HandheldCompanion.Devices.FakeA"})!&&count==2);
+        Check("C01-cross-device-conflict-rejected",Reject(()=>{_=InvokeTarget(Catalog,"BuildExtensionRoutes",FakeRows(("ymcc.device.FakeA","HandheldCompanion.Devices.FakeA"),("ymcc.device.FakeB","HandheldCompanion.Devices.FakeA")));}));
         Check("HC-not-loaded",!AppDomain.CurrentDomain.GetAssemblies().Any(a=>a.GetName().Name=="HandheldCompanion"));
         return Save(args[1],HcLightingCapabilityCatalog.Bindings.Count);
     }

@@ -33,11 +33,15 @@ function Read-Identity([string]$Exe,[string]$Arguments) {
   } finally {$process.Dispose()}
 }
 $native=Read-Identity (Join-Path $root 'YeManCC\YeManCC.exe') '--battery-runtime-identity'
-$hostInfo=Read-Identity (Join-Path $root 'PowerControl\battery-host\YeManBatteryHost.exe') '--identity'
+$hostInfo=Read-Identity (Join-Path $root 'YeManCC\YeManCC.exe') '--battery-component-identity'
+if($hostInfo.execution -cne 'in-process' -or $hostInfo.pollingIntervalMs -ne 60000){throw 'Battery component is not the integrated 60-second implementation'}
 foreach($identity in @($native,$hostInfo)){
   if($identity.protocol -ne $expected.protocol -or $identity.sourceId -cne $expected.sourceId){throw 'Loaded component contract differs from this delivery'}
 }
 $wantedPower=[IO.Path]::GetFullPath((Join-Path $root 'PowerControl')).TrimEnd('\')
+$wantedComponent=Join-Path $wantedPower 'battery-host\YeManBatteryHost.dll'
+if([IO.Path]::GetFullPath($hostInfo.assemblyPath) -ine $wantedComponent){throw 'Battery library loaded from a different package path'}
+if([IO.Path]::GetFullPath($hostInfo.processPath) -ine (Join-Path $root 'YeManCC\YeManCC.exe')){throw 'Battery library did not execute in the selected YMCC executable'}
 if([IO.Path]::GetFullPath($native.powerRoot).TrimEnd('\') -ine $wantedPower){throw ("程序实际加载的 PowerControl 目录不同："+$native.powerRoot+"。请检查 YEMAN_POWER_CONTROL_DIR 或使用正式安装目录 C:\SOFT\YeMan。")}
 $running=@(Get-Process -Name YeManCC -ErrorAction SilentlyContinue)
 $restartNeeded=@($running | ForEach-Object {
@@ -45,6 +49,6 @@ $restartNeeded=@($running | ForEach-Object {
   [ordered]@{pid=$_.Id;path=$_.Path;started=$_.StartTime;action='Exit and relaunch after verifying this delivery'}
 })
 [ordered]@{ok=$true;buildId=$expected.buildId;sourceId=$expected.sourceId;implementation=$native.implementation;
-  nativePath=$native.nativePath;powerRoot=$native.powerRoot;helperVersion=$hostInfo.version;
+  nativePath=$native.nativePath;powerRoot=$native.powerRoot;componentVersion=$hostInfo.version;execution=$hostInfo.execution;pollingIntervalMs=$hostInfo.pollingIntervalMs;
   checkedFiles=@($expected.files).Count;hardwareAccessed=$false;runningInstances=$restartNeeded} | ConvertTo-Json -Depth 6
 if($running.Count){Write-Warning '文件检查通过；已有 YMCC 进程仍需退出后重开，磁盘文件正确不代表旧进程已更新。'}

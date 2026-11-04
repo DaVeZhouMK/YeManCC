@@ -11,18 +11,20 @@ import { startGamepad } from '@/gamepad/engine';
 import { startControllerShortcutRuntime } from '@/bridge/controllerShortcutRuntime';
 import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
 import { on, invoke } from '@/bridge/ipc';
+import { createNetworkAccelerationWakeRecovery } from '@/bridge/networkAccelerationWake';
+const networkAccelerationWake = createNetworkAccelerationWakeRecovery(generation => invoke('updateAccel.resume', { generation }, { timeoutMs: 8000 }));
 import { applyCpuAutostart } from '@/bridge/autostart';
 import { LEGACY_CCD_UNDERVOLT_ACTIVE } from '@/bridge/legacyCpuFeaturePolicy';
 import { applyTrayResident } from '@/bridge/trayResident';
 import { ensureDesktopModeStartupDefault } from '@/bridge/desktopModeStartup';
 import { restoreSelectedBootMode, migrateBootTrayPreference, cancelBootModeLaunches, cancelBootModeDeferredMouse, readBootModeFanIntent } from '@/bridge/bootModes';
-import { getFloatInfo, setAutofloatPowerControlDir } from '@/bridge/autofloat';
+import { getFloatInfo, setAutofloatPowerControlDir, invalidateFloatPowerSource } from '@/bridge/autofloat';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
 import { initMusic } from '@/bridge/music';
-import { toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
+import { toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, primeTdpSession, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
-import { adjustContinuousPerformanceTdp, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
+import { adjustContinuousPerformanceTdp, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, onContinuousPerformanceApplied, SkipApplyError } from '@/bridge/performanceSchedule';
 import { getMouseModeState, type MouseModeState } from '@/bridge/gameproc';
 import { acceptMouseModeState } from '@/bridge/mouseModeState';
 import {
@@ -145,7 +147,7 @@ function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<
       const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
       const sceneWantsFan = await readBootModeFanIntent(reason === 'boot' ? 'startup' : 'current');
       if ((sceneWantsFan ?? startup.fanControl) !== true || !mayProceed()) return;
-      const gate = await fanHostLifecycle.start();
+      const gate = await fanHostLifecycle.start({ manualRecovery: true, reason: 'authorized-auto-' + reason });
       if (!gate.allowed || !gate.writeReady) {
         fanDiagnosticLog('lifecycle.auto-start-blocked', {
           reason, generation, allowed: gate.allowed, writeReady: gate.writeReady, gate: gate.reason ?? '',
@@ -245,6 +247,8 @@ const BACKGROUND_RETRY_INTERVAL_MS = 5000;
 const DYNAMIC_BACKGROUND_NO_GAME_GRACE_MS = 4000;
 let backgroundRetryTimer: number | null = null;
 let backgroundRetryUntil = 0;
+let sharedBackgroundRetryIdentity = '';
+let sharedBackgroundRetryAttempts = 0;
 let dynamicBackgroundNoGameTimer: number | null = null;
 let resumeVideoTimer: number | null = null;
 let hlsInstance: { destroy: () => void; on: (event: string, callback: (...args: any[]) => void) => void; loadSource: (url: string) => void; attachMedia: (video: HTMLVideoElement) => void } | null = null;
@@ -486,7 +490,7 @@ async function reconcileBackgroundVideo(): Promise<void> {
   } catch {
     if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
     videoDesired.value = false;
-    onBackgroundVideoError();
+    onBackgroundVideoError(undefined, video);
   }
 }
 
@@ -649,6 +653,7 @@ function requestVideoPowerCheck(delayMs = 0, expectedMode?: 'ac' | 'dc'): void {
 
 function onVideoPowerSourceChanged(ac: boolean): void {
   const mode = ac ? 'ac' : 'dc';
+  invalidateFloatPowerSource(mode);
   applyVideoPowerMode(mode, true);
   requestVideoPowerCheck(300, mode);
 }
@@ -661,13 +666,77 @@ watch([backgroundUrl, backgroundKind], () => {
   void nextTick(reconcileBackgroundVideo);
 });
 
-function onBackgroundVideoError(message = 'Steam 在线视频播放失败'): void {
-  videoDesired.value = false;
-  invalidateBackgroundMedia();
+// A local interruption is not evidence that the shared file is corrupt. Keep
+// one selected, foreground-only retry; visibility/source/OFF cleanup reuses the
+// existing retry owner, so inactive windows own neither a decoder nor a timer.
+function scheduleSharedBackgroundRetry(message: string): void {
+  if (backgroundRetryTimer !== null || !activeDynamicMediaAsset) return;
+  const epoch = backgroundMediaEpoch;
+  const identity = JSON.stringify(activeDynamicMediaAsset);
+  const source = backgroundUrl.value;
+  const selected = JSON.stringify([identity, source]);
+  if (selected !== sharedBackgroundRetryIdentity) {
+    sharedBackgroundRetryIdentity = selected;
+    sharedBackgroundRetryAttempts = 0;
+  }
+  const delay = [500, 2000][sharedBackgroundRetryAttempts] ?? 60000;
+  sharedBackgroundRetryAttempts = Math.min(2, sharedBackgroundRetryAttempts + 1);
+  const timer = window.setTimeout(() => {
+    if (backgroundRetryTimer !== timer) return;
+    backgroundRetryTimer = null;
+    if (epoch !== backgroundMediaEpoch || source !== backgroundUrl.value ||
+        identity !== JSON.stringify(activeDynamicMediaAsset) || backgroundSource.value !== 'dynamic' ||
+        backgroundKind.value !== 'video' || backgroundVideoSuspended.value ||
+        !documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
+        isVideoPlaybackBlockedByPower() || !getDynamicBackgroundConfig().enabled) return;
+    backgroundVideoGeneration.value++;
+    void nextTick(async () => {
+      if (epoch !== backgroundMediaEpoch || source !== backgroundUrl.value ||
+          identity !== JSON.stringify(activeDynamicMediaAsset) || backgroundVideoSuspended.value ||
+          !documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
+          isVideoPlaybackBlockedByPower() || !getDynamicBackgroundConfig().enabled) return;
+      await setupBackgroundVideo();
+      void reconcileBackgroundVideo();
+    });
+  }, delay);
+  backgroundRetryTimer = timer;
+  window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+    detail: '播放暂时中断，' + (delay / 1000) + '秒后重试：' + message,
+  }));
+}
+
+function onBackgroundVideoMediaError(event: Event): void {
+  const video = backgroundVideo.value;
+  if (!video || event.target !== video) return;
+  onBackgroundVideoError(undefined, video);
+}
+
+function onBackgroundVideoError(message = 'Steam 在线视频播放失败', failedVideo?: HTMLVideoElement): void {
+  if (failedVideo && failedVideo !== backgroundVideo.value) return;
   if (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled) return;
-  if (backgroundVideoSuspended.value) return;
-  if (backgroundKind.value !== 'video') return;
-  if(backgroundSource.value==='dynamic'&&activeDynamicMediaAsset){const failed=activeDynamicMediaAsset;activeDynamicMediaAsset=null;void sharedGameMedia.playbackFailed(failed).catch(()=>{});return;}
+  if (backgroundVideoSuspended.value || !documentVisible.value || !nativeWindowVisible.value ||
+      lowBatteryStatic.value || isVideoPlaybackBlockedByPower() || backgroundKind.value !== 'video') return;
+  videoDesired.value = false;
+  if (backgroundSource.value === 'dynamic') {
+    if (!activeDynamicMediaAsset) return;
+    const video = failedVideo || backgroundVideo.value;
+    const code = video?.error?.code;
+    if (code === 3 || code === 4) {
+      invalidateBackgroundMedia();
+      clearBackgroundRetry();
+      const failed = activeDynamicMediaAsset;
+      activeDynamicMediaAsset = null;
+      void sharedGameMedia.playbackFailed(failed).catch(() => {});
+    } else if (backgroundRetryTimer === null) {
+      invalidateBackgroundMedia();
+      scheduleSharedBackgroundRetry(message);
+      video?.pause();
+      video?.removeAttribute('src');
+      video?.load();
+    }
+    return;
+  }
+  invalidateBackgroundMedia();
   const urls = backgroundFallbackUrls.value;
   const nextIndex = backgroundFallbackIndex.value + 1;
   if (nextIndex >= urls.length) {
@@ -691,7 +760,8 @@ function onBackgroundVideoError(message = 'Steam 在线视频播放失败'): voi
   });
 }
 
-function onBackgroundVideoPlaying(): void {
+function onBackgroundVideoPlaying(event?: Event): void {
+  if (event && event.target !== backgroundVideo.value) return;
   clearBackgroundRetry();
   if (dynamicBackgroundActive.value && isHlsUrl(backgroundUrl.value)) {
     window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
@@ -713,7 +783,7 @@ provide('globalRefreshKey', globalRefreshKey);
 async function syncMouseModeAtStartup(): Promise<void> {
   try {
     const state = await getMouseModeState();
-    acceptMouseModeState(state);
+    if (!acceptMouseModeState(state)) return;
     window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
       detail: { ...state },
     }));
@@ -764,6 +834,7 @@ function notePowerTransitionGeneration(e: Event): number {
   return generation;
 }
 function onPowerSuspending(e: Event): void {
+  networkAccelerationWake.cancel();
   tdpRuntimeStore.invalidatePower();
   const generation = notePowerTransitionGeneration(e);
   if (generation > 0 && generation >= fanHostLifecycle.coordinatorSnapshot.powerGeneration) {
@@ -866,6 +937,7 @@ function onPowerResumed(e: Event): void {
   // native edge is the Fan-only compensation path; FanHost shares any already
   // running F5 promise so this never opens HC twice.
   requestFanCommittedResume(generation);
+  networkAccelerationWake.schedule(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
   resumeVideoTimer = window.setTimeout(() => {
@@ -891,7 +963,7 @@ function onUiSettingsLoaded(): void {
 }
 // ── UI 缩放层：设计基准 580×780，整体在窗口中居中显示 ──
 // 用户偏好 2026-08-04：在原本「按窗口高度贴齐」基础上再放大 30%，居中后左右两侧留空更协调。
-// 视觉允许高度方向溢出（被裁剪的部分由 .app-content 滚动兜底），但宽度方向不许超窗口，避免点击区跑到屏幕外。
+// 保留原缩放风格；stage 和内页滚动视口始终止于当前可视边界，避免控件落在滚动区外。
 const layoutBaseWidth = computed(() => ymccDesignWidth(router.currentRoute.value.path));
 const BASE_H = YMCC_SHELL_BASE_HEIGHT;
 const SCALE_BOOST = YMCC_SHELL_SCALE_BOOST; // "再放大 30%"
@@ -904,49 +976,56 @@ watch(() => router.currentRoute.value.path, async () => {
   await nextTick();
   resetInnerPageViewport();
 }, { flush: 'post' });
-// 原生 WM_SIZE 下发的物理客户区尺寸。窗口从隐藏状态被呼出时，WebView2 恢复渲染前
-// window.innerWidth/Height 仍是旧值；只依赖它会让 stage 高度停在旧尺寸，底部露出透明带。
-const nativeViewport = ref<{ w: number; h: number } | null>(null);
+// Native sizes bridge the first few frames of WebView2 restoration. They are
+// physical pixels at the DPR at receipt, not a permanent maximum over DOM size.
+const nativeViewport = ref<{ w: number; h: number; dpr: number } | null>(null);
+let nativeViewportFrames = 0;
+const NATIVE_VIEWPORT_GRACE_FRAMES = 3;
 function setUiScale(scale: number) {
   uiScale.value = scale;
-  // Dropdown 等 Teleport 到 body 的浮层不在 .app-stage 的 zoom 树中。
-  // 把同一缩放值发布到根节点，供这些浮层同步字号与控件尺寸。
-  document.documentElement.style.setProperty('--ui-scale', String(scale));
+  // Teleported popups share the shell's zoom without inheriting its CSS tree.
+  const value = String(scale);
+  if (document.documentElement.style.getPropertyValue('--ui-scale') !== value)
+    document.documentElement.style.setProperty('--ui-scale', value);
 }
-// 视口尺寸取「原生上报值」与「JS 测量值」的较大者：两者一致时无副作用，原生值更新
-// 更及时时以它为准，避免呼出瞬间读到过期视口。native 未设置 WebView 缩放因子，故
-// 物理像素按 devicePixelRatio 换算即为 CSS 像素。
-// documentElement/visualViewport 是额外兜底：WebView2 从隐藏恢复时三种读数可能
-// 先后更新，取最大者保证不会因为某个读数滞后而把 stage 算短（底部露出透明带）。
+function validViewport(w: number, h: number): boolean {
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0;
+}
+function viewportDpr(): number {
+  const dpr = window.devicePixelRatio;
+  return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+}
 function viewportSize(): { w: number; h: number } {
-  const dpr = window.devicePixelRatio || 1;
-  // Native window.resized is broadcast by the main HWND to child renderers.
-  // A standalone editor must use its own DOM viewport, not the main window size.
-  const native = isStandaloneEditor.value ? null : nativeViewport.value;
   const root = document.documentElement;
   const vv = window.visualViewport;
-  return {
-    w: Math.max(
-      window.innerWidth,
-      root ? root.clientWidth : 0,
-      vv ? vv.width : 0,
-      native ? native.w / dpr : 0,
-    ),
-    h: Math.max(
-      window.innerHeight,
-      root ? root.clientHeight : 0,
-      vv ? vv.height : 0,
-      native ? native.h / dpr : 0,
-    ),
-  };
+  // Keep width/height from one coordinate space. Per-axis maxima can invent
+  // a viewport that never existed during rotation or a monitor/DPI change.
+  const dom = root && validViewport(root.clientWidth, root.clientHeight)
+    ? { w: root.clientWidth, h: root.clientHeight }
+    : validViewport(window.innerWidth, window.innerHeight)
+      ? { w: window.innerWidth, h: window.innerHeight }
+      : vv && validViewport(vv.width, vv.height) ? { w: vv.width, h: vv.height } : null;
+  const sample = isStandaloneEditor.value ? null : nativeViewport.value;
+  // A cached physical sample must not be reinterpreted at a new display DPR.
+  if (sample && sample.dpr === viewportDpr() && (nativeViewportFrames > 0 || !dom)) {
+    return { w: sample.w / sample.dpr, h: sample.h / sample.dpr };
+  }
+  // Root client size defines the viewport for the fixed shell. Other DOM
+  // observations may lag; a stale larger observation cannot pin its size.
+  return dom ?? { w: viewportWidth.value, h: viewportHeight.value };
+}
+function resetViewportScrollTail() {
+  document.querySelector<HTMLElement>('.app-content')?.style.removeProperty('--gamepad-clip-bottom');
 }
 function updateScale() {
   const { w, h } = viewportSize();
+  const changed = w !== viewportWidth.value || h !== viewportHeight.value;
+  if (w !== viewportWidth.value || h !== viewportHeight.value) resetViewportScrollTail();
   viewportWidth.value = w;
   viewportHeight.value = h;
   if (h <= 0 || w <= 0) {
     setUiScale(1);
-    return;
+    return changed;
   }
   // 用户视觉目标：在原本 innerHeight/BASE_H 的基础上再乘 1.3
   const boosted = (h / BASE_H) * SCALE_BOOST;
@@ -955,20 +1034,29 @@ function updateScale() {
   // must adapt its own width, never shrink the sidebar, toolbar or other UI.
   const widthCapped = w / YMCC_SHELL_BASE_WIDTH;
   setUiScale(Math.min(boosted, widthCapped));
+  return changed;
 }
 // 呼出/尺寸变化后视口读数可能分多帧才稳定（WebView2 隐藏→恢复、DWM 合成延迟）。
 // 按「帧数」而非墙钟时间收尾：窗口隐藏时 rAF 会被暂停，墙钟计时会提前结束。
 let settleFrames = 0;
 let settleRaf = 0;
+const STABLE_VIEWPORT_FRAMES = 4;
+let stableViewportFrames = 0;
 function settleScale(frames = 90) {
+  stableViewportFrames = 0;
   if (settleRaf) {
     settleFrames = Math.max(settleFrames, frames);
     return;
   }
   settleFrames = frames;
   const step = () => {
-    updateScale();
+    if (nativeViewportFrames > 0) nativeViewportFrames -= 1;
+    const changed = updateScale();
+    stableViewportFrames = changed || nativeViewportFrames > 0 ? 0 : stableViewportFrames + 1;
     settleFrames -= 1;
+    // ResizeObserver/native/visibility events re-arm a later real change. Do
+    // not poll a stable viewport for 90 frames or rewrite identical CSS zoom.
+    if (stableViewportFrames >= STABLE_VIEWPORT_FRAMES) settleFrames = 0;
     if (settleFrames > 0) settleRaf = requestAnimationFrame(step);
     else settleRaf = 0;
   };
@@ -977,8 +1065,9 @@ function settleScale(frames = 90) {
 // Route changes only adapt stage width; they must not alter the shared UI scale.
 function onNativeResize(e: Event) {
   const detail = (e as CustomEvent<{ w?: number; h?: number }>).detail;
-  if (!isStandaloneEditor.value && detail && Number(detail.w) > 0 && Number(detail.h) > 0) {
-    nativeViewport.value = { w: Number(detail.w), h: Number(detail.h) };
+  if (!isStandaloneEditor.value && detail && validViewport(Number(detail.w), Number(detail.h))) {
+    nativeViewport.value = { w: Number(detail.w), h: Number(detail.h), dpr: viewportDpr() };
+    nativeViewportFrames = NATIVE_VIEWPORT_GRACE_FRAMES;
   }
   updateScale();
   settleScale();
@@ -986,8 +1075,13 @@ function onNativeResize(e: Event) {
 // 呼出后 WebView2 才恢复渲染，此时原生尺寸消息可能晚于 DOM 视口更新到达。跨多帧重算
 // 兜底，确保视口稳定后再定稿缩放与 stage 高度。
 function refreshScaleAfterSummon() {
+  resetViewportScrollTail();
+  nativeViewportFrames = 0;
   updateScale();
   settleScale();
+}
+function refreshScaleWhenVisible() {
+  if (document.visibilityState === 'visible') refreshScaleAfterSummon();
 }
 const scalerStyle = computed(() => {
   if (isStandaloneEditor.value) {
@@ -999,14 +1093,11 @@ const scalerStyle = computed(() => {
     };
   }
   const scale = Math.max(uiScale.value, 0.01);
-  // 设计基准 580×780 与窗口宽高比一致时，stage 恰好铺满窗口。但当实际视口比设计
-  // 比例更高（例如隐藏任务栏后窗口底部吸附到屏幕下沿、高度增加），按宽度算出的
-  // 缩放会让 stage 高度小于视口，底部露出透明带（底板/背景层没有延伸）。
-  // 这里让 stage 至少撑满视口高度，保证底板与背景层始终覆盖整个窗口。
-  // The boot page scrolls through startup services and system tools. Its scroll
-  // viewport must end at the physical window edge after zoom, not below it.
-  const viewportStageHeight = Math.ceil(viewportHeight.value / scale);
-  const stageHeight = router.currentRoute.value.path === '/power' ? viewportStageHeight : Math.max(BASE_H, viewportStageHeight);
+  // The zoom is visual policy; the scroll viewport must still fit the actual
+  // client area, including wide/rotated windows. A minimum design height can
+  // otherwise clip controls outside the only scroll layer. Keep subpixel
+  // precision so rounding up does not create a clipped tail at high DPI.
+  const stageHeight = viewportHeight.value / scale;
   return {
     width: ymccStageWidth(layoutBaseWidth.value, viewportWidth.value, scale) + 'px',
     height: stageHeight + 'px',
@@ -1062,7 +1153,7 @@ function onGamepadBrightness(e: Event) {
 }
 function onGamepadMouseToggle(e: Event) {
   const detail = (e as CustomEvent<Partial<MouseModeState>>).detail || {};
-  acceptMouseModeState(detail);
+  if (!acceptMouseModeState(detail)) return;
   if (detail.ok === false) {
     window.dispatchEvent(new CustomEvent('mouse-mode:error', { detail }));
   }
@@ -1094,6 +1185,7 @@ let stopForegroundPowerSource: (() => void) | null = null;
 let stopResumeWatch: (() => void) | null = null;
 let stopFanResumeWatch: (() => void) | null = null;
 let stopSchemeWatch: (() => void) | null = null;
+let stopStartupPerformanceWatch: (() => void) | null = null;
 let stopDynamicBackground: (() => void) | null = null;
 let stopUiVisibility: (() => void) | null = null;
 let sleepPlanOptimizationTimer: number | null = null;
@@ -1271,6 +1363,7 @@ function scheduleResumeTransaction(generation: number): void {
     // or curve write after the coordinator admitted the rebuild.
 
     committedResumeGeneration = targetGeneration;
+    networkAccelerationWake.schedule(targetGeneration);
     resumeRetryCounts.delete(targetGeneration);
     const schemeOwner = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
     const performanceOwner = await restorePerformanceScheduleIfConfigured(mode, {
@@ -1549,6 +1642,11 @@ onMounted(async () => {
       setGyroVirtualFeatureAssetsRoot(dir);
     }
   } catch { /* fixed formal path remains the compatibility fallback */ }
+  // Validate and warm the shared TDP session once at shell startup. No polling
+  // or hardware set is performed here; high-frequency callers reuse its handles.
+  if (!aiCpuIsolated) void primeTdpSession(lifecycleAtMountPromise).catch((error) => {
+    store.pushLog({ cmd: 'tdp.startup-session', args: {}, ok: false, error: String(error) });
+  });
   // Provision the RTSS bridge at every main YMCC startup, not just when
   // monitoring is enabled. This optional repair must not delay UI readiness,
   // start/restart RTSS, or change the user's currently selected template.
@@ -1615,6 +1713,13 @@ onMounted(async () => {
   // 专属配置的「选择手柄 / 陀螺仪开关」覆盖：常驻订阅，不随窗口可见性暂停，
   // 否则游戏运行时窗口隐藏会让覆盖无法下发/恢复。
   startGameInputOverrideWatch();
+  // A startup-local receipt joins Boot and the resident owner without caching hardware state.
+  let startupPerformanceIntent = '';
+  let startupPerformanceResumeGeneration = latestResumeGeneration;
+  stopStartupPerformanceWatch = onContinuousPerformanceApplied(signature => {
+    startupPerformanceIntent = signature;
+    startupPerformanceResumeGeneration = latestResumeGeneration;
+  }, () => { startupPerformanceIntent = ''; });
   startGamePolicyRuntime();
   stopLosslessRuntimeOwner=startLosslessRuntimeOwner();
   if (!aiFanMockActive && !aiCpuIsolated) stopGameTrainerAutoPrepare = startGameTrainerAutoPrepare();
@@ -1710,7 +1815,7 @@ onMounted(async () => {
     // A missed source notification must also restore the correct global/game
     // profile. Reuse existing ownership/generation/write guards only on change;
     // merely showing the same AC/DC side never replays fan/CPU/TDP settings.
-    if (changed) schedulePowerChangePerformanceRestore(mode);
+    if (changed) { invalidateFloatPowerSource(mode); schedulePowerChangePerformanceRestore(mode); }
   });
   // Compensate for a one-shot resume event that was emitted while WebView2
   // was being recreated.  The native lifecycle remains `resuming` until the
@@ -1729,6 +1834,7 @@ onMounted(async () => {
       fanHostLifecycle.setPowerGeneration(committedGeneration);
       fanHostLifecycle.observePowerBoundary('resumed', committedGeneration);
       requestFanCommittedResume(committedGeneration);
+      networkAccelerationWake.schedule(committedGeneration);
     }
   } else if (lifecycleAtMount?.phase === 'resuming') {
     // Native has not delivered F5 yet. Wait for its durable resume-ready
@@ -1785,22 +1891,28 @@ onMounted(async () => {
   // A freshly recreated page can mount while native is still Resuming. Do not
   // let normal boot restoration race the gated wake transaction; the latter
   // restores the current automatic bank after commit; manual banks stay static.
-  if (!aiCpuIsolated && await powerLifecycleReadyForWrites()) {
-    const schemeOwnerAtBoot = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
-    const performanceOwnerAtBoot = await restorePerformanceScheduleIfConfigured(undefined, {
-      dedicatedOnly: schemeOwnerAtBoot !== 'auto',
-      automaticOnly: true,
-    }).catch(() => null);
-    if (performanceOwnerAtBoot === 'auto' && schemeOwnerAtBoot === 'auto') {
-      // Some boot tasks/OEM services rewrite the three hybrid-core values
-      // after the first restore.  Reapply only the saved core mode after the
-      // system settles; manual mode never enters this path.
-      window.setTimeout(() => {
-        void refreshPerformanceScheduleCoreMode().catch(() => {});
-      }, 3000);
-    } else if (performanceOwnerAtBoot === 'none') {
-      await applyProgramControls().catch(() => {});
+  try {
+    if (!aiCpuIsolated && await powerLifecycleReadyForWrites()) {
+      const schemeOwnerAtBoot = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
+      const performanceOwnerAtBoot = await restorePerformanceScheduleIfConfigured(undefined, {
+        dedicatedOnly: schemeOwnerAtBoot !== 'auto',
+        automaticOnly: true,
+        completedStartupIntent: () => startupPerformanceResumeGeneration === latestResumeGeneration ? startupPerformanceIntent : '',
+      }).catch(() => null);
+      if (performanceOwnerAtBoot === 'auto' && schemeOwnerAtBoot === 'auto') {
+        // Some boot tasks/OEM services rewrite the three hybrid-core values
+        // after the first restore.  Reapply only the saved core mode after the
+        // system settles; manual mode never enters this path.
+        window.setTimeout(() => {
+          void refreshPerformanceScheduleCoreMode().catch(() => {});
+        }, 3000);
+      } else if (performanceOwnerAtBoot === 'none') {
+        await applyProgramControls().catch(() => {});
+      }
     }
+  } finally {
+    stopStartupPerformanceWatch?.();
+    stopStartupPerformanceWatch = null;
   }
 
   // ── 任务栏常驻偏好：启动期按持久化套用（默认不常驻，由设置/总闸驱动）──
@@ -1851,6 +1963,7 @@ onUnmounted(() => {
     dynamicBackgroundNoGameTimer = null;
   }
   resumeLifecycleActive = false;
+  networkAccelerationWake.dispose();
   if (resumeRetryTimer) {
     clearTimeout(resumeRetryTimer);
     resumeRetryTimer = null;
@@ -1914,6 +2027,8 @@ onUnmounted(() => {
   stopResumeWatch?.();
   stopFanResumeWatch?.();
   stopSchemeWatch?.();
+  stopStartupPerformanceWatch?.();
+  stopStartupPerformanceWatch = null;
   // Fan Host shutdown has one canonical owner: the native app-exit boundary
   // (or NavRail.quit, which awaits the same lifecycle before app.exit).  A
   // second close from root unmount races that HC gate and can turn one
@@ -1931,6 +2046,8 @@ onMounted(() => {
   window.addEventListener('ipc:window.resized', onNativeResize as EventListener);
   // 呼出后重新定稿：原生尺寸消息可能早于 WebView2 视口恢复到达。
   window.addEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
+  window.addEventListener('orientationchange', refreshScaleAfterSummon);
+  document.addEventListener('visibilitychange', refreshScaleWhenVisible);
   window.visualViewport?.addEventListener('resize', updateScale);
   // 原生 reflow（隐藏任务栏后窗口吸底变高）可能不派发 window resize，
   // 用 ResizeObserver 监测文档根节点尺寸变化兜底，避免内容层停留在旧尺寸、
@@ -1949,9 +2066,12 @@ onUnmounted(() => {
   if (settleRaf) cancelAnimationFrame(settleRaf);
   settleRaf = 0;
   settleFrames = 0;
+  nativeViewportFrames = 0;
   window.removeEventListener('resize', updateScale);
   window.removeEventListener('ipc:window.resized', onNativeResize as EventListener);
   window.removeEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
+  window.removeEventListener('orientationchange', refreshScaleAfterSummon);
+  document.removeEventListener('visibilitychange', refreshScaleWhenVisible);
   window.visualViewport?.removeEventListener('resize', updateScale);
 });
 </script>
@@ -1977,7 +2097,7 @@ onUnmounted(() => {
       @canplay="onBackgroundVideoCanPlay"
       @playing="onBackgroundVideoPlaying"
       @pause="onBackgroundVideoPause"
-      @error="() => onBackgroundVideoError()"
+      @error="onBackgroundVideoMediaError"
     />
     <div
       v-else-if="backgroundUrl"

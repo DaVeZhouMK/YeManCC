@@ -140,12 +140,14 @@ struct Journal {
     std::uint64_t beforeBytes = 0;
     Option target;
 };
-struct JournalRead { bool ok = true; std::optional<Journal> value; };
+struct JournalRead { bool ok = true; std::optional<Journal> value; bool recoverable = false; };
 struct Ops {
     virtual ~Ops() = default;
     virtual Probe probe() = 0;
     virtual JournalRead journal() = 0;
     virtual bool save(const Journal&) = 0;
+    // Archive damaged metadata after a validated live probe. No hardware write or applied proof.
+    virtual bool recoverJournal(const Probe&) { return false; }
     virtual bool write(const Probe&, const Option&) = 0;
 };
 inline bool capacityMatches(const Probe& p, const Option& target) {
@@ -196,13 +198,20 @@ inline std::string verification(const Probe& p, const std::optional<Journal>& j)
     if (capacityMatches(p,j->target)) return "verified";
     return "not_effective";
 }
-struct Result { bool ok = false; std::string reason; Probe snapshot; std::optional<Journal> journal; };
+struct Result { bool ok = false; std::string reason; Probe snapshot; std::optional<Journal> journal; bool journalRecoveryRequired = false; bool journalRecovered = false; };
 inline Result read(Ops& ops) {
     Result r; r.snapshot = ops.probe();
     if (!admitted(r.snapshot)) { r.reason = r.snapshot.reason.empty() ? "无法确认当前专用显存" : r.snapshot.reason; return r; }
     const auto saved = ops.journal();
-    if (!saved.ok) { r.reason = "显存设置记录无法读取"; return r; }
-    r.ok = true; r.journal = saved.value; return r;
+    if (!saved.ok) {
+        r.journalRecoveryRequired = saved.recoverable;
+        // A recovered default means no trustworthy journal, not an assumed
+        // capacity or driver ACK. Retain all corrupt bytes before retiring it.
+        if (!saved.recoverable || !ops.recoverJournal(r.snapshot)) { r.reason = "显存设置记录无法读取"; return r; }
+        r.journalRecoveryRequired = false; r.journalRecovered = true;
+        r.reason = "已保留损坏的显存记录，当前仅使用实际读数";
+    }
+    r.ok = true; r.journal = saved.ok ? saved.value : std::nullopt; return r;
 }
 inline Result applyFromRead(Ops& ops, Result r, const std::string& expectedFence, const std::string& optionId, bool confirmed) {
     if (!r.ok) return r;

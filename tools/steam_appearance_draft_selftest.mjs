@@ -1,8 +1,13 @@
-import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import {transformSync} from 'esbuild';
+import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import {transformSync} from 'esbuild';import path from 'node:path';import{createHash}from'node:crypto';
+
+const selected=process.argv.includes('--journal-config'),arg=name=>{const i=process.argv.indexOf(name);return i<0?null:process.argv[i+1]},out=selected?arg('--out'):process.argv[2],caseFilter=arg('--case-filter'),sourceOverride=arg('--source');
+if(selected&&(!out||!path.isAbsolute(out)))throw Error('journal-config requires an explicit owned output file');if(sourceOverride&&(!selected||!path.resolve(sourceOverride).startsWith(path.dirname(path.resolve(out))+path.sep)))throw Error('Private source must be inside the owned output directory');
+const sourcePath=sourceOverride||'src/bridge/steamAppearanceDraft.ts',pin=p=>({path:path.resolve(p),sha256:createHash('sha256').update(fs.readFileSync(p)).digest('hex')}),inputPaths=[sourcePath,'tools/steam_appearance_draft_selftest.mjs','node_modules/esbuild/lib/main.js','node_modules/@esbuild/win32-x64/esbuild.exe'],inputs=inputPaths.map(pin),started=performance.now();
+
 const names=['Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details'];const module={exports:{}};
-const code=transformSync(fs.readFileSync('src/bridge/steamAppearanceDraft.ts','utf8'),{loader:'ts',format:'cjs'}).code;
+const code=transformSync(fs.readFileSync(sourcePath,'utf8'),{loader:'ts',format:'cjs'}).code;
 vm.runInNewContext(code,{module,exports:module.exports,require:()=>({STEAM_APPEARANCE_THEMES:names.map(name=>({name})),steamAppearance:{}}),Date,setTimeout,clearTimeout,Error,Number,Object,JSON,Infinity});
-const {createAppearanceDraft}=module.exports;const cases=[];async function flush(){for(let i=0;i<25;i++)await Promise.resolve()};async function check(name,fn){await fn();cases.push(name)};
+const {createAppearanceDraft}=module.exports;const cases=[],failures=[],skipped=[];async function flush(){for(let i=0;i<25;i++)await Promise.resolve()};async function check(name,fn){if(caseFilter&&!name.includes(caseFilter)){skipped.push(name);return;}try{await fn();cases.push(name)}catch(error){if(!selected)throw error;failures.push({name,error:error.stack||String(error)})}};
 function fixture(storage=new Map()){
  let now=0,id=0,revision=1;const timers=new Map(),calls={read:0,apply:[],refresh:0,reset:0,active:0,maxActive:0};let applyRelease=null,fail=false,savedUnconfirmed=false,hold=false;
  let actual={targetId:'a'.repeat(16),revision:'1'.padStart(64,'0'),linked:true,backendReady:true,backendProcessCount:2,steamRunning:true,configuredMatchesBackend:true,note:'',packAvailable:true,packPrepared:false,packOwned:false,themes:names.map(name=>({name,installed:true,configured:true,backendEnabled:true,parameterCount:3,error:''}))};
@@ -10,6 +15,7 @@ function fixture(storage=new Map()){
  const q=createAppearanceDraft(deps);
  return{q,deps,calls,timers,storage,get actual(){return actual},setTarget(id){actual.targetId=id},setFail(v){fail=v},setHold(v){hold=v},setSavedUnconfirmed(v){savedUnconfirmed=v},release(){const r=applyRelease;applyRelease=null;r?.()},async advance(ms){now+=ms;for(let i=0;i<40;i++){const next=[...timers].find(([,t])=>t.due<=now);if(!next)break;timers.delete(next[0]);next[1].fn();await flush()}await flush()},async init(){await q.read();await flush()}};
 }
+if(!selected){
 const f=fixture();await f.init();
 await check('view initialization only reads and never replays startup/apply',()=>{assert.equal(f.calls.apply.length,0);assert.equal(f.calls.refresh,0);assert.equal(f.timers.size,0)});
 f.q.set({'Round':false});await check('one click changes the draft immediately without waiting or locking',()=>{assert.equal(f.q.getState().changes.Round,false);assert.equal(f.q.getState().locked,false);assert.equal(f.calls.apply.length,0)});
@@ -78,4 +84,60 @@ const repairFailure=fixture();repairFailure.actual.packOwned=true;repairFailure.
 await check('failed reconciliation preserves the observed configuration without a retry timer',()=>{assert.equal(repairFailure.q.getState().phase,'saved-unconfirmed');assert(repairFailure.q.getState().snapshot);assert.equal(repairFailure.timers.size,0)});
 const oldJournal=fixture(new Map([['YMCC.steamAppearanceDraft.v1:'+'a'.repeat(16),JSON.stringify({version:1,targetId:'a'.repeat(16),states:{Round:false,'Game Cover Reflections':true}})]]));await oldJournal.init();await oldJournal.advance(60000);
 await check('retired reflection journal entry is discarded while other choices remain display-only',()=>{assert.deepEqual({...oldJournal.q.getState().changes},{Round:false});assert.equal(oldJournal.calls.apply.length,0);assert.equal(oldJournal.timers.size,0);assert.equal(JSON.parse([...oldJournal.storage.values()][0]).states['Game Cover Reflections'],undefined)});
-const record={ok:true,passed:cases.length,cases,realSteamOperations:0,realCssOperations:0};const out=process.argv[2];if(out)fs.writeFileSync(out,JSON.stringify(record,null,2));console.log(JSON.stringify(record,null,2));
+}
+
+if(selected){
+const id='a'.repeat(16),key='YMCC.steamAppearanceDraft.v1:'+id,age=7*24*60*60*1000;
+const journal=(states={Round:false},extra={})=>JSON.stringify({version:1,targetId:id,states,savedAt:0,...extra});
+const idle=f=>{assert.equal(f.calls.apply.length,0);assert.equal(f.calls.refresh,0);assert.equal(f.calls.reset,0);assert.equal(f.timers.size,0)};
+await check('journal-config: malformed types UTF duplicate depth and size default inactive without deleting bytes',async()=>{
+ const raws=['','{','null','[]',journal({Round:'false'}),journal({Round:null}),journal({Round:[]}),journal({}, {savedAt:'0'}),journal({}, {savedAt:-1}),journal({}, {targetId:42}),'{"version":1,"targetId":"'+id+'","states":{"Round":true,"Roun\\u0064":false}}',journal({Round:false},{unknown:'\ud800'}),' '.repeat(65537),'{"version":1,"n":NaN}',journal({Round:false},{unknown:JSON.parse('['.repeat(18)+'0'+']'.repeat(18))})];
+ for(const raw of raws){const f=fixture(new Map([[key,raw]]));await f.init();assert.equal(f.q.getState().pendingCount,0,'accepted '+raw.slice(0,90));assert.equal(f.storage.get(key),raw);idle(f);}
+});
+await check('journal-config: valid BOM UTF unknowns and legacy display survive write and readback',async()=>{
+ const f=fixture(new Map([[key,'\uFEFF'+journal({Round:false,FutureTheme:true},{extension:{label:'主题😀'}})]]));await f.init();assert.equal(f.q.getState().phase,'restored');idle(f);f.q.set({'Mini Carousel':false});const doc=JSON.parse(f.storage.get(key));assert.equal(doc.extension.label,'主题😀');assert.equal(doc.states.FutureTheme,true);const next=fixture(f.storage);await next.init();assert.equal(next.q.getState().changes.Round,false);assert.equal(next.q.getState().changes['Mini Carousel'],false);idle(next);
+ const legacy=fixture(new Map([[key,JSON.stringify({version:1,targetId:id,states:{Round:false}})]]));await legacy.init();assert.equal(legacy.q.getState().phase,'restored');idle(legacy);
+});
+await check('journal-config: future journal never gains write or removal permission',async()=>{
+ for(const extra of [{version:2},{schemaVersion:2}]){const raw=journal({Round:false},extra),f=fixture(new Map([[key,raw]]));await f.init();assert.equal(f.q.getState().pendingCount,0);f.q.set({Round:false});assert.equal(f.storage.get(key),raw);assert.equal(f.q.getState().journalStatus,'future');assert.equal(f.storage.has(key+'.rejected'),false);}
+});
+await check('journal-config: expired future timestamps reject and exact age boundary stays display only',async()=>{
+ for(const [savedAt,accepted]of[[age,true],[age-1,false],[2*age+1,false]]){const raw=journal({Round:false},{savedAt}),f=fixture(new Map([[key,raw]]));f.deps.now=()=>2*age;await f.init();assert.equal(f.q.getState().pendingCount,accepted?1:0);assert.equal(f.storage.get(key),raw);idle(f);}
+});
+await check('journal-config: read denial does not become absence or permanently suppress explicit retry',async()=>{
+ const f=fixture(new Map([[key,journal()]])),read=f.deps.storage.getItem;let denied=true,reads=0;f.deps.storage.getItem=k=>{reads++;if(denied)throw Error('owned storage read denied');return read(k)};await f.init();assert.equal(f.q.getState().pendingCount,0);const n=reads;await f.advance(60000);assert.equal(reads,n);idle(f);denied=false;await f.q.read();assert.equal(f.q.getState().phase,'restored');assert.equal(f.q.getState().changes.Round,false);idle(f);
+});
+await check('journal-config: set failure or unconfirmed readback retains intent and permits explicit save retry',async()=>{
+ const f=fixture();await f.init();const set=f.deps.storage.setItem;let refused=true;f.deps.storage.setItem=(k,v)=>{if(refused)throw Error('owned quota refusal');return set(k,v)};f.q.set({Round:false});assert.equal(f.q.getState().journalStatus,'unavailable');assert.equal(f.q.getState().changes.Round,false);assert.equal(f.storage.has(key),false);refused=false;f.q.set({Round:false});assert.equal(f.q.getState().journalStatus,'saved');const next=fixture(f.storage);await next.init();assert.equal(next.q.getState().phase,'restored');idle(next);
+ const unconfirmed=fixture();await unconfirmed.init();unconfirmed.deps.storage.setItem=(k,v)=>unconfirmed.storage.set(k,journal({}, {version:2}));unconfirmed.q.set({Round:false});assert.notEqual(unconfirmed.q.getState().journalStatus,'saved');assert.equal(unconfirmed.q.getState().changes.Round,false);
+});
+await check('journal-config: corrupt preimage is archived before repair and archival quota failure is retryable',async()=>{
+ const raw='{bad original',f=fixture(new Map([[key,raw]]));await f.init();const set=f.deps.storage.setItem;let denied=true;f.deps.storage.setItem=(k,v)=>{if(denied&&k.endsWith('.rejected'))throw Error('archive quota');return set(k,v)};f.q.set({Round:false});assert.equal(f.storage.get(key),raw);assert.equal(f.q.getState().changes.Round,false);denied=false;f.q.set({Round:false});assert.equal(f.storage.get(key+'.rejected'),raw);assert.equal(JSON.parse(f.storage.get(key)).states.Round,false);assert.equal(f.q.getState().journalStatus,'saved');const next=fixture(f.storage);await next.init();assert.equal(next.q.getState().phase,'restored');idle(next);
+});
+await check('journal-config: remove failure is visible without faking CSS failure or retry polling',async()=>{
+ const f=fixture();await f.init();const remove=f.deps.storage.removeItem;f.q.set({Round:false});f.deps.storage.removeItem=()=>{throw Error('owned removal denial')};await f.q.flush(false);await flush();assert.equal(f.q.getState().pendingCount,0);assert.equal(f.q.getState().snapshot.themes.find(x=>x.name==='Round').configured,false);assert.equal(f.q.getState().journalStatus,'unavailable');const reads=f.calls.read;await f.advance(60000);assert.equal(f.calls.read,reads);f.deps.storage.removeItem=remove;f.q.set({Round:false});assert.equal(f.storage.has(key),false);assert.equal(f.q.getState().journalStatus,'saved');
+});
+await check('journal-config: concurrent journals retain untouched choices and late writer cannot erase replacement',async()=>{
+ const shared=new Map(),a=fixture(shared),b=fixture(shared);await a.init();await b.init();a.setHold(true);a.q.set({Round:false});const old=a.q.flush(false);await flush();b.q.set({'Mini Carousel':false});const latest=shared.get(key);assert.equal(JSON.parse(latest).states.Round,false);assert.equal(JSON.parse(latest).states['Mini Carousel'],false);a.release();await old;await flush();assert.equal(shared.get(key),latest);assert.equal(a.q.getState().journalStatus,'conflict');assert.equal(b.q.getState().changes.Round,undefined);assert.equal(b.calls.apply.length,0);
+});
+await check('journal-config: target changes isolate drafts and unknown identity never schedules an operation',async()=>{
+ const f=fixture();await f.init();f.q.set({Round:false});const original=f.storage.get(key);f.setTarget('b'.repeat(16));await f.q.flush(false);assert.equal(f.calls.apply.length,0);assert.equal(f.storage.get(key),original);f.setTarget(id);await f.q.read();assert.equal(f.q.getState().changes.Round,false);idle(f);
+ for(const bad of ['',null,'../x',42]){const x=fixture();x.setTarget(bad);await x.init();x.q.set({Round:false});await x.advance(60000);assert.equal(x.q.getState().pendingCount,0);assert.equal(x.storage.size,0);assert.equal(x.calls.apply.length,0);assert.equal(x.calls.refresh,0);assert.equal(x.timers.size,0);}
+});
+
+await check('journal-config: browser storage getter recovers after denied module initialization and later reads',async()=>{
+ const f=fixture(),map=new Map([[key,JSON.stringify({version:1,targetId:id,states:{Round:false}})]]);let denied=true,gets=0;const window={};Object.defineProperty(window,'localStorage',{get(){gets++;if(denied)throw Error('fake SecurityError');return{getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)}}});
+ const m={exports:{}};vm.runInNewContext(code,{module:m,exports:m.exports,require:()=>({STEAM_APPEARANCE_THEMES:names.map(name=>({name})),steamAppearance:f.deps}),window,Date,setTimeout(){throw Error('restored journal must not arm timers')},clearTimeout(){},Error,Number,Object,JSON,Infinity});const q=m.exports.steamAppearanceDraft;await q.read();assert.equal(q.getState().pendingCount,0);assert.equal(q.getState().journalStatus,'unavailable');denied=false;await q.read();assert.equal(q.getState().changes.Round,false);assert.equal(q.getState().phase,'restored');assert(gets>=2);idle(f);
+ const fresh=fixture();await fresh.init();fresh.storage.set(key,journal({'Mini Carousel':false}));await fresh.q.read();assert.equal(fresh.q.getState().changes['Mini Carousel'],false);idle(fresh);
+});
+await check('journal-config: oversized multibyte and occupied archive never authorize destructive repair',async()=>{
+ for(const raw of [journal({Round:false},{unknown:'界'.repeat(22000)}),journal({Round:false},{version:2,unknown:'x'.repeat(65536)})]){const f=fixture(new Map([[key,raw]]));await f.init();assert.equal(f.q.getState().pendingCount,0);f.q.set({Round:false});assert.equal(f.storage.get(key),raw);assert.notEqual(f.q.getState().journalStatus,'saved');}
+ const f=fixture(new Map([[key,'{bad'],[key+'.rejected','older exact original']]));await f.init();f.q.set({Round:false});assert.equal(f.storage.get(key),'{bad');assert.equal(f.storage.get(key+'.rejected'),'older exact original');assert.equal(f.q.getState().journalStatus,'unavailable');
+});
+
+await check('journal-config: late backend read cannot rebind target or resurrect a replaced journal',async()=>{
+ const f=fixture();await f.init();let release;f.deps.read=()=>new Promise(r=>release=r);const old=f.q.read();await flush();f.q.set({Round:false});const raw=journal({'Mini Carousel':false},{extension:'external'});f.storage.set(key,raw);release({...structuredClone(f.actual),targetId:'b'.repeat(16)});await old;assert.equal(f.q.getState().snapshot.targetId,id);assert.equal(f.q.getState().changes.Round,false);assert.equal(f.storage.get(key),raw);assert.equal(f.calls.apply.length,0);
+});
+}
+
+const record={ok:!failures.length,passed:cases.length,failed:failures.length,cases,failures,skipped,selected:selected?'journal-config':'original',caseFilter,inputs,sourceDrift:inputPaths.map(pin).filter((x,i)=>x.sha256!==inputs[i].sha256),node:{...pin(process.execPath),version:process.version},elapsedMs:performance.now()-started,realSteamOperations:0,realCssOperations:0,boundary:'Actual TS createAppearanceDraft; original inert SteamAppearance port, fakeStorage and clock only; no real WebView/localStorage/Steam/CSS'};if(out){fs.mkdirSync(path.dirname(path.resolve(out)),{recursive:true});fs.writeFileSync(out,JSON.stringify(record,null,2));}console.log(JSON.stringify(record,null,2));if(failures.length||record.sourceDrift.length)process.exitCode=1;

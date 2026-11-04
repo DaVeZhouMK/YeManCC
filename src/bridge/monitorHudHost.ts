@@ -52,11 +52,16 @@ export function startMonitorHudHost() {
   const contextKey=(route:string|null)=>route+'|'+(route==='steam'?JSON.stringify(relay.inspect().status?.game??null):'')+'|'+desktopCloseSerial;
   async function reconcile(){
     if(!ready||ended||restoring||applying||settling||!activePreferences?.enabled||activePreferences.output!=='ymcc')return;
-    const route=await router.kind(activePreferences);if(!route)return;
+    const revision=settleRevision,startedVersion=version;
+    const route=await router.kind(activePreferences);
+    // Recheck intent after native IO. Same-output appearance drafts stay live,
+    // but an explicit switch/OFF or a newer event invalidates this recovery.
+    if(!ready||ended||restoring||applying||settling||!route||!activePreferences?.enabled||activePreferences.output!=='ymcc'||revision!==settleRevision||startedVersion!==version)return;
+    const desired=activePreferences;
     const key=contextKey(route); // Default desktop never needs a game identity.
     if(key===lastAttemptKey||desktop.inspect().opening)return;
     lastAttemptKey=key;restoring=true;const at=version;
-    try{await monitorOutputCoordinator.apply(activePreferences);}finally{restoring=false;if(at!==version)invalidate();}
+    try{await monitorOutputCoordinator.apply(desired);}finally{restoring=false;if(at!==version)invalidate();}
   }
   const offSteamPresence=on<{steamKnown:boolean;steamRunning:boolean}>('deckySidebar.updated',state=>{
     relay.noteSteamPresence(state.steamKnown===true?state.steamRunning:null);
@@ -71,7 +76,11 @@ export function startMonitorHudHost() {
     source.setGameLogoEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.underlay==='game-logo');
     clock.setFrameTime(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.frametimeGraph === true);
     relay.updateAppearance(prefs);desktop.updateAppearance(prefs);
-    if(activePreferences?.output==='ymcc'){
+    // Retire obsolete custom recovery while the existing save/apply queue runs.
+    // Saving the new target alone still does not start or migrate any output.
+    if(!prefs.enabled||prefs.output!=='ymcc'){
+      activePreferences=normalizeMonitorOutput(prefs);
+    }else if(activePreferences?.output==='ymcc'){
       const next=normalizeMonitorOutput(prefs);
       activePreferences={...activePreferences,mouseStatusEnabled:next.mouseStatusEnabled,ymcc:next.ymcc,ymccTemplate:next.ymccTemplate,ymccTemplateRevision:next.ymccTemplateRevision,ymccTemplates:next.ymccTemplates};
     }
@@ -89,7 +98,11 @@ export function startMonitorHudHost() {
       if(at===settleRevision&&!ended){settling=false;invalidate();}
     });
   });
-  const offApplied=onMonitorOutputApplied((prefs,result)=>{if(result.ok){activePreferences=normalizeMonitorOutput(prefs);source.setDemand(hudNativeDemand(activePreferences.ymcc.fields));source.setClockEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.clock === true);source.setGameLogoEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.underlay==='game-logo');clock.setFrameTime(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.frametimeGraph === true);if(result.applied!=='ymcc')lastAttemptKey='';}});
+  const offApplied=onMonitorOutputApplied((prefs,result)=>{
+    // Keep the requested output/OFF intent even when its application fails,
+    // so a later event cannot revive the previously selected custom HUD.
+    activePreferences=normalizeMonitorOutput(prefs);
+    if(result.ok){source.setDemand(hudNativeDemand(activePreferences.ymcc.fields));source.setClockEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.clock === true);source.setGameLogoEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.underlay==='game-logo');clock.setFrameTime(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.frametimeGraph === true);if(result.applied!=='ymcc')lastAttemptKey='';}});
   return {
     async ready(){
       if(ended)return;activePreferences=await readMonitorOutputPreferences().catch(()=>null);if(ended)return;

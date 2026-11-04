@@ -1,5 +1,6 @@
 // Included by main.cpp after the existing process/path/file helpers.
 #include "rtss/protocol.h"
+#include "rtss_profile_text.h"
 static std::mutex g_rtssBridgeMx;
 
 static json nativeRtssReloadProfiles(const std::wstring& dllPath) {
@@ -157,6 +158,9 @@ static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& la
     RtssBridgeSearch search{dir};
     EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
     if (!search.window) return nativeRtssMissingBridge(dir);
+    const auto config=(fspath::path(dir)/L"Plugins/Client/OverlayEditor.cfg").wstring();
+    const auto prepared=ymcc::rtssprofiletext::normalize(config,[](const std::wstring&path,const std::string&bytes){return sgWriteFileAtomic(path,bytes);});
+    if(!prepared.ok)return json{{"ok",false},{"error","RTSS 模板配置准备失败，未加载新模板"},{"errorCode",prepared.code},{"win32Error",prepared.error},{"path",W2U(config)}};
     static std::atomic<std::uint32_t> next{static_cast<std::uint32_t>(GetTickCount()) | 1u};
     packet.requestId = ++next;
     if (!packet.requestId) packet.requestId = ++next;
@@ -190,5 +194,7 @@ static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& la
         }
         return json{{"ok", false}, {"error", detail}, {"bridgeCode", reply}};
     }
-    return json{{"ok", true}, {"layout", layout}};
+    const auto persisted=ymcc::rtssprofiletext::verifyLayout(config,layout);
+    if(!persisted.ok)return json{{"ok",false},{"error","RTSS 模板请求已完成，但配置读回未确认；当前显示状态未知"},{"errorCode",persisted.code},{"win32Error",persisted.error},{"path",W2U(config)}};
+    return json{{"ok", true}, {"layout", layout},{"configurationConfirmed",true},{"configurationEncodingNormalized",prepared.changed},{"encodingBackupCreated",prepared.backupCreated}};
 }

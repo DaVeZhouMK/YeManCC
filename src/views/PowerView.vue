@@ -4,12 +4,17 @@ import SettingsSections from '@/components/SettingsSections.vue';
 import IntegratedPage from '@/components/IntegratedPage.vue';
 import Toggle from '@/components/Toggle.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
-import {ref,reactive,onMounted,onUnmounted,onActivated,inject,watch,type Ref} from 'vue';
+import {computed,ref,reactive,onMounted,onUnmounted,onActivated,inject,watch,type Ref} from 'vue';
 import {taskExists,toggleTask,searchState,openSearchFolder,readBootMirrorState,toggleBootMirror,BOOT_MIRROR_CHANGED_EVENT,readHardwareGpuSchedule,writeHardwareGpuSchedule,readBootRtssState,toggleBootRtss,deleteAllYemanTasks,restoreAllYemanTasks} from '@/bridge/yeman';
 import {shell} from '@/bridge/api';
 import {DESKTOP_MODE_BOOT_TASK,DESKTOP_MODE_BOOT_CHANGED_EVENT,setDesktopModeStartup} from '@/bridge/desktopModeStartup';
 import {readSettingsSection,saveSettingsSection} from '@/bridge/settingsRepository';
-const desktopBootOn=ref(false),bootOn=ref(false),fanControlOnBoot=ref(false),rtssBootOn=ref(false),steamCommunityBoot=ref(false),hardwareGpuSchedule=ref(false);
+const desktopBootOn=ref(false),bootOn=ref(false),fanControlOnBoot=ref(false),rtssBootOn=ref(false),steamCommunityBoot=ref(false);
+const hardwareGpuSchedule=ref(false),gpuScheduleKnown=ref(false),gpuScheduleReadFailed=ref(false);
+const gpuScheduleDescription=computed(()=>{
+ const state=gpuScheduleReadFailed.value?'状态读取失败，请重新进入页面重试；':!gpuScheduleKnown.value?'正在读取系统状态；':`当前设置：${hardwareGpuSchedule.value?'开启':'关闭'}；`;
+ return state+'通常建议开启，AMD Ryzen AI Max 385 / Max+ 388、395 建议关闭';
+});
 const tasks=reactive({energyStar:false,cleanMem:false});type TaskKey=keyof typeof tasks;
 const STEAMCOMMUNITY_TASK='Steamcommunity_302';
 const searchSt=ref<'hidden'|'trimmed'|'full'>('full');
@@ -25,7 +30,8 @@ async function refresh(){
  if(community.status==='fulfilled')steamCommunityBoot.value=community.value;if(search.status==='fulfilled')searchSt.value=search.value;
  if(boot.status==='fulfilled')bootOn.value=boot.value;if(rtss.status==='fulfilled')rtssBootOn.value=rtss.value;
  if(fanRevision===fanBootSettingRevision&&fan.status==='fulfilled')fanControlOnBoot.value=fan.value.fanControl===true;
- if(gpu.status==='fulfilled')hardwareGpuSchedule.value=gpu.value;
+ if(gpu.status==='fulfilled'){hardwareGpuSchedule.value=gpu.value;gpuScheduleKnown.value=true;gpuScheduleReadFailed.value=false;}
+ else{gpuScheduleKnown.value=false;gpuScheduleReadFailed.value=true;}
  if(desktopRevision===desktopBootSettingRevision&&desktop.status==='fulfilled')desktopBootOn.value=desktop.value;
  if(results.some(result=>result.status==='rejected'))errMsg.value='部分通用启动状态未能读取，可收回后重新打开。';
 }
@@ -126,7 +132,7 @@ async function restoreAllTasks() {
 }
 
 async function onHardwareGpuSchedule(v: boolean) {
-  if (busy.value) return;
+  if (busy.value || !gpuScheduleKnown.value) return;
   ++refreshRevision;
   busy.value = true;
   errMsg.value = '';
@@ -134,7 +140,7 @@ async function onHardwareGpuSchedule(v: boolean) {
   hardwareGpuSchedule.value = v;
   try {
     const ok = await writeHardwareGpuSchedule(v);
-    if (!ok) throw new Error('注册表写入失败');
+    if (!ok) throw new Error('注册表写入或回读验证失败');
     errMsg.value = '硬件加速GPU计划已更新，重启电脑后生效';
   } catch (e) {
     hardwareGpuSchedule.value = prev;
@@ -212,7 +218,7 @@ onActivated(()=>{void refresh();});
 <Toggle v-model="tasks.cleanMem" label="清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
 
 <Toggle v-model="steamCommunityBoot" label="网络加速" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
-<Toggle class="gpu-schedule-setting" :model-value="hardwareGpuSchedule" label="硬件加速GPU计划" description="默认建议开启，AMD 395 机型建议关闭" color="accent" :disabled="busy" @update:model-value="onHardwareGpuSchedule" /></div></section>
+<Toggle class="gpu-schedule-setting" :model-value="hardwareGpuSchedule" label="硬件加速GPU计划" :description="gpuScheduleDescription" color="accent" :disabled="busy || !gpuScheduleKnown" @update:model-value="onHardwareGpuSchedule" /></div></section>
  <section class="settings-section-panel" aria-label="系统工具" data-boot-startup-group="tools"><header class="settings-section-heading"><h3><InlineIcon name="tools"/>系统工具</h3></header><div class="startup-setting-list"><div class="row">
         <span><InlineIcon name="search" /> Windows 任务栏搜索</span>
         <button class="mini-btn" @click="onSearch">{{searchSt==='hidden'?'不可用':searchSt==='trimmed'?'恢复搜索':'精简搜索'}}</button>

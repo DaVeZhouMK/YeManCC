@@ -3,12 +3,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {runtimeBundle,outputDirectory,fingerprints} from './boot_modes_fixture/harness.mjs';
 const out=outputDirectory(process.argv.slice(2),'runtime');
-const report={schema:1,suite:'boot-modes-runtime',pass:false,isolation:'Bundled actual bootModeModel.ts and bootModes.ts; every imported native owner is aliased to memory; no installed application.',assertions:[],sourceHashes:{},errors:[]};
+if(process.argv.includes('--sleep-timeouts')){const {runSleepTimeouts}=await import('./boot_modes_fixture/sleepTimeouts.mjs');await runSleepTimeouts(out,process.argv.slice(2));process.exit(process.exitCode||0);}
+if(process.argv.includes('--gpu-schedule')){const {runGpuScheduleFirstRun}=await import('./boot_modes_fixture/gpuScheduleFirstRun.mjs');await runGpuScheduleFirstRun(out,process.argv.slice(2));process.exit(process.exitCode||0);}
+const filterIndex=process.argv.indexOf('--filter');
+const filter=filterIndex>=0?process.argv[filterIndex+1]:null;
+if(filterIndex>=0&&!filter)throw Error('--filter requires an exact case-name substring');
+const notRun=[];
+const report={selection:filter||'all',notRun,schema:1,suite:'boot-modes-runtime',pass:false,isolation:'Bundled actual bootModeModel.ts and bootModes.ts; every imported native owner is aliased to memory; no installed application.',assertions:[],sourceHashes:{},errors:[]};
 const {model:m,boot:b,desktopStartup:desktop,ports:p,shortcuts,inputs}=await runtimeBundle(out);
-const nativeContractInputs=['src/App.vue','native/main.cpp','native/boot_mode_shortcuts.h','src/bridge/gameproc.ts','src/bridge/ipc.ts','src/bridge/yeman.ts','src/bridge/steamUi.ts'];
+const suppliedControllerInput=process.argv.indexOf('--controller-input');if(suppliedControllerInput>=0){const file=path.resolve(process.argv[suppliedControllerInput+1]);if(!fs.existsSync(file))throw Error('Missing actual editor receipt');inputs.push(path.relative(process.cwd(),file));}
+const nativeContractInputs=['src/App.vue','native/main.cpp','native/boot_mode_shortcuts.h','src/bridge/gameproc.ts','src/bridge/ipc.ts','src/bridge/yeman.ts','src/bridge/steamUi.ts','src/bridge/settingsRepository.ts','tools/fixtures/settings_baseline.mjs'];
 report.sourceHashes=fingerprints([...new Set([...inputs,...nativeContractInputs,'tools/boot_modes_selftest.mjs','tools/boot_modes_fixture/harness.mjs'])]);
 if(!globalThis.window)globalThis.window=new EventTarget();
-const test=async(name,run)=>{b.cancelBootModeDeferredMouse?.();p.reset();try{const evidence=await run();report.assertions.push({name,pass:true,...(evidence?{evidence:structuredClone(evidence)}:{})});}catch(error){report.assertions.push({name,pass:false,error:error.stack||String(error)});}finally{b.cancelBootModeDeferredMouse?.();}};
+const test=async(name,run)=>{if(filter&&!name.includes(filter)){notRun.push(name);return;}b.cancelBootModeDeferredMouse?.();p.reset();try{const evidence=await run();report.assertions.push({name,pass:true,...(evidence?{evidence:structuredClone(evidence)}:{})});}catch(error){report.assertions.push({name,pass:false,error:error.stack||String(error)});}finally{b.cancelBootModeDeferredMouse?.();}};
 const waitSignal=async(signal,label)=>{let timer;try{return await Promise.race([signal,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Timed out waiting for '+label)),1500);})]);}finally{clearTimeout(timer);}};
 const startMode=(id,document)=>b.applyBootMode(id,document,{startup:true});
 const baseline=()=>b.captureBootModeSnapshot();
@@ -16,6 +23,39 @@ const fresh=async()=>m.createBootModeDocument(await baseline());
 const stored=doc=>{p.settings.extensions.bootModes=structuredClone(doc);};
 const opNames=()=>p.calls.map(c=>c.op);
 const changes=()=>p.calls.filter(c=>c.op!=='settings.update'&&c.op!=='ipc.bootMode.startup.identity');
+await test('sleep guard timeout config preserves legacy defaults, partial saves and boot snapshots',async()=>{
+ const {compileSettingsConsumer,createSettingsFixture}=await import('./fixtures/settings_baseline.mjs');
+ const code=await compileSettingsConsumer(process.cwd());
+ const saved={sleep:{pauseGameOnSleep:false,retryOnEntryFailure:false,retryOnNonUserWake:true}};
+ const f=createSettingsFixture(code,saved);await f.repo.loadSettings();
+ assert.equal(f.repo.normalizeSettings(saved).sleep.retryOnSleepTimeout,false);
+ await f.repo.saveSettingsSection('sleep',{retryOnSleepTimeout:true});
+ await f.repo.saveSettingsSection('sleep',{retryOnEntryFailure:true});
+ assert.equal(f.document().sleep.retryOnSleepTimeout,true);assert.equal(f.document().sleep.retryOnNonUserWake,true);assert.equal(f.document().sleep.pauseGameOnSleep,false);
+ const reopened=createSettingsFixture(code,f.document());assert.equal((await reopened.repo.loadSettings()).sleep.retryOnSleepTimeout,true);
+ const {createRequire}=await import('node:module'),require=createRequire(path.resolve('package.json')),ts=require('typescript');
+ const bridge=fs.readFileSync('src/bridge/yeman.ts','utf8'),ast=ts.createSourceFile('actual.ts',bridge,ts.ScriptTarget.Latest,true);
+ const names=['sleepGuardGet','sleepGuardSet','sleepGuardSetConfig'];
+ const selected=ast.statements.filter(n=>ts.isFunctionDeclaration(n)&&names.includes(n.name?.text)).map(n=>n.getText(ast).replace(/^export\s+/,''));
+ assert.equal(selected.length,names.length);
+ const js=require('esbuild').transformSync(selected.join('\n'),{loader:'ts',format:'cjs'}).code;
+ const calls=[];let reply={enabled:false,mode:'custom',pauseGameOnSleep:false,retryOnEntryFailure:false,resleepEnabled:true};
+ const api=new Function('invoke',js+';return {sleepGuardGet,sleepGuardSet,sleepGuardSetConfig};')(async(cmd,value)=>{calls.push({cmd,value});return reply;});
+ const compat=await api.sleepGuardGet();assert.equal(compat.retryOnSleepTimeout,false);assert.equal(compat.retryOnEntryFailure,false);assert.equal(compat.retryOnNonUserWake,true);
+ reply={...reply,retryOnSleepTimeout:true,retryOnNonUserWake:false};assert.equal((await api.sleepGuardGet()).retryOnSleepTimeout,true);assert.equal((await api.sleepGuardGet()).retryOnNonUserWake,false);
+ await api.sleepGuardSetConfig({retryOnSleepTimeout:true});assert.deepEqual(calls.at(-1),{cmd:'sleepGuard.setConfig',value:{retryOnSleepTimeout:true}});
+ for(const enabled of [false,true]){
+  p.reset();p.settings.sleep={mode:'custom',pauseGameOnSleep:false,retryOnEntryFailure:false,retryOnNonUserWake:false,retryOnSleepTimeout:enabled};
+  const doc=await fresh();assert.equal(doc.global.sleep.config.retryOnSleepTimeout,enabled);
+  doc.scenes.steam.overrides.sleep={...structuredClone(doc.global.sleep),config:{...doc.global.sleep.config,retryOnSleepTimeout:!enabled}};
+  const reopened=await b.saveBootModes(doc);stored(reopened);
+  const result=await startMode('steam',reopened);assert.equal(result.document.current,'steam');
+  assert.equal(p.calls.find(c=>c.op==='sleep.config')?.value.retryOnSleepTimeout,!enabled);
+  assert.equal(p.settings.extensions.bootModes.activeSnapshot.sleep.config.retryOnSleepTimeout,!enabled);
+  const bad=structuredClone(reopened);bad.global.sleep.config.retryOnSleepTimeout='true';assert.throws(()=>m.normalizeBootModeDocument(bad,doc.global),/retryOnSleepTimeout/);
+ }
+ return {legacyDefaults:false,explicitChoicesPreserved:true,partialSaveAndReload:true,bootCaptureSaveApply:true,malformedBooleanRejected:true,nativeExecution:'NOT_RUN'};
+});
 const startupOnly=c=>c.op.startsWith('startup.')||c.op==='fx.set'&&c.value===false||c.op==='addon.set'&&c.value.enabled===false||c.op==='legacy.desktop.remove'&&c.value==='桌面模式-开机设置为桌面模式'||c.op==='registry.read'&&c.value.hive==='HKCU'&&c.value.key===String.raw`Software\Microsoft\Windows\CurrentVersion\Run`&&c.value.name==='Joyxoff';
 
 const gameState=()=>JSON.stringify({profiles:p.settings.gameProfiles,games:p.settings.games});
@@ -108,27 +148,29 @@ await test('partial scenes merge recursive defaults, replace arrays, follow late
  m.setBootModeModuleScope(doc,'xbox','input',false);assert.throws(()=>m.mutableBootModeModule(doc,'xbox','input'),/全局/);
  for(const module of m.BOOT_MODE_MODULES){const own=structuredClone(doc.global[module]);own.fixtureOwnMarker=module;doc.scenes.xbox.overrides[module]=own;m.setBootModeModuleScope(doc,'xbox',module,false);assert.throws(()=>m.mutableBootModeModule(doc,'xbox',module),/全局/);const restored=m.normalizeBootModeDocument(doc,doc.global);m.setBootModeModuleScope(restored,'xbox',module,true);assert.equal(restored.scenes.xbox.overrides[module].fixtureOwnMarker,module);assert.equal(doc.global[module].fixtureOwnMarker,undefined);}
 });
-await test('new global shortcuts in all four current modes survive saved-mode restart unless explicitly overridden',async()=>{
- const rows=[];for(const id of m.BOOT_MODE_IDS)for(const own of [false,true]){
-  p.reset();const doc=await fresh();if(id==='global'&&own)continue;
-  if(own)doc.scenes[id].overrides.controller={name:'Mode own',rules:[{...doc.global.controller.rules[0],id:'own-only',origin:'custom'}]};
-  stored(doc);const running=(await startMode(id,doc)).document,modeTemplates=structuredClone(running.scenes);
-  const added={...running.global.controller.rules[0],id:'global-after-mode-start',origin:'custom',enabled:true,params:{preserved:true}};
-  const patch={buttonMapping:{rules:{schemaVersion:2,closure:'UNENCLOSED',shortcutRules:[...running.global.controller.rules,added]}}};
-  const result=await p.compareAndSwapInputSettings(p.settings.input.revision,patch,undefined,{globalShortcuts:true});assert.equal(result.ok,true);
-  assert(result.globalShortcutRules.shortcutRules.some(r=>r.id===added.id));assert(p.settings.input.buttonMapping.rules.shortcutRules.some(r=>r.id===added.id));assert.equal((p.settings.input.bootModeShortcuts?.rules??p.settings.input.buttonMapping.rules.shortcutRules).some(r=>r.id===added.id),!own);
-  const reopened=await b.loadBootModes({editorOnly:true});assert(reopened.document.global.controller.rules.some(r=>r.id===added.id));assert.deepEqual(reopened.document.scenes,modeTemplates);
-  for(const target of m.BOOT_MODE_IDS)assert.equal(m.resolveBootMode(reopened.document,target).controller.rules.some(r=>r.id===added.id),!(own&&target===id));
-  await startMode(id,reopened.document);assert(p.settings.input.buttonMapping.rules.shortcutRules.some(r=>r.id===added.id));assert.equal((p.settings.input.bootModeShortcuts?.rules??p.settings.input.buttonMapping.rules.shortcutRules).some(r=>r.id===added.id),!own);
-  const stale=await p.compareAndSwapInputSettings(p.settings.input.revision-1,patch,undefined,{globalShortcuts:true});assert.equal(stale.ok,false);
-  if(own){const follow=await b.loadBootModes({editorOnly:true});m.setBootModeModuleScope(follow.document,id,'controller',false);const saved=await b.saveBootModes(follow.document);await startMode(id,saved);assert(p.settings.input.buttonMapping.rules.shortcutRules.some(r=>r.id===added.id));m.setBootModeModuleScope(saved,id,'controller',true);assert.equal(saved.scenes[id].overrides.controller.rules[0].id,'own-only');}
-  const ordinaryPatch={buttonMapping:{rules:{schemaVersion:2,closure:'UNENCLOSED',shortcutRules:[{...added,id:'ordinary-canonical'}]}}};
-  await p.compareAndSwapInputSettings(p.settings.input.revision,ordinaryPatch);const ordinaryRead=(await b.loadBootModes({editorOnly:true})).document;assert.equal(ordinaryRead.global.controller.rules[0].id,'ordinary-canonical','Ordinary configuration must be the only shared source');
-  const removed=await p.compareAndSwapInputSettings(p.settings.input.revision,{buttonMapping:{rules:{schemaVersion:2,closure:'UNENCLOSED',shortcutRules:[]}}},undefined,{globalShortcuts:true});assert.equal(removed.ok,true);assert.deepEqual(removed.globalShortcutRules.shortcutRules,[]);
-  const empty=(await b.loadBootModes({editorOnly:true})).document;assert.deepEqual(empty.global.controller.rules,[]);await startMode(id,empty);assert.deepEqual(p.settings.input.buttonMapping.rules.shortcutRules,[]);if(!own)assert.equal(p.settings.input.bootModeShortcuts,null);
-  rows.push({id,own,globalNewRulePreserved:true,ownWins:own,staleSaveRejected:true,ordinaryConfigIsGlobal:true,emptyGlobalPreserved:true});
+await test('controller edits and calibration remain global across four modes; stale mode parameters are deleted',async()=>{
+ const rows=[];
+ for(const id of m.BOOT_MODE_IDS){
+  p.reset();const doc=await fresh(),controllerInputIndex=process.argv.indexOf('--controller-input'),controllerReceipt=controllerInputIndex>=0?JSON.parse(fs.readFileSync(process.argv[controllerInputIndex+1],'utf8'))[0]:null,globalRules=controllerReceipt?.input?.buttonMapping?.rules?.shortcutRules||[{id:'global-only',origin:'custom',enabled:true,inputs:[],actionId:'keyboard.key',params:{key:'F9'}}];
+  p.settings.input.buttonMapping.rules={schemaVersion:2,shortcutRulesInitialized:true,shortcutRules:structuredClone(globalRules)};
+  p.settings.input.axisCalibration={deviceKey:'global-device',left:{offsetX:.12},right:{offsetY:-.05}};
+  const globalBefore=structuredClone({mapping:p.settings.input.buttonMapping,calibration:p.settings.input.axisCalibration,flags:p.settings.gamepad});
+  doc.global.controller={name:'obsolete global snapshot',rules:[]};doc.global.input.axisCalibration={deviceKey:'old'};doc.controllerTemplates={legacy:{rules:[]}};
+  for(const mode of ['xbox','steam','xbox-steam']){doc.scenes[mode].overrides.controller={name:'old mode',rules:[]};doc.scenes[mode].rememberedOverrides={controller:{rules:[]}};doc.scenes[mode].overrides.input={...structuredClone(doc.global.input),buttonMapping:{rules:{shortcutRules:[]}},axisCalibration:{deviceKey:'mode'}};}
+  doc.presets.steam={old:{name:'old',overrides:{controller:{rules:[]},input:{axisCalibration:{deviceKey:'preset'}}}}};
+  p.settings.input.bootModeShortcuts={schema:1,mode:'steam',boot:'fixture-windows-boot-1',rules:[]};stored(doc);
+  const before=JSON.stringify(doc),normalized=m.normalizeBootModeDocument(doc,doc.global);assert.equal(JSON.stringify(doc),before,'Normalization mutated the caller');
+  assert(!('controllerTemplates' in normalized));assert(!('controller' in normalized.global));assert(!('axisCalibration' in normalized.global.input));
+  for(const mode of m.BOOT_MODE_IDS){const snapshot=m.resolveBootMode(normalized,mode);assert(!('controller' in snapshot));assert(!('buttonMapping' in snapshot.input));assert(!('axisCalibration' in snapshot.input));if(mode!=='global'){assert(!('controller' in normalized.scenes[mode].overrides));assert(!('controller' in (normalized.scenes[mode].rememberedOverrides||{})));}}
+  assert(!('controller' in normalized.presets.steam.old.overrides));assert(!('axisCalibration' in normalized.presets.steam.old.overrides.input));
+  const saved=await b.saveBootModes(normalized),running=await startMode(id,saved);assert.equal(p.settings.input.bootModeShortcuts,null);
+  assert.deepEqual(p.settings.input.buttonMapping,globalBefore.mapping);assert.deepEqual(p.settings.input.axisCalibration,globalBefore.calibration);assert.deepEqual(p.settings.gamepad,globalBefore.flags);assert(!opNames().includes('summon.set'));
+  const added={...globalRules[0],id:'edited-globally'};const updated=await p.compareAndSwapInputSettings(p.settings.input.revision,{buttonMapping:{rules:{shortcutRules:[added],shortcutRulesInitialized:true}}});assert(updated.ok);
+  const reopened=await b.loadBootModes({editorOnly:true});await startMode(id,reopened.document);assert.equal(p.settings.input.buttonMapping.rules.shortcutRules[0].id,added.id);assert.deepEqual(p.settings.input.axisCalibration,globalBefore.calibration);
+  rows.push({mode:id,oldParametersRemoved:true,globalEditsPreserved:true,globalCalibrationPreserved:true,actualEditorReceipt:!!controllerReceipt,savedRuleCount:globalRules.length});
  }return rows;
 });
+
 await test('normalization strips unsafe keys and foreign modules without changing game records',async()=>{
  const doc=await fresh();const raw=JSON.parse(JSON.stringify(doc));raw.scenes.steam.overrides.gameProfiles={danger:true};raw.global.input=JSON.parse('{"persona":"elite","__proto__":{"polluted":true},"constructor":1,"bad":null}');raw.global.input.invalid=Infinity;
  const normalized=m.normalizeBootModeDocument(raw,doc.global);assert(!('gameProfiles' in normalized.scenes.steam.overrides));assert(!Object.hasOwn(normalized.global.input,'__proto__'));assert(!Object.hasOwn(normalized.global.input,'constructor'));assert(!('invalid' in normalized.global.input));assert.equal({}.polluted,undefined);
@@ -166,7 +208,7 @@ await test('all four boot preparation paths immediately match Xbox or None selec
  for(const id of m.BOOT_MODE_IDS)for(const initialXbox of [true,false]){
   p.reset();p.state.xbox=initialXbox;p.state.deviceForm=3;p.state.steam=true;p.state.earlyCommand='previous-command';const doc=await fresh();stored(doc);const input=structuredClone(p.settings.input),home=p.state.homeApp;await b.chooseBootMode(id,doc,true);
   assert.equal(p.state.homeApp,id==='global'?home:id==='xbox'||id==='xbox-steam'?'Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App':'');assert.deepEqual(p.settings.input,input);assert(!p.calls.some(c=>['app.launch','steam.launch','platform.set'].includes(c.op)));
-  if(id==='global'){assert.equal(p.state.xbox,initialXbox);assert.equal(p.state.deviceForm,3);assert.equal(p.state.earlyCommand,'previous-command');assert.equal(changes().length,0);}
+  if(id==='global'){assert.equal(p.state.xbox,initialXbox);assert.equal(p.state.deviceForm,3);assert.equal(p.state.steam,false);assert.equal(p.state.earlyCommand,'');assert.deepEqual(changes().map(c=>c.op),['startup.steam','startup.commandRepair']);}
   else {assert.equal(p.state.xbox,id==='xbox'||id==='xbox-steam');assert.equal(p.state.deviceForm,46);assert.equal(p.state.steam,id==='steam'||id==='xbox-steam');assert.equal(p.state.earlyCommand,id==='xbox'?'':'"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat"');}
   assert.deepEqual(await b.bootModeConnections(id),[]);rows.push({id,initialXbox,xbox:p.state.xbox,deviceForm:p.state.deviceForm,advanced:p.state.steam,homeApp:p.state.homeApp,homePreserved:id==='global',currentInputUnchanged:true});
  }return rows;
@@ -274,7 +316,7 @@ await test('duplicate global application paths preserve the existing name across
 await test('all sixteen scene transitions preserve the current runtime and follow the latest Xbox/Steam startup matrix',async()=>{
  const evidence=[];
  for(const from of ['global','steam','xbox','xbox-steam'])for(const to of ['global','steam','xbox','xbox-steam']){
-  p.reset();p.state.xbox=true;const doc=await fresh();stored(doc);const current=structuredClone(p.settings.input),games=gameState();const first=await b.chooseBootMode(from,doc,true);const previousXbox=p.state.xbox,previousSteam=p.state.steam,beforeCalls=p.calls.length;const next=await b.chooseBootMode(to,first,true);const expectedXbox=to==='global'?previousXbox:to==='xbox'||to==='xbox-steam';assert.equal(p.state.xbox,expectedXbox);assert.equal(p.state.steam,to==='global'?previousSteam:to==='steam'||to==='xbox-steam');assert.equal(next.current,'global');assert.equal(next.boot,to);assert.deepEqual(p.settings.input,current);assert.equal(gameState(),games);assert.equal(p.calls.slice(beforeCalls).filter(row=>row.op==='startup.xbox').length,to==='global'?0:1);evidence.push({from,to,xbox:expectedXbox,steam:p.state.steam,currentUnchanged:true});
+  p.reset();p.state.xbox=true;const doc=await fresh();stored(doc);const current=structuredClone(p.settings.input),games=gameState();const first=await b.chooseBootMode(from,doc,true);const previousXbox=p.state.xbox,previousSteam=p.state.steam,beforeCalls=p.calls.length;const next=await b.chooseBootMode(to,first,true);const expectedXbox=to==='global'?previousXbox:to==='xbox'||to==='xbox-steam';assert.equal(p.state.xbox,expectedXbox);assert.equal(p.state.steam,to==='steam'||to==='xbox-steam');assert.equal(next.current,'global');assert.equal(next.boot,to);assert.deepEqual(p.settings.input,current);assert.equal(gameState(),games);assert.equal(p.calls.slice(beforeCalls).filter(row=>row.op==='startup.xbox').length,to==='global'?0:1);evidence.push({from,to,xbox:expectedXbox,steam:p.state.steam,currentUnchanged:true});
  }return evidence;
 });
 await test('all 16 mode transitions commit Windows Xbox or None before reboot while preserving live input',async()=>{
@@ -325,7 +367,7 @@ await test('mouse OFF stops the previous owner and never starts or selects any b
  const doc=await fresh();doc.scenes.steam.overrides.input={...structuredClone(doc.global.input),mouse:'off'};stored(doc);await startMode('steam',doc);assert.equal(p.state.mouse.on,false);assert.deepEqual(p.calls.filter(c=>c.op.startsWith('mouse.')).map(c=>[c.op,c.value]),[['mouse.enable',false]]);
 });
 await test('global application completely removes scene residue in input, gyro, and action rules',async()=>{
- const doc=await fresh(),games=gameState();doc.current='steam';doc.global.input.outputTarget={persona:'elite',buttonMappingEnabled:true,gyroEnabled:false};doc.global.input.mouse='off';doc.global.gyro.motion={enabled:false};doc.global.controller.rules=[];stored(doc);
+ const doc=await fresh(),games=gameState();doc.current='steam';doc.global.input.outputTarget={persona:'elite',buttonMappingEnabled:true,gyroEnabled:false};doc.global.input.mouse='off';doc.global.gyro.motion={enabled:false};stored(doc);
  p.settings.input.outputTarget={persona:'steamdeck',buttonMappingEnabled:true,gyroEnabled:true,sceneOnly:'must disappear'};p.settings.input.gyroMotion={enabled:true,sceneOnly:true};p.settings.input.buttonMapping.rules={shortcutRules:[],shortcutRulesInitialized:true};p.settings.input.bootModeShortcuts={schema:1,mode:'steam',boot:'',rules:[{id:'scene-only'}]};
  await startMode('global',doc);assert(!('sceneOnly' in p.settings.input.outputTarget));assert(!('sceneOnly' in p.settings.input.gyroMotion));assert.deepEqual(p.settings.input.buttonMapping.rules.shortcutRules,[]);assert.equal(p.settings.input.bootModeShortcuts,null);assert.equal(gameState(),games);
 });
@@ -540,12 +582,13 @@ await test('fan scene uses the original owner’s latest custom curve and preser
  assert.deepEqual(p.calls.filter(c=>c.op.startsWith('fan.')).map(c=>c.op),['fan.save','fan.start','fan.curve','fan.preset']);
  await startMode('global',saved);assert.equal(p.state.fanIntent,false);assert.equal(p.state.fanReady,false);assert.deepEqual(p.settings.fan.presetCurves,expected);assert.deepEqual(p.settings.fan.nodes,original.balanced);assert.equal(p.calls.filter(c=>c.op==='fan.preset').length,1);
 });
-await test('deleted native shortcut clears its persisted flag and is not reseeded by capture or reopen',async()=>{
- const defaults=shortcuts.NATIVE_DEFAULT_SHORTCUTS;assert(defaults.length>1);p.settings.gamepad={...p.settings.gamepad,...Object.fromEntries(defaults.map(item=>[item.defaultKey,true])),unrelatedKeep:true};Object.assign(p.state.nativeGamepadFlags,Object.fromEntries(defaults.map(item=>[item.defaultKey,true])));const games=gameState(),doc=await fresh();const removed=defaults.find(item=>item.defaultKey==='openKeyboard');assert(removed);assert(doc.global.controller.rules.some(rule=>rule.defaultKey===removed.defaultKey&&rule.enabled));
- const rules=structuredClone(doc.global.controller.rules).filter(rule=>rule.defaultKey!==removed.defaultKey);const disabled=rules.find(rule=>rule.defaultKey==='mouseToggle');assert(disabled);disabled.enabled=false;doc.scenes.steam.overrides.controller={...structuredClone(doc.global.controller),name:'Deleted native default',rules};stored(doc);await startMode('steam',doc);
- for(const definition of defaults){const kept=rules.find(rule=>rule.origin==='native-default'&&rule.defaultKey===definition.defaultKey);assert.equal(p.settings.gamepad[definition.defaultKey],kept?.enabled===true,'Persisted native flag disagrees with the selected complete rule list: '+definition.defaultKey);}assert.equal(p.settings.gamepad[removed.defaultKey],false);assert.equal(p.state.nativeGamepadFlags[removed.defaultKey],false,'Deleted shortcut remains enabled in the live native g_summon cache');assert.equal(p.state.nativeGamepadFlags[disabled.defaultKey],false,'Disabled shortcut remains active until restart');assert(p.calls.some(c=>c.op==='summon.set'),'Runtime never updated the native shortcut owner');for(const definition of defaults)assert.equal(p.state.nativeGamepadFlags[definition.defaultKey],p.settings.gamepad[definition.defaultKey]);assert.equal(p.settings.gamepad.unrelatedKeep,true);assert.equal(gameState(),games);
- const captured=await b.captureBootModeSnapshot();assert(!captured.controller.rules.some(rule=>rule.defaultKey===removed.defaultKey),'Capture resurrected the deleted shortcut');assert.equal(captured.controller.rules.find(rule=>rule.defaultKey===disabled.defaultKey)?.enabled,false);const reopened=await b.loadBootModes();assert(!m.resolveBootMode(reopened.document,'steam').controller.rules.some(rule=>rule.defaultKey===removed.defaultKey),'Reopening resurrected the deleted shortcut');
+await test('mode switching cannot replace global native shortcut flags or resurrect retired mode rules',async()=>{
+ const doc=await fresh(),defaults=shortcuts.NATIVE_DEFAULT_SHORTCUTS;
+ Object.assign(p.settings.gamepad,Object.fromEntries(defaults.map((v,i)=>[v.defaultKey,i%2===0])));
+ const flags=structuredClone(p.settings.gamepad);for(const id of ['xbox','steam','xbox-steam'])doc.scenes[id].overrides.controller={rules:defaults.map(v=>({...v,enabled:true}))};stored(doc);
+ let current=doc;for(const mode of ['xbox-steam','global','steam','xbox','global']){current=(await startMode(mode,current)).document;assert.deepEqual(p.settings.gamepad,flags);assert.equal(p.settings.input.bootModeShortcuts,null);assert(!opNames().includes('summon.set'));}
 });
+
 await test('new boot selection preserves common desktop startup and retires JoyXoff Run without changing current input',async()=>{
  const doc=await fresh();stored(doc);p.state.legacyDesktop=true;p.state.joyStartup='"C:\\SOFT\\Joyxoff\\Joyxoff.exe"';const input=JSON.stringify(p.settings.input),mouse=structuredClone(p.state.mouse);const next=await b.chooseBootMode('xbox',doc,true);
  assert.equal(next.boot,'xbox');assert.equal(next.current,'global');assert.equal(p.state.legacyDesktop,true);assert.equal(p.state.joyStartup,null);assert.equal(JSON.stringify(p.settings.input),input);assert.deepEqual(p.state.mouse,mouse);assert(!opNames().some(name=>name.startsWith('mouse.')));assert(!opNames().includes('app.launch'));assert(!opNames().includes('steam.launch'));
@@ -603,9 +646,11 @@ await test('rejected non-startup request cannot cancel a legitimate startup defe
 await test('explicit deferred-mouse cancellation removes native event ownership and makes late events inert without writing settings',async()=>{
  assert.equal(typeof b.cancelBootModeDeferredMouse,'function');await pendingMicrosoft();assert(p.ipcListenerCount('mouseMode.changed')>0);assert(p.ipcListenerCount('gamepad.mouse-toggle')>0);const count=p.calls.length,reads=p.state.mouseReads;b.cancelBootModeDeferredMouse();b.cancelBootModeDeferredMouse();assert.equal(p.ipcListenerCount('mouseMode.changed'),0);assert.equal(p.ipcListenerCount('gamepad.mouse-toggle'),0);removeOverlay();const settings=structuredClone(p.settings);await p.emitMemoryIpc('mouseMode.changed',readyMouse);await p.emitMemoryIpc('gamepad.mouse-toggle',readyMouse);assert.deepEqual(p.settings,settings);assert.equal(p.calls.length,count);assert.equal(p.state.mouseReads,reads);assert.equal(p.state.mouse.on,false);return {repeatedCancelSafe:true,nativeListenersAfterCancel:0,lateWrites:0};
 });
-await test('native shortcut acknowledgement mismatch rejects apply and restores both persisted and live shortcut flags',async()=>{
- const defaults=shortcuts.NATIVE_DEFAULT_SHORTCUTS;Object.assign(p.settings.gamepad,Object.fromEntries(defaults.map(item=>[item.defaultKey,true])));Object.assign(p.state.nativeGamepadFlags,Object.fromEntries(defaults.map(item=>[item.defaultKey,true])));const native=structuredClone(p.state.nativeGamepadFlags),doc=await fresh(),games=gameState();doc.scenes.steam.overrides.controller={...structuredClone(doc.global.controller),rules:doc.global.controller.rules.filter(rule=>rule.defaultKey!=='openKeyboard')};stored(doc);p.faults['summon.ack-mismatch']=1;await assert.rejects(startMode('steam',doc),error=>{assert.equal(error.failedStep,'controller-native-flags');assert(error.rollback.every(r=>r.ok));return true;});assert.equal(p.settings.extensions.bootModes.current,'global');assert.equal(p.settings.extensions.bootModes.revision,0);assert.deepEqual(p.state.nativeGamepadFlags,native);for(const item of defaults)assert.equal(p.settings.gamepad[item.defaultKey],true);assert.equal(gameState(),games);
+await test('retired mode shortcuts never call the native shortcut writer, even when its acknowledgement would fail',async()=>{
+ const doc=await fresh(),games=gameState(),flags=structuredClone(p.settings.gamepad);doc.scenes.steam.overrides.controller={name:'retired',rules:[{id:'mode',enabled:true}]};stored(doc);p.faults['summon.ack-mismatch']=1;
+ await startMode('steam',doc);assert(!opNames().includes('summon.set'));assert.deepEqual(p.settings.gamepad,flags);assert.equal(gameState(),games);assert(!('controller' in p.settings.extensions.bootModes.scenes.steam.overrides));
 });
+
 await test('saved-only editor opens without touching stalled CPU, charge, mouse or sleep owners',async()=>{
  const doc=await fresh();stored(doc);const before=structuredClone(p.settings);let deviceReads=0;
  for(const key of ['cpuArchitectureRead','tdpCapabilityRead','chargeRead','hibernateRead','mouseRead'])p.hooks[key]=()=>{deviceReads++;throw Error('editor must not probe '+key);};
@@ -630,6 +675,52 @@ await test('saved-only editor retains unapplied default OFF and capability failu
  p.hooks.cpuArchitectureRead=()=>{throw Error('unavailable CPU observation');};const support=await b.readBootModeSupport('performance');assert.equal(support.hybridCores.state,'unknown');
  return {pendingPersona:desired,cpuState:support.hybridCores.state};
 });
-report.pass=report.assertions.every(a=>a.pass);report.counts={passed:report.assertions.filter(a=>a.pass).length,failed:report.assertions.filter(a=>!a.pass).length};
+
+await test('malformed known module data is rejected before rendering, saving or preparing any of four modes',async()=>{
+ const cases=[['performance',{controls:null}],['performance',{controls:{ac:{auto:[]}}}],['performance',{frames:{dc:42}}],['gyro',{motion:42}],['gyro',{motion:{presets:[]}}],['softwareLaunch',{paths:{bad:'path'}}],['softwareLaunch',{paths:[null,123]}],['monitor',{preferences:null}],['monitor',{preferences:{ymcc:[]}}],['touch',{profiles:{disabled:42}}],['input',{outputTarget:null}],['input',{persona:'invalid'}],['sleep',{config:[]}],['sleep',{timeouts:'bad'}],['steamAppearance',{states:['bad']}],['background',{ui:false}],['fan',{enabled:'false'}],['display',{brightness:'bright'}],['charge',{limit:'80'}],['audioOptimization',{enabled:{}}],['frameGeneration',{enabled:[]}],['steamWallpaper',{cpuThreshold:'fast'}],['steamDecky',{enabled:1}]];
+ let checked=0;for(const id of m.BOOT_MODE_IDS)for(const [module,value]of cases){
+  p.reset();const doc=await fresh();if(id==='global')doc.global[module]=structuredClone(value);else doc.scenes[id].overrides[module]=structuredClone(value);stored(doc);const before=structuredClone(p.settings);
+  for(const options of [{overviewOnly:true},{editorOnly:true}])await assert.rejects(b.loadBootModes(options),/开机模式数据格式异常/);
+  await assert.rejects(b.saveBootModes(doc),/开机模式数据格式异常/);await assert.rejects(b.chooseBootMode(id,doc),/开机模式数据格式异常/);
+  assert.deepEqual(p.settings,before);assert.equal(changes().length,0,'invalid config caused an OS/device write');checked++;
+ }return {modes:4,malformedCases:checked,operationsPerCase:4,sourcePreserved:true,externalWrites:0};
+});
+await test('malformed hidden remembered presets, invalid metadata and future boot schema cannot be silently reset',async()=>{
+ const cases=[d=>d.scenes.steam.rememberedOverrides={gyro:{motion:[]}},d=>d.presets.xbox={saved:{name:'saved',overrides:{softwareLaunch:{paths:{}}}}},d=>d.scenes=[],d=>d.global=null,d=>d.activeSnapshot=[],d=>d.current='unknown',d=>d.boot='unknown',d=>d.bootEnabled='true',d=>d.revision=-1,d=>d.schema=99];
+ for(const mutate of cases){p.reset();const doc=await fresh();mutate(doc);stored(doc);const before=structuredClone(p.settings);await assert.rejects(b.loadBootModes({overviewOnly:true}));await assert.rejects(b.saveBootModes(doc));await assert.rejects(b.chooseBootMode('steam',doc));const startup=await runtimeBundle(out);startup.ports.settings.extensions.bootModes=structuredClone(doc);const startupBefore=structuredClone(startup.ports.settings);await assert.rejects(startup.boot.restoreSelectedBootMode());assert.deepEqual(startup.ports.settings,startupBefore);assert.deepEqual(p.settings,before);assert.equal(changes().length,0);}
+ return {malformedDocuments:cases.length,originalsPreserved:true,noBootClaim:true};
+});
+await test('runtime settings fallback cannot masquerade as durable boot configuration or claim startup',async()=>{
+ for(const reason of ['unsupported','read-failed','write-failed','corrupt']){
+  p.reset();const doc=await fresh();stored(doc);const before=structuredClone(p.settings);p.hooks.recoveryState={status:'runtime-fallback',persisted:reason==='read-failed',message:'injected '+reason};
+  for(const options of [{overviewOnly:true},{editorOnly:true},{}])await assert.rejects(b.loadBootModes(options),/尚未安全读取/);
+  await assert.rejects(b.saveBootModes(doc),/尚未安全读取/);await assert.rejects(b.chooseBootMode('steam',doc),/尚未安全读取/);const startup=await runtimeBundle(out);startup.ports.settings.extensions.bootModes=structuredClone(doc);startup.ports.hooks.recoveryState=structuredClone(p.hooks.recoveryState);const startupBefore=structuredClone(startup.ports.settings);await assert.rejects(startup.boot.restoreSelectedBootMode(),/尚未安全读取/);assert.deepEqual(startup.ports.settings,startupBefore);
+  assert.deepEqual(p.settings,before);assert.equal(changes().length,0);
+ }return {fallbackReasons:4,operationsPerReason:6,noWrites:true};
+});
+await test('revision overflow and invalid requested mode cannot commit settings or startup side effects',async()=>{
+ const doc=await fresh();doc.revision=Number.MAX_SAFE_INTEGER;stored(doc);const before=structuredClone(p.settings);
+ await assert.rejects(b.saveBootModes(doc),/版本号/);await assert.rejects(b.chooseBootMode('steam',doc),/版本号/);await assert.rejects(b.chooseBootMode('__proto__',doc),/选择无效/);assert.deepEqual(p.settings,before);assert.equal(changes().length,0);
+});
+
+await test('modes 1 and 2 force advanced .earlystart OFF, modes 3 and 4 force it ON across all inverse selections',async()=>{
+ const rows=[];for(const from of m.BOOT_MODE_IDS)for(const to of m.BOOT_MODE_IDS){
+  p.reset();const doc=await fresh();stored(doc);const before=structuredClone(p.settings.input);const first=await b.chooseBootMode(from,doc);const next=await b.chooseBootMode(to,first);const advanced=to==='steam'||to==='xbox-steam';
+  assert.equal(p.state.steam,advanced);assert.equal(p.state.earlyCommand.length>0,advanced);assert.equal(next.boot,to);assert.deepEqual(p.settings.input,before);assert.equal(next.bootNotice,undefined);assert(!opNames().includes('steam.launch'));rows.push({from,to,advanced,currentInputUnchanged:true});
+ }return rows;
+});
+await test('failed advanced close/open remains pending and explicit same-mode retry repairs all four choices',async()=>{
+ const rows=[];for(const id of m.BOOT_MODE_IDS){p.reset();const doc=await fresh();stored(doc);const target=id==='steam'||id==='xbox-steam';p.state.steam=!target;p.state.earlyCommand=target?'':'stale-command';const input=structuredClone(p.settings.input);p.faults['startup.steam']=1;
+  const failed=await b.chooseBootMode(id,doc);assert.equal(failed.boot,id);assert.equal(p.state.steam,!target);assert.match(failed.bootNotice,/Steam 高级启动.*injected/);
+  const retried=await b.chooseBootMode(id,failed);assert.equal(retried.bootNotice,undefined);assert.equal(p.state.steam,target);assert.equal(p.state.earlyCommand.length>0,target);assert.deepEqual(p.settings.input,input);rows.push({id,failedNoticeRetained:true,retryConfirmed:true});
+ }return rows;
+});
+await test('queued disable then enable follows latest mode and does not overlap .earlystart writes',async()=>{
+ const doc=await fresh();stored(doc);let release,entered;const held=new Promise(r=>release=r),started=new Promise(r=>entered=r);let calls=0;
+ p.hooks.steamStartupWrite=async()=>{if(++calls===1){entered();await held;}};
+ const close=b.chooseBootMode('global',doc);await waitSignal(started,'advanced close');const next=close.then(saved=>b.chooseBootMode('steam',saved));assert.equal(calls,1);release();const saved=await next;assert.equal(saved.boot,'steam');assert.equal(p.state.steam,true);assert.deepEqual(p.calls.filter(c=>c.op==='startup.steam').map(c=>c.value),[false,true]);
+ return {serialWrites:2,finalMode:'steam',restarts:0};
+});
+report.pass=report.assertions.length>0&&report.assertions.every(a=>a.pass);report.counts={passed:report.assertions.filter(a=>a.pass).length,failed:report.assertions.filter(a=>!a.pass).length};
 fs.writeFileSync(path.join(out,'boot-modes-runtime.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({pass:report.pass,...report.counts,report:path.join(out,'boot-modes-runtime.json'),failed:report.assertions.filter(a=>!a.pass).map(a=>({name:a.name,error:a.error.split('\n')[0]}))},null,2));if(!report.pass)process.exitCode=1;
 

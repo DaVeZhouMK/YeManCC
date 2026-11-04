@@ -1,0 +1,4418 @@
+{
+  "schemaVersion": 1,
+  "updatedHongKong": "2026-11-04T16:01:02.391646+08:00",
+  "role": "family/source/consumer coverage navigation only; not new runtime registration",
+  "runtimeConsumer": false,
+  "registrationAuthority": "ExistingFanCapabilityCatalog/PinnedFanSourceCatalog + hc-device-catalog domainpolicies + HcOemInputCapabilityBinding exact identity + original live consumers",
+  "objective": "对onexplayer全家族的能力继续正反推导排查补完能力总库",
+  "goalComplete": false,
+  "allFamilySoftwareCoverageComplete": false,
+  "fixedSourceClassCount": 20,
+  "factoryConcreteClassCount": 17,
+  "nonFactoryBaseClasses": [
+    "OneXPlayerG1",
+    "OneXPlayerMini",
+    "OneXPlayerX1"
+  ],
+  "sharedOneXAOKZOENotCountedAsOnexProduct": true,
+  "exactFactoryProductLabels": 21,
+  "factoryCountErratum": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\source-audit\\FACTORY-COUNT-ERRATUM.json",
+    "bytes": 16681,
+    "sha256": "36e0effa348aa33ddca1ac02ffaf48e0f54f47b4e99774db03b285211a43f05d"
+  },
+  "models": [
+    {
+      "name": "OneXPlayer2",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayer2",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayer2"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayer2.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer2.cs",
+        "sha256": "bd8ce3cff11f496be143cb7e5b18e3e6e1892436a2cad7419196aa57b8c3068a",
+        "matchedManifest": true,
+        "line": 9
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayer2",
+            "line": 1081,
+            "context": "device = new OneXPlayer2();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER 2 ARP23"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "NOT_DECLARED_OR_NON_FACTORY_BASE",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-2:gyro:neg-x-neg-y-neg-z-swap-yz",
+              "accel": "hc-06c0b954:onexplayer-2:accel:x-neg-y-neg-z-swap-yz",
+              "sourceSha256": "cc5c61b6c51065362601a1ebe2cca7c207d4cc3ab7323a8102f66376f7eabf8f",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayer2.json",
+          "resourceSha256": "9d984d0f4e22188c5ed473f0f9953b6377ff444a985381ec1cf7bead0a03723e",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.LWin, KeyCode.LMenu, KeyCode.LControl], [KeyCode.LWin, KeyCode.LMenu, KeyCode.LControl], false, ButtonFlags.OEM2))",
+              "line": 37
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneX2)",
+            "catalogExpression": "oemCatalogOf(kOneX2Keys)",
+            "keyTable": "kOneX2Keys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayer2Pro",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayer2Pro",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayer2",
+        "OneXPlayer2Pro"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayer2.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer2.cs",
+        "sha256": "bd8ce3cff11f496be143cb7e5b18e3e6e1892436a2cad7419196aa57b8c3068a",
+        "matchedManifest": true,
+        "line": 84
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayer2Pro",
+            "line": 1085,
+            "context": "device = new OneXPlayer2Pro();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER 2 PRO ARP23P",
+                  "ONEXPLAYER 2 PRO ARP23P EVA-01"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "NOT_DECLARED_OR_NON_FACTORY_BASE",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-2:gyro:neg-x-neg-y-neg-z-swap-yz",
+              "accel": "hc-06c0b954:onexplayer-2:accel:x-neg-y-neg-z-swap-yz",
+              "sourceSha256": "cc5c61b6c51065362601a1ebe2cca7c207d4cc3ab7323a8102f66376f7eabf8f",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayer2.json",
+          "resourceSha256": "9d984d0f4e22188c5ed473f0f9953b6377ff444a985381ec1cf7bead0a03723e",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneX2)",
+            "catalogExpression": "oemCatalogOf(kOneX2Keys)",
+            "keyTable": "kOneX2Keys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayer3",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayer3",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX2",
+        "OneXPlayer3"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+        "sha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+        "matchedManifest": true,
+        "line": 25
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayer3",
+            "line": 1089,
+            "context": "device = new OneXPlayer3();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER 3",
+                  "ONEXPLAYER-3"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "WmiBankedEc",
+            "restore": "PINNED_SOURCE_SESSION"
+          },
+          "sourceRegistry": "capabilities/PinnedFanSourceCatalog.cs (extensions only)",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "breathing",
+            "preset"
+          ],
+          "presetAvailable": true,
+          "statusAvailable": false,
+          "sourceAdapter": "oxp3-hid-v1",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-f2e58468:onexplayer-3:gyro:neg-y-neg-z-x",
+              "accel": "hc-f2e58468:onexplayer-3:accel:neg-y-neg-z-x",
+              "sourceSha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayer3.json",
+          "resourceSha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.RemoveAll(c => c.state.Buttons.Contains(ButtonFlags.OEM4))",
+              "line": 63
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"G-Key\", null, null, false, ButtonFlags.OEM4))",
+              "line": 64
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX3)",
+            "catalogExpression": "oemCatalogOf(kOneXX3Keys)",
+            "keyTable": "kOneXX3Keys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "home",
+                "label": "Home",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "l4",
+                "label": "M1",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "M2",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "gkey",
+                "label": "G-Key",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true,
+            "lastCorrection": "2026-10-31 re-read from current native/main.cpp after f2e58468: OemChordProfileId::OneXX3 + oemCatalogOf(kOneXX3Keys); six keys with held Home and G-Key"
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "REGISTERED_REVIEWED_ROUTE",
+          "routes": [
+            {
+              "ruleId": "battery.rule.oxp3-wmi-ec.OneXPlayer3",
+              "provider": "oxp3-wmi-ec",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "systemProduct",
+                "values": [
+                  "ONEXPLAYER 3",
+                  "ONEXPLAYER-3"
+                ],
+                "deviceClass": "OneXPlayer3"
+              },
+              "firmwareGate": {
+                "kind": "provider-probe-required",
+                "majorMin": 0,
+                "minorMin": 0
+              }
+            }
+          ],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "ymcc.device.OneXPlayer3",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
+        "brightness": true,
+        "secondColor": true,
+        "declaredEffects": [
+          "solid",
+          "breathing",
+          "preset"
+        ],
+        "presetAvailable": true,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerApex",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX1AMD",
+        "OneXPlayerApex"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerApex.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerApex.cs",
+        "sha256": "f16cde1294b01aba99d51542ca9935af25dedf203eafc6638c42338407b74ff8",
+        "matchedManifest": true,
+        "line": 10
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerApex",
+            "line": 1039,
+            "context": "device = new OneXPlayerApex();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER APEX",
+                  "ONEXPLAYERAPEX"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "preset"
+          ],
+          "presetAvailable": true,
+          "statusAvailable": true,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-apex:gyro:y-neg-x-z",
+              "accel": "hc-06c0b954:onexplayer-apex:accel:neg-y-x-neg-z",
+              "sourceSha256": "2cfa66a5dc619ea4206e006ae7b95ccd3d32b788bb3d43fa55b86275fec4ad17",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerApex.json",
+          "resourceSha256": "2471eef62a1e636d78f30a215988957f1a363bca0df314866faa605501bb9f77",
+          "previousAuditDisposition": "LATEST_RESOURCE_REJECTED_SAFE_LEGACY_RETAINED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Clear()",
+              "line": 24
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.LControl, KeyCode.LMenu, KeyCode.LWin], [KeyCode.LWin, KeyCode.LMenu, KeyCode.LControl], false, ButtonFlags.OEM1))",
+              "line": 26
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard\", [KeyCode.LControl, KeyCode.LWin, KeyCode.O], [KeyCode.O, KeyCode.LWin, KeyCode.LControl], false, ButtonFlags.OEM2))",
+              "line": 32
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Orange\", [KeyCode.LWin, KeyCode.G], [KeyCode.G, KeyCode.LWin], false, ButtonFlags.OEM3))",
+              "line": 38
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard + Orange\", [KeyCode.RControl, KeyCode.RAlt, KeyCode.Delete], [KeyCode.Delete, KeyCode.RAlt, KeyCode.RControl], false, ButtonFlags.OEM4))",
+              "line": 44
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo + Orange\", [KeyCode.LWin, KeyCode.Snapshot], [KeyCode.Snapshot, KeyCode.LWin], false, ButtonFlags.OEM5))",
+              "line": 50
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Orange, Long-press\", [KeyCode.LWin, KeyCode.D], [KeyCode.D, KeyCode.LWin], false, ButtonFlags.OEM6))",
+              "line": 56
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXApex)",
+            "catalogExpression": "oemCatalogOf(kOneXApexKeys)",
+            "keyTable": "kOneXApexKeys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "orange",
+                "label": "Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "orangekb",
+                "label": "Keyboard + Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "orangetb",
+                "label": "Turbo + Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "orangelp",
+                "label": "Orange, Long-press",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null,
+          "priorAuditGap": "ONEX-SRC-003",
+          "currentContract": "HcOemInputCapabilityBinding -> HcOneXVendorInputContract -> existing native OneX owner",
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "battery": {
+          "state": "REGISTERED_REVIEWED_ROUTE",
+          "routes": [
+            {
+              "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerApex",
+              "provider": "oxp-x1-amd-ec",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "boardProduct",
+                "values": [
+                  "ONEXPLAYER APEX",
+                  "ONEXPLAYERAPEX"
+                ],
+                "deviceClass": "OneXPlayerApex"
+              },
+              "firmwareGate": {
+                "kind": "hc-ec-components",
+                "majorMin": 1,
+                "minorMin": 3,
+                "unknownValue": 255
+              }
+            }
+          ],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerApex",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
+        "brightness": true,
+        "secondColor": true,
+        "declaredEffects": [
+          "solid",
+          "preset"
+        ],
+        "presetAvailable": true,
+        "statusAvailable": true
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "input": "CURRENT_CORRECTED_CONSUMER_VALIDATED_SOFTWARE_SCOPE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      }
+    },
+    {
+      "name": "OneXPlayerG1",
+      "factoryInstantiable": false,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerG1",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerG1"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "sha256": "f03f6f5e3b750e44df9d59f95f6a2330c5ca2febd93399fcc66ba8dde15e887b",
+        "matchedManifest": true,
+        "line": 10
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "NON_FACTORY_BASE_NO_ROUTE",
+          "contract": null,
+          "sourceRegistry": "capabilities/PinnedFanSourceCatalog.cs (extensions only)",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": false,
+          "effects": [
+            "solid",
+            "rainbow"
+          ],
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "NON_FACTORY_BASE",
+          "recipes": [],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerG1.json",
+          "resourceSha256": "99f94e265b9f053f85ff4fb342fdffc3df1bad4f5500df9bfdb85fe688772f45",
+          "previousAuditDisposition": "BASE_NO_FACTORY",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::None)",
+            "catalogExpression": "{nullptr, 0}",
+            "keyTable": null,
+            "keys": [],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerG1",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerG1",
+        "brightness": true,
+        "secondColor": false,
+        "declaredEffects": [
+          "solid",
+          "rainbow"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerG1AMD",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerG1AMD",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerG1",
+        "OneXPlayerG1AMD"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "sha256": "f03f6f5e3b750e44df9d59f95f6a2330c5ca2febd93399fcc66ba8dde15e887b",
+        "matchedManifest": true,
+        "line": 85
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerG1AMD",
+            "line": 1051,
+            "context": "device = new OneXPlayerG1AMD();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER G1 A"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 255,
+            "transport": "SuperIO16 / exact empty-contract adapter",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": false,
+          "effects": [
+            "solid",
+            "rainbow"
+          ],
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:reviewed-OneXPlayerG1AMD:gyro:x-z-y",
+              "accel": "hc-a250b19a:reviewed-OneXPlayerG1AMD:accel:x-neg-z-y",
+              "sourceSha256": "99f94e265b9f053f85ff4fb342fdffc3df1bad4f5500df9bfdb85fe688772f45",
+              "controllerPreferred": false
+            },
+            {
+              "kind": "Legacy",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-06c0b954:onexplayer-g1:gyro:x-y-z",
+              "accel": "hc-06c0b954:onexplayer-g1:accel:x-neg-y-z",
+              "sourceSha256": "9b41a71d9be7c0482d6394652a0b9696f287676420615adb33f56fc42084bf65",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerG1.json",
+          "resourceSha256": "99f94e265b9f053f85ff4fb342fdffc3df1bad4f5500df9bfdb85fe688772f45",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::None)",
+            "catalogExpression": "{nullptr, 0}",
+            "keyTable": null,
+            "keys": [],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerG1AMD",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerG1AMD",
+        "brightness": true,
+        "secondColor": false,
+        "declaredEffects": [
+          "solid",
+          "rainbow"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerG1Intel",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerG1Intel",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerG1",
+        "OneXPlayerG1Intel"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+        "sha256": "f03f6f5e3b750e44df9d59f95f6a2330c5ca2febd93399fcc66ba8dde15e887b",
+        "matchedManifest": true,
+        "line": 122
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerG1Intel",
+            "line": 1048,
+            "context": "device = new OneXPlayerG1Intel();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER G1 i"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16 / exact empty-contract adapter",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": false,
+          "effects": [
+            "solid",
+            "rainbow"
+          ],
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:reviewed-OneXPlayerG1Intel:gyro:x-z-y",
+              "accel": "hc-a250b19a:reviewed-OneXPlayerG1Intel:accel:x-neg-z-y",
+              "sourceSha256": "99f94e265b9f053f85ff4fb342fdffc3df1bad4f5500df9bfdb85fe688772f45",
+              "controllerPreferred": false
+            },
+            {
+              "kind": "Legacy",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-06c0b954:onexplayer-g1:gyro:x-y-z",
+              "accel": "hc-06c0b954:onexplayer-g1:accel:x-neg-y-z",
+              "sourceSha256": "9b41a71d9be7c0482d6394652a0b9696f287676420615adb33f56fc42084bf65",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerG1.json",
+          "resourceSha256": "99f94e265b9f053f85ff4fb342fdffc3df1bad4f5500df9bfdb85fe688772f45",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::None)",
+            "catalogExpression": "{nullptr, 0}",
+            "keyTable": null,
+            "keys": [],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerG1Intel",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerG1Intel",
+        "brightness": true,
+        "secondColor": false,
+        "declaredEffects": [
+          "solid",
+          "rainbow"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerMini",
+      "factoryInstantiable": false,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerMini",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerMini"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "sha256": "6dad960267c2a3ae8dc90a68cf20c71c3c5e6e00d0d6b40a95816f08b3c93682",
+        "matchedManifest": true,
+        "line": 11
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "NON_FACTORY_BASE_NO_ROUTE",
+          "contract": null,
+          "sourceRegistry": "capabilities/PinnedFanSourceCatalog.cs (extensions only)",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "NOT_DECLARED_OR_NON_FACTORY_BASE",
+          "gap": null
+        },
+        "motion": {
+          "state": "NON_FACTORY_BASE",
+          "recipes": [],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerMini.json",
+          "resourceSha256": "d56b7c17becb56154db23f86c2161a29273393415586bc2f0628df13aff259ee",
+          "previousAuditDisposition": "BASE_NO_FACTORY",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Orange\", [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], false, ButtonFlags.OEM1))",
+              "line": 34
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard\", [KeyCode.LWin, KeyCode.RControl, KeyCode.O], [KeyCode.O, KeyCode.RControl, KeyCode.LWin], false, ButtonFlags.OEM2))",
+              "line": 40
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Function\", [KeyCode.LWin, KeyCode.D], [KeyCode.LWin, KeyCode.D], false, ButtonFlags.OEM3))",
+              "line": 46
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXMini)",
+            "catalogExpression": "oemCatalogOf(kOneXMiniKeys)",
+            "keyTable": "kOneXMiniKeys",
+            "keys": [
+              {
+                "keyId": "orange",
+                "label": "Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "function",
+                "label": "Function",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerMiniAMD",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerMiniAMD",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerMini",
+        "OneXPlayerMiniAMD"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "sha256": "6dad960267c2a3ae8dc90a68cf20c71c3c5e6e00d0d6b40a95816f08b3c93682",
+        "matchedManifest": true,
+        "line": 127
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerMiniAMD",
+            "line": 1066,
+            "context": "device = new OneXPlayerMiniAMD();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONE XPLAYER",
+                  "ONEXPLAYER Mini Pro"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "Version",
+                "values": [
+                  "V01"
+                ],
+                "hasDefault": true
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "deviceClass": "OneXPlayerMiniAMD",
+            "line": 1078,
+            "context": "device = new OneXPlayerMiniAMD();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER mini A07"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 100,
+            "transport": "ACPI C4/C5 / exact runtime metadata adapter",
+            "restore": "OneXAcpiFanMode"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "NOT_DECLARED_OR_NON_FACTORY_BASE",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:reviewed-OneXPlayerMiniAMD:gyro:x-neg-z-y",
+              "accel": "hc-a250b19a:reviewed-OneXPlayerMiniAMD:accel:x-z-y",
+              "sourceSha256": "839e9381099a2b50520c6cea91d8c1540d55bc5109a6b63858975da31ee1dc46",
+              "controllerPreferred": false
+            },
+            {
+              "kind": "Legacy",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-06c0b954:onexplayer-mini:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-miniamd:accel:x-y-z",
+              "sourceSha256": "772b1735b4de267fba94532ca4cab8a90b4ebacc11aa3048400d7b3ccefabf39",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerMiniAMD.json",
+          "resourceSha256": "839e9381099a2b50520c6cea91d8c1540d55bc5109a6b63858975da31ee1dc46",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXMini)",
+            "catalogExpression": "oemCatalogOf(kOneXMiniKeys)",
+            "keyTable": "kOneXMiniKeys",
+            "keys": [
+              {
+                "keyId": "orange",
+                "label": "Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "function",
+                "label": "Function",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerMiniIntel",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerMiniIntel",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerMini",
+        "OneXPlayerMiniIntel"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+        "sha256": "6dad960267c2a3ae8dc90a68cf20c71c3c5e6e00d0d6b40a95816f08b3c93682",
+        "matchedManifest": true,
+        "line": 151
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerMiniIntel",
+            "line": 1069,
+            "context": "device = new OneXPlayerMiniIntel();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONE XPLAYER",
+                  "ONEXPLAYER Mini Pro"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "Version",
+                "values": [
+                  "1002-C"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 255,
+            "transport": "ACPI C4/C5",
+            "restore": "OneXAcpiFanMode"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "NOT_DECLARED_OR_NON_FACTORY_BASE",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:reviewed-OneXPlayerMiniIntel:gyro:z-neg-x-neg-y",
+              "accel": "hc-a250b19a:reviewed-OneXPlayerMiniIntel:accel:x-neg-z-neg-y",
+              "sourceSha256": "4908ebbc8d5560218345b49fa0142d8e946c491a5f08d1310e832f1cea35112a",
+              "controllerPreferred": false
+            },
+            {
+              "kind": "Legacy",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-06c0b954:onexplayer-miniintel:gyro:z-neg-x-neg-y",
+              "accel": "hc-06c0b954:onexplayer-miniintel:accel:x-neg-y-neg-z",
+              "sourceSha256": "772b1735b4de267fba94532ca4cab8a90b4ebacc11aa3048400d7b3ccefabf39",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerMiniIntel.json",
+          "resourceSha256": "4908ebbc8d5560218345b49fa0142d8e946c491a5f08d1310e832f1cea35112a",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXMini)",
+            "catalogExpression": "oemCatalogOf(kOneXMiniKeys)",
+            "keyTable": "kOneXMiniKeys",
+            "keys": [
+              {
+                "keyId": "orange",
+                "label": "Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "function",
+                "label": "Function",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerMiniPro",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerMiniPro",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerMini",
+        "OneXPlayerMiniPro"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerMiniPro.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMiniPro.cs",
+        "sha256": "eda4db0c77010713fd93cc3158ea1c697dab72aec49bba28a7973de5678d6cd5",
+        "matchedManifest": true,
+        "line": 6
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerMiniPro",
+            "line": 1072,
+            "context": "device = new OneXPlayerMiniPro();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONE XPLAYER",
+                  "ONEXPLAYER Mini Pro"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "Version",
+                "values": [
+                  "V03"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 255,
+            "transport": "ACPI C4/C5",
+            "restore": "OneXAcpiFanMode"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "NOT_DECLARED_OR_NON_FACTORY_BASE",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:reviewed-OneXPlayerMiniPro:gyro:x-z-y",
+              "accel": "hc-a250b19a:reviewed-OneXPlayerMiniPro:accel:x-neg-z-y",
+              "sourceSha256": "d3939ee42a4495b87d495e3abc54e3c919348352981eb8b98411eb509cf61b20",
+              "controllerPreferred": false
+            },
+            {
+              "kind": "Legacy",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-06c0b954:onexplayer-mini:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-minipro:accel:x-neg-y-z",
+              "sourceSha256": "0989ec86ca08214aba5ee941c4302127cd5e6c80c4d130b30d17057a4d367c59",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerMiniPro.json",
+          "resourceSha256": "d3939ee42a4495b87d495e3abc54e3c919348352981eb8b98411eb509cf61b20",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Clear()",
+              "line": 18
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Orange\", [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], false, ButtonFlags.OEM1))",
+              "line": 20
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard\", [KeyCode.RControl, KeyCode.LWin, KeyCode.O], [KeyCode.O, KeyCode.LWin, KeyCode.RControl], false, ButtonFlags.OEM2))",
+              "line": 26
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Function\", [KeyCode.LWin, KeyCode.D], [KeyCode.LWin, KeyCode.D], false, ButtonFlags.OEM3))",
+              "line": 32
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXMini)",
+            "catalogExpression": "oemCatalogOf(kOneXMiniKeys)",
+            "keyTable": "kOneXMiniKeys",
+            "keys": [
+              {
+                "keyId": "orange",
+                "label": "Orange",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "function",
+                "label": "Function",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerOneXFly",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerOneXFly",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerOneXFly"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerOneXFly.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerOneXFly.cs",
+        "sha256": "082f87fa78e7a75e54c9e4ce2369558a18f4bdcec251e4942a17eb65a921d77b",
+        "matchedManifest": true,
+        "line": 14
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerOneXFly",
+            "line": 1054,
+            "context": "device = new OneXPlayerOneXFly();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER F1"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 11,
+            "max": 255,
+            "transport": "ACPI C4/C5",
+            "restore": "OneXAcpiFanMode"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": false,
+          "effects": [
+            "solid",
+            "rainbow"
+          ],
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-fly:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-fly:accel:neg-x-neg-z-y",
+              "sourceSha256": "1d2df7fbde8f9915a75ec01670dfd3e18a55ad3c86794645734db744e4805639",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerOneXFly.json",
+          "resourceSha256": "bc0e138cb17a82e6d83b9fbb5e0bed3b0a5c205e4d2645ca48d4590a736c40d8",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LMenu, KeyCode.LWin, KeyCode.LControl], false, ButtonFlags.OEM1))",
+              "line": 60
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard\", [KeyCode.RControl, KeyCode.LWin, KeyCode.O], [KeyCode.O, KeyCode.LWin, KeyCode.RControl], false, ButtonFlags.OEM2))",
+              "line": 66
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Home\", [KeyCode.LWin, KeyCode.D], [KeyCode.LWin, KeyCode.D], false, ButtonFlags.OEM3))",
+              "line": 72
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXFly)",
+            "catalogExpression": "oemCatalogOf(kOneXFlyKeys)",
+            "keyTable": "kOneXFlyKeys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "home",
+                "label": "Home",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerOneXFly",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerOneXFly",
+        "brightness": true,
+        "secondColor": false,
+        "declaredEffects": [
+          "solid",
+          "rainbow"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerOneXFlyF1Pro",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerOneXFly",
+        "OneXPlayerOneXFlyF1Pro"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerOneXFly.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerOneXFly.cs",
+        "sha256": "082f87fa78e7a75e54c9e4ce2369558a18f4bdcec251e4942a17eb65a921d77b",
+        "matchedManifest": true,
+        "line": 253
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerOneXFlyF1Pro",
+            "line": 1057,
+            "context": "device = new OneXPlayerOneXFlyF1Pro();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER F1Pro"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 11,
+            "max": 255,
+            "transport": "ACPI C4/C5",
+            "restore": "OneXAcpiFanMode"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": false,
+          "effects": [
+            "solid",
+            "rainbow"
+          ],
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-fly:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-fly:accel:neg-x-neg-z-y",
+              "sourceSha256": "1d2df7fbde8f9915a75ec01670dfd3e18a55ad3c86794645734db744e4805639",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerOneXFly.json",
+          "resourceSha256": "bc0e138cb17a82e6d83b9fbb5e0bed3b0a5c205e4d2645ca48d4590a736c40d8",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXFly)",
+            "catalogExpression": "oemCatalogOf(kOneXFlyKeys)",
+            "keyTable": "kOneXFlyKeys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "home",
+                "label": "Home",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerOneXFlyF1Pro",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+        "brightness": true,
+        "secondColor": false,
+        "declaredEffects": [
+          "solid",
+          "rainbow"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerX1",
+      "factoryInstantiable": false,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX1",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485",
+        "matchedManifest": true,
+        "line": 24
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "NON_FACTORY_BASE_NO_ROUTE",
+          "contract": null,
+          "sourceRegistry": "capabilities/PinnedFanSourceCatalog.cs (extensions only)",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "preset"
+          ],
+          "presetAvailable": true,
+          "statusAvailable": true,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "NON_FACTORY_BASE",
+          "recipes": [],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX1.json",
+          "resourceSha256": "337348525496d3732b490881fe3953531a4574d51cd3ac60c6372b549d587985",
+          "previousAuditDisposition": "BASE_NO_FACTORY",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.RControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LMenu, KeyCode.LWin, KeyCode.RControl], false, ButtonFlags.OEM1))",
+              "line": 127
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard\", [KeyCode.RControl, KeyCode.LWin, KeyCode.O], [KeyCode.O, KeyCode.LWin, KeyCode.RControl], false, ButtonFlags.OEM2))",
+              "line": 133
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX1)",
+            "catalogExpression": "oemCatalogOf(kOneXKeys)",
+            "keyTable": "kOneXKeys",
+            "keys": [
+              {
+                "keyId": "special",
+                "label": "Special",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "l4",
+                "label": "L4",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "R4",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null,
+          "priorAuditGap": null,
+          "currentContract": "HcOemInputCapabilityBinding -> HcOneXVendorInputContract -> existing native OneX owner",
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerX1",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerX1",
+        "brightness": true,
+        "secondColor": true,
+        "declaredEffects": [
+          "solid",
+          "preset"
+        ],
+        "presetAvailable": true,
+        "statusAvailable": true
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "input": "CURRENT_CORRECTED_CONSUMER_VALIDATED_SOFTWARE_SCOPE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      }
+    },
+    {
+      "name": "OneXPlayerX1AMD",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX1AMD"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485",
+        "matchedManifest": true,
+        "line": 753
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerX1AMD",
+            "line": 1029,
+            "context": "device = new OneXPlayerX1AMD();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER X1 A",
+                  "ONEXPLAYER X1z"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "preset"
+          ],
+          "presetAvailable": true,
+          "statusAvailable": true,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-x1:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-x1:accel:x-neg-y-neg-z-swap-yz",
+              "sourceSha256": "19b4a24b7d7c508146de395465f0aa73ebd94029a8391f9f845d4c3ead582d9c",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX1AMD.json",
+          "resourceSha256": "c6409f75dffa3d569c12142e371ee1c6405dfdf1eed3412a6989b97f7e90562b",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX1)",
+            "catalogExpression": "oemCatalogOf(kOneXKeys)",
+            "keyTable": "kOneXKeys",
+            "keys": [
+              {
+                "keyId": "special",
+                "label": "Special",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "l4",
+                "label": "L4",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "R4",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null,
+          "priorAuditGap": null,
+          "currentContract": "HcOemInputCapabilityBinding -> HcOneXVendorInputContract -> existing native OneX owner",
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "battery": {
+          "state": "REGISTERED_REVIEWED_ROUTE",
+          "routes": [
+            {
+              "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD",
+              "provider": "oxp-x1-amd-ec",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "boardProduct",
+                "values": [
+                  "ONEXPLAYER X1 A",
+                  "ONEXPLAYER X1z"
+                ],
+                "deviceClass": "OneXPlayerX1AMD"
+              },
+              "firmwareGate": {
+                "kind": "hc-ec-components",
+                "majorMin": 1,
+                "minorMin": 3,
+                "unknownValue": 255
+              }
+            }
+          ],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerX1AMD",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+        "brightness": true,
+        "secondColor": true,
+        "declaredEffects": [
+          "solid",
+          "preset"
+        ],
+        "presetAvailable": true,
+        "statusAvailable": true
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "input": "CURRENT_CORRECTED_CONSUMER_VALIDATED_SOFTWARE_SCOPE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      }
+    },
+    {
+      "name": "OneXPlayerX1Intel",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX1Intel",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX1Intel"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+        "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485",
+        "matchedManifest": true,
+        "line": 808
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerX1Intel",
+            "line": 1025,
+            "context": "device = new OneXPlayerX1Intel();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER X1 i"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "preset"
+          ],
+          "presetAvailable": true,
+          "statusAvailable": true,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-x1:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-x1:accel:x-neg-y-neg-z-swap-yz",
+              "sourceSha256": "19b4a24b7d7c508146de395465f0aa73ebd94029a8391f9f845d4c3ead582d9c",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX1.json",
+          "resourceSha256": "337348525496d3732b490881fe3953531a4574d51cd3ac60c6372b549d587985",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX1)",
+            "catalogExpression": "oemCatalogOf(kOneXKeys)",
+            "keyTable": "kOneXKeys",
+            "keys": [
+              {
+                "keyId": "special",
+                "label": "Special",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "l4",
+                "label": "L4",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "R4",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null,
+          "priorAuditGap": null,
+          "currentContract": "HcOemInputCapabilityBinding -> HcOneXVendorInputContract -> existing native OneX owner",
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "battery": {
+          "state": "REGISTERED_REVIEWED_ROUTE",
+          "routes": [
+            {
+              "ruleId": "battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel",
+              "provider": "oxp-x1-intel-ec",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "boardProduct",
+                "values": [
+                  "ONEXPLAYER X1 i"
+                ],
+                "deviceClass": "OneXPlayerX1Intel"
+              },
+              "firmwareGate": {
+                "kind": "hc-ec-components",
+                "majorMin": 0,
+                "minorMin": 67,
+                "unknownValue": 255
+              }
+            }
+          ],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerX1Intel",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerX1Intel",
+        "brightness": true,
+        "secondColor": true,
+        "declaredEffects": [
+          "solid",
+          "preset"
+        ],
+        "presetAvailable": true,
+        "statusAvailable": true
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "input": "CURRENT_CORRECTED_CONSUMER_VALIDATED_SOFTWARE_SCOPE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      }
+    },
+    {
+      "name": "OneXPlayerX1Mini",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX1Mini",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX1Mini"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+        "sha256": "93feaddb6b0387e110e92265d000d08c9242968939a36f69d1653bab70630121",
+        "matchedManifest": true,
+        "line": 9
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerX1Mini",
+            "line": 1032,
+            "context": "device = new OneXPlayerX1Mini();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER X1 mini"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "ACTUAL_INDEPENDENT_CONSUMER_EFFECTIVE_FEATURES",
+          "brightness": true,
+          "secondColor": false,
+          "effects": [
+            "solid",
+            "rainbow",
+            "preset"
+          ],
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null,
+          "sourceDeclaredSecondColor": true,
+          "effectiveEffects": [
+            "solid",
+            "rainbow"
+          ],
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:reviewed-OneXPlayerX1Mini:gyro:x-z-y",
+              "accel": "hc-a250b19a:reviewed-OneXPlayerX1Mini:accel:x-neg-z-y",
+              "sourceSha256": "2dd5e2ef9634c0077275790b50dff3bfb950b9f85159d614bae904d1e2bc902a",
+              "controllerPreferred": false
+            },
+            {
+              "kind": "Legacy",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-06c0b954:onexplayer-g1:gyro:x-y-z",
+              "accel": "hc-06c0b954:onexplayer-g1:accel:x-neg-y-z",
+              "sourceSha256": "da46ae5ae78f1107a67fc04c1d79e100543696df0dcf49808a76798beaea88a8",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX1Mini.json",
+          "resourceSha256": "2dd5e2ef9634c0077275790b50dff3bfb950b9f85159d614bae904d1e2bc902a",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX1)",
+            "catalogExpression": "oemCatalogOf(kOneXKeys)",
+            "keyTable": "kOneXKeys",
+            "keys": [
+              {
+                "keyId": "special",
+                "label": "Special",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "l4",
+                "label": "L4",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "R4",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null,
+          "priorAuditGap": "ONEX-SRC-003",
+          "currentContract": "HcOemInputCapabilityBinding -> HcOneXVendorInputContract -> existing native OneX owner",
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "battery": {
+          "state": "REGISTERED_REVIEWED_ROUTE",
+          "routes": [
+            {
+              "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Mini",
+              "provider": "oxp-x1-amd-ec",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "boardProduct",
+                "values": [
+                  "ONEXPLAYER X1 mini"
+                ],
+                "deviceClass": "OneXPlayerX1Mini"
+              },
+              "firmwareGate": {
+                "kind": "hc-ec-components",
+                "majorMin": 1,
+                "minorMin": 3,
+                "unknownValue": 255
+              }
+            }
+          ],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerX1Mini",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerX1Mini",
+        "brightness": true,
+        "secondColor": false,
+        "sourceDeclaredSecondColor": true,
+        "consumerSecondColor": false,
+        "declaredEffects": [
+          "solid",
+          "rainbow",
+          "preset"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "input": "CURRENT_CORRECTED_CONSUMER_VALIDATED_SOFTWARE_SCOPE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "lightingEffectiveSecondColor": false,
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      },
+      "lightingSourceAuditAt062": {
+        "state": "REGISTERED_DECLARATION",
+        "brightness": true,
+        "secondColor": true,
+        "effects": [
+          "solid",
+          "rainbow",
+          "preset"
+        ],
+        "presetAvailable": false,
+        "statusAvailable": false,
+        "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+        "gap": "ONEX-SRC-002"
+      }
+    },
+    {
+      "name": "OneXPlayerX1Pro",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX1Pro",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX1AMD",
+        "OneXPlayerX1Pro"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Pro.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Pro.cs",
+        "sha256": "7ae1196c28a0187768c62ec722cad4c886af768cd908e434c26f9738f1d81ef7",
+        "matchedManifest": true,
+        "line": 3
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerX1Pro",
+            "line": 1035,
+            "context": "device = new OneXPlayerX1Pro();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER X1Pro"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "SuperIO16",
+            "restore": "GenericEcControl"
+          },
+          "sourceRegistry": "capabilities/FAN-RETURN-CONSUMPTION.json#/routes",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "REGISTERED_DECLARATION",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "preset"
+          ],
+          "presetAvailable": true,
+          "statusAvailable": true,
+          "sourceAdapter": "FrozenHc / exact independent X1Mini policy",
+          "gap": null
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Legacy",
+              "primaryKind": "Legacy",
+              "gyro": "hc-06c0b954:onexplayer-x1:gyro:x-neg-z-y",
+              "accel": "hc-06c0b954:onexplayer-x1:accel:x-neg-y-neg-z-swap-yz",
+              "sourceSha256": "e1cc435b5e7cf9fae4216542ed23b467a25e4249b66d98b70fc46af0ff6af452",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX1AMD.json",
+          "resourceSha256": "c6409f75dffa3d569c12142e371ee1c6405dfdf1eed3412a6989b97f7e90562b",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX1)",
+            "catalogExpression": "oemCatalogOf(kOneXKeys)",
+            "keyTable": "kOneXKeys",
+            "keys": [
+              {
+                "keyId": "special",
+                "label": "Special",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "l4",
+                "label": "L4",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "R4",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null,
+          "priorAuditGap": null,
+          "currentContract": "HcOemInputCapabilityBinding -> HcOneXVendorInputContract -> existing native OneX owner",
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          }
+        },
+        "battery": {
+          "state": "REGISTERED_REVIEWED_ROUTE",
+          "routes": [
+            {
+              "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Pro",
+              "provider": "oxp-x1-amd-ec",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "boardProduct",
+                "values": [
+                  "ONEXPLAYER X1Pro"
+                ],
+                "deviceClass": "OneXPlayerX1Pro"
+              },
+              "firmwareGate": {
+                "kind": "hc-ec-components",
+                "majorMin": 1,
+                "minorMin": 3,
+                "unknownValue": 255
+              }
+            }
+          ],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "currentLightingEffective": {
+        "deviceId": "hc.device.OneXPlayerX1Pro",
+        "deviceClass": "HandheldCompanion.Devices.OneXPlayerX1Pro",
+        "brightness": true,
+        "secondColor": true,
+        "declaredEffects": [
+          "solid",
+          "preset"
+        ],
+        "presetAvailable": true,
+        "statusAvailable": true
+      },
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "input": "CURRENT_CORRECTED_CONSUMER_VALIDATED_SOFTWARE_SCOPE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      }
+    },
+    {
+      "name": "OneXPlayerX2",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX2",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX2"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+        "sha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b",
+        "matchedManifest": true,
+        "line": 13
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerX2",
+            "line": 1042,
+            "context": "device = new OneXPlayerX2();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER X2"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 184,
+            "transport": "WmiBankedEc",
+            "restore": "PINNED_SOURCE_SESSION"
+          },
+          "sourceRegistry": "capabilities/PinnedFanSourceCatalog.cs (extensions only)",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "UNKNOWN_TRANSPORT",
+          "gap": "ONEX-SRC-005"
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:onexplayer-x2:gyro:z-x-neg-y",
+              "accel": "hc-a250b19a:onexplayer-x2:accel:z-x-neg-y",
+              "sourceSha256": "6b3e2babf6b7c3482a3b73d2f51d3e9701f90239a7a1b39490337a1eb552bbe8",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX2.json",
+          "resourceSha256": "6b3e2babf6b7c3482a3b73d2f51d3e9701f90239a7a1b39490337a1eb552bbe8",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.RemoveAll(c => c.state.Buttons.Contains(ButtonFlags.OEM1))",
+              "line": 77
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LMenu, KeyCode.LWin, KeyCode.LControl], false, ButtonFlags.OEM1, flushInterval: 100))",
+              "line": 79
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LMenu, KeyCode.LControl, KeyCode.LWin], false, ButtonFlags.OEM1, flushInterval: 100))",
+              "line": 80
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Turbo\", [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], [KeyCode.LControl, KeyCode.LWin, KeyCode.LMenu], false, ButtonFlags.OEM1, flushInterval: 100))",
+              "line": 81
+            },
+            {
+              "expression": "OEMChords.RemoveAll(c => c.state.Buttons.Contains(ButtonFlags.OEM2))",
+              "line": 84
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Keyboard\", [KeyCode.LControl, KeyCode.LWin, KeyCode.O], [KeyCode.O, KeyCode.LWin, KeyCode.LControl], false, ButtonFlags.OEM2, flushInterval: 100))",
+              "line": 85
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"Home\", null, null, false, ButtonFlags.OEM3))",
+              "line": 88
+            },
+            {
+              "expression": "OEMChords.RemoveAll(c => c.state.Buttons.Contains(ButtonFlags.OEM4))",
+              "line": 91
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"G-Key\", [KeyCode.LButton, KeyCode.XButton2], [KeyCode.LButton, KeyCode.XButton2], true, ButtonFlags.OEM4))",
+              "line": 92
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX1)",
+            "catalogExpression": "oemCatalogOf(kOneXX2Keys)",
+            "keyTable": "kOneXX2Keys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "home",
+                "label": "Home",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": true
+              },
+              {
+                "keyId": "l4",
+                "label": "M1",
+                "backIndex": 1,
+                "form": "HidButton",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "M2",
+                "backIndex": 2,
+                "form": "HidButton",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT"
+    },
+    {
+      "name": "OneXPlayerX2MiniPro",
+      "factoryInstantiable": true,
+      "sourceFullName": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+      "inheritance": [
+        "IDevice",
+        "OneXAOKZOE",
+        "OneXPlayerX1",
+        "OneXPlayerX2",
+        "OneXPlayerX2MiniPro"
+      ],
+      "fixedSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Code-Capability-Upgrade-20261031/upstream/source/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs",
+        "upstreamPath": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs",
+        "sha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+        "matchedManifest": true,
+        "line": 10
+      },
+      "identification": {
+        "manufacturerValues": [
+          "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+          "ONE-NETBOOK"
+        ],
+        "exactFactoryCases": [
+          {
+            "deviceClass": "OneXPlayerX2MiniPro",
+            "line": 1045,
+            "context": "device = new OneXPlayerX2MiniPro();",
+            "switches": [
+              {
+                "field": "ManufacturerName",
+                "values": [
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+                  "ONE-NETBOOK"
+                ],
+                "hasDefault": false
+              },
+              {
+                "field": "ProductName",
+                "values": [
+                  "ONEXPLAYER X2Mini PRO"
+                ],
+                "hasDefault": false
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "cpuDoesNotSelectFactoryClass": true,
+        "marketingNamesAreNotDmiAliases": true
+      },
+      "domains": {
+        "fan": {
+          "state": "EXISTING_REGISTERED_CONSUMER",
+          "contract": {
+            "min": 0,
+            "max": 255,
+            "transport": "SuperIO16",
+            "restore": "PINNED_SOURCE_SESSION"
+          },
+          "sourceRegistry": "capabilities/PinnedFanSourceCatalog.cs (extensions only)",
+          "newRepair": false
+        },
+        "lighting": {
+          "state": "ACTUAL_CONSUMER_ACCEPTED_SOFTWARE_SCOPE",
+          "sourceAdapter": "OneXX2MiniHid",
+          "brightness": true,
+          "secondColor": true,
+          "effects": [
+            "solid",
+            "breathing"
+          ],
+          "off": true,
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "speed": "Actual consumer fixed/ignored; not an upstream explicit FixedSpeed declaration",
+          "gap": null,
+          "softwareReview": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+            "bytes": 3346,
+            "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+          },
+          "ordinaryPackage": {
+            "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+            "bytes": 110387690,
+            "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+          },
+          "physicalAcceptance": "UNKNOWN"
+        },
+        "motion": {
+          "state": "REGISTERED_RECIPE_PROVIDER_UNKNOWN",
+          "recipes": [
+            {
+              "kind": "Reviewed",
+              "primaryKind": "Reviewed",
+              "gyro": "hc-a250b19a:onexplayer-x2minipro:gyro:y-neg-z-neg-x",
+              "accel": "hc-a250b19a:onexplayer-x2minipro:accel:neg-x-neg-z-y",
+              "sourceSha256": "5689156e5219ecc5009bfb208dbafbdae8b6607ece15b5f8ca41ea6b5953b57a",
+              "controllerPreferred": false
+            }
+          ],
+          "resourceReference": "HandheldCompanion/Resources/Devices/OneXPlayerX2MiniPro.json",
+          "resourceSha256": "5689156e5219ecc5009bfb208dbafbdae8b6607ece15b5f8ca41ea6b5953b57a",
+          "previousAuditDisposition": "LATEST_JSON_SEMANTICS_ALIGNED",
+          "previousRuntimeChecksReexecuted": false
+        },
+        "oemInput": {
+          "sourceDeclarations": [
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"M1\", [KeyCode.F15], [KeyCode.F15], false, ButtonFlags.L4))",
+              "line": 54
+            },
+            {
+              "expression": "OEMChords.Add(new KeyboardChord(\"M2\", [KeyCode.F16], [KeyCode.F16], false, ButtonFlags.R4))",
+              "line": 55
+            }
+          ],
+          "existingSelector": {
+            "profileExpression": "id(OemChordProfileId::OneXX2MiniPro)",
+            "catalogExpression": "oemCatalogOf(kOneXX2MiniProKeys)",
+            "keyTable": "kOneXX2MiniProKeys",
+            "keys": [
+              {
+                "keyId": "turbo",
+                "label": "Turbo",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "keyboard",
+                "label": "Keyboard",
+                "backIndex": 0,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "home",
+                "label": "Home",
+                "backIndex": 0,
+                "form": "HidButton",
+                "clickOnly": true
+              },
+              {
+                "keyId": "l4",
+                "label": "M1",
+                "backIndex": 1,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              },
+              {
+                "keyId": "r4",
+                "label": "M2",
+                "backIndex": 2,
+                "form": "KeyboardVk",
+                "clickOnly": false
+              }
+            ],
+            "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
+            "profileNoneIsNotNoController": true
+          },
+          "gap": null
+        },
+        "battery": {
+          "state": "NO_REVIEWED_ROUTE",
+          "routes": [],
+          "inheritanceDoesNotAdmit": true
+        },
+        "controllerInput": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.input.xinput.standard",
+          "chassisSelectsProvider": false
+        },
+        "controllerFeedback": {
+          "state": "LIVE_PROVIDER_REQUIRED",
+          "candidate": "controller.feedback.xinput.physical",
+          "chassisProvesMotorOrGameFeedback": false
+        },
+        "controllerMotion": {
+          "state": "NO_ONEX_CONTROLLER_PROVIDER",
+          "note": "Current provider policy admits only four Lenovo model bindings; OneX chassis recipes are separate."
+        },
+        "controllerConfiguration": {
+          "state": "NO_ONEX_ROUTE_IN_MSI_REAR_POLICY",
+          "note": "Existing native OneX vendor-HID input owner is separate; no inferred MSI provider."
+        }
+      },
+      "sourceAuditEpoch": "originalSOURCE-TO-CATALOG capture; do not treat its pre-fixfinding text as currentrepair state",
+      "cpuBoundConsumers": {
+        "performance.tdp": "Existing CPU identity and UXTU provider recipe; no per-model HC nTDP/cTDP admission or limits.",
+        "performance.ccd-affinity": "Explicit Settings process affinity by actual Windows L3 domains/processor groups; no physical CCD power off.",
+        "performance.cpu-voltage-offset": "Explicit CPU identity/current channel/generated UV recipe; AMDallcore/Intelcore-cache only, firmware acceptance and appliedoffset separate.",
+        "sourceClockAndWattMetadataIsNotUserSafeRange": true
+      },
+      "standardControllerBoundary": "Standard input/feedback depends on physicalXInput/MSI provider; unknown/chassis identity does not hide generic controller or grantvendor/IMU extras.",
+      "physicalAcceptance": "NOT_ESTABLISHED_BY_THIS_AUDIT",
+      "currentHc063Consumer": {
+        "lighting": "ACTUAL_MANAGED_NATIVE_CONSUMERS_AND_ORDINARY_PACKAGE_ACCEPTED_SOFTWARE_SCOPE",
+        "sourceAdapter": "OneXX2MiniHid",
+        "actions": [
+          "brightness",
+          "off",
+          "color:solid",
+          "color:breathing"
+        ],
+        "secondColor": true,
+        "statusAvailable": false,
+        "presetAvailable": false,
+        "sourceOwnerModelTag": 2,
+        "ordinaryPackage": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+          "bytes": 110387690,
+          "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+        },
+        "physicalAcceptance": "UNKNOWN",
+        "softwareReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+          "bytes": 3346,
+          "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+        }
+      },
+      "lightingSourceAuditAt062": {
+        "state": "UNCONSUMED",
+        "gap": "ONEX-SRC-004"
+      }
+    }
+  ],
+  "currentRepairs": [
+    {
+      "id": "ONEX-SRC-001",
+      "status": "SOURCE_REPAIRED_101_COMPILED_PRODUCTION_INPUTS_AND_OLD_SEMANTIC_NEGATIVE_VERIFIED_ORDINARY_PACKAGE_VERIFIED",
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\identity-fix\\IDENTITY-DIAGNOSTIC-RESULT.json",
+        "bytes": 18039,
+        "sha256": "050fcfb74aecb5ce3a1fbc3064e8aa17215cfc89225f85a99171bab3e49fd5c7"
+      },
+      "consumer": "nativeymccResolveFamily→same capabilities/HcOemInputCapabilityBinding.h exact source21 productcases,2 manufacturers,17 concreteclasses",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-122113\\YeManCC.zip",
+        "bytes": 110375586,
+        "sha256": "ad4d3651e310bfd2d3df9bcf3a0ec0a10f82c3cb67875de5797d9de184bb33d3"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-062-ONEX-FAMILY-ORDINARY-EXPORT.json",
+        "bytes": 3526,
+        "sha256": "24bc2763c869bb70084d21f3d010a67123b2b8e483f8d46cccccd1efc30c2ff1"
+      }
+    },
+    {
+      "id": "ONEX-SRC-002",
+      "status": "SOURCE_REPAIRED_EFFECTIVE_DESCRIPTOR_AND_ACTUAL_NATIVE_CONSUMER_VALIDATED_ORDINARY_PACKAGE_VERIFIED",
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\lighting-fix\\PARENT-GENERATED-MERGE.json",
+        "bytes": 1661,
+        "sha256": "758d3222372a5c4bd96f85eaf25e0413b2f03dc35c7e666e36a16ebd7b549996"
+      },
+      "originalSchemaReceipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\lighting-fix\\SCHEMA-VALIDATION-RECEIPT.json",
+        "bytes": 530,
+        "sha256": "f7a99585aef380a18aba85363366fe78281b1d768fbd42d1f4de6b4822c24b54"
+      },
+      "originalNativeParityReceipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\lighting-fix\\NATIVE-PARITY-RECEIPT.json",
+        "bytes": 486,
+        "sha256": "d0765b37033973ff63ff74ce91e1b4e18bac2f9dd58e7e517d2729c16a38abe3"
+      },
+      "consumer": "X1Mini secondcolorfalse because writer ignores secondary, source declaration stilltrue; allothercontrols/routes retained",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-122113\\YeManCC.zip",
+        "bytes": 110375586,
+        "sha256": "ad4d3651e310bfd2d3df9bcf3a0ec0a10f82c3cb67875de5797d9de184bb33d3"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-062-ONEX-FAMILY-ORDINARY-EXPORT.json",
+        "bytes": 3526,
+        "sha256": "24bc2763c869bb70084d21f3d010a67123b2b8e483f8d46cccccd1efc30c2ff1"
+      }
+    },
+    {
+      "id": "ONEX-CONSUMER-BAT-001",
+      "status": "SOURCE_REPAIRED_ORIGINAL_ONE_GROUP_AND_OLD_SEMANTIC_MUTANT_VERIFIED_ORDINARY_PACKAGE_VERIFIED",
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\BAT-001-PRODUCT-EDIT.json",
+        "bytes": 765,
+        "sha256": "e6e89d1255811a1596d0bbdb367a90df2d845868f10670e20d2c712745f5ac47"
+      },
+      "originalCaseReceipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\BAT-001-POSITIVE-AND-SELECTOR-VERIFICATION.json",
+        "bytes": 2255,
+        "sha256": "f3597279183488ba18d2830b7eadc1201434102dd0c4dceac2b0045304a7c239"
+      },
+      "negativeReceipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\BAT-001-MUTANT-RECEIPT.json",
+        "bytes": 1156,
+        "sha256": "109ffc11e8d895d00dac522c2a69d13ea0f88bef4175f591ed57385ee15c5bfc"
+      },
+      "consumer": "ExistingOXP3 chargeWMI unique endpoint only; acquiredresource cleanup, no methodcallbeforeunique selection",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-122113\\YeManCC.zip",
+        "bytes": 110375586,
+        "sha256": "ad4d3651e310bfd2d3df9bcf3a0ec0a10f82c3cb67875de5797d9de184bb33d3"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-062-ONEX-FAMILY-ORDINARY-EXPORT.json",
+        "bytes": 3526,
+        "sha256": "24bc2763c869bb70084d21f3d010a67123b2b8e483f8d46cccccd1efc30c2ff1"
+      }
+    },
+    {
+      "id": "ONEX-CONSUMER-FAN-002",
+      "status": "SOURCE_NEUTRAL_RECEIPT_CORRECTED_NO_LOGIC_OR_PROTOCOL_CHANGE_ORDINARY_PACKAGE_VERIFIED",
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\fan-receipt-fix\\RESULT.json",
+        "bytes": 9420,
+        "sha256": "82135538cf35b5b30e8fe3c7309aecf1158bc9bb23a11c5235caf65383f87876"
+      },
+      "consumer": "OpenPinnedSourceCore reports modeobserved rather than falseautomatic assertion; literal has no logicselector",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-122113\\YeManCC.zip",
+        "bytes": 110375586,
+        "sha256": "ad4d3651e310bfd2d3df9bcf3a0ec0a10f82c3cb67875de5797d9de184bb33d3"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-062-ONEX-FAMILY-ORDINARY-EXPORT.json",
+        "bytes": 3526,
+        "sha256": "24bc2763c869bb70084d21f3d010a67123b2b8e483f8d46cccccd1efc30c2ff1"
+      }
+    },
+    {
+      "id": "ONEX-SRC-003",
+      "status": "ACCEPTED_SOFTWARE_SCOPE",
+      "description": "Existing six exact X1-family vendor-input consumers now read one pinned library contract: Mini B3 only, Apex02 prefix/50ms,4000ms initial wait,200ms source reinit with existing minimum/budget, independent15..512 input ReportId/logical markers and64/65 output, coalesced status reinit and actual-terminal return fences",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+        "bytes": 110387690,
+        "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+        "bytes": 3346,
+        "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+      }
+    },
+    {
+      "id": "ONEX-CONSUMER-X2-ENDPOINT-063",
+      "status": "ACCEPTED_SOFTWARE_SCOPE",
+      "description": "Existing Windows X2 input owner requires unique matching collection and exact observed PID on reopen; failed probe close remains same owner slot, permission/pending/stop boundaries retained",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+        "bytes": 110387690,
+        "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+        "bytes": 3346,
+        "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+      }
+    },
+    {
+      "id": "ONEX-SRC-004",
+      "status": "ACCEPTED_SOFTWARE_SCOPE",
+      "description": "Exact X2MiniPro lighting actual independent core through one policy/adapter: five-zone primary/secondary solid/breathing/brightness/off,200ms per zone and partial failure semantics; exact same model/generation/path native-owner v2 handoff, no unsupported-action fallback",
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+        "bytes": 110387690,
+        "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+        "bytes": 3346,
+        "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+      }
+    }
+  ],
+  "remainingFindings": [
+    {
+      "id": "ONEX-SRC-005",
+      "priority": "P2",
+      "domains": [
+        "lighting",
+        "battery"
+      ],
+      "state": "UNKNOWN_TRANSPORT_EXPLICIT_BATTERY_REFUSAL",
+      "title": "X2 继承灯光/电池字段不能直接扩成可用路线",
+      "observed": "X2 disables serial and has no SetLedColor/SetLedBrightness/SetLEDPreset override; inherited X1 writers use serial. X2 battery-protection override explicitly returns false because X1 registers are unverified; X2MiniPro inherits false despite possible battery flags. OXP3 overrides true and has a dedicated WMI route.",
+      "finiteRepair": [
+        "X2 lighting stays SOURCE_DECLARED_WITHOUT_VERIFIED_TRANSPORT.",
+        "X2/X2MiniPro battery stays unmapped; do not reuse exact OXP3 WMI or exact X1 direct-I/O route based on inheritance."
+      ],
+      "hardwareAcceptance": "UNKNOWN",
+      "currentSourceLimitAudit": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\source-limit-audit\\SOURCE-LIMIT-DECISIONS.json",
+        "bytes": 8157,
+        "sha256": "fe47ac1d5611670cb6ae05981f9b4de3de89c8966b61758cca4bd47840563615"
+      }
+    },
+    {
+      "id": "ONEX-SRC-006",
+      "priority": "P2",
+      "domains": [
+        "family-discovery",
+        "identity"
+      ],
+      "state": "UNMAPPED_DISCOVERY",
+      "title": "固定20类/21精确Product与当前家族覆盖仍有差额",
+      "observed": "本地固定 source union 无专用 X2Mini(Intel Arc G3 Extreme)/X2Air/X1Air/ApexAir/SuperX/SuperXPro/SuperV 类或 factory case。父提供官方存在性；商业名到旧类的候选对应只作检索，不作 DMI 别名或能力准入。",
+      "finiteRepair": [
+        "保留有限商业覆盖差额表及父持有的官方引用，能力标 UNKNOWN。",
+        "UNMAPPED labels 不新增 runtime alias，不复制 EC/HID/IMU policy。"
+      ],
+      "hardwareAcceptance": "UNKNOWN",
+      "currentPrimaryComparison": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\domain-comparison\\DOMAIN-COMPARISON.json",
+        "bytes": 13820,
+        "sha256": "172c20f50e934254ffd42dae6033174b15839188a1953770c5b007271df39e11"
+      },
+      "previousTitle": "商业名覆盖超出 fixed snapshot，不能把 frozen18/fan17 当全家族",
+      "currentWindowsEvidence": "Pinned XmaX Windows implementation uses UMAInterface GetEcValue/SetEcValue rawInt32 Index044A/044B, distinct from existing SuRwECRegInterface bank packing; actual YMCC consumer/provenance not yet implemented. WIP source is not physical acceptance.",
+      "currentWindowsSourceDecision": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\WINDOWS-SUPERX-PRIMARY-DECISION.json",
+        "bytes": 20367,
+        "sha256": "b4930b1d4a9393d3eeb3a8f6527614013c1166ea5604efc6e3ab23c0576b2282"
+      },
+      "currentNextBoundedConsumer": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\NEXT-BOUNDED-CONSUMER-PLAN.json",
+        "bytes": 2832,
+        "sha256": "ac05721b2c4e633dcd0f52a736a6b94f0367661c52555bd8de27d33c22df6910"
+      }
+    },
+    {
+      "id": "ONEX-SRC-007",
+      "priority": "P3",
+      "domains": [
+        "motion"
+      ],
+      "state": "KNOWN_UPSTREAM_BLOCKER_NOT_A_NEW_REPAIR",
+      "title": "固定 Apex JSON AxisSwap 非双射；现有效 legacy 矩阵应保留",
+      "observed": "X:Y,Y:X,Z:Y 重复 Y；既有家族审计已拒绝，保留 frozen gyro y,-x,z / accel -y,x,-z。14份资源本轮只重核字节 SHA；不移借旧运行/数值检查为本轮通过。",
+      "finiteRepair": [
+        "保留明确来源阻塞与有效旧矩阵。",
+        "不为宣称升级覆盖而发明修正轴或导入非法表。"
+      ],
+      "hardwareAcceptance": "UNKNOWN",
+      "currentSourceLimitAudit": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\source-limit-audit\\SOURCE-LIMIT-DECISIONS.json",
+        "bytes": 8157,
+        "sha256": "fe47ac1d5611670cb6ae05981f9b4de3de89c8966b61758cca4bd47840563615"
+      }
+    }
+  ],
+  "officialMarketingDiscovery": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\OFFICIAL-FAMILY-DISCOVERY.json",
+    "bytes": 867,
+    "sha256": "165fe70b0d44efd26c47d8149126148270cc43b78a3629eb9762aad4b31331df"
+  },
+  "sourceForwardAudit": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\SOURCE-TO-CATALOG-AUDIT.json",
+    "bytes": 300495,
+    "sha256": "647616d06a696421e81b4ecc8f1d483cab4be27759344b62864b5aec6ce9bde5"
+  },
+  "actualConsumerReverseAudit": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\CONSUMER-TO-LIBRARY-AUDIT.json",
+    "bytes": 89079,
+    "sha256": "dac178f4441a8e37e9974ef7a1709ccb463dd29c71dee7d64d324fac425d56d0"
+  },
+  "fieldEvidence": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\USER-FIELD-EVIDENCE-RECONCILIATION.json",
+    "bytes": 6502,
+    "sha256": "143653f7c04325340176beb1da29d5ac9e076991bcecccd04a186342124ffb5b"
+  },
+  "fieldBatteryDeduplication": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\USER-BATTERY-LOG-DEDUPLICATION.json",
+    "bytes": 8587,
+    "sha256": "2ea376daa829c229a6bb0e73ee978654ff65b465c9fe9e3bfd0f674c35739935"
+  },
+  "normalExport": {
+    "status": "ACCEPTED_SOFTWARE_SCOPE_HC063_INPUT_LIGHTING_AND_EXACT_ENDPOINT",
+    "package": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+      "bytes": 110387690,
+      "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+    },
+    "receipt": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\EXPORT-RECEIPT.json",
+      "bytes": 70760,
+      "sha256": "1d221e72596e3d0da52e84152cc71a119133b17c46ae9a4792475b8046cd8adf"
+    },
+    "buildId": "58fb91dafbc251ddb0458dade65eab0b0ec27ee6da8f30dbee7a950d50bf2e2a",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+      "bytes": 3346,
+      "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+    },
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "deployed": false,
+    "wholeFamilyComplete": false
+  },
+  "preservedBoundaries": [
+    "Do not activateunconsumedGPU/SA/per-core/auto voltage or batterybypassUI from sourceflags.",
+    "Unmappedofficialnamesdo notget brand/CPU/fuzzyprotocolfallback.",
+    "Missingexact rowdoes not mean genericcontroller/CPU providerunavailable.",
+    "Source/class/fixturecounts are notsupported-device or physicalpasscounts.",
+    "Apexinvalidlatestaxispermutationdoes notjustifyguessingsensoraxes.",
+    "Oldfan/light/UV/testcostledgersandFAIL/UNKNOWN remain; currentproofs are exactscoped sourceepochs."
+  ],
+  "nextExistingConsumerMigration": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\NEXT-BOUNDED-CONSUMER-PLAN.json",
+    "bytes": 2832,
+    "sha256": "ac05721b2c4e633dcd0f52a736a6b94f0367661c52555bd8de27d33c22df6910"
+  },
+  "postFreezeNavigationUpdate": {
+    "atHongKong": "2026-11-04T15:40:39.602019+08:00",
+    "scope": "This navigation state was updated after immutable HC063 package freeze; package contains its SourceReady-era navigation, not this later delivery text. No extra build for docs.",
+    "packageIncludesRuntimeFixes": true,
+    "thisLaterNavigationTextInPackage": false,
+    "postPackageMainlineLightingAdoption": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-mainline-adoption\\RESULT.json",
+      "bytes": 9914,
+      "sha256": "7a4d5574994718c23e52ffffcffc0bf3d8e39af1b3f35985fe5d5572b379082f"
+    },
+    "otherPostFreezeParallelChangesNotAttributedToPackage": 28
+  },
+  "currentHc063": {
+    "batch": "HC-CODEX-063-ONEX-INPUT-LIGHTING",
+    "atHongKong": "2026-11-04T15:40:39.602019+08:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_PACKAGE_DELIVERED",
+    "ordinaryPackage": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+      "bytes": 110387690,
+      "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+    },
+    "sourceImplementation": {
+      "input": "Single HcOneXVendorInputContract via existing HcOemInputCapabilityBinding; six exact classes; independent input ReportId,15..512 bounded input,64/65 output; fixed init plans/delay and status reinit; original native lifecycle",
+      "x2Transport": "Unique source-matching collection; reopen exact observed PID; original pending IO and probe-close ownership",
+      "lighting": "Exact X2MiniPro five-zone main/secondary solid/breathing/brightness/off actual independent core and generated single policy; owner ABI v2 exact model/generation/path; no preset/status"
+    },
+    "inputEvidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+      "bytes": 1572,
+      "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+    },
+    "x2WindowsEvidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\X2-WINDOWS-VERIFICATION.json",
+      "bytes": 1436,
+      "sha256": "a3833c5891e4e987ba63785e0a2b295e82a435271ea3c021af25f38300c98432"
+    },
+    "nativeLightingEvidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-tests\\run-native-001\\result.json",
+      "bytes": 44596,
+      "sha256": "54996305baac3ef51fc355727beaa2deabdf254713bfed649a79da40a64437c3"
+    },
+    "managedLightingEvidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-tests\\COMBINED-ACTUAL-CONSUMER-VERIFICATION.json",
+      "bytes": 984495,
+      "sha256": "047cf706a715a5d28711fba153cb8ae3ca447dfeaa02ee5b187bef801f7997ef"
+    },
+    "productionCoreSha256": "924576fffd04ead813fc7cb0f1ddbda4b15d8e43416b564c1107b88a76211675",
+    "notHardwareOrWholeApplicationAcceptance": true,
+    "oldFailedEpochAndProducerCostsRetained": true,
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\SOURCE_READY.json",
+      "bytes": 2249,
+      "sha256": "a0e053429df9910b34ef12eebd14972f390015958681d5c077c31de89631e541"
+    },
+    "ordinaryReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+      "bytes": 3346,
+      "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+    },
+    "mainlineLightingPayloadAdoption": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-mainline-adoption\\RESULT.json",
+      "bytes": 9914,
+      "sha256": "7a4d5574994718c23e52ffffcffc0bf3d8e39af1b3f35985fe5d5572b379082f"
+    },
+    "ordinaryExportReceipt": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\EXPORT-RECEIPT.json",
+      "bytes": 70760,
+      "sha256": "1d221e72596e3d0da52e84152cc71a119133b17c46ae9a4792475b8046cd8adf"
+    },
+    "wholeFamilyComplete": false
+  },
+  "newPrimaryDiscoveryNotRuntimeAdmission": {
+    "hhdProductNameLiterals": 27,
+    "domainComparison": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\domain-comparison\\DOMAIN-COMPARISON.json",
+      "bytes": 13820,
+      "sha256": "172c20f50e934254ffd42dae6033174b15839188a1953770c5b007271df39e11"
+    },
+    "superXEc8ToWindowsSuperIo16Equivalence": "UNKNOWN",
+    "airAndNewMiniProTargetPacketContract": "UNKNOWN",
+    "fixedHcModelCountsUnchanged": true
+  },
+  "normalExportHistory": [
+    {
+      "status": "ACCEPTED_SOFTWARE_SCOPE_FOUR_BOUNDED_REPAIRS",
+      "package": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-122113\\YeManCC.zip",
+        "bytes": 110375586,
+        "sha256": "ad4d3651e310bfd2d3df9bcf3a0ec0a10f82c3cb67875de5797d9de184bb33d3"
+      },
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-122113\\EXPORT-RECEIPT.json",
+        "bytes": 75138,
+        "sha256": "6d7f1f07f2f8f1572af5763ddc38df4933b935602660c4f769cc377c9efb7e7e"
+      },
+      "buildId": "9113bb87065f6b0910443da721b60929e1f56886a675562fabe9f70f7d25db17",
+      "review": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-062-ONEX-FAMILY-ORDINARY-EXPORT.json",
+        "bytes": 3526,
+        "sha256": "24bc2763c869bb70084d21f3d010a67123b2b8e483f8d46cccccd1efc30c2ff1"
+      },
+      "fixtureValidation": "NOT_RUN",
+      "formalReleaseAccepted": false,
+      "deployed": false
+    }
+  ],
+  "closedHc063Findings": [
+    {
+      "id": "ONEX-SRC-003",
+      "priority": "P2",
+      "domains": [
+        "oem-input",
+        "controller.configuration"
+      ],
+      "state": "ACCEPTED_SOFTWARE_SCOPE",
+      "title": "X1 Mini/Apex 现有 vendor HID 仍用冻结旧初始化，固定升级源码已有具体差异",
+      "differences": [
+        {
+          "model": "OneXPlayerX1Mini",
+          "fixed": "ConfigureController issues only B3 [01,05,05]; status data[3]==FE triggers same reconfiguration after200ms",
+          "current": "Shared B4 page1 + B4 page2 + B3 motor",
+          "disposition": "Existing native consumer present, newer source behavior lacks explicit retained-vs-upgraded disposition."
+        },
+        {
+          "model": "OneXPlayerApex",
+          "fixed": "B4 page1/page2 prefix [02,38,02,...];50ms gaps; B2 page3 + intercept release",
+          "current": "Shared prefix [02,38,20,...];100/100/200ms gaps",
+          "disposition": "Specific encoding and timing mismatch; current route cannot be described as f2e58468-equivalent."
+        },
+        {
+          "model": "X1/Apex shared base",
+          "fixed": "Status data[5]==20 then200ms reconfigure; usage FF00:0001 collection; output framing distinguishes64/65 report bytes",
+          "current": "Old monitor/derived native MI_02/64 framing and only exact X1Mini B8 FE reinit",
+          "disposition": "Do not automatically switch a whole family or infer real collection compatibility."
+        }
+      ],
+      "finiteRepair": [
+        "Record exact per-model migration or retained-legacy disposition against source hashes.",
+        "If migration admitted, change only existing X1Mini/Apex plan through same owner, with byte-level existing oracle and lifecycle fences.",
+        "Do not add OneX to MSI-only rear configuration policy to claim coverage."
+      ],
+      "hardwareAcceptance": "UNKNOWN",
+      "currentHc063Disposition": {
+        "state": "CORRECTED_SOURCE_AND_ORIGINAL_CONSUMER_SOFTWARE_VALIDATED_PENDING_PACKAGE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+          "bytes": 1572,
+          "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+        },
+        "historicalDifferencesAboveArePreHc063": true
+      },
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+        "bytes": 110387690,
+        "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+        "bytes": 3346,
+        "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+      },
+      "priorFindingSnapshot": {
+        "id": "ONEX-SRC-003",
+        "priority": "P2",
+        "domains": [
+          "oem-input",
+          "controller.configuration"
+        ],
+        "state": "UNCONSUMED_FIXED_SOURCE_DELTA",
+        "title": "X1 Mini/Apex 现有 vendor HID 仍用冻结旧初始化，固定升级源码已有具体差异",
+        "differences": [
+          {
+            "model": "OneXPlayerX1Mini",
+            "fixed": "ConfigureController issues only B3 [01,05,05]; status data[3]==FE triggers same reconfiguration after200ms",
+            "current": "Shared B4 page1 + B4 page2 + B3 motor",
+            "disposition": "Existing native consumer present, newer source behavior lacks explicit retained-vs-upgraded disposition."
+          },
+          {
+            "model": "OneXPlayerApex",
+            "fixed": "B4 page1/page2 prefix [02,38,02,...];50ms gaps; B2 page3 + intercept release",
+            "current": "Shared prefix [02,38,20,...];100/100/200ms gaps",
+            "disposition": "Specific encoding and timing mismatch; current route cannot be described as f2e58468-equivalent."
+          },
+          {
+            "model": "X1/Apex shared base",
+            "fixed": "Status data[5]==20 then200ms reconfigure; usage FF00:0001 collection; output framing distinguishes64/65 report bytes",
+            "current": "Old monitor/derived native MI_02/64 framing and only exact X1Mini B8 FE reinit",
+            "disposition": "Do not automatically switch a whole family or infer real collection compatibility."
+          }
+        ],
+        "finiteRepair": [
+          "Record exact per-model migration or retained-legacy disposition against source hashes.",
+          "If migration admitted, change only existing X1Mini/Apex plan through same owner, with byte-level existing oracle and lifecycle fences.",
+          "Do not add OneX to MSI-only rear configuration policy to claim coverage."
+        ],
+        "hardwareAcceptance": "UNKNOWN",
+        "currentHc063Disposition": {
+          "state": "CORRECTED_SOURCE_AND_ORIGINAL_CONSUMER_SOFTWARE_VALIDATED_PENDING_PACKAGE",
+          "evidence": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\input-tests\\CORRECTED-INPUT-VERIFICATION.json",
+            "bytes": 1572,
+            "sha256": "c0c6f65d17df4b5e7849cd61f07d7d55ba76d8133f92f0a426104d048c0b2648"
+          },
+          "historicalDifferencesAboveArePreHc063": true
+        }
+      }
+    },
+    {
+      "id": "ONEX-SRC-004",
+      "priority": "P2",
+      "domains": [
+        "lighting"
+      ],
+      "state": "ACCEPTED_SOFTWARE_SCOPE",
+      "title": "固定 X2 Mini Pro 五灯区双色 HID writer 尚无 lighting 扩展登记/适配器",
+      "observed": "Lighting extension list is OneXPlayer3/AYANEO3/AYANEONEXT2; no X2MiniPro. Source brightness zones01/02/07/05/06; SolidColor/Breathing primary01/02/07, secondary05/06,200ms after each zone. No aggregate side0. Fan/OEM/motion membership does not consume this writer. Inherited serial preset/status require separate review.",
+      "finiteRepair": [
+        "Record source facts as UNCONSUMED now.",
+        "A later admitted enabled-domain implementation must use existing dispatcher/owner with exact X2MiniPro pure source adapter, five-zone order/bytes; do not substitute X1Mini or OXP3.",
+        "Keep preset/status separate from implemented solid/breathing/brightness; no automatic activation from this audit."
+      ],
+      "hardwareAcceptance": "UNKNOWN",
+      "currentHc063Disposition": {
+        "state": "ACTUAL_CONSUMER_AND_SOURCE_VALIDATED_PENDING_ORDINARY_PACKAGE",
+        "evidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-tests\\COMBINED-ACTUAL-CONSUMER-VERIFICATION.json",
+          "bytes": 984495,
+          "sha256": "047cf706a715a5d28711fba153cb8ae3ca447dfeaa02ee5b187bef801f7997ef"
+        },
+        "originalFailuresPreserved": true
+      },
+      "ordinaryPackage": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-151037\\YeManCC.zip",
+        "bytes": 110387690,
+        "sha256": "19a9842ed177d4bd9f07c4a4933fcd1fdbeb531fbcd581f117f7e0ccdb10db4f"
+      },
+      "softwareReview": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-063-ONEX-INPUT-LIGHTING-ORDINARY-EXPORT.json",
+        "bytes": 3346,
+        "sha256": "9cbae64e0bf5e3ab6865842bc9417524b34283d4007334d3b1e70f4a14e69584"
+      },
+      "priorFindingSnapshot": {
+        "id": "ONEX-SRC-004",
+        "priority": "P2",
+        "domains": [
+          "lighting"
+        ],
+        "state": "UNCONSUMED",
+        "title": "固定 X2 Mini Pro 五灯区双色 HID writer 尚无 lighting 扩展登记/适配器",
+        "observed": "Lighting extension list is OneXPlayer3/AYANEO3/AYANEONEXT2; no X2MiniPro. Source brightness zones01/02/07/05/06; SolidColor/Breathing primary01/02/07, secondary05/06,200ms after each zone. No aggregate side0. Fan/OEM/motion membership does not consume this writer. Inherited serial preset/status require separate review.",
+        "finiteRepair": [
+          "Record source facts as UNCONSUMED now.",
+          "A later admitted enabled-domain implementation must use existing dispatcher/owner with exact X2MiniPro pure source adapter, five-zone order/bytes; do not substitute X1Mini or OXP3.",
+          "Keep preset/status separate from implemented solid/breathing/brightness; no automatic activation from this audit."
+        ],
+        "hardwareAcceptance": "UNKNOWN",
+        "currentHc063Disposition": {
+          "state": "ACTUAL_CONSUMER_AND_SOURCE_VALIDATED_PENDING_ORDINARY_PACKAGE",
+          "evidence": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\lighting-tests\\COMBINED-ACTUAL-CONSUMER-VERIFICATION.json",
+            "bytes": 984495,
+            "sha256": "047cf706a715a5d28711fba153cb8ae3ca447dfeaa02ee5b187bef801f7997ef"
+          },
+          "originalFailuresPreserved": true
+        }
+      }
+    }
+  ],
+  "currentWindowsSuperXPrimaryIntake": {
+    "atHongKong": "2026-11-04T16:01:02.391646+08:00",
+    "status": "CONCRETE_WINDOWS_UMA_EC16_IMPLEMENTATION_CANDIDATE_FOUND_PENDING_ACTUAL_YMCC_CONSUMER",
+    "decision": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\WINDOWS-SUPERX-PRIMARY-DECISION.json",
+      "bytes": 20367,
+      "sha256": "b4930b1d4a9393d3eeb3a8f6527614013c1166ea5604efc6e3ab23c0576b2282"
+    },
+    "nextBoundedPlan": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\windows-superx-primary\\NEXT-BOUNDED-CONSUMER-PLAN.json",
+      "bytes": 2832,
+      "sha256": "ac05721b2c4e633dcd0f52a736a6b94f0367661c52555bd8de27d33c22df6910"
+    },
+    "sourceCommit": "6d728795511c2f9f683d1757e72481236de9b23a",
+    "actualRuntimeRegistration": false,
+    "newLibraryRuntimeRows": 0,
+    "hc063PackageChanged": false,
+    "allFamilyComplete": false
+  },
+  "previousExistingConsumerMigration": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-062-ONEX-FAMILY-AUDIT\\reviewer\\HID-INIT-AUDIT-INTAKE.json",
+    "bytes": 12417,
+    "sha256": "eb752411669c6d562ca4b649fe81e5fe683d3ab4fb8eead91fd057b6ab12c94a"
+  }
+}

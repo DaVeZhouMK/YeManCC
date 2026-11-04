@@ -48,8 +48,13 @@ export function resolveUiToolPackage({name,repoRoot=UI_REPO_ROOT,manifestPath=pr
  const d=loadUiToolDeclaration({repoRoot,manifestPath}),matches=[];
  for(const row of d.files){if(path.basename(row.path)!=='package.json')continue;verifyDeclaredFile(row);const p=JSON.parse(fs.readFileSync(row.path,'utf8'));if(p.name===name)matches.push(row);}
  need(matches.length===1,'UI_TOOL_PACKAGE_NOT_UNIQUELY_DECLARED:'+name);
- const entry=createRequire(matches[0].path).resolve(name),row=d.byPath.get(key(entry));
- need(row&&inside(path.dirname(matches[0].path),entry),'UI_TOOL_PACKAGE_ENTRY_UNDECLARED:'+name);verifyDeclaredFile(row);return entry;
+ const packageRoot=path.dirname(matches[0].path),entry=createRequire(matches[0].path).resolve(name);
+ // Node returns realpaths across package junctions. Keep both logical package
+ // membership and physical containment, then reuse exact-file/hash admission.
+ need(inside(fs.realpathSync(packageRoot),fs.realpathSync(entry)),'UI_TOOL_PACKAGE_ENTRY_UNDECLARED:'+name);
+ const files=d.files.filter(row=>inside(packageRoot,row.path)),selected={...d,files,byPath:new Map(files.map(row=>[key(row.path),row]))};
+ const row=admittedTool(selected,canonicalTools(selected),entry);
+ need(row,'UI_TOOL_PACKAGE_ENTRY_UNDECLARED:'+name);return entry;
 }
 export function verifyDeclaredFile(row){need(fs.existsSync(row.path)&&fs.lstatSync(row.path).isFile()&&!fs.lstatSync(row.path).isSymbolicLink()&&hash(row.path)===row.sha256,'UI_TOOL_FILE_CHANGED:'+row.path);return true;}
 function walk(dir){need(fs.lstatSync(dir).isDirectory()&&!fs.lstatSync(dir).isSymbolicLink(),'UI_TOOL_DIRECTORY_INVALID:'+dir);const files=[];for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);need(!e.isSymbolicLink(),'UI_TOOL_REPARSE_MEMBER:'+p);if(e.isDirectory())files.push(...walk(p));else{need(e.isFile(),'UI_TOOL_NONFILE_MEMBER:'+p);files.push(p);}}return files;}

@@ -40,18 +40,52 @@
       "requiredSourceText": "EnableSerialPort = false"
     }
   ],
+  "secondColorExclusions": [
+    {
+      "device": "OneXPlayerX1Mini",
+      "sourceDeclaredSecondColor": true,
+      "consumerSecondColor": false,
+      "methodOwner": "OneXPlayerX1Mini",
+      "method": "SetLedColor",
+      "sourceFile": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+      "sourceSha256": "2bcc0688ac0cb65091f29432a2351e00d724259778ffb3891ac9ca82a05852c0",
+      "methodSha256": "6a343183d894a039d63255e315dd947204d9fbaf61ded1f1498c32447d483798",
+      "independentConsumer": {
+        "sourceFile": "FanLab/LightSetter/DeviceCore/PinnedOneXHidV1.g.cs",
+        "sourceSha256": "e4904be4ee0cf0a9ba2d32f73a5bfaa7a4b6413d2fdcaaf97439312b18e031c3",
+        "type": "PinnedX1MiniProtocol",
+        "method": "SetLedColor"
+      },
+      "reason": "Exact existing X1 Mini color writers use mainColor at side 0x00 and do not consume secondaryColor. Preserve the inherited source declaration; exclude only effective secondary-color consumption. This constraint adds no route, provider, model alias or write authority."
+    }
+  ],
   "independentCore": {
     "provider": "ymcc-onex-hid-v1",
     "assemblyFile": "YeManLightDeviceCore.dll",
-    "sha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
-    "device": "OneXPlayerX1Mini",
-    "actions": {
-      "brightness": true,
-      "color": [
-        "solid",
-        "rainbow"
-      ]
-    }
+    "sha256": "924576fffd04ead813fc7cb0f1ddbda4b15d8e43416b564c1107b88a76211675",
+    "models": [
+      {
+        "device": "OneXPlayerX1Mini",
+        "actions": {
+          "brightness": true,
+          "color": [
+            "solid",
+            "rainbow"
+          ]
+        }
+      },
+      {
+        "device": "OneXPlayerX2MiniPro",
+        "actions": {
+          "brightness": true,
+          "color": [
+            "solid",
+            "breathing"
+          ],
+          "off": true
+        }
+      }
+    ]
   },
   "brightnessCompatibility": [
     {
@@ -63,6 +97,262 @@
       ],
       "methodOwner": "ClawA1M",
       "reason": "Preserve existing MSI brightness route: source flags omit brightness but SetLedBrightness performs the reviewed device.Write and returns its bool"
+    }
+  ],
+  "reviewedExtensionModels": [
+    {
+      "name": "OneXPlayer3",
+      "deviceId": "ymcc.device.OneXPlayer3",
+      "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
+      "family": "OneXPlayer",
+      "sourceFile": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+      "sourceSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+      "capabilities": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "ledEffects": [
+        "SolidColor",
+        "Breathing",
+        "LEDPreset"
+      ],
+      "brightness": true,
+      "secondColor": true,
+      "presetDeclared": true,
+      "presetAvailable": true,
+      "statusAvailable": false,
+      "statusTransportDisabled": true,
+      "fixedSpeed": true,
+      "semanticSourceFacts": {
+        "zones": {
+          "leftStick": 1,
+          "rightStick": 2,
+          "gkey": 5,
+          "logo": 6
+        },
+        "delaysMs": {
+          "zone": 150,
+          "safe": 300,
+          "stick": 600
+        },
+        "classicPreset": 1000,
+        "classicColor": [
+          183,
+          48,
+          0
+        ],
+        "secondSetColorSetting": "LEDSecondColor",
+        "secondSetBreathingSetting": "LEDSecondSetBreathing"
+      },
+      "requestLimits": [
+        "Preset second-set breathing comes from the HC LEDSecondSetBreathing setting; the one-shot request has no such field. Explicit color requests can select breathing.",
+        "Preset second-set color and main color follow the explicit request colors passed by the native caller; there is no hidden re-read of HC settings.",
+        "Fixed speed cannot be changed by request; speed is recorded as ignored."
+      ],
+      "sourceAdapter": "oxp3-hid-v1"
+    },
+    {
+      "name": "AYANEO3",
+      "deviceId": "ymcc.device.AYANEO3",
+      "deviceClass": "HandheldCompanion.Devices.AYANEO3",
+      "family": "AYANEO",
+      "sourceAdapter": "superjoy-cec-v1",
+      "sourceFile": "capabilities/upstream/f2e58468/AYANEO3.cs",
+      "sourceSha256": "bee53cd4d730013900da5c542c751b018f006ee09b886c55926f0ac7c17ee88b",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+      "sourceDependencies": [
+        {
+          "role": "cec",
+          "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+          "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da"
+        },
+        {
+          "role": "superjoy",
+          "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+          "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12"
+        }
+      ],
+      "capabilities": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "ledEffects": [
+        "SolidColor"
+      ],
+      "brightness": true,
+      "secondColor": true,
+      "statusAvailable": true,
+      "statusTransportDisabled": false,
+      "presetDeclared": false,
+      "presetAvailable": false,
+      "fixedSpeed": false,
+      "semanticSourceFacts": {
+        "sticks": "superjoy",
+        "otherZone": "cec-aya",
+        "ayaZone": 4,
+        "ayaChannels": [
+          "B",
+          "R",
+          "G"
+        ],
+        "confirmation": false,
+        "ownerAbi": 2,
+        "explicitColorContext": true
+      },
+      "requestLimits": [
+        "Each one-shot request carries both explicit colors and brightness; no guessed or cached current colors.",
+        "Only fixed-source solid lighting is admitted; no presets, secondary display, charging or new controller reader.",
+        "Protocol completion and cleanup are software scope; physical effect, installed behavior and performance remain unverified."
+      ]
+    },
+    {
+      "name": "AYANEONEXT2",
+      "deviceId": "ymcc.device.AYANEONEXT2",
+      "deviceClass": "HandheldCompanion.Devices.AYANEONEXT2",
+      "family": "AYANEO",
+      "sourceAdapter": "superjoy-cec-v1",
+      "sourceFile": "capabilities/upstream/f2e58468/AYANEONEXT2.cs",
+      "sourceSha256": "b47a90a52912eebd2568e920da7c1d0a264a286bb06657f9e274feb7f5da91c2",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+      "sourceDependencies": [
+        {
+          "role": "cec",
+          "path": "capabilities/upstream/f2e58468/AYANEODeviceCEc.cs",
+          "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da"
+        },
+        {
+          "role": "superjoy",
+          "path": "capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs",
+          "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12"
+        }
+      ],
+      "capabilities": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "ledEffects": [
+        "SolidColor"
+      ],
+      "brightness": true,
+      "secondColor": true,
+      "statusAvailable": true,
+      "statusTransportDisabled": false,
+      "presetDeclared": false,
+      "presetAvailable": false,
+      "fixedSpeed": false,
+      "semanticSourceFacts": {
+        "sticks": "superjoy",
+        "otherZone": "cec-aya",
+        "ayaZone": 4,
+        "ayaChannels": [
+          "B",
+          "R",
+          "G"
+        ],
+        "confirmation": true,
+        "ownerAbi": 2,
+        "explicitColorContext": true
+      },
+      "requestLimits": [
+        "Each one-shot request carries both explicit colors and brightness; no guessed or cached current colors.",
+        "Only fixed-source solid lighting is admitted; no presets, secondary display, charging or new controller reader.",
+        "Protocol completion and cleanup are software scope; physical effect, installed behavior and performance remain unverified."
+      ]
+    },
+    {
+      "name": "OneXPlayerX2MiniPro",
+      "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+      "deviceClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+      "family": "OneXPlayer",
+      "sourceAdapter": "onex-x2mini-hid-v1",
+      "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2MiniPro.cs",
+      "sourceSha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+      "sourceDependencies": [
+        {
+          "role": "x1",
+          "path": "capabilities/upstream/f2e58468/OneXPlayerX1.cs",
+          "sha256": "3b80d932227c3beddbb6b3a4007c57fc19e0fb55df0db54d389ca8834eae3485"
+        },
+        {
+          "role": "x2",
+          "path": "capabilities/upstream/f2e58468/OneXPlayerX2.cs",
+          "sha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b"
+        },
+        {
+          "role": "lighting-base",
+          "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+          "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+        },
+        {
+          "role": "report-base",
+          "path": "capabilities/upstream/f2e58468/IDevice.cs",
+          "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+        }
+      ],
+      "consumerSources": [
+        {
+          "role": "protocol",
+          "path": "FanLab/LightSetter/DeviceCore/PinnedX2MiniProProtocol.cs",
+          "sha256": "49257929a8d670c6c823be78e7695410b9606909d4419100bd92287f580cd330"
+        },
+        {
+          "role": "entry",
+          "path": "FanLab/LightSetter/DeviceCore/X2MiniProDeviceCore.cs",
+          "sha256": "602d14ce95f00a6f85972dbdfcb2816b7bfb3a2750a989be46b960fd3619ebb5"
+        },
+        {
+          "role": "transport",
+          "path": "FanLab/LightSetter/DeviceCore/WindowsHidTransport.cs",
+          "sha256": "a6acaacca7d18ff57788d77c2379555d153ac2dffca322772cf0326f468c89bf"
+        },
+        {
+          "role": "abi",
+          "path": "FanLab/LightSetter/DeviceCore/LightingDeviceCore.cs",
+          "sha256": "1a369735af086c140bbea47ab378a31b6a7d82ca9139e0b89fe6d28f8736f9af"
+        }
+      ],
+      "capabilities": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "ledEffects": [
+        "SolidColor",
+        "Breathing"
+      ],
+      "brightness": true,
+      "secondColor": true,
+      "statusAvailable": false,
+      "statusTransportDisabled": true,
+      "presetDeclared": true,
+      "presetAvailable": false,
+      "fixedSpeed": true,
+      "semanticSourceFacts": {
+        "primaryZones": [
+          1,
+          2,
+          7
+        ],
+        "secondaryZones": [
+          5,
+          6
+        ],
+        "zoneDelayMs": 200,
+        "speedIgnored": true,
+        "aggregateZoneAllowed": false,
+        "offUsesExplicitBlackAndZeroBrightness": true
+      },
+      "requestLimits": [
+        "Only the exact newer source five-zone solid/breathing and brightness writers are consumed. Main color=01/02/07; secondary=05/06; no side0 aggregate.",
+        "The existing native OneX owner must finish source initialization and lend its exact current-generation path. Revocation/deadline/cleanup remain mandatory; no independent device discovery or OXP3 wire protocol.",
+        "Existing off uses five brightness-zero and five explicit black solid reports; no SetLedStatus, serial preset, guessed cached colors or physical confirmation.",
+        "speedIgnored/fixedSpeed are effective consumer facts. Source did not declare DynamicLightingFixedSpeed; inherited LEDPreset declaration does not prove a five-zone preset writer."
+      ]
     }
   ],
   "nativeAdapters": [

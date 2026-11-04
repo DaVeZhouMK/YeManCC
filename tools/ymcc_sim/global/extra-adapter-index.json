@@ -1852,6 +1852,30 @@
           "lifecycleDeclared": false
         }
       ]
+    },
+    {
+      "rows": [
+        {
+          "id": "sensor.monitor-owned-close-consumer",
+          "domain": "sensor",
+          "profiles": [
+            "full"
+          ],
+          "lifecycleDeclared": false
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "id": "settings.game-rule-storage-consumer",
+          "domain": "settings",
+          "profiles": [
+            "full"
+          ],
+          "lifecycleDeclared": false
+        }
+      ]
     }
   ],
   "sources": [
@@ -2372,7 +2396,7 @@
     },
     {
       "path": "PowerControl/pawnio/YeManTdpCtl.py",
-      "sha256": "b6bc6dc01f86490eff41ed4d50946a6f84dc72e9cba6bc5663e16a15b8e70bc5"
+      "sha256": "20d22f3f73d3b55f9b69dfec4edee4695c4ccadb512c161c5e16cb4e24ea5a73"
     },
     {
       "path": "PowerControl/settings-baseline.json",
@@ -7056,7 +7080,7 @@
     },
     {
       "path": "src/bridge/cpuctl.ts",
-      "sha256": "515697309d5e7fa8322a065d5a60655af9c29984fff98922cb0aa3c9bf2ab262",
+      "sha256": "da78b22cf0fdfc26260e942bb63a3260d13cbbad892f51e8fbba98963c5f0291",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10635,7 +10659,7 @@
     },
     {
       "path": "tools/input_coordinator_lifecycle_selftest.mjs",
-      "sha256": "bac71e8d17d677a45283c33e9e44042da26cfb65a502f932d4caa358a5bade09",
+      "sha256": "53e5038646e6a3de8a44d6d9f82cceb97aea9fd61f9a20ad0cc99530480f681e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10918,6 +10942,11 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/monitor_hud_host_optional_selftest.mjs",
+      "sha256": "d776ce828f42b560cd74ba4cab127cf2078b40e4cf36f1a8bee2fe86d603d9f6",
+      "contentNormalization": "utf8-lf"
+    },
+    {
       "path": "tools/monitor_hud_vue_build.mjs",
       "sha256": "22fd62a58c2e97f1a1e6c2f9ab14d4d0543e07eb3975b5ddfa6d883acd6a3095",
       "contentNormalization": "utf8-lf"
@@ -10940,6 +10969,11 @@
     {
       "path": "tools/monitor_hwinfo_recovery_epoch_selftest.mjs",
       "sha256": "d3c29a4ea228baf1a0304db6042d07ef6c9afa4117645a36eeb0dc88285725e8",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/monitor_optional_steam_carrier_selftest.mjs",
+      "sha256": "52095b6f7f30f9da50f3281f3f867b861738a1ace173b74c718e6e399f38936e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11328,7 +11362,7 @@
     },
     {
       "path": "tools/steam_linked_launch_selftest.mjs",
-      "sha256": "9e6f6e1c145db08854e99577ec37f123ac7ae7ed50d1638766f9ddd5a1ae6d0b",
+      "sha256": "65df2e4f55a52c5cc5f473c1738622b75c3ab005615c5d6b80f705305d02540e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11368,12 +11402,12 @@
     },
     {
       "path": "tools/tdp_frontend_static_selftest.ts",
-      "sha256": "2c4f6f24d14751fc6ff32e3c27b0f00634a21321ba2b1dc22d5391e82e8e9f95",
+      "sha256": "27ed37ecfaf8eb7e027d4b6a5b69900e7cec858d1e212ebf912c6cbffa01efbf",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/tdp_protocol_selftest.py",
-      "sha256": "82ec47c05cc2341934d08ed975e9683d4118e25ee1af7cb447813aa24fb42bd4"
+      "sha256": "8c105ff1fa601e7d0954cb11b2eca1094418f069f2384aa7584c0901955be90f"
     },
     {
       "path": "tools/tray_resident_selftest.mjs",
@@ -11485,7 +11519,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/adapters.mjs",
-      "sha256": "9f45cf13e8d83cb6303250c346d9b30cc1f46e3839733f777dac745fb203717e",
+      "sha256": "f32a6bd7edeaca085f4cc13c60e925ff074e3d7a6e2dc622ff4adc476791e5c0",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11675,7 +11709,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/cli.mjs",
-      "sha256": "c9aae7d231af9274efc3b101dc163b601ed6d6d9546883cf900b7fb4581b5660",
+      "sha256": "6b12fcadd3e081465559fd97212e7be763adb0a306ad5dfd118dfecc81103a71",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11890,7 +11924,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-prepared.mjs",
-      "sha256": "392c46d1414d793c1e166c49b2031d190ea81989f5a4957459edb4da080fc921",
+      "sha256": "8a9e0d2a2c92fde6c471938d7e3e5d07b5b7dfd3e6eff90af050ef2cda92af58",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11905,7 +11939,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-run.mjs",
-      "sha256": "be425fd3988f394b57f77573460724c7dcf32ffd01e20a5f45d5e0d06efc777c",
+      "sha256": "0af2561830fd9eb70e4e9b89b1a63bfb11c81536d8725c5e214805f8c372eb44",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12438,7 +12472,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-signal-evidence/adapter.mjs",
-      "sha256": "3fb439538d573a96ac026657f18e8b0dc4d4dfd732d14e7f61a294f630d44ce3",
+      "sha256": "75274af05c0ea006e5dedc91b85990d22a0225ccb7215161bcbbc2843980d684",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13946,6 +13980,26 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/ymcc_sim/global/game-rule-storage-consumer/README.md",
+      "sha256": "374bbb770e74650da29524094b329f51e22b8056ac5c9e70594564d943079554",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/game-rule-storage-consumer/adapter.mjs",
+      "sha256": "1e2096aed9557ec8543634051b4542763b772752b01e290cdaedf127beaa422a",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/game-rule-storage-consumer/run.mjs",
+      "sha256": "d2cbcd2f2e047d20512f9d946aec9960f02326ca40127541d1a41c53251f5079",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/game-rule-storage-consumer/spec.json",
+      "sha256": "56ceb0e595874e4b08fb83cc38f7c68e8983c35a086b3ca5b8bfae38d88f77cd",
+      "contentNormalization": "utf8-lf"
+    },
+    {
       "path": "tools/ymcc_sim/global/gpu-memory-signals/NativeBridge.cpp",
       "sha256": "79ce790ab556a7c5b88ce2c6d548b0f94349ccfda317e0e286e9431c3f491f83",
       "contentNormalization": "utf8-lf"
@@ -14106,7 +14160,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/host-process.ps1",
-      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74",
+      "sha256": "883998b60c2e5d9ca73d5081d4c1b66f53123aa47c609f916a7f47c55ba31982",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14802,6 +14856,31 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/README.md",
+      "sha256": "8d9281666f64663153f7a19cee2fbcbf3c859e40b81e36081544514c9d1762c0",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/adapter.mjs",
+      "sha256": "a9b5db595d35c6dc65a27632212969bc79d8b4441ba49cd224e0b7a142a49a2a",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/run.mjs",
+      "sha256": "843a9a6019140bcdf9bd9b3d17989a58b6548e3838d0f9c6e3754700b44bab15",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/runtime.mjs",
+      "sha256": "3925a2d401365d734f55154263b36ab30391482a0a3520bec4c84453bd567411",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/spec.json",
+      "sha256": "85ed89f905b5d2b58abae89076e7c907ef88bf0008a806bf2c0033b5897622c2",
+      "contentNormalization": "utf8-lf"
+    },
+    {
       "path": "tools/ymcc_sim/global/monitor-signals/adapt.mjs",
       "sha256": "662bcaa66eba24ef4ffbc4232ca9e2157a7f8d3546568efd1dc5132dd6395d82",
       "contentNormalization": "utf8-lf"
@@ -15038,7 +15117,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/music-player-tool-scope/adapter.mjs",
-      "sha256": "5d036575ce5b624d106c6fcfe1f1e43bc7bb0a52b7a724371a1b24b17e602598",
+      "sha256": "32ae364b8b7d4a6576e453cf2cf34e6ffc0db9190c133bb4b45053b899289c33",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -15817,7 +15896,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/runner.mjs",
-      "sha256": "891cb04224416d21628e953f44523180f97ee154c80c022cdeaa21df7171f1fc",
+      "sha256": "e102fa67399482bb183e0c65c1ae5516620bf8dfef4fe6672375e6bfdecdc323",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16408,12 +16487,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/snapshot-node-tools.mjs",
-      "sha256": "c56385a5062a8263c4c74a9e480da9312ec8f4400bb7be846206cd7e71f10fff",
+      "sha256": "925860973c785d1e60e88caac12d10e443d07c1d27822994b906f5da0acdbc12",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/source-snapshot.mjs",
-      "sha256": "b08df46078a238cfe8ec37bd78eb9bf30435115304e659ceb5d053d080847ebe",
+      "sha256": "d572cb775495c9e602969058fac6e41eee23b1e9d4e513c44ee2e6b7c83af4bb",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16462,17 +16541,17 @@
     },
     {
       "path": "tools/ymcc_sim/global/tdp-consumer-signals/run.mjs",
-      "sha256": "9472d34eb97c236c33f5fa1dc16c7c63aa58ed9a41f5f86a59c752df5cb62a4f",
+      "sha256": "11d23448aac12f39614554d5069efb0a132cc181a0d22dfb13c438cdd66f1eb4",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-consumer-signals/runner.test.mjs",
-      "sha256": "efb0f0063b0d97f07fa2a7083ed280c2398d3f5ddbb1f426a2133853033f8430",
+      "sha256": "4512c4bcbef91724acbbc06c1e554b453e176c2584f79970160864c2ee1065cc",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-consumer-signals/spec.json",
-      "sha256": "22a70b7882c776fcdb361c63a02537f76054ee65fb51e4bbde9df9c3c7a3acaf",
+      "sha256": "676ad919dc08783a55c58cf596e4d67d39830a9561892c09e2396c2b1787d564",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16502,27 +16581,27 @@
     },
     {
       "path": "tools/ymcc_sim/global/tdp-protocol-consumer/run.mjs",
-      "sha256": "5acbd0fad9c1cc8e4b0f08a4d55dc862d816faacb9fc61d168a35274919befcb",
+      "sha256": "6ea34c85ab3820827b68c9399f569328fb575c5df9241cd13b1c47cc61f706ab",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-protocol-consumer/runner.test.mjs",
-      "sha256": "fef4b6b261278bea410f42074eb1a7c68917e0405ab7c282b5ac39fa986baa3e",
+      "sha256": "0d5504b31c499ea15c677e5fb4fae3a425c46b21cee2d7b1b2e5d7d26a83fa52",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-protocol-consumer/spec.json",
-      "sha256": "078e9e1e7a109274f00d06341fa70697bf497f519efce3d1665e1c4d92bf0c49",
+      "sha256": "0f65b4dc957dcebe3e37445dc9f13c77e764598abd0bcea6c91986f760e4489a",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-protocol-consumer/toolchain-inputs.json",
-      "sha256": "ebac5a81fa1e39feb1ee0c1c297af39ba605ace2d0e8cc863f49ce319cba8041",
+      "sha256": "bbad170ffd88183b23ebbed7b9b4e23d720eac3670ecf534d284cafd2b129d70",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-protocol-consumer/worker.py",
-      "sha256": "6b91bd58cefd1892587675a08fa58a281989ef26f4824e7c638d4ee897412096"
+      "sha256": "4f6ea6c167614f5a6b130a5f48a5c055ec8a371b9deba51b07eb686bbd849e7b"
     },
     {
       "path": "tools/ymcc_sim/global/tdp-runtime-display-consumer/README.md",

@@ -74,7 +74,7 @@ def main():
     production += '\nstatic void dispatchReturnTimer(){const WPARAM w=RETURN_GAME_FOCUS_TIMER_ID;\n' + timer_body + '\n}\n'
     production += '\nstatic void dispatchPowerCancel(WPARAM w){\n' + power_body + '\n}\n'
     (out / 'production_focus.inc').write_text(production, 'utf-8')
-    inputs = ['native/lossless_return_focus.h', 'native/resume_focus.h', 'native/monitor_identity.h',
+    inputs = ['native/lossless_return_focus.h', 'native/resume_focus.h', 'native/monitor_identity.h', 'native/process_inventory.h',
               'tools/lossless_return_focus_selftest.cpp', 'tools/lossless_return_focus_selftest.py', 'deps/json/json.hpp',
               'tools/fixtures/hc_reviewed_calibration/toolchain.mjs']
     snapshots = {p: (REPO / p).read_bytes() for p in inputs}

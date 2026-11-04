@@ -149,3 +149,6 @@ deps/ymcc-device-core-runtime/bin/*
 
 # Recorded failure is an explicit regression fixture input.
 !/tools/ymcc_sim/global/sleep-recovery-ui-consumer/fixtures/prior-original.stderr.log
+
+# Literal environment expansion cache is local runtime data.
+/%SystemDrive%/

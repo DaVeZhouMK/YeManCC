@@ -23,10 +23,12 @@ const props = withDefaults(
     /** Hide the optional live test-mode switch in compact/editor mirrors. */
     showTestMode?: boolean;
     minimumPressFeedback?: boolean;
+    /** Pause only the covered display; the native stream and test safety still run. */
+    presentationActive?: boolean;
     /** Use the Steam Deck height in the controller settings card only. */
     matchSteamDeckHeight?: boolean;
   }>(),
-  { persona: 'xbox', highlightButtons: () => [], oemKeys: () => OEM_EMPTY_SNAPSHOT, highlightOemKeys: () => [], showTestMode: true, minimumPressFeedback: false, matchSteamDeckHeight: false }
+  { persona: 'xbox', highlightButtons: () => [], oemKeys: () => OEM_EMPTY_SNAPSHOT, highlightOemKeys: () => [], showTestMode: true, minimumPressFeedback: false, presentationActive: true, matchSteamDeckHeight: false }
 );
 
 // Bounded observation only: no input gate or render pacing lives here.
@@ -50,7 +52,7 @@ function observePreview(phase: 'receipt' | 'presented' | 'willPatch' | 'didPatch
   } catch { stopPreviewTrace(); }
 }
 function syncPreviewTrace(): void {
-  try { previewTrace?.setVisible(viewActive && isUiVisible() && previewIntersects); }
+  try { previewTrace?.setVisible(viewActive && props.presentationActive && isUiVisible() && previewIntersects); }
   catch { stopPreviewTrace(); }
 }
 
@@ -75,6 +77,7 @@ const pressFeedback = createPressFeedback(keys => { pulseKeys.value = keys; });
 const diagramButtons = computed(() => props.minimumPressFeedback ? Array.from({length:Math.max(live.value.length,18)},(_,i)=>Boolean(live.value[i])||pulseKeys.value.includes('button:'+i)) : live.value);
 const diagramOemKeys = computed(() => props.minimumPressFeedback ? [...new Set([...oemPressedKeys.value,...pulseKeys.value.filter(key=>key.startsWith('oem:')).map(key=>key.slice(4))])] : oemPressedKeys.value);
 let viewActive = true;
+function presentationVisible(): boolean { return viewActive && props.presentationActive && isUiVisible(); }
 let stopState: (() => void) | null = null;
 let stopVisibility: (() => void) | null = null;
 let testBTimer: number | null = null;
@@ -98,32 +101,33 @@ function cancelImageRetry(): void {
 function refreshBaseImage(): void {
   cancelImageRetry();
   imageFailures = 0;
-  if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+  if (!presentationVisible()) { imageRefreshPending = true; return; }
   imageRefreshPending = false;
   baseImageRevision.value += 1;
   // Preserve the existing bounded second load after the compositor resumes.
   baseImageRetryTimer = window.setTimeout(() => {
     baseImageRetryTimer = null;
-    if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+    if (!presentationVisible()) { imageRefreshPending = true; return; }
     baseImageRevision.value += 1;
   }, 250);
 }
 
 function onBaseImageError(): void {
   cancelImageRetry();
-  if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+  if (!presentationVisible()) { imageRefreshPending = true; return; }
   // A missing/failed image must not create a permanent 120ms render/network loop.
   if (imageFailures >= IMAGE_RETRY_LIMIT) return;
   const delay = 120 * 2 ** imageFailures++;
   baseImageRetryTimer = window.setTimeout(() => {
     baseImageRetryTimer = null;
-    if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+    if (!presentationVisible()) { imageRefreshPending = true; return; }
     baseImageRevision.value += 1;
   }, delay);
 }
 
 function syncPresentationVisibility(): void {
-  const visible = viewActive && isUiVisible();
+  const visible = presentationVisible();
+  if (!visible) pressFeedback.reset();
   presenter.setVisible(visible);
   syncPreviewTrace();
   if (!visible) {
@@ -158,6 +162,7 @@ function onTestModeEvent(e: Event) {
 
 onBeforeUpdate(() => observePreview('willPatch'));
 onUpdated(() => observePreview('didPatch'));
+watch(() => props.presentationActive, syncPresentationVisibility);
 watch(() => props.persona, () => {
   try { previewTrace?.personaChanged(); } catch { stopPreviewTrace(); }
 });
@@ -165,7 +170,7 @@ onMounted(() => {
   try {
     previewTrace = createControllerPreviewTrace({
       displayPersona: () => controllerDiagramPersona(props.persona),
-      visible: () => viewActive && isUiVisible() && previewIntersects,
+      visible: () => viewActive && props.presentationActive && isUiVisible() && previewIntersects,
     });
     if (typeof IntersectionObserver === 'function' && previewRoot.value) {
       previewObserver = new IntersectionObserver(entries => {
@@ -187,7 +192,7 @@ onMounted(() => {
     testBHeld = Boolean(Array.isArray(raw?.buttons) && raw.buttons[1]);
     if (!raw?.connected && testMode.value) setTestMode(false);
     syncTestBHold();
-    if(props.minimumPressFeedback){const state=payload as {connected?:boolean;buttons?:boolean[];oemPressedKeys?:string[]};if(state.connected){pressFeedback.accept([...(state.buttons||[]).flatMap((down,i)=>down?['button:'+i]:[]),...(state.oemPressedKeys||[]).filter(key=>props.oemKeys.keys.some(k=>k.keyId===key&&k.captureImplemented!==false)).map(key=>'oem:'+key)])}else pressFeedback.reset()}
+    if(props.minimumPressFeedback&&presentationVisible()){const state=payload as {connected?:boolean;buttons?:boolean[];oemPressedKeys?:string[]};if(state.connected){pressFeedback.accept([...(state.buttons||[]).flatMap((down,i)=>down?['button:'+i]:[]),...(state.oemPressedKeys||[]).filter(key=>props.oemKeys.keys.some(k=>k.keyId===key&&k.captureImplemented!==false)).map(key=>'oem:'+key)])}else pressFeedback.reset()}
     presenter.accept(payload);
   });
   stopResumeReady = onIpc('power.resume-ready', refreshBaseImage);
@@ -277,7 +282,7 @@ function oemLabel(key: OemSpecialKey): string {
 </script>
 
 <template>
-  <div ref="previewRoot" class="viz" :class="{ 'vector-device': Boolean(CONTROLLER_DIAGRAMS[diagramPersona].nodes) }">
+  <div ref="previewRoot" class="viz" :class="{ 'vector-device': Boolean(CONTROLLER_DIAGRAMS[diagramPersona].nodes), 'presentation-paused': !props.presentationActive }">
     <div class="pad-wrap">
       <div v-if="exteriorSpecialKeys.length" class="oem-special-exterior" aria-label="专用按键">
         <div class="oem-caption">专用按键</div>
@@ -448,6 +453,8 @@ function oemLabel(key: OemSpecialKey): string {
 </template>
 
 <style scoped>
+/* Covered previews keep their nodes and blink phase without repainting. */
+.viz.presentation-paused, .viz.presentation-paused :deep(*) { animation-play-state: paused !important; }
 .viz {
   margin-top: 6px;
 }

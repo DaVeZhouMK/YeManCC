@@ -13,17 +13,39 @@ export function verifyReport(report,spec,{fault=false}={}){
   if(row.ok)need(row.evidence&&typeof row.evidence==='object'&&!Array.isArray(row.evidence)&&!Object.hasOwn(row,'error'),'FAN_FAILED_READ_SUCCESS_EVIDENCE');
   else{need(typeof row.error==='string'&&row.error.startsWith('AssertionError [ERR_ASSERTION]:')&&Array.isArray(row.calls)&&Array.isArray(row.observations),'FAN_FAILED_READ_NONASSERTION_FAILURE');failures.push({index,name:row.name,error:row.error,assertionLine:49});}
  }
+ const extension=spec.sourceRetirementRegression;
+ if(extension){
+  const row=report.results.find(row=>row.name===extension.caseName),receipt=row?.evidence?.coldSource;
+  need(row?.ok===true&&receipt&&JSON.stringify(receipt.boundaries)===JSON.stringify(extension.boundaries.map(boundary=>({boundary,opened:boundary!=='current'})))
+   &&JSON.stringify(receipt.publicReopenOrder)===JSON.stringify(extension.publicReopenOrder)&&receipt.writes===extension.writes,'FAN_FAILED_READ_COLD_SOURCE_REENTRY_EVIDENCE');
+  const active=extension.inUseRecovery,reopened=row?.evidence?.settledSource;
+  if(active)need(reopened&&JSON.stringify(reopened.order)===JSON.stringify(active.order)&&reopened.writes===active.writes
+   &&reopened.sleepResumeRequests===0&&reopened.physicalAcceptance===false
+   &&JSON.stringify(reopened.manualOrder)===JSON.stringify(active.manualOrder)&&reopened.manualWrites===1&&reopened.failedManualOpenRetiredMirrors===true
+   &&JSON.stringify(reopened.boundaries)===JSON.stringify([
+    ...active.boundaries.map(name=>({name,allowed:name==='current'})),
+    ...active.nativeAwaitEdges.map(name=>({name:'native-'+name,ordinaryWrites:0})),
+    ...active.manualNativeAwaitEdges.map(name=>({name:'manual-native-'+name,ordinaryWrites:0}))]),'FAN_FAILED_READ_SETTLED_SOURCE_RECOVERY_EVIDENCE');
+ }
  if(fault){need(report.ok===false&&JSON.stringify(failures)===JSON.stringify(spec.fault.expectedFailures),'FAN_FAILED_READ_EXACT_PREDICTED_ASSERTIONS_NOT_DETECTED');for(const row of report.results.filter(row=>!row.ok))need(row.observations.length===1&&row.observations[0].failureReads===1&&row.observations[0].retiredAdoptions===0&&row.observations[0].when==='during-write','FAN_FAILED_READ_ORIGINAL_IDENTITY_EVIDENCE');}
  else need(report.ok===true&&failures.length===0,'FAN_FAILED_READ_ORIGINAL_FAILURE_PRESERVED');
  return {checks:45,passedRows:45-failures.length,failedRows:failures.length,exactFailures:failures,caseNames:report.results.map(row=>row.name),originalAssertionsUnchanged:true};
 }
-export function verifyExecution(raw,spec,{fault=false}={}){
- need(Number.isInteger(raw.exitCode)&&raw.exitCode===(fault?1:0)&&!raw.error&&!raw.signal,'FAN_FAILED_READ_PROCESS_NOT_COMPLETE');const b=raw.boundary,o=raw.observation;
- need(b?.kind==='fan-global-runtime-boundary'&&b.exitCode===raw.exitCode&&b.status===(fault?'FAIL':'PASS')&&b.explicitExitCalled===false&&Array.isArray(b.denied)&&b.denied.length===0,'FAN_FAILED_READ_RUNTIME_BOUNDARY');
+export function verifyColdSourceFaultReport(report,spec){
+ const expected=spec.sourceRetirementRegression.fault,row=report?.results?.[0];
+ need(report?.ok===false&&report.checks===1&&report.scope===spec.originalScope&&report.results.length===1
+  &&row?.name===expected.caseName&&row.ok===false&&row.error===expected.expectedFailure
+  &&Array.isArray(row.calls)&&Array.isArray(row.observations),'FAN_FAILED_READ_COLD_SOURCE_EXACT_FAULT_REQUIRED');
+ return {checks:1,passedRows:0,failedRows:1,exactFailures:[{name:row.name,error:row.error}],caseNames:[row.name],originalAssertionsUnchanged:true};
+}
+export function verifyExecution(raw,spec,{fault=false,coldFault=false}={}){
+ const failed=fault||coldFault;
+ need(Number.isInteger(raw.exitCode)&&raw.exitCode===(failed?1:0)&&!raw.error&&!raw.signal,'FAN_FAILED_READ_PROCESS_NOT_COMPLETE');const b=raw.boundary,o=raw.observation;
+ need(b?.kind==='fan-global-runtime-boundary'&&b.exitCode===raw.exitCode&&b.status===(failed?'FAIL':'PASS')&&b.explicitExitCalled===false&&Array.isArray(b.denied)&&b.denied.length===0,'FAN_FAILED_READ_RUNTIME_BOUNDARY');
  for(const key of ['realNetwork','realChildProcess','nativeLibraryLoad','writesOutsideEvidence','realHostMain','hardwareAccess','operatingSystemSleep'])need(b.boundaries?.[key]===false,'FAN_FAILED_READ_REAL_IO');
  need(o?.beforeExitObserved===true&&o.exitCode===raw.exitCode&&o.nodeWindowAbsentAtStart===true&&o.nodeChromeAbsentAtStart===true&&o.nodeWindowAbsentAtEnd===true&&o.nodeChromeAbsentAtEnd===true&&Array.isArray(o.activeResources)&&!o.activeResources.includes('Timeout'),'FAN_FAILED_READ_NATURAL_END_OR_NATIVE_ENVIRONMENT');
  let report;try{report=JSON.parse(raw.stdout.trim());}catch{throw Error('FAN_FAILED_READ_SINGLE_ORIGINAL_JSON_REQUIRED');}
- return {...verifyReport(report,spec,{fault}),naturalOriginalEndpoint:true,report};
+ return {...(coldFault?verifyColdSourceFaultReport(report,spec):verifyReport(report,spec,{fault})),naturalOriginalEndpoint:true,report};
 }
 export function summarizeActualCoverage(coverage,program){
  need(coverage&&Array.isArray(coverage.functions),'FAN_FAILED_READ_PROGRAM_COVERAGE_MISSING');const ranges=coverage.functions.flatMap(fn=>fn.ranges);

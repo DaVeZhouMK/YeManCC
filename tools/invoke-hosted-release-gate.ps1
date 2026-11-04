@@ -58,10 +58,11 @@ for(const [name,entry,exportName] of [['native','native-launch-worker.mjs','star
   $env:YEMAN_RELEASE_ENVELOPE='full'
   & powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-workspace.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
   if($LASTEXITCODE -ne 0){throw 'Frozen source build failed'}
-  foreach($test in @('test:updater','test:updater-manager-resume','test:updater-resume','test:updater-retry','test:updater-rollback','test:fan-host-paths','test:fan-payload')){& pnpm run $test;if($LASTEXITCODE -ne 0){throw ('Release regression failed: '+$test)}}
+  . (Join-Path $repo 'tools/ymcc_sim/optimization/release-full-budget.ps1')
+  foreach($test in @('test:updater','test:updater-manager-resume','test:updater-resume','test:updater-retry','test:updater-rollback','test:fan-host-paths','test:fan-payload')){Invoke-YmccFullReleaseRegression -ProjectRoot $repo -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -Test $test;if($LASTEXITCODE -ne 0){throw ('Release regression failed: '+$test)}}
   & powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -ReleaseEnvelope full -FullAcceptance
   if($LASTEXITCODE -ne 0){throw 'Full package assembly failed'}
-  & pnpm run test:updater-install-chain
+  Invoke-YmccFullReleaseRegression -ProjectRoot $repo -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -Test 'test:updater-install-chain'
   if($LASTEXITCODE -ne 0){throw 'Release install-chain regression failed'}
  }
  Save-Record 'worker-result.json' @{status='PASS';mode=$Mode;sid=$identity.User.Value;formalReleaseAccepted=$false}

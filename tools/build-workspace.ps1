@@ -14,7 +14,8 @@ param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
   [switch]$TestExport,
   [switch]$FullAcceptance,
-  [switch]$FastRelease
+  [switch]$FastRelease,
+  [string]$LifecycleEvidenceRoot=''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,12 @@ if ($FastRelease -and ($FullAcceptance -or $TestExport)) { throw 'FastRelease is
 $TestExport = -not [bool]$FullAcceptance
 $env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
 $fixtureValidation = if ($FullAcceptance) { 'EXPLICIT_FULL_ACCEPTANCE_REQUESTED' } else { 'NOT_RUN' }
+# Direct explicit builds share the same fixture session as their lighting and Decky consumers.
+if($FullAcceptance -and -not $env:YMCC_RELEASE_FIXTURE_SESSION){
+  . (Join-Path $PSScriptRoot 'ymcc_sim/optimization/release-full-budget.ps1')
+  $env:YMCC_RELEASE_FIXTURE_SESSION=New-YmccFullReleaseFixtureSession -ProjectRoot (Split-Path -Parent $PSScriptRoot)
+}
+
 # End export execution mode.
 . (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
 
@@ -51,6 +58,22 @@ function Assert-ChildPath([string]$Child, [string]$Parent, [string]$Label) {
   if (-not $childFull.StartsWith($parentFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw "$Label is outside the workspace: $childFull"
   }
+}
+
+# Compile with the restored package's declared Node entry, not package-manager
+# auto-install or Windows command shims. Missing compilers still fail closed;
+# export never purges the shared dependency tree to run a compiler.
+function Resolve-ProjectNodeCommand([string]$PackageName, [string]$CommandName) {
+  $packageRoot = Join-Path $ProjectRoot ('node_modules/' + $PackageName)
+  $packageJson = Join-Path $packageRoot 'package.json'
+  if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) { throw "Missing restored build package: $PackageName" }
+  $packageInfo = Get-Content -LiteralPath $packageJson -Raw -Encoding UTF8 | ConvertFrom-Json
+  $entry = if ($packageInfo.bin -is [string]) { [string]$packageInfo.bin } else { [string]$packageInfo.bin.$CommandName }
+  if ([string]::IsNullOrWhiteSpace($entry)) { throw "Missing declared Node command: $PackageName/$CommandName" }
+  $resolved = Get-FullPath (Join-Path $packageRoot $entry)
+  Assert-ChildPath $resolved $packageRoot 'Build compiler entry'
+  if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "Missing restored compiler entry: $resolved" }
+  return $resolved
 }
 
 function Get-Sha256([string]$Path) {
@@ -260,6 +283,11 @@ try {
   & node (Join-Path $ProjectRoot 'tools\settings-baseline-contract.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Settings baseline validation failed: exit=$LASTEXITCODE" }
 
+  # CSL_PREMAIN_BEGIN: real producer before main, with one later package consumer.
+  . (Join-Path $PSScriptRoot 'custom_steam_library_build_guard.ps1')
+  $preMainWorker = Start-CslWorkerBeforeMain -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+  # CSL_PREMAIN_END
+
   # Pin compiler inputs after version generation, before any compiler runs.
   $exportSourcesBefore = @(Get-ExportSourceIndex $ProjectRoot)
   # YMCC Decky sidebar: build the additive passive payload from the authoritative mainline sources.
@@ -268,7 +296,7 @@ try {
   # Keep a workspace-local plugin output beside THIS Native/Web build.
   & node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs') --out $DeckyBuild
   if ($LASTEXITCODE -ne 0) { throw "Workspace Decky payload build failed: exit=$LASTEXITCODE" }
-  & pnpm exec vue-tsc --noEmit
+  & node (Resolve-ProjectNodeCommand 'vue-tsc' 'vue-tsc') --noEmit
   if ($LASTEXITCODE -ne 0) { throw "Type check failed: exit=$LASTEXITCODE" }
 
   # Keep source documentation in public/, outside the release payload.
@@ -287,11 +315,14 @@ try {
   Copy-WebPublicAssets (Join-Path $ProjectRoot 'public') $webPublic
   $env:YEMAN_BUILD_PUBLIC_DIR = $webPublic
 
-  & pnpm exec vite build
+  & node (Resolve-ProjectNodeCommand 'vite' 'vite') build
   if ($LASTEXITCODE -ne 0) { throw "Frontend build failed: exit=$LASTEXITCODE" }
 
   Copy-Item -LiteralPath (Join-Path $ProjectRoot 'app.config.json') -Destination (Join-Path $WebBuild 'app.config.json') -Force
 
+  # VC setup may replace PATH; pass the actual compiler runtime by file.
+  $env:YEMAN_NODE_EXE = [string]((Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path)
+  if (-not (Test-Path -LiteralPath $env:YEMAN_NODE_EXE -PathType Leaf)) { throw 'Resolved Node compiler runtime is missing' }
   & cmd.exe /d /c (Join-Path $ProjectRoot 'native\build_native.bat')
   if ($LASTEXITCODE -ne 0) { throw "Native build failed: exit=$LASTEXITCODE" }
 
@@ -336,7 +367,8 @@ $required = @(
   (Join-Path $WebBuild 'notice-output.html'),
   (Join-Path $WebBuild 'assets'),
   (Join-Path $WebBuild 'app.config.json'),
-  (Join-Path $AppBuildRoot 'BatteryHost\YeManBatteryHost.exe'),
+  (Join-Path $AppBuildRoot 'BatteryHost\YeManBatteryHost.dll'),
+  (Join-Path $AppBuildRoot 'BatteryHost\YeManBatteryHost.runtimeconfig.json'),
   (Join-Path $NativeBuild 'YeManCC.exe'),
   (Join-Path $NativeBuild 'YeManRecoveryService.exe'),
   (Join-Path $NativeBuild 'YeManControllerVisibilityProbe.exe'),
@@ -370,12 +402,19 @@ if ($LASTEXITCODE -ne 0) {
   throw "Adopted-optimization inheritance gate FAILED at build (exit=$LASTEXITCODE); see $OptBuildManifest"
 }
 
+# CSL_PREMAIN_PENDING_BEGIN
+Begin-CslWorkerBuildBinding $preMainWorker $ProjectRoot $WorkspaceRoot
+# CSL_PREMAIN_PENDING_END
 $exportBuildIdentity = Write-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -SourceBefore $exportSourcesBefore
+# CSL_PREMAIN_BIND_BEGIN
+Complete-CslWorkerBeforeMain $preMainWorker $exportBuildIdentity $ProjectRoot $WorkspaceRoot
+# CSL_PREMAIN_BIND_END
 # Required release node: both Decky update channels and YMCC updater ownership.
 if ($TestExport) {
   Write-Output 'FIXTURE_VALIDATION=NOT_RUN: Decky lifecycle fixtures skipped; current build and payload identity verified separately.'
 } else {
-  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Build -WorkspaceRoot $WorkspaceRoot
+  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Build -WorkspaceRoot $WorkspaceRoot -LifecycleEvidenceRoot $LifecycleEvidenceRoot
+  if($LASTEXITCODE -ne 0){throw ('FULL_RELEASE_BUILD_FIXTURE_FAILED exit='+$LASTEXITCODE)}
 }
 Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
 $exe = Get-Item -LiteralPath (Join-Path $NativeBuild 'YeManCC.exe')

@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Out)
+param([Parameter(Mandatory=$true)][string]$Out,[string]$ProcessQuery="",[uint32]$ExpectedPid=0,[uint32]$BackendPid=0,[uint32]$EditorPid=0)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
@@ -7,6 +7,26 @@ New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $cases=New-Object Collections.Generic.List[string]
 function Assert($Value,$Name){if(!$Value){throw $Name};$cases.Add($Name)}
 function Reject([scriptblock]$Work){try{&$Work|Out-Null;return $false}catch{return $true}}
+if($ProcessQuery){
+ Initialize-ResidentAppearanceInterop
+ function Get-Process {param($Id,$Name) if($Name -or !$Id){throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'};Microsoft.PowerShell.Management\Get-Process -Id $Id -ErrorAction Stop}
+ function Get-CimInstance {throw 'PRIVATE_CIM_ENUMERATION_DENIED'}
+ $first=Update-AppearanceProcessInventory
+ Assert ($first.steamPid -eq $ExpectedPid) 'Cross-process receipt carries the exact upstream host identity'
+ Assert (@(Get-AppearanceProcessCandidates 1|Where-Object Id -eq $BackendPid).Count -eq 1) 'Shared filtered candidates include the owned backend with a checked birth'
+ Assert (@(Get-AppearanceProcessCandidates 2|Where-Object Id -eq $EditorPid).Count -eq 1) 'Shared filtered candidates include the owned minimized-independent editor identity'
+ Assert (Reject {Update-AppearanceProcessInventory}) 'A fresh unavailable native owner observation remains Unknown'
+ Assert ($null -eq $script:AppearanceProcessReceipt) 'A failed fresh observation revokes previous absence/candidates'
+ $null=Update-AppearanceProcessInventory
+ $row=@($script:AppearanceProcessReceipt.rows|Where-Object pid -eq $BackendPid)[0];$row.birth=([long]$row.birth+1).ToString()
+ Assert (Reject {Get-AppearanceProcessCandidates 1}) 'A reused PID cannot inherit a shared candidate receipt'
+ $null=Update-AppearanceProcessInventory
+ $editor=Get-AppearanceProcessCandidates 2|Where-Object Id -eq $EditorPid
+ $parent=Get-AppearanceParentId $editor
+ Assert ($parent -eq $ExpectedPid) 'Parent ancestry uses the pinned process directly without CIM discovery'
+ [pscustomobject]@{ok=$true;passed=$cases.Count;cases=@($cases);realCssOperations=0;realSteamOperations=0;privateScans=0;ownedFixtureProcessesOnly=$true}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
+ Write-Output "PASS: $($cases.Count) real native-to-PS shared process checks";exit 0
+}
 $own=[Diagnostics.Process]::GetCurrentProcess()
 $expected=$own.MainModule.FileName;$born=$own.StartTime.ToUniversalTime().ToFileTimeUtc()
 $limited=[pscustomobject]@{Id=$own.Id;StartTime=$own.StartTime;Path=$null}
@@ -36,7 +56,8 @@ foreach($name in @('Get-BackendProcesses','Test-BackendOwner')){
  Invoke-Expression $fn.Extent.Text
 }
 $script:BackendExe=$expected
-function Get-Process {param($Name,$Id) $limited}
+function Get-AppearanceBackendCandidates {$limited}
+function Get-Process {param($Name,$Id) if($Name -or !$Id){throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'};$limited}
 function Test-CurrentUserProcess($Process){$Process.Id -eq $own.Id}
 function Get-NetTCPConnection {param($State,$LocalPort) [pscustomobject]@{LocalAddress='127.0.0.1';OwningProcess=$own.Id}}
 Assert (@(Get-BackendProcesses).Count -eq 1) 'Controller backend enumeration recognizes a verified existing process with empty .NET Path'

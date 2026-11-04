@@ -1,5 +1,5 @@
 from pathlib import Path
-import argparse,hashlib,json,shutil,subprocess,sys
+import argparse,hashlib,json,re,shutil,subprocess,sys
 
 def block(text,signature):
     start=text.index(signature);opened=text.index('{',start);depth=1;end=opened+1
@@ -17,7 +17,9 @@ def main():
     out.mkdir(parents=True);hostroot=out/'host';hostroot.mkdir();origin=project/'FanLab/real-host'
     inputs=[]
     for p in origin.iterdir():
-        if p.is_file() and p.suffix.lower() in ['.cs','.json']:shutil.copyfile(p,hostroot/p.name);inputs.append({'name':p.name,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+        if p.is_file() and p.suffix.lower() in ['.cs','.json']:
+            chosen=source if p.name=='Program.cs' else p
+            shutil.copyfile(chosen,hostroot/p.name);inputs.append({'name':p.name,'source':str(chosen),'sha256':hashlib.sha256(chosen.read_bytes()).hexdigest()})
     raw=source.read_bytes();text=raw.decode('utf-8-sig');nl='\r\n' if '\r\n' in text else '\n'
     marker='internal sealed class FanHostEngine : IDisposable';start=text.index('{',text.index(marker))+1
     fields='''
@@ -46,14 +48,24 @@ def main():
     }'''.replace('\n',nl)
     text=text.replace(collector,replacement);(hostroot/'Program.cs').write_bytes(text.encode('utf-8'))
     xml=(origin/'YeManFanHost.csproj').read_text(encoding='utf-8-sig').replace('<AssemblyName>YeManFanHost</AssemblyName>','<AssemblyName>YeManFanHostEvidenceProbe</AssemblyName>').replace('..\\fan-backend\\YeManFanBackend.csproj',str(project/'FanLab/fan-backend/YeManFanBackend.csproj'))
+    # Preserve every formal linked compile input when the Host is built outside its source directory.
+    linked=[]
+    def bind_compile(match):
+        exact=(origin/match.group(1).replace('\\','/')).resolve()
+        linked.append({'path':str(exact),'sha256':hashlib.sha256(exact.read_bytes()).hexdigest()})
+        from xml.sax.saxutils import escape
+        return '<Compile Include="'+escape(str(exact),{'"':'&quot;'})+'"'
+    xml=re.sub(r'<Compile Include="([^"]+)"',bind_compile,xml)
     (hostroot/'ProbeHost.csproj').write_text(xml,encoding='utf-8')
+    targets=out/'exclude-source-outputs.targets'
+    targets.write_text('<Project><Target Name="ExcludeWorkspaceOutputs" BeforeTargets="CoreCompile"><ItemGroup><Compile Remove="$(MSBuildProjectDirectory)/bin/**/*.cs"/><Compile Remove="$(MSBuildProjectDirectory)/obj/**/*.cs"/></ItemGroup></Target></Project>',encoding='utf-8')
     runner=out/'runner';runner.mkdir();shutil.copyfile(Path(__file__).with_suffix('.cs'),runner/'Program.cs')
     (runner/'Checks.csproj').write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup></Project>',encoding='utf-8')
     for name,proj,dest in [('host',hostroot/'ProbeHost.csproj',out/'host-bin'),('runner',runner/'Checks.csproj',out/'runner-bin')]:
-        with (out/(name+'-build.log')).open('w',encoding='utf-8') as log:r=subprocess.run(['dotnet','build',str(proj),'-c','Release','--artifacts-path',str(out/(name+'-artifacts')),'-o',str(dest)],stdout=log,stderr=subprocess.STDOUT)
+        with (out/(name+'-build.log')).open('w',encoding='utf-8') as log:r=subprocess.run(['dotnet','build',str(proj),'-c','Release','-p:CustomAfterMicrosoftCommonTargets='+str(targets),'--artifacts-path',str(out/(name+'-artifacts')),'-o',str(dest)],stdout=log,stderr=subprocess.STDOUT)
         if r.returncode:print((out/(name+'-build.log')).read_text(encoding='utf-8',errors='replace'));return r.returncode
     with (out/'run.log').open('w',encoding='utf-8') as log:r=subprocess.run(['dotnet',str(out/'runner-bin/Checks.dll'),str(out/'host-bin/YeManFanHostEvidenceProbe.dll'),str(out/'logs'),args.mode,str(out/'result.json')],stdout=log,stderr=subprocess.STDOUT)
-    binding={'productProgramSha256':hashlib.sha256(raw).hexdigest(),'originalDiagnosticsMethodSha256':hashlib.sha256(sample.encode()).hexdigest(),'originalCollectorSha256':hashlib.sha256(collector.encode()).hexdigest(),'instrumentedProgramSha256':hashlib.sha256(text.encode()).hexdigest(),'hostInputs':inputs,'mode':args.mode,'scope':'Actual diagnostics scheduling, logger, maintenance finally and control state; process CPU/timestamps and thread collector replaced only in scratch; other process metadata getters read fixture process only; no real Host Main, HC, device, sleep or CPU performance timing','exit':r.returncode}
+    binding={'productProgramSha256':hashlib.sha256(raw).hexdigest(),'originalDiagnosticsMethodSha256':hashlib.sha256(sample.encode()).hexdigest(),'originalCollectorSha256':hashlib.sha256(collector.encode()).hexdigest(),'instrumentedProgramSha256':hashlib.sha256(text.encode()).hexdigest(),'hostInputs':inputs,'linkedCompileInputs':linked,'formalProjectSha256':hashlib.sha256((origin/'YeManFanHost.csproj').read_bytes()).hexdigest(),'runnerSourceSha256':hashlib.sha256(Path(__file__).with_suffix('.cs').read_bytes()).hexdigest(),'mode':args.mode,'scope':'Actual diagnostics scheduling, logger, maintenance finally and control state; process CPU/timestamps and thread collector replaced only in scratch; other process metadata getters read fixture process only; no real Host Main, HC, device, sleep or CPU performance timing','exit':r.returncode}
     (out/'binding.json').write_text(json.dumps(binding,ensure_ascii=False,indent=2),encoding='utf-8');print((out/'run.log').read_text(encoding='utf-8'));return r.returncode
 if __name__=='__main__':
     try:sys.exit(main())

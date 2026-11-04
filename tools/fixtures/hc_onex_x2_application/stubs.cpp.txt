@@ -5,6 +5,11 @@ static std::atomic<unsigned long long> g_powerGeneration{11};
 static std::atomic<unsigned> g_xinputTopologyEpoch{23};
 static bool g_inputCaptureReady=true;
 static std::atomic<bool> g_exitRequested{false},g_shortcutRecordingActive{false};
+// Explicit foreground/release inputs for the shared production click matcher.
+static std::atomic<bool> g_inputReleaseRequired{false};
+static bool customSteamLibraryInputSuppressed(){return false;}
+static bool fixtureRadialOwner=false;
+static bool radialHasInputOwner(){return fixtureRadialOwner;}
 static std::atomic<uint32_t> g_oemShortcutEdgeEpoch{1};
 static std::atomic<int> g_oemBackState{0},g_oemBackStateKb{0},g_oemBackProfileId{0};
 static std::atomic<uint64_t> g_oemKeyMask{0},g_oemKeyMaskMsiDinput{0},g_oemKeyMaskMsi{0},g_oemKeyMaskRog{0};
@@ -29,6 +34,7 @@ static uint64_t oemProducerAuthorityMask();
 static uint64_t oemProducerPhysicalMask();
 static uint64_t nativeOemKeyboardActionMask();
 // @action
+static bool nativeShortcutUiDispatch(const NativeKeyboardShortcutRule&,uint64_t,uint64_t,uint64_t,bool,OemProducerTokens){test::fail("UI side effect is outside this OneX consumer fixture");}
 // Only the backend action side effect is replaced. Token, epoch, exit/recording
 // admission in nativeYmccShortcutSubmit and all new UI decision code are real.
 static bool nativeYmccShortcutEmit(const std::string& action,int delta,uint64_t epoch,uint64_t wg,uint64_t ws,bool fallback,OemProducerTokens tokens){
@@ -38,12 +44,16 @@ namespace ymcc {inline json inputShortcutContext(const json&,int){return json::o
 static json ymSettingsSection(const char*){return json::object();}
 static int gameInputOwnerSession(){return 1;}
 static void nativeInputShortcutToggle(const std::string& action,const std::string&,const json&){appmock::actions.push_back(action);}
-static void nativeKeyboardShortcutSend(WORD key,bool){appmock::actions.push_back("key:"+std::to_string(key));}
+static void nativeKeyboardShortcutSend(WORD key,bool,bool){appmock::actions.push_back("key:"+std::to_string(key));}
 // @ui
 struct Evaluation {WORD buttons;XINPUT_GAMEPAD pad;ULONGLONG capturedAt;uint64_t mask,scope;OemProducerTokens tokens;};
 static std::vector<Evaluation> evaluations;
 static std::vector<OemProducerEdgeReceipt> rogReceipts;
 static void nativeRogClickDispatch(const OemProducerEdgeReceipt& r){rogReceipts.push_back(r);}
+static std::vector<uint64_t> recordedClicks,recordedChords;
+static void gamepadRecordShortcutClick(uint64_t bit){recordedClicks.push_back(bit);}
+static void gamepadRecordShortcutChord(uint64_t mask){recordedChords.push_back(mask);}
+static void nativeSecondaryDisplayKeyboardConsume(uint64_t,uint64_t,uint64_t){test::fail("Inactive secondary display must never be called");}
 static void nativeKeyboardShortcutsRefresh(ULONGLONG){++appmock::refreshes;}
 static uint32_t g_nativeShortcutLegacyOverrideMask=0,g_nativeOemEdgeEpochSeen=0;
 static bool g_nativeWmiAuthoritySeen=false;

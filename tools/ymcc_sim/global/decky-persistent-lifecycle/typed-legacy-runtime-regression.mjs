@@ -111,7 +111,7 @@ export async function execute(argv) {
   report.nodeToolProof=node.proof;write(path.join(out,'SOURCE-PINS.json'),[...sources.values()]);write(path.join(out,'TOOL-PINS.json'),[...tools.values()]);
   const legacy=fs.readFileSync(path.join(repo,legacyRel),'utf8'),expected=originalAssertions(legacy);write(path.join(out,'ORIGINAL-ASSERTIONS.json'),expected);
   fs.copyFileSync(path.join(repo,legacyRel),path.join(out,'historical-legacy-runtime.cpp'));
-  const original=fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8'),end=original.indexOf('\nint main(int argc,char** argv){');
+  const original=fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8'),end=original.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END');
   assert(end>0,'ORIGINAL_HELPER_BOUNDARY_CHANGED');
   const pure=legacy.slice(legacy.indexOf('    using ymcc::deckysidebar::officialLoaderSearchPath;'),legacy.indexOf('    Runtime runtime;'));
   assert.equal((pure.match(/\bcheck\(/g)??[]).length,8,'PURE_ASSERTION_EXTRACTION');

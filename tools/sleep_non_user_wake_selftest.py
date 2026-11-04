@@ -81,7 +81,10 @@ for broadcast in ['PBT_APMRESUMEAUTOMATIC', 'PBT_APMRESUMESUSPEND']:
         assert body.index('confirmedUserWake()') < body.index('sgObserveNonUserWake(')
 assert 'sgArmNonUserWakeGuard("sleep-trigger")' in function('sgMarkSleepTrigger')
 assert 'request(caps,' in function('sgRequestSystemSleep')
-assert 'SetSuspendState(mode==Mode::Hibernate ? TRUE : FALSE,FALSE,FALSE)' in function('sgRequestSystemSleep')
+request_terminal = function('sgRequestSystemSleep')
+assert 'SetSuspendState(FALSE,FALSE,FALSE)' in request_terminal
+assert 'SendMessageTimeoutW(' not in request_terminal and 'SC_MONITORPOWER' not in request_terminal
+assert 'SetSuspendState(TRUE' not in request_terminal
 assert 'g_sgPauseResume' not in function('sgEvaluateExternalDeviceWake')
 assert 'sgCancelEntryFailureRetry("entry-failure-setting-disabled")' in function('sgSaveConfig')
 
@@ -162,7 +165,8 @@ static constexpr ULONGLONG SG_S0_REASON7_FAILURE_WINDOW_MS=5000;
 static constexpr ULONGLONG epoch=133000000000000000ULL;
 enum class PowerLifecycle : uint8_t {Ready,Suspending,Suspended,Resuming};
 enum class SgSleepMode : uint8_t {Unknown,S3,S4};
-enum class SgRetryKind : uint8_t {None,EntryFailure,UnexpectedWake};
+enum class SgRetryKind : uint8_t {None,EntryFailure,UnexpectedWake,SleepTimeout};
+static void sgCancelEntryFailureRetry(const char*,SgRetryKind=SgRetryKind::EntryFailure);
 enum class SgWork : uint8_t {Suspend,WakeAutomatic,WakeSuspend,WakeHibernate};
 struct SgSleepTask {unsigned long long generation=0;SgSleepMode mode=SgSleepMode::Unknown;SgRetryKind retryKind=SgRetryKind::None;unsigned retryAttempt=0;bool unexpectedWakeConsumed=false;} g_sgTask;
 struct Internal {SgRetryKind kind=SgRetryKind::None;ULONGLONG dispatchTick=0,dispatchFileTime=0;} g_sgInternalSleepRequest;
@@ -182,6 +186,7 @@ std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0},g_sgLastKernel507EventF
 std::atomic<bool> g_sensorSuspendCallbackActive{false};
 std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 std::atomic<bool> g_sgSleepCycleActive{false},g_sgGameActuallySuspended{false},g_sgInSuspend{false},g_inputReady{true},g_inputHostPowerAdmissionRevoked{false};
+bool g_sgRetrySleepTimeout=false;
 bool g_guardEnabled=true,g_sgResleepEnabled=true,g_sgRetryEntryFailure=true,g_sgRepairEligible=false,g_sgRetryInProgress=false,g_sgNonUserWakeObserved=false,g_sgSleepIntentArmed=false,g_sgModernStandbyActive=false,g_sgModernWakeClassified=false;
 bool g_sgSleepQueryGateClosed=false,g_sgSleepQueryOwnsGeneration=false;
 unsigned long long g_sgSleepQueryGeneration=0;
@@ -208,7 +213,7 @@ ULONGLONG currentPowerGeneration(){return generation;}
 UINT_PTR fakeSetTimer(HWND,UINT_PTR id,UINT delay,TIMERPROC){assert(id==SG_RETRY_TIMER_ID);timerDue=nowTick+delay;return id;}
 BOOL fakeKillTimer(HWND,UINT_PTR id){assert(id==SG_RETRY_TIMER_ID);timerDue=0;return TRUE;}
 void sgRecordFact(const char* e,const json& d=json::object()){facts.emplace_back(e,d);}
-const char* sgRetryKindName(SgRetryKind kind){return kind==SgRetryKind::EntryFailure?"entry-failure":kind==SgRetryKind::UnexpectedWake?"unexpected-wake":"none";}
+const char* sgRetryKindName(SgRetryKind kind){return kind==SgRetryKind::EntryFailure?"entry-failure":kind==SgRetryKind::UnexpectedWake?"unexpected-wake":kind==SgRetryKind::SleepTimeout?"sleep-timeout":"none";}
 std::string sgFormatFactFileTime(ULONGLONG t){return std::to_string(t);}
 const char* sgKernelPowerReasonName(int){return "test";}
 const char* powerLifecycleName(PowerLifecycle){return "test";}
@@ -226,6 +231,13 @@ bool sgShouldKeepInputDuringStandby(){return keepInput;}
 bool sgReadSleepTarget(SgSleepTarget& target){target={frozen,generation};return frozen;}
 bool sgSleepLeaseOwnedByGeneration(ULONGLONG g){return frozen&&g==generation;}
 SgResumeResult sgResumeSleepTarget(ULONGLONG g,bool){assert(g==generation);if(frozen){frozen=false;++resumeCount;}return {resumeCount};}
+// New timeout hooks are disabled memory ports in the original wake replay.
+// The separate timeout fixture owns its timer, evidence, and shared-budget policy.
+struct {bool active() const {return false;}} g_sgSleepTimeoutWindow;
+static bool sgSleepTimeoutCurrent(){return false;}
+static void sgSleepTimeoutStop(const char*) noexcept {}
+static void sgSleepTimeoutArm(int,ULONGLONG){assert(!g_sgRetrySleepTimeout);}
+static bool sgSleepTimeoutDispatchPermitted(){return false;}
 static void sgAbnormalArm(int,ULONGLONG){}
 static void sgAbnormalStop(const char*){}
 static void sgAbnormalInternalEntry(){}
@@ -281,7 +293,7 @@ void reset(bool pause=false){
  g_fanPhysicalWake.~Observation();new (&g_fanPhysicalWake) ymcc::fan_wake::Observation();g_fanPhysicalWake.generation(generation);
  g_sgLastPowerButtonSleepIntentFileTime=0;g_sgLastPowerButtonWakeEventFileTime=0;g_sgPauseWorkCompletedGeneration=2;
  g_sgLatestUserSleepEntryFileTime=0;g_sgClosedSleepIntentFileTime=0;g_sgOriginalPowerButtonWakeFileTime=0;
- g_guardEnabled=true;g_sgResleepEnabled=true;g_sgRetryEntryFailure=true;g_sgRepairEligible=false;
+ g_guardEnabled=true;g_sgResleepEnabled=true;g_sgRetryEntryFailure=true;g_sgRetrySleepTimeout=false;g_sgRepairEligible=false;
  g_sgLastKernel506EventFileTime=0;g_sgLastKernel507EventFileTime=0;g_sensorSuspendCallbackActive=false;
  g_sgRetryInProgress=false;g_sgNonUserWakeObserved=false;g_sgIgnoredEarlyWakeFileTime=0;g_sgSleepIntentArmed=false;
  g_sgModernStandbyActive=false;g_sgModernWakeClassified=false;g_sgModernWakeClassifiedTick=0;
@@ -352,12 +364,12 @@ void replay(const char* path){
 
 void verifyActualFanRetryBoundary(){
  reset();sleepIntent();const auto physical=g_fanPhysicalWake.recordSleep(generation,nowFile-20);
- assert(physical&&g_fanPhysicalWake.recordWake(generation,nowFile-10,false,true));assert(g_fanPhysicalWake.physical(physical));
+ assert(physical&&g_fanPhysicalWake.recordWake(generation,nowFile-10,false));assert(g_fanPhysicalWake.physical(physical));
  sgStartSleepRetry(SgRetryKind::EntryFailure,"pure-fan-retry-boundary");
  assert(sgSleepRetryActive()&&timerDue&&requestCount==0&&!g_fanPhysicalWake.physical(physical)&&g_fanPhysicalWake.awaitingWake(physical));
- auto stale=ymcc::fan_wake::Observation();const auto g=stale.recordSleep(1,100);assert(g&&stale.recordWake(1,110,false,true));
+ auto stale=ymcc::fan_wake::Observation();const auto g=stale.recordSleep(1,100);assert(g&&stale.recordWake(1,110,false));
  stale.retryBoundary(2,120);assert(stale.physical(g));stale.retryBoundary(1,120);assert(!stale.physical(g)&&stale.awaitingWake(g));
- assert(!stale.recordWake(1,119,false,true)&&!stale.recordWake(1,130,true,true));
+ assert(!stale.recordWake(1,119,false)&&!stale.recordWake(1,130,true));
  std::cout<<"PASS actual fan pure-state retry boundary clears wake only for the matching shared generation; no hardware terminal\n";
 }
 

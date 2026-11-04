@@ -1,5 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import{spawnSync}from'node:child_process';import{pathToFileURL,fileURLToPath}from'node:url';
-const args=process.argv.slice(2);const opt=(k,d)=>{const i=args.indexOf(k);return i<0?d:args[i+1];};
+const args=process.argv.slice(2);const observationOnly=args.includes('--observation-only');const opt=(k,d)=>{const i=args.indexOf(k);return i<0?d:args[i+1];};
 const repo=path.resolve(opt('--repo',path.join(path.dirname(fileURLToPath(import.meta.url)),'..')));
 const source=path.resolve(opt('--source-root',path.join(repo,'InputHost'))),out=path.resolve(opt('--out','./game-output-fixture'));
 if(fs.existsSync(out))throw Error('Fresh evidence directory required');fs.mkdirSync(out,{recursive:true});
@@ -34,7 +34,9 @@ if(candidate)extra+=' public string AppendDirect(string response,string wire,boo
 extra+='}}';fs.writeFileSync(path.join(out,'Bindings.cs'),extra);
 let legacy=fs.readFileSync(repo+'/tools/msi_steamdeck_release_fence_1726_selftest.cs','utf8').replace('internal static class Fixture','internal static partial class Fixture').replace('private static int Main()','private static int RunLegacyFenceTests()').replace('Fixture.Reset(); body(); ++_tests;','Fixture.Reset(); if (ContinueLegacy) LegacyRecord(name, body); else body(); ++_tests;');
 fs.writeFileSync(path.join(out,'Legacy.cs'),legacy);fs.copyFileSync(repo+'/tools/inputhost_lifecycle_selftest.cs',path.join(out,'Test.cs'));
-for(const n of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs'])fs.copyFileSync(path.join(source,n),path.join(out,n));
+const supportFiles=['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs'];
+if(fs.readFileSync(path.join(source,'Program.cs'),'utf8').includes('CompactFrameReplyBinding'))supportFiles.push('CompactFrameReplyBinding.cs');
+for(const n of supportFiles)fs.copyFileSync(path.join(source,n),path.join(out,n));
 let gameTests=fs.readFileSync(new URL('./inputhost_game_output_observation_selftest.cs',import.meta.url),'utf8');
 if(!candidate)gameTests=gameTests.slice(0,gameTests.indexOf('    // CANDIDATE_ONLY'))+'    private static int GameOutputMain()=>RunGameGroups(false);\n}\n';
 fs.writeFileSync(path.join(out,'Game.cs'),gameTests);
@@ -44,7 +46,7 @@ fs.writeFileSync(path.join(out,'NuGet.Config'),'<configuration><packageSources><
 const profiles=[];
 for(const config of (opt('--configs','Release,Debug').split(','))){
  const profile={config};
- for(const [name,a]of [['build',['build','Fixture.csproj','-c',config,'--nologo','-v:q']],...(candidate?[['original-lifecycle',[path.join(out,'bin',config,'net10.0/Fixture.dll'),'--lifecycle']]]:[]),['game-observation',[path.join(out,'bin',config,'net10.0/Fixture.dll')]]]){
+ for(const [name,a]of [['build',['build','Fixture.csproj','-c',config,'--nologo','-v:q']],...(candidate&&!observationOnly?[['original-lifecycle',[path.join(out,'bin',config,'net10.0/Fixture.dll'),'--lifecycle']]]:[]),['game-observation',[path.join(out,'bin',config,'net10.0/Fixture.dll')]]]){
   const r=spawnSync('C:/Program Files/dotnet/dotnet.exe',a,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true});const log=(r.stdout??'')+(r.stderr??'');fs.writeFileSync(path.join(out,config+'-'+name+'.log'),log);profile[name]={exit:r.status};if(r.error)profile[name].error=String(r.error);
   if(name==='build'&&r.status!==0)throw Error('Build failed: '+out+'/'+config+'-'+name+'.log');
   if(name!=='build'){try{profile[name].result=JSON.parse(r.stdout.trim().split(/\r?\n/).at(-1));}catch{}}
@@ -52,7 +54,7 @@ for(const config of (opt('--configs','Release,Debug').split(','))){
  profiles.push(profile);
 }
 const stable=sources.every(r=>sha(fs.readFileSync(r.path))===r.sha256);
-const passed=stable&&profiles.every(p=>p['game-observation'].exit===0&&(!candidate||p['original-lifecycle'].exit===0));
-const result={status:passed?'PASS':'FAIL',candidate,stable,profiles,sources,extracted:receipt,sourceRoot:source,targetAssemblyLoaded:false,realHostStarted:false,deviceIo:false,actualMethods:['Host parser/dispatch/prepare/release/serializer',...(candidate?['Host output bind/detach/append','Bounded coalesced observation helper']:[])],injection:['SDK HMController inert event surface matching locked metadata; physical construction excluded','Existing fixture SDK/PnP/neutral/frame/stop delegates retained','Existing optional diagnostics inert; original three legacy parser expectation failures retained']};
+const passed=stable&&profiles.every(p=>p['game-observation'].exit===0&&(!candidate||observationOnly||p['original-lifecycle'].exit===0));
+const result={status:passed?'PASS':'FAIL',candidate,stable,selectedScope:observationOnly?'observation-only':'original-with-lifecycle',profiles,sources,extracted:receipt,sourceRoot:source,targetAssemblyLoaded:false,realHostStarted:false,deviceIo:false,actualMethods:['Host parser/dispatch/prepare/release/serializer',...(candidate?['Host output bind/detach/append','Bounded coalesced observation helper']:[])],injection:['SDK HMController inert event surface matching locked metadata; physical construction excluded','Existing fixture SDK/PnP/neutral/frame/stop delegates retained','Existing optional diagnostics inert; original three legacy parser expectation failures retained']};
 fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify({status:result.status,candidate,stable,profiles:profiles.map(p=>({config:p.config,build:p.build.exit,lifecycle:p["original-lifecycle"]?.exit,game:p["game-observation"].exit,cases:p["game-observation"].result?.cases.length,failures:p["game-observation"].result?.cases.filter(c=>!c.pass)}))}));if(!passed)process.exitCode=1;

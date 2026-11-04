@@ -17,12 +17,12 @@ inline const char* frontendUpdateScript(){return R"YMCCUPDATE(// One version-spe
     previous?.cancel?.();
     const state = host[key] = {stamp, phase:'waiting-loader', probes:0, dispatched:false};
     let timer = null, deadline = null, onReady = null;
-    const current = () => host[key] === state && host.__YMCC_DECKY_MIRROR__?.runId === value.runId && host.__YMCC_DECKY_MIRROR__?.frontendBuildId === expected;
+    const current = () => host[key] === state && host.__YMCC_DECKY_MIRROR__?.runId === value.runId && host.__YMCC_DECKY_MIRROR__?.revoked !== true && host.__YMCC_DECKY_MIRROR__?.frontendBuildId === expected;
     const clear = () => { if(timer!==null)host.clearTimeout(timer);if(deadline!==null)host.clearTimeout(deadline);timer=deadline=null;if(onReady)host.removeEventListener('ymcc-decky-frontend-ready',onReady);onReady=null;host.removeEventListener('ymcc-decky-health-stop',state.cancel); };
     state.cancel = () => { clear();state.phase='canceled'; };
     host.addEventListener('ymcc-decky-health-stop',state.cancel);
     const stop = phase => { clear();state.phase=phase; };
-    onReady = () => { if(current()&&fresh())stop('current'); };
+    onReady = () => { if(current()&&fresh()){refreshActivePanel();stop('current');} };
     host.addEventListener('ymcc-decky-frontend-ready',onReady);
     const retry = () => {if(current()&&state.phase!=='canceled'&&!state.dispatched&&state.probes<3)timer=host.setTimeout(()=>{void probe();},state.probes===1?4000:8000);else stop('failed');};
     const probe = async () => {
@@ -50,7 +50,7 @@ inline const char* frontendUpdateScript(){return R"YMCCUPDATE(// One version-spe
         deadline=host.setTimeout(()=>{if(current())stop(fresh()?'current':'failed');},10000);
         // One request, including queued/uncertain results. Never replay an import
         // merely because it returned before the ready event.
-        Promise.resolve(loader.importPlugin(plugin.name,plugin.version,plugin.load_type,true,10000)).catch(()=>{if(current())stop(fresh()?'current':'failed');});
+        Promise.resolve(loader.importPlugin(plugin.name,plugin.version,plugin.load_type,true,10000)).then(()=>{if(current()&&fresh())refreshActivePanel();}).catch(()=>{if(current())stop(fresh()?'current':'failed');});
         if(fresh())stop('current');
       } catch (_) {if(deadline!==null)host.clearTimeout(deadline);deadline=null;if(state.dispatched)stop('failed');else retry();}
     };
@@ -59,8 +59,21 @@ inline const char* frontendUpdateScript(){return R"YMCCUPDATE(// One version-spe
   }
   const key = '__YMCC_DECKY_FRONTEND_UPDATE__';
   const fresh = () => host.__YMCC_DECKY_FRONTEND__?.active === true && host.__YMCC_DECKY_FRONTEND__.buildId === expected;
+  // Upstream #976 retains an old activePlugin object after setPlugins(). Once
+  // this exact YMCC build is ready, follow the new object through the public
+  // setter only if the user is already viewing YMCC; never navigate another tab.
+  const refreshActivePanel = () => {
+    if(!fresh()||host.__YMCC_DECKY_MIRROR__?.revoked===true||host.__YMCC_DECKY_MIRROR__?.runId!==value.runId)return;
+    try {
+      const loader=host.DeckyPluginLoader,state=loader?.deckyState,active=state?.publicState?.()?.activePlugin;
+      if(active?.name!=='ymcc-sidebar'||typeof state.setActivePlugin!=='function'||!Array.isArray(loader.plugins))return;
+      const own=loader.plugins.filter(p=>p?.name==='ymcc-sidebar');
+      if(own.length===1&&active!==own[0])state.setActivePlugin('ymcc-sidebar');
+    } catch {} // Optional presentation repair never changes load/retry authority.
+  };
+
   const previous = host[key];
-  if (fresh()) { previous?.cancel?.(); return; }
+  if (fresh()) { refreshActivePanel();previous?.cancel?.(); return; }
   const boot = host.__YMCC_DECKY_FRONTEND_BOOT__;
   if (boot?.stamp === value.runId + ':' + expected && boot.dispatched) return;
   const loader = host.DeckyPluginLoader;
@@ -73,7 +86,7 @@ inline const char* frontendUpdateScript(){return R"YMCCUPDATE(// One version-spe
   previous?.cancel?.();
   const state = host[key] = { stamp, buildId: expected, phase: 'pending', attempts: 0, pending: false };
   let retry = null, deadline = null, onReady = null, rejectReady = null;
-  const current = () => host[key] === state && host.__YMCC_DECKY_MIRROR__?.runId === value.runId && host.__YMCC_DECKY_MIRROR__?.frontendBuildId === expected;
+  const current = () => host[key] === state && host.__YMCC_DECKY_MIRROR__?.runId === value.runId && host.__YMCC_DECKY_MIRROR__?.revoked !== true && host.__YMCC_DECKY_MIRROR__?.frontendBuildId === expected;
   const clearWait = () => {
     if (deadline !== null) host.clearTimeout(deadline);
     deadline = null;
@@ -100,7 +113,7 @@ inline const char* frontendUpdateScript(){return R"YMCCUPDATE(// One version-spe
       // importPlugin may return before a queued reload starts. The receipt event
       // remains mandatory, so queue admission never masquerades as loaded code.
       await Promise.all([Promise.resolve().then(() => loader.importPlugin(plugin.name, plugin.version, plugin.loadType, true, 10000)), ready]);
-      if (current()) state.phase = fresh() ? 'current' : 'failed';
+      if (current()) {if(fresh())refreshActivePanel();state.phase = fresh() ? 'current' : 'failed';}
     } catch (_) {
       if (current()) {
         state.phase = fresh() ? 'current' : 'failed';

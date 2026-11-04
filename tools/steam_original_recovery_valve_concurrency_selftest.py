@@ -40,7 +40,7 @@ def build_environment():
     env["PATH"] = str(compiler.parent) + os.pathsep + env.get("PATH", "")
     return compiler, env
 
-def run(output):
+def run(output, config_only=False, normal_only=False, identity_path_only=False):
     repo = Path(__file__).resolve().parents[1]
     out = Path(output).resolve()
     if out == repo or repo in out.parents or out in repo.parents:
@@ -65,6 +65,14 @@ def run(output):
         raise RuntimeError("preserved ROG snapshot structure drift")
     functions = {name: extractor.function(main, name) for name in FUNCTIONS}
     functions["nativeGameTargetJson"] = extractor.function(main, "nativeGameTargetJson")
+    functions["nativeValveValidateCurrentTarget"] = extractor.function(main, "nativeValveValidateCurrentTarget")
+    publisher = extractor.function(main, "nativeValvePublish")
+    discovery_patterns = {
+        name: r"\benum\s+class\s+" + name + r"\s*\{"
+        for name in ("NativeGameDiscoveryState", "NativeOnePidResult")
+    }
+    discovery_types = {name: extractor.extract(main, pattern, True) for name, pattern in discovery_patterns.items()}
+    discovery_name = extractor.function(main, "nativeGameDiscoveryStateName")
     json_header = repo / "deps/json/json.hpp"
     (out / "json.hpp").write_bytes(json_header.read_bytes())
     snapshot = extractor.extract(main, struct_pattern, True)
@@ -98,25 +106,31 @@ def run(output):
         }.get(field, "g_gameValveTarget.game." + field + " == game." + field)
         variants.append(("commit-ignores-" + field, commit, condition, "true"))
     results = []
+    if identity_path_only:
+        variants = [("identity-path-recovery", None, None, None)]
+    elif config_only:
+        variants = [("config-read-errors", None, None, None)]
+    elif normal_only:
+        variants = [("positive", None, None, None)]
     for name, function, old, new in variants:
         case_dir = out / name
         case_dir.mkdir()
         selected = dict(functions)
         if function:
             selected[function] = replace_once(selected[function], old, new, name)
-        code = template.replace("@@GAME_STRUCT@@", game).replace("@@CURRENT_STRUCT@@", snapshot).replace("@@CURRENT_FUNCTIONS@@", "\n\n".join(selected.values()))
+        code = template.replace("@@DISCOVERY_TYPES@@", "\n\n".join(discovery_types.values()) + "\n\n" + discovery_name).replace("@@GAME_STRUCT@@", game).replace("@@CURRENT_STRUCT@@", snapshot).replace("@@CURRENT_PUBLISHER@@", publisher).replace("@@CURRENT_FUNCTIONS@@", "\n\n".join(selected.values()))
         if re.search(r"@@[A-Z_]+@@", code):
             raise RuntimeError("unexpanded fixture token")
         (case_dir / "fixture.cpp").write_text(code, encoding="utf-8")
         item = {"name": name, "sourceSha256": sha(code), "expectedReturnCode": 0 if not function else 1}
         try:
-            command = [str(compiler), "/nologo", "/std:c++20", "/O2", "/EHsc", "/MT", "/utf-8", "fixture.cpp", "/I" + str(out), "/Fe:fixture.exe"]
+            command = [str(compiler), "/nologo", "/std:c++20", "/Od" if identity_path_only else "/O2", "/EHsc", "/MT", "/utf-8", "fixture.cpp", "/I" + str(out), "/Fe:fixture.exe"]
             built = subprocess.run(command, cwd=case_dir, env=env, capture_output=True, timeout=60)
             (case_dir / "compile.stdout").write_bytes(built.stdout)
             (case_dir / "compile.stderr").write_bytes(built.stderr)
             item["compileReturnCode"] = built.returncode
             if built.returncode == 0:
-                ran = subprocess.run([str(case_dir / "fixture.exe")], cwd=case_dir, env=env, capture_output=True, timeout=10)
+                ran = subprocess.run([str(case_dir / "fixture.exe")] + (["--identity-path-recovery-only"] if identity_path_only else ["--config-read-errors-only"] if config_only else []), cwd=case_dir, env=env, capture_output=True, timeout=10)
                 (case_dir / "run.stdout").write_bytes(ran.stdout)
                 (case_dir / "run.stderr").write_bytes(ran.stderr)
                 item["returnCode"] = ran.returncode
@@ -132,11 +146,22 @@ def run(output):
             item.update(passed=False, timeoutSeconds=exc.timeout)
         results.append(item)
     now = main_path.read_text(encoding="utf-8-sig")
-    drift = [name for name, value in functions.items() if extractor.function(now, name) != value]
-    if extractor.extract(now, struct_pattern, True) != snapshot:
-        drift.append("NativeGameValveSnapshot")
-    if extractor.extract(now, r"\bstruct\s+NativeDetectedGame\s*\{", True) != game:
-        drift.append("NativeDetectedGame")
+    # Exact unchanged full source already proves every captured callable/type unchanged.
+    # Preserve the original region checks when any source text changed.
+    drift = []
+    if now != main:
+        drift = [name for name, value in functions.items() if extractor.function(now, name) != value]
+        if extractor.extract(now, struct_pattern, True) != snapshot:
+            drift.append("NativeGameValveSnapshot")
+        if extractor.extract(now, r"\bstruct\s+NativeDetectedGame\s*\{", True) != game:
+            drift.append("NativeDetectedGame")
+        if extractor.function(now, "nativeValvePublish") != publisher:
+            drift.append("nativeValvePublish")
+        for name, pattern in discovery_patterns.items():
+            if extractor.extract(now, pattern, True) != discovery_types[name]:
+                drift.append(name)
+        if extractor.function(now, "nativeGameDiscoveryStateName") != discovery_name:
+            drift.append("nativeGameDiscoveryStateName")
     if identity_path.read_bytes() != identity:
         drift.append("monitor_identity.h")
     if fixture_path.read_text(encoding="utf-8") != template:
@@ -146,8 +171,10 @@ def run(output):
         "variants": results, "productionMain": str(main_path), "productionMainSha256AtStart": sha(main),
         "productionExtracts": {name: sha(value) for name, value in functions.items()},
         "snapshotSha256": sha(snapshot), "nativeDetectedGameSha256": sha(game),
+        "discoveryExtracts": {**{name: sha(value) for name, value in discovery_types.items()}, "nativeGameDiscoveryStateName": sha(discovery_name)},
         "jsonHeaderSha256": hashlib.sha256(json_header.read_bytes()).hexdigest(),
         "preservedBefore": {"export": FROZEN_EXPORT, "functions": FROZEN_HASHES},
+        "publisherSourceSha256": sha(publisher), "publisherActuallyCompiled": True,
         "sourceDrift": drift, "compiler": str(compiler),
         "controlledPorts": ["disk rule refresh", "process identity/session/memory", "game scan result", "publication sink", "clock"],
         "schedule": "one-shot synchronous I/O interleavings at released valve-lock boundaries; no random sleeps",
@@ -161,7 +188,10 @@ def run(output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="Fresh directory outside the source tree")
+    parser.add_argument("--config-read-errors-only", action="store_true", help="Only original consumer config-failure caller scenarios; no preserved normal/negative matrix rerun")
+    parser.add_argument("--normal-only", action="store_true", help="Only preserved original normal consumer, without rerunning unrelated semantic variants")
+    parser.add_argument("--identity-path-recovery-only", action="store_true", help="Only the original valve consumer path recovery and heartbeat assertions; no normal or semantic-matrix rerun")
     args = parser.parse_args()
-    result = run(args.output)
+    result = run(args.output, args.config_read_errors_only, args.normal_only, args.identity_path_recovery_only)
     print(json.dumps(result, ensure_ascii=False))
     raise SystemExit(0 if result["passed"] else 1)

@@ -85,6 +85,37 @@ export async function gyroNavigationCases({f,height,command,press,actionCase,tas
 export async function gyroFullscreenCases({height,open,command,press,actionCase,page,task}){
  let f;
  const evidence=[];
+ async function installLoopProbe(){
+  await f.evaluate(()=>{
+   if(window.__simulationLoopProbe)return;
+   const pending=new Map(),request=window.requestAnimationFrame.bind(window),cancel=window.cancelAnimationFrame.bind(window);
+   const transform=CanvasRenderingContext2D.prototype.setTransform;
+   const probe=window.__simulationLoopProbe={paints:0,pending,old:null};
+   CanvasRenderingContext2D.prototype.setTransform=function(...args){if(this.canvas.closest('.gyro-simulation-window'))probe.paints++;return transform.apply(this,args);};
+   window.requestAnimationFrame=callback=>{let id;id=request(now=>{pending.delete(id);callback(now);});pending.set(id,callback);return id;};
+   window.cancelAnimationFrame=id=>{pending.delete(id);return cancel(id);};
+  });
+  await f.waitForFunction(()=>window.__simulationLoopProbe.pending.has(window.__gyroGameAudit.frameId));
+ }
+ async function hiddenLoop(stop,resume){
+  await installLoopProbe();
+  const before=await f.evaluate(()=>{const p=window.__simulationLoopProbe,a=window.__gyroGameAudit;p.old=p.pending.get(a.frameId);return {paints:p.paints,documentVisible:document.visibilityState==='visible',scene:a.scene};});
+  await f.evaluate(stop=>window.dispatchEvent(new Event(stop)),stop);
+  const initial=await f.evaluate(()=>{const p=window.__simulationLoopProbe,a=window.__gyroGameAudit;return {paints:p.paints,time:a.scene==='fps'?a.range.time:a.motorcycle.time};});
+  await page.waitForTimeout(350);
+  const hidden=await f.evaluate(()=>{const p=window.__simulationLoopProbe,a=window.__gyroGameAudit;return {paints:p.paints,time:a.scene==='fps'?a.range.time:a.motorcycle.time,pending:a.framePending,playing:a.playing,documentVisible:document.visibilityState==='visible'};});
+  await f.evaluate(resume=>window.dispatchEvent(new Event(resume)),resume);
+  await f.waitForFunction(paints=>window.__simulationLoopProbe.paints>paints,hidden.paints);
+  const stale=await f.evaluate(()=>{const p=window.__simulationLoopProbe,a=window.__gyroGameAudit,id=a.frameId,paints=p.paints;p.old?.(performance.now());const after=window.__gyroGameAudit;return {sameFrame:after.frameId===id,extraPaints:p.paints-paints,playing:after.playing};});
+  const row={scene:before.scene,stop,resume,documentVisible:before.documentVisible&&hidden.documentVisible,observationMs:350,hiddenPaints:hidden.paints-initial.paints,modelAdvance:hidden.time-initial.time,pendingWhileHidden:hidden.pending,playingWhileHidden:hidden.playing,stale};evidence.push(row);
+  assert.equal(row.documentVisible,true,'native-hidden test must leave document visible');
+  assert.equal(row.hiddenPaints,0,'hidden simulator must do zero Canvas paints');
+  assert.equal(row.modelAdvance,0,'hidden simulator model clock must remain stopped');
+  assert.equal(row.pendingWhileHidden,false,'hidden simulator must own no animation frame');
+  assert.equal(row.playingWhileHidden,false);assert.equal(stale.playing,false,'show does not resume game input');
+  assert.equal(stale.sameFrame,true,'canceled old frame must not clear or replace a successor frame');assert.equal(stale.extraPaints,0,'canceled old frame must not draw after show');
+ }
+
  async function enter(){
   await f.evaluate(()=>window.__emitNativeEvent('gamepad.state',{connected:true,buttons:Array(16).fill(false),axes:[0,0,0,0]}));
   await command(f,'debug');await f.waitForFunction(()=>window.__gyroGameAudit.playing);
@@ -115,8 +146,7 @@ export async function gyroFullscreenCases({height,open,command,press,actionCase,
  });
  for(const [stop,resume] of [['ipc:window.hidden','ipc:window.shown'],['ipc:window.minimized','ipc:window.restored'],['ipc:power.suspending','ipc:power.resumed']])await actionCase('Gyro native '+stop+' stops input and '+resume+' never auto plays',height,async()=>{
   await enter();await supply(.6);await f.waitForFunction(()=>window.__gyroGameAudit.motorcycle.steer>.3);
-  await f.evaluate(stop=>window.dispatchEvent(new Event(stop)),stop);assert.equal(await f.evaluate(()=>window.__gyroGameAudit.playing),false);
-  await f.evaluate(resume=>window.dispatchEvent(new Event(resume)),resume);assert.equal(await f.evaluate(()=>window.__gyroGameAudit.playing),false);
+  await hiddenLoop(stop,resume);assert.equal(await f.evaluate(()=>window.__gyroGameAudit.playing),false);
   assert.doesNotMatch(await f.locator('.gyro-simulation-signal').textContent(),/使用实际陀螺仪输出/);
  });
  await actionCase('Gyro safe-zero observation cannot become active motion in the full-screen simulator',height,async()=>{
@@ -138,7 +168,33 @@ export async function gyroFullscreenCases({height,open,command,press,actionCase,
   });
   await f.waitForFunction(()=>window.__gyroGameAudit.range.shots>0&&window.__gyroGameAudit.range.yaw>.02,null,{timeout:3000});
   const range=await f.evaluate(()=>({yaw:window.__gyroGameAudit.range.yaw,shots:window.__gyroGameAudit.range.shots}));evidence.push({scene:'fps',...range});
-  await command(f,'back');assert.equal(await f.evaluate(()=>window.__gyroGameAudit.playing),false);await command(f,'back');
+  await hiddenLoop('ipc:window.hidden','ipc:window.shown');
+  await f.evaluate(()=>{const p=window.__simulationLoopProbe;p.old=p.pending.get(window.__gyroGameAudit.frameId);});
+  await command(f,'back');assert.equal(await f.locator('.gyro-simulation-window').count(),0);
+  const retired=await f.evaluate(()=>{const p=window.__simulationLoopProbe,paints=p.paints;p.old?.(performance.now());return {paints:p.paints-paints,pending:window.__gyroGameAudit.framePending};});
+  assert.equal(retired.paints,0,'unmounted simulation cannot draw from a queued old callback');assert.equal(retired.pending,false,'unmounted simulator must retire its animation ticket');
+ });
+ await actionCase('Gyro simulation mounted during native-hidden owns no frame until shown',height,async()=>{
+  f=await open('/gyro-motion',height,{nativeWidth:'1'});
+  await f.evaluate(()=>{window.dispatchEvent(new Event('ipc:window.hidden'));document.querySelector('.gyro-simulation-open').click();});
+  await f.locator('.gyro-simulation-window').waitFor({state:'attached'});await page.waitForTimeout(120);
+  const hidden=await f.evaluate(()=>({pending:window.__gyroGameAudit.framePending,time:window.__gyroGameAudit.range.time,playing:window.__gyroGameAudit.playing}));
+  assert.equal(hidden.pending,false);assert.equal(hidden.time,0);assert.equal(hidden.playing,false);
+  await f.evaluate(()=>window.dispatchEvent(new Event('ipc:window.shown')));
+  await f.waitForFunction(()=>window.__gyroGameAudit.range.time>0&&window.__gyroGameAudit.framePending);
+  assert.equal(await f.evaluate(()=>window.__gyroGameAudit.playing),false);
+  await command(f,'back');assert.equal(await f.locator('.gyro-simulation-window').count(),0);
+ });
+ await actionCase('Gyro document-hidden pauses the same model without allocating repeated frames',height,async()=>{
+  f=await open('/gyro-motion',height,{nativeWidth:'1'});await press(f,f.getByRole('button',{name:'模拟陀螺仪',exact:true}));await f.locator('.gyro-simulation-window').waitFor();
+  await installLoopProbe();
+  await f.evaluate(()=>{window.__simulationDocVisible='hidden';Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>window.__simulationDocVisible});Object.defineProperty(document,'hidden',{configurable:true,get:()=>window.__simulationDocVisible==='hidden'});document.dispatchEvent(new Event('visibilitychange'));});
+  const start=await f.evaluate(()=>({paints:window.__simulationLoopProbe.paints,time:window.__gyroGameAudit.range.time}));await page.waitForTimeout(150);
+  const hidden=await f.evaluate(()=>({paints:window.__simulationLoopProbe.paints,time:window.__gyroGameAudit.range.time,pending:window.__gyroGameAudit.framePending}));
+  assert.equal(hidden.paints,start.paints);assert.equal(hidden.time,start.time);assert.equal(hidden.pending,false);
+  await f.evaluate(()=>{window.__simulationDocVisible='visible';document.dispatchEvent(new Event('visibilitychange'));});
+  await f.waitForFunction(time=>window.__gyroGameAudit.range.time>time,start.time);assert.equal(await f.evaluate(()=>window.__gyroGameAudit.playing),false);
+  await command(f,'back');assert.equal(await f.locator('.gyro-simulation-window').count(),0);
  });
  await actionCase('Gyro H5 still requires browser focus and stops on browser blur',height,async()=>{
   f=await open('/gyro-motion',height);await press(f,f.getByRole('button',{name:'模拟陀螺仪',exact:true}));await f.locator('.gyro-simulation-window').waitFor();
@@ -222,3 +278,135 @@ export async function gyroPresetSwitchCases({height,open,press,actionCase,page})
   await presets.filter({hasText:'FPS'}).evaluate(el=>window.__gamepadAudit.focus(el));await f.evaluate(()=>window.__gamepadAudit.command('nav-right'));assert.equal(await presets.filter({hasText:'赛车'}).evaluate(el=>document.activeElement===el),true);
  });
 }
+
+// Reuse the original gyro page and simulator acceptance in the bounded display import.
+export async function gyroPageNavigationCases({height,open,command,press,actionCase,state,shot,page,task}){
+ let f;
+  f=await open('/gyro-motion',height);
+  await actionCase('Gyro unrecognized state retains equal actions and usable settings',height,async()=>{await f.evaluate(async()=>{window.__fixture.profileInput.gyroOverride='off';await window.__profileChanged();});await f.locator('.gyro-power-btn.unknown').waitFor();assert.ok(await f.locator('.gyro-power-btn.unknown').isDisabled());await state(f,'gyro/unrecognized',height);const layout=await f.locator('.gyro-power-row>.gyro-power-btn').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().toJSON()));assert.ok(Math.abs(layout[0].y-layout[1].y)<1&&Math.abs(layout[0].width-layout[1].width)<1);});
+  f=await open('/gyro-motion',height);await press(f,f.getByRole('button',{name:'展开',exact:true}));await state(f,'gyro/advanced',height);await press(f,f.getByRole('button',{name:'赛车',exact:true}));await state(f,'gyro/racing',height);await press(f,f.locator('.seg-btn').filter({hasText:/^Steam$/}));await state(f,'gyro/steam',height);await press(f,f.getByRole('button',{name:'自定义',exact:true}));await state(f,'gyro/custom',height);
+  f=await open('/gyro-motion',height);await press(f,f.getByRole('button',{name:'模拟陀螺仪',exact:true}));await f.locator('.gyro-simulation-window').waitFor();await page.waitForTimeout(130);await state(f,'gyro/simulation',height,'.gyro-simulation-window');
+  await gyroNavigationCases({f,height,command,press,actionCase,task});
+  await actionCase('Gyro simulation dropdown B stays inside; LB/RB page lock',height,async()=>{const trigger=f.locator('.gyro-simulation-window .dd-trigger').first();await press(f,trigger);await f.locator('[role="listbox"]').waitFor();await command(f,'nav-down');await command(f,'back');await f.waitForFunction(()=>!document.querySelector('[role="listbox"]'));assert.equal(await f.locator('.gyro-simulation-window').count(),1);await command(f,'page-next');assert.equal(await f.locator('.gyro-simulation-window').count(),1);assert.ok(await f.locator('.route-view[data-route="/gyro-motion"]').count());});
+  await press(f,f.getByRole('button',{name:'展开',exact:true}));await state(f,'gyro/simulation-advanced',height,'.gyro-simulation-window');await shot('gyro-simulation-'+height);
+  await actionCase('Gyro nested deletion B stays in simulation then B exits',height,async()=>{await press(f,f.locator('[data-gyro-profile-exit]'));await f.locator('.profile-remove-dialog').waitFor();await state(f,'gyro/simulation-delete',height,'.profile-remove-dialog');await command(f,'back');assert.equal(await f.locator('.profile-remove-dialog').count(),0);assert.equal(await f.locator('.gyro-simulation-window').count(),1);await command(f,'back');assert.equal(await f.locator('.gyro-simulation-window').count(),0);assert.equal(await f.locator('.gyro-integrated-page').count(),1);});
+  await actionCase('Native Start outside simulator does not open global debug',height,async()=>{
+   const before=await f.evaluate(()=>window.__startDebugEvents);assert.equal(before,0);await command(f,'debug');assert.equal(await f.evaluate(()=>window.__startDebugEvents),before);
+  });
+  await actionCase('Browser Start outside simulator does not open global debug',height,async()=>{
+   const before=await f.evaluate(()=>window.__startDebugEvents);assert.equal(before,0);await f.evaluate(()=>window.__gamepadAudit.browserStart(false,true,false));assert.equal(await f.evaluate(()=>window.__startDebugEvents),before);
+  });
+}
+
+async function gyroControlSignal(f,admission='hc-motion-admitted'){
+ await f.evaluate(admission=>window.dispatchEvent(new CustomEvent('input:motion-telemetry',{detail:{
+  sequence:window.__gyroControlSequence=(window.__gyroControlSequence||0)+1,timestampUtc:new Date().toISOString(),sensorPresent:true,
+  gyro:{x:-13.4,y:3.9,z:-5.8},accel:{x:0,y:0,z:1},motionAdmission:admission,motionContribution:{x:.43,y:.27}
+ }})),admission);
+ await f.waitForFunction(admitted=>{
+  const p=document.querySelector('.gyro-input-output-preview'),label=p?.querySelector('.stick-visual')?.getAttribute('aria-label');
+  return admitted?p?.classList.contains('receiving')&&label?.includes('+43%'):!p?.classList.contains('receiving')&&label?.includes('—');
+ },admission==='hc-motion-admitted',{timeout:5000});
+}
+export async function gyroControlCases({height,open,command,press,actionCase,state,shot}){
+ for(const scope of ['global','dedicated'])await actionCase('Gyro control '+scope+': live data, layout and passive preview',height,async()=>{
+  const f=await open('/gyro-motion',height,{controllerScope:scope});
+  await state(f,'gyro/control/'+scope,height);
+  await gyroControlSignal(f);
+  assert.equal(await f.locator('.gyro-workflow-card>.card-title').innerText(),'陀螺仪控制');
+  assert.equal(await f.locator('.gyro-state-line').count(),1);
+  assert.equal(await f.locator('.gyro-stick-preview .gyro-state-line').count(),1);
+  assert.equal(await f.locator('.gyro-stick-preview .gyro-space-caption').count(),1);
+  assert.deepEqual(await f.locator('.gyro-info-row small').allTextContents(),['触发','输入','输出']);
+  assert.deepEqual(await f.locator('.gyro-xyz-axis b').allTextContents(),['-13.4','3.9','-5.8']);
+  assert.equal(await f.locator('.gyro-stick-heading,.gyro-stick-signal,.gyro-stick-coordinates').count(),0);
+  assert.ok(!/%|有效输出|摇杆预览/.test(await f.locator('.gyro-input-output-preview').innerText()));
+  const layout=await f.locator('.gyro-input-output-preview').evaluate(el=>{
+   const box=e=>e.getBoundingClientRect().toJSON(),left=el.querySelector('.gyro-stick-preview'),right=el.querySelector('.gyro-flow-summary');
+   return {left:box(left),right:box(right),rows:[...right.children].map(box),focusable:window.__gamepadAudit.focusables().filter(e=>el.contains(e)).length,overflow:el.scrollWidth-el.clientWidth};
+  });
+  assert.equal(layout.focusable,0);assert.ok(layout.overflow<=1);
+  assert.ok(Math.abs(layout.left.y-layout.right.y)<1&&Math.abs(layout.left.height-layout.right.height)<1);
+  assert.ok(Math.max(...layout.rows.map(r=>r.height))-Math.min(...layout.rows.map(r=>r.height))<1);
+  await f.locator('.gyro-workflow-card').scrollIntoViewIfNeeded();await shot('gyro-control-'+scope+'-'+height);
+  await gyroControlSignal(f,'safe-zero');assert.match(await f.locator('.gyro-state-line').innerText(),/传感器已连接/);
+  await gyroControlSignal(f);
+  await press(f,f.getByRole('button',{name:'赛车',exact:true}));
+  await f.waitForFunction(()=>document.querySelector('.gyro-flow-summary')?.textContent.includes('左摇杆'));
+  assert.match(await f.locator('.gyro-flow-summary').innerText(),/左摇杆 · 横向/);
+  await press(f,f.locator('.seg-btn').filter({hasText:/^Steam$/}));
+  await f.waitForFunction(()=>document.querySelector('.gyro-flow-summary')?.textContent.includes('Steam 体感'));
+  assert.equal(await f.locator('.gyro-input-output-preview.receiving').count(),0);
+  await press(f,f.getByRole('button',{name:'FPS射击',exact:true}));await gyroControlSignal(f);
+  await press(f,f.locator('.gyro-power-btn:not(.link)'));await f.waitForFunction(()=>!document.querySelector('.gyro-input-output-preview.receiving'));
+  assert.match(await f.locator('.stick-visual').getAttribute('aria-label'),/—/);
+ });
+ await actionCase('Gyro control sliders retain A, LT/RT edit and B exit',height,async()=>{
+  const f=await open('/gyro-motion',height,{controllerScope:'global'});
+  await press(f,f.getByRole('button',{name:'展开',exact:true}));
+  const slider=f.locator('input[type=range]:not(:disabled)').first();
+  await slider.evaluate(el=>window.__gamepadAudit.focus(el));const before=Number(await slider.inputValue());
+  await command(f,'slider-increase');assert.equal(Number(await slider.inputValue()),before);
+  await command(f,'confirm');assert.equal(await f.evaluate(()=>window.__gamepadAudit.editing()),true);
+  await command(f,'slider-increase');const after=Number(await slider.inputValue());assert.ok(after>before);
+  await command(f,'slider-decrease');assert.ok(Number(await slider.inputValue())<after);
+  await command(f,'back');assert.equal(await f.evaluate(()=>window.__gamepadAudit.editing()),false);
+  await command(f,'nav-up');assert.equal(await slider.evaluate(el=>document.activeElement===el),false);
+  await state(f,'gyro/control/slider-return',height);
+ });
+ await actionCase('Gyro control LB/RB keeps existing page navigation',height,async()=>{
+  const f=await open('/gyro-motion',height,{controllerScope:'global'});
+  await command(f,'page-next');await f.locator('.route-view[data-route="/steam"]').waitFor();
+  await command(f,'page-prev');await f.locator('.gyro-integrated-page').waitFor();
+  assert.equal(await f.evaluate(()=>window.__gamepadAudit.editing()),false);
+  await state(f,'gyro/control/page-return',height);
+ });
+ await actionCase('Gyro control simulator mirrors telemetry and square output',height,async()=>{
+  const f=await open('/gyro-motion',height);
+  await press(f,f.getByRole('button',{name:'模拟陀螺仪',exact:true}));await f.locator('.gyro-simulation-window').waitFor();
+  assert.equal(await f.locator('.gyro-state-line').count(),1);assert.equal(await f.locator('.gyro-simulation-window .gyro-input-output-preview').count(),1);
+  await gyroControlSignal(f);await press(f,f.getByRole('button',{name:'展开',exact:true}));
+  await press(f,f.locator('.dd-trigger[data-gp-row="27"]'));await f.locator('[role=listbox]').waitFor();
+  await press(f,f.getByRole('option',{name:/方形/}));
+  await f.waitForFunction(()=>document.querySelector('.stick-visual rect[x="37"]'));
+  await gyroControlSignal(f);await state(f,'gyro/control/simulation-square',height,'.gyro-simulation-window');
+  await gyroControlSignal(f,'safe-zero');await command(f,'back');assert.equal(await f.locator('.gyro-simulation-window').count(),0);
+ });
+}
+
+export const gyroControlSelection={
+  "actions": [
+    "Gyro control global: live data, layout and passive preview",
+    "Gyro control dedicated: live data, layout and passive preview",
+    "Gyro control sliders retain A, LT/RT edit and B exit",
+    "Gyro control LB/RB keeps existing page navigation",
+    "Gyro control simulator mirrors telemetry and square output",
+    "Gyro A edits controls; Start enters from right and B returns without slider edit leak",
+    "Gyro right settings can reach and return from both left scene tabs by directions",
+    "Gyro dropdown and nested confirmation retain Start ownership",
+    "Gyro browser Start requires release and never replays a shortcut modifier",
+    "Motorcycle steering: admitted gyro and stick directions match the rider and visible handlebar",
+    "Motorcycle gameplay: X strikes a nearby AI rider, RT accelerates and LT brakes",
+    "Gyro two-scene UI stays complete after test exit",
+    "Gyro unrecognized state retains equal actions and usable settings",
+    "Gyro simulation dropdown B stays inside; LB/RB page lock",
+    "Gyro nested deletion B stays in simulation then B exits",
+    "Native Start outside simulator does not open global debug",
+    "Browser Start outside simulator does not open global debug"
+  ],
+  "states": [
+    "gyro/control/global",
+    "gyro/control/dedicated",
+    "gyro/control/slider-return",
+    "gyro/control/page-return",
+    "gyro/control/simulation-square",
+    "gyro/unrecognized",
+    "gyro/advanced",
+    "gyro/racing",
+    "gyro/steam",
+    "gyro/custom",
+    "gyro/simulation",
+    "gyro/simulation-advanced",
+    "gyro/simulation-delete"
+  ]
+};

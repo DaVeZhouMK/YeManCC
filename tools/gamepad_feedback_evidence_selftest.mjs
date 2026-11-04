@@ -66,6 +66,11 @@ try{for(unsigned iteration=0;iteration<512;++iteration){const unsigned bits=(ite
   g_machineIdentity.deviceClass=std::string("HandheldCompanion.Devices.")+name;auto r=caps();++cases;
   check(r.at("brightnessAvailable")==true&&r.at("presetImplemented")==true,"serial OneX has actual operation metadata");check(r.at("ledPresets").size()==11,"eleven named HC presets");check(r.at("ledPresets")[8].at("id")=="LEDPreset_OneXPlayerX1_Preset09","stable ID for high-value preset");
  }
+ g_machineIdentity.deviceClass="HandheldCompanion.Devices.OneXPlayer3";auto oxp3=caps();++cases;
+ check(oxp3.at("ledPresets").size()==10,"OXP3 advertises only ten reviewed presets, not the legacy eleven");
+ for(const auto& preset:oxp3.at("ledPresets")) check(ymcc::lighting::validPreset(g_machineIdentity.deviceClass,preset.at("id").get<std::string>()),"Every advertised preset must be admitted by this exact model");
+ check(oxp3.at("lightingFixedSpeed")==true,"OXP3 fixed firmware speed must reach the UI");
+ check(oxp3.at("presetSupportsSecondColor")==true,"OXP3 preset secondary zones must remain controllable");
  g_machineIdentity.deviceClass="HandheldCompanion.Devices.OneXPlayerX1Mini";auto mini=caps();++cases;
  check(mini.at("ledAvailable")==true&&mini.at("brightnessAvailable")==true,"Mini retains HID light and brightness");check(mini.at("presetDeclared")==true&&mini.at("presetImplemented")==false&&mini.at("ledPresets").empty(),"Mini inherited serial preset remains explicit missing operation");check(mini.at("presetReason")=="preset-transport-not-implemented","Mini failure reason not hidden");
  g_machineIdentity.family=YmccFamily::MsiClaw;g_machineIdentity.deviceClass="HandheldCompanion.Devices.ClawCG3EM";auto msi=caps();++cases;

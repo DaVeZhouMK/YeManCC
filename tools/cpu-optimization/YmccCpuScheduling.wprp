@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0" Author="YMCC CPU optimization">
+  <Profiles>
+    <SystemCollector Id="YmccCpuSchedulingCollector" Name="YMCC bounded CPU scheduling collector">
+      <BufferSize Value="256" />
+      <Buffers Value="256" />
+    </SystemCollector>
+    <SystemProvider Id="YmccCpuSchedulingProvider">
+      <Keywords>
+        <Keyword Value="CpuConfig" />
+        <Keyword Value="ProcessThread" />
+        <Keyword Value="Loader" />
+        <Keyword Value="SampledProfile" />
+        <Keyword Value="CSwitch" />
+        <Keyword Value="DPC" />
+        <Keyword Value="Interrupt" />
+      </Keywords>
+      <Stacks><Stack Value="SampledProfile" /></Stacks>
+    </SystemProvider>
+    <Profile Id="YmccCpuScheduling.Verbose.Memory" Name="YmccCpuScheduling" Description="Bounded scheduling intervals plus execution samples; no context-switch stackwalk; validate actual per-CPU retention" LoggingMode="Memory" DetailLevel="Verbose">
+      <Collectors><SystemCollectorId Value="YmccCpuSchedulingCollector"><SystemProviderId Value="YmccCpuSchedulingProvider" /></SystemCollectorId></Collectors>
+    </Profile>
+    <Profile Id="YmccCpuScheduling.Verbose.File" Name="YmccCpuScheduling" Description="Bounded file scheduling intervals plus execution samples" LoggingMode="File" DetailLevel="Verbose">
+      <Collectors><SystemCollectorId Value="YmccCpuSchedulingCollector"><SystemProviderId Value="YmccCpuSchedulingProvider" /></SystemCollectorId></Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

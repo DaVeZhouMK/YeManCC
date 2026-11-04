@@ -4,6 +4,8 @@
 import DiagnosticLogPauseClearButton from '@/components/DiagnosticLogPauseClearButton.vue';
 import SettingsSections from '@/components/SettingsSections.vue';
 import BatteryChargeSettings from '@/components/BatteryChargeSettings.vue';
+import CcdCard from '@/components/CcdCard.vue';
+import UndervoltCard from '@/components/UndervoltCard.vue';
 import GpuDedicatedMemorySettings from '@/components/GpuDedicatedMemorySettings.vue';
 import AmdFsrUpgradeSettings from '@/components/AmdFsrUpgradeSettings.vue';
 import UsbipUpgradeStatus from '@/components/UsbipUpgradeStatus.vue';
@@ -353,6 +355,7 @@ async function refreshMsiControllerShield(): Promise<void> {
 const updateAccel = ref<UpdateAccelState>({
   exists: false,
   running: false,
+  known: false,
 });
 const uaBusy = ref(false);
 const fanDiagnosticLoggingEnabled = ref(getFanFeatureSettings().diagnosticLoggingEnabled === true);
@@ -410,7 +413,8 @@ async function exportAllLogs(): Promise<void> {
     }>(
       'logs.exportAll',
       { tdpDiagnosticDeliveryFailures: tdpDiagnosticDeliveryFailures(), frontendDiagnosticDeliveryFailures: frontendDiagnosticDeliveryFailures() },
-      { timeoutMs: 150000 },
+      // Two 5-minute archive attempts plus snapshot copying and hash/index work.
+      { timeoutMs: 900000 },
     );
     if (r.ok !== true || !r.path) {
       const details = [r.reason || '导出失败'];
@@ -579,6 +583,7 @@ async function onUpdateAccelToggle() {
     const next = await updateAccelToggle();
     updateAccel.value = next;
     if (!next.ok) {
+      if (next.known === false) { errMsg.value = '加速器状态读取失败，请重新进入页面重试'; return; }
       errMsg.value = next.running
         ? '停止加速失败'
         : next.exists
@@ -890,13 +895,15 @@ onBeforeUnmount(() => {
       Query only the active device tab; model admission and writes stay in BatteryHost/Controller. -->
  <template #device="{ active }"><div class="device-flow"><BatteryChargeSettings v-if="active" />
  <GpuDedicatedMemorySettings v-if="active" />
+ <CcdCard v-if="active" />
+ <UndervoltCard v-if="active" />
  <AmdFsrUpgradeSettings v-if="active" />
     <section v-if="msiControllerShield.supported" class="card msi-controller-shield-card" aria-label="微星专属修复">
       <h3 class="card-title">微星专属修复</h3>
       <Toggle :model-value="msiControllerShield.enabled" label="微星前端屏蔽" color="accent" :disabled="msiShieldBusy" data-msi-controller-shield-toggle @update:model-value="onMsiControllerShieldToggle" />
       <p class="muted body" role="status">微星屏蔽 {{ msiControllerShield.enabled ? '开启' : '关闭' }} · {{ msiShieldExecutionStatus }}</p>
       <p class="muted body">专用键接管 {{ msiShieldShortcutStatus }} · 基础服务 {{ msiShieldServiceStatus }} · 重启 无需</p>
-      <p class="muted body">开启后关闭 MSI Center M 前端及 Server/Updater 启动任务，保留基础服务。<br />按键效果 待验证<span v-if="msiShieldExecutionStatus === '总体 OK（屏蔽已关闭）'"> · 前端未运行时可手动启动</span></p>
+      <p class="muted body">开启后关闭 MSI Center M 前端并删除 Server/Updater 启动任务；关闭屏蔽后从 XML 恢复任务，保留基础服务。<br />按键效果 待验证<span v-if="msiShieldExecutionStatus === '总体 OK（屏蔽已关闭）'"> · 前端未运行时可手动启动</span></p>
       <p v-if="msiShieldStatus" class="muted body" role="status">{{ msiShieldStatus }}</p>
     </section>
  <section v-if="active" class="card usbip-settings-card" aria-label="USB/IP 配套">
@@ -930,11 +937,11 @@ onBeforeUnmount(() => {
           <button
             class="action-btn outline update-accel-btn"
             :class="{ active: updateAccel.running }"
-            :disabled="uaBusy || !updateAccel.exists"
-            :title="updateAccel.exists ? (updateAccel.running ? '关闭更新加速' : '开启更新加速') : '更新加速文件未找到'"
+            :disabled="uaBusy || !updateAccel.exists || updateAccel.known === false"
+            :title="updateAccel.known === false ? '加速器状态读取失败' : updateAccel.exists ? (updateAccel.running ? '关闭更新加速' : '开启更新加速') : '更新加速文件未找到'"
             @click="onUpdateAccelToggle"
           >
-            {{ updateAccel.running ? '加速已开启' : '加速未开启' }}
+            {{ updateAccel.known === false ? '状态读取失败' : updateAccel.running ? '加速已开启' : '加速未开启' }}
           </button>
           
         </div>

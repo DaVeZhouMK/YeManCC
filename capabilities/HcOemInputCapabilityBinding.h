@@ -3,10 +3,54 @@
 // A chassis model binding does not grant vendor extras to an external physical controller.
 #pragma once
 #include "hc-device-catalog.generated.h"
+#include "HcOneXVendorInputContract.h"
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace ymcc::capabilities::oem {
+// Exact ONEX identity input to the existing shared OEM/motion/lighting consumers.
+// Fixed HC f2e58468 IDevice factory: two manufacturers, 21 product labels.
+// Source SHA256 f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47.
+// Inputs already use the native DMI trim/uppercase normalization. No substring,
+// marketing-name, CPU, or systemProduct fallback grants a device class.
+inline constexpr bool oneXManufacturerMatches(std::string_view manufacturer) noexcept {
+    return manufacturer == "ONE-NETBOOK" || manufacturer == "ONE-NETBOOK TECHNOLOGY CO., LTD.";
+}
+inline constexpr std::string_view resolveOneXDeviceClass(std::string_view manufacturer,
+        std::string_view product, std::string_view version) noexcept {
+    if (!oneXManufacturerMatches(manufacturer)) return {};
+    if (product == "ONE XPLAYER" || product == "ONEXPLAYER MINI PRO") {
+        if (version == "1002-C") return "HandheldCompanion.Devices.OneXPlayerMiniIntel";
+        if (version == "V03") return "HandheldCompanion.Devices.OneXPlayerMiniPro";
+        return "HandheldCompanion.Devices.OneXPlayerMiniAMD";
+    }
+    struct Rule { std::string_view product, deviceClass; };
+    constexpr Rule rules[] = {
+        {"ONEXPLAYER X1 I", "HandheldCompanion.Devices.OneXPlayerX1Intel"},
+        {"ONEXPLAYER X1 A", "HandheldCompanion.Devices.OneXPlayerX1AMD"},
+        {"ONEXPLAYER X1Z", "HandheldCompanion.Devices.OneXPlayerX1AMD"},
+        {"ONEXPLAYER X1 MINI", "HandheldCompanion.Devices.OneXPlayerX1Mini"},
+        {"ONEXPLAYER X1PRO", "HandheldCompanion.Devices.OneXPlayerX1Pro"},
+        {"ONEXPLAYER APEX", "HandheldCompanion.Devices.OneXPlayerApex"},
+        {"ONEXPLAYERAPEX", "HandheldCompanion.Devices.OneXPlayerApex"},
+        {"ONEXPLAYER X2", "HandheldCompanion.Devices.OneXPlayerX2"},
+        {"ONEXPLAYER X2MINI PRO", "HandheldCompanion.Devices.OneXPlayerX2MiniPro"},
+        {"ONEXPLAYER G1 I", "HandheldCompanion.Devices.OneXPlayerG1Intel"},
+        {"ONEXPLAYER G1 A", "HandheldCompanion.Devices.OneXPlayerG1AMD"},
+        {"ONEXPLAYER F1", "HandheldCompanion.Devices.OneXPlayerOneXFly"},
+        {"ONEXPLAYER F1PRO", "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro"},
+        {"ONEXPLAYER MINI A07", "HandheldCompanion.Devices.OneXPlayerMiniAMD"},
+        {"ONEXPLAYER 2 ARP23", "HandheldCompanion.Devices.OneXPlayer2"},
+        {"ONEXPLAYER 2 PRO ARP23P", "HandheldCompanion.Devices.OneXPlayer2Pro"},
+        {"ONEXPLAYER 2 PRO ARP23P EVA-01", "HandheldCompanion.Devices.OneXPlayer2Pro"},
+        {"ONEXPLAYER 3", "HandheldCompanion.Devices.OneXPlayer3"},
+        {"ONEXPLAYER-3", "HandheldCompanion.Devices.OneXPlayer3"},
+    };
+    for (const auto& rule : rules) if (product == rule.product) return rule.deviceClass;
+    return {};
+}
+
 // Only immutable model/profile/catalog selection is retained here. Live hook,
 // ownership, interface, generation, key state and release guards stay with the
 // existing input lifecycle owner and must be evaluated for every consumption.

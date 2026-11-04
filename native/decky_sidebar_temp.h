@@ -10,6 +10,7 @@
 namespace ymcc::deckysidebar {
 class LoaderTemporaryRun {
     std::filesystem::path base_,run_;
+    bool shortRoot_=false;
     std::string cleanupStage_="not-requested";
     std::filesystem::path cleanupFailure_;
     struct DirectoryLock {
@@ -57,6 +58,11 @@ class LoaderTemporaryRun {
         return good&&last==ERROR_NO_MORE_FILES;
     }
 public:
+    // Public onefile consumers need room for _MEIxxxxxx + packaged filenames.
+    // Keep this UTF-16 bound paired with the actual official CArchive assertion
+    // in decky_loader_official_selftest.mjs whenever the public Loader changes.
+    static constexpr size_t maxRunPathUnits=190;
+    static constexpr size_t extractionReserveUnits=68;
     LoaderTemporaryRun()=default;
     LoaderTemporaryRun(const LoaderTemporaryRun&)=delete;
     LoaderTemporaryRun& operator=(const LoaderTemporaryRun&)=delete;
@@ -64,7 +70,25 @@ public:
         if(!run_.empty())throw std::runtime_error("loader-temp-run-still-owned");
         const auto canonical=std::filesystem::absolute(home).lexically_normal();
         if(!ordinaryAncestors(canonical))throw std::runtime_error("loader-temp-home-not-ordinary");
-        base_=canonical/L"runtime-temp";
+        base_=canonical/L"runtime-temp";shortRoot_=false;
+        // A deep candidate/upgrade install must not also become the onefile
+        // extraction root. Some supported Windows systems still apply MAX_PATH
+        // despite an executable's longPathAware manifest. Never change that OS
+        // policy, shorten business paths, reuse another run, or clear global TEMP.
+        constexpr size_t runSuffixUnits=1+43; // separator + 128-bit random name
+        if(base_.wstring().size()+runSuffixUnits>maxRunPathUnits){
+            wchar_t buffer[32768]{};
+            const auto count=GetTempPathW(static_cast<DWORD>(std::size(buffer)),buffer);
+            if(!count||count>=std::size(buffer))throw std::runtime_error("loader-temp-short-root-unavailable");
+            const auto temp=std::filesystem::absolute(buffer).lexically_normal();
+            if(!ordinaryAncestors(temp))throw std::runtime_error("loader-temp-short-root-not-ordinary");
+            const auto owner=temp/L"YMCC-Decky";
+            base_=owner/L"runtime-temp";
+            if(base_.wstring().size()+runSuffixUnits>maxRunPathUnits)throw std::runtime_error("loader-temp-path-too-long");
+            if(!CreateDirectoryW(owner.c_str(),nullptr)&&GetLastError()!=ERROR_ALREADY_EXISTS)throw std::runtime_error("loader-temp-short-root-create-failed");
+            if(!ordinaryAncestors(owner))throw std::runtime_error("loader-temp-short-root-not-ordinary");
+            shortRoot_=true;
+        }
         if(!CreateDirectoryW(base_.c_str(),nullptr)&&GetLastError()!=ERROR_ALREADY_EXISTS)throw std::runtime_error("loader-temp-base-failed");
         if(!ordinaryAncestors(base_))throw std::runtime_error("loader-temp-base-not-ordinary");
         for(unsigned attempt=0;attempt<8;++attempt){
@@ -77,6 +101,7 @@ public:
         }throw std::runtime_error("loader-temp-name-collision");
     }
     const std::filesystem::path& path()const{return run_;}
+    bool usedShortRoot()const{return shortRoot_;}
     const std::string& cleanupStage()const{return cleanupStage_;}
     const std::filesystem::path& cleanupFailure()const{return cleanupFailure_;}
     bool cleanupAfterJobEmpty(bool noActiveProcesses){

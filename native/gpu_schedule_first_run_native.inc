@@ -15,7 +15,7 @@ static void initializeGpuScheduleFirstRunDefault() {
         if(mainExists||backupExists)return;
         ymccResolveMachineIdentityOnce(); // Reuse the process-wide cached CPU identity.
         const auto& processor=g_machineIdentity.processor;
-        if(!ymcc::gpuschedule::isAmd395(processor))return;
+        if(!ymcc::gpuschedule::isAmdAiMaxDefaultOff(processor))return;
         constexpr auto key=L"SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers";
         constexpr auto value=L"HwSchMode";
         DWORD before=0,bytes=sizeof(before);

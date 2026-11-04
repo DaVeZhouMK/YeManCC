@@ -16,7 +16,33 @@
 namespace custom_steam_library::opti_catalog {
 using Json = nlohmann::json;
 inline constexpr unsigned startupDelayMs = 30000;
-inline constexpr unsigned itemDelayMs = 50;
+inline constexpr unsigned itemDelayMs = 1500;
+inline constexpr unsigned workBudgetMs = 240000;
+struct WorkLimit {};
+// Shared by item pacing and lazy artwork traversal. Commit uses the owner's
+// remaining minute, while cancellation still rejects every pending write.
+class WorkBudget {
+    std::function<bool()> cancelled_;
+    ULONGLONG started_=GetTickCount64(), yielded_=started_;
+    unsigned budget_;
+public:
+    explicit WorkBudget(std::function<bool()> cancelled, unsigned budget=workBudgetMs)
+        :cancelled_(std::move(cancelled)),budget_(budget){}
+    void check() const {
+        if(cancelled_())throw std::runtime_error("OPT supplement cancelled");
+        if(GetTickCount64()-started_>=budget_)throw WorkLimit{};
+    }
+    void pause(unsigned duration) {
+        const auto start=GetTickCount64();
+        for(;;){check();const auto elapsed=GetTickCount64()-start;
+            if(elapsed>=duration)break;
+            Sleep(static_cast<DWORD>(std::min<ULONGLONG>(25,duration-elapsed)));
+        }
+        yielded_=GetTickCount64();
+    }
+    void checkpoint(){check();if(GetTickCount64()-yielded_>=8)pause(25);}
+    void item(){check();if(GetTickCount64()-started_+itemDelayMs>=budget_)throw WorkLimit{};pause(itemDelayMs);}
+};
 inline constexpr size_t maxCatalogBytes = 16u << 20;
 inline constexpr size_t maxGames = 20000;
 struct Candidate {
@@ -71,22 +97,34 @@ inline bool missing(const Json& game, const char* key) {
     return it == game.end() || it->is_null() || (it->is_string() && it->get_ref<const std::string&>().empty());
 }
 struct Result {
-    std::string status = "idle", reason;
+    std::string status = "idle", reason, nextCandidate;
+    bool workLimited=false;
+    size_t considered=0;
     size_t candidates = 0, added = 0, supplemented = 0, covers = 0, skipped = 0;
     Json document() const {
         return {{"status", status}, {"reason", reason}, {"candidates", candidates},
             {"added", status == "synced" ? added : 0}, {"supplemented", status == "synced" ? supplemented : 0},
-            {"covers", status == "synced" ? covers : 0}, {"coversCopied", covers}, {"skipped", skipped}};
+            {"covers", status == "synced" ? covers : 0}, {"coversCopied", covers}, {"skipped", skipped},
+            {"workLimited", workLimited}, {"considered", considered}, {"nextCandidate", nextCandidate}};
     }
 };
 struct Ports {
     std::function<std::optional<std::string>()> read;
     std::function<void(const std::string&)> backup, commit;
     std::function<bool()> clientRunning, cancelled;
-    std::function<void()> pace;
+    std::function<void()> pace, checkpoint;
     std::function<std::string()> newId;
     std::function<std::string(const Candidate&)> copyCover, resolveCover;
 };
+inline std::string candidateKey(const Candidate& item) {
+    return pathKey(item.installPath)+"|"+pathKey(item.executablePath)+"|"+std::to_string(item.steamAppId);
+}
+inline bool resumeCandidates(std::vector<Candidate>& candidates,const std::string& next) {
+    if(next.empty())return false;
+    const auto found=std::find_if(candidates.begin(),candidates.end(),[&](const auto& item){return candidateKey(item)==next;});
+    if(found==candidates.end())return false;
+    std::rotate(candidates.begin(),found,candidates.end());return true;
+}
 inline Json parseCatalog(const std::optional<std::string>& bytes) {
     if (!bytes) return Json::array();
     if (bytes->size() > maxCatalogBytes) throw std::runtime_error("OPT catalog exceeds size limit");
@@ -107,10 +145,13 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
         if (row.contains("Platform") && row["Platform"] == 0 && !text(row, "AppId").empty())
             bySteamId[text(row, "AppId")].insert(i);
     };
-    for (size_t i = 0; i < games.size(); ++i) index(i);
+    for (size_t i = 0; i < games.size(); ++i) { if(ports.checkpoint)ports.checkpoint(); index(i); }
     result.candidates = candidates.size();
     for (const auto& item : candidates) {
+      try {
+        if(ports.checkpoint)ports.checkpoint();
         if (ports.cancelled()) throw std::runtime_error("OPT supplement cancelled");
+        ++result.considered;
         if (!valid(item)) { ++result.skipped; continue; }
         const auto exe = pathKey(item.executablePath), dir = pathKey(item.installPath);
         std::set<size_t> matches;
@@ -128,19 +169,22 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
         if (matches.empty() && games.size() >= maxGames) { ++result.skipped; continue; }
         const bool added = matches.empty();
         size_t i = added ? games.size() : *matches.begin();
-        if (added) games.push_back({{"Platform", item.steamAppId > 0 ? 0 : 8},
-            {"AppId", item.steamAppId > 0 ? std::to_string(item.steamAppId) : "Manual_" + ports.newId()}});
-        const bool needsMetadata = (!item.name.empty() && missing(games[i], "Name")) ||
-            missing(games[i], "InstallPath") || (!item.executablePath.empty() && missing(games[i], "ExecutablePath"));
-        const bool needsCover = missing(games[i], "CoverImageUrl") && (!item.coverPath.empty() || ports.resolveCover);
+        Json row=added?Json::object():games[i];
+        const bool needsMetadata = (!item.name.empty() && missing(row, "Name")) ||
+            missing(row, "InstallPath") || (!item.executablePath.empty() && missing(row, "ExecutablePath"));
+        const bool needsCover = missing(row, "CoverImageUrl") && (!item.coverPath.empty() || ports.resolveCover);
         if (!added && !needsMetadata && !needsCover) continue;
-        // Pace actual missing data only. Complete records need neither artwork IO
-        // nor a 50ms sleep, so the once-only worker can exit promptly.
+        // One incomplete item at a time. Admit before allocating an ID or row;
+        // a work deadline preserves only previously completed rows.
         ports.pace();
         if (ports.cancelled()) throw std::runtime_error("OPT supplement cancelled");
-        const auto before = games[i];
+        if (ports.clientRunning()) { result.status="deferred"; result.reason="client-running"; return games; }
+        if(ports.checkpoint)ports.checkpoint();
+        if(added)row={{"Platform",item.steamAppId>0?0:8},
+            {"AppId",item.steamAppId>0?std::to_string(item.steamAppId):"Manual_"+ports.newId()}};
+        const auto before = row;
         auto fill = [&](const char* key, const std::string& value) {
-            if (!value.empty() && missing(games[i], key)) games[i][key] = value;
+            if (!value.empty() && missing(row, key)) row[key] = value;
         };
         fill("Name", item.name);
         fill("InstallPath", item.installPath);
@@ -148,15 +192,19 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
         if (needsCover) {
             auto withCover = item;
             if (withCover.coverPath.empty() && ports.resolveCover) withCover.coverPath = ports.resolveCover(item);
+            if(ports.checkpoint)ports.checkpoint();
             if (!withCover.coverPath.empty()) {
                 const auto cover = ports.copyCover(withCover);
                 if (!cover.empty()) { fill("CoverImageUrl", cover); ++result.covers; }
             }
         }
-        if (added) ++result.added;
-        else if (before != games[i]) ++result.supplemented;
+        if (added) { games.push_back(std::move(row)); ++result.added; }
+        else { if(before!=row)++result.supplemented; games[i]=std::move(row); }
         // Add newly filled identities to the index, including earlier candidates.
         index(i);
+      } catch(const WorkLimit&) {
+        result.workLimited=true;result.reason="work-budget";result.nextCandidate=candidateKey(item);break;
+      }
     }
     return games;
 }
@@ -168,7 +216,7 @@ inline Result supplement(const std::vector<Candidate>& candidates, Ports& ports)
     const auto original = ports.read();
     const auto catalog = parseCatalog(original);
     const auto merged = merge(catalog, candidates, ports, result);
-    if (merged == catalog) return result; // No backup, covers or catalog writes on an unchanged pass.
+    if (result.status=="deferred" || merged == catalog) return result; // No backup, covers or catalog writes on an unchanged pass.
     const auto content = merged.dump(2) + '\n';
     if (content.size() > maxCatalogBytes) throw std::runtime_error("OPT merged catalog exceeds size limit");
     auto ready = [&] {

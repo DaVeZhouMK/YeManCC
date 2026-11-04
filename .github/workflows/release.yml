@@ -15,273 +15,24 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       # Keep build outputs and acceptance evidence outside tracked product sources.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
+      pnpm_config_verify_deps_before_run: 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Normalize release workspace paths
-        shell: pwsh
-        run: |
-          $workspace = [IO.Path]::GetFullPath($env:YEMAN_WORKSPACE_ROOT).TrimEnd('\')
-          $project = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\')
-          if ($workspace -eq $project -or $workspace.StartsWith($project + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Build workspace must be outside product sources' }
-          "YEMAN_WORKSPACE_ROOT=$workspace" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Verify tag and source versions
-        shell: pwsh
-        run: |
-          if ('${{ github.ref_type }}' -ne 'tag') {
-            throw 'Release workflow must run from a Git tag.'
-          }
-          $manifest = Get-Content -LiteralPath version.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          $package = Get-Content -LiteralPath package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          $version = [string]$manifest.version
-          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
-            throw "version.json has an invalid strict version: $version"
-          }
-          $versionParts = @([int64]$Matches[1], [int64]$Matches[2], [int64]$Matches[3])
-          if (@($versionParts | Where-Object { $_ -gt [int]::MaxValue }).Count -gt 0) {
-            throw "version.json version part is out of range: $version"
-          }
-          if ([string]$package.version -ne $version) {
-            throw "Version mismatch: version.json=$version, package.json=$($package.version)"
-          }
-          $expectedTag = "v$version"
-          $notesPath = "docs/release-notes/$expectedTag.md"
-          if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) { throw "Approved release notes are missing: $notesPath" }
-          "RELEASE_NOTES_PATH=$notesPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          if ('${{ github.ref_name }}' -ne $expectedTag) {
-            throw "Tag mismatch: expected $expectedTag, got ${{ github.ref_name }}"
-          }
-
-      - name: Setup pnpm 11.16.0
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Build and check immutable release candidate
+        id: candidate
+        uses: ./.github/actions/release-build
         with:
-          version: 11.16.0
-
-      - name: Setup Node 22
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22.14.0'
-          cache: 'pnpm'
-
-      - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: '10.0.400'
-
-      - name: Provide frozen-source Visual Studio compatibility entrypoints
-        shell: pwsh
-        run: |
-          # Only provision the disposable hosted runner. No tracked source is edited.
-          $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          # Reuse a selected installation or discover MSVC directly (including preview VS).
-          $installation = $env:VSINSTALLDIR
-          if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
-            $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-            $discoveryExit = $LASTEXITCODE
-            if ($discoveryExit -ne 0) { throw "Installed MSVC toolchain discovery failed: $discoveryExit" }
-            $installation = $locations | Select-Object -First 1
-          }
-          if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
-          # MSVC exports Platform=x64. MSBuild treats it as a project property and
-          # moves .NET outputs to bin/x64/Release, outside the frozen recipe's lane.
-          # Clear only that ambient property; project PlatformTarget/RID remain x64.
-          $env:Platform = $null
-          'Platform=' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $inputProperties = & dotnet msbuild InputHost/YeManInputHost.csproj -nologo -p:Configuration=Release -getProperty:Platform,PlatformTarget,OutputPath
-          if ($LASTEXITCODE -ne 0) { throw 'InputHost output-lane evaluation failed.' }
-          $inputProperties = ($inputProperties -join "`n") | ConvertFrom-Json
-          if ($inputProperties.Properties.PlatformTarget -ne 'x64' -or $inputProperties.Properties.OutputPath -ne 'bin\Release\net10.0-windows\') {
-            throw 'Frozen InputHost recipe no longer targets the approved x64 output lane.'
-          }
-          $actualRoot = Join-Path $installation 'VC\Auxiliary\Build'
-          $legacyRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build'
-          $entries = @()
-          foreach ($name in @('vcvars32.bat', 'vcvars64.bat')) {
-            $actual = Join-Path $actualRoot $name
-            $legacy = Join-Path $legacyRoot $name
-            if (-not (Test-Path -LiteralPath $actual -PathType Leaf)) { throw "Missing installed MSVC entrypoint: $actual" }
-            $created = $false
-            if (-not (Test-Path -LiteralPath $legacy -PathType Leaf)) {
-              New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
-              $shim = "@echo off`r`ncall `"$actual`" %*`r`nexit /b %errorlevel%`r`n"
-              [IO.File]::WriteAllText($legacy, $shim, [Text.Encoding]::ASCII)
-              $created = $true
-            }
-            $entries += [ordered]@{ legacy = $legacy; installed = $actual; shimCreated = $created }
-          }
-          $probe = Join-Path $env:RUNNER_TEMP 'probe-yemancc-x86.cmd'
-          $entry32 = Join-Path $legacyRoot 'vcvars32.bat'
-          [IO.File]::WriteAllText($probe, "@echo off`r`ncall `"$entry32`"`r`nif errorlevel 1 exit /b 1`r`nif /i not `"%VSCMD_ARG_TGT_ARCH%`"==`"x86`" exit /b 2`r`nwhere cl.exe`r`nexit /b %errorlevel%`r`n", [Text.Encoding]::ASCII)
-          & $env:ComSpec /d /c $probe
-          if ($LASTEXITCODE -ne 0) { throw 'Frozen-source x86 MSVC entrypoint probe failed.' }
-          git diff --exit-code
-          if ($LASTEXITCODE -ne 0) { throw 'Runner provisioning changed tracked frozen source.' }
-          $record = [ordered]@{ tag = '${{ github.ref_name }}'; tagCommit = (git rev-parse HEAD); tagTree = (git rev-parse 'HEAD^{tree}'); installedVisualStudio = $installation; compatibilityEntrypoints = $entries; trackedSourceChanged = $false; scope = 'Hosted runner toolchain provisioning only; tagged source unchanged.' }
-          $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'release-runner-compatibility.json') -Encoding utf8
-
-      - name: Activate x64 compiler and Windows SDK
-        shell: pwsh
-        run: |
-          $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 discovery failed' }
-          $installation = $locations | Select-Object -First 1
-          if (!$installation) { throw 'MSVC x64 toolchain is missing' }
-          $entry = Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
-          $batch = Join-Path $env:RUNNER_TEMP 'ymcc-x64-environment.cmd'
-          [IO.File]::WriteAllText($batch, "@echo off`r`ncall `"$entry`" >nul`r`nif errorlevel 1 exit /b 1`r`nset`r`n", [Text.Encoding]::ASCII)
-          $rows = & cmd.exe /d /c $batch
-          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 environment failed' }
-          foreach ($row in $rows) {
-            $i = $row.IndexOf('=')
-            if ($i -le 0) { continue }
-            $name = $row.Substring(0, $i)
-            if ($name -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion|VSINSTALLDIR|VSCMD_ARG_TGT_ARCH)$') { $row | Out-File $env:GITHUB_ENV -Encoding utf8 -Append }
-          }
-          'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build and assemble Release
-        shell: pwsh
-        run: |
-          # Formal Git releases default to fast mode; complete fixtures run separately on request.
-          & tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease
-          if ($LASTEXITCODE -ne 0) { throw 'Fast release build/package failed.' }
-      - name: Verify release outputs
-        shell: pwsh
-        run: |
-          $root = $env:YEMAN_WORKSPACE_ROOT
-          $required = @(
-            'Release\YeManCC\YeManCC.exe',
-            'Release\YeManCC\index.html',
-            'Release\PowerControl\pawnio\YeManTdpCtl.exe',
-            'Release\PowerControl\pawnio\_internal\python313.dll',
-            'Release\YeManCC\update-manifest.json',
-            'Release\Packages\YeManCC.zip',
-            'Release\version.json'
-          )
-          foreach ($relative in $required) {
-            if (-not (Test-Path -LiteralPath (Join-Path $root $relative))) {
-              throw "Release output missing: $relative"
-            }
-          }
-          $releaseManifest = (Get-Content -LiteralPath (Join-Path $root 'Release\version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
-          $layoutManifestText = Get-Content -LiteralPath (Join-Path $root 'Release\YeManCC\update-manifest.json') -Raw -Encoding UTF8
-          $layoutManifest = $layoutManifestText.TrimStart([char]0xFEFF) | ConvertFrom-Json
-          if ([int]$layoutManifest.schemaVersion -ne 1 -or [string]$layoutManifest.packageVersion -ne [string]$releaseManifest.version) {
-            throw 'Release update-manifest.json has an invalid schema or package version.'
-          }
-          $declaredRoots = @($layoutManifest.roots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
-          $requiredRoots = @($layoutManifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-          $missingRoots = @($requiredRoots | Where-Object { $_ -notin $declaredRoots })
-          if ($missingRoots.Count -gt 0) { throw "update-manifest.json misses required roots: $($missingRoots -join ', ')" }
-          foreach ($definition in @($layoutManifest.roots)) {
-            $rootPath = Join-Path $root (Join-Path 'Release' ([string]$definition.source))
-            if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { throw "Release root missing: $($definition.source)" }
-            if ($definition.packageManifest -and -not (Test-Path -LiteralPath (Join-Path $rootPath ([string]$definition.packageManifest)) -PathType Leaf)) {
-              throw "Release package manifest missing: $($definition.source)/$($definition.packageManifest)"
-            }
-          }
-          $localHash = (Get-FileHash -LiteralPath (Join-Path $root 'Release\Packages\YeManCC.zip') -Algorithm SHA256).Hash
-          if ($localHash -ne [string]$releaseManifest.sha256) {
-            throw "Release manifest SHA-256 mismatch: expected $($releaseManifest.sha256), got $localHash"
-          }
-          if (Test-Path -LiteralPath (Join-Path $root 'Release\Packages\YeManCC-Complete.zip')) {
-            throw 'Release\Packages must not contain the incorrect package name YeManCC-Complete.zip.'
-          }
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $root 'Release\Packages\YeManCC.zip'))
-          try {
-            $roots = @($zip.Entries | ForEach-Object {
-              $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
-              if ($normalized) { ($normalized -split '/')[0] }
-            } | Sort-Object -Unique)
-            $missingZipRoots = @($requiredRoots | Where-Object { $_ -notin $roots })
-            $unexpectedZipRoots = @($roots | Where-Object { $_ -notin $declaredRoots })
-            if ($missingZipRoots.Count -gt 0 -or $unexpectedZipRoots.Count -gt 0) {
-              throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($roots -join ', ')"
-            }
-            $layoutManifestEntries = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' })
-            if ($layoutManifestEntries.Count -ne 1) {
-              throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
-            }
-            $flat = @($zip.Entries | Where-Object {
-              $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
-              $normalized -and ($normalized -split '/').Count -eq 1 -and -not $normalized.EndsWith('/')
-            })
-            if ($flat.Count -gt 0) { throw 'YeManCC.zip contains flattened YeManCC entries.' }
-          } finally {
-            $zip.Dispose()
-          }
-
-      - name: Verify local Fan Host V2 lane before publishing
-        shell: pwsh
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release\Packages\YeManCC.zip')
-          if ($LASTEXITCODE -ne 0) { throw 'Local Fan Host V2 path/identity gate failed.' }
-
-      - name: Assemble complete release attachments from the immutable source tag
-        shell: pwsh
-        run: |
-          $tag = '${{ github.ref_name }}'
-          $tagCommit = (git rev-parse "$tag^{commit}").Trim()
-          if ($LASTEXITCODE -ne 0 -or $tagCommit -ne (git rev-parse HEAD).Trim()) { throw 'Source archive must come from the checked-out release tag.' }
-          $sourceName = "YeManCC-source-$tag.zip"
-          $sourcePath = Join-Path $env:YEMAN_WORKSPACE_ROOT "Release/Packages/$sourceName"
-          git archive --format=zip --prefix=YeManCC/ --output=$sourcePath $tag
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'Tagged source ZIP creation failed.' }
-          $packageDir = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/Packages'
-          Copy-Item -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Destination (Join-Path $packageDir 'version.json') -Force
-          $rows = foreach ($name in @('YeManCC.zip', $sourceName, 'version.json')) {
-            $file = Join-Path $packageDir $name
-            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
-            "$hash  $name"
-          }
-          [IO.File]::WriteAllText((Join-Path $packageDir 'SHA256SUMS.txt'), (($rows -join "`n") + "`n"), [Text.Encoding]::ASCII)
-          Write-Output "COMPLETE_RELEASE_ATTACHMENTS_OK sourceTag=$tag commit=$tagCommit"
-
-      - name: Verify fast-release declaration (fixtures NOT_RUN)
-        shell: pwsh
-        run: |
-          # Inspect this release's manifest and bytes; no historical fixture receipts are consumed.
-          $releaseRoot = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release'
-          $manifest = (Get-Content -LiteralPath (Join-Path $releaseRoot 'version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
-          $expectedVersion = '${{ github.ref_name }}'.Substring(1)
-          if ([string]$manifest.version -cne $expectedVersion) { throw 'Fast release manifest does not match the current tag.' }
-          if ([string]$manifest.releaseMode -cne 'fast' -or [string]$manifest.fixtureValidation -cne 'NOT_RUN') {
-            throw 'Formal fast release requires releaseMode=fast and fixtureValidation=NOT_RUN.'
-          }
-          $markers = @(Get-ChildItem -LiteralPath $releaseRoot -Filter 'test-export.json' -File -Recurse -Force -ErrorAction Stop)
-          if ($markers.Count -gt 0) { throw 'Formal release tree must not contain test-export.json.' }
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $releaseRoot 'Packages/YeManCC.zip'))
-          try {
-            $zipMarkers = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -match '(^|/)test-export\.json$' })
-            if ($zipMarkers.Count -gt 0) { throw 'Formal release ZIP must not contain test-export.json.' }
-          } finally {
-            $zip.Dispose()
-          }
-          Write-Output 'FAST_RELEASE_DECLARATION_OK releaseMode=fast fixtureValidation=NOT_RUN; complete fixtures were not executed.'
-
-      # Online hard gate: the immutable source tag must already contain the latest official Windows Loader.
-      # Upgrade/commit via tools/decky-loader-upgrade.ps1 before tagging; CI never rewrites tag sources.
-      - name: Required official Decky latest-stable gate
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky-loader-upgrade.ps1 -Action ReleaseGate -EvidenceDir (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Build/Validation/DeckyUpdate/OfficialLoader')
-          if ($LASTEXITCODE -ne 0) { throw 'Official Decky Loader is stale or unverified; refusing to publish.' }
+          mode: formal
 
       - name: Save release identity and official Decky evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: decky-update-release-evidence
@@ -291,7 +42,7 @@ jobs:
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/opt-gate
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyExport
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/version.json
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3; Node.js 24
@@ -301,18 +52,30 @@ jobs:
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC-source-${{ github.ref_name }}.zip
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/version.json
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          tag_name: ${{ steps.candidate.outputs.tag }}
           overwrite_files: false
-          body_path: ${{ env.RELEASE_NOTES_PATH }}
+          body_path: ${{ steps.candidate.outputs.notes-path }}
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify published package before advertising the version
+        timeout-minutes: 10
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $release = gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets | ConvertFrom-Json
+          $release = gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json 'assets,isDraft,isPrerelease' | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release) { throw 'Cannot read the published release.' }
+          if ($release.isDraft -or $release.isPrerelease) { throw 'Formal release must be public and stable before advertising.' }
+          $names = @('YeManCC.zip', "YeManCC-source-${{ github.ref_name }}.zip", 'version.json', 'SHA256SUMS.txt')
+          foreach ($name in $names) {
+            $matches = @($release.assets | Where-Object { $_.name -ceq $name })
+            if ($matches.Count -ne 1 -or $matches[0].state -cne 'uploaded' -or $matches[0].size -le 0) {
+              throw "Published attachment missing, duplicated or incomplete: $name"
+            }
+          }
           $asset = @($release.assets | Where-Object { $_.name -eq 'YeManCC.zip' })
           if ($asset.Count -ne 1) {
             throw 'GitHub Release does not contain exactly one YeManCC.zip asset.'
@@ -324,13 +87,19 @@ jobs:
           $manifest = (Get-Content -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
           New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern 'YeManCC.zip' --dir $downloadRoot --clobber
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern 'YeManCC.zip' --dir $downloadRoot --clobber
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 3) { throw 'Cannot download published complete package after 3 attempts.' }
+            Start-Sleep -Seconds $attempt
+          }
           $publishedHash = (Get-FileHash -LiteralPath (Join-Path $downloadRoot 'YeManCC.zip') -Algorithm SHA256).Hash
           if ($publishedHash -ne [string]$manifest.sha256) {
             throw "Published asset SHA-256 mismatch: expected $($manifest.sha256), got $publishedHash"
           }
 
       - name: Verify every complete-release attachment by downloading published bytes
+        timeout-minutes: 10
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -342,8 +111,12 @@ jobs:
             $local = Join-Path $env:YEMAN_WORKSPACE_ROOT "Release/Packages/$name"
             $public = Join-Path $downloadRoot $name
             if (-not (Test-Path -LiteralPath $public -PathType Leaf)) {
-              gh release download $tag --repo '${{ github.repository }}' --pattern $name --dir $downloadRoot
-              if ($LASTEXITCODE -ne 0) { throw "Cannot download published attachment: $name" }
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                gh release download $tag --repo '${{ github.repository }}' --pattern $name --dir $downloadRoot --clobber
+                if ($LASTEXITCODE -eq 0) { break }
+                if ($attempt -eq 3) { throw "Cannot download published attachment after 3 attempts: $name" }
+                Start-Sleep -Seconds $attempt
+              }
             }
             if ((Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $public -Algorithm SHA256).Hash) {
               throw "Published attachment differs from its built/source bytes: $name"
@@ -369,6 +142,7 @@ jobs:
         run: |
           $generated = (Get-Content -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $currentText = gh api "repos/${{ github.repository }}/contents/version.json?ref=main" --jq .content
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read main manifest before advertising.' }
           $currentText = ($currentText -replace '\s', '')
           $currentJsonText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentText))
           # GitHub contents may return a UTF-8 BOM from an older manifest.
@@ -403,6 +177,7 @@ jobs:
           $manifestPath = Join-Path $env:RUNNER_TEMP 'version.json'
           $generated = (Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $current = gh api "repos/$repo/contents/version.json?ref=main" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $current.sha) { throw 'Cannot read current main manifest identity.' }
           $currentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($current.content -replace '\s', ''))).TrimStart([char]0xFEFF)
           $currentJson = $currentText | ConvertFrom-Json
           if ([version]$generated.version -lt [version]$currentJson.version) {
@@ -416,16 +191,18 @@ jobs:
             branch = 'main'
           } | ConvertTo-Json -Compress
           $result = $payload | gh api --method PUT "repos/$repo/contents/version.json" --input - | ConvertFrom-Json
-          if (-not $result.commit.sha) { throw 'Failed to commit generated version manifest through GitHub API' }
+          if ($LASTEXITCODE -ne 0 -or -not $result.commit.sha) { throw 'Failed to commit generated version manifest through GitHub API' }
           Write-Output "version manifest committed: $($result.commit.sha)"
 
       - name: Preserve release provenance and checksums
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-provenance-${{ github.ref_name }}
           path: |
             ${{ runner.temp }}/release-runner-compatibility.json
+            ${{ runner.temp }}/release-preflight-*.json
             ${{ runner.temp }}/version.json
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/SHA256SUMS.txt
           if-no-files-found: warn

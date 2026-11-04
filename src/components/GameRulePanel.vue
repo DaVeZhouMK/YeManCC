@@ -294,7 +294,7 @@ onBeforeUnmount(() => {
       <div v-if="message || error" class="game-rules-message" :class="{ error: !!error }">{{ error || message }}</div>
 
       <div class="game-rules-bottom-actions" data-gp-group="game-rules-bottom-actions" data-gp-game-row="rules-footer">
-        <button type="button" class="rules-close-bottom" data-gp-rule-focus="rules-close" @click="emit('close')"><strong>B</strong>关闭页面</button>
+        <button type="button" class="rules-close-bottom" data-gp-rule-focus="rules-close" @click="emit('close')"><span class="controller-key" data-controller-key="B">B</span>关闭页面</button>
       </div>
       </div>
     </Transition>

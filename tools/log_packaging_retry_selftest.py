@@ -218,7 +218,7 @@ def main() -> int:
 
     check("tar-zip-stream-uses-owned-output-handle", "--format=zip -c -f -" in command_source and "archiveOutput=CreateFileW(" in compact_helper and "fspath::path(tempPath)" in helper and "si.hStdOutput = stdoutHandle ? stdoutHandle : hOutW" in capture)
 
-    check("tar-has-exact-handles-wide-cwd-and-original-budget", "runCapture(command,120000,{},archiveInput,archiveOutput,stagingRoot.c_str())" in compact_helper and "nullptr, workingDirectory, &si, &pi" in capture)
+    check("tar-has-exact-handles-wide-cwd-and-five-minute-budget", "LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS=300000" in compact_helper and "runCapture(command,LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS,{},archiveInput,archiveOutput,stagingRoot.c_str())" in compact_helper and "nullptr, workingDirectory, &si, &pi" in capture)
 
     before_validation = compact_helper[:compact_helper.index("constboolarchiveReady")]
 

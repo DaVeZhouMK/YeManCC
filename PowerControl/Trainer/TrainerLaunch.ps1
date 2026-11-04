@@ -40,11 +40,21 @@ function Get-TrainerSafeLaunchPath([string]$Path) {
     }
     return Join-Path $junction ([IO.Path]::GetFileName($Path))
 }
+function Assert-TrainerLaunchOptions($Settings) {
+    if($null -eq $Settings){return}
+    if($Settings -isnot [pscustomobject]){throw '修改器管理器启动选项必须是对象'}
+    foreach($field in @('safePath','launchAsAdmin','launchCTAsAdmin','enableGCM')){
+        if($null -ne $Settings.PSObject.Properties[$field] -and $Settings.$field -isnot [bool]){throw '修改器管理器启动选项布尔字段类型无效'}
+    }
+    foreach($field in @('cePath','managerPath')){if($null -ne $Settings.PSObject.Properties[$field] -and $Settings.$field -isnot [string]){throw '修改器管理器程序路径类型无效'}}
+}
 function Resolve-TrainerLaunchPlan {
     param([ValidateSet('Trainer','Manager','CheatEngine')][string]$Mode='Trainer', [string]$TrainerPath='', [string]$TrainerFolder='', [string]$ExpectedSha256='',
         [string]$GcmSettingsRoot=(Join-Path $env:APPDATA 'GCM Settings'), [string]$GcmDefaultRoot=(Join-Path $env:APPDATA 'GCM Trainers'),
         [string]$ManagerPath='', [string]$AppDirectory='', [string]$TrainerGameName='', [string]$TrainerOrigin='', [string]$GcmResourceId='')
+    Assert-TrainerLaunchOptions (Read-TrainerJson (Join-Path $GcmSettingsRoot 'settings.json') 65536)
     $settings = Repair-TrainerGcmCePath -SettingsRoot $GcmSettingsRoot
+    Assert-TrainerLaunchOptions $settings
     $arguments = ''
     $verb = 'open'
     $safe = $false
@@ -152,7 +162,20 @@ function Invoke-TrainerLaunch {
     Assert-TrainerNotReparse $CacheRoot
     $ResultPath=Assert-TrainerChild $ResultPath (Join-Path $CacheRoot 'requests')
     if($RequestId -notmatch '^[a-zA-Z0-9-]{10,80}$' -or [IO.Path]::GetFileName($ResultPath) -ne ($RequestId+'.json')){throw '修改器启动任务身份无效'}
-    $result=@{requestId=$RequestId;ok=$false;pending=$false}
+    $requestBinding=Get-TrainerRequestBinding $ResultPath $RequestId $GameExecutablePath $GameProcessId $GameProcessCreated
+    # Claim the exact persisted request before resolving or launching anything.
+    # The shared byte-CAS writer serializes duplicate consumers; a failed claim
+    # never reaches launch effects, even when its commit acknowledgement is lost.
+    $pending=Read-TrainerJson $ResultPath 65536
+    if($pending -and $null -ne $pending.PSObject.Properties['requestClaimed'] -and ($pending.requestClaimed -isnot [bool] -or $pending.requestClaimed)){throw '修改器启动请求已被消费'}
+    if($pending -and $null -ne $pending.PSObject.Properties['requestId'] -and $pending.requestId -cne $RequestId){throw '修改器启动请求已被替换'}
+    foreach($key in $requestBinding.Keys){
+        if($null -eq $pending -or $null -eq $pending.PSObject.Properties[$key] -or $null -eq $pending.$key -or $pending.$key.GetType() -ne $requestBinding[$key].GetType() -or $pending.$key -cne $requestBinding[$key]){throw '修改器启动请求绑定已改变'}
+    }
+    $claim=ConvertTo-TrainerMap $pending
+    $claim.requestId=$RequestId;$claim.ok=$false;$claim.pending=$true;$claim.requestClaimed=$true
+    Write-TrainerJson $ResultPath $claim
+    $result=@{requestId=$RequestId;ok=$false;pending=$false;requestClaimed=$true}
     $plan=$null
     try {
         $plan=Resolve-TrainerLaunchPlan -Mode $Mode -TrainerPath $TrainerPath -TrainerFolder $TrainerFolder -ExpectedSha256 $ExpectedSha256 -TrainerGameName $TrainerGameName -TrainerOrigin $TrainerOrigin -GcmResourceId $GcmResourceId -AppDirectory $AppDirectory -GcmSettingsRoot $GcmSettingsRoot -GcmDefaultRoot $GcmDefaultRoot
@@ -173,6 +196,7 @@ function Invoke-TrainerLaunch {
         $result.program=$resolvedProgram;$result.arguments=$resolvedArguments
         if($plan.trainer){$result.trainerPath=$plan.trainer.path;$result.trainerFolder=$plan.trainer.folder;$result.libraryRoot=$plan.trainer.libraryRoot}
     } catch {$result.error=$_.Exception.Message;$result.code=[string]$_.Exception.Data['trainerCode'];if($plan){$result.program=$plan.program;$result.arguments=$plan.arguments}}
+    foreach($key in $requestBinding.Keys){$result[$key]=$requestBinding[$key]}
     Write-TrainerJson $ResultPath $result
     if($Mode -in @('Trainer','CheatEngine','Manager')){
         # Keep one bounded diagnostic after the frontend consumes/removes the IPC receipt.

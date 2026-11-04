@@ -119,26 +119,33 @@ export class MediaDownloads {
     });
   }
   recheck():Promise<void>{
-    if(!this.active||!this.port.ready()||!this.port.enabled()&&!(Number(this.state.manualUntil||0)>Date.now()))return Promise.resolve();
+    if(!this.active||this.suspended||!this.port.ready()||!this.port.enabled()&&!(Number(this.state.manualUntil||0)>Date.now()))return Promise.resolve();
     if(this.checking)return this.checking;
-    const epoch=this.epoch;
+    const epoch=this.epoch,generation=this.readGeneration;
     const pending=this.port.invoke<MediaDownloadState>('gameMedia.background',{recheck:true},{timeoutMs:5000}).then(state=>{
-      if(!this.active||epoch!==this.epoch)return;this.accept(state);
-      // A lost setting/policy write is repaired only when the native return
-      // actually differs; unchanged checks never request catalogs/inventory.
-      if(state.enabled!==this.port.enabled()||state.pauseReason!==this.pause||state.cpuThreshold!==this.port.threshold()){this.applied='';this.sync();}
-    }).catch(()=>{if(this.active&&epoch===this.epoch)this.display({...this.state,phase:'deferred',reason:'host-unavailable'});}).finally(()=>{if(this.checking===pending)this.checking=null;});
+      if(!this.active||this.suspended||epoch!==this.epoch||generation!==this.readGeneration)return;this.accept(state);
+      // A newer push may already have superseded this return. Repair against
+      // the accepted native state; equal revisions still repair a real mismatch.
+      const current=this.state;
+      if(current.enabled!==this.port.enabled()||current.pauseReason!==this.pause||current.cpuThreshold!==this.port.threshold()){this.applied='';this.sync();}
+    }).catch(()=>{if(this.active&&!this.suspended&&epoch===this.epoch&&generation===this.readGeneration)this.display({...this.state,phase:'deferred',reason:'host-unavailable'});}).finally(()=>{if(this.checking===pending)this.checking=null;});
     this.checking=pending;return pending;
   }
-  async requestNow(){const value=await this.port.invoke<MediaDownloadState>('gameMedia.background',{manual:true},{timeoutMs:8000});this.accept(value);return value;}
-  async cancelManual(){const value=await this.port.invoke<MediaDownloadState>('gameMedia.background',{cancelManual:true},{timeoutMs:8000});this.accept(value);return value;}
+  private async manualCommand(args:{manual?:boolean;cancelManual?:boolean}){
+    const epoch=this.epoch,generation=this.readGeneration;
+    const value=await this.port.invoke<MediaDownloadState>('gameMedia.background',args,{timeoutMs:8000});
+    if(this.active&&!this.suspended&&epoch===this.epoch&&generation===this.readGeneration)this.accept(value);
+    return value;
+  }
+  requestNow(){return this.manualCommand({manual:true});}
+  cancelManual(){return this.manualCommand({cancelManual:true});}
   start(){
     if(this.active)return()=>{};
     this.active=true;this.suspended=false;const epoch=++this.epoch;this.applied='';this.submitted='';this.failures=0;
     const off=this.port.listen(state=>{if(this.active&&epoch===this.epoch)this.accept(state);});
     const settings=()=>{this.sync();this.armStartupCheck();};
     const visible=()=>{if(typeof document==='undefined'||document.visibilityState!=='hidden')void this.refresh();};
-    const suspending=on('power.suspending',()=>{this.suspended=true;++this.readGeneration;this.reading=null;this.cancelStartupCheck();});
+    const suspending=on('power.suspending',()=>{this.suspended=true;++this.readGeneration;this.reading=this.checking=null;this.cancelStartupCheck();});
     const resumed=subscribeGameMediaResume(()=>{this.suspended=false;void this.refresh();},on);
     window.addEventListener('pageshow',visible);window.addEventListener('focus',visible);
     if(typeof document!=='undefined')document.addEventListener('visibilitychange',visible);

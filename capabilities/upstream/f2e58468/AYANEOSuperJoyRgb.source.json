@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "repository": "Valkirie/HandheldCompanion",
+  "commit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+  "sourcePath": "HandheldCompanion/Devices/AYANEO/AYANEOSuperJoyRgb.cs",
+  "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12",
+  "purpose": "Exact fixed-source test oracle; never included in the product helper or an HC runtime",
+  "sourceOnly": true,
+  "runtimeAdmission": false,
+  "hcDeviceConstructed": false
+}

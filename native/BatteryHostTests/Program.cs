@@ -28,6 +28,53 @@ internal sealed class Ports(ushort expected,byte initial) : IEcAccess
     public void Write(ushort register,byte value){if(register!=expected)throw new Exception("write outside reviewed EC address");Writes++;Value=value;}
     public void Dispose(){}
 }
+internal sealed class Oxp3WmiFixture : IOxp3WmiEc
+{
+    public byte Limit=80;
+    public int Reads,Writes;
+    public bool FailRead,FailWrite,IgnoreWrite;
+    public readonly List<(ushort Register,byte Value)> Log=[];
+    public byte ReadByte(ushort register)
+    {
+        Reads++;if(FailRead)throw new IOException("mock OXP3 WMI read failed");
+        if(register==Oxp3WmiProvider.BypassRegister)return 0;
+        if(register!=Oxp3WmiProvider.LimitRegister)throw new Exception("wrong OXP3 WMI register");
+        return Limit;
+    }
+    public void WriteByte(ushort register,byte value)
+    {
+        Writes++;Log.Add((register,value));if(FailWrite)throw new IOException("mock OXP3 WMI write failed");
+        if(!IgnoreWrite&&register==Oxp3WmiProvider.LimitRegister)Limit=value;
+    }
+    public void Dispose(){}
+}
+internal sealed class Oxp3WmiMethodFixture : IOxp3WmiMethod
+{
+    public byte Limit=80;
+    public int Reads,Writes,DisposeCalls;
+    public bool FailRead,FailWrite,NullRead,NullWrite,ThrowDispose;
+    public string? ReadResponse,WriteResponse;
+    public readonly List<(string Method,uint Arg)> Calls=[];
+    public string? Invoke(string method,object[] arguments)
+    {
+        var arg=Convert.ToUInt32(arguments[0]);Calls.Add((method,arg));
+        if(method=="ReadECReg")
+        {
+            Reads++;if(FailRead)throw new IOException("mock OXP3 WMI method failed");
+            if(NullRead)return null;
+            return ReadResponse??("0,"+Limit.ToString("X2"));
+        }
+        if(method=="WriteECReg")
+        {
+            Writes++;if(FailWrite)throw new IOException("mock OXP3 WMI write method failed");
+            if(NullWrite)return null;
+            if(WriteResponse is not null)return WriteResponse;
+            Limit=(byte)(arg>>16);return "0";
+        }
+        throw new Exception("unexpected OXP3 WMI method");
+    }
+    public void Dispose(){DisposeCalls++;if(ThrowDispose)throw new IOException("mock OXP3 WMI method disposal failed");}
+}
 internal sealed class Rig
 {
     public readonly Identity Id;
@@ -50,12 +97,27 @@ internal sealed class Rig
 internal static class Program
 {
     static int count;
+    static string? selectedCase;
     static void Check(bool value,string reason="assertion failed"){if(!value)throw new Exception(reason);}
-    static void Test(string name,Action test){test();count++;Console.WriteLine("PASS "+name);}
-    static void Main()
+    static void Test(string name,Action test)
     {
+        if(selectedCase is not null&&!string.Equals(name,selectedCase,StringComparison.Ordinal))return;
+        test();count++;Console.WriteLine("PASS "+name);
+    }
+    static void Main(string[] args)
+    {
+        if(args.Length==1&&args[0]=="--in-process"){InProcessFixture.Run();return;}
+        if(args.Length!=0)
+        {
+            if(args.Length!=2||args[0]!="--case"||string.IsNullOrWhiteSpace(args[1]))
+            {
+                Console.Error.WriteLine("FAIL invalid arguments; use no arguments, --in-process or --case <exact existing Test name>; count=0.");
+                Environment.ExitCode=1;return;
+            }
+            selectedCase=args[1];
+        }
         Test("unified catalog selects every exact actual battery rule and trusted receipt",()=>{
-            Check(Policy.Routes.Length==40);
+            Check(Policy.Routes.Length==41);
             foreach(var route in Policy.Routes)foreach(var value in route.Identity.Values){
                 var id=new Identity(route.Identity.Manufacturers[0],route.Identity.Field=="boardProduct"?value:"board",route.Identity.Field=="systemProduct"?value:"system","HX 370","2.10",2,route.RouteId=="gpd-win-mini-2025"?7:80);
                 var binding=Policy.ResolveCapability(id);Check(binding is not null&&ReferenceEquals(binding.Consumer,route));
@@ -99,6 +161,22 @@ internal static class Program
             foreach(var route in Policy.Routes)foreach(var name in route.Identity.Values){var id=new Identity(route.Identity.Manufacturers[0],route.Identity.Field=="boardProduct"?name:"",route.Identity.Field=="systemProduct"?name:"","HX 370","2.10",2,7);Check(Policy.Resolve(id)?.RouteId==route.RouteId);}
             foreach(var name in new[]{"ONEXPLAYER X2","ONEXPLAYER X2Mini PRO","ONEXPLAYER 3","unknown"})Check(Policy.Resolve(new("ONE-NETBOOK",name,"","","",1,80)) is null);
             Check(Policy.Resolve(new("AOKZOE","AOKZOE A1X","","","",1,80)) is null);
+            // Fixed newer X2 returns IsBatteryProtectionSupported=false. Exercise the
+            // actual controller, not just the route table: neither identity field may
+            // borrow X1/OXP3 charging, even when a battery and AC are present.
+            var inert=new Rig();
+            foreach(var manufacturer in new[]{"ONE-NETBOOK","ONE-NETBOOK TECHNOLOGY CO., LTD."})
+            foreach(var product in new[]{"ONEXPLAYER X2","ONEXPLAYER X2Mini PRO"})
+            foreach(var fields in new[]{(Board:product,System:product),(Board:product,System:""),(Board:"",System:product)}){
+                var opens=0;
+                var identity=new Identity(manufacturer,fields.Board,fields.System,"AMD Ryzen AI MAX+ 395","2.10",2,80);
+                var store=new MemoryStore();
+                var consumer=new Controller(identity,store,_=>{opens++;return inert.Device;},()=> (true,true,70));
+                var read=consumer.Read();
+                Check(!read.Supported,"exact X2 source-negative model was admitted");
+                Check(!consumer.Apply(read.Fence,80).Ok&&!consumer.Apply(read.Fence,1).Ok,"exact X2 limit/bypass request accepted");
+                Check(opens==0&&inert.Device.Reads==0&&inert.Device.Writes==0&&store.Data.Count==0,"exact X2 rejection touched provider or recovery state");
+            }
         });
         Test("product minimum 50 preserves stricter hardware choices and rejects lower writes",()=>{
             foreach(var route in Policy.Routes){
@@ -342,6 +420,137 @@ internal static class Program
                 Check(after.Verification==(present?"unconfirmed":"unknown"));Check(store.Data.ContainsKey(Controller.RecoveryFile)==present);
             }
         });
+        Test("OXP3 WMI EC production route reads back independently and rejects stale or failed writes",()=>{
+            var id=new Identity("ONE-NETBOOK","board","ONEXPLAYER 3","Intel","2.10",2,80);
+            var binding=Policy.ResolveCapability(id);
+            Check(binding?.Consumer.RouteId=="oxp3-wmi-ec");
+            Check(binding!.Descriptor.RuleId=="battery.rule.oxp3-wmi-ec.OneXPlayer3"&&binding.Descriptor.DeviceId=="ymcc.device.OneXPlayer3"&&binding.Descriptor.Origin=="reviewed-native-extension");
+            Check(Policy.Resolve(id with {SystemProduct="ONEXPLAYER-3"})?.RouteId=="oxp3-wmi-ec");
+            Check(Policy.Resolve(id with {Manufacturer="AOKZOE"}) is null);
+            Check(Policy.Resolve(new Identity("ONE-NETBOOK","ONEXPLAYER X2","ONEXPLAYER X2","Intel","2.10",2,80)) is null);
+            Check(binding.Consumer.Choices.All(v=>v>=50&&v<=100&&v%5==0));
+            var f=new Oxp3WmiFixture();var store=new MemoryStore();
+            Controller New()=>new(id,store,_=>new Oxp3WmiProvider(f),()=> (true,true,75));
+            var before=New().Read();
+            Check(before.Ok&&before.Supported&&before.CurrentLimit==80&&before.Verification=="readback"&&f.Writes==0);
+            var c=New();var after=c.Apply(c.Read().Fence,90);
+            Check(after.Ok&&after.CurrentLimit==90&&after.Verification=="readback"&&f.Writes==1);
+            Check(f.Log.Count==1&&f.Log[0].Register==Oxp3WmiProvider.LimitRegister&&f.Log[0].Value==90);
+            Check(!store.Data.ContainsKey(Controller.RecoveryFile));
+            Check(c.Apply(after.Fence,90).Ok&&f.Writes==1);
+            Check(Oxp3WmiProvider.PackAddress(Oxp3WmiProvider.LimitRegister)==0xA304u);
+            Check(Oxp3WmiProvider.PackWrite(Oxp3WmiProvider.LimitRegister,80)==0x50A304u);
+            Check(Oxp3WmiProvider.BypassValue(0)==0x00&&Oxp3WmiProvider.BypassValue(1)==0x01&&Oxp3WmiProvider.BypassValue(2)==0x0B);
+            var productWrites=f.Writes;
+            using(var bypass=new Oxp3WmiProvider(f))
+            {
+                bypass.WriteBypassMode(1);
+                Check(f.Log.Last().Register==Oxp3WmiProvider.BypassRegister&&f.Log.Last().Value==0x01,"bypass source mapping was not exercised");
+                try{bypass.WriteBypassMode(3);throw new Exception("unknown OXP3 bypass mode accepted");}catch(IOException){}
+            }
+            Check(f.Writes==productWrites+1,"product limit workflow must not write the bypass register");
+            var fc=New();f.Limit=20;var low=fc.Read();Check(low.Ok&&low.CurrentLimit==20&&low.Choices.All(v=>v>=50));
+            f.Limit=70;Check(!fc.Apply(low.Fence,80).Ok&&f.Writes==productWrites+1);
+            using(var p=new Oxp3WmiProvider(f)){var rb=p.Read();f.Limit=60;try{p.Write(80,rb);throw new Exception("stale OXP3 write accepted");}catch(IOException){}Check(f.Writes==productWrites+1);}
+            var failedRead=new Oxp3WmiFixture{FailRead=true};
+            Check(!new Controller(id,new MemoryStore(),_=>new Oxp3WmiProvider(failedRead),()=> (true,true,75)).Read().Ok&&failedRead.Writes==0);
+            var failedWrite=new Oxp3WmiFixture{FailWrite=true};var store2=new MemoryStore();
+            var cw=new Controller(id,store2,_=>new Oxp3WmiProvider(failedWrite),()=> (true,true,75));
+            Check(!cw.Apply(cw.Read().Fence,90).Ok&&failedWrite.Writes==1&&store2.Data.ContainsKey(Controller.RecoveryFile));
+            var ignored=new Oxp3WmiFixture{IgnoreWrite=true};
+            var ci=new Controller(id,new MemoryStore(),_=>new Oxp3WmiProvider(ignored),()=> (true,true,75));
+            var mismatch=ci.Apply(ci.Read().Fence,90);Check(!mismatch.Ok&&mismatch.Verification=="unconfirmed"&&ignored.Writes==1);
+            var invalid=new Oxp3WmiFixture{Limit=101};
+            Check(!new Controller(id,new MemoryStore(),_=>new Oxp3WmiProvider(invalid),()=> (true,true,75)).Read().Ok);
+            var aok=new Oxp3WmiFixture();var opens=0;
+            var unknown=new Controller(id with {Manufacturer="AOKZOE"},new MemoryStore(),_=>{opens++;return new Oxp3WmiProvider(aok);},()=> (true,true,75));
+            Check(!unknown.Read().Supported&&opens==0);
+        });
+        Test("OXP3 production WMI adapter records exact arguments, responses and failures",()=>{
+            var method=new Oxp3WmiMethodFixture();using var ec=new Oxp3WmiEc(method);using var p=new Oxp3WmiProvider(ec);
+            var before=p.Read();
+            Check(before.Limit==80&&method.Calls.Count==1&&method.Calls[0].Method=="ReadECReg"&&method.Calls[0].Arg==0xA304u);
+            p.Write(90,before);
+            Check(method.Calls.Count==3&&method.Calls[1].Method=="ReadECReg"&&method.Calls[1].Arg==0xA304u&&method.Calls[2].Method=="WriteECReg"&&method.Calls[2].Arg==0x5AA304u&&method.Limit==90);
+            Check(p.Read().Limit==90);
+            method.ReadResponse="1,00";try{p.Read();throw new Exception("non-zero OXP3 status accepted");}catch(IOException){}
+            method.ReadResponse="0,zz";try{p.Read();throw new Exception("invalid OXP3 response byte accepted");}catch(IOException){}
+            method.ReadResponse="0";try{p.Read();throw new Exception("missing OXP3 status/value accepted");}catch(IOException){}
+            method.ReadResponse=null;method.FailRead=true;try{p.Read();throw new Exception("OXP3 method exception accepted");}catch(IOException){}
+            method.FailRead=false;method.NullRead=true;try{p.Read();throw new Exception("missing OXP3 read result accepted");}catch(IOException){}
+            method.NullRead=false;method.NullWrite=true;try{p.Write(80,p.Read());throw new Exception("missing OXP3 write result accepted");}catch(IOException){}
+            method.NullWrite=false;method.WriteResponse="";try{p.Write(80,p.Read());throw new Exception("empty OXP3 write status accepted");}catch(IOException){}
+            method.WriteResponse="1,00";try{p.Write(80,p.Read());throw new Exception("OXP3 write status accepted");}catch(IOException){}
+            method.WriteResponse=null;method.FailWrite=true;try{p.Write(80,p.Read());throw new Exception("OXP3 write exception accepted");}catch(IOException){}
+            var mem=new Oxp3WmiMethodFixture();var id=new Identity("ONE-NETBOOK","board","ONEXPLAYER 3","Intel","2.10",2,80);var store=new MemoryStore();
+            Controller New()=>new(id,store,_=>new Oxp3WmiProvider(new Oxp3WmiEc(mem)),()=> (true,true,75));
+            var c=New();var state=c.Read();Check(state.Ok&&state.CurrentLimit==80);
+            var applied=c.Apply(state.Fence,90);Check(applied.Ok&&applied.CurrentLimit==90&&mem.Reads>=2&&mem.Writes==1);
+
+            // Exercise the production selector with inert method objects, never a WMI query.
+            int yielded=0,returned=0;
+            IEnumerable<Oxp3WmiMethodFixture> Candidates(Oxp3WmiMethodFixture[] values,bool failMoveNext=false,bool failDispose=false)
+            {
+                yielded=returned=0;
+                try
+                {
+                    foreach(var value in values){yielded++;yield return value;}
+                    if(failMoveNext)throw new IOException("mock OXP3 enumeration failed");
+                }
+                finally
+                {
+                    returned++;
+                    if(failDispose)throw new IOException("mock OXP3 enumerator disposal failed");
+                }
+            }
+            var unique=new Oxp3WmiMethodFixture();
+            var selected=Oxp3WmiManagementMethod.SelectUniqueInstance(Candidates([unique]));
+            Check(ReferenceEquals(selected,unique)&&yielded==1&&returned==1,"unique OXP3 endpoint was not returned after enumeration cleanup");
+            Check(unique.DisposeCalls==0&&unique.Calls.Count==0,"selection disposed or invoked the caller-owned unique endpoint");
+            selected.Dispose();Check(unique.DisposeCalls==1,"caller did not retain unique endpoint disposal ownership");
+
+            try{Oxp3WmiManagementMethod.SelectUniqueInstance(Candidates([]));throw new Exception("empty OXP3 endpoint set accepted");}catch(IOException){}
+            Check(yielded==0&&returned==1,"empty OXP3 enumeration was not returned");
+            foreach(var mode in new[]{"distinct","first-dispose","second-dispose","both-dispose","enumerator-dispose"})
+            {
+                var first=new Oxp3WmiMethodFixture{ThrowDispose=mode is "first-dispose" or "both-dispose"};
+                var second=new Oxp3WmiMethodFixture{ThrowDispose=mode is "second-dispose" or "both-dispose"};
+                var untouched=new Oxp3WmiMethodFixture();
+                try{Oxp3WmiManagementMethod.SelectUniqueInstance(Candidates([first,second,untouched],failDispose:mode=="enumerator-dispose"));throw new Exception("ambiguous OXP3 endpoint set accepted: "+mode);}catch(IOException){}
+                Check(yielded==2&&returned==1,"OXP3 ambiguity did not stop at the second object and return enumeration: "+mode);
+                Check(first.DisposeCalls==1&&second.DisposeCalls==1&&untouched.DisposeCalls==0,"OXP3 ambiguity did not attempt disposal of every acquired object exactly once: "+mode);
+                Check(first.Calls.Count==0&&second.Calls.Count==0&&untouched.Calls.Count==0,"ambiguous OXP3 endpoint enumeration invoked a method: "+mode);
+            }
+            foreach(var nullFirst in new[]{true,false})
+            {
+                var first=new Oxp3WmiMethodFixture();var untouched=new Oxp3WmiMethodFixture();
+                Oxp3WmiMethodFixture[] values=nullFirst ? [null!,untouched] : [first,null!,untouched];
+                try{Oxp3WmiManagementMethod.SelectUniqueInstance(Candidates(values));throw new Exception("null OXP3 endpoint accepted");}catch(IOException){}
+                Check(yielded==(nullFirst?1:2)&&returned==1,"null OXP3 endpoint did not stop and return enumeration");
+                Check(first.DisposeCalls==(nullFirst?0:1)&&untouched.DisposeCalls==0,"null OXP3 endpoint leaked an acquired object or disposed an unacquired object");
+                Check(first.Calls.Count==0&&untouched.Calls.Count==0,"null OXP3 endpoint enumeration invoked a method");
+            }
+            var duplicate=new Oxp3WmiMethodFixture();var afterDuplicate=new Oxp3WmiMethodFixture();
+            try{Oxp3WmiManagementMethod.SelectUniqueInstance(Candidates([duplicate,duplicate,afterDuplicate]));throw new Exception("duplicate OXP3 reference accepted as unique");}catch(IOException){}
+            Check(yielded==2&&returned==1&&duplicate.DisposeCalls==1&&afterDuplicate.DisposeCalls==0,"duplicate OXP3 reference was not rejected and released exactly once");
+            Check(duplicate.Calls.Count==0&&afterDuplicate.Calls.Count==0,"duplicate OXP3 endpoint enumeration invoked a method");
+            foreach(var failMoveNext in new[]{true,false})
+            {
+                var first=new Oxp3WmiMethodFixture();
+                try{Oxp3WmiManagementMethod.SelectUniqueInstance(Candidates([first],failMoveNext:failMoveNext,failDispose:!failMoveNext));throw new Exception("failed OXP3 enumeration accepted");}catch(IOException){}
+                Check(yielded==1&&returned==1&&first.DisposeCalls==1,"failed OXP3 enumeration leaked its selected endpoint or enumerator");
+                Check(first.Calls.Count==0,"failed OXP3 endpoint enumeration invoked a method");
+            }
+        });
+        if(selectedCase is not null)
+        {
+            if(count!=1)
+            {
+                Console.Error.WriteLine($"FAIL --case '{selectedCase}': expected exactly 1 group, actual count={count}.");
+                Environment.ExitCode=1;return;
+            }
+            Console.WriteLine($"Selected case count={count}.");
+        }
         Console.WriteLine($"{count} groups passed; fake providers only, no hardware writes.");
     }
 }

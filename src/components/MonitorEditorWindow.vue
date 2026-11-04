@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { nextTick, onBeforeMount, onBeforeUnmount, onMounted, ref } from 'vue';
 import MonitorOutputSettings from './MonitorOutputSettings.vue';
 import { windowApi } from '@/bridge/api';
 import { isNativeRuntime } from '@/bridge/ipc';
@@ -17,15 +17,21 @@ async function releaseWidth(){if(widthOwned){widthOwned=false;await windowApi.co
 async function close(){
  if(closing.value)return;closing.value=true;closeError.value='';
  try{await editor.value?.flushEdits();await releaseWidth();if(alive)emit('close');}
- catch{closeError.value='保存失败，请重试返回。';closing.value=false;}
+ catch{closeError.value='监控修改未完成，请检查页面提示后重试。';closing.value=false;await nextTick();if(alive)focusGamepadElement(modal.value?.querySelector<HTMLElement>('.monitor-editor-close')??null);}
 }
 function ownsBack(){const layers=[...document.querySelectorAll<HTMLElement>('[data-gp-modal]')].filter(el=>el.getBoundingClientRect().height>0);return layers[layers.length-1]===modal.value&&!modal.value?.querySelector('.dd-open,[aria-expanded="true"][aria-haspopup="listbox"]');}
 function back(event:Event){if(event.defaultPrevented||!ownsBack())return;event.preventDefault();void close();}
+// The explicit Return control owns B before the nested section navigator.
+// Other controls keep their existing dropdown/section/modal back ordering.
+function returnControlBack(event:Event){const focused=document.activeElement;if(focused instanceof Element&&modal.value?.contains(focused)&&focused.closest('.monitor-editor-close'))back(event);}
 function keydown(event:KeyboardEvent){if(event.key==='Escape')back(event);}
+// This semantic event targets window itself: register before child mount,
+// rather than relying on capture to outrank its earlier window listeners.
+onBeforeMount(()=>window.addEventListener('ipc:gamepad-back',returnControlBack));
 onMounted(async()=>{window.addEventListener('ipc:gamepad-back',back);window.addEventListener('keydown',keydown);void widen();await nextTick();focusGamepadElement(modal.value?.querySelector<HTMLElement>('.monitor-editor-close')??null);});
-onBeforeUnmount(()=>{alive=false;window.removeEventListener('ipc:gamepad-back',back);window.removeEventListener('keydown',keydown);void releaseWidth();});
+onBeforeUnmount(()=>{alive=false;window.removeEventListener('ipc:gamepad-back',returnControlBack);window.removeEventListener('ipc:gamepad-back',back);window.removeEventListener('keydown',keydown);void releaseWidth();});
 </script>
-<template><Teleport to="body"><div ref="modal" class="monitor-editor-window" data-gp-modal="monitor-editor" data-gp-scope="monitor-editor" data-gp-spatial="nearest" role="dialog" aria-modal="true" aria-label="编辑自定义监控"><div class="monitor-editor-viewport" data-monitor-editor-viewport><MonitorOutputSettings ref="editor" @close="close"/><p v-if="closeError" class="monitor-editor-error" role="alert">{{closeError}}</p></div></div></Teleport></template>
+<template><Teleport to="body"><div ref="modal" class="monitor-editor-window" data-gp-modal="monitor-editor" data-gp-scope="monitor-editor" data-gp-spatial="nearest" role="dialog" aria-modal="true" aria-label="编辑自定义监控"><div class="monitor-editor-viewport" data-monitor-editor-viewport :inert="closing||undefined" :aria-busy="closing||undefined"><MonitorOutputSettings ref="editor" @close="close"/><p v-if="closeError" class="monitor-editor-error" role="alert">{{closeError}}</p></div></div></Teleport></template>
 <style scoped>
 .monitor-editor-window{position:fixed;inset:0;z-index:1100;overflow:hidden;padding:12px;background:radial-gradient(ellipse at 10% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 60%),#0b111a;color:var(--text);font-family:'Segoe UI','Microsoft YaHei',system-ui,-apple-system,sans-serif;font-size:15px;box-sizing:border-box}.monitor-editor-viewport{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}.monitor-editor-error{position:absolute;bottom:12px;left:24px;color:var(--danger,#ff687d);background:var(--bg,#0b1019);padding:8px 12px}
 </style>

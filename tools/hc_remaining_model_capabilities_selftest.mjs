@@ -39,6 +39,20 @@ if (!fs.existsSync(beforePath)) throw Error(`Frozen preimage unavailable: ${befo
 const sourceBytes=fs.readFileSync(sourcePath), beforeBytes=fs.readFileSync(beforePath);
 const source=sourceBytes.toString('utf8'), before=beforeBytes.toString('utf8'), bindings=[];
 const oemHeaders=captureOemInputHeaders({repo,out,source});
+// Keep the new OneX contract in the same copied header graph as the existing
+// binding; the shared legacy capture helper only lists its original two roots.
+const visitedOemHeaders=new Set();
+function captureOemClosure(file){
+ if(visitedOemHeaders.has(file))return;visitedOemHeaders.add(file);
+ const relative=path.relative(repo,file);if(relative.startsWith('..')||path.isAbsolute(relative))throw Error('OEM header escaped repo');
+ if(!oemHeaders.inputs.some(input=>input.original===file)){
+  const bytes=fs.readFileSync(file),copy=path.join(out,'oem-input-headers',relative);fs.mkdirSync(path.dirname(copy),{recursive:true});fs.writeFileSync(copy,bytes);
+  oemHeaders.inputs.push({file:relative,original:file,copy,sha256:hash(bytes)});
+ }
+ for(const m of fs.readFileSync(file,'utf8').matchAll(/^\s*#include\s+"([^"\r\n]+)"/gm))captureOemClosure(path.resolve(path.dirname(file),m[1]));
+}
+for(const input of [...oemHeaders.inputs])captureOemClosure(input.original);
+
 function extract(text,snapshot) {
   const parts=[];
   const bind=(name,start,end,kind='compiled-definition')=>{
@@ -102,9 +116,16 @@ const legacyProfiles=enumNames(frozen.definition('enum class OemChordProfileId :
 const legacyFamilies=enumNames(frozen.definition('enum class YmccFamily : int {'));
 const canonicalNames=[...frozen.fn('nativeKeyboardShortcutMaskBit').matchAll(/\{"([^"]+)",/g)].map(m=>m[1]);
 expectations.canonicalNames=canonicalNames; writeJson('expectations.json',expectations);
-const immutable=['onexCapDescriptorFor','ymccDeviceClassSupportsLighting','nativeKeyboardShortcutMaskBit','oemBackHookVkBit'];
+// The descriptor now delegates to the pinned contract. Preserve the existing
+// harness comparison of every old descriptor field and all negative identities.
+const descriptorMigration={before:hash(frozen.fn('onexCapDescriptorFor')),current:hash(actual.fn('onexCapDescriptorFor')),runtimeOracle:'testCaptureGateAndOldOneXDescriptor: original six classes and exact negatives',status:'requires-original-runtime-comparison'};
+const immutable=['ymccDeviceClassSupportsLighting','oemBackHookVkBit'];
 const compareSourceBoundary=(name,oldCode,newCode)=>({name,unchanged:oldCode.replaceAll('\r\n','\n')===newCode.replaceAll('\r\n','\n'),comparison:'CRLF-to-LF-only',rawBytesEqual:oldCode===newCode,beforeRawSha256:hash(oldCode),currentRawSha256:hash(newCode),beforeNormalizedSha256:hash(oldCode.replaceAll('\r\n','\n')),currentNormalizedSha256:hash(newCode.replaceAll('\r\n','\n'))});
 const sourceChecks=immutable.map(name=>compareSourceBoundary(name,frozen.fn(name),actual.fn(name)));
+const oldCanonical=frozen.fn('nativeKeyboardShortcutMaskBit'),newCanonical=actual.fn('nativeKeyboardShortcutMaskBit'),gkeyAppend=', {"gkey", 1ull << 63}';
+if(newCanonical.split(gkeyAppend).length!==2)throw Error('Exact reviewed canonical G-Key append missing/duplicated');
+const canonicalCheck=compareSourceBoundary('nativeKeyboardShortcutMaskBit:existing-subset',oldCanonical,newCanonical.replace(gkeyAppend,''));
+sourceChecks.push({...canonicalCheck,comparison:'exact old canonical function after removing only reviewed bit63 G-Key append',completeCurrentRawSha256:hash(newCanonical),reviewedAppend:gkeyAppend});
 // Unified generation may reorder the source list; preserve exact registered identities instead.
 const lightingIdentities=code=>[...code.matchAll(/"(HandheldCompanion\.Devices\.[A-Za-z0-9_.]+)"/g)].map(m=>m[1]).sort();
 const beforeLightingCode=frozen.fn('ymccDeviceClassLightingSet'),currentLightingCode=actual.fn('ymccDeviceClassLightingSet');
@@ -128,7 +149,7 @@ const evidence={schema:'hc-remaining-model-capabilities-offline-v2',startedAt:ne
   source:{path:sourcePath,sha256:hash(sourceBytes)},before:{path:beforePath,sha256:hash(beforeBytes)},hcCommit:expectations.hcCommit,integrity:expectations.integrity,
   runner:{path:runnerPath,sha256:hash(fs.readFileSync(runnerPath))},fixtures:['harness.cpp','expectations.mjs','README.md','source-pins.json'].map(n=>({path:path.join(fixtures,n),sha256:hash(fs.readFileSync(path.join(fixtures,n)))})),
   toolchain:{path:path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'),sha256:hash(fs.readFileSync(path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')))},
-  oemInputHeaders:oemHeaders.inputs,jsonHeader:{path:jsonPath,sha256:hash(fs.readFileSync(jsonPath))},generatedCppSha256:hash(cpp),expectationsSha256:hash(fs.readFileSync(path.join(out,'expectations.json'))),bindings,sourceChecks,configurations:[],
+  oemHeaderCapture:{path:path.join(repo,'tools/lib/hc_oem_input_fixture.mjs'),sha256:hash(fs.readFileSync(path.join(repo,'tools/lib/hc_oem_input_fixture.mjs')))},oemInputHeaders:oemHeaders.inputs,jsonHeader:{path:jsonPath,sha256:hash(fs.readFileSync(jsonPath))},generatedCppSha256:hash(cpp),expectationsSha256:hash(fs.readFileSync(path.join(out,'expectations.json'))),bindings,sourceChecks,descriptorMigration,configurations:[],
   legacyCaptureCorrection:expectations.steamDeckCapturePolicy,
   boundaries:['Exact production identities/selectors/catalogs/profiles/evaluator/canonical names/matrix methods and oem.keys.get lambda execute in a standalone offline process.',
     'All 181 old aliases retain complete query/log equality after validating and removing only three added fields on the exact SteamDeck identity; its two Embedded catalog keys remain supported but uncapturable.',
@@ -175,7 +196,9 @@ try {
         {name:'cycle-inverse',section:'matrix-remap-independent-helper',text:source.replace('hc-a250b19a:onexplayer-x2:gyro:z-x-neg-y','hc-a250b19a:onexplayer-x2:gyro:y-z-neg-x')},
         {name:'ayaneo3-win-d',section:'profile-evaluator-press-release-combinations',text:source.replace(actual.definition('static const OemChordRule kP_Ayaneo3[] = {'),actual.definition('static const OemChordRule kP_Ayaneo3[] = {').replace('kVkF24,','kVkWin | kVkD,'))},
         {name:'home-capture-removed',section:'oem.keys.get-lambda-return-and-log',text:injectInFunction('oemKeyCaptureImplemented',`if (family == YmccFamily::OneXPlayer && ${exactNewClass} && key == "home") return false;`)},
-        {name:'unknown-key-accepted',section:'capture-gate-exact-five-keys',text:injectInFunction('oemKeyCaptureImplemented',`if (family == YmccFamily::OneXPlayer && ${exactNewClass} && key == "__not_catalog_key__") return true;`)},
+        {name:'unknown-key-accepted',section:'capture-gate-exact-per-model-keys',text:injectInFunction('oemKeyCaptureImplemented',`if (family == YmccFamily::OneXPlayer && ${exactNewClass} && key == "__not_catalog_key__") return true;`)},
+        {name:'oxp3-gkey-capture-removed',section:'oem.keys.get-lambda-return-and-log',text:injectInFunction('oemKeyCaptureImplemented','if (family == YmccFamily::OneXPlayer && cls == "HandheldCompanion.Devices.OneXPlayer3" && key == "gkey") return false;')},
+        {name:'oxp3-home-click-only',section:'oem.keys.get-lambda-return-and-log',text:injectBeforeQueryLog('if (g_machineIdentity.deviceClass == "HandheldCompanion.Devices.OneXPlayer3") for (auto& key : arr) if (key.at("keyId") == "home") key["triggerCapability"] = "click-only";')},
         {name:'home-keyboard-route',section:'oem.keys.get-lambda-return-and-log',text:injectBeforeQueryLog('for (auto& key : arr) if (key.contains("captureRoute") && key.at("keyId") == "home") key["captureRoute"] = "keyboard-vk";')},
         {name:'mini-rear-vendor-route',section:'oem.keys.get-lambda-return-and-log',text:injectBeforeQueryLog('if (g_machineIdentity.deviceClass == "HandheldCompanion.Devices.OneXPlayerX2MiniPro") for (auto& key : arr) if (key.at("keyId") == "l4" || key.at("keyId") == "r4") key["captureRoute"] = "onex-x2-vendor-held";')},
         {name:'legacy-route-leak',section:'oem.keys.get-lambda-return-and-log',text:injectBeforeQueryLog('for (auto& key : arr) if (!key.contains("captureRoute")) key["captureRoute"] = "keyboard-vk";')},

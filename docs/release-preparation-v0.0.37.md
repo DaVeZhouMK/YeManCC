@@ -1,3 +1,5 @@
+2026-11-04 更新：本文保留037当时准备记录；当前入口和夹具策略见 [GitHub发布前检查](github-release-preflight.md)。当前默认check-only；显式build_packages才完整FastRelease，夹具NOT_RUN。
+
 # YeManCC 0.0.37 正式发布环境准备
 
 2026-10-30 用户已授权正式发布，当前进入最终源码冻结与发布验收；通过前不宣称已发布。版本唯一来源为根 `version.json`，由 `scripts/write-version.mjs` 生成前端和原生版本；根 package 与子库 packageVersion 必须一致。

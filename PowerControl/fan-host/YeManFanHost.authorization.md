@@ -1,8 +1,8 @@
 ﻿candidateOnly: true
 releaseApproved: false
 installed: false
-sourceBatch: candidate-canonical-lhm-20261024
-sourceSnapshotManifestSha256: 561129d604ccbfd20621737d290fad691b127d1ce99b0ffdf4110955972ac03c
+sourceBatch: candidate-onex-superx-uma-20261104
+sourceSnapshotManifestSha256: 296687d4f179cd228d73edd68ae6fb6e33a0331880c64c39f9ab1706777eb867
 
 # YeManFanHost 正式授权记录
 
@@ -12,8 +12,8 @@ hardwareWriteAuthorizationGranted: true
 hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
-approvedHostExeSha256: A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733
-approvedHostDllSha256: 5C235B39FFA6EB43346D7EB5D0E43AAD5ECCB96BD5C3F19530E9B39131E266DF
+approvedHostExeSha256: F1163D7AAFACAA376E32D6AB14F10DD1B3C51380FF9BE7B392573F9AEBA77C0E
+approvedHostDllSha256: FCF9152B7C6A47B14150A130C31A8E7F1B2420306E9FC079E7435B9DB52C8651
 approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
 baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline
@@ -46,3 +46,25 @@ fanColdWakePreparedCandidate: candidate-coldwake-20261023; fan-only initializati
 fanColdWakePreparedCandidate: candidate-stop-cancellation-20261024; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
 
 fanColdWakePreparedCandidate: candidate-canonical-lhm-20261024; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-x2minipro-20261102-r2; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-family-20261102-r1; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-source-entry-20261102-r1; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-source-entry-20261102-r2; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-profile-protocol-20261102-r1; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-source-recovery-20261103-r1; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-source-recovery-20261103-r2; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-ec-protocol-20261103-r1; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-receipt-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-input-lighting-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-superx-uma-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted

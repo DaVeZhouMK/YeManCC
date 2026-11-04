@@ -43,22 +43,34 @@ class Supervisor {
     result.append(slashes * 2, L'\\');
     return result + L'\"';
   }
-  std::string resourceReason() {
+  std::string resourceReason(const std::string &token = {}) {
+    const auto state = queue_.snapshot();
+    if (!downloadsEnabled(state) || policyBlocked(state) ||
+        (!token.empty() && (Queue::terminalReceipt(state, token) ||
+                           !Queue::policyAllowed(state, token))))
+      return {};
+    const auto publish = [&](const std::string &reason,
+                             std::optional<double> cpu = {}, int64_t until = 0) {
+      return queue_.resource(reason, cpu, until, token, &state);
+    };
     const auto ac = resources_.ac();
     if (ac != 1) {
       sampledAt_ = 0;
       resourceReason_ = ac == 0 ? "on-battery" : "power-unknown";
-      queue_.resource(resourceReason_);
+      publish(resourceReason_);
       return resourceReason_;
     }
     const auto tick = GetTickCount64();
     if (tick - processStartedTick < limits_.startup) {
       resourceReason_ = "startup-protection";
-      queue_.resource(resourceReason_);
+      publish(resourceReason_);
       return resourceReason_;
     }
-    const auto state = queue_.snapshot();
-    if(manualRun(state)){sampledAt_=0;resourceReason_.clear();queue_.resource("");return {};}
+    if(manualRun(state)||(resources_.foreground?resources_.foreground():libraryForeground(executable_))){
+      // Foreground library use bypasses only CPU admission. AC/startup and
+      // queue/storage/game policy still apply. Loss of focus samples afresh.
+      sampledAt_=0;resourceReason_.clear();publish("");return {};
+    }
     const auto threshold = (std::clamp)(state.value("cpuThreshold", 15), 5, 90);
     if (!sampledAt_ || tick - sampledAt_ >= limits_.monitor ||
         threshold != sampledThreshold_) {
@@ -68,8 +80,14 @@ class Supervisor {
             resources_.cpu ? resources_.cpu(tick) : cpuReader_.read(tick);
       }
       sampledThreshold_ = threshold;
+      const auto previousGate = cpuGate_;
       resourceReason_ = cpuGate_.observe(sampledCpu_, threshold, tick);
-      queue_.resource(resourceReason_, sampledCpu_);
+      if (!publish(resourceReason_, sampledCpu_)) {
+        // A rejected observation cannot leave hysteresis for a superseded
+        // threshold/request. Re-evaluate on the existing policy wake.
+        cpuGate_ = previousGate;
+        sampledAt_ = 0;
+      }
     }
     return resourceReason_;
   }
@@ -141,6 +159,32 @@ class Supervisor {
     struct LaneClock {int64_t task=0,heartbeat=0;uint64_t started=0,activity=0,bytes=0,byteProgress=0;};
     std::map<std::string,LaneClock> laneClocks;
     std::string failure,failedKey;
+    bool terminalAccepted = false;
+    const auto childExit = [&] {
+      DWORD code = 0;
+      if (!GetExitCodeProcess(child.hProcess, &code))
+        failure = "download-worker-exit-unavailable";
+      else if (code)
+        failure = "download-worker-exited-" + std::to_string(code);
+    };
+    const auto drainTerminal = [&] {
+      terminalAccepted = true;
+      // The worker has durably handed back its lanes and result. Wait only
+      // for this owned process/stop, keeping the original session/stall clocks.
+      for (;;) {
+        const auto tick = GetTickCount64();
+        failure = expiry(tick, started, activity, 0, limits_);
+        if (!failure.empty()) return;
+        const auto remaining = (std::min)(limits_.session - (tick - started),
+                                          limits_.stall - (tick - activity));
+        HANDLE events[] = {stop_, child.hProcess};
+        const auto result = WaitForMultipleObjects(2, events, FALSE,
+            static_cast<DWORD>((std::min)(remaining, uint64_t{INFINITE - 1})));
+        if (result == WAIT_OBJECT_0) { failure = "owner-stopped"; return; }
+        if (result == WAIT_OBJECT_0 + 1) { childExit(); return; }
+        if (result == WAIT_FAILED) { failure = "download-worker-wait-failed"; return; }
+      }
+    };
     for (;;) {
       HANDLE events[] = {stop_, child.hProcess, wake_};
       const auto result =
@@ -150,18 +194,28 @@ class Supervisor {
         break;
       }
       if (result == WAIT_OBJECT_0 + 1) {
-        DWORD exit = 0;
-        GetExitCodeProcess(child.hProcess, &exit);
-        if (exit)
-          failure = "download-worker-exited-" + std::to_string(exit);
+        childExit();
         break;
       }
-      resourceReason();
-      if (!queue_.allowed(token)) {
-        failure = "download-paused";
+      if (result == WAIT_FAILED) {
+        failure = "download-worker-wait-failed";
         break;
       }
       auto state = queue_.snapshot();
+      if (Queue::terminalReceipt(state, token)) { drainTerminal(); break; }
+      // Cancellation/OFF and policy pauses are authoritative before resource
+      // probes. An existing resource pause may still be cleared by a fresh probe.
+      if (!Queue::policyAllowed(state, token)) {
+        failure = "download-paused";
+        break;
+      }
+      resourceReason(token);
+      state = queue_.snapshot();
+      if (Queue::terminalReceipt(state, token)) { drainTerminal(); break; }
+      if (!Queue::allowed(state, token)) {
+        failure = "download-paused";
+        break;
+      }
       const auto stamp = state.value("heartbeatAt", int64_t{0});
       if (stamp != heartbeat) {
         heartbeat = stamp;
@@ -202,10 +256,14 @@ class Supervisor {
       WaitForSingleObject(child.hProcess, 2000);
       if (WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0)
         try { queue_.cleanupTemporary(); } catch (...) {}
-      if (failure == "download-paused" || failure == "owner-stopped")
-        queue_.end(token, "paused", failure);
-      else
-        queue_.recover(token, failure,failedKey);
+      // A durable end may race the last wait/probe or a nonzero process exit.
+      // Recheck after teardown; accepted results/history/retry debt stay intact.
+      if (!terminalAccepted && !Queue::terminalReceipt(queue_.snapshot(), token)) {
+        if (failure == "download-paused" || failure == "owner-stopped")
+          queue_.end(token, "paused", failure);
+        else
+          queue_.recover(token, failure,failedKey);
+      }
     }
     FILETIME created{}, exited{}, kernel{}, user{};
     if (GetProcessTimes(child.hProcess, &created, &exited, &kernel, &user)) {
@@ -292,7 +350,9 @@ class Supervisor {
       }
       bool slowRecovery=false;
       try{const auto retained=armed_.load()?queue_.snapshot():Json::object();
-        slowRecovery=armed_.load()&&downloadsEnabled(retained)&&
+        // Queue repair cannot lift an explicit policy pause. The policy owner
+        // publishes a wake when it changes; only eligible stranded work polls.
+        slowRecovery=armed_.load()&&downloadsEnabled(retained)&&!policyBlocked(retained)&&
             (retained.value("remaining",size_t{0})>0||retained.value("catalogPending",false))&&delay<0;
         if(slowRecovery)delay=limits_.recheck;
       }catch(...){delay=limits_.recheck;}
@@ -355,7 +415,9 @@ public:
   Json background(const Json &request) {
     if (!request.is_object())
       throw std::runtime_error("media-download-command-invalid");
+    if(!steamDemand::allowed(request))return steamDemand::inactive();
     std::lock_guard lock(commandMutex_);
+    if(!steamDemand::allowed(request))return steamDemand::inactive();
     if(request.value("recheck",false))owner_.queue().recheck();
     if (request.contains("enabled"))
       owner_.queue().configure(request.value("enabled", true),
@@ -365,10 +427,11 @@ public:
     if(request.value("manual",false))owner_.queue().requestSupplement(true);
     if(request.value("cancelManual",false))owner_.queue().cancelManual();
     if (request.contains("targets"))
-      owner_.queue().enqueue(request["targets"]);
+      owner_.queue().enqueue(request["targets"],{},request);
     if(request.contains("inventoryRequestId"))owner_.queue().inventoryReady(request.value("inventoryRequestId",std::string{}));
     if (request.contains("enabled")||request.value("manual",false)||request.value("cancelManual",false)||request.value("recheck",false))
       owner_.wake(true);
+    if(!steamDemand::allowed(request))return steamDemand::inactive();
     return owner_.queue().snapshot();
   }
   Json snapshot() { return owner_.queue().snapshot(); }

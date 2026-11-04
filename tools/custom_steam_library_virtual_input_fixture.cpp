@@ -34,7 +34,10 @@ static ULONGLONG fixtureTick = 50000;
 static bool processDenied = false, processQueryFailed = false;
 static bool g_webviewReady = true, directFocusAllowed = true, altFocusAllowed = true, altInserted = false, altInsertionSucceeds = true;
 static unsigned foregroundAttempts = 0, altAttempts = 0, windowRestores = 0;
-static unsigned foregroundReads = 0;
+static unsigned foregroundReads = 0, findWindowCalls = 0;
+static std::function<void()> duringImageQuery;
+static json discoveryReceipts=json::array();
+static unsigned assertionCount=0;
 static unsigned processOpens = 0, imageQueries = 0, processCloses = 0;
 struct FixtureWebViewController {
     unsigned moves = 0;
@@ -50,7 +53,7 @@ static BOOL fixtureIsIconic(HWND window) { return fixtureIsWindow(window) && fix
 static HWND fixtureForeground() { ++foregroundReads; return foregroundWindow; }
 static HWND fixtureAncestor(HWND window, UINT) { return window ? fixture(window)->root : nullptr; }
 static HWND fixtureFindWindow(const wchar_t* name, const wchar_t*) {
-    return childWindow.present && std::wcscmp(name, L"YeManSteamLibraryWorkspace") == 0 ? childHandle : nullptr;
+    ++findWindowCalls;return childWindow.present && std::wcscmp(name, L"YeManSteamLibraryWorkspace") == 0 ? childHandle : nullptr;
 }
 static HANDLE fixtureGetProp(HWND window, const wchar_t* name) {
     if (!window) return nullptr;
@@ -64,7 +67,7 @@ static HANDLE fixtureOpenProcess(DWORD, BOOL, DWORD pid) {
     return processDenied || pid != childWindow.pid ? nullptr : reinterpret_cast<HANDLE>(childHandle);
 }
 static BOOL fixtureQueryProcess(HANDLE, DWORD, wchar_t* buffer, DWORD* length) {
-    ++imageQueries;
+    ++imageQueries;if(duringImageQuery)duringImageQuery();
     if (processQueryFailed || childWindow.image.size() >= *length) return FALSE;
     std::wcscpy(buffer, childWindow.image.c_str()); *length = static_cast<DWORD>(childWindow.image.size()); return TRUE;
 }
@@ -207,7 +210,7 @@ static FocusPlan virtualPlan(const std::string& persona) {
     g_inputHostBoundPersona = persona;
     return focusIsolationPlanTick(true);
 }
-static void check(bool value, const char* reason) { if (!value) throw std::runtime_error(reason); }
+static void check(bool value, const char* reason) { ++assertionCount;if (!value) throw std::runtime_error(reason); }
 static void dsuLiveSample() {
     g_curPad.wButtons = 0xffff;
     g_curPad.sThumbLX = -32768; g_curPad.sThumbLY = 32767;
@@ -240,6 +243,7 @@ static void checkDsuLive(const std::array<uint8_t, 100>& packet) {
     check(gyro == 11, "Background DSU wire lost motion");
 }
 static void reset() {
+    g_controllerFrontendIsolationEnabled.store(true);
     fixtureKnownMsi = false;
     g_inputReleaseRequired.store(false);
     mainWindow = {}; childWindow = {}; mainPopup = {}; otherWindow = {};
@@ -249,7 +253,7 @@ static void reset() {
     processDenied = processQueryFailed = physicalRelease = false;
     g_webviewReady = directFocusAllowed = altFocusAllowed = altInsertionSucceeds = true;
     altInserted = false; foregroundAttempts = altAttempts = windowRestores = 0;
-    foregroundReads = 0; processOpens = imageQueries = processCloses = 0;
+    foregroundReads = findWindowCalls = 0;duringImageQuery={}; processOpens = imageQueries = processCloses = 0;
     fixtureController.moves = 0; g_ctrl = &fixtureController;
     g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
     g_inputHostPrepared = g_inputHostNeutralized = fixtureVirtualWriterAllowed = true;
@@ -286,13 +290,108 @@ static FocusFrameContent liveFrame() {
     frame.screenButtons = 4; frame.touchpads.present = true;
     return frame;
 }
-int main() {
+int main(int argc,char** argv) {
+    const std::vector<std::string> selected(argv+1,argv+argc);
+    const bool defaultFrontendIsolationEnabled = g_controllerFrontendIsolationEnabled.load();
     json cases = json::array();
     const auto test = [&](const char* name, const std::function<void()>& action) {
-        reset();
-        try { action(); cases.push_back({{"name", name}, {"passed", true}}); }
-        catch (const std::exception& error) { cases.push_back({{"name", name}, {"passed", false}, {"error", error.what()}}); }
+        if(!selected.empty()&&std::find(selected.begin(),selected.end(),std::string(name))==selected.end())return;
+        reset();const auto beforeAssertions=assertionCount;
+        try { action(); cases.push_back({{"name", name}, {"passed", true},{"assertions",assertionCount-beforeAssertions}}); }
+        catch (const std::exception& error) { cases.push_back({{"name", name}, {"passed", false}, {"error", error.what()},{"assertions",assertionCount-beforeAssertions}}); }
     };
+    test("frontend-isolation-default-and-json-setting", [&] {
+        check(defaultFrontendIsolationEnabled, "Production frontend isolation must default ON");
+        for (const auto& input : {json(), json::array(), json(false), json(0), json("false"), json::object()})
+            check(controllerFrontendIsolationSetting(input), "Missing or invalid input disabled isolation");
+        for (const auto& ownership : {json(), json::array(), json(false), json(0), json("false"), json::object()})
+            check(controllerFrontendIsolationSetting(json{{"ownership", ownership}}), "Missing or invalid ownership disabled isolation");
+        for (const auto& enabled : {json(), json::array(), json::object(), json(0), json(1), json("false"), json("true")})
+            check(controllerFrontendIsolationSetting(json{{"ownership", {{"frontendIsolationEnabled", enabled}}}}), "Non-boolean setting disabled isolation");
+        check(controllerFrontendIsolationSetting(json{{"ownership", {{"frontendIsolationEnabled", true}}}}), "Explicit true disabled isolation");
+        check(!controllerFrontendIsolationSetting(json{{"ownership", {{"frontendIsolationEnabled", false}}}}), "Explicit false did not disable isolation");
+        check(controllerFrontendIsolationSetting(json{{"frontendIsolationEnabled", false}}), "Setting outside ownership changed isolation");
+    });
+    test("frontend-isolation-main-toggle-all-output-gates", [] {
+        fixtureKnownMsi = true;
+        const auto live = liveFrame();
+        const auto neutral = focusIsolationAssembleFrame(focusIsolationNeutralContent());
+        for (const bool enabled : {false, true, false}) {
+            g_controllerFrontendIsolationEnabled.store(controllerFrontendIsolationSetting(
+                json{{"ownership", {{"frontendIsolationEnabled", enabled}}}}));
+            for (const auto& persona : {"elite", "steamdeck", "dualsense-edge"}) {
+                const auto plan = virtualPlan(persona);
+                check(virtualUiOwnsInput(plan) == enabled, "Generic output ignored main isolation setting");
+                check(steamDeckUiOwnsInput(plan) == (enabled && plan.steamDeckTarget), "Deck gate ignored main isolation setting or target");
+                check(ps5UiOwnsInput(plan) == (enabled && plan.ps5Target), "PS5 gate ignored main isolation setting or target");
+                check(msiUiOwnsInput(plan) == (enabled && plan.msiTarget), "MSI gate ignored main isolation setting or target");
+                check(outputFrame(plan, live) == (enabled ? neutral : focusIsolationAssembleFrame(live)), "Main toggle did not restore the complete final frame");
+                check(gamepadUiInputEligible(), "Main isolation toggle disabled native navigation admission");
+            }
+        }
+    });
+    test("frontend-isolation-off-preserves-main-navigation", [] {
+        g_controllerFrontendIsolationEnabled.store(false);
+        check(gamepadUiInputEligible() && !gamepadUiOutputIsolationEligible(), "Main output setting changed navigation admission");
+        sample(XINPUT_GAMEPAD_A, 1000); sample(0, 1020);
+        sample(XINPUT_GAMEPAD_DPAD_DOWN, 1040); sample(0, 1060);
+        sample(XINPUT_GAMEPAD_Y, 1080);
+        check(parentActions == std::vector<std::string>{"confirm", "nav-down", "edit-game"} && childActions.empty(), "Isolation OFF changed native main actions");
+        foregroundWindow = otherHandle;
+        check(!gamepadUiInputEligible(), "Isolation OFF admitted background main navigation");
+        sample(0, 1100); sample(XINPUT_GAMEPAD_A, 1120);
+        check(parentActions.size() == 3, "Background navigation escaped input admission with isolation OFF");
+    });
+    test("frontend-isolation-off-keeps-radial-and-return-protected", [] {
+        g_controllerFrontendIsolationEnabled.store(false); foregroundWindow = otherHandle;
+        for (const bool returning : {false, true}) {
+            g_radialUiOwnsInput.store(!returning); g_radialReturning.store(returning);
+            check(gamepadUiOutputIsolationEligible(), "Isolation OFF bypassed radial ownership or return");
+            for (const auto& persona : {"elite", "steamdeck", "dualsense-edge"})
+                check(outputFrame(virtualPlan(persona), liveFrame()) == focusIsolationAssembleFrame(focusIsolationNeutralContent()), "Radial-owned virtual output retained input with isolation OFF");
+            const auto nativePlan = nativeDsuPlan(); dsuLiveSample(); checkDsuNeutral(dsuOutput(nativePlan));
+            g_realStickTest = {true, true}; g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
+        }
+        g_radialReturning.store(false);
+        check(!gamepadUiOutputIsolationEligible(), "Radial return release retained background output ownership");
+    });
+    test("frontend-isolation-off-keeps-verified-child-and-navigation-protected", [] {
+        g_controllerFrontendIsolationEnabled.store(false); useChild();
+        for (const auto& persona : {"elite", "steamdeck", "dualsense-edge"})
+            check(outputFrame(virtualPlan(persona), liveFrame()) == focusIsolationAssembleFrame(focusIsolationNeutralContent()), "Isolation OFF leaked verified child output");
+        sample(XINPUT_GAMEPAD_X, 1000); sample(XINPUT_GAMEPAD_X, 1008);
+        check(childActions == std::vector<std::string>{"edit"} && parentActions.empty(), "Isolation OFF duplicated or disabled child semantic navigation");
+        const auto plan = nativeDsuPlan(); dsuLiveSample(); checkDsuNeutral(dsuOutput(plan));
+        childWindow.owner = 0;
+        check(!gamepadUiInputEligible() && !gamepadUiOutputIsolationEligible(), "Isolation OFF trusted an unowned child");
+        checkDsuLive(dsuOutput(plan));
+    });
+    test("frontend-isolation-toggle-native-dsu-wire", [] {
+        const auto plan = nativeDsuPlan(); dsuLiveSample(); const auto physical = g_curPad;
+        g_controllerFrontendIsolationEnabled.store(false);
+        const auto baseline = dsuOutput(plan); checkDsuLive(baseline);
+        g_controllerFrontendIsolationEnabled.store(true); checkDsuNeutral(dsuOutput(plan));
+        g_controllerFrontendIsolationEnabled.store(false);
+        check(dsuOutput(plan) == baseline, "Native DSU did not restore its exact wire payload after toggle");
+        check(std::memcmp(&physical, &g_curPad, sizeof physical) == 0, "Native DSU toggle modified physical UI sample");
+    });
+    test("frontend-isolation-off-source-loss-keeps-neutral-cleanup", [] {
+        g_controllerFrontendIsolationEnabled.store(false);
+        for (const auto& persona : {"elite", "steamdeck", "dualsense-edge"}) {
+            g_inputHostBoundPersona = persona;
+            const auto plan = focusIsolationPlanTick(false);
+            check(plan.decision == FocusDecision::Neutral && plan.neutralCleanup && !gamepadUiOutputIsolationEligible(), "Isolation OFF changed source-loss cleanup admission");
+            check(outputFrame(plan, liveFrame()) == focusIsolationAssembleFrame(focusIsolationNeutralContent()), "Isolation OFF leaked virtual output after source loss");
+            dsuLiveSample(); checkDsuNeutral(dsuOutput(plan, false));
+        }
+        auto plan = nativeDsuPlan(); plan.neutralCleanup = true;
+        checkDsuNeutral(dsuOutput(plan, false));
+    });
+    test("frontend-isolation-off-physical-release-still-neutral", [] {
+        g_controllerFrontendIsolationEnabled.store(false); physicalRelease = true;
+        check(outputFrame(virtualPlan("elite"), liveFrame()) == focusIsolationAssembleFrame(focusIsolationNeutralContent()), "Isolation OFF bypassed physical release protection");
+        const auto plan = nativeDsuPlan(); dsuLiveSample(); checkDsuNeutral(dsuOutput(plan));
+    });
     test("headless-process-without-window-never-suppresses-parent", [] {
         mainWindow.visible=false;foregroundWindow=otherHandle;
         for(int phase=0;phase<4;++phase){g_customSteamLibraryInputPhase.store(phase);check(!customSteamLibraryInputSuppressed(),"Headless process phase suppressed input");}
@@ -359,9 +458,11 @@ int main() {
         check(!customSteamLibraryInputSuppressed(),"Foreground close left a persistent library ownership gate");
     });
     test("background-library-repeated-probes-do-zero-process-identity-work", [] {
-        useChild(); foregroundWindow=otherHandle;
+        useChild(); foregroundWindow=otherHandle;otherWindow.owner=0;otherWindow.parentPid=0;
         for(int i=0;i<2000;++i){check(!customSteamLibraryInputSuppressed(),"Background child acquired input");check(!gamepadUiInputEligible(),"Background child allowed UI input");}
         check(processOpens==0&&imageQueries==0&&processCloses==0,"Background input path repeated full process identity probes");
+        discoveryReceipts.push_back({{"iterations",2000},{"suppressionDecisions",4000},{"findWindowCalls",findWindowCalls},{"processOpens",processOpens},{"imageQueries",imageQueries},{"processCloses",processCloses}});
+        check(findWindowCalls==0,"unrelated foreground repeats global child-window discovery");
     });
     test("hidden-and-minimized-library-probes-do-zero-process-identity-work", [] {
         useChild(); childWindow.visible=false;
@@ -387,6 +488,8 @@ int main() {
         check(!gamepadUiInputEligible(),"Prior identity bypassed a fresh executable check");
         childWindow.image=L"G:\\Fixture\\CustomSteamLibrary.exe";processQueryFailed=true;
         check(!gamepadUiInputEligible(),"Prior identity bypassed failed verification");
+        processQueryFailed=false;duringImageQuery=[] {foregroundWindow=otherHandle;};
+        check(!customSteamLibraryInputSuppressed(),"Focus loss during fresh image query retained child admission");
     });
     test("deck-main-foreground-still-neutral", [] { check(steamDeckUiOwnsInput(deckPlan()), "Main UI lost Deck neutral output"); });
     test("deck-main-root-owner-popup-still-neutral", [] { foregroundWindow = popupHandle; check(steamDeckUiOwnsInput(deckPlan()), "Main root-owner foreground behavior changed"); });
@@ -728,7 +831,8 @@ int main() {
     });
 
     size_t failures = 0; for (const auto& result : cases) if (!result["passed"].get<bool>()) ++failures;
-    std::cout << json{{"allPassed", failures == 0}, {"caseCount", cases.size()}, {"failedCount", failures}, {"cases", cases},
+    if(!selected.empty()&&cases.size()!=selected.size())++failures;
+    std::cout << json{{"allPassed", failures == 0},{"assertions",assertionCount},{"discoveryReceipts",discoveryReceipts}, {"caseCount", cases.size()}, {"failedCount", failures}, {"cases", cases},
         {"productionHelpersExecuted", true}, {"win32AndActionsMocked", true}, {"realSteamFilesModified", false}, {"realDeviceIo", false}}.dump(2) << '\n';
     return failures ? 1 : 0;
 }

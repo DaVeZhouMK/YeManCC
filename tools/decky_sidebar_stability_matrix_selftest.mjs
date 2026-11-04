@@ -13,7 +13,9 @@ const {PowerChoiceDebounce}=load(source('decky-plugin/src/powerChoiceDebounce.ts
 const {FanChoiceDebounce}=load(source('decky-plugin/src/fanChoiceDebounce.ts'));
 const runId='a'.repeat(32),peer={connection:'1',runId,connected:true};
 const cases=[],metrics={clientTransitions:0,semanticRejections:0,relayMutations:0,duplicateDeliveries:0,debounceChoices:0},seeds=[0x1a12011,0x20261015,0xc0ffee,0x9e3779b9];
-const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();};
+// Drain the actual native-style promise turn as well as the virtual microtask burst.
+// This does not advance any virtual client/debounce clock or remove a case.
+const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();await new Promise(resolve=>setImmediate(resolve));};
 const defer=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};};
 const rng=seed=>()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)/4294967296;};
 async function check(group,name,fn){try{await fn();cases.push({group,name,status:'passed'});}catch(e){cases.push({group,name,status:'failed',error:e.stack});}}

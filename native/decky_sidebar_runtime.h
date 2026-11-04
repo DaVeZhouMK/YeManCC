@@ -1,6 +1,6 @@
 #pragma once
 // YMCC Decky sidebar: opt-in process ownership only. No game/fan/TDP actions.
-// No idle polling: one worker waits on events/process exits; startup checks followed by slow admission recovery, and capped outage recovery only.
+// One worker owns event/receipt-driven recovery; idle30s health fallback, active5s shared readonly evidence, no business replay.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -94,7 +94,7 @@ struct LaunchAdmission {
 class AdmissionWindow {
     ymcc::steamsession::RetryWindow retries_;
     unsigned long long epoch_ = 0;
-    bool known_ = false, active_ = false;
+    bool known_ = false, active_ = false, parked_ = false;
     ULONGLONG opened_ = 0, slowDue_ = 0;
     unsigned attempts_ = 0;
 public:
@@ -102,9 +102,19 @@ public:
     void blocked(unsigned long long epoch, ULONGLONG now, bool retryable) {
         if (!known_ || epoch_ != epoch) {
             known_ = true; epoch_ = epoch; attempts_ = 1; retries_ = {};
-            opened_ = now; slowDue_ = 0; active_ = retryable;
+            opened_ = now; slowDue_ = 0; active_ = retryable; parked_ = !retryable;
             if (retryable) retries_.begin(now);
-        } else if (!retryable) stop();
+        } else if (!retryable) {
+            // A loaded/desktop permission refusal parks only this observer's
+            // clock. It grants no work while refused, and cannot erase retry
+            // debt before a later independently verified pending mode.
+            if(active_){active_=false;parked_=true;}
+        } else if(parked_) {
+            parked_=false;active_=true;
+            // An initially terminal mode has no fast window to replenish.
+            // Continue at the existing slow recovery cadence instead.
+            if(retries_.timeout(now)==INFINITE&&!slowDue_)slowDue_=now+recoveryIntervalMs;
+        }
         // Window events do not refill or postpone either recovery stage.
     }
     DWORD timeout(ULONGLONG now) const {
@@ -127,7 +137,7 @@ public:
     unsigned attempts() const { return attempts_; }
     ULONGLONG elapsed(ULONGLONG now) const { return active_ && now >= opened_ ? now - opened_ : 0; }
     bool recovering() const { return active_ && slowDue_ != 0; }
-    void stop() { retries_ = {}; slowDue_ = 0; active_ = false; }
+    void stop() { retries_ = {}; slowDue_ = 0; active_ = false; parked_ = false; }
     void completed() { stop(); known_ = false; attempts_ = 0; }
 };
 
@@ -157,10 +167,16 @@ struct Config {
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
     std::function<std::string()> retainedBinding; // Transport-only attach; must recheck exact actual-target frontend.
 #endif
-    std::function<void()> connectionRecovery; // Existing worker, bounded document budget, no idle polling.
+    std::function<void()> connectionRecovery; // Existing worker, bounded document budget.
+    std::function<DWORD()> connectionRecoveryTimeout; // Finite only for active cleanup grace or owned-backend proof; healthy state INFINITE.
+    std::function<void()> cancelConnectionRecovery; // Latch the exact final-cleanup child before OFF/session/exit joins.
     // Existing worker only. Resource/debug preparation grants no Loader or binding authority.
     // Callback must honor canContinue before each side effect and bound its own IO.
     std::function<std::string(const std::function<bool()>&)> prepareEnvironment;
+    // Append-only optional port: preserve existing Config aggregate consumers.
+    // Cached verified mode + authenticated broker only; no external IO on healthy reads.
+    std::function<ConnectionHealth()> connectionHealth;
+    std::function<nlohmann::json(ConnectionRecoveryWindow::Action)> connectionStep; // Owned worker; UI steps use cancellable private child.
 };
 class Runtime {
     std::mutex lifecycleMutex_, stateMutex_, ownedLeaseMutex_;
@@ -184,6 +200,7 @@ class Runtime {
     ymcc::deckyhealth::PendingStop pendingSafetyStop_; // Exact current binding; normal owner-thread OFF still owns persistence.
     std::string activeBindingRun_; // Published only after typed Client admits this binding request.
     bool transportRecoveryRequested_ = false;
+    bool connectionCheckRequested_ = false;
     bool retainedAdmissionRefreshRequested_ = false; // Observation only; worker owns admission/launch.
     unsigned long long launchIntent_ = 0; // Only user enable or a genuine Steam state/session change.
     unsigned long long crashResetEpoch_ = 0;
@@ -263,6 +280,7 @@ class Runtime {
 #endif
     }
     void cancelPending() noexcept {
+        try {if(config_.cancelConnectionRecovery)config_.cancelConnectionRecovery();}catch(...){}
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
         try { if(config_.cancelPending)config_.cancelPending(); } catch (...) {}
 #else
@@ -407,11 +425,36 @@ class Runtime {
         // and remaining attempts. Clearing it here makes a later verified mode
         // return lose recovery forever, or tempts a refill on every UI event.
         const auto cancelResourceRetry=[&]{resourcePending=false;resourceDue=false;};
+        // Both the initial read and the recheck AFTER a deferred bootstrap share
+        // this one finite window. A network delay must not turn a later clean
+        // resource-worker timeout into a permanent unavailable state, or refill
+        // the window on each binding attempt. Only a cleaned timeout may retry.
+        const auto rejectedResources=[&](const std::string& failure){
+            if(failure=="resource-worker-deadline"){
+                if(!resourceWindowOpened){resourceWindowOpened=true;resourceRetries.begin(GetTickCount64());}
+                resourcePending=true;
+            }else cancelResourceRetry();
+        };
         ConnectionRetryWindow outage,loaderRecovery;
+        ConnectionRecoveryWindow connectionFallback;
+        const auto reportConnection=[&](ConnectionRecoveryWindow::Action action,const ConnectionHealth& health,ULONGLONG now,bool blocked=false){
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+            using Action=ConnectionRecoveryWindow::Action;if(action==Action::none)return;
+            const auto observed=snapshot();const bool recovering=action==Action::reconnect||action==Action::recycle||action==Action::rebuild||action==Action::reopen;
+            bindingDiagnostic({{"scope","global-connection"},{"recoveryEpisode",connectionFallback.episode()},
+                {"recoveryPhase",action==Action::recovered?"connected":action==Action::stopped?"stopped":action==Action::exhausted?"manual-required":blocked?"blocked":"recovering"},
+                {"stage",action==Action::recovered?"decky-channels":action==Action::stopped?"eligibility-lost":action==Action::exhausted?"recovery-exhausted":blocked?"owner-safety-stop":action==Action::reopen?"reopen-bigpicture":action==Action::rebuild?"rebuild-ui-document":action==Action::recycle?(process?"recycle-owned-loader":"no-owned-loader"):"reconnect"},
+                {"reason",blocked&&recovering?"owner-safety-stop":health.reason},{"runtimeReason",observed.reason},
+                {"phase",observed.phase},{"pid",observed.pid},{"attempted",recovering&&!blocked},
+                {"connected",health.connected},{"bindingAttempts",connectionFallback.attempts()},
+                {"elapsedMs",connectionFallback.elapsed(now)},{"nextRetryMs",connectionFallback.timeout(now)},
+                {"stageBudgetMs",connectionFallback.stageBudget()},{"stageRemainingMs",connectionFallback.remaining(now)},{"recoveryTrigger",connectionFallback.trigger()}},"diagnostic");
+#endif
+        };
         LoaderCrashBudget crashBudget;
         unsigned long long crashEpoch=~0ULL;DWORD lastLoaderExit=0;
         bool outageDue=false,loaderRecoveryDue=false;
-        ULONGLONG loaderStarted=0;
+        ULONGLONG loaderStarted=0;bool loaderWasHealthy=false;
         bool launchPending=false,deferredLaunch=false,retryDue=false;
         unsigned attempts=0;
         auto closeContext=[&]{if(context){CloseHandle(context);context=nullptr;}};
@@ -499,6 +542,10 @@ class Runtime {
             std::wstring command=L"\""+config_.executable+L"\"";
             try{
                 const auto temp=temporary.prepare(config_.home);
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                bindingDiagnostic({{"scope","loader-environment"},{"bootstrapStage","loader-temp-prepared"},
+                    {"tempPathUnits",temp.size()},{"tempShortRoot",temporary.usedShortRoot()}},"diagnostic");
+#endif
                 auto env=environment(config_.home,temp);
                 const auto directory=std::filesystem::path(config_.executable).parent_path().wstring();
                 const auto launch=ymcc::deckylaunch::create(config_.executable,command,env.data(),directory,startup,child);
@@ -518,13 +565,29 @@ class Runtime {
                     CloseHandle(child.hThread);closeOwned();publish("failed","ownership-failed",error);
                 }else{
                     CloseHandle(child.hThread);
-                    loaderStarted=GetTickCount64();
+                    loaderStarted=GetTickCount64();loaderWasHealthy=false;
                     publish("loader-started","mirror-handshake-pending",0,child.dwProcessId,false,attempts,launch.stage,launch.mode);
+                    if(connectionFallback.serviceStarted(GetTickCount64())){
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                        bindingDiagnostic({{"scope","stage-window"},{"stage","cold-loader-grace"},
+                            {"stageBudgetMs",ConnectionRecoveryWindow::coldStartGraceMs},{"reason","new-owned-loader"}},"diagnostic");
+#endif
+                    }
                 }
+            }catch(const std::exception& failure){
+                // Keep only a closed set of our own stages, never arbitrary OS/
+                // filesystem exception text (which may contain private paths).
+                const std::string stage=failure.what();
+                const bool tempFailure=stage=="loader-temp-short-root-unavailable"||stage=="loader-temp-short-root-not-ordinary"||
+                    stage=="loader-temp-short-root-create-failed"||stage=="loader-temp-path-too-long"||stage=="loader-temp-base-failed"||
+                    stage=="loader-temp-base-not-ordinary"||stage=="loader-temp-home-not-ordinary"||stage=="loader-temp-run-create-failed"||
+                    stage=="loader-temp-random-failed"||stage=="loader-temp-name-collision"||stage=="loader-temp-run-still-owned";
+                closeOwned();publish("failed","environment-failed",stage=="loader-temp-path-too-long"?ERROR_FILENAME_EXCED_RANGE:0,0,false,attempts,tempFailure?stage:"");
             }catch(...){closeOwned();publish("failed","environment-failed");}
         };
         auto bind=[&](unsigned long long intent,bool beforeLaunch,bool renew){
             if(renew&&!beginPending(intent))return;
+            connectionFallback.started(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
             std::string reason;bool revalidateSession=false;
             ++attempts;
             try{
@@ -550,9 +613,18 @@ class Runtime {
                     if(!launchAllowed(intent))return;
                     launchPending=false;deferredLaunch=false;
                     if(reason.empty())startOwned(intent);
-                    else{closeContext();publish("unavailable",reason,0,0,false,attempts);}
+                    else{
+                        closeContext();
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                        if(!stopOwnedBinding())reason="mirror-binding-cleanup-incomplete";
+#endif
+                        if(!launchAllowed(intent))return;
+                        rejectedResources(reason);
+                        publish("unavailable",reason,0,0,false,attempts);
+                    }
                 }else publish("loader-started","mirror-handshake-pending",0,GetProcessId(process),false,attempts);
             }else{
+                connectionFallback.failed(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
                 const bool pending=revalidateSession||retryableBinding(reason);
                 if(pending){retries={};outage.begin(GetTickCount64());}
                 if(!pending){retries={};outage.reset();launchPending=false;deferredLaunch=false;}
@@ -561,14 +633,18 @@ class Runtime {
             }
         };
         for(;;){
-            bool stop,enabled,known,steam,recoveryRequested,retainedAdmissionRequested,safetyPending,retainedFrontend;
+            bool stop,enabled,known,steam,recoveryRequested,healthRequested,retainedAdmissionRequested,safetyPending,retainedFrontend;
             unsigned long long intent,launchIntent,admissionEpoch,crashResetEpoch,preparationEpoch;
             {std::lock_guard lock(stateMutex_);stop=stopping_;enabled=state_.enabled;known=state_.steamKnown;
                 steam=state_.steamRunning;intent=intent_;launchIntent=launchIntent_;admissionEpoch=admissionEpoch_;crashResetEpoch=crashResetEpoch_;preparationEpoch=preparationEpoch_;
                 retainedFrontend=state_.phase=="frontend-attached"||(state_.phase=="reconnecting"&&state_.reason=="retained-frontend-rebind");
                 recoveryRequested=transportRecoveryRequested_;transportRecoveryRequested_=false;
+                healthRequested=connectionCheckRequested_;connectionCheckRequested_=false;
                 retainedAdmissionRequested=retainedAdmissionRefreshRequested_;retainedAdmissionRefreshRequested_=false;safetyPending=pendingSafetyStop_.active(intent_); }
-            if(stop){closeOwned();break;}
+            if(stop){
+                const auto now=GetTickCount64();const ConnectionHealth health{false,false,"decky-stopped"};
+                reportConnection(connectionFallback.observe(now,health),health,now);closeOwned();break;
+            }
             if(resourceAdmissionEpoch!=admissionEpoch||resourcePreparationEpoch!=preparationEpoch){
                 resourceAdmissionEpoch=admissionEpoch;resourcePreparationEpoch=preparationEpoch;
                 // Ready may arrive during this already admitted resource wait.
@@ -578,6 +654,8 @@ class Runtime {
                 cancelResourceRetry();resourceRetries={};resourceWindowOpened=false;
             }
             if(safetyPending){
+                const auto now=GetTickCount64();const ConnectionHealth health{false,false,"terminal-safety-stop"};
+                reportConnection(connectionFallback.observe(now,health),health,now);
                 cancelResourceRetry();
                 // The terminal page was live-read before its packet was posted.
                 // Stop only its owned binding now; retain Loader/broker authority
@@ -591,13 +669,66 @@ class Runtime {
                 loaderRecovery.reset();loaderRecoveryDue=false;
                 WaitForSingleObject(wake_,INFINITE);continue;
             }
-            if(crashEpoch!=crashResetEpoch){crashEpoch=crashResetEpoch;crashBudget.reset();loaderRecovery.reset();loaderRecoveryDue=false;}
+            if(crashEpoch!=crashResetEpoch){
+                const auto now=GetTickCount64();const ConnectionHealth health{false,false,"steam-session-changed"};
+                reportConnection(connectionFallback.observe(now,health),health,now);
+                crashEpoch=crashResetEpoch;crashBudget.reset();loaderRecovery.reset();loaderRecoveryDue=false;healthRequested=true; // New verified session must check now, not wait for the idle backstop.
+            }
             if(process&&loaderStarted&&GetTickCount64()-loaderStarted>=LoaderCrashBudget::stableUptimeMs){crashBudget.healthy(GetTickCount64()-loaderStarted);loaderRecovery.reset();}
             if(process&&WaitForSingleObject(process,0)==WAIT_OBJECT_0){
                 DWORD code=0;GetExitCodeProcess(process,&code);lastLoaderExit=code;
-                const bool retry=crashBudget.exited(GetTickCount64()-loaderStarted);closeOwned();attempted=intent;
+                const auto uptime=GetTickCount64()-loaderStarted;
+                const bool retry=crashBudget.exited(uptime);
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                bindingDiagnostic({{"scope","loader-exit"},{"bootstrapStage","loader-exited"},{"pid",GetProcessId(process)},
+                    {"error",code},{"loaderUptimeMs",uptime},{"crashFailures",crashBudget.failures()},
+                    {"tempPathUnits",temporary.path().wstring().size()},{"tempShortRoot",temporary.usedShortRoot()}},"diagnostic");
+#endif
+                closeOwned();attempted=intent;
                 if(retry)loaderRecovery.begin(GetTickCount64());
                 publish("failed",retry?"loader-exited":"loader-crash-loop",code);continue;
+            }
+            // ON + verified existing Big Picture + disconnected => recover,
+            // including faults nobody has named yet. Reuse the original owner;
+            // UI tiers are separate bounded callbacks, never a Steam process restart,
+            // business-write replay, or automatic refund of a durable reservation.
+            const auto healthNow=GetTickCount64();
+            if(config_.connectionHealth&&(healthRequested||recoveryRequested||connectionFallback.timeout(healthNow)==0||!enabled||!known||!steam)){
+                ConnectionHealth health;
+                if(enabled&&known&&steam){try{health=config_.connectionHealth();}catch(...){health.reason="connection-health-unavailable";}}
+                else health.reason=!enabled?"decky-off":!known?"steam-state-unknown":"steam-not-running";
+                if(process&&health.connected)loaderWasHealthy=true;
+                health.coldLoaderStarted=process&&!loaderWasHealthy?loaderStarted:0;
+                const auto action=connectionFallback.observe(healthNow,health);
+                using Action=ConnectionRecoveryWindow::Action;
+                const bool recovering=action==Action::reconnect||action==Action::recycle||action==Action::rebuild||action==Action::reopen;
+                const bool blocked=crashBudget.blocked()||ownedBindingCleanupError_.load()!=ERROR_SUCCESS;
+                reportConnection(action,health,healthNow,blocked);
+                if(recovering&&!blocked&&launchAllowed(intent)){
+                    if(action==Action::recycle){
+                        if(process){closeOwned();publish("reconnecting","global-connection-recovery");}
+                        else connectionFallback.failed(Action::recycle,GetTickCount64()); // No owned service to restart: do not wait20s.
+                    }
+                    if((action==Action::rebuild||action==Action::reopen)&&config_.connectionStep){
+                        // Stop only our service before a verified page operation. The
+                        // native child rechecks OFF, account, power and durable budgets.
+                        closeOwned();
+                        if(ownedBindingCleanupError_.load()==ERROR_SUCCESS&&launchAllowed(intent)){
+                            publish("waiting-manual-steam","decky-context-already-loaded");
+                            try{
+                                const auto receipt=config_.connectionStep(action);
+                                if(receipt.value("ok",false)&&receipt.value("mutated",false)&&!receipt.value("uncertain",false))
+                                    connectionFallback.started(action,GetTickCount64());
+                                else if(!receipt.value("ok",false)&&receipt.contains("mutated")&&!receipt.value("mutated",true)&&!receipt.value("uncertain",false))
+                                    connectionFallback.failed(action,GetTickCount64());
+                            }catch(...){/* Possible dispatch: leave the bounded observation, never replay. */}
+                        }else publish("failed","owned-binding-cleanup-pending",ownedBindingCleanupError_.load());
+                    }
+                    // Re-arm the validated owner. Preflight/admission/identity
+                    // run again; no alternate launch path bypasses them.
+                    if(!process&&!launchPending&&!resourcePending){attempted=~0ULL;launchAttempted=~0ULL;}
+                    recoveryRequested=true;
+                }
             }
             LaunchAdmission admission;
             const auto readAdmission=[&]{
@@ -610,6 +741,8 @@ class Runtime {
             // original retained-binding worker rechecks that exact document.
             // Do not put disk preparation in front of this existing consumer.
             readAdmission();if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;
+            if(!process&&(admission.bindingOnly||(!admission.allowed&&!admission.retryable)))
+                connectionFallback.failed(ConnectionRecoveryWindow::Action::recycle,GetTickCount64());
             bool preparationRan=false;
             // One preparation per enable/committed Ready, even when Steam is explicitly absent.
             // Unknown presence waits for the existing observer. A live retained
@@ -662,6 +795,7 @@ class Runtime {
                     attempted=intent;launchAttempted=launchIntent;retryDue=false;outageDue=false;
                     loaderRecovery.reset();loaderRecoveryDue=false;closeContext();
                     publish("reconnecting", "retained-frontend-rebind");
+                    connectionFallback.started(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
                     std::string failure;bool revalidateSession=false;
                     try {
                         if(!beginPending(intent))continue;
@@ -676,6 +810,7 @@ class Runtime {
                     if(!failure.empty())stopOwnedBinding();
 #endif
                     if(!launchAllowed(intent))continue;
+                    if(!failure.empty())connectionFallback.failed(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
                     const bool retry=!failure.empty()&&(revalidateSession||retryableBinding(failure));
                     if(retry)outage.begin(GetTickCount64());else outage.reset();
                     publish(failure.empty()?"frontend-attached":retry?"reconnecting":"unavailable",
@@ -712,14 +847,10 @@ class Runtime {
                 if(!launchAllowed(intent))continue;
                 if(failure.empty())cancelResourceRetry();
                 if(!failure.empty()){
-                    if(failure=="resource-worker-deadline"){
-                        // The worker adapter reports this only after exact Job,
-                        // reader and handle cleanup; otherwise it returns
-                        // resource-worker-cleanup-incomplete. Recheck admission
-                        // and preflight before any binding or Loader creation.
-                        if(!resourceWindowOpened){resourceWindowOpened=true;resourceRetries.begin(GetTickCount64());}
-                        resourcePending=true;
-                    }else cancelResourceRetry();
+                    // The worker adapter reports a retryable timeout only after
+                    // exact cleanup; malformed/hash/cleanup failures stay terminal.
+                    // Admission and preflight are reread before any child launch.
+                    rejectedResources(failure);
                     publish("unavailable",failure);
                 }
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
@@ -741,7 +872,12 @@ class Runtime {
             }
             // Automatic and manual share the same repair orchestrator/budget.
             // Its exact state/session/resource checks run only on this owner.
-            if(!process&&enabled&&known&&steam&&config_.connectionRecovery){try{config_.connectionRecovery();}catch(...){}}
+            if(enabled&&known&&steam&&config_.connectionRecovery){try{config_.connectionRecovery();}catch(...){}}
+            const auto stepState=snapshot();
+            if(stepState.phase=="failed"||stepState.phase=="unavailable"){
+                connectionFallback.failed(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
+                connectionFallback.failed(ConnectionRecoveryWindow::Action::recycle,GetTickCount64());
+            }
             HANDLE handles[5]{wake_};DWORD count=1;
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             BindingWaitLeases bindingLeases(config_.ownedBinding);
@@ -760,7 +896,11 @@ class Runtime {
             if(bindingLeases.child)handles[bindingChildIndex]=bindingLeases.child;
 #endif
             const auto now=GetTickCount64();
-            const DWORD timeout=(std::min)({retries.timeout(now),admissionChecks.timeout(now),outage.timeout(now),loaderRecovery.timeout(now),resourcePending?resourceRetries.timeout(now):INFINITE});
+            DWORD timeout=(std::min)({retries.timeout(now),admissionChecks.timeout(now),outage.timeout(now),loaderRecovery.timeout(now),resourcePending?resourceRetries.timeout(now):INFINITE});
+            if(enabled&&known&&steam&&config_.connectionRecoveryTimeout)
+                timeout=(std::min)(timeout,config_.connectionRecoveryTimeout());
+            if(enabled&&known&&steam&&config_.connectionHealth)
+                timeout=(std::min)(timeout,connectionFallback.timeout(now));
             const DWORD result=WaitForMultipleObjects(count,handles,FALSE,timeout);
             if(result==WAIT_TIMEOUT){const auto due=GetTickCount64();retryDue=retries.take(due);outageDue=outage.take(due);loaderRecoveryDue=loaderRecovery.take(due);admissionChecks.take(due);resourceDue=resourcePending&&resourceRetries.take(due);continue;}
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
@@ -775,14 +915,25 @@ class Runtime {
                     stopOwnedBinding();closeContext();
                     const auto reason=packet.reason.empty()?std::string("mirror-bootstrap-context-exited"):packet.reason;
                     bindingDiagnostic({{"bootstrapStage","failed"},{"reason",reason},{"mutated",nullptr},{"mutationState","unknown"}},"diagnostic");
-                    if(enabled&&known&&steam)outage.begin(GetTickCount64());
+                    if(enabled&&known&&steam){
+                        connectionFallback.failed(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
+                        connectionFallback.failed(ConnectionRecoveryWindow::Action::recycle,GetTickCount64());
+                        outage.begin(GetTickCount64());
+                    }
                 }
                 continue;
             }
 #endif
             if(process&&result==WAIT_OBJECT_0+processIndex){
                 DWORD code=0;GetExitCodeProcess(process,&code);lastLoaderExit=code;
-                const bool retry=crashBudget.exited(GetTickCount64()-loaderStarted);closeOwned();
+                const auto uptime=GetTickCount64()-loaderStarted;
+                const bool retry=crashBudget.exited(uptime);
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                bindingDiagnostic({{"scope","loader-exit"},{"bootstrapStage","loader-exited"},{"pid",GetProcessId(process)},
+                    {"error",code},{"loaderUptimeMs",uptime},{"crashFailures",crashBudget.failures()},
+                    {"tempPathUnits",temporary.path().wstring().size()},{"tempShortRoot",temporary.usedShortRoot()}},"diagnostic");
+#endif
+                closeOwned();
                 if(retry)loaderRecovery.begin(GetTickCount64());publish("failed",retry?"loader-exited":"loader-crash-loop",code);
             }else if(context&&result==WAIT_OBJECT_0+contextIndex){
                 closeContext();
@@ -828,6 +979,14 @@ public:
             list.NumberOfProcessIdsInList > result.count;
         for (DWORD i = 0; i < result.count; ++i) result.pids[i] = static_cast<DWORD>(list.ProcessIdList[i]);
         return result;
+    }
+    // Native recovery receipts require actual membership in THIS live Loader
+    // Job. A PID list or matching executable name alone cannot certify ownership.
+    bool ownsLiveProcess(HANDLE candidate) {
+        if(!candidate||WaitForSingleObject(candidate,0)!=WAIT_TIMEOUT)return false;
+        std::lock_guard lock(ownedLeaseMutex_);BOOL owned=FALSE;
+        return stopJob_&&stopProcess_&&WaitForSingleObject(stopProcess_,0)==WAIT_TIMEOUT&&
+            IsProcessInJob(candidate,stopJob_,&owned)&&owned;
     }
     bool acceptsSafetyStop(const nlohmann::json& event,const std::string& currentBrokerRun) {
         std::lock_guard lock(stateMutex_);
@@ -890,8 +1049,12 @@ public:
     }
     bool requestConnectionCheck() {
         std::lock_guard lock(stateMutex_);
-        if(pendingSafetyStop_.active(intent_) || stopping_||!state_.enabled||!state_.steamKnown||!state_.steamRunning||state_.pid)return false;
-        if(state_.phase!="frontend-attached"&&!(state_.phase=="waiting-manual-steam"&&state_.reason=="decky-context-already-loaded"))return false;
+        if(pendingSafetyStop_.active(intent_) || stopping_||!state_.enabled||!state_.steamKnown||!state_.steamRunning)return false;
+        // A healthy owned Loader may still await its first native completion
+        // receipt. Wake only its observer; never open launch/binding authority.
+        if(state_.phase!="frontend-attached"&&!(state_.pid&&state_.phase=="loader-started")&&
+           !(state_.phase=="waiting-manual-steam"&&state_.reason=="decky-context-already-loaded"))return false;
+        connectionCheckRequested_=true;
         if(wake_)SetEvent(wake_);return true;
     }
     bool requestTransportRecovery() {

@@ -39,27 +39,45 @@ export function extract(main,before){
   const ownerTick=tickRange.text,ownerStop=stopRange.text;
   const masks=['oemBackMergedKeyMask','nativeOemKeyboardActionMask','nativeOemKeyMask'].map(take).join('\n');
   const rule=takeBlock('struct NativeKeyboardShortcutRule {');
+  const inactiveAnchor='static constexpr bool kSecondaryDisplayProductEnabled = false;';
+  if(main.split(inactiveAnchor).length!==2)throw Error('Inactive secondary-display policy changed; no activation from OneX fixture');
+  const inactiveStart=main.indexOf(inactiveAnchor);
+  const inactivePolicy=slice('Inactive secondary-display policy',inactiveAnchor,inactiveStart+inactiveAnchor.length);
   const submit=take('nativeYmccShortcutSubmit'),dispatch=take('nativeKeyboardShortcutDispatch');
-  const home=take('nativeOnexX2HomeDispatch'),drain=take('nativeOemProducerDrain');
+  const clickMatch=take('nativeKeyboardShortcutClickMatches'),home=take('nativeOnexX2HomeDispatch'),drain=take('nativeOemProducerDrain');
   const evaluator=take('nativeKeyboardShortcutsEvaluate'),recordingMask=take('gamepadShortcutRecordingMask');
   const maskEntries=text=>{const start=text.indexOf('kOemProducerMasks = {');if(start<0)throw Error('Mask catalog missing');const open=text.indexOf('{',start);return text.slice(open+1,closeAt(text,open,'{','}')).split(',').map(s=>s.replace(/\s+/g,'')).filter(Boolean);};
   const oldMasks=maskEntries(before),newMasks=maskEntries(main);
   if(oldMasks.length!==6||newMasks.length!==8||JSON.stringify(oldMasks)!==JSON.stringify(newMasks.slice(0,6)))throw Error('Old producer masks changed');
   const oldProfiles=before.slice(before.indexOf('struct OemChordRule {'),func(before,'oemChordProfileFor').end);
   const newProfiles=main.slice(main.indexOf('struct OemChordRule {'),func(main,'oemChordProfileFor').end);
-  if(oldProfiles!==newProfiles)throw Error('Model keyboard profile data changed since before-application; review required');
+  // The only reviewed append is OXP3's held-input profile; compare every old
+  // profile byte after removing those exact enum/table entries from the copy.
+  const enumAppend='Ayaneo3, OneXX2MiniPro, OneXX3,',tableAppend='{ kP_Ayaneo3, 9 }, { kP_OneXX2MiniPro, 4 }, { kP_OneXX1, 2 },';
+  if(newProfiles.split(enumAppend).length!==2||newProfiles.split(tableAppend).length!==2)throw Error('Reviewed OXP3 profile append missing/duplicated');
+  const existingProfiles=newProfiles.replace(enumAppend,'Ayaneo3, OneXX2MiniPro,').replace(tableAppend,'{ kP_Ayaneo3, 9 }, { kP_OneXX2MiniPro, 4 },');
+  if(oldProfiles!==existingProfiles)throw Error('Existing model keyboard profile data changed beyond reviewed OXP3 append');
   const rog=func(main,'nativeRogClickDispatch'),oldRog=func(before,'nativeRogClickDispatch');
-  if(rog.text!==oldRog.text)throw Error('ROG dispatch changed against main.before-application.cpp; stub cannot stand for unreviewed changes');
+  // Shared hotkey work reviewed exactly: source-bound click matching and live
+  // independent tokens replace two old expressions. ROG remains an observation
+  // stub, so these changes are NOT certified as ROG behavior by this fixture.
+  const nl=oldRog.text.includes('\r\n')?'\r\n':'\n';
+  const oldSupported=['const bool supported = rule.requiredMask == receipt.mask && rule.desktopKeys.empty() &&','            (rule.trigger == "press" || rule.trigger == "double");'].join(nl);
+  const oldTokens='OemProducerTokens tokens = receipt.tokens; tokens.requiredMask = rule.requiredMask;';
+  const newTokens=['OemProducerTokens tokens = oemProducerTokensFor(rule.requiredMask);','        for (size_t i=0;i<kOemProducerCount;++i) if (receipt.tokens.generations[i]) {','            tokens.generations[i]=receipt.tokens.generations[i];tokens.authorities[i]=receipt.tokens.authorities[i];','        }','        tokens.requiredMask = rule.requiredMask;'].join(nl);
+  if(oldRog.text.split(oldSupported).length!==2||oldRog.text.split(oldTokens).length!==2||rog.text!==oldRog.text.replace(oldSupported,'const bool supported = nativeKeyboardShortcutClickMatches(rule, receipt.mask);').replace(oldTokens,newTokens))throw Error('ROG dispatch changed beyond the two reviewed shared-hotkey expressions');
   const staticWiring={};
   for(const name of ['inputCaptureEmergencyCleanup','inputCaptureShutdown','inputCaptureThreadProc']){const f=func(main,name);ranges.push({...f,staticOnly:true});if(!f.text.includes(name==='inputCaptureThreadProc'?'onexX2OwnerTick();':'onexX2OwnerStop();'))throw Error(`${name}: new owner wiring absent`);staticWiring[name]={sha256:sha(f.text),startLine:main.slice(0,f.start).split('\n').length,bytes:Buffer.byteLength(f.text)};}
-  const shutdown=func(main,'inputCaptureShutdown').text;if(shutdown.indexOf('onexX2OwnerStop();')>shutdown.indexOf('if (!g_inputCaptureReady)'))throw Error('OwnerStop after early return');
+  const shutdown=func(main,'inputCaptureShutdown').text,stop=shutdown.indexOf('onexX2OwnerStop();');
+  const beforeStop=shutdown.slice(0,stop).replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g,' ');
+  if(stop<0||/\breturn\b/.test(beforeStop))throw Error('OwnerStop missing or preceded by early return');
   const powerFunction=take('currentPowerGeneration');
-  return {env,keys:keys.join('\n'),profiles,ledger,owner,ownerPrefix,ownerTick,ownerStop,masks,rule,submit,dispatch,home,drain,evaluator,recordingMask,powerFunction,
+  return {env,keys:keys.join('\n'),profiles,ledger,owner,ownerPrefix,ownerTick,ownerStop,masks,rule,inactivePolicy,submit,dispatch,clickMatch,home,drain,evaluator,recordingMask,powerFunction,
     evidence:{ranges:ranges.map(({name,start,end,text,staticOnly})=>({name,start,end,startLine:main.slice(0,start).split('\n').length,endLine:main.slice(0,end).split('\n').length,sha256:sha(text),staticOnly:!!staticOnly})),
-    staticWiring,oldProducerMasks:{entries:oldMasks,unchanged:true},oldModelKeyboardProfiles:{sha256:sha(newProfiles),beforeSha256:sha(oldProfiles),unchanged:true},rogDispatch:{currentSha256:sha(rog.text),beforeSha256:sha(oldRog.text),unchanged:true},bitRange:{start:bitStart,end:bitEnd}}};
+    staticWiring,oldProducerMasks:{entries:oldMasks,unchanged:true},oldModelKeyboardProfiles:{sha256:sha(newProfiles),beforeSha256:sha(oldProfiles),unchanged:false,existingSubset:{sha256:sha(existingProfiles),beforeSha256:sha(oldProfiles),unchanged:true},reviewedAppend:{profile:'OneXX3',rules:'kP_OneXX1',ruleCount:2,reason:'f2e58468 OXP3 held Home/G-Key replaces inherited mouse OEM4'}},rogDispatch:{currentSha256:sha(rog.text),beforeSha256:sha(oldRog.text),unchanged:false,reviewedExpressions:['nativeKeyboardShortcutClickMatches','merge-current-independent-producer-tokens'],stubScope:'observe wrong OneX route only; does not certify changed ROG behavior'},bitRange:{start:bitStart,end:bitEnd}}};
 }
 export function generated(parts,slots){
   return ['// Production bodies below are byte-for-byte source slices. See source-bindings.json.',parts.env,slots.environment,parts.powerFunction,parts.keys,slots.forward,
-    parts.profiles,parts.ledger,parts.ownerPrefix,slots.ownerObservation,'#define onexX2RevokeSources appObserveRealRevoke',parts.ownerTick,'#undef onexX2RevokeSources',parts.ownerStop,parts.masks,parts.rule,'static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;',
-    parts.submit,slots.action,parts.dispatch,slots.ui,parts.recordingMask,parts.evaluator,slots.observation,parts.home,'#define nativeKeyboardShortcutsEvaluate appObserveRealEvaluation',parts.drain,'#undef nativeKeyboardShortcutsEvaluate'].join('\n\n')+'\n';
+    parts.profiles,parts.ledger,parts.ownerPrefix,slots.ownerObservation,'#define onexX2RevokeSources appObserveRealRevoke',parts.ownerTick,'#undef onexX2RevokeSources',parts.ownerStop,parts.masks,parts.rule,parts.inactivePolicy,'static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;',
+    parts.submit,slots.action,parts.dispatch,slots.ui,parts.recordingMask,parts.clickMatch,parts.evaluator,slots.observation,parts.home,'#define nativeKeyboardShortcutsEvaluate appObserveRealEvaluation',parts.drain,'#undef nativeKeyboardShortcutsEvaluate'].join('\n\n')+'\n';
 }

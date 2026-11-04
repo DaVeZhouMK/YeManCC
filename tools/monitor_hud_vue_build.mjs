@@ -4,7 +4,7 @@ export function monitorHudVuePlugin(root) {
  const {parse,compileScript,compileStyle}=createRequire(path.join(root,'package.json'))('vue/compiler-sfc');
  return {name:'ymcc-shared-hud-vue',setup(build){
   // Shared AppIcon assets must use the same inline bytes in every consumer.
-  build.onLoad({filter:/\.png$/},args=>({contents:fs.readFileSync(args.path),loader:'dataurl'}));
+  build.onLoad({filter:/\.(?:png|svg)$/},args=>({contents:fs.readFileSync(args.path),loader:'dataurl'}));
   build.onResolve({filter:/^@\//},args=>({path:path.resolve(root,'src',args.path.slice(2)+(/\.[a-z]+$/i.test(args.path)?'':'.ts'))}));
   build.onLoad({filter:/\.vue$/},args=>{
    const {descriptor}=parse(fs.readFileSync(args.path,'utf8'),{filename:args.path});

@@ -73,7 +73,8 @@ struct Operations:TransactionOps {
  std::optional<Proof> proof(unsigned period){return parentProofAvailable?TransactionOps::proof(period):std::optional<Proof>{};}
 };
 static BOOL inertShell(SHELLEXECUTEINFOW* info){++shellCalls;if(shellReturnsChild){info->hProcess=CreateEventW(nullptr,TRUE,TRUE,nullptr);return info->hProcess!=nullptr;}SetLastError(ERROR_CANCELLED);return FALSE;}
-static BOOL inertChildExit(HANDLE,LPDWORD code){*code=0;return TRUE;}
+static DWORD childResultCode=0;
+static BOOL inertChildExit(HANDLE,LPDWORD code){*code=childResultCode;return TRUE;}
 #define GetExitCodeProcess inertChildExit
 #define ShellExecuteExW inertShell
 // ACTUAL_RUN
@@ -168,5 +169,8 @@ try{using ymcc::monitorrecovery::RetryBudget;using ymcc::monitorrecovery::Stalle
  {ymcc::hwinfo::ShellApartment scoped;check("existing worker apartment remains owned by its original caller",scoped.status==RPC_E_CHANGED_MODE&&SUCCEEDED(CoGetApartmentType(&apt,&qualifier))&&apt==APTTYPE_MTA);}
  check("recovery does not uninitialize another owner's MTA",SUCCEEDED(CoGetApartmentType(&apt,&qualifier))&&apt==APTTYPE_MTA);if(SUCCEEDED(existing))CoUninitialize();
 #endif
+
+ {RetryBudget debtBudget;StalledProducer debtStall;g_powerLifecycle=PowerLifecycle::Ready;g_poolCancel=false;g_monitorHWiNFOManagementPending=false;consume(debtBudget,debtStall,true);g_nativeHWiNFORecoveryArmed=false;debtBudget.started();publish(16,powerGeneration,g_monitorHWiNFODemandGeneration);consume(debtBudget,debtStall,true);check("code16 with healthy shared data cannot schedule or admit a restart",!debtBudget.waiting&&!g_nativeHWiNFORecoveryArmed);debtBudget.started();publish(16,powerGeneration,g_monitorHWiNFODemandGeneration);consume(debtBudget,debtStall,false);check("code16 without readable data retains original thirty second failure cooldown",debtBudget.waiting&&debtBudget.retryAt==tick+30000);}
+ elevationTest::shellReturnsChild=true;elevationTest::parentProofAvailable=true;elevationTest::childResultCode=16;elev=elevationTest::invoke(true);check("actual elevated completion preserves16 and separately confirms parent data",elev.code==16&&elev.dataReady&&elev.sensorPolicy=="unconfirmed-elevated-journal");elevationTest::parentProofAvailable=false;elev=elevationTest::invoke(true);check("elevated16 alone cannot manufacture parent data readiness",elev.code==7&&!elev.dataReady);elevationTest::childResultCode=0;elevationTest::shellReturnsChild=false;
 }catch(const std::exception&e){error=e.what();ok=false;}
 std::ofstream(argv[1])<<json({{"ok",ok},{"error",error},{"cases",checks},{"events",events},{"managedCalls",managedCalls},{"hardwareWrites",false}}).dump(2);return ok?0:3;}

@@ -19,6 +19,18 @@ static LRESULT CALLBACK probeBridgeProc(HWND window, UINT message, WPARAM w, LPA
         if (data->dwData == ymcc::rtss::kCopyDataTag && data->cbData == sizeof(ymcc::rtss::Packet) && data->lpData) {
             ymcc::rtss::Packet packet{};
             std::memcpy(&packet, data->lpData, sizeof(packet));
+            if(packet.command==ymcc::rtss::Command::Status){
+                const auto reply=CallWindowProcW(originalBridgeProc,window,message,w,l);
+                if(reply==static_cast<LRESULT>(ymcc::rtss::Reply::Complete)){
+                    // Selected, owned-file race ports only: a completed rebuild
+                    // is not proof that a later raw config read still matches.
+                    if(GetFileAttributesW(L"mock-corrupt-persisted-layout")!=INVALID_FILE_ATTRIBUTES)
+                        WritePrivateProfileStringW(L"Settings",L"Layout",L"Empty.ovl",L".\\Plugins\\Client\\OverlayEditor.cfg");
+                    if(GetFileAttributesW(L"mock-delete-persisted-layout")!=INVALID_FILE_ATTRIBUTES)
+                        DeleteFileW(L".\\Plugins\\Client\\OverlayEditor.cfg");
+                }
+                return reply;
+            }
             if (packet.command == ymcc::rtss::Command::Ping) {
                 if (GetFileAttributesW(L"mock-incompatible-bridge") != INVALID_FILE_ATTRIBUTES)
                     return static_cast<LRESULT>(ymcc::rtss::Reply::Invalid);
@@ -29,6 +41,10 @@ static LRESULT CALLBACK probeBridgeProc(HWND window, UINT message, WPARAM w, LPA
     return CallWindowProcW(originalBridgeProc, window, message, w, l);
 }
 int wmain() {
+    // OverlayEditor normally reads its settings at startup. Prime the actual
+    // profile API cache before the client normalizes the owned config file.
+    wchar_t initialLayout[128]{};
+    GetPrivateProfileStringW(L"Settings",L"Layout",L"",initialLayout,128,L".\\Plugins\\Client\\OverlayEditor.cfg");
     HMODULE hooks=LoadLibraryW(L"RTSSHooks.dll");
     HMODULE editor=LoadLibraryW(L"Plugins\\Client\\OverlayEditor.dll");
     HMODULE bridge=LoadLibraryW(L"Plugins\\Client\\YMCCOverlayBridge.dll");

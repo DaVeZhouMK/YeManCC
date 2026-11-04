@@ -1,14 +1,12 @@
 /** Scenes replace the one global configuration; dedicated game profiles keep priority. */
-import { loadSettings, updateSettings, compareAndSwapInputSettings, getSettingsGeneration, assertSettingsGeneration, type UnifiedSettings } from './settingsRepository';
+import { loadSettings, updateSettings, compareAndSwapInputSettings, getSettingsRecoveryState, getSettingsGeneration, assertSettingsGeneration, type UnifiedSettings } from './settingsRepository';
 import { cloneBootValue, normalizeBootConfig, normalizeBootModeDocument, normalizeBootStartupResult, isBootModeId, type BootStartupResult, resolveBootMode, executeBootModeSteps, BOOT_MODE_MODULES, type BootModeDocument, type BootModeId, type BootModeCategory, type BootModeSnapshot, type BootModeModule, type BootDeviceCapabilities, type BootApplyStep } from './bootModeModel';
-import { normalizeContinuousControls } from './performanceControls';
-import { continuousControlsFromSchedule, snapshotPerformanceSchedule, loadPerformanceSchedule, savePerformanceSchedule, restorePerformanceScheduleIfConfigured } from './performanceSchedule';
+import { normalizeContinuousControls, normalizeControlPowerSchemes } from './performanceControls';
+import { continuousControlsFromSchedule, snapshotPerformanceSchedule, loadPerformanceSchedule, applyPerformanceConfiguration } from './performanceSchedule';
 import { frameRatePair } from './frameRateModel';
 import { normalizeMonitorOutput } from './monitorHudModel';
 import { readMonitorOutputPreferences, saveMonitorOutputPreferences, monitorOutputCoordinator } from './monitorOutput';
 import { screenTouchpadsGet, screenTouchpadsSet, screenTouchpadDefaults, type ScreenTouchpadPersona, type ScreenTouchpadConfig } from './screenTouchpads';
-import { NATIVE_DEFAULT_SHORTCUTS, reconcileControllerShortcutRules, readControllerShortcutRules } from './controllerShortcutRules';
-import { globalShortcutContainer, effectiveShortcutContainer, hasStoredGlobalShortcuts, hasModeShortcutOverride } from './bootModeSharedShortcuts';
 import { getMouseModeState, setMouseModeEnabled, setMouseModePolicy, setMouseBackend, type MouseModeState } from './gameproc';
 import { batteryCharge } from './batteryCharge';
 import { steamUi, type SteamUiState } from './steamUi';
@@ -25,7 +23,7 @@ import { normalizeInputStartupPreferences } from './inputStartupPolicy';
 import { readBootDisplay, applyBootBrightness } from './bootModePlatform';
 import { invoke, on } from './ipc';
 import {fxSound} from './fxSound';
-import { summonSet, readGamingHomeConfiguration, writeGamingHomeStartup, steamMasterSet, joySet, steamAddonExists, steamAddonSet, STEAM_ADDONS, fxExists, fxSet, readHibernateState, readHibernateSize, readSleepTimeouts, setHibernate, setHibernateSize, setSleepTimeout, getPowerBtnIdx, setPowerBtnIdx, sleepGuardGet, sleepGuardSetConfig, getTdpExecutionCapability, detectCoreArchitecture, getSleepPowerPlanOptimizationEnabled, setSleepPowerPlanOptimizationEnabled, reactivateCurrentScheme, type PowerBtnIdx } from './yeman';
+import { readGamingHomeConfiguration, writeGamingHomeStartup, steamMasterSet, joySet, steamAddonExists, steamAddonSet, STEAM_ADDONS, fxExists, fxSet, readHibernateState, readHibernateSize, readSleepTimeouts, setHibernate, setHibernateSize, setSleepTimeout, getPowerBtnIdx, setPowerBtnIdx, sleepGuardGet, sleepGuardSetConfig, getTdpExecutionCapability, detectCoreArchitecture, getSleepPowerPlanOptimizationEnabled, setSleepPowerPlanOptimizationEnabled, reactivateCurrentScheme, type PowerBtnIdx } from './yeman';
 const PERSONAS = ['disabled', 'elite', 'steamdeck', 'dualsense-edge'] as const;
 const MODULE_KEY = 'bootModes';
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -83,7 +81,7 @@ export interface BootModeReceipt {
 }
 let queue: Promise<unknown> = Promise.resolve();
 const serialized = <T>(run: () => Promise<T>): Promise<T> => { const result = queue.then(run); queue = result.catch(() => { }); return result; };
-const LABELS: Record<BootModeModule, string> = { performance: '性能调度', fan: '风扇', charge: '充电限制', input: '模拟鼠标', gyro: '陀螺仪', controller: '手柄自定义', touch: '屏幕触摸配置', audioOptimization: '掌机音质优化', frameGeneration: '小黄鸭联动', softwareLaunch: '快捷应用联动', steamAppearance: 'Steam 美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '监控', display: '画面', background: 'YMCC 背景', sleep: '睡眠优化' };
+const LABELS: Record<BootModeModule, string> = { performance: '性能调度', fan: '风扇', charge: '充电限制', input: '模拟鼠标', gyro: '陀螺仪', touch: '屏幕触摸配置', audioOptimization: '掌机音质优化', frameGeneration: '小黄鸭联动', softwareLaunch: '快捷应用联动', steamAppearance: 'Steam 美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '监控', display: '画面', background: 'YMCC 背景', sleep: '睡眠优化' };
 const BACKGROUND_KEYS = ['theme', 'dynamicBackgroundEnabled', 'backgroundOpacity', 'backgroundBlur', 'videoBatteryPause'] as const;
 const backgroundSettings = (value: UiSettings) => Object.fromEntries(BACKGROUND_KEYS.map(key => [key, value[key]]));
 const TOUCH_KEYS = Object.keys(screenTouchpadDefaults('disabled')) as Array<keyof ScreenTouchpadConfig>;
@@ -114,16 +112,13 @@ export async function captureBootModeSnapshot(shared?: BootModeSharedReads): Pro
         ? basePolicy === 'off' ? 'off' : basePolicy === 'on' && ['gamebar', 'joyxoff'].includes(baseBackend)
             ? baseBackend === 'gamebar' ? 'microsoft' : 'joyxoff' : null
         : mouse?.stateKnown === false ? null : mouse ? mouse.on ? mouse.backend === 'gamebar' ? 'microsoft' : 'joyxoff' : 'off' : null;
-    const persistedRules = readControllerShortcutRules(effectiveShortcutContainer(settings));
-    const rules = hasStoredGlobalShortcuts(settings) || hasModeShortcutOverride(settings)
-        ? persistedRules : reconcileControllerShortcutRules(persistedRules, settings.gamepad).rules;
     // A failed read stays unknown. It must not become a fabricated OFF value later applied to hardware.
     return cloneBootValue({
-        performance: { schedule: config, controls: continuousControlsFromSchedule(config), frames: frameRatePair(settings.rtss.frameRates) },
+        performance: { schedule: config, powerSchemes: normalizeControlPowerSchemes(config.powerSchemes), controls: continuousControlsFromSchedule(config), frames: frameRatePair(settings.rtss.frameRates) },
         fan: { enabled: fanHostLifecycle.hasControlIntent, preset: settings.fan.preset || 'balanced' },
         charge: { enabled: charge ? charge.managed === true : null, limit: charge?.requestedLimit ?? charge?.currentLimit ?? null },
         input: { persona: input.outputTarget.persona, outputTarget: input.outputTarget, ownership: input.ownership, mouseBackend: baseBackend ?? null, mousePolicy: basePolicy ?? null, mouse: baseMouse },
-        gyro: { motion: input.gyroMotion }, controller: { name: '当前手柄规则', rules },
+        gyro: { motion: input.gyroMotion },
         touch: { profiles: Object.fromEntries(profiles.filter(([, state]) => state).map(([persona, state]) => [persona, touchConfig(state!)])) },
         audioOptimization: { enabled: fx }, frameGeneration: { enabled: scaling }, softwareLaunch: { paths: [], timing: 'scene', delay: 0 },
         steamAppearance: { states: appearance ? Object.fromEntries(appearance.themes.map(item => [item.name, item.configured])) : {} },
@@ -156,12 +151,7 @@ export async function readBootModeSupport(category?: BootModeCategory, shared?: 
 }
 export function readStoredBootMode(settings: UnifiedSettings, baseline: BootModeSnapshot): BootModeDocument {
     const raw = object(settings.extensions?.[MODULE_KEY]);
-    const persisted = readControllerShortcutRules(globalShortcutContainer(settings));
-    const controller = { name: '当前手柄规则', rules: hasStoredGlobalShortcuts(settings)
-        ? persisted : reconcileControllerShortcutRules(persisted, settings.gamepad).rules } as unknown as BootModeSnapshot['controller'];
-    // This is an in-memory view of ordinary global settings, never another
-    // persisted global shortcut snapshot. Independent scenes remain separate.
-    return normalizeBootModeDocument({ ...raw, global: { ...object(raw.global), controller } }, { ...baseline, controller });
+    return normalizeBootModeDocument(raw, baseline);
 }
 /** Overview reads durable preferences only. Unknown device values remain null;
  * this view must never substitute for the editor's live capture. */
@@ -172,13 +162,12 @@ function savedOverviewSnapshot(settings: UnifiedSettings): BootModeSnapshot {
     const mouse = input.outputTarget.persona === 'steamdeck' ? 'steamdeck' : gamepad.mouseMode === 'off' ? 'off'
         : gamepad.mouseMode === 'on' ? gamepad.mouseBackend === 'gamebar' ? 'microsoft' : 'joyxoff' : null;
     return cloneBootValue({
-        performance: { schedule, controls: continuousControlsFromSchedule(schedule), frames: frameRatePair(settings.rtss.frameRates) },
+        performance: { schedule, powerSchemes: normalizeControlPowerSchemes(schedule.powerSchemes), controls: continuousControlsFromSchedule(schedule), frames: frameRatePair(settings.rtss.frameRates) },
         fan: { enabled: null, preset: settings.fan.preset || 'balanced' },
         charge: { enabled: null, limit: null },
         input: { persona: input.outputTarget.persona, outputTarget: input.outputTarget, ownership: input.ownership,
             mouseBackend: gamepad.mouseBackend, mousePolicy: gamepad.mouseMode, mouse },
         gyro: { motion: input.gyroMotion },
-        controller: { name: '当前手柄规则', rules: reconcileControllerShortcutRules(readControllerShortcutRules(input.buttonMapping?.rules), gamepad).rules },
         touch: { profiles: object(settings.screenTouchpads).profiles || {} },
         audioOptimization: { enabled: null }, frameGeneration: { enabled: null },
         softwareLaunch: { paths: [], timing: 'scene', delay: 0 }, steamAppearance: { states: {} },
@@ -188,6 +177,16 @@ function savedOverviewSnapshot(settings: UnifiedSettings): BootModeSnapshot {
         sleep: { config: settings.sleep, acButton: null, dcButton: null, hibernate: null, hibernateSize: null, timeouts: null, steamAutoRecovery: null },
     } as unknown as BootModeSnapshot);
 }
+function assertBootSettingsReady(): void {
+    const state = getSettingsRecoveryState();
+    if (state.status !== 'ready' || !state.persisted)
+        throw new Error('开机模式配置尚未安全读取：' + (state.message || '请重新读取后再选择或保存。'));
+}
+function nextBootRevision(revision: number): number {
+    if (!Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(revision + 1))
+        throw new Error('开机模式版本号无效或已超出范围，未保存。');
+    return revision + 1;
+}
 export async function loadBootModes(options: { overviewOnly?: boolean; editorOnly?: boolean } = {}): Promise<BootModeContext> {
     const generation = getSettingsGeneration();
     // A saved preset is user intent, not a mirror of current runtime values.
@@ -196,8 +195,9 @@ export async function loadBootModes(options: { overviewOnly?: boolean; editorOnl
     // Full capture still serves live capability reads and startup comparison.
     if (options.overviewOnly || options.editorOnly) {
         const settings = await readOnce(loadSettings, '开机模式设置'), raw = object(settings.extensions?.[MODULE_KEY]);
+        assertSettingsGeneration(generation); assertBootSettingsReady();
         const global = object(raw.global);
-        const complete = raw.schema === 1 && BOOT_MODE_MODULES.every(module => module === 'controller' || global[module] && typeof global[module] === 'object' && !Array.isArray(global[module]));
+        const complete = raw.schema === 1 && BOOT_MODE_MODULES.every(module => global[module] && typeof global[module] === 'object' && !Array.isArray(global[module]));
         const baseline = complete
             ? Object.fromEntries(BOOT_MODE_MODULES.map(module => [module, normalizeBootConfig(global[module])])) as BootModeSnapshot
             : savedOverviewSnapshot(settings);
@@ -210,7 +210,7 @@ export async function loadBootModes(options: { overviewOnly?: boolean; editorOnl
         const shared = sharedBootModeReads();
         const [baseline, support] = await Promise.all([captureBootModeSnapshot(shared), readBootModeSupport(undefined, shared)]);
         const settings = await readOnce(loadSettings, '开机模式设置');
-        assertSettingsGeneration(generation);
+        assertSettingsGeneration(generation); assertBootSettingsReady();
         const document = readStoredBootMode(settings, baseline);
         return { document, startupResult: normalizeBootStartupResult(settings.extensions?.bootModesStartupResult, object(settings.input).startupObservedBoot), baseline: cloneBootValue(document.global), support, apps: Array.isArray(settings.quickApps.apps) ? cloneBootValue(settings.quickApps.apps) : [] };
     });
@@ -218,6 +218,7 @@ export async function loadBootModes(options: { overviewOnly?: boolean; editorOnl
 export function saveBootModes(document: BootModeDocument, expectedRevision = document.revision): Promise<BootModeDocument> {
     return serialized(async () => {
         const generation = getSettingsGeneration();
+        await readOnce(loadSettings, '开机模式设置'); assertSettingsGeneration(generation); assertBootSettingsReady();
         const boot = await optional(() => invoke<string>('bootMode.startup.identity', {}, { timeoutMs: 3000 }), 'Windows 启动标识');
         let saved!: BootModeDocument;
         await updateSettings(settings => {
@@ -226,7 +227,7 @@ export function saveBootModes(document: BootModeDocument, expectedRevision = doc
             if (current.revision !== expectedRevision)
                 throw Error('开机模式已被其他窗口修改，请重新读取');
             saved = normalizeBootModeDocument(document, document.global);
-            saved.revision = current.revision + 1;
+            saved.revision = nextBootRevision(current.revision);
             saved.activeSnapshot = cloneBootValue(current.activeSnapshot);
             saved.current = current.current;
             saved.boot = current.boot;
@@ -253,8 +254,10 @@ export async function bootModeConnections(_id: BootModeId): Promise<Array<{ labe
 /** Setting next boot never applies runtime settings, changes mouse ownership or launches applications. */
 export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabled = true): Promise<BootModeDocument> {
     return serialized(async () => {
+        if (!isBootModeId(id) || typeof enabled !== 'boolean') throw new Error('开机模式选择无效');
         const generation = getSettingsGeneration();
-        let copy = cloneBootValue(document);
+        await readOnce(loadSettings, '开机模式设置'); assertSettingsGeneration(generation); assertBootSettingsReady();
+        let copy = normalizeBootModeDocument(document, document.global);
         const boot = await optional(() => invoke<string>('bootMode.startup.identity', {}, { timeoutMs: 3000 }), 'Windows 启动标识');
         copy.boot = id;
         copy.bootEnabled = enabled;
@@ -264,7 +267,7 @@ export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabl
             if (latest.revision !== document.revision) {
                 const startup = normalizeBootStartupResult(settings.extensions?.bootModesStartupResult, boot);
                 const requested = normalizeBootModeDocument(document, document.global);
-                const sameTemplates = ['global', 'scenes', 'presets', 'controllerTemplates'].every(key =>
+                const sameTemplates = ['global', 'scenes', 'presets'].every(key =>
                     same((latest as any)[key], (requested as any)[key]));
                 if (!startup || startup.status === 'failed' || startup.sourceRevision !== document.revision ||
                     startup.revision !== latest.revision || latest.current !== startup.mode ||
@@ -274,7 +277,7 @@ export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabl
                 copy.boot = id; copy.bootEnabled = enabled; delete copy.bootNotice;
             }
             copy.current = latest.current;
-            copy.revision = latest.revision + 1;
+            copy.revision = nextBootRevision(latest.revision);
             // Selection only schedules the next Windows boot, including when the
             // page is used before startup restoration has completed.
             settings.extensions = { ...settings.extensions, [MODULE_KEY]: copy,
@@ -286,7 +289,11 @@ export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabl
         const writes: Array<[
             string,
             () => Promise<unknown>
-        ]> = id === 'global' ? [] : [
+        ]> = id === 'global' ? [
+            // Mode 1 still leaves Windows/Xbox and ordinary global preferences
+            // alone, but its logon route must not inherit advanced Steam startup.
+            ['Steam 高级启动', () => steamMasterSet(false, true)],
+        ] : [
             ['旧模拟鼠标开机入口', async () => {
                     const key = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run';
                     const legacy = await registry.read('HKCU', key, 'Joyxoff');
@@ -301,7 +308,7 @@ export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabl
             // select Xbox AND enable its sign-in flag immediately; 3 clears both now.
             // These are pre-boot OS settings, never deferred to runtime restoration.
             ['Windows 开机配置', () => writeGamingHomeStartup(enabled && (id === 'xbox' || id === 'xbox-steam'), enabled, enabled && (id === 'xbox' || id === 'xbox-steam') ? 'xbox' : 'none')],
-            ['Steam 高级启动', () => steamMasterSet(enabled && (id === 'steam' || id === 'xbox-steam'), enabled)],
+            ['Steam 高级启动', () => steamMasterSet(enabled && (id === 'steam' || id === 'xbox-steam'), true)],
             ['音质优化开机联动', () => fxSet(false)],
             ['小黄鸭开机联动', () => steamAddonSet('steamscale', false)],
         ];
@@ -479,21 +486,21 @@ function deferBootMouse(input: BootModeSnapshot['input'], receipt: BootModeRecei
     // Close the gap between the failed apply and subscription without a timer or poller.
     wake();
 }
-function inputPatch(snapshot: BootModeSnapshot, settings: UnifiedSettings, activate = true, shortcutOverride?: Record<string, any> | null): Record<string, any> {
+function inputPatch(snapshot: BootModeSnapshot, settings: UnifiedSettings, activate = true): Record<string, any> {
     const input = object(snapshot.input), rawMotion = object(object(snapshot.gyro).motion), motion = { ...rawMotion, ...(activate && rawMotion.enabled === true ? { outputMode: 'virtual-stick', unit: 'deg/s' } : {}) };
     return { outputTarget: { ...object(input.outputTarget), ...(activate ? { persona: input.persona, buttonMappingEnabled: input.persona !== 'disabled', gyroEnabled: rawMotion.enabled === true } : {}) }, ...(input.ownership === undefined ? {} : { ownership: input.ownership }), gyroMotion: motion,
-        bootModeShortcuts: shortcutOverride === undefined ? settings.input.bootModeShortcuts ?? null : shortcutOverride };
+        bootModeShortcuts: activate ? null : settings.input.bootModeShortcuts ?? null };
 }
-async function writeBaseInput(snapshot: BootModeSnapshot, expected: number, isCurrent: () => boolean, shortcutOverride: Record<string, any> | null): Promise<number> {
+async function writeBaseInput(snapshot: BootModeSnapshot, expected: number, isCurrent: () => boolean): Promise<number> {
     const settings = await readOnce(loadSettings, '开机模式设置');
-    const result = await compareAndSwapInputSettings(expected, inputPatch(snapshot, settings, true, shortcutOverride), isCurrent);
+    const result = await compareAndSwapInputSettings(expected, inputPatch(snapshot, settings, true), isCurrent);
     if (result.ok === false)
         throw Error('全局输入配置冲突或写入未确认：' + result.reason);
     return result.value.revision;
 }
 async function applySleep(value: any, before: any, receipt: BootModeReceipt) {
     const cfg = object(value.config), old = object(before.config);
-    const guardKeys = ['mode', 'pauseGameOnSleep', 'retryOnEntryFailure', 'retryOnNonUserWake'] as const;
+    const guardKeys = ['mode', 'pauseGameOnSleep', 'retryOnEntryFailure', 'retryOnSleepTimeout', 'retryOnNonUserWake'] as const;
     const guard = Object.fromEntries(guardKeys.filter(key => cfg[key] !== undefined).map(key => [key, cfg[key]]));
     if (guardKeys.some(key => !same(cfg[key], old[key])))
         await sleepGuardSetConfig(guard);
@@ -553,10 +560,8 @@ async function applySleep(value: any, before: any, receipt: BootModeReceipt) {
 async function applyRuntimeModule(id: BootModeModule, value: any, before: any, receipt: BootModeReceipt): Promise<void> {
     const pendingBefore = receipt.pending.length, skippedBefore = receipt.skipped.length;
     if (id === 'performance') {
-        const config = { ...value.schedule, controls: normalizeContinuousControls(value.controls), configured: true, enabled: true };
-        await savePerformanceSchedule(config);
-        await updateSettings(settings => { settings.rtss = { ...settings.rtss, frameRates: frameRatePair(value.frames), templateDefaults: false }; });
-        await restorePerformanceScheduleIfConfigured();
+        const config = { ...value.schedule, powerSchemes: normalizeControlPowerSchemes(value.powerSchemes ?? value.schedule?.powerSchemes), controls: normalizeContinuousControls(value.controls), configured: true, enabled: true };
+        await applyPerformanceConfiguration(config, frameRatePair(value.frames));
     }
     else if (id === 'touch') {
         for (const persona of PERSONAS) {
@@ -861,6 +866,7 @@ export function applyBootMode(id: BootModeId, document: BootModeDocument, option
 }
 async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, mouseEpoch: number, owner?: StartupContext): Promise<{document: BootModeDocument; receipt: BootModeReceipt}> {
     cancelBootModeLaunches();
+    document = normalizeBootModeDocument(document, document.global);
     const generation = getSettingsGeneration(), beforeSettings = await readOnce(loadSettings, '开机模式设置'), before = await captureBootModeSnapshot(), next = resolveBootMode(document, id), receipt: BootModeReceipt = { mode: id, applied: [], skipped: [], pending: [] };
     if (owner) startupOwners.set(receipt, owner);
     if (next.display.resolution === 'native')
@@ -872,9 +878,7 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
         throw Error('开机模式已变化，请重新读取');
     const isCurrent = () => getSettingsGeneration() === generation;
     // Native-only metadata is not input intent. No dedicated game profile is written here.
-    const ownShortcuts = id !== 'global' && document.scenes[id].overrides.controller;
-    const shortcutOverride = ownShortcuts ? { schema: 1, mode: id, boot: String(beforeSettings.input.startupObservedBoot || ''), rules: cloneBootValue(next.controller.rules) } : null;
-    const inputChanged = !same(inputPatch(before, beforeSettings, false), inputPatch(next, beforeSettings, true, shortcutOverride));
+    const inputChanged = !same(inputPatch(before, beforeSettings, false), inputPatch(next, beforeSettings, true));
     const mouseChanged = before.input.persona !== next.input.persona || (next.input.mouse !== null && (before.input.mouse !== next.input.mouse || (before.input.mousePolicy !== null && before.input.mousePolicy !== (next.input.mouse === 'off' ? 'off' : 'on'))));
     const steps: BootApplyStep[] = [];
     let inputRevision = beforeSettings.input.revision;
@@ -891,14 +895,12 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
                 }
             }, rollback: () => restoreMouse(before.input) });
     if (inputChanged)
-        steps.push({ id: 'global-input', apply: async () => { inputRevision = await writeBaseInput(next, inputRevision, isCurrent, shortcutOverride); receipt.applied.push('全局手柄与陀螺仪'); }, rollback: async () => {
-                const result = await compareAndSwapInputSettings(inputRevision, { outputTarget: beforeSettings.input.outputTarget, ownership: beforeSettings.input.ownership, gyroMotion: beforeSettings.input.gyroMotion, bootModeShortcuts: beforeSettings.input.bootModeShortcuts ?? null }, isCurrent);
+        steps.push({ id: 'global-input', apply: async () => { inputRevision = await writeBaseInput(next, inputRevision, isCurrent); receipt.applied.push('全局手柄与陀螺仪'); }, rollback: async () => {
+                const result = await compareAndSwapInputSettings(inputRevision, { outputTarget: beforeSettings.input.outputTarget, ownership: beforeSettings.input.ownership, gyroMotion: beforeSettings.input.gyroMotion, bootModeShortcuts: null }, isCurrent);
                 if (result.ok === false)
                     throw Error('旧输入配置恢复遇到新版本：' + result.reason);
                 inputRevision = result.value.revision;
             } });
-    if (!same(before.controller, next.controller))
-        steps.push({ id: 'controller-native-flags', apply: () => writeNativeFlags(next), rollback: () => writeNativeFlags(before) });
     if (mouseChanged && next.input.mouse !== null)
         steps.push({ id: 'mouse-start', apply: async () => {
                 try {
@@ -920,9 +922,9 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
         receipt.pending.push('模拟鼠标：目标配置未知，已关闭旧模拟鼠标');
     const saved = cloneBootValue(document);
     saved.current = id;
-    saved.revision++;
+    saved.revision = nextBootRevision(saved.revision);
     saved.activeSnapshot = cloneBootValue(before);
-    for (const module of ['input', 'gyro', 'controller', 'softwareLaunch'] as const)
+    for (const module of ['input', 'gyro', 'softwareLaunch'] as const)
         saved.activeSnapshot[module] = cloneBootValue(next[module]);
     steps.push({ id: 'save-current-mode', apply: () => updateSettings(settings => {
             const latest = readStoredBootMode(settings, document.global);
@@ -944,7 +946,7 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
     // Commit input/mouse and selected mode first. Optional hardware/software failures have explicit
     // receipts and cannot cause a later input error to replay an old hardware snapshot.
     for (const module of BOOT_MODE_MODULES) {
-        if (['input', 'gyro', 'controller', 'softwareLaunch', 'audioOptimization', 'frameGeneration'].includes(module) || same(before[module], next[module]))
+        if (['input', 'gyro', 'softwareLaunch', 'audioOptimization', 'frameGeneration'].includes(module) || same(before[module], next[module]))
             continue;
         assertSettingsGeneration(generation);
         const latest = readStoredBootMode(await readOnce(loadSettings, '开机模式设置'), document.global);
@@ -982,27 +984,14 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
     await publishReceipt(receipt);
     return { document: saved, receipt };
 }
-async function writeNativeFlags(snapshot: BootModeSnapshot) {
-    const flags: Record<string, boolean> = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(item => [item.defaultKey, false]));
-    for (const rule of Array.isArray(snapshot.controller.rules) ? snapshot.controller.rules : []) {
-        const value = object(rule);
-        if (value.origin === 'native-default' && typeof value.defaultKey === 'string' && Object.prototype.hasOwnProperty.call(flags, value.defaultKey))
-            flags[value.defaultKey] = value.enabled === true;
-    }
-    const actual = await summonSet(flags);
-    if (Object.entries(flags).some(([key, value]) => (actual as unknown as Record<string, unknown>)[key] !== value))
-        throw Error('原生快捷键开关同步未确认');
-    await updateSettings(settings => { settings.gamepad = { ...settings.gamepad, ...flags }; });
-    if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ipc:gamepad.settings', { detail: actual }));
-        window.dispatchEvent(new CustomEvent('ipc:controller-shortcuts.updated'));
-    }
-}
 let startupRestore: Promise<void> | null = null;
 export function restoreSelectedBootMode(): Promise<void> {
     return startupRestore ??= serialized(async () => {
         const generation = getSettingsGeneration(), boot = await invoke<string>('bootMode.startup.identity', {}, { timeoutMs: 3000 });
         if (!boot || typeof boot !== 'string') throw Error('Windows 启动标识尚未确认，开机模式暂不自动应用');
+        const settings = await readOnce(loadSettings, '开机模式设置');
+        assertSettingsGeneration(generation); assertBootSettingsReady();
+        readStoredBootMode(settings, savedOverviewSnapshot(settings));
         let shouldApply = false, owner: StartupContext | undefined, claimedRaw: unknown;
         await updateSettings(settings => {
             assertSettingsGeneration(generation);

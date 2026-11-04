@@ -96,6 +96,10 @@ static void roles() {
         const bool expected = std::find(oracle::clickRoles.begin(), oracle::clickRoles.end(), tag) != oracle::clickRoles.end();
         require(p::clickOnly(static_cast<p::Button>(tag)) == expected, "click/held/invalid semantics");
     }
+    for (const auto& m:oracle::models) for(unsigned tag=0;tag<256;++tag) {
+        const bool expected=std::find(m.clickRoles.begin(),m.clickRoles.end(),tag)!=m.clickRoles.end();
+        require(p::clickOnly(static_cast<p::Model>(m.tag),static_cast<p::Button>(tag))==expected,"source model-specific click/held semantics");
+    }
     require(p::clickPulseMs == oracle::clickMs, "source click duration");
 }
 static void initialization() {

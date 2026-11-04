@@ -9,7 +9,7 @@ const definitions=[
 ['long-packet-admitted','HostGameOutputObservation.cs','if (data.Length != 63)','if (data.Length < 63)','UNPROVEN_PACKET_BECAME_MOTORS'],
 ['haptics-mode-unchecked','HostGameOutputObservation.cs','if ((flags0 & 0x02) == 0) return Result.UnsupportedHapticMode;','/* private source fault: haptic selection ignored */','UNPROVEN_PACKET_BECAME_MOTORS'],
 ['motor-delivery-omitted','HostGameOutputObservation.cs','if (includeMotors && (_pending & MotorPending) != 0)','if (false && includeMotors && (_pending & MotorPending) != 0)','GAME_MOTOR_REPLY_MISSING'],
-['neutral-ack-drains-motor','Program.cs','includeMotors: envelope.Command == "SUBMIT_FRAME"','includeMotors: envelope.Command is "SUBMIT_FRAME" or "SUBMIT_NEUTRAL"','NEUTRAL_ACK_CONSUMED_MOTORS']];
+['neutral-ack-drains-motor','Program.cs','var includeMotors = envelope?.Command == "SUBMIT_FRAME";','var includeMotors = envelope?.Command is "SUBMIT_FRAME" or "SUBMIT_NEUTRAL";','NEUTRAL_ACK_CONSUMED_MOTORS']];
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const inputs=[...fs.readdirSync(source).filter(n=>n.endsWith('.cs')).map(n=>path.join(source,n)),producer,generator,catalog,observation,fileURLToPath(import.meta.url)].map(file=>({file,sha256:sha(file)}));
 const cases=[];

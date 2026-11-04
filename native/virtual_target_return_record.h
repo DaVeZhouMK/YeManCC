@@ -41,6 +41,8 @@ struct Record {
     std::string machineBinding;
     std::uint64_t revision=1;
     std::vector<Obligation> obligations;
+    // In-memory candidate basis only, never wire data or endpoint authority.
+    mutable std::string sourceRecord;
 };
 namespace detail {
 inline bool fail(std::string* error,const char* reason){if(error)*error=reason;return false;}
@@ -149,7 +151,10 @@ inline bool decode(std::string_view bytes,Record&out,std::string*error=nullptr){
         }if(!validRecord(r,error))return false;out=std::move(r);return true;
     }catch(...){return detail::fail(error,"record-decode-failed");}
 }
-inline bool revisionMatches(const Record&r,std::uint64_t expected,std::string*e){return validRecord(r,e)&&(r.revision==expected||detail::fail(e,"stale-revision"));}
+inline bool revisionMatches(const Record&r,std::uint64_t expected,std::string*e){
+    if(!validRecord(r,e)||!(r.revision==expected||detail::fail(e,"stale-revision")))return false;
+    std::string source;if(!encode(r,source,e))return false;r.sourceRecord=std::move(source);return true;
+}
 // Caller-authenticated PREPARE dispatch evidence, even if its ACK is lost.
 // This reserves historical target duty only; it never admits current output.
 struct TargetCreationProof { bool dispatchBoundaryReached=false, authenticatedHostTuple=false; };

@@ -51,9 +51,9 @@ const runtimePath = path.join(repo, 'native/msi_crash_recovery_runtime.h');
 const journalPath = path.join(repo, 'native/msi_crash_recovery_journal.h');
 const runtimeBytes = fs.readFileSync(runtimePath), journalBytes = fs.readFileSync(journalPath);
 const runtime = runtimeBytes.toString('utf8'), journal = journalBytes.toString('utf8');
-const names = ['msiCrashHasDuty', 'msiCrashNote', 'msiCrashDecision', 'msiCrashLegacyRecord', 'msiCrashStoreLocked', 'msiCrashLoadLocked', 'msiCrashLocations', 'msiCrashPhysicalXinputSnapshotEligible', 'msiCrashPrepareOwner',
-  'msiCrashRecoveryBeforeModeWrite', 'msiCrashRecoveryBeforeHide', 'msiCrashRecoveryAfterOwnedRestore',
-  'msiCrashRecoveryAfterModeDischarge', 'msiCrashRecoveryInitialize', 'msiCrashResolveDinputIdentity', 'msiCrashRetireStartupJournal', 'msiCrashAdoptStartupModeDuty', 'msiCrashRecoveryMaintenance'];
+const names = ['msiCrashHasDuty', 'msiCrashNote', 'msiCrashDecision', 'msiCrashLegacyRecord', 'msiCrashNativeLegacyRecord', 'msiCrashStoreLocked', 'msiCrashRetryableRecordReadError', 'msiCrashRecordLoadFailed', 'msiCrashLoadLocked', 'msiCrashLocations', 'msiCrashPhysicalXinputSnapshotEligible', 'msiCrashPrepareOwner',
+  'msiCrashRecoveryBeforeModeWrite', 'msiCrashRecoveryBeforeHideImpl', 'msiCrashRecoveryBeforeHide', 'msiCrashRecoveryBeforeNativeHide', 'msiCrashRecoveryAfterOwnedRestore',
+  'msiCrashRecoveryAfterModeDischarge', 'msiCrashRecoveryInitialize', 'msiCrashResolveDinputIdentity', 'msiCrashRetireStartupJournal', 'msiCrashAdoptStartupModeDuty', 'msiCrashRetryOwnedRecordLoad', 'msiCrashReturnNativeConfiguration', 'msiCrashRecoveryMaintenance'];
 const functions = names.map(n => extract(runtime, n));
 const mainPath=path.join(repo,'native/main.cpp');
 const mainSource=fs.readFileSync(mainPath,'utf8');
@@ -69,13 +69,17 @@ const endpointFunction=extract(mainSource,'hidHideVirtualEndpointAbsent'),restor
 const predicateStart=restoreFunction.body.indexOf('const bool msiOwnedReturn='),predicateEnd=restoreFunction.body.indexOf('json restoreResultRow',predicateStart),tailStart=restoreFunction.body.indexOf('msiCrashRecoveryAfterOwnedRestore(restoreAfter,restoreReadback);');
 if(predicateStart<0||predicateEnd<0||tailStart<0)throw Error('Actual restore predicate/tail anchor changed');
 const restorePredicate=restoreFunction.body.slice(predicateStart,predicateEnd).trim(),restoreTail=restoreFunction.body.slice(tailStart,restoreFunction.body.lastIndexOf('}')).trim();
-const startFunction=extract(mainSource,'inputHostStart'),startGateOffset=startFunction.body.indexOf('if (g_inputHostReleaseQuarantined ||');
+const startRuntimePath=path.join(repo,'native/virtual_controller_start_runtime.h');
+const startFunction=extract(fs.readFileSync(startRuntimePath,'utf8'),'inputHostStart'),startGateOffset=startFunction.body.indexOf('if (g_inputHostReleaseQuarantined ||');
 if(startGateOffset<0)throw Error('Actual start visibility gate anchor changed');
 const startGateBody=startFunction.body.slice(startGateOffset,endBrace(startFunction.body,startFunction.body.indexOf('{',startGateOffset)));
 const restoreActual=endpointFunction.body+'\nstatic bool fixtureActualRestoreResult(Journal& journal,const HidHideVisibilitySnapshot& restoreAfter,bool restoreReadback,bool virtualEndpointAbsent,int restoreTargetCount,int restoreTargetsChecked,int restoreRemaining,int restoreMissingIdentity,int restoreUnknown){\n'+restorePredicate+'\nreturn restored;\n}\n';
 const restoreBinding={path:mainPath,productionFunction:{name:restoreFunction.name,line:restoreFunction.line,sha256:restoreFunction.sha256},predicate:{sha256:sha(restorePredicate),body:restorePredicate},tail:{sha256:sha(restoreTail),body:restoreTail},endpointFunction:{name:endpointFunction.name,line:endpointFunction.line,sha256:endpointFunction.sha256},startGate:{productionFunction:startFunction.name,line:startFunction.line+startFunction.body.slice(0,startGateOffset).split('\n').length-1,sha256:sha(startGateBody),body:startGateBody},scope:'actual production predicate/tail and start visibility gate; restore transport/readback and applications are fake; no product start'};
 fs.writeFileSync(path.join(out,'actual-restore-predicate-tail.inc'),restoreActual+'\n// Actual restore tail\n'+restoreTail+'\n// Actual startup visibility gate\n'+startGateBody);
-const boundarySnapshotPath='G:/YeManCC-Work/Build/Validation/G3E-141537-startup-off-failure-20261014/main.cpp.before-recovery-resolver';
+restoreBinding.startGate.path=startRuntimePath;
+restoreBinding.startGate.sourceSha256=sha(fs.readFileSync(startRuntimePath));
+const resolverBoundaryAt=args.indexOf('--resolver-boundary');
+const boundarySnapshotPath=resolverBoundaryAt>=0?path.resolve(args[resolverBoundaryAt+1]):'G:/YeManCC-Work/Build/Validation/G3E-141537-startup-off-failure-20261014/main.cpp.before-recovery-resolver';
 const boundaryBytes=fs.existsSync(boundarySnapshotPath)?fs.readFileSync(boundarySnapshotPath):null;
 const resolverBoundaryMatches=boundaryBytes?resolverFunctions.every(f=>extract(boundaryBytes.toString('utf8'),f.name).sha256===f.sha256):null;
 if(resolverBoundaryMatches===false)throw Error('Resolver changed from the supplied main boundary snapshot');
@@ -105,6 +109,7 @@ const adapter = decodeApiMismatch ? 'namespace ymcc::msi::recovery { struct Read
 fs.writeFileSync(path.join(out, 'runtime-snapshot.h'), runtimeBytes);
 fs.writeFileSync(path.join(out, 'msi_crash_recovery_journal.h'), journalBytes);
 fs.copyFileSync(path.join(repo, 'deps/json/json.hpp'), path.join(out, 'json.hpp'));
+fs.copyFileSync(path.join(repo, 'native/virtual_output_status.h'), path.join(out, 'virtual_output_status.h'));
 const archiveAt = args.indexOf('--archive');
 const archiveFiles = {}, archiveBindings = [];
 let archiveBoardKey = '';
@@ -170,7 +175,19 @@ if(retirementAt>=0){
  retirementFixture={loaded,off,source,board,restore,settled,blocked,boardKey:[board.row.manufacturer,board.row.product,board.row.systemProduct,board.row.deviceClass].join('|'),nativeSha256:captured['YeManCC-export-manifest.txt'].match(/^nativeSha256=(.+)$/m)?.[1]?.trim(),scope:'actual PID9792 metadata and 12 denials; reconstructed journal with real codec; locations, owner death, fresh source, storage, driver and mode I/O fake'};
 }
 if(args.includes('--startup-retirement-only')&&!retirementFixture)throw Error('--startup-retirement-only requires --startup-retirement-archive');
-fs.writeFileSync(path.join(out,'archive-input.json'),JSON.stringify({files:archiveFiles,boardKey:archiveBoardKey,fixtureRows:archiveFixtureRows,startupFixture,retirementFixture,retirementOnly:args.includes('--startup-retirement-only')}));
+const nativeArchiveAt=args.indexOf('--native-archive');let nativeArchive=null;
+if(nativeArchiveAt>=0){
+  if(!args[nativeArchiveAt+1])throw Error('Missing native archive directory');
+  const directory=path.resolve(args[nativeArchiveAt+1]);nativeArchive={files:{}};
+  for(const name of ['msi-controller-return.json','native-lifecycle.log.1','native-lifecycle.log',
+      'msi-controller-visibility.log.1','msi-controller-visibility.log',
+      'msi-controller-visibility-wake-1.log.1','msi-controller-visibility-wake-1.log',
+      'msi-controller-visibility-wake-2.log.1','msi-controller-visibility-wake-2.log']){
+    const file=path.join(directory,name),bytes=fs.readFileSync(file);
+    nativeArchive.files[name]=bytes.toString('utf8');archiveBindings.push({path:file,bytes:bytes.length,sha256:sha(bytes),scope:'native ownership receipt and independent owner birth; device and process liveness are fake'});
+  }
+}
+fs.writeFileSync(path.join(out,'archive-input.json'),JSON.stringify({files:archiveFiles,boardKey:archiveBoardKey,fixtureRows:archiveFixtureRows,startupFixture,retirementFixture,nativeArchive,retirementOnly:args.includes('--startup-retirement-only')}));
 fs.writeFileSync(path.join(out,'archive-source-binding.json'),JSON.stringify({readOnly:true,files:archiveBindings},null,2));
 const prelude = String.raw`
 #include <algorithm>
@@ -189,6 +206,7 @@ const prelude = String.raw`
 #include <string>
 #include <vector>
 #include "msi_crash_recovery_journal.h"
+#include "virtual_output_status.h"
 using json = nlohmann::json;
 using DWORD = std::uint32_t; using BYTE = std::uint8_t; using ULONGLONG = std::uint64_t;
 using HANDLE = std::uintptr_t; using HDEVINFO=HANDLE; using BOOL=int; using USHORT=std::uint16_t; using CONFIGRET=DWORD;
@@ -207,6 +225,10 @@ enum class HidBaseWalk {Complete,Incomplete};
 constexpr HANDLE INVALID_HANDLE_VALUE = static_cast<HANDLE>(-1);
 constexpr DWORD INVALID_FILE_ATTRIBUTES = static_cast<DWORD>(-1);
 constexpr DWORD ERROR_SUCCESS=0, ERROR_FILE_NOT_FOUND = 2, ERROR_PATH_NOT_FOUND = 3;
+constexpr DWORD ERROR_RETRY=1237,ERROR_SHARING_VIOLATION=32,ERROR_LOCK_VIOLATION=33,ERROR_BUSY=170,ERROR_NOT_READY=21,ERROR_READ_FAULT=30,ERROR_IO_DEVICE=1117,ERROR_DEVICE_NOT_CONNECTED=1167;
+ULONGLONG GetTickCount64(){return 1000;}
+bool legionMotionCollectionAdmitted(USHORT,USHORT,USHORT,USHORT){return false;}
+template<class... Args>bool inputHostTargetReturnAfterPhysicalRestoreLocked(Args&&...){return true;}
 enum class PowerLifecycle { Ready, Suspended };
 struct HidHideVisibilitySnapshot { bool valid = true, cloaking = true; std::vector<std::wstring> hidden, applications; };
 struct HidHidePhysicalIdentity { bool resolved = false; unsigned vendorId = 0x0db0, productId = 0x1902; std::string baseContainerDeviceInstanceId, deviceInstanceId, sourcePath, baseContainerDevicePath, physicalIdentity; USHORT usagePage=0,usage=0; };
@@ -223,7 +245,8 @@ bool hidHideContainsPath(const std::vector<std::wstring>& paths, const std::stri
   for (const auto& p : paths) if (ymcc::msi::recovery::detail::equalAscii(W2U(p), s)) return true;
   return false;
 }
-struct InputCaptureGamepadSnapshot {bool live=false;DWORD primarySlot=0,connectedMask=0;std::string inputSource="none";unsigned long long readAttemptSequence=0,readPowerGeneration=0;unsigned readTopologyGeneration=0;bool readContextStable=false;};
+struct InputCaptureGamepadSnapshot {bool live=false;DWORD primarySlot=0,connectedMask=0;std::string inputSource="none";unsigned long long readAttemptSequence=0,readPowerGeneration=0;unsigned readTopologyGeneration=0;bool readContextStable=false;uint64_t readIdentityGeneration=1,readStartedTick=900,readCompletedTick=1000;};
+std::atomic<uint64_t> g_xinputSlotIdentityEpoch{1};
 InputCaptureGamepadSnapshot g_inputCaptureGamepadSnapshot;
 std::mutex g_inputCaptureGamepadSnapshotMx;
 std::mutex g_inputHostMx, g_msiPersonaPumpMx;
@@ -264,6 +287,7 @@ namespace fake {
   std::map<std::string,std::string> archiveFiles;
   std::string boardKey = "MICRO-STAR|MS-1T91|FAKE-SYSTEM|ClawCG3EM";
   std::vector<std::wstring> locations{L"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(4)"};
+  std::function<void()> locationHook;
   std::vector<HidHidePhysicalIdentity> additionalSources;
   struct Interface {std::string path,root,instance;USHORT vid=0x0db0,pid=0x1902;DWORD devInst=0;};
   struct DeviceSet {std::vector<Interface> rows;};
@@ -289,7 +313,11 @@ std::string msiCrashBoardKey() { return fake::boardKey; }
 std::wstring app_data_dir() { return L"FAKE-ARCHIVE-DIR"; }
 std::wstring msiCrashRecoveryPath() { return L"FAKE-STORAGE-ONLY"; }
 bool msiCrashOldOwnerDead(const ymcc::msi::recovery::Record&) { return fake::ownerDead; }
-DWORD GetFileAttributesW(const wchar_t*) {fake::lastError=fake::storePresent?0:ERROR_FILE_NOT_FOUND;return fake::storePresent?0:INVALID_FILE_ATTRIBUTES;}
+DWORD GetFileAttributesW(const wchar_t* path) {
+ if(std::wstring(path)==msiCrashRecoveryPath()){fake::lastError=fake::storePresent?0:ERROR_FILE_NOT_FOUND;return fake::storePresent?0:INVALID_FILE_ATTRIBUTES;}
+ const auto name=W2U(path);const auto at=name.find_last_of("\\/");const bool present=fake::archiveFiles.count(name.substr(at==std::string::npos?0:at+1))!=0;
+ fake::lastError=present?0:ERROR_FILE_NOT_FOUND;return present?0:INVALID_FILE_ATTRIBUTES;
+}
 DWORD GetLastError() {return fake::lastError;}
 bool msiCrashReadBounded(const std::wstring& path, std::size_t limit, std::string& text) {
   ++fake::reads; if (fake::failRead) return false;
@@ -300,6 +328,10 @@ bool msiCrashReadBounded(const std::wstring& path, std::size_t limit, std::strin
   const auto found = fake::archiveFiles.find(name.substr(at == std::string::npos ? 0 : at + 1));
   if (found == fake::archiveFiles.end() || found->second.size() > limit) return false;
   text = found->second; return true;
+}
+DWORD msiCrashReadOwnedRecord(const std::wstring& path,std::string& text){
+  if(fake::failRead)return ERROR_READ_FAULT;
+  return msiCrashReadBounded(path,32768,text)?ERROR_SUCCESS:ERROR_FILE_NOT_FOUND;
 }
 bool sgWriteFileAtomic(const std::wstring&, const std::string& bytes) {
   if (fake::cutBeforeCommit) { fake::cutBeforeCommit = false; throw fake::Cut{}; }
@@ -312,7 +344,7 @@ bool sgWriteFileAtomic(const std::wstring&, const std::string& bytes) {
 void appendNativeLifecycleLog(const char* event, const json& row) {
   auto value=row; value["event"]=event; fake::logs.push_back(std::move(value));
 }
-std::vector<std::wstring> msiForegroundIsolationLocations(const std::string&) { return fake::locations; }
+std::vector<std::wstring> msiForegroundIsolationLocations(const std::string&) { if(fake::locationHook)fake::locationHook();return fake::locations; }
 bool deviceInterfaceUsbInstance(const wchar_t*, std::wstring& root) {
   if(!fake::resolveOk)return false; root=U2W(fake::source.usbInstance);return true;
 }
@@ -379,6 +411,13 @@ std::wstring hidHideResolveXusbInterfacePath(const std::string&){return {};}
 void msiDinputReleasePad(const char*) { fake::sourcePresent = false; g_msiDinput.pad=nullptr; }
 void msiDinputClearOwnedState(const char*) { g_msiDinputSourceValid = false;g_msiDinput.mainInterfaceMatched=false;g_msiDinput.productId=0; }
 bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot&);
+bool hidHideRun(const std::wstring& command){
+ const std::wstring prefix=L"--dev-unhide \"";
+ if(command.rfind(prefix,0)!=0 || command.back()!=L'"')throw std::runtime_error("unexpected native fake driver operation");
+ const auto path=command.substr(prefix.size(),command.size()-prefix.size()-1);++fake::unhideWrites;
+ if(fake::unhideOk)fake::hidden.erase(std::remove(fake::hidden.begin(),fake::hidden.end(),path),fake::hidden.end());
+ return fake::unhideOk;
+}
 bool hidHideRestorePhysicalTransaction(const char*);
 bool msiClawRestoreXInputMode(const char*);
 static void msiOwnedReturnRecordInitial(const char*,const MsiClawCommandOutcome&);
@@ -426,7 +465,7 @@ bool fixtureOwnedObserverCompleteModeDuty() {
   appendNativeLifecycleLog("fixture-owned-observer",{{"action","controlled-mode-completion"},
     {"simulated",true},{"returnDebtEpisodeId",fake::observerEpisode},
     {"physicalSignalVerified",false},{"twoStableSignalWindowsVerified",false}});
-  msiCrashRecoveryAfterModeDischarge();
+  msiCrashRecoveryAfterModeDischarge({});
   if(g_msiCrashRecord.modeReturnPending)return false;
   g_msiDinputReturnOwed=false;return true;
 }
@@ -460,6 +499,7 @@ ymcc::msi::recovery::Record durable() {
 void restart(DWORD pid = 101) {
   fake::pid = pid; fake::creation = std::to_string(2000 + pid);
   g_msiCrashRecord = {}; g_msiCrashLoaded = false; g_msiCrashStoreInvalid = false;
+  g_msiCrashReadRetryPending=false;g_msiCrashReadAttempts=0;g_msiCrashReadRetryAt=g_msiCrashReadStartedAt=0;
   g_msiCrashInheritedPending = false; g_msiCrashStartupAttempted = false; g_msiCrashNextTick = 0; g_msiCrashLastDecision.clear(); g_msiCrashUnhideAttempts=0; g_msiCrashSettlementChecks=0; g_msiCrashDecisionRows=0;
   g_hidHideVisibilityJournal = {};g_msiCrashStartupTransactionId.clear();g_msiCrashStartupHiddenPaths.clear();g_inputHostReleaseQuarantined=false;g_wakeHoldPhysicalUnhide=false;g_xinputConnectedMask=0; g_realStickTest.virtualTargetEnabled = false;
   g_inputCaptureGamepadSnapshot={};
@@ -477,6 +517,7 @@ void restart(DWORD pid = 101) {
   g_msiOwnedReturnSourceEvent=0;
   g_msiFeedbackSampleTopology=g_xinputTopologyEpoch=4;g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;
   fake::locations={L"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(4)"};fake::additionalSources.clear();
+  fake::locationHook={};
   fake::resetSetup();fake::resolveOk = true; fake::resolveHook = {}; fake::afterCommit = {};fake::snapshotHook={};fake::snapshotValid=true;fake::applications.clear();
   fake::failCommit = fake::failRead = fake::cutBeforeCommit = fake::cutAfterCommit = false;
   fake::seam = false; fake::knownBoard = fake::ownerDead = fake::hardwareGate = true;
@@ -673,7 +714,7 @@ int runStartupRetirement(const json& archive){
   else if(kind=="cloak-changed")g_hidHideVisibilityJournal.cloakChanged=true;else if(kind=="unknown-board")fake::knownBoard=false;else if(kind=="power-not-ready")g_powerLifecycle=PowerLifecycle::Suspended;else if(kind=="exit")fake::exitFence=true;
   else if(kind=="durable-mode-duty"){g_msiCrashRecord.modeReturnPending=true;save(g_msiCrashRecord);}
   else if(kind=="durable-hidden-duty"){g_msiCrashRecord.hiddenPaths={fake::owned};save(g_msiCrashRecord);}
-  else if(kind=="durable-mode-settlement-fail"){g_msiCrashRecord.modeReturnPending=true;save(g_msiCrashRecord);fake::failCommit=true;msiCrashRecoveryAfterModeDischarge();}
+  else if(kind=="durable-mode-settlement-fail"){g_msiCrashRecord.modeReturnPending=true;save(g_msiCrashRecord);fake::failCommit=true;msiCrashRecoveryAfterModeDischarge({});}
   else if(kind=="hidden-path-added")g_hidHideVisibilityJournal.hiddenByUs.push_back(L"OTHER-OWNERS-PATH");else if(kind=="hidden-path-replaced")g_hidHideVisibilityJournal.hiddenByUs.front()=L"OTHER-OWNERS-PATH";else if(kind=="hidden-path-empty")g_hidHideVisibilityJournal.hiddenByUs.clear();
   else if(kind=="before-hidden"){g_hidHideVisibilityJournal.before.valid=true;g_hidHideVisibilityJournal.before.hidden={L"OTHER-BASELINE-PATH"};}else if(kind=="before-application"){g_hidHideVisibilityJournal.before.valid=true;g_hidHideVisibilityJournal.before.applications={L"OTHER-BASELINE-APP"};}else if(kind=="before-cloak"){g_hidHideVisibilityJournal.before.valid=true;g_hidHideVisibilityJournal.before.cloaking=true;}
   const auto writes=fake::modeWrites,unhides=fake::unhideWrites;const auto logs=retiredRows();const auto tx=g_hidHideVisibilityJournal.transactionId,tag=g_msiCrashStartupTransactionId;
@@ -1059,6 +1100,63 @@ int main(int argc,char** argv) { try {
     check("migration-cut-after-commit-reloads",g_msiCrashRecord.ownerPid==9956&&g_msiCrashRecord.hiddenPaths.size()==4&&fake::storage==committedMigration,
       "A cut after migration commit reloads durable exact ownership instead of reconstructing it from driver state");
   }
+  if(!archive.at("nativeArchive").is_null()){
+    const auto& captured=archive.at("nativeArchive").at("files");
+    const auto original=msiRecovery::decodeRecord(captured.at("msi-controller-return.json").get<std::string>()).record;
+    auto nativeSeed=[&](){seed(false,false);restart();fake::boardKey=original.boardKey;fake::locations.clear();for(const auto& position:original.locationPaths)fake::locations.push_back(U2W(position));
+      fake::archiveFiles=captured.get<std::map<std::string,std::string>>();save(original);};
+    nativeSeed();msiCrashRecoveryInitialize();const auto migrated=g_msiCrashRecord;
+    check("native-real-archive-exact-four-owned-paths",g_msiCrashInheritedPending && migrated.nativeLegacyImported && migrated.ownerPid==17848 &&
+      migrated.ownerCreationTime=="134375313626906592" && migrated.hiddenPaths.size()==4 && !migrated.modeReturnPending,
+      "Actual archive receipt is bound to exact board root locations and independently retained process birth",{{"record",json::parse(msiRecovery::encodeRecord(migrated))}});
+    fake::sourcePresent=false;g_inputCaptureGamepadSnapshot={};fake::hidden={U2W(fake::foreign)};
+    for(const auto& path:migrated.hiddenPaths)fake::hidden.push_back(U2W(path));msiCrashRecoveryMaintenance(1000);
+    check("native-return-does-not-require-working-input",!g_msiCrashInheritedPending && durable().hiddenPaths.empty() && fake::unhideWrites==4 &&
+      fake::hidden==std::vector<std::wstring>{U2W(fake::foreign)} && fake::modeWrites==0 && !g_hidHideVisibilityJournal.active,
+      "Exact old native ownership plus present root and matching locations returns configuration without live input or mode writes");
+    nativeSeed();msiCrashRecoveryInitialize();fake::locations={L"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(9)"};msiCrashRecoveryMaintenance(1000);
+    check("native-return-refuses-changed-location",g_msiCrashInheritedPending && fake::unhideWrites==0,"No live input requirement cannot bypass current exact PnP location");
+    nativeSeed();msiCrashRecoveryInitialize();fake::locationHook=[](){g_powerLifecycle=PowerLifecycle::Suspended;};msiCrashRecoveryMaintenance(1000);
+    check("native-return-rechecks-power-after-location-IO",g_msiCrashInheritedPending && fake::unhideWrites==0,"A power hold without an already advanced generation denies driver writes after a blocking property query");
+    nativeSeed();msiCrashRecoveryInitialize();fake::unhideOk=false;fake::visibilityReadOk=false;
+    for(unsigned attempt=0;attempt<30;++attempt)msiCrashRecoveryMaintenance(1000+attempt*1000);
+    check("native-failed-return-bounded-and-retained",g_msiCrashInheritedPending && !durable().hiddenPaths.empty() && fake::unhideWrites==12 &&
+      g_msiCrashUnhideAttempts==3 && g_msiCrashSettlementChecks==20,"Driver failure stops at original budgets without dropping owned debt");
+    nativeSeed();fake::ownerDead=false;msiCrashRecoveryInitialize();
+    check("native-archive-live-owner-not-adopted",!g_msiCrashInheritedPending && g_msiCrashRecord.hiddenPaths.empty(),"A live or unknown process never grants old ownership");
+    nativeSeed();for(auto& [name,text]:fake::archiveFiles)if(name.find("visibility")!=std::string::npos)text.clear();msiCrashRecoveryInitialize();
+    check("native-archive-missing-birth-denied",!g_msiCrashInheritedPending && g_msiCrashRecord.hiddenPaths.empty(),"Hidden-list entries do not substitute for process birth");
+    nativeSeed();auto wrong=original;wrong.locationPaths={"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(9)"};save(wrong);msiCrashRecoveryInitialize();
+    check("native-archive-wrong-location-denied",!g_msiCrashInheritedPending,"Even identical root spelling cannot bypass location binding");
+    nativeSeed();fake::archiveFiles.erase("native-lifecycle.log.1");msiCrashRecoveryInitialize();
+    check("native-archive-missing-rotation-denied",!g_msiCrashInheritedPending,"A partial retained history does not authorize migration");
+    nativeSeed();{
+      std::istringstream history(fake::archiveFiles["native-lifecycle.log.1"]+fake::archiveFiles["native-lifecycle.log"]);std::string line,selected;
+      while(std::getline(history,line)){try{const auto row=json::parse(line);if(row.value("event",std::string{})=="msi-native-foreground-isolation" && row.value("pid",0u)==17848)selected+=line+"\n";}catch(const json::exception&){}}
+      fake::archiveFiles["native-lifecycle.log"]=selected;
+    }fake::archiveFiles.erase("native-lifecycle.log.1");msiCrashRecoveryInitialize();
+    check("native-complete-current-log-without-rotation-admitted",g_msiCrashInheritedPending && g_msiCrashRecord.hiddenPaths.size()==4,"An explicitly absent optional rotation does not suppress complete current-log proof");
+    nativeSeed();fake::archiveFiles["native-lifecycle.log.1"].resize((8u<<20)+1);msiCrashRecoveryInitialize();
+    check("native-unreadable-present-rotation-denied",!g_msiCrashInheritedPending,"A present but oversized history is uncertainty and cannot be skipped");
+    nativeSeed();msiCrashRecoveryInitialize();fake::hidden.clear();HidHideVisibilitySnapshot returned;returned.valid=true;
+    msiCrashRecoveryAfterOwnedRestore(returned,true);restart();msiCrashRecoveryInitialize();
+    check("native-migration-once-marker-survives-restart",g_msiCrashRecord.nativeLegacyImported && g_msiCrashRecord.hiddenPaths.empty() && !g_msiCrashInheritedPending,"A settled native migration cannot recreate historical hide debt");
+    auto cleanNative=[&](){nativeSeed();fake::archiveFiles.clear();auto clean=original;clean.nativeLegacyImported=false;save(clean);msiCrashRecoveryInitialize();};
+    HidHidePhysicalIdentity nativePhysical;nativePhysical.resolved=true;nativePhysical.vendorId=0x0db0;nativePhysical.productId=0x1901;nativePhysical.baseContainerDeviceInstanceId=original.rootInstance;
+    const std::vector<std::string> nativeTargets={original.rootInstance,"HID\\VID_0DB0&PID_1901&IG_01\\8&36E80569&0&0000","USB\\VID_0DB0&PID_1901&MI_00\\6&2B02AE9F&0&0000"};
+    HidHideVisibilitySnapshot nativeBefore;nativeBefore.valid=true;
+    cleanNative();const bool nativeClaim=msiCrashRecoveryBeforeNativeHide(nativePhysical,nativeTargets,nativeBefore,"native-offline-lease");
+    check("native-write-ahead-has-no-virtual-journal",nativeClaim && durable().hiddenPaths==nativeTargets && !g_hidHideVisibilityJournal.active && g_hidHideVisibilityJournal.hiddenByUs.empty(),"Native ownership persists before mutation without contaminating virtual controller journal");
+    msiCrashRecoveryAfterOwnedRestore(nativeBefore,true);const auto settledNative=durable();nativeSeed();save(settledNative);restart();msiCrashRecoveryInitialize();
+    check("native-new-protocol-settlement-cannot-revive-old-log-duty",g_msiCrashRecord.nativeLegacyImported && !g_msiCrashInheritedPending && g_msiCrashRecord.hiddenPaths.empty(),"New native protocol commits the migration cutoff before mutation so old logs cannot override durable settlement");
+    cleanNative();msiCrashRecoveryBeforeNativeHide(nativePhysical,nativeTargets,nativeBefore,"native-offline-lease");
+    restart();msiCrashRecoveryInitialize();
+    check("native-crash-reloads-return-duty",g_msiCrashInheritedPending && durable().hiddenPaths==nativeTargets,"A crash cannot erase committed native-only ownership");
+    cleanNative();fake::failCommit=true;
+    check("native-storage-failure-denies-hide",!msiCrashRecoveryBeforeNativeHide(nativePhysical,nativeTargets,nativeBefore,"native-failed-store") && durable().hiddenPaths.empty(),"Failed storage never grants hide permission");
+    cleanNative();fake::afterCommit=[](){++fakePower;};
+    check("native-stale-after-persistence-denies-hide",!msiCrashRecoveryBeforeNativeHide(nativePhysical,nativeTargets,nativeBefore,"native-stale-context") && durable().hiddenPaths==nativeTargets,"Changed generation preserves debt but grants no device mutation");
+  }
   std::cout << "SIDECAR_RESULT " << json({{"assertions", assertions}, {"failures", failures}, {"results", results},
     {"ownedObserver", "controlled-sidecar-simulation"}, {"twoStableSignalWindowsVerified", false},
     {"productionEntrypointExecuted", false}, {"realDeviceCalls", 0}, {"realRegistryCalls", 0}, {"realHostCalls", 0},
@@ -1078,6 +1176,7 @@ const ownedObserver = {
 const binding = {scope: 'actual extracted crash runtime functions; real journal codec; fake storage/process/driver/source and owned-observer boundaries',
   ownedObserver,
   runtime: {path: runtimePath, sha256: sha(runtimeBytes)}, journal: {path: journalPath, sha256: sha(journalBytes)},
+  sourceWindow:{path:path.join(repo,'native/virtual_output_status.h'),sha256:sha(fs.readFileSync(path.join(out,'virtual_output_status.h')))},
   restoreSemantics:restoreBinding,
   interfaceResolver:{path:mainPath,functions:resolverFunctions.map(({body,...rest})=>rest),mockScope:"fake SetupAPI/HID/parent-chain leaves; actual resolver and actual instance-ID function; no Win32 linkage",boundarySnapshot:boundaryBytes?{path:boundarySnapshotPath,sha256:sha(boundaryBytes),resolverFunctionsMatch:resolverBoundaryMatches}:null},
   retirementDisabledMutation:{scope:"actual maintenance with retirement helper bypassed as success to reproduce old unconditional no-duty shutdown; restores use true production predicate/tail",originalMaintenanceSha256:maintenance.sha256,mutatedSha256:sha(legacyRetirementMaintenance)},
@@ -1098,15 +1197,15 @@ const result = JSON.parse(row.slice('SIDECAR_RESULT '.length));
 result.runnerExitCode = run.status;
 const afterMainSource=fs.readFileSync(mainPath,'utf8');
 result.resolverDependenciesChangedDuringRun=resolverFunctions.some(f=>extract(afterMainSource,f.name).sha256!==f.sha256);
-const afterRestore=extract(afterMainSource,'hidHideRestorePhysicalTransaction'),afterStart=extract(afterMainSource,'inputHostStart');
+const afterRestore=extract(afterMainSource,'hidHideRestorePhysicalTransaction'),afterStart=extract(fs.readFileSync(startRuntimePath,'utf8'),'inputHostStart');
 const afterPredicateStart=afterRestore.body.indexOf('const bool msiOwnedReturn='),afterPredicateEnd=afterRestore.body.indexOf('json restoreResultRow',afterPredicateStart),afterTailStart=afterRestore.body.indexOf('msiCrashRecoveryAfterOwnedRestore(restoreAfter,restoreReadback);'),afterGateStart=afterStart.body.indexOf('if (g_inputHostReleaseQuarantined ||');
 result.restoreDependenciesChangedDuringRun=extract(afterMainSource,'hidHideVirtualEndpointAbsent').sha256!==endpointFunction.sha256||sha(afterRestore.body.slice(afterPredicateStart,afterPredicateEnd).trim())!==sha(restorePredicate)||sha(afterRestore.body.slice(afterTailStart,afterRestore.body.lastIndexOf('}')).trim())!==sha(restoreTail)||sha(afterStart.body.slice(afterGateStart,endBrace(afterStart.body,afterStart.body.indexOf('{',afterGateStart))))!==sha(startGateBody);
-result.sourceChangedDuringRun = sha(fs.readFileSync(runtimePath)) !== binding.runtime.sha256 || sha(fs.readFileSync(journalPath)) !== binding.journal.sha256 || result.resolverDependenciesChangedDuringRun || result.restoreDependenciesChangedDuringRun;
+result.sourceChangedDuringRun = sha(fs.readFileSync(runtimePath)) !== binding.runtime.sha256 || sha(fs.readFileSync(journalPath)) !== binding.journal.sha256 || sha(fs.readFileSync(binding.sourceWindow.path))!==binding.sourceWindow.sha256 || result.resolverDependenciesChangedDuringRun || result.restoreDependenciesChangedDuringRun;
 result.dependencyAdapter = binding.dependencyAdapter;
 result.ownedObserver = binding.ownedObserver;
 result.assertionCounts = {
-  original: result.results.filter(r => !/^(startup-adoption-|owned-observer-boundary-)/.test(r.id)).length,
-  added: result.results.filter(r => /^(startup-adoption-|owned-observer-boundary-)/.test(r.id)).length,
+  original: result.results.filter(r => !/^(startup-adoption-|owned-observer-boundary-|native-)/.test(r.id)).length,
+  added: result.results.filter(r => /^(startup-adoption-|owned-observer-boundary-|native-)/.test(r.id)).length,
   total: result.assertions
 };
 result.retirementDisabledMutation=binding.retirementDisabledMutation;result.restoreSemantics=binding.restoreSemantics;result.existingMode1Gate=binding.existingMode1Gate;result.interfaceResolver=binding.interfaceResolver;result.legacyCallMutation=binding.legacyCallMutation;

@@ -12,7 +12,7 @@ namespace HandheldCompanion.Utils
  }
 }
 namespace HandheldCompanion.Commands.Functions.HC { public sealed class MainWindowCommands{} public sealed class QuickToolsCommands{} }
-namespace WindowsInput.Events { public enum KeyCode { RControlKey,LControl,LWin,F17,D,F15,F16 } }
+namespace WindowsInput.Events { public enum KeyCode { RControlKey,RControl,LControl,LWin,F17,D,F15,F16 } }
 namespace HandheldCompanion.Inputs
 {
  public enum ButtonFlags { OEM1,OEM2,OEM3,OEM4 }

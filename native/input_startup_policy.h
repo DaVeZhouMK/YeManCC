@@ -31,7 +31,7 @@ inline nlohmann::json startupGyroPresetParams(const std::string& preset, const n
                   {"antiDeadzone", 20}, {"autoCalibrate", true}};
         if (preset == "fps") {
             params.update(json{{"outputStick", "right"}, {"outputAxis", "xy"},
-                               {"motionInput", "local-space"}, {"aimingSightsTrigger", "LT"}});
+                               {"motionInput", "local-space"}, {"aimingSightsTrigger", "LT"}, {"gyroWeight", 1.3}});
         } else if (preset == "racing") {
             params.update(json{{"outputStick", "left"}, {"outputAxis", "x"}, {"motionInput", "joystick-steering"}});
         } else if (preset == "steam") {
@@ -46,7 +46,7 @@ inline nlohmann::json startupGyroPresetParams(const std::string& preset, const n
     trigger = start == std::string::npos ? "" : trigger.substr(start, trigger.find_last_not_of(" \t\r\n") - start + 1);
     params.erase("gyroMode");
     params["motionMode"] = mode == "suppress" ? "on" : mode;
-    params["motionTrigger"] = mode == "on" || trigger.empty() ? json(nullptr) : json(trigger);
+    params["motionTrigger"] = mode == "on" ? json(nullptr) : json(trigger.empty() ? "LT" : trigger);
     return params;
 }
 
@@ -111,9 +111,48 @@ inline nlohmann::json initializeInputStartup(const nlohmann::json& savedInput,
 // is only the materialized next-boot cache when a four-mode document exists.
 // In particular, v1's exact factory SD recipe must not run once before the
 // renderer retires it under v2. User-edited modules and future versions survive.
+// Only validate fields consumed before the renderer starts. An invalid intent
+// must not quietly fall through to an older startupDesired/persona cache.
+inline void validateBootModeInputStartup(const nlohmann::json& modes) {
+    using nlohmann::json;
+    if (modes.is_null() || (modes.is_object() && modes.empty())) return;
+    const auto reject = [] { throw std::runtime_error("boot-mode-startup-data-invalid"); };
+    if (!modes.is_object() || modes.value("schema", json(nullptr)) != 1) reject();
+    const auto objectAt = [&](const json& value, const char* key) -> json {
+        if (!value.contains(key)) return json::object();
+        if (!value.at(key).is_object()) reject();
+        return value.at(key);
+    };
+    if (modes.contains("bootEnabled") && !modes.at("bootEnabled").is_boolean()) reject();
+    const auto selected = modes.value("boot", json("global"));
+    if (selected != "global" && selected != "xbox" && selected != "steam" && selected != "xbox-steam") reject();
+    if (modes.contains("revision")) {
+        const auto& revision = modes.at("revision");
+        if (!revision.is_number()) reject();
+        const double value = revision.get<double>();
+        if (!std::isfinite(value) || value < 0 || std::floor(value) != value || value > 9007199254740991.0) reject();
+    }
+    const auto validate = [&](const json& snapshot) {
+        const auto input = objectAt(snapshot, "input");
+        if (input.contains("persona")) {
+            const auto& persona = input.at("persona");
+            if (persona != "disabled" && persona != "elite" && persona != "steamdeck" && persona != "dualsense-edge") reject();
+        }
+        const auto motion = objectAt(objectAt(snapshot, "gyro"), "motion");
+        if (motion.contains("enabled") && !motion.at("enabled").is_boolean() && !motion.at("enabled").is_null()) reject();
+        for (const auto* key : {"preset", "activePreset"}) if (motion.contains(key) && !motion.at(key).is_null()) {
+            const auto& preset = motion.at(key);
+            if (preset != "fps" && preset != "racing" && preset != "custom" && preset != "steam" && preset != "off") reject();
+        }
+    };
+    validate(objectAt(modes, "global"));
+    const auto scenes = objectAt(modes, "scenes");
+    for (const auto* id : {"xbox", "steam", "xbox-steam"}) validate(objectAt(objectAt(scenes, id), "overrides"));
+}
 inline nlohmann::json bootModeInputStartupPreferences(const nlohmann::json& modes,
                                                       const nlohmann::json& fallback) {
     using nlohmann::json;
+    validateBootModeInputStartup(modes);
     if (!modes.is_object() || modes.value("schema", json(nullptr)) != 1)
         return normalizeInputStartupPreferences(fallback);
     const auto objectAt = [](const json& value, const char* key) -> json {

@@ -1,3 +1,4 @@
+import { parseKeyboardSequence } from './controllerKeyboardSequence';
 import { CONTROLLER_PERSONA_OPTIONS, migrateControllerPersona } from './controllerPersona';
 import { isRadialTestingEnabled } from '../radial/testingState';
 /**
@@ -116,6 +117,8 @@ export type ControllerShortcutRule = {
   intervalMs: number;
   params: Record<string, string | number | boolean>;
 };
+/** Explicit user selections matter even when normalization made their value look unchanged. */
+export type ControllerShortcutFieldEdits = ReadonlyMap<string, ReadonlySet<keyof ControllerShortcutRule>>;
 export type ControllerShortcutAction = {
   id: string;
   label: string;
@@ -380,7 +383,9 @@ export function newControllerShortcutRule(seed = `${Date.now()}`, actionId = 'wi
 export function normalizeControllerShortcutRule(value: unknown, index: number): ControllerShortcutRule | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<ControllerShortcutRule>;
-  const actionId = typeof raw.actionId === 'string' && raw.actionId ? raw.actionId : 'window.summon';
+  // Preserve damaged records as opaque data instead of inventing a summon action.
+  if (typeof raw.actionId !== 'string' || !raw.actionId) return null;
+  const actionId = raw.actionId;
   const inputs = Array.isArray(raw.inputs)
     ? raw.inputs.map(normalizeInput).filter((item): item is ControllerShortcutInput => item !== null).filter((item, position, all) => all.findIndex((candidate) => inputKey(candidate) === inputKey(item)) === position).slice(0, CONTROLLER_SHORTCUT_MAX_INPUTS)
     : [];
@@ -467,6 +472,7 @@ export function mergeControllerShortcutDraft(
   baseline: readonly ControllerShortcutRule[],
   draft: readonly ControllerShortcutRule[],
   latest: readonly ControllerShortcutRule[],
+  explicitFields?: ControllerShortcutFieldEdits,
 ): ControllerShortcutDraftMerge {
   const stable = (value: unknown): string => {
     if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
@@ -489,7 +495,14 @@ export function mergeControllerShortcutDraft(
     const base = maps[0].get(id), local = maps[1].get(id), remote = maps[2].get(id);
     const baseText = stable(base), localText = stable(local), remoteText = stable(remote);
     let chosen: ControllerShortcutRule | undefined;
-    if (localText === baseText) chosen = remote;
+    if (localText === baseText) {
+      // Re-recording a normalized legacy chord is still an explicit edit. A
+      // concurrent replacement/deletion of that field must retain the draft.
+      if (local && [...(explicitFields?.get(id) || [])].some(key => stable(local[key]) !== stable(remote?.[key]))) {
+        conflicts.add(id); continue;
+      }
+      chosen = remote;
+    }
     else if (remoteText === baseText || remoteText === localText) chosen = local;
     else { conflicts.add(id); continue; }
     if (chosen) merged.set(id, JSON.parse(JSON.stringify(chosen)) as ControllerShortcutRule);
@@ -517,23 +530,38 @@ export function validateControllerShortcutRules(rules: ControllerShortcutRule[],
   for (const rule of rules) {
     if (seenIds.has(rule.id)) problems.push('动作编号重复，请重新新建动作。');
     seenIds.add(rule.id);
+    // Disabled records can be retained for another device or repaired later.
+    // They must not prevent disabling/removing an unavailable input.
+    if (!rule.enabled) continue;
+    if (!triggerSet.has(rule.trigger)) problems.push('请选择有效的触发方式。');
+    const validTime = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max;
+    if ((rule.trigger === 'hold' || rule.trigger === 'repeat') && !validTime(rule.holdMs, rule.trigger === 'repeat' ? 0 : 100, 10000)) problems.push('请重新选择有效的长按时间。');
+    if (rule.trigger === 'double' && !validTime(rule.doubleWindowMs, 200, 2000)) problems.push('请重新选择 200 至 2000 ms 的双击窗口。');
+    if (rule.trigger === 'repeat' && !validTime(rule.intervalMs, 40, 2000)) problems.push('请重新选择 40 至 2000 ms 的连发间隔。');
+    if (rule.actionId.startsWith('keyboard.') && Object.prototype.hasOwnProperty.call(rule.params, 'keySequence') && !parseKeyboardSequence(rule.params.keySequence)) problems.push('键盘组合或顺序无效，请检查按键、时长和等待步骤。');
+    if (rule.actionId.startsWith('keyboard.') && parseKeyboardSequence(rule.params.keySequence)?.mode === 'toggle' && rule.trigger === 'repeat') problems.push('循环输出请使用按下、长按、松开或双击触发，避免连发反复开关。');
     const action = actionMap.get(rule.actionId);
     if (!action) problems.push('请选择一个有效的输出动作。');
     else {
       for (const parameter of action.parameters || []) {
         const inputToggle = action.id === 'input.gyroToggle' || action.id === 'input.virtualGamepadToggle' || action.id === 'input.frontendButton';
-        const shortcutControl = ['monitor.toggle','display.frameRateControl','fan.switchPreset'].includes(action.id);
-        if (parameter.presentation !== 'key-grid' && !((inputToggle || shortcutControl) && parameter.type === 'select')) continue;
         const value = rule.params[parameter.id] ?? parameter.default;
+        if (parameter.type === 'boolean') {
+          if (typeof value !== 'boolean') problems.push('请重新设置有效的动作开关。');
+          continue;
+        }
+        // Quick apps use the current device's dynamic choices; validate the
+        // saved path below rather than the empty static option list.
+        if (parameter.type !== 'select' || (action.id === 'app.launchQuickApp' && parameter.id === 'appPath')) continue;
         if (typeof value !== 'string' || !parameter.options?.some((option) => option.value === value)) {
-          problems.push(inputToggle ? '请重新选择有效的输出预设。' : '请重新选择有效的输出按键。');
+          problems.push(inputToggle ? '请重新选择有效的输出预设。' : parameter.presentation === 'key-grid' ? '请重新选择有效的输出按键。' : '请重新选择有效的动作参数。');
         }
       }
     }
-    // Native defaults mirror existing routes; custom rules require at least
-    // one input and may use up to four ordered inputs.
-    if (rule.origin !== 'native-default' && (rule.inputs.length < CONTROLLER_SHORTCUT_MIN_INPUTS || rule.inputs.length > CONTROLLER_SHORTCUT_MAX_INPUTS)) problems.push('请录制 1 至 4 个输入按键。');
-    if (action?.id === 'app.launchQuickApp' && (typeof rule.params.appPath !== 'string' || !rule.params.appPath || rule.params.appPath.length > 2048)) problems.push('请选择要启动的快捷应用。');
+    // Default rows are editable too: an enabled action always needs its
+    // actual recorded input, never an implicit fallback outside the rule list.
+    if (rule.inputs.length < CONTROLLER_SHORTCUT_MIN_INPUTS || rule.inputs.length > CONTROLLER_SHORTCUT_MAX_INPUTS) problems.push('请录制 1 至 4 个输入按键。');
+    if (action?.id === 'app.launchQuickApp' && (typeof rule.params.appPath !== 'string' || !rule.params.appPath || rule.params.appPath.length > 2048 || /[\u0000-\u001f]/.test(rule.params.appPath))) problems.push('请选择要启动的快捷应用。');
     if (new Set(rule.inputs.map(inputKey)).size !== rule.inputs.length) problems.push('输入中有重复按键，请重新录制。');
     // Mixed physical controller/OEM/keyboard/mouse chords are intentional.
     // Persist real source/code pairs; only the preview classifies F13–F24 as handheld.

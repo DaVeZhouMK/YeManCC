@@ -24,8 +24,8 @@ const engine = read('src/gamepad/engine.ts');
 const router = read('src/router.ts');
 const app = read('src/App.vue');
 check('pointer and LB/RB share policy', () => {
-  assert.match(nav, /residentNavigationRoutes\(ROUTES, false\)/);
-  assert.match(engine, /residentNavigationRoutes\(ROUTES, enabled\)/);
+  assert.match(nav, /residentNavigationRoutes\(ROUTES, false, radialTestingEnabled\.value\)/);
+  assert.match(engine, /residentNavigationRoutes\(ROUTES, enabled, isRadialTestingEnabled\(\)\)/);
 });
 for (const [name, text] of [['sidebar', nav], ['controller navigation', engine], ['router', router]]) {
   check(`${name}: no capability visibility dependency`, () => assert.doesNotMatch(text, /fanFeatureEnabled|virtualGamepadFeatureEnabled|gyroMotionFeatureEnabled|refreshGyroVirtualFeatureAvailability/));
@@ -37,11 +37,11 @@ check('sidebar order excludes retired pages in every mode', () => {
   const block = router.slice(blockStart, router.indexOf('];', blockStart));
   const declared = [...block.matchAll(/path:\s*'(\/[^']+)'/g)].map((m) => m[1]);
   assert.deepEqual(declared, [
-    '/schedule', '/fan', '/button-mapping', '/gyro-motion',
-    '/steam', '/power', '/sleep', '/rtss', '/settings', '/quick',
+    '/schedule', '/fan', '/button-mapping', '/touch-mouse', '/gyro-motion',
+    '/steam', '/power', '/sleep', '/rtss', '/radial', '/settings', '/quick',
   ]);
-  assert.deepEqual(declared.filter((path) => path !== '/tdp' && path !== '/cpu'), [
-    '/schedule', '/fan', '/button-mapping', '/gyro-motion',
+  assert.deepEqual(residentNavigationRoutes(declared.map(path => ({path,...(path==='/radial'?{testing:'radial' as const}:{})})),false).map(route=>route.path), [
+    '/schedule', '/fan', '/button-mapping', '/touch-mouse', '/gyro-motion',
     '/steam', '/power', '/sleep', '/rtss', '/settings', '/quick',
   ]);
 });

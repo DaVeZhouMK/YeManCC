@@ -1,3 +1,4 @@
+import { gyroMotionForEnable } from './gyroPresetModel';
 import { snapshotSettingsData } from './settingsSnapshot';
 import { loadSettings, compareAndSwapInputSettings, getSettingsGeneration, assertSettingsGeneration, mergeSettings,
   type InputSettingsSnapshot, type SettingsCasResult } from './settingsRepository';
@@ -5,7 +6,7 @@ import { loadGameCustomConfig, onGameCustomConfigChanged, patchGameCustomProfile
   type GameCustomConfig, type GameCustomProfile, type GameCustomProfileTarget } from './performanceSchedule';
 import { detectPolicyGame, getPolicyGame, gamePolicyKey, subscribePolicyGameStatus } from './gamePolicyTarget';
 import { buildGameInputOverlay } from './gameInputOverride';
-import { detectedGameName } from './gamedetect';
+import { detectedGameName, isGameStatusCurrent, isCurrentGameTarget } from './gamedetect';
 
 /** The ordinary pages and the Y menu edit the same per-game record. */
 export interface GameInputEditor {
@@ -24,7 +25,7 @@ function trackOwner(config = latestConfig): void {
   latestConfig = config;
   const game = getPolicyGame(), exe = game ? gamePolicyKey(game) : '';
   const entry = config?.entries[exe];
-  const signature = JSON.stringify([getSettingsGeneration(), exe, game?.pid, game?.processCreated, game?.identityGeneration, !!entry && entry.enabled !== false]);
+  const signature = JSON.stringify([getSettingsGeneration(), exe, game?.pid, game?.processCreated, game?.path?.toLowerCase(), game?.identityGeneration, !!entry && entry.enabled !== false]);
   if (signature !== ownerSignature) { ownerSignature = signature; ownerEpoch++; }
 }
 const listeners = new Set<() => void>();
@@ -41,7 +42,8 @@ export function onGameInputEditorChanged(cb: () => void): () => void {
 }
 function sameTarget(editor: GameInputEditor): boolean {
   const game = getPolicyGame();
-  return editor.target.generation === getSettingsGeneration() && editor.ownerEpoch === ownerEpoch &&
+  return isGameStatusCurrent() && (game ? isCurrentGameTarget(editor.target) : editor.target.pid === 0) &&
+    editor.target.generation === getSettingsGeneration() && editor.ownerEpoch === ownerEpoch &&
     (game?.pid || 0) === editor.target.pid && String(game?.processCreated || '') === editor.target.processCreated &&
     (game ? gamePolicyKey(game) : '') === editor.target.exe;
 }
@@ -66,12 +68,17 @@ export async function readGameInputEditor(): Promise<GameInputEditor> {
     input.gyroMotion = overlay.gyroMotion as InputSettingsSnapshot['gyroMotion'];
   }
   return { input, profile, ownerEpoch, gameName: profile ? profile.displayName || detectedGameName(game) || exe : '',
-    target: { exe, pid: game?.pid || 0, processCreated: String(game?.processCreated || ''), generation } };
+    target: { exe, pid: game?.pid || 0, processCreated: String(game?.processCreated || ''), path: game?.path || '', identityGeneration: game?.identityGeneration, generation } };
 }
 
 /** Keep page writes in their captured owner; never fall back to a different game or the base. */
 export async function saveGameInputEditor(editor: GameInputEditor, patch: Record<string, any>, isCurrent: () => boolean = () => true): Promise<SettingsCasResult> {
   if (!sameTarget(editor) || !isCurrent()) throw new Error('当前编辑对象已变化，请重新调整');
+  // Link/power buttons used to set only enabled=true, leaving the native
+  // off + empty-trigger baseline inactive until a preset was clicked.
+  if (patch.gyroMotion?.enabled === true && !Object.prototype.hasOwnProperty.call(patch.gyroMotion, 'motionMode')) {
+    patch = { ...patch, gyroMotion: { ...gyroMotionForEnable(editor.input.gyroMotion), ...patch.gyroMotion } };
+  }
   if (!editor.profile) return compareAndSwapInputSettings(editor.input.revision, patch, () => sameTarget(editor) && isCurrent());
   if (Object.keys(patch).some(key => !['outputTarget', 'gyroMotion'].includes(key))) throw new Error('此设置属于公用配置');
   const fields: Partial<GameCustomProfile> = {
@@ -86,9 +93,10 @@ export async function saveGameInputEditor(editor: GameInputEditor, patch: Record
   }
   await patchGameCustomProfile(editor.target, fields, undefined, {
     expectedEnabled: true, expectedInputRevision: gameProfileInputRevision(editor.profile),
+    admit: () => sameTarget(editor) && isCurrent(),
   });
   const next = await readGameInputEditor();
-  if (next.target.exe !== editor.target.exe || next.target.pid !== editor.target.pid ||
+  if (!sameTarget(editor) || !isCurrent() || next.target.exe !== editor.target.exe || next.target.pid !== editor.target.pid ||
       next.target.processCreated !== editor.target.processCreated || !next.profile) throw new Error('当前编辑对象已变化');
   return { ok: true, revision: next.input.revision, value: next.input };
 }

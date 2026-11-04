@@ -310,7 +310,7 @@ static void testCaptureAndCatalogQuery(const json& expected) {
                 {"backIndex", want.at("backIndex")}, {"triggerCapability", trigger}, {"physicalForm", form}};
             if (newOneX) {
                 check(got.at("captureImplemented").is_boolean() && got.at("captureImplemented") == true,
-                      name + " all five catalog keys have implemented software capture");
+                      name + " all per-model catalog keys have implemented software capture");
                 check(want.at("capture") == true, name + " independent software policy expects implemented capture");
                 const auto& route = policy.at("routes").at(name).at(want.at("id").get<std::string>());
                 check(want.at("captureRoute") == route, name + " independent policy/catalog route consistency");
@@ -393,18 +393,19 @@ static void testCaptureAndCatalogQuery(const json& expected) {
     check(!queryCurrent(old).at("keys").at(0).contains("captureImplemented"), "legacy NEXT2 query has no new capture field");
 }
 static void testCaptureGateAndOldOneXDescriptor(const json& expected) {
-    group("capture-gate-exact-five-keys");
+    group("capture-gate-exact-per-model-keys");
     const auto& policy = expected.at("oneXApplicationPolicy");
     const std::vector<std::string> invalid = {"__not_catalog_key__", "", "Home", "HOME", "special", "m1", "m2", "l5", "r5", "home ", " home", "l4x", "xturbo", "Keyboard", "native-held", "*"};
     for (const auto& entry : policy.at("routes").items()) {
         const std::string cls = "HandheldCompanion.Devices." + entry.key();
-        for (const auto& key : policy.at("legalKeys")) {
-            const std::string id = key;
+        for (const auto& key : entry.value().items()) {
+            const std::string id = key.key();
             check(current::oemKeyCaptureImplemented(current::YmccFamily::OneXPlayer, cls, id), cls + "/" + id + " software gate admits exact catalog key");
             for (const auto& bad : {id + "x", "x" + id, id + " ", " " + id, id + std::string(1, '\0'), std::string(1, '\0') + id}) {
                 check(!current::oemKeyCaptureImplemented(current::YmccFamily::OneXPlayer, cls, bad), cls + " software gate rejects key padding/prefix/suffix/NUL");
             }
         }
+        check(current::oemKeyCaptureImplemented(current::YmccFamily::OneXPlayer, cls, "gkey") == (entry.key()=="OneXPlayer3"), "G-Key software capture remains exclusive to exact OXP3 class");
         for (const auto& id : invalid) check(!current::oemKeyCaptureImplemented(current::YmccFamily::OneXPlayer, cls, id), cls + " software gate rejects noncatalog key");
         for (unsigned byte = 0; byte != 256; ++byte) {
             check(!current::oemKeyCaptureImplemented(current::YmccFamily::OneXPlayer, cls, std::string(1, static_cast<char>(byte))), cls + " software gate rejects all one-byte noncatalog inputs");
@@ -420,6 +421,7 @@ static void testCaptureGateAndOldOneXDescriptor(const json& expected) {
             check(current::oemKeyCaptureImplemented(id.family, id.deviceClass, catalog.keys[i].keyId) == !steamDeck, "legacy catalog capture gate unchanged except exact unavailable SteamDeck");
         check(current::oemKeyCaptureImplemented(id.family, id.deviceClass, "__not_catalog_key__") == !steamDeck, "legacy unknown-key compatibility true except exact unavailable SteamDeck");
     }
+    uint64_t gkeyBit=0;check(current::nativeKeyboardShortcutMaskBit("gkey",gkeyBit)&&gkeyBit==(uint64_t{1}<<63),"G-Key uses the exact new uint64 canonical bit");
     group("onex-new-models-never-x1");
     const std::vector<std::string> oldClasses = {"OneXPlayerX1", "OneXPlayerX1AMD", "OneXPlayerX1Intel", "OneXPlayerX1Mini", "OneXPlayerX1Pro", "OneXPlayerApex"};
     for (const auto& simple : oldClasses) {

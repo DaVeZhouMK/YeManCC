@@ -5,7 +5,7 @@
       "id": "game-library.account-discovery-consumer",
       "title": "Actual library account discovery preserves current results across stale snapshots and concurrent refresh",
       "producer": "tools/custom_steam_library_account_status_selftest.mjs",
-      "producerSha256": "6e93da44d19f671be7ac86058d2734f2a97dcf967966f376abc5b652fe99ceb4",
+      "producerSha256": "842dde6ecc2f37328c6ee2943c0d9bc490c2f27c56bb698999212371570022fc",
       "productSources": [
         "CustomSteamLibrary/workspace-ui/app.js"
       ],
@@ -36,7 +36,17 @@
         "malformed-detection-6-is-not-login-warning",
         "malformed-detection-7-is-not-login-warning",
         "malformed-detection-8-is-not-login-warning",
-        "manual-scan-has-forced-account-recheck-hook"
+        "manual-scan-has-forced-account-recheck-hook",
+        "background-render-and-events-never-scan-or-retain-a-timer",
+        "focus-edge-refreshes-once-and-foreground-retains-one-timer",
+        "blur-cancels-timer-and-refocus-rereads-steam-state-once",
+        "hidden-document-cancels-even-without-window-blur",
+        "inflight-read-completes-in-background-without-restarting-polling",
+        "slow-read-coalesces-focus-storm-and-all-render-requests",
+        "pagehide-and-late-read-stay-dormant-until-pageshow",
+        "manual-forced-refresh-in-background-is-one-shot",
+        "failed-foreground-read-retains-one-normal-interval",
+        "hidden-library-page-stops-the-polling-owner"
       ],
       "fault": {
         "functionBegin": "function steamAccounts()",
@@ -51,7 +61,7 @@
             "name": "older-game-snapshot-cannot-restore-false-negative",
             "message": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /已发现 1 个/. Input:\n\n'正在检测 Steam 账户'\n",
             "producerFrame": {
-              "line": 142,
+              "line": 154,
               "column": 10
             }
           }
@@ -62,7 +72,7 @@
       "id": "game-library.snapshot-consumer",
       "title": "Actual library snapshot and artwork consumers preserve good state when incoming rows are malformed",
       "producer": "tools/custom_steam_library_ui_datachain_selftest.mjs",
-      "producerSha256": "3eaf6d2cbea922ca9f8a397838e6806cb7c459c7987873696b606a85af56ff41",
+      "producerSha256": "f1cae9d463d41e77fbdd8c9b3f5004520e1515dc6198ce8765e57bcf3d2f739e",
       "productSources": [
         "CustomSteamLibrary/workspace-ui/app.js",
         "CustomSteamLibrary/workspace-ui/index.html"
@@ -107,7 +117,20 @@
         "same-filename-distinct-exes-remain-separate-cards",
         "builtin-steam-tool-all-snapshot-boundaries",
         "builtin-steam-tool-non-authoritative-fallback-still-filters",
-        "builtin-steam-tool-strict-id-and-exact-name"
+        "builtin-steam-tool-strict-id-and-exact-name",
+        "cached-wallpaper-merge-has-linear-path-work",
+        "media-merge-keeps-original-first-match-precedence",
+        "media-merge-normalizes-exact-executable-and-last-record-wins",
+        "unconfirmed-id-never-becomes-a-wallpaper-alias",
+        "unmatched-media-records-stay-distinct-and-cleared-id-stays-cleared",
+        "card-selection-does-not-rebuild-or-copy-the-entire-library",
+        "legacy-path-override-and-identity-lookups-have-linear-batch-work",
+        "override-index-retains-direct-precedence-and-first-falsy-fallback",
+        "identity-index-retains-alias-order-and-exact-direct-precedence",
+        "bucket-index-retains-directory-direct-executable-and-entry-order",
+        "lookup-scope-releases-indexes-on-error-and-next-in-place-update",
+        "changed-primary-does-not-inherit-old-directory-plan-or-media",
+        "directory-plan-without-an-executable-retains-legacy-display-fallback"
       ],
       "fault": {
         "functionBegin": "function normalizeWorkspaceSnapshot(",
@@ -128,6 +151,16 @@
             "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'G:\\\\Games\\\\New'\n- 'G:\\\\Games\\\\Good'\n              ^\n"
           }
         ]
+      },
+      "producerRevision": {
+        "date": "2026-11-02",
+        "previousSha256": "7f4950eedb1614e45170e644e17ddca65995872e64681efad6dfaf2a0038ea08",
+        "retainedCaseCount": 51,
+        "addedCaseNames": [
+          "changed-primary-does-not-inherit-old-directory-plan-or-media",
+          "directory-plan-without-an-executable-retains-legacy-display-fallback"
+        ],
+        "reason": "Retain all original assertions and precise semantic faults; append changed-primary identity/media isolation and legitimate legacy display fallback."
       }
     }
   }

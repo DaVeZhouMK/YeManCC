@@ -103,7 +103,7 @@ internal static partial class Program
         // backButtons（bit0=M1→L5、bit1=M2→R5，native 仅 steamdeck 且开关 ON
         // 时非零）。不进 normalizedInputHash（独立字段，零哈希耦合）；缺省 0
         // ——老 native 不发该字段，白名单缺省解析回退 0，零污染。
-        , "backButtons", "touchpads", "screenButtons"
+        , "backButtons", "touchpads", "screenButtons", "frameReplyBinding"
     };
     // HIDHIDE_* 命令专用字段（HC 屏蔽层 API 化：native 经 pipe 下发 hide/
     // unhide/cloak/app-reg 操作，InputHost 内以 Nefarius.Drivers.HidHide
@@ -194,7 +194,8 @@ internal static partial class Program
         }
     }
 
-    // GP-PREREQ-4: an unavailable or throwing dependency probe cannot prevent the factory call.
+    // GP-PREREQ-4: ordinary backend failures remain advisory for this prepare.
+    // A refused persistent USB/IP budget must block the factory as well.
     // Factory failures propagate to the existing PREPARE_TARGET exception/error receipt.
     private static T CreateTargetWithBackendWarning<T>(Func<(bool Ready, string Detail)> prepareBackend,
         Func<T> createTarget, out string backendReceipt)
@@ -204,7 +205,7 @@ internal static partial class Program
             var probe = prepareBackend();
             backendReceipt = (probe.Ready ? "backend-ready:" : "backend-warning:") + probe.Detail;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not YeManInputHost.UsbipBackendBudgetRejectedException)
         {
             backendReceipt = "backend-warning:backend-check-exception:" + ex.GetType().Name;
         }
@@ -1556,6 +1557,7 @@ internal static partial class Program
         private bool _costFlagEnabled = CostLoggingRequestedByFlag();
         private long _lastActivityAt = Environment.TickCount64;
         private readonly string _hostInstanceId = Guid.NewGuid().ToString("N");
+        private readonly CompactFrameReplyBinding _compactFrameReplies = new();
         private HostRuntimeBinaryIdentity.Snapshot? _runtimeBinaryIdentity;
         private UsbipTransportObservation? _usbipTransportObservation;
         // ── GP-GBRETURN-1：关闭归还刷新的"短受理—后台执行—有界查询"支持（**只服务 T1 关闭归还**）──
@@ -1667,6 +1669,13 @@ internal static partial class Program
             if (envelope.Sequence != _lastSequence + 1) return Error(envelope, "protocol-error", "sequence-stale-or-gap");
             _lastSequence = envelope.Sequence;
             _lastActivityAt = Environment.TickCount64;
+            // This post-sequence gate consumes a valid command but never submits
+            // a frame for a stale or foreign reply-format/controller binding.
+            if (envelope.Command == "SUBMIT_FRAME" && envelope.FrameReplyBinding is not null &&
+                !_compactFrameReplies.Matches(_controller, envelope.FrameReplyBinding))
+                return Error(envelope, "state-rejected", "frame-reply-binding-mismatch");
+            if (envelope.Command is "PREPARE_TARGET" or "RECREATE_TARGET" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN")
+                _compactFrameReplies.Revoke();
 
             switch (envelope.Command)
             {
@@ -1680,6 +1689,7 @@ internal static partial class Program
                     }
                     ResetBackendSubmitStats();   // GP-926R17：目标代次重置（只绑当前 tuple）
                     _phase = Phase.Prepared;
+                    BindCompactFrameRepliesSafely();
                     ArmReportChain1410Safely(envelope);
                     {
                         var response = Ack(envelope, "target-prepared", prepareDetail);
@@ -1716,6 +1726,7 @@ internal static partial class Program
                     }
                     ResetBackendSubmitStats();   // GP-926R17：目标代次重置（只绑当前 tuple）
                     _phase = Phase.Prepared;
+                    BindCompactFrameRepliesSafely();
                     {
                         var response = Ack(envelope, "target-prepared", recreateDetail);
                         RememberIdempotent(envelope, response);
@@ -2081,27 +2092,87 @@ internal static partial class Program
                     case "HIDHIDE_QUERY":
                     {
                         if (_costFlagEnabled) _costHidHideQueryFull++;
-                        var svc = TryNewHidHideService();
                         string payload = "{\"ok\":false}";
-                        if (svc is not null)
+                        // Same command/Host/tuple, read-only recovery. Retry only an
+                        // explicit transient Win32 failure once; never reset the
+                        // native switch budget or start another Host/driver writer.
+                        for (int attempt = 1; attempt <= 2; attempt++)
                         {
+                            string stage = "control-service-create";
                             try
                             {
+                                var svc = new HidHideControlService();
+                                stage = "blocked-instances";
                                 var blocked = svc.BlockedInstanceIds.Select(x => x.ToUpperInvariant()).ToList();
+                                stage = "application-paths";
                                 var applications = svc.ApplicationPaths.ToList();
-                                // R4：可选只读 inverse，独立 try（内部）⇒ 读异常只使该字段
-                                // unknown，绝不使上面已完整读取的 hidden/applications/cloakOn 失效。
+                                // Inverse remains optional: its failed read stays unknown.
                                 var inverse = ReadHidHideInverseState(svc);
+                                stage = "cloak-state";
+                                bool cloakOn = svc.IsActive;
                                 payload = JsonSerializer.Serialize(new
                                 {
                                     ok = true,
-                                    cloakOn = svc.IsActive,
+                                    cloakOn,
                                     hidden = blocked,
                                     applications,
-                                    inverse
+                                    inverse,
+                                    queryAttempts = attempt
                                 });
+                                break;
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                // HidHideException keeps the native code at throw time.
+                                // GetLastWin32Error here would report an unrelated later call.
+                                int? nativeError = null;
+                                try
+                                {
+                                    if (ex is System.ComponentModel.Win32Exception win32)
+                                        nativeError = win32.NativeErrorCode;
+                                    else if (ex.GetType().GetProperty("NativeErrorCode")?.GetValue(ex) is int captured)
+                                        nativeError = captured;
+                                }
+                                catch { /* Unknown is not a fabricated Win32 error. */ }
+                                bool transient = nativeError is 21 or 32 or 170 or 1167 or 1237;
+                                if (attempt == 1 && transient)
+                                {
+                                    // Bounded wait inside the original query, no timer/thread.
+                                    Thread.Sleep(100);
+                                    continue;
+                                }
+                                string message = "exception-message-unavailable";
+                                try { message = ex.Message ?? ""; }
+                                catch { }
+                                if (message.Length > 768) message = message[..768];
+                                object? controlLibrary = null;
+                                try
+                                {
+                                    var assembly = typeof(HidHideControlService).Assembly;
+                                    controlLibrary = new
+                                    {
+                                        loadedAssemblyPath = assembly.Location,
+                                        loadedMvid = assembly.ManifestModule.ModuleVersionId.ToString("D"),
+                                        assemblyIdentity = assembly.FullName,
+                                        scope = "loaded-HidHide-client-metadata-at-failed-query;not-loaded-image-bytes-or-driver-identity"
+                                    };
+                                }
+                                catch { /* Evidence failure does not replace the control error. */ }
+                                payload = JsonSerializer.Serialize(new
+                                {
+                                    ok = false,
+                                    failureStage = stage,
+                                    errorType = ex.GetType().FullName,
+                                    hresult = ex.HResult,
+                                    nativeErrorCode = nativeError,
+                                    message,
+                                    queryAttempts = attempt,
+                                    recovery = transient ? "transient-read-retry-exhausted" : "non-transient-or-unclassified",
+                                    controlLibrary,
+                                    scope = "read-only-control-query;no-driver-repair-or-configuration-write"
+                                });
+                                break;
+                            }
                         }
                         return Ack(envelope, "hidhide-query", payload);
                     }
@@ -2262,6 +2333,7 @@ internal static partial class Program
 
         private bool ReleaseLocalLocked(out string detail, HostReleaseTimingEvidence? releaseTiming = null)
         {
+            _compactFrameReplies.Revoke();
             _psEndpointOwnership.Invalidate("release-started");
             var gameOutputDetachDetail = DetachGameOutputObservation();
             if (_sdkDisposeFailure.Length != 0)
@@ -2623,7 +2695,7 @@ internal static partial class Program
                     return false;
                 }
                 // GP-PREREQ-4: prepare only the selected profile's backend; probe failure is a warning.
-                // USBIP/local auto-install paths remain unchanged, and the SDK factory owns creation success.
+                // A USB/IP reservation covers advisory install plus this factory; refusal blocks both.
                 _controller = CreateTargetWithBackendWarning(() =>
                 {
                     var ready = TryEnsureDriverInstalled(_context, out var backendDetail,
@@ -2786,13 +2858,25 @@ internal static partial class Program
         // No local transport fork or external-installer fallback.
         private static bool TryEnsureUsbipBackend(out string detail, UsbipSetupEvidence? usbipDiagnostics = null)
         {
-            usbipDiagnostics?.Stage("backend-probe-begin");
-            if (HMContext.IsUsbipBackendAvailable)
+            bool available;
+            try {
+                usbipDiagnostics?.Stage("backend-probe-begin");
+                available = HMContext.IsUsbipBackendAvailable;
+            }
+            catch {
+                // The advisory catch may still reach an installing factory.
+                YeManInputHost.UsbipHostBackendBudget.Reserve();
+                throw;
+            }
+            if (available)
             {
                 detail = "usbip-backend-available";
                 usbipDiagnostics?.Stage("backend-probe-result", detail, true);
                 return true;
             }
+            // The existing global maintenance lease remains held through SDK
+            // create. Persist before either terminal can try to repair/install.
+            YeManInputHost.UsbipHostBackendBudget.Reserve();
             usbipDiagnostics?.Stage("backend-probe-result", "usbip-backend-unavailable", false);
 
             try
@@ -2876,7 +2960,7 @@ internal static partial class Program
         {
             try
             {
-                if (!_costFlagEnabled) { ResetVirtualSignalEvidenceSafely(); return default; }
+                if (!_costFlagEnabled) return default;
                 var binding = cause ?? _tuple;
                 // Never substitute a trigger/prepare envelope for actual internal controls.
                 if (binding is null || canonical is null) return default;
@@ -2892,7 +2976,6 @@ internal static partial class Program
             try
             {
                 if (_costFlagEnabled) _virtualSignalEvidence?.CompleteSafely(attempt, exception);
-                else ResetVirtualSignalEvidenceSafely();
             }
             catch { }
         }
@@ -2959,7 +3042,7 @@ internal static partial class Program
 
             try
             {
-                var profile = _context.GetProfile(profileName) ?? throw new InvalidOperationException("profile-missing:" + profileName);
+                var profile = _controller.Profile ?? throw new InvalidOperationException("profile-missing:" + profileName);
                 // R3（2026-09-17 需求单）：HID 提交段计时（门控缓存；关时零累加）。
                 var costHidStarted = _costFlagEnabled ? Stopwatch.GetTimestamp() : 0L;
                 _msiHostStageEvidence?.BeginBackend();
@@ -3325,7 +3408,7 @@ internal static partial class Program
             }
             try
             {
-                var profile = _context.GetProfile(profileName) ?? throw new InvalidOperationException("profile-missing:" + profileName);
+                var profile = _controller.Profile ?? throw new InvalidOperationException("profile-missing:" + profileName);
                 var neutral = new CommandEnvelope(
                     "SUBMIT_NEUTRAL", "neutral", 1, "neutral", 1, 1, "target", "coordinator",
                     _tuple.Persona, profileName, _startupNonce, 1, new string('0', 64));
@@ -3401,13 +3484,17 @@ internal static partial class Program
         private string AppendGameOutputObservation(string response, CommandEnvelope? envelope, bool ok)
         {
             var bindingReply = envelope?.Command is "PREPARE_TARGET" or "RECREATE_TARGET";
-            if ((!_gameOutputObservation.HasPending && !bindingReply) || !ok || envelope is null || _gameOutputTuple is null || _controller is null ||
+            var includeMotors = envelope?.Command == "SUBMIT_FRAME";
+            // The raw mailbox is diagnostic evidence. Explicit stats can read it
+            // even while detailed logging is off; ordinary frames need motors.
+            var includeRaw = _costFlagEnabled || envelope?.Command == "TUPLE_SUBMIT_STATS";
+            if ((!_gameOutputObservation.HasPendingFor(includeRaw, includeMotors) && !bindingReply) || !ok || envelope is null || _gameOutputTuple is null || _controller is null ||
                 !ReferenceEquals(_controller, _gameOutputController) || !SameTuple(_gameOutputTuple, envelope) ||
                 _phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active)) return response;
             // Reserve space for the existing bounded optional evidence appenders.
             if (bindingReply) response = _gameOutputObservation.TryAppendBinding(response, _controller, MaxMessageBytes - 2048);
             return _gameOutputObservation.TryAppend(response, _controller, MaxMessageBytes - 2048,
-                includeMotors: envelope.Command == "SUBMIT_FRAME");
+                includeMotors: includeMotors, includeRaw: includeRaw);
         }
 
         internal void ResetBackendSubmitStats()
@@ -3494,9 +3581,38 @@ internal static partial class Program
             return _psEndpointOwnership.Append(response, PsOwnershipBinding(envelope), MaxMessageBytes);
         }
 
+        private string AppendCompactFrameReplyBinding(string response, CommandEnvelope? envelope, bool ok, string status)
+        {
+            if (ok && status == "target-prepared" && envelope?.Command is ("PREPARE_TARGET" or "RECREATE_TARGET") &&
+                _compactFrameReplies.TryGetToken(_controller, out var replyBinding))
+            {
+                var suffix = ",\"frameReplyBinding\":" + JsonSerializer.Serialize(replyBinding) + "}";
+                if (Encoding.UTF8.GetByteCount(response) + Encoding.UTF8.GetByteCount(suffix) - 1 <= MaxMessageBytes)
+                    response = response[..^1] + suffix;
+            }
+            return response;
+        }
+
+        private void BindCompactFrameRepliesSafely()
+        {
+            // Entropy/allocation failure changes only the optional wire format.
+            // The prepared target continues on the existing full reply path.
+            try
+            {
+                if (_controller is not null) _compactFrameReplies.Bind(_controller);
+                else _compactFrameReplies.Revoke();
+            }
+            catch { _compactFrameReplies.Revoke(); }
+        }
+
         private string SerializeResponse(CommandEnvelope? envelope, bool ok, string status, string detail, bool? firstFrame, string? releaseDisposition)
         {
-            var response = JsonSerializer.Serialize(new HostResponseFields(
+            var compactReply = ok && status == "frame-accepted" && envelope?.Command == "SUBMIT_FRAME" &&
+                envelope.FrameReplyBinding is not null && _compactFrameReplies.Matches(_controller, envelope.FrameReplyBinding);
+            var response = compactReply
+                ? JsonSerializer.Serialize(new CompactFrameReplyFields(ProtocolVersion, true, envelope!.Command,
+                    envelope.RequestId, envelope.Sequence, envelope.FrameReplyBinding!, status, firstFrame, _lastSubmitElapsedUs))
+                : JsonSerializer.Serialize(new HostResponseFields(
                 ProtocolVersion,
                 ok,
                 envelope?.Command ?? "",
@@ -3530,6 +3646,7 @@ internal static partial class Program
                 releaseDisposition,
                 _lastSubmitElapsedUs));
             response = AppendGameOutputObservation(response, envelope, ok);
+
             if (envelope is not null && envelope.Command is ("PREPARE_TARGET" or "RECREATE_TARGET" or "RELEASE_TARGET" or "SHUTDOWN") &&
                 _msiSteamDeckReleaseFence1726?.Evidence is not null && _msiSteamDeckReleaseFence1726.Matches(envelope))
                 response = response[..^1] + ",\"msiSteamDeckReleaseEvidence\":" +
@@ -3559,11 +3676,11 @@ internal static partial class Program
                     var armed = ok && status == "target-prepared" && _reportChain1410?.Armed == true;
                     var suffix = ",\"msiReportChainDiagnosticArmed\":" + (armed ? "true" : "false");
                     if (armed) suffix += ",\"msiReportChainDiagnosticSessionId\":" + JsonSerializer.Serialize(_reportChain1410!.SessionId);
-                    return AppendPsEndpointOwnership(response[..^1] + suffix + "}", envelope);
+                    return AppendCompactFrameReplyBinding(AppendPsEndpointOwnership(response[..^1] + suffix + "}", envelope), envelope, ok, status);
                 }
             }
             catch { }
-            return AppendPsEndpointOwnership(response, envelope);
+            return AppendCompactFrameReplyBinding(AppendPsEndpointOwnership(response, envelope), envelope, ok, status);
         }
 
         private static bool TryVerifyLockedAsset(out string detail)
@@ -3802,8 +3919,16 @@ internal static partial class Program
                 ScreenPad padLeft = default, padRight = default;
                 if (padsPresent && ((persona is not ("steamdeck" or "dualsense-edge")) || !TryReadScreenPads(padsElement, out padLeft, out padRight)))
                 { error = "invalid-touchpads"; return false; }
+                string? frameReplyBinding = null;
+                if (properties.ContainsKey("frameReplyBinding"))
+                {
+                    if (!TryReadString(properties, "frameReplyBinding", 64, out var token) || !IsSha256(token))
+                    { error = "invalid-frame-reply-binding"; return false; }
+                    frameReplyBinding = token;
+                }
                 parsed = parsed with
                 {
+                    FrameReplyBinding = frameReplyBinding,
                     ScreenButtons=screenButtons,
                     ScreenPadsPresent = padsPresent, ScreenPadLeft = padLeft, ScreenPadRight = padRight,
                     Buttons = buttons, Lx = lx, Ly = ly, Rx = rx, Ry = ry, Lt = lt, Rt = rt,
@@ -4303,6 +4428,8 @@ internal static partial class Program
         [System.Text.Json.Serialization.JsonIgnore] public MsiReportChainSource1410? ReportChainSource1410 { get; init; }
         [System.Text.Json.Serialization.JsonPropertyName("msiSteamDeckReleaseFence")]
         public bool MsiSteamDeckReleaseFence { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? FrameReplyBinding { get; init; }
         public int Buttons { get; init; }
         public float Lx { get; init; }
         public float Ly { get; init; }

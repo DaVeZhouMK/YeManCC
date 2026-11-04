@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <set>
 #include "json.hpp"
 #pragma comment(lib, "ws2_32.lib")
 namespace ymcc::deckyresources {
@@ -50,6 +51,24 @@ struct PortLease {
     bool acquired()const{return value!=INVALID_SOCKET;}
 };
 inline void require(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
+// Persistence is bounded and unambiguous before any ownership decision. The
+// parser callback sees decoded keys, so escaped duplicates are rejected too.
+inline Json readDocument(const std::filesystem::path& path,std::size_t limit){
+    require(std::filesystem::is_regular_file(path)&&std::filesystem::file_size(path)<=limit,"resource-cache-document-invalid");
+    std::ifstream input(path,std::ios::binary);require(input.is_open(),"resource-cache-document-invalid");
+    std::string bytes(limit+1,'\0');input.read(bytes.data(),static_cast<std::streamsize>(bytes.size()));
+    require(!input.bad()&&input.eof()&&input.gcount()>0&&static_cast<std::size_t>(input.gcount())<=limit,"resource-cache-document-invalid");
+    bytes.resize(static_cast<std::size_t>(input.gcount()));std::vector<std::set<std::string>> objects;
+    return Json::parse(bytes,[&](int depth,Json::parse_event_t event,Json& value){
+        require(depth<=32,"resource-cache-document-invalid");
+        if(event==Json::parse_event_t::object_start)objects.emplace_back();
+        else if(event==Json::parse_event_t::key)require(!objects.empty()&&objects.back().insert(value.get<std::string>()).second,"resource-cache-document-invalid");
+        else if(event==Json::parse_event_t::object_end)objects.pop_back();
+        return true;
+    });
+}
+inline bool schemaOne(const Json& value){return value.is_object()&&value.contains("schemaVersion")&&value["schemaVersion"].is_number_integer()&&value["schemaVersion"]==1;}
+
 class Cache {
     std::filesystem::path home_,root_;
     Json manifest_;
@@ -97,17 +116,23 @@ class Cache {
         const Json expected={{"schemaVersion",1},{"owner","YMCC"},{"purpose","resource-cache-staging"},{"files",Json::array({"copy-stage.tmp","metadata-stage.tmp"})}};
         if(exists(ownership)){
             require(std::filesystem::is_regular_file(ownership)&&std::filesystem::file_size(ownership)<=1024,"resource-cache-stage-owner-invalid");
-            std::ifstream input(ownership,std::ios::binary);Json observed;
-            try{observed=Json::parse(input);}catch(...){throw std::runtime_error("resource-cache-stage-owner-invalid");}
+            Json observed;
+            try{observed=readDocument(ownership,1024);}catch(...){throw std::runtime_error("resource-cache-stage-owner-invalid");}
+            require(schemaOne(observed),"resource-cache-stage-owner-invalid");
             require(observed==expected,"resource-cache-stage-owner-invalid");
         }else{
             // Missing provenance cannot authorize deleting even a familiar name.
             for(const auto* name:{copyStage,metadataStage}){const auto file=root_/name;safe(file);require(!exists(file),"resource-cache-stage-unowned");}
             require(current(),"resource-cache-write-cancelled");Handle file;
-            file.value=CreateFileW(ownership.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+            file.value=CreateFileW(ownership.c_str(),GENERIC_WRITE|DELETE,0,nullptr,CREATE_NEW,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
             require(file.value!=INVALID_HANDLE_VALUE,"resource-cache-stage-owner-create-failed");
             const auto bytes=expected.dump();DWORD written=0;
-            require(WriteFile(file.value,bytes.data(),static_cast<DWORD>(bytes.size()),&written,nullptr)&&written==bytes.size()&&FlushFileBuffers(file.value),"resource-cache-stage-owner-write-failed");
+            if(!WriteFile(file.value,bytes.data(),static_cast<DWORD>(bytes.size()),&written,nullptr)||written!=bytes.size()||!FlushFileBuffers(file.value)){
+                // Only this CREATE_NEW handle owns the failed publication. A
+                // pre-existing invalid record never enters this cleanup path.
+                FILE_DISPOSITION_INFO remove{TRUE};SetFileInformationByHandle(file.value,FileDispositionInfo,&remove,sizeof(remove));
+                throw std::runtime_error("resource-cache-stage-owner-write-failed");
+            }
         }
         stagingOwned_=true;
         retireOwnedStage(copyStage);retireOwnedStage(metadataStage);
@@ -148,6 +173,21 @@ class Cache {
             require(MoveFileExW(staged.c_str(),destination.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE,"resource-cache-metadata-replace-failed");owned=false;
         }catch(...){if(file.value!=INVALID_HANDLE_VALUE){CloseHandle(file.value);file.value=INVALID_HANDLE_VALUE;}if(owned&&safe_(staged))DeleteFileW(staged.c_str());throw;}
     }
+    bool slotContract(const Json& value)const{
+        if(!schemaOne(value)||value.value("owner",std::string{})!="YMCC"||value.value("origin",std::string{})!="official-release"||
+            value.value("loaderVersion",std::string{}).empty()||!value.contains("files")||!value["files"].is_array()||value["files"].size()!=entries_.size())return false;
+        const auto hex=[](const Json& hash){return hash.is_string()&&hash.get_ref<const std::string&>().size()==64&&hash.get_ref<const std::string&>().find_first_not_of("0123456789abcdef")==std::string::npos;};
+        if(!value.contains("loaderSha256")||!hex(value["loaderSha256"]))return false;
+        std::set<std::string> seen;
+        for(const auto& item:value["files"]){
+            if(!item.is_object()||!item.contains("path")||!item["path"].is_string()||!item.contains("sha256")||!hex(item["sha256"])||
+                !item.contains("bytes")||!item["bytes"].is_number_integer()||item["bytes"]<=0||item["bytes"]>134217728)return false;
+            const auto name=item["path"].get<std::string>();bool allowed=false;
+            for(const auto& entry:entries_){const auto utf8=entry.relative.generic_u8string();if(name==std::string(utf8.begin(),utf8.end())){allowed=true;break;}}
+            if(!allowed||!seen.insert(name).second||(name=="PluginLoader_noconsole.exe"&&item["sha256"]!=value["loaderSha256"]))return false;
+        }
+        return true;
+    }
     struct Slot {std::filesystem::path root;Json metadata;bool owned=false,empty=false;std::filesystem::file_time_type written{};};
     Slot readSlot(const wchar_t* name)const{
         Slot result;result.root=root_/name;safe(result.root);
@@ -157,8 +197,8 @@ class Cache {
         if(!exists(metadata)){result.empty=std::filesystem::is_empty(result.root);return result;}
         try{
             if(!std::filesystem::is_regular_file(metadata)||std::filesystem::file_size(metadata)>131072)return result;
-            std::ifstream input(metadata,std::ios::binary);result.metadata=Json::parse(input);
-            result.owned=result.metadata.value("schemaVersion",0)==1&&result.metadata.value("owner",std::string{})=="YMCC"&&result.metadata.contains("manifest")&&result.metadata["manifest"].is_object();
+            result.metadata=readDocument(metadata,131072);
+            result.owned=schemaOne(result.metadata)&&result.metadata.value("owner",std::string{})=="YMCC"&&result.metadata.contains("complete")&&result.metadata["complete"].is_boolean()&&result.metadata.contains("manifest")&&slotContract(result.metadata["manifest"]);
             result.written=std::filesystem::last_write_time(metadata);
         }catch(...){result.owned=false;}
         return result;

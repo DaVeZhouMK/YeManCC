@@ -28,6 +28,6 @@ export function verifyObserverInsertion(cpp,audit,context){
  const row=audit.gameObserverContext,text=lf(fs.readFileSync(cpp,'utf8')),include=context.insertion.include;
  need(row&&row.headerSha256===context.header.sha256&&row.reviewSha256===context.reviewSha256,'GAME_MSI_INSERTION_PROOF_MISSING');
  need(text.split(include).length===2&&text.includes(include+context.insertion.anchor),'GAME_MSI_INSERTION_NOT_EXACT');
- need(sha256(text)===row.generatedTextSha256&&sha256(text.replace(include,''))===row.originalTextSha256,'GAME_MSI_ORIGINAL_CPP_CHANGED');
+ let restored=text.replace(include,'');for(const edit of [...(context.insertion.scaffoldingReplacements??[])].reverse()){need(restored.split(edit.after).length===2&&!restored.includes(edit.before),'GAME_MSI_SCAFFOLDING_REVERSE_NOT_EXACT');restored=restored.replace(edit.after,edit.before);}need(sha256(text)===row.generatedTextSha256&&sha256(restored)===row.originalTextSha256,'GAME_MSI_ORIGINAL_CPP_CHANGED');
  need(sha256(fs.readFileSync(cpp))===row.generatedFileSha256,'GAME_MSI_GENERATED_CPP_BYTES_CHANGED');return row;
 }

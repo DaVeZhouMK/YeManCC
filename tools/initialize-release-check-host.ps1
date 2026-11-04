@@ -1,6 +1,30 @@
 [CmdletBinding()]
-param([switch]$CaptureOnly)
+param([switch]$CaptureOnly,[switch]$LocalFrozenWorkspace,[string]$LocalCoreRoot)
 $ErrorActionPreference='Stop'
+if($LocalFrozenWorkspace){
+ if($CaptureOnly -or -not $LocalCoreRoot -or $env:YMCC_RELEASE_HOSTED_ENVIRONMENT -ceq '1' -or $env:GITHUB_ACTIONS -ceq 'true'){throw 'LOCAL_FROZEN_MODE_REQUIRES_SEPARATE_LOCAL_CORE'}
+ $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+ if(-not [IO.Path]::IsPathRooted($LocalCoreRoot)){throw 'LOCAL_FROZEN_CORE_ABSOLUTE_PATH_REQUIRED'}
+ $core=[IO.Path]::GetFullPath($LocalCoreRoot).TrimEnd('\')
+ . (Join-Path $PSScriptRoot 'ymcc_sim/global/release-host-environment.ps1')
+ $marker=[pscustomobject]@{core=$core;schemaVersion=1;owner='YMCC-local-check';kind='ymcc-local-frozen-core-v1';repo=$repo;parentCore='G:\YeManCC-Work\Testing\YMCC'}
+ Assert-YmccLocalFrozenCore $core $repo $marker
+ $markerPath=Join-Path $core '.ymcc-local-check-core.json'
+ if(Test-Path -LiteralPath $core){
+  if(Test-Path -LiteralPath $markerPath -PathType Leaf){Assert-YmccLocalFrozenPath $markerPath;$prior=Get-Content -LiteralPath $markerPath -Raw -Encoding UTF8|ConvertFrom-Json;Assert-YmccLocalFrozenCore $core $repo $prior}
+  elseif(@([IO.Directory]::EnumerateFileSystemEntries($core)).Count){throw 'LOCAL_FROZEN_CORE_NOT_EMPTY'}
+ }else{[IO.Directory]::CreateDirectory($core)|Out-Null}
+ if(-not(Test-Path -LiteralPath $markerPath)){
+  $bytes=[Text.Encoding]::UTF8.GetBytes(($marker|ConvertTo-Json -Compress));$stream=[IO.File]::Open($markerPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+  try{$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+ }
+ foreach($child in @('Evidence','Workspace')){$childPath=Join-Path $core $child;Assert-YmccLocalFrozenPath $childPath;[IO.Directory]::CreateDirectory($childPath)|Out-Null}
+ & (Join-Path $PSScriptRoot 'release-check-host/initialize-historical-inputs.ps1') -CoreRoot $core -LocalFrozenWorkspace
+ $env:YMCC_SIM_CORE_ROOT=$core
+ [pscustomobject]@{status='LOCAL_FROZEN_CORE_READY';core=$core;repo=$repo;owner='YMCC-local-check';hosted=$false;testsExecuted=0}|ConvertTo-Json -Compress
+ return
+}
+if($LocalCoreRoot){throw 'LOCAL_CORE_REQUIRES_LOCAL_FROZEN_MODE'}
 if($env:GITHUB_ACTIONS -cne 'true'){throw 'Hosted release setup requires a disposable GitHub runner'}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $tempRoot=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')

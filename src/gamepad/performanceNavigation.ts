@@ -1,4 +1,4 @@
-import { spatialNavigationTarget, type SpatialDirection } from './spatial';
+import { spatialNavigationTarget, nearestSpatialTarget, type SpatialDirection } from './spatial';
 /** One row map for the global, dedicated and simulation performance editors. */
 export function performancePanelTarget(elements: readonly HTMLElement[], current: HTMLElement, direction: SpatialDirection): HTMLElement | null | undefined {
   const panel = current.closest<HTMLElement>('[data-gp-performance-panel]');
@@ -63,5 +63,9 @@ export function performancePanelTarget(elements: readonly HTMLElement[], current
     if (target) return target;
     if (direction.dy < 0) return closestColumn(inRows(siblings, ['controls']));
   }
+  // TS results and the native editor now live in the same document and scope.
+  // Keep the editor's existing row map; leave it only at a visual boundary.
+  const workbench = panel.closest<HTMLElement>('[data-gp-performance-workbench]');
+  if (workbench) return nearestSpatialTarget(elements.filter(el => workbench.contains(el)), current, direction);
   return null;
 }

@@ -23,12 +23,28 @@ export function selectedNativeTools(){return hostedReleaseProfile()?.nativeManif
 export function selectedOwnedTools(){return hostedReleaseProfile()?.ownedManifest??read(path.join(repo,'tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json'));}
 export function selectedPackageFixtureTools(){return hostedReleaseProfile()?.packageFixtureManifest??null;}
 export function simulationNodePath(){return hostedReleaseProfile()?.node.path??'G:/YeManCC-Work/Environment/Toolchains/nodejs/node-v22.14.0-win-x64/node.exe';}
+// Explicit local frozen checks use a different owner from disposable hosted runs.
+// Both the source and its disjoint run core must remain under the existing core Workspace.
+function assertLocalFrozenCore(core, marker) {
+ const parent=path.resolve('G:/YeManCC-Work/Testing/YMCC'),workspace=path.join(parent,'Workspace');
+ const fields=['core','kind','owner','parentCore','repo','schemaVersion'];
+ if(!marker||Object.keys(marker).sort().join('|')!==fields.join('|')||marker.schemaVersion!==1||marker.owner!=='YMCC-local-check'||marker.kind!=='ymcc-local-frozen-core-v1'||typeof marker.core!=='string'||key(marker.core)!==key(core)||typeof marker.parentCore!=='string'||typeof marker.repo!=='string'||key(marker.parentCore)!==key(parent)||key(marker.repo)!==key(repo))throw Error('LOCAL_SIMULATION_CORE_OWNER_INVALID');
+ if(!inside(workspace,core)||!inside(workspace,repo)||!/[\\/]Mainline[\\/]YeManCC-source[\\/]YeManCC$/i.test(repo)||key(core)===key(repo)||inside(core,repo)||inside(repo,core))throw Error('LOCAL_SIMULATION_CORE_SCOPE_INVALID');
+ for(const file of [core,repo]){
+  let cursor=file;
+  while(cursor){if(fs.existsSync(cursor)&&(fs.lstatSync(cursor).isSymbolicLink()||key(fs.realpathSync.native(cursor))!==key(cursor)))throw Error('LOCAL_SIMULATION_CORE_REPARSE_PATH');const next=path.dirname(cursor);if(next===cursor)break;cursor=next;}
+ }
+}
 export function simulationCorePath(relative=''){
  const core=path.resolve(process.env.YMCC_SIM_CORE_ROOT??'G:/YeManCC-Work/Testing/YMCC');
  if(key(core)===key(path.parse(core).root)||key(core)===key(repo)||inside(repo,core)||inside(core,repo))throw Error('SIMULATION_CORE_SCOPE_INVALID');
  if(process.env.YMCC_SIM_CORE_ROOT){
-  const marker=read(path.join(core,'.ymcc-release-check-core.json'));
-  if(marker.schemaVersion!==1||marker.owner!=='YMCC-release-check'||key(marker.repo)!==key(repo))throw Error('SIMULATION_CORE_OWNER_CHANGED');
+  const local=path.join(core,'.ymcc-local-check-core.json');
+  if(fs.existsSync(local)){if(fs.lstatSync(local).isSymbolicLink()||key(fs.realpathSync.native(local))!==key(local))throw Error('LOCAL_SIMULATION_CORE_REPARSE_PATH');assertLocalFrozenCore(core,read(local));}
+  else {
+   const marker=read(path.join(core,'.ymcc-release-check-core.json'));
+   if(marker.schemaVersion!==1||marker.owner!=='YMCC-release-check'||key(marker.repo)!==key(repo))throw Error('SIMULATION_CORE_OWNER_CHANGED');
+  }
  }
  if(path.isAbsolute(relative)||relative.split(/[\\/]/).includes('..'))throw Error('SIMULATION_CORE_CHILD_PATH_INVALID');
  return path.join(core,relative);

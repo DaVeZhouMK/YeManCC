@@ -59,6 +59,10 @@ internal static class Program
 
     // LEDLevel（[Flags]）：None=0, SolidColor=1, Breathing=2, Rainbow=4,
     // Wave=8, Wheel=16, Gradient=32, Ambilight=64, LEDPreset=128。
+    private const string Oxp3DeviceClass = "HandheldCompanion.Devices.OneXPlayer3";
+    // Source identity only; this predicate never grants catalog availability.
+    internal static bool IsSuperJoySourceModel(string? modelClass) =>
+        modelClass is "HandheldCompanion.Devices.AYANEO3" or "HandheldCompanion.Devices.AYANEONEXT2";
     private static readonly Dictionary<string, int> LedLevels = new(StringComparer.OrdinalIgnoreCase)
     {
         ["solid"] = 1,
@@ -106,10 +110,18 @@ internal static class Program
         }
     }
 
-    private static Dictionary<string, object?> Run(string[] args)
+    private static Dictionary<string, object?> Run(string[] args) => RunWithSuperJoyPorts(args,
+        (identity, owner, stop) => SuperJoyWindowsHidTransport.Open(identity, () => owner.IsCurrent, owner.Token, stop),
+        (root, stop) => AyaneoCeWindowsEcTransport.Open(root, stop));
+
+    // Same parser, sole catalog, owner acquire and dispatch as the shipping entry.
+    // Only internal software fixtures may supply terminal factories; no CLI bypass.
+    internal static Dictionary<string, object?> RunWithSuperJoyPorts(string[] args,
+        Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, ISuperJoyLightingTransport> openHid,
+        Func<string, CancellationToken, IAyaneoCeLightingEc> openEc)
     {
         string? hcPath = null, runtimeRootOpt = null, action = null, level = null, statusArg = null, presetId = null, expectedDeviceClass = null;
-        string? corePath = null, coreCallerHash = null;
+        string? corePath = null, coreCallerHash = null, ownerInterfacePath = null, ownerGeneration = null;
         var hcProfile = "legacy";
         int? r = null, g = null, b = null, r2 = null, g2 = null, b2 = null;
         int? brightness = null, speed = null;
@@ -134,6 +146,8 @@ internal static class Program
                 case "--level": level = Next(); break;
                 case "--preset-id": presetId = Next(); break;
                 case "--expected-device-class": expectedDeviceClass = Next(); break;
+                case "--owner-interface-path": ownerInterfacePath = Next(); break;
+                case "--owner-generation": ownerGeneration = Next(); break;
                 case "--r": r = int.Parse(Next()); break;
                 case "--g": g = int.Parse(Next()); break;
                 case "--b": b = int.Parse(Next()); break;
@@ -150,6 +164,17 @@ internal static class Program
 
         ValidateRequest(action, level, statusArg, presetId);
         if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+        // Dispatch before legacy HC. Catalog admission remains closed until the
+        // actual native selector/lifecycle is wired; caller arguments cannot grant it.
+        if (IsSuperJoySourceModel(expectedDeviceClass))
+            return ExecuteSuperJoyLighting(expectedDeviceClass!, action!, level, statusArg,
+                r, g, b, r2, g2, b2, brightness, presetId, timeoutMs,
+                runtimeRootOpt, ownerInterfacePath, ownerGeneration, openHid, openEc);
+        if (string.Equals(expectedDeviceClass, Oxp3DeviceClass, StringComparison.Ordinal))
+            return ExecuteOxp3Lighting(action!, level, r, g, b, r2, g2, b2, brightness, speed, presetId,
+                timeoutMs, ownerInterfacePath, ownerGeneration);
+        if (expectedDeviceClass == DeviceCoreConsumer.X2MiniPro && corePath is null)
+            throw new NotSupportedException("X2 Mini Pro requires the pinned independent device core and native owner");
         if (corePath is not null)
         {
             var coreResult = DeviceCoreConsumer.TryExecute(corePath, coreCallerHash,
@@ -157,7 +182,7 @@ internal static class Program
                 {
                     Action = action, Level = level, R = r, G = g, B = b,
                     R2 = r2, G2 = g2, B2 = b2, Brightness = brightness, Speed = speed, PresetId = presetId,
-                });
+                }, ownerInterfacePath, ownerGeneration, timeoutMs);
             if (coreResult is not null) return coreResult;
             if (string.IsNullOrWhiteSpace(hcPath))
                 throw new NotSupportedException("device-core capability unavailable; explicit --hc-assembly legacy adapter required");
@@ -225,6 +250,164 @@ internal static class Program
             ["queuedWriteTasks"] = transaction.WriteTasks,
             ["queuedWriteFailures"] = transaction.FailedTasks,
             ["physicalEffectVerified"] = false,
+        };
+    }
+
+    private static Dictionary<string, object?> ExecuteSuperJoyLighting(string model, string action,
+        string? level, string? status, int? r, int? g, int? b, int? r2, int? g2, int? b2,
+        int? brightness, string? presetId, int timeoutMs, string? suppliedRuntime,
+        string? ownerPath, string? ownerToken,
+        Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, ISuperJoyLightingTransport> openHid,
+        Func<string, CancellationToken, IAyaneoCeLightingEc> openEc)
+    {
+        // A source model or valid token is not runtime catalog availability.
+        if (!HcLightingCapabilityCatalog.IsReviewedExtension(model))
+            throw new NotSupportedException("SUPERJOY_LIGHTING_ROUTE_NOT_CONNECTED: " + model);
+        var operation = HcLightingCapabilityCatalog.Require(model, model, action, level, brightness is not null, presetId);
+        if (operation.Capabilities.SourceAdapter != LightingSourceAdapter.SuperJoyCec || operation.PreferredProvider != "superjoy-cec-v1")
+            throw new InvalidOperationException("SUPERJOY_PROVIDER_IDENTITY_MISMATCH");
+        var request = AyaneoSuperJoyRequest.Create(model, action, level, status, r, g, b, r2, g2, b2, brightness);
+        if (string.IsNullOrWhiteSpace(ownerPath) || string.IsNullOrWhiteSpace(ownerToken) || string.IsNullOrWhiteSpace(suppliedRuntime))
+            throw new ArgumentException("SUPERJOY_NATIVE_OWNER_AND_RUNTIME_REQUIRED");
+        var parts = SuperJoyOwnerLease.ParseToken(ownerToken);
+        var identity = new SuperJoyIdentity(model, ownerPath, checked((long)parts[2]));
+        using var deadline = new CancellationTokenSource(timeoutMs);
+        using var owner = SuperJoyOwnerLease.Acquire(identity, ownerToken, deadline.Token);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(owner.Token, deadline.Token);
+        runtimeRoot = Path.GetFullPath(suppliedRuntime);
+        AssemblyLoadContext.Default.Resolving += ResolveDependency;
+        var result = AyaneoSuperJoyConsumer.Apply(identity, request, () => owner.IsCurrent, stop.Token,
+            () => openHid(identity, owner, stop.Token),
+            () => openEc(runtimeRoot, stop.Token));
+        return new()
+        {
+            ["deviceClass"] = model, ["capabilityId"] = operation.Device.DeviceId,
+            ["capabilityOperation"] = operation.OperationId,
+            ["capabilityCatalogSha256"] = HcLightingCapabilityCatalog.CatalogSha256,
+            ["backend"] = "superjoy-cec-v1", ["action"] = action,
+            ["note"] = result.Completed ? "ok" : result.Reason,
+            ["protocolResult"] = result.Reason,
+            ["queuedWritesCompleted"] = result.Completed,
+            ["hidWrites"] = result.HidWrites, ["hidReads"] = result.HidReads,
+            ["ecWrites"] = result.EcWrites, ["handbackAttempted"] = result.HandbackAttempted,
+            ["handbackCompleted"] = result.HandbackCompleted,
+            ["ownerAdmission"] = "native-owner-handoff-v2", ["ownerGeneration"] = identity.Generation,
+            ["hcSha256"] = "", ["physicalEffectVerified"] = false,
+        };
+    }
+
+    // The pinned HC assembly predates OXP3 lighting. This path performs only the
+    // reviewed source-derived HID v1 writes and never constructs or replaces an
+    // HC device, WMI EC, serial port or controller reader.
+    private static Dictionary<string, object?> ExecuteOxp3Lighting(string action, string? level,
+        int? r, int? g, int? b, int? r2, int? g2, int? b2, int? brightness, int? speed, string? presetId,
+        int timeoutMs, string? ownerInterfacePath, string? ownerGeneration) =>
+        ExecuteOxp3LightingWith(action, level, r, g, b, r2, g2, b2, brightness, speed, presetId,
+            timeoutMs, ownerInterfacePath, ownerGeneration,
+            (path, token) => Oxp3WindowsHidTransport.Open(path, token));
+
+    internal static Dictionary<string, object?> ExecuteOxp3LightingWith(string action, string? level,
+        int? r, int? g, int? b, int? r2, int? g2, int? b2, int? brightness, int? speed, string? presetId,
+        int timeoutMs, string? ownerInterfacePath, string? ownerGeneration,
+        Func<string?, CancellationToken, IOxp3HidTransport> open)
+    {
+        if (string.IsNullOrWhiteSpace(ownerInterfacePath) || string.IsNullOrWhiteSpace(ownerGeneration))
+            throw new ArgumentException("OXP3 requires --owner-interface-path and --owner-generation from the native owner");
+        using var deadline = new CancellationTokenSource(timeoutMs);
+        // Admission and catalog validation happen before any device open.
+        var operation = HcLightingCapabilityCatalog.Require(Oxp3DeviceClass, Oxp3DeviceClass, action,
+            level, brightness is not null, presetId);
+        using var lease = Oxp3OwnerLease.Acquire(ownerInterfacePath, ownerGeneration, deadline.Token);
+        // The effective request deadline and owning-lease withdrawal both flow
+        // into admission, device open, the sequence and its in-flight IO.
+        using var operationToken = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, lease.Token);
+        var transport = open(ownerInterfacePath, operationToken.Token);
+        try
+        {
+            lease.ValidateInterfacePath(transport.DevicePath);
+            lease.EnsureCurrent();
+            return ExecuteOxp3Core(operation, action, level, r, g, b, r2, g2, b2, brightness, speed, presetId,
+                transport, operationToken.Token, lease);
+        }
+        finally
+        {
+            transport.Dispose();
+        }
+    }
+
+    internal static Dictionary<string, object?> ExecuteOxp3Admitted(string action, string? level,
+        int? r, int? g, int? b, int? r2, int? g2, int? b2, int? brightness, int? speed, string? presetId,
+        IOxp3HidTransport transport, CancellationToken cancellationToken = default)
+    {
+        var operation = HcLightingCapabilityCatalog.Require(Oxp3DeviceClass, Oxp3DeviceClass, action,
+            level, brightness is not null, presetId);
+        return ExecuteOxp3Core(operation, action, level, r, g, b, r2, g2, b2, brightness, speed, presetId,
+            transport, cancellationToken, null);
+    }
+
+    private static Dictionary<string, object?> ExecuteOxp3Core(LightingCapabilityOperation operation,
+        string action, string? level, int? r, int? g, int? b, int? r2, int? g2, int? b2,
+        int? brightness, int? speed, string? presetId, IOxp3HidTransport transport,
+        CancellationToken cancellationToken, Oxp3OwnerLease? lease)
+    {
+        if (operation.Capabilities.SourceAdapter != LightingSourceAdapter.Oxp3Hid ||
+            !HcLightingCapabilityCatalog.IsReviewedExtension(operation.Device.DeviceId))
+            throw new InvalidOperationException("OXP3 lighting extension route is not registered");
+        var main = new Oxp3Rgb((byte)Clamp(r ?? 255), (byte)Clamp(g ?? 0), (byte)Clamp(b ?? 0));
+        var secondary = new Oxp3Rgb((byte)Clamp(r2 ?? r ?? 255), (byte)Clamp(g2 ?? g ?? 0), (byte)Clamp(b2 ?? b ?? 0));
+        var presetValue = 0;
+        if (action == "preset" && !HcLightingCapabilityCatalog.TryResolveExtensionPreset(operation.Device.DeviceId, presetId!, out presetValue))
+            throw new ArgumentException("preset-id is absent for this HC device");
+        Action? ownerCheck = lease is null ? null : lease.EnsureCurrent;
+        var writer = new Oxp3LightingWriter(transport, cancellationToken: cancellationToken, ownerCheck: ownerCheck);
+        var canceled = false;
+        var ok = false;
+        try
+        {
+            ok = action switch
+            {
+                "color" => writer.ApplyColor(main, secondary, string.Equals(operation.Level, "breathing", StringComparison.Ordinal), brightness ?? 100),
+                "brightness" => writer.ApplyBrightness(brightness ?? 50, main, secondary),
+                "off" => writer.ApplyOff(),
+                "preset" => writer.ApplyPreset(presetValue, secondary, brightness ?? 100),
+                _ => throw new ArgumentException($"unknown action {action}")
+            };
+        }
+        catch (OperationCanceledException) { canceled = true; }
+        var note = ok ? "ok" : lease?.WasRevoked == true ? "lighting-owner-revoked"
+            : lease?.WasSuperseded == true ? "lighting-owner-generation-changed"
+            : canceled ? "lighting-sequence-timeout" : action switch
+        {
+            "color" => "setLedColor-false",
+            "brightness" => "setLedBrightness-false",
+            "preset" => "setLEDPreset-false",
+            _ => "off-partial"
+        };
+        return new Dictionary<string, object?>
+        {
+            ["deviceClass"] = Oxp3DeviceClass,
+            ["capabilityId"] = operation.Device.DeviceId,
+            ["capabilityOperation"] = operation.OperationId,
+            ["capabilityCatalogSha256"] = HcLightingCapabilityCatalog.CatalogSha256,
+            ["backend"] = "oxp3-pure-hid-v1",
+            ["hcSha256"] = "",
+            ["ready"] = true,
+            ["opened"] = true,
+            ["action"] = action,
+            ["note"] = note,
+            ["presetId"] = presetId,
+            ["queuedWriteManaged"] = false,
+            ["queuedWritesCompleted"] = ok,
+            ["queuedWriteTasks"] = writer.Writes,
+            ["queuedWriteFailures"] = writer.FailedWrites,
+            ["physicalEffectVerified"] = false,
+            ["fixedSpeed"] = true,
+            ["speed"] = speed,
+            ["speedApplied"] = false,
+            ["ownerAdmission"] = lease is null ? "test-admitted" : "native-owner-handoff",
+            ["ownerGeneration"] = lease?.Generation,
+            ["ownerRevoked"] = lease?.WasRevoked ?? false,
+            ["ownerGenerationChanged"] = lease?.WasSuperseded ?? false
         };
     }
 
@@ -471,7 +654,7 @@ internal static class Program
     // note→退出码映射（从 Main 提取，使离线 harness 能直接测试真实映射）：
     // 仅 "ok" 记成功，其余（setLedColor-false/setLedBrightness-false/
     // setLedStatus-false/off-partial 及 null）均非零。
-    private static int ExitCodeForNote(string? note) => note == "ok" ? 0 : 1;
+    internal static int ExitCodeForNote(string? note) => note == "ok" ? 0 : 1;
 
     private static int Clamp(int value) => Math.Clamp(value, 0, 255);
 

@@ -22,6 +22,7 @@
 #include <set>
 #include "json.hpp"
 #include "steam_live_script.h"
+#include "game_process_inventory.h"
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "iphlpapi.lib")
 
@@ -68,16 +69,32 @@ inline bool listenerProcessBound(const std::wstring& steam, const std::wstring& 
     return child.compare(0,root.size()+1,root+L"\\") == 0 && std::filesystem::path(child).filename() == L"steamwebhelper.exe" &&
         normalizedPath(parentImage) == root+L"\\steam.exe" && (!expectedSteamPid || parentPid == expectedSteamPid);
 }
+// A fresh topology hint, not a reusable identity lease. The native owner alone
+// performs Basic and fallback acquisition. Every listener still validates both
+// current process images; an incomplete fallback supplies no parent authority.
+inline std::map<DWORD,DWORD> listenerParents(
+    ymcc::gameInventory::Query query = ymcc::gameInventory::resolveQuery()) {
+    std::map<DWORD,DWORD> parents;
+    {
+        ymcc::gameInventory::BasicSnapshot basic(query);
+        if (basic.valid()) {
+            for (const auto& entry : basic.entries()) parents[entry.pid] = entry.parentPid;
+            return parents;
+        }
+    }
+    // Preserve the one-shot/reentrant fallback, through the same producer.
+    // Failed prefixes cannot establish a parent relation or authorize a port.
+    const auto fallback = ymcc::processInventory::read(nullptr,
+        ymcc::processInventory::currentTime, 0);
+    if (!fallback || fallback->status != ymcc::processInventory::Status::Complete)
+        throw std::runtime_error("live-debug-unavailable");
+    for (const auto& entry : fallback->rows) parents[entry.pid] = entry.parentPid;
+    return parents;
+}
 inline std::vector<Endpoint> listeners(const std::wstring& steam, DWORD expectedSteamPid = 0) {
     // Only enumerate Steam's own listeners, not arbitrary localhost ports.
     const auto root = normalizedPath(steam);
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) throw std::runtime_error("live-debug-unavailable");
-    std::map<DWORD,DWORD> parents;
-    PROCESSENTRY32W entry{sizeof(entry)};
-    if (Process32FirstW(snapshot, &entry)) do { parents[entry.th32ProcessID] = entry.th32ParentProcessID; }
-    while (Process32NextW(snapshot, &entry));
-    CloseHandle(snapshot);
+    const auto parents = listenerParents();
     std::map<DWORD,bool> verified;
     const auto trusted = [&](DWORD pid) {
         const auto known = verified.find(pid);

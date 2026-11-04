@@ -14,7 +14,7 @@ inline const char* name(Mode mode) {
         case Mode::Hibernate:return "hibernate";default:return "none"; }
 }
 inline const char* api(Mode mode) {
-    return mode==Mode::ModernStandby ? "SC_MONITORPOWER" : mode==Mode::None ? "none" : "SetSuspendState";
+    return mode==Mode::None ? "none" : "SetSuspendState";
 }
 inline const char* name(Outcome result) {
     return result==Outcome::Accepted ? "accepted-pending-confirmation" : result==Outcome::Unsupported ? "unsupported" : "failed";
@@ -23,7 +23,7 @@ inline const char* name(Outcome result) {
 // Permission/token errors and invalid arguments must be returned as Failed by
 // their adapter, even if a prerequisite happened to use an unsupported code.
 inline bool unsupportedError(std::uint32_t code) { return code==1 || code==50 || code==120; }
-template<class Request> Result request(const Capabilities& caps, Request&& invoke, Mode first=Mode::ModernStandby, Mode last=Mode::Hibernate) {
+template<class Request> Result request(const Capabilities& caps, Request&& invoke, Mode first=Mode::ModernStandby, Mode last=Mode::Sleep) {
     Result result;
     if (!caps.known) { result.reply={Outcome::Failed,caps.error ? caps.error : 31U}; return result; }
     constexpr std::array modes{Mode::ModernStandby,Mode::Sleep,Mode::Hibernate};

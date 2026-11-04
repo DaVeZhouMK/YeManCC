@@ -7,11 +7,12 @@
 #include <string_view>
 
 // Pure protocol data only. Reference: HC a250b19a4b7e29dac3b383f2d1ac517d1af43e4e,
-// OneXPlayerX1 / X2 / X2MiniPro / 3. No discovery, handles, timers or I/O.
+// OneXPlayerX1 / X2 / X2MiniPro plus f2e58468 OXP3 held Home/G-Key.
+// Selected through the existing YMCC total-library OEM binding. No I/O here.
 namespace ymcc::onex_x2 {
 
 enum class Model : std::uint8_t { Unsupported, X2, X2MiniPro, OneXPlayer3 };
-enum class Button : std::uint8_t { None, Turbo, Keyboard, Home, L4, R4 };
+enum class Button : std::uint8_t { None, Turbo, Keyboard, Home, L4, R4, GKey };
 
 constexpr bool supported(Model model) noexcept {
     return model == Model::X2 || model == Model::X2MiniPro || model == Model::OneXPlayer3;
@@ -42,12 +43,16 @@ constexpr Button mapButton(Model model, std::uint8_t id) noexcept {
     case 0x23: return Button::R4;
     // OXP3 inherits X2's 0x21 Home and overrides 0x24 to Home as well.
     case 0x24: return model == Model::X2 ? Button::Keyboard : Button::Home;
+    case 0x25: return model == Model::OneXPlayer3 ? Button::GKey : Button::None;
     default: return Button::None;
     }
 }
 
 constexpr bool clickOnly(Button button) noexcept {
     return button == Button::Turbo || button == Button::Keyboard || button == Button::Home;
+}
+constexpr bool clickOnly(Model model, Button button) noexcept {
+    return supported(model) && !(model == Model::OneXPlayer3 && button == Button::Home) && clickOnly(button);
 }
 inline constexpr unsigned clickPulseMs = 100; // Reference pulse duration; no timer is started.
 
@@ -142,12 +147,15 @@ constexpr std::optional<InitStep> initStep(Model model, std::size_t index) noexc
         }
         result.payloadSize = 59;
     } else {
-        // X2 and OXP3 inherit this third B4 page verbatim, including 0x25 -> 0x21.
+        // X2 retains its original page; OXP3 f2e58468 maps G-Key to vendor press/release.
         result.payload = {
             0x02, 0x38, 0x20, 0x03, 0x01,
             0x24, 0x02, 0x02, 0x05, 0x00, 0x00,
             0x25, 0x01, 0x21, 0x00, 0x00, 0x00
         };
+        if (model == Model::OneXPlayer3) {
+            result.payload[12] = 0x02; result.payload[13] = 0x01; result.payload[14] = 0x68;
+        }
         result.payloadSize = 17;
     }
     if (mini) result.payload[2] = 0x02;

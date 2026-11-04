@@ -14,16 +14,16 @@ export function assembleExtraAdapters(factories,index,{repoRoot,selectedIds,audi
  const selection=Array.isArray(selectedIds)&&selectedIds.length?new Set(selectedIds):null,audit=Array.isArray(auditReceiptIds)?new Set(auditReceiptIds):null,env=environment(),shared=new Map(),result=[];
  for(let i=0;i<factories.length;i++){
   const identity=index.groups[i];
-  // Missing registrations need identity only. Any supplied execution, explicit
-  // selection, or declared lifecycle capability is materialized by its getter.
-  const wanted=!indexCurrent||(!selection&&!audit)||identity.rows.some(row=>selection?.has(row.id)||audit?.has(row.id)||(!selection&&audit&&row.lifecycleDeclared));
+  // Explicit selections retain their indexed factory scope even if sources change.
+  // Audit-only registration retains its receipt/lifecycle materialization scope.
+  const wanted=(!selection&&!indexCurrent)||(!selection&&!audit)||identity.rows.some(row=>selection?.has(row.id)||audit?.has(row.id)||(!selection&&audit&&row.lifecycleDeclared));
   if(!wanted){if(audit&&!selection)result.push(...identity.rows.map(({lifecycleDeclared,...row})=>({...row,registrationIdentityOnly:true})));continue;}
   const id=path.resolve(repoRoot)+'|'+i+'|'+JSON.stringify(selectedIds??null),prior=cache.get(id);let rows;
-  if(prior&&prior.env===env&&unchanged(prior,shared))rows=structuredClone(prior.rows);
-  else{const captured=observeRegistration(factories[i]);cache.set(id,{...captured,env,rows:structuredClone(captured.rows)});rows=captured.rows;}
-  if(indexCurrent){const actual=rows.map(row=>({id:row.id,domain:row.domain,profiles:row.profiles,lifecycleDeclared:row.lifecycleContract!==undefined}));if(JSON.stringify(actual)!==JSON.stringify(identity.rows))throw Error('EXTRA_REGISTRATION_INDEX_CHANGED:'+i);}
+  if(indexCurrent&&prior&&prior.env===env&&unchanged(prior,shared))rows=structuredClone(prior.rows);
+  else{const captured=observeRegistration(factories[i]);if(indexCurrent)cache.set(id,{...captured,env,rows:structuredClone(captured.rows)});rows=captured.rows;}
+  const actual=rows.map(row=>({id:row.id,domain:row.domain,profiles:row.profiles,lifecycleDeclared:row.lifecycleContract!==undefined}));if(JSON.stringify(actual)!==JSON.stringify(identity.rows))throw Error('EXTRA_REGISTRATION_INDEX_CHANGED:'+i);
   result.push(...rows);
  }
- return selection&&indexCurrent?result.filter(row=>selection.has(row.id)):result;
+ return selection?result.filter(row=>selection.has(row.id)):result;
 }
 export function registrationIndexCurrent(index,repoRoot){return index.sources.every(row=>{try{const bytes=original.readFileSync(path.join(repoRoot,row.path));if(row.contentNormalization!==undefined&&row.contentNormalization!=='utf8-lf')return false;const actual=digest(row.contentNormalization==='utf8-lf'?Buffer.from(bytes.toString('utf8').replace(/\r\n/g,'\n')):bytes);if(actual!==row.sha256)process.stderr.write('YMCC_REGISTRATION_SOURCE_MISMATCH '+JSON.stringify({path:row.path,expected:row.sha256,actual})+'\n');return actual===row.sha256;}catch{return false;}});}

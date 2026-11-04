@@ -1,0 +1,66 @@
+<?xml version='1.0' encoding='utf-8'?>
+<WindowsPerformanceRecorder Version="1.0" Author="YMCC CPU optimization">
+  <Profiles>
+    <SystemCollector Id="RogCpuCollector" Name="YMCC bounded CPU scheduling collector">
+      <BufferSize Value="256" />
+      <Buffers Value="256" />
+    </SystemCollector>
+    <EventCollector Id="RogClrCollector" Name="YMCC ROG bounded CLR collector">
+      <BufferSize Value="256" />
+      <Buffers Value="64" />
+    </EventCollector>
+    <SystemProvider Id="RogCpuProvider">
+      <Keywords>
+        <Keyword Value="CpuConfig" />
+        <Keyword Value="ProcessThread" />
+        <Keyword Value="Loader" />
+        <Keyword Value="SampledProfile" />
+        <Keyword Value="CSwitch" />
+        <Keyword Value="DPC" />
+        <Keyword Value="Interrupt" />
+      </Keywords>
+      <Stacks>
+        <Stack Value="SampledProfile" />
+      </Stacks>
+    </SystemProvider>
+    <EventProvider Id="RogClrRuntime" Name="Microsoft-Windows-DotNETRuntime" Level="5">
+      <Keywords>
+        <Keyword Value="0x40000020019" />
+      </Keywords>
+      <CaptureStateOnSave>
+        <Keyword Value="0x20038" />
+      </CaptureStateOnSave>
+    </EventProvider>
+    <EventProvider Id="RogClrRundown" Name="Microsoft-Windows-DotNETRuntimeRundown" Level="5">
+      <CaptureStateOnSave>
+        <Keyword Value="0x20038" />
+      </CaptureStateOnSave>
+    </EventProvider>
+    <Profile Id="RogCpu.Verbose.Memory" Name="RogCpu" Description="Bounded scheduling intervals plus execution samples; no context-switch stackwalk; validate actual per-CPU retention" LoggingMode="Memory" DetailLevel="Verbose">
+      <Collectors>
+        <SystemCollectorId Value="RogCpuCollector">
+          <SystemProviderId Value="RogCpuProvider" />
+        </SystemCollectorId>
+        <EventCollectorId Value="RogClrCollector">
+          <EventProviders>
+            <EventProviderId Value="RogClrRuntime" />
+            <EventProviderId Value="RogClrRundown" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+    <Profile Id="RogCpu.Verbose.File" Name="RogCpu" Description="Bounded file scheduling intervals plus execution samples" LoggingMode="File" DetailLevel="Verbose">
+      <Collectors>
+        <SystemCollectorId Value="RogCpuCollector">
+          <SystemProviderId Value="RogCpuProvider" />
+        </SystemCollectorId>
+        <EventCollectorId Value="RogClrCollector">
+          <EventProviders>
+            <EventProviderId Value="RogClrRuntime" />
+            <EventProviderId Value="RogClrRundown" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

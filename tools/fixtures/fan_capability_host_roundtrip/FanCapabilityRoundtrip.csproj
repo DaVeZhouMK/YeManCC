@@ -10,13 +10,18 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <StartupObject>FanCapabilityRoundtrip</StartupObject>
     <NuGetAudit>false</NuGetAudit>
+    <HcBinaryAdapterEnabled Condition="'$(HcBinaryAdapterEnabled)' == ''">true</HcBinaryAdapterEnabled>
   </PropertyGroup>
-  <PropertyGroup Condition="Exists('HcBinaryAdapter.cs')">
+  <PropertyGroup Condition="'$(HcBinaryAdapterEnabled)' == 'true' and Exists('HcBinaryAdapter.cs')">
     <DefineConstants>$(DefineConstants);HC_BINARY_ADAPTER_READY</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Runner.cs" />
-    <Compile Include="HcBinaryAdapter.cs" Condition="Exists('HcBinaryAdapter.cs')" />
+    <Compile Include="PinnedFanSourceChecks.cs" />
+    <Compile Include="PinnedFanCurveChecks.cs" />
+    <Compile Include="PinnedFanHostConsumerChecks.cs" />
+    <Compile Include="PinnedUmaFanChecks.cs" />
+    <Compile Include="HcBinaryAdapter.cs" Condition="'$(HcBinaryAdapterEnabled)' == 'true' and Exists('HcBinaryAdapter.cs')" />
     <Compile Include="../../../FanLab/real-host/*.cs" Link="Host/%(Filename)%(Extension)" />
     <Compile Include="../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
     <Compile Include="../../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />

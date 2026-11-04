@@ -1,7 +1,7 @@
 // 野蛮系统控制台: one passive mirror. No Python/main.py or own settings.
 import { MirrorClient, type Bootstrap, type ClientState, type Choice, type MirrorSnapshot, type MirrorCommand } from './mirrorClient';
 import { DECKY_GYRO_CHOICES } from '../../src/bridge/deckyInputOptions';
-import {losslessProgramLabel} from '../../src/bridge/losslessProgramState';
+import {losslessProgramLabel,losslessToggleLabel} from '../../src/bridge/losslessProgramState';
 import { FRAME_RATE_CEILINGS } from '../../src/bridge/frameRateModel';
 import { AnchoredDropdown } from './AnchoredDropdown';
 import { FanChoiceDebounce, FAN_CHOICES } from './fanChoiceDebounce';
@@ -34,6 +34,8 @@ if (typeof useQuickAccessVisible !== 'function') throw new Error('YMCC QAM 可�
 if (!SliderField || !DropdownItem || !ToggleField) throw new Error('YMCC 需要 Steam 原生调节控件；未启动镜像连接');
 const client = new MirrorClient({ bootstrap: () => window.__YMCC_DECKY_MIRROR__, socket: url => new WebSocket(url),
   schedule: (action, delay) => setTimeout(action, delay), cancel: handle => clearTimeout(handle), clientId: crypto.randomUUID(),buildId:typeof __YMCC_DECKY_BUILD_ID__==='string'?__YMCC_DECKY_BUILD_ID__:undefined,steam:() => observeSteamRunning(DFL.Router) });
+// Keep the authenticated link while loaded; hidden QAM requests no business snapshots.
+client.setPassiveDemand('connection',true);
 const disposeMonitorHud = typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__ ? null
   : installSteamMonitorHud({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
 const disposeWallpaper=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installSteamWallpaper({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
@@ -51,6 +53,22 @@ const performanceChoice=new PerformanceIntentQueue<MirrorSnapshot>({confirmOnSna
 }
 const bootstrapListener = () => client.bootstrapChanged();
 window.addEventListener('ymcc-decky-bootstrap',bootstrapListener);
+// Recover a missed initial native notification even when no sidebar, wallpaper
+// or updater owns transport yet. The existing observation lease reads only the
+// native property and shares the client's original capped local retry. It ends
+// on any defined binding, including OFF/invalid, and never grants a socket.
+// Existing consumers decide transport authority from the current native data.
+const stopBootstrapReconcile = (()=>{
+  const stopConnection=client.subscribe(state=>{
+    if(!state.connected)return;
+    const nativeBinding=window.__YMCC_DECKY_MIRROR__;
+    if(nativeBinding&&nativeBinding.revoked!==true)window.dispatchEvent(new Event('ymcc-decky-bootstrap'));
+  },{connectionOnly:true});
+  const stopWaiting=window.__YMCC_DECKY_MIRROR__==null?client.waitForBootstrap({},()=>{
+    if(window.__YMCC_DECKY_MIRROR__!=null)window.dispatchEvent(new Event('ymcc-decky-bootstrap'));
+  }):()=>{};
+  return()=>{stopWaiting();stopConnection();};
+})();
 const directContent = <Content />;
 // Steam centers QAM SVG icons with native dimensions/margins; a text span skips that rule.
 // Keep the Y outline centered in its viewBox and leave the tab height to Steam.
@@ -90,7 +108,7 @@ function Content() {
   const performanceChoice=intents.performance,fanChoice=intents.fan;
   const [state, setState] = React.useState(client.snapshot());
   const [performancePending, setPerformancePending] = React.useState(performanceChoice.snapshot());
-  const [frameDraft, setFrameDraft] = React.useState<number|null>(null);
+  const [frameDraft, setFrameDraft] = React.useState(null as number|null);
   const frameStart=React.useRef(null) as {current:MirrorSnapshot|null};
   const [fanPending, setFanPending] = React.useState(fanChoice.snapshot());
   const visible = useQuickAccessVisible();
@@ -183,6 +201,7 @@ function Content() {
     });
   };
   const losslessData=menuField(snapshot,'losslessScaling');
+  const losslessNext=losslessData?.nextValue??(losslessData?.value==='on'?'off':'on');
   const losslessProgram=state.connected&&snapshot?.ready?snapshot.losslessProgram:undefined;
   const side=snapshot?.powerSource;
   const frameSetting=side?snapshot?.frames?.pair[side]:undefined;
@@ -272,7 +291,8 @@ function Content() {
     <PanelSection>
       <GameProfileControls snapshot={snapshot} disabled={disabled} pending={!!performancePending||!!fanPending||frameDraft!==null} change={(value,owned)=>{if(!disabled&&!performancePending&&!fanPending&&frameDraft===null)void client.mutate('game.setField',{field:'profile',value},owned).catch(()=>{});}}/>
       {heading('性能调度')}
-      {snapshot?.performance ? <PerformanceControls begin={()=>{if(ownsPerformanceInteraction())performanceChoice.begin();}} end={()=>{if(ownsPerformanceInteraction())performanceChoice.end();}} view={snapshot.performance} disabled={disabled||!snapshot.actions?.performance} draft={performancePending?.patch??{}} status={performancePending?.phase==='confirming'?'等待状态确认…':performancePending?.phase==='applying'?'正在应用…':performancePending?'松开后 3 秒应用':''} change={(field,value)=>{if(ownsPerformanceInteraction()&&!disabled&&snapshot){fanChoice.cancel();performanceChoice.choose(field,value,snapshot);}}}/> : unavailable('性能调度待读取')}
+      {/* YMCC requires a standalone power-scheme transaction; do not batch it with delayed slider edits. */}
+      {snapshot?.performance ? <PerformanceControls begin={()=>{if(ownsPerformanceInteraction())performanceChoice.begin();}} end={()=>{if(ownsPerformanceInteraction())performanceChoice.end();}} view={snapshot.performance} disabled={disabled||!snapshot.actions?.performance} draft={performancePending?.patch??{}} status={performancePending?.phase==='confirming'?'等待状态确认…':performancePending?.phase==='applying'?'正在应用…':performancePending?'松开后 3 秒应用':''} change={(field,value)=>{if(ownsPerformanceInteraction()&&!disabled&&snapshot){fanChoice.cancel();if(field==='powerScheme'){performanceChoice.cancel();void client.mutate('performance.setControls',{patch:{powerScheme:value}},snapshot).catch(()=>{});}else performanceChoice.choose(field,value,snapshot);}}}/> : unavailable('性能调度待读取')}
       
       {heading('画面与散热')}
       {frameSetting && side && <PanelSectionRow><SliderField className="ymcc-decky-slider" label={<span className="ymcc-performance-label"><span>{frameLabel}</span><span>{frameSetting.fps===0?'不锁帧':`${frameDraft??frameSetting.fps} FPS`}</span></span>}
@@ -327,8 +347,8 @@ function Content() {
         layout="inline" bottomSeparator="none" childrenContainerWidth="max" highlightOnFocus={false}
         fieldClassName="ymcc-trainer-field" className="ymcc-trainer-button"
         disabled={disabled||!snapshot?.game||!snapshot?.actions?.game||!losslessData?.supported}
-        onClick={()=>{if(snapshot?.game&&snapshot?.actions?.game&&losslessData?.supported)apply('game.setField',{field:'losslessScaling',value:'on'},'losslessScaling');}}>
-        {state.busy?'处理中…':'一键缩放'}
+        onClick={()=>{if(snapshot?.game&&snapshot?.actions?.game&&losslessData?.supported)apply('game.setField',{field:'losslessScaling',value:losslessNext},'losslessScaling');}}>
+        {state.busy?'处理中…':losslessToggleLabel(losslessNext)}
       </ButtonItem> : <div className="ymcc-decky-unavailable">{losslessProgramLabel(losslessProgram)} · 一键缩放不可用</div>}</PanelSectionRow>
       <PanelSectionRow>{ButtonItem ? <ButtonItem label={smallLabel('修改器')} layout="inline" bottomSeparator="none"
         fieldClassName="ymcc-trainer-field" className="ymcc-trainer-button" childrenContainerWidth="max" highlightOnFocus={false}
@@ -347,6 +367,7 @@ let dismounted = false;
 function dismount() {
   if (dismounted) return;
   dismounted = true;
+  stopBootstrapReconcile();
   window.removeEventListener('pagehide',dismount);
   if(window.__YMCC_DECKY_FRONTEND__===frontendReceipt)delete window.__YMCC_DECKY_FRONTEND__;
   window.removeEventListener('ymcc-decky-bootstrap',bootstrapListener);

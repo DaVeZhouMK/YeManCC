@@ -38,10 +38,20 @@ inline Json read(steamsession::Observer& observer, bool force = false) {
         const auto mode = result.value("mode", std::string("unknown"));
         if (mode == "desktop" || mode == "bigpicture") {
             state["mode"] = mode;
+            // Private read-only proof for Decky offline startup; no account is
+            // adopted into the shared observer or any controller/settings owner.
+            const auto account=result.find("observedAccount");
+            if(account!=result.end()&&account->is_number_integer()&&
+               (account->is_number_unsigned()?account->get<uint64_t>()>0&&account->get<uint64_t>()<=MAXDWORD:
+                account->get<int64_t>()>0&&account->get<int64_t>()<=MAXDWORD))state["observedAccount"]=*account;
+            if(result.contains("deckyAccountWatchAvailable")&&result["deckyAccountWatchAvailable"].is_boolean())
+                state["deckyAccountWatchAvailable"]=result["deckyAccountWatchAvailable"];
             const auto epoch = result.value("modeEpoch", std::string{});
             if (epoch.size() <= 96) state["modeEpoch"] = epoch;
             if (result.contains("deckyFrontendLoaded") && result["deckyFrontendLoaded"].is_boolean())
                 state["deckyFrontendLoaded"] = result["deckyFrontendLoaded"];
+            for(const char* field:{"deckyBackendConnected","deckyHooksInstalled"})
+                if(result.contains(field)&&result[field].is_boolean())state[field]=result[field];
             const auto residue=ymcc::deckyupdate::residue(result.value("deckyUpdateResidue",Json()));
             if(!residue.empty())state["deckyUpdateResidue"]=residue;
             const auto empty=result.value("deckyEmptyFrontend",Json());
@@ -89,6 +99,23 @@ inline Json set(steamsession::Observer& observer, const Json& args) {
     // Submission is NOT proof of a transition. UI waits for a real mode read.
     return {{"ok", accepted}, {"reason", accepted ? "" : current ? "steam-ui-command-failed" : "steam-session-changed"},
         {"requestedMode", mode}};
+}
+
+// Internal recovery port. Only the private Decky child calls this with a
+// fresh account witness + durable reservation; no fabricated manual intent.
+inline bool dispatchRecoveryMode(const steamsession::Session& session,const std::string& mode,const std::function<bool()>& current){
+    const auto uri=uriFor(mode);ULONGLONG birth=0;
+    HANDLE process=steamsession::verifiedProcess(session.pid,session.root,&birth);
+    if(!process||birth!=session.created){if(process)CloseHandle(process);return false;}
+    const auto exe=session.root+L"\\steam.exe";
+    const auto parameters=std::wstring(L"-url \"")+uri+L"\"";
+    SHELLEXECUTEINFOW info{sizeof(info)};info.fMask=SEE_MASK_FLAG_NO_UI;info.lpVerb=L"open";
+    info.lpFile=exe.c_str();info.lpParameters=parameters.c_str();info.lpDirectory=session.root.c_str();
+    // This flag belongs to the Steam target, not the hidden recovery worker.
+    // Reopening Big Picture must carry the same display intent as set().
+    info.nShow=mode=="bigpicture"?SW_SHOWNORMAL:SW_HIDE;
+    const bool accepted=current()&&WaitForSingleObject(process,0)==WAIT_TIMEOUT&&ShellExecuteExW(&info);
+    CloseHandle(process);return accepted; // Submission only; caller observes both transitions.
 }
 
 // Bring the already-running Big Picture UI forward only on an explicit click.

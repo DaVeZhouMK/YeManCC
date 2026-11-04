@@ -1,4 +1,5 @@
 import { powerLifecycle } from './api';
+import { isGameStatusCurrent, isCurrentGameTarget, type DetectedGame } from './gamedetect';
 import { powerSourceMode } from './powerSource';
 import { readSettingsSection,saveSettingsSection,getSettingsGeneration,assertSettingsGeneration } from './settingsRepository';
 import { detectPerformanceTemplate, detectPowerModeReliable,readRtssLimit,setRtssLimit } from './yeman';
@@ -11,6 +12,7 @@ const listeners=new Set<(pair:FrameRatePair)=>void>();
 let writeQueue:Promise<void>=Promise.resolve();
 let fallbackCache:FrameRatePair|null=null;
 let fallbackGeneration=-1;
+const frameTargetCurrent=(target:DetectedGame|null)=>isGameStatusCurrent() && (target ? isCurrentGameTarget(target) : getPolicyGame()===null);
 export function onFrameRatesChanged(listener:(pair:FrameRatePair)=>void):()=>void {listeners.add(listener);return ()=>listeners.delete(listener);}
 export async function loadGlobalFrameRates():Promise<FrameRatePair> {
   const current=await readSettingsSection<any>('rtss');
@@ -30,51 +32,56 @@ export async function loadGlobalFrameRates():Promise<FrameRatePair> {
   return frameRatePair(fallbackCache); // migration is read-only until a real save/apply boundary
 }
 export async function ensureGlobalFrameRates():Promise<FrameRatePair> {
-  const generation=getSettingsGeneration();
+  const generation=getSettingsGeneration(), target=getPolicyGame();
   const run=writeQueue.then(async()=>{
     assertSettingsGeneration(generation);
     const current=await readSettingsSection<any>('rtss');
     const pair=await loadGlobalFrameRates();
-    if(!current.frameRates?.ac || !current.frameRates?.dc)await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);
+    if((!current.frameRates?.ac || !current.frameRates?.dc) && frameTargetCurrent(target))await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);
     return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
 export async function saveGlobalFrameRate(side:FrameRateSide,value:unknown):Promise<FrameRatePair> {
-  const generation=getSettingsGeneration();
+  const generation=getSettingsGeneration(), target=getPolicyGame();
+  const verify=()=>{assertSettingsGeneration(generation);if(!frameTargetCurrent(target))throw new Error("当前游戏状态未确认，请重新调整");};
+  verify();
   // Capture submitted fields before waiting for other AC/DC writes.
   const requested=value && typeof value==='object'?{...value}:value;
   const run=writeQueue.then(async()=>{
-    assertSettingsGeneration(generation);
+    verify();
     const pair=await loadGlobalFrameRates();pair[side]=frameRateSetting(requested,pair[side]);
+    verify();
     await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);fallbackCache=frameRatePair(pair);
     for(const listener of [...listeners]){try{listener(frameRatePair(pair));}catch{/* observer failure cannot turn durable save into failure */}}return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
-export async function effectiveFrameRates():Promise<{pair:FrameRatePair;identity:string;dedicated:boolean}> {
+export async function effectiveFrameRates():Promise<{pair:FrameRatePair;identity:string;dedicated:boolean;target:DetectedGame|null}> {
   const pair=await loadGlobalFrameRates();
   const game=getPolicyGame();
-  if(!game)return {pair,identity:'',dedicated:false};
+  if(!game)return {pair,identity:'',dedicated:false,target:null};
   const custom=await loadGameCustomConfig();const key=gamePolicyKey(game),entry=custom.entries[key];
   const dedicated=!!entry && entry.enabled!==false && custom.rtss[key]?.enabled!==false;
-  return {pair:dedicated?dedicatedFrameRatePair(custom.rtss[key],pair):pair,identity:`${game.pid}:${game.processCreated}`,dedicated};
+  return {pair:dedicated?dedicatedFrameRatePair(custom.rtss[key],pair):pair,identity:`${game.pid}:${game.processCreated}`,dedicated,target:game};
 }
 let applyQueue:Promise<void>=Promise.resolve();
 // Disk Limit may already match after a failed live reload. Retain a retry so
 // an equal disk read cannot acknowledge a limit that RTSS never received.
 let rtssReloadPending=false;
 export function applyIndependentFrameRates(isCurrent:()=>boolean=()=>true):Promise<boolean> {
+  const targetAtStart=getPolicyGame();
+  const admitted=()=>frameTargetCurrent(targetAtStart);
   const run=applyQueue.then(async()=>{
-    if(!isCurrent() || !isPolicyGameInitialized())return false;
+    if(!isCurrent() || !isPolicyGameInitialized() || !admitted())return false;
     const lifecycle=await powerLifecycle.get().catch(()=>null);
     if(lifecycle?.phase!=='ready' || lifecycle.hardwareWritesAllowed!==true)return false;
     const side=await detectPowerModeReliable();
     if(!side)return false; // Unknown power is not permission to apply the AC cap.
     const state=await effectiveFrameRates();
-    const identity=()=>{const game=getPolicyGame();return game?`${game.pid}:${game.processCreated}`:'';};
-    if(!isCurrent() || identity()!==state.identity || (await detectPowerModeReliable())!==side)return false;
+    const targetCurrent=()=>admitted() && (state.target ? isCurrentGameTarget(state.target) : getPolicyGame()===null);
+    if(!isCurrent() || !targetCurrent() || (await detectPowerModeReliable())!==side)return false;
     setFloatRtssLinked(false);
     const value=state.pair[side];
-    const current=()=>isCurrent() && identity()===state.identity && (powerSourceMode.value===null || powerSourceMode.value===side);
+    const current=()=>isCurrent() && targetCurrent() && (powerSourceMode.value===null || powerSourceMode.value===side);
     if(!current())return false;
     const actual=await readRtssLimit();
     if(!current())return false;
@@ -85,6 +92,7 @@ export function applyIndependentFrameRates(isCurrent:()=>boolean=()=>true):Promi
       rtssReloadPending=false;
     }
     if(!current() || (await detectPowerModeReliable())!==side)return false;
+    if(!current())return false;
     const optimizer=getFloatInfo();
     const optimizerTarget = isContinuousFloat() ? value.fps : value.fps || value.lastFps;
     if(optimizer.enabled && optimizer.target!==optimizerTarget)await setFloatTarget(optimizerTarget);

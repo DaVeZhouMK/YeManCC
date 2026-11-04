@@ -19,6 +19,17 @@
  * Fan UI (and future pages with the same geometry) only supplies DOM semantics.
  */
 
+/** Measurements live for one synchronous navigation only, before focus/scroll writes. */
+export function createSpatialMeasurements() {
+  const rects = new Map<HTMLElement, DOMRect>(), styles = new Map<HTMLElement, CSSStyleDeclaration>();
+  return {
+    rect(el: HTMLElement): DOMRect { let value = rects.get(el); if (!value) { value = el.getBoundingClientRect(); rects.set(el, value); } return value; },
+    style(el: HTMLElement): CSSStyleDeclaration { let value = styles.get(el); if (!value) { value = getComputedStyle(el); styles.set(el, value); } return value; },
+    clear() { rects.clear(); styles.clear(); },
+  };
+}
+export type SpatialMeasurements = ReturnType<typeof createSpatialMeasurements>;
+
 export interface SpatialPosition {
   row: number;
   col: number;
@@ -43,12 +54,12 @@ export function getSpatialPosition(el: HTMLElement | null): SpatialPosition | nu
  * Within one scroller this is a shared translation. Across split panes it keeps
  * the fixed preview/header from competing with settings scrolled out of view.
  */
-export function spatialNavigationRect(el: HTMLElement): Pick<DOMRect, 'left'|'right'|'top'|'bottom'|'width'|'height'> {
-  const r = el.getBoundingClientRect(), scope = el.closest('[data-gp-scope]');
+export function spatialNavigationRect(el: HTMLElement, measurements?: SpatialMeasurements): Pick<DOMRect, 'left'|'right'|'top'|'bottom'|'width'|'height'> {
+  const r = measurements ? measurements.rect(el) : el.getBoundingClientRect(), scope = el.closest('[data-gp-scope]');
   let x = 0, y = 0;
   for (let parent = el.parentElement; parent && parent !== scope; parent = parent.parentElement) {
     if (!parent.scrollTop && !parent.scrollLeft) continue;
-    const style = getComputedStyle(parent), box = parent.getBoundingClientRect();
+    const style = measurements ? measurements.style(parent) : getComputedStyle(parent), box = measurements ? measurements.rect(parent) : parent.getBoundingClientRect();
     if (/auto|scroll/.test(style.overflowY) && parent.offsetHeight > 0) y += parent.scrollTop * box.height / parent.offsetHeight;
     if (/auto|scroll/.test(style.overflowX) && parent.offsetWidth > 0) x += parent.scrollLeft * box.width / parent.offsetWidth;
   }
@@ -58,11 +69,12 @@ export function spatialNavigationRect(el: HTMLElement): Pick<DOMRect, 'left'|'ri
 /** Scoped nearest-direction resolver. No wrap, hidden controls or cross-page jumps. */
 export function nearestSpatialTarget(
   elements: readonly HTMLElement[], current: HTMLElement, direction: SpatialDirection,
+  measurements: SpatialMeasurements = createSpatialMeasurements(),
 ): HTMLElement | null {
   if ((direction.dx === 0) === (direction.dy === 0)) return null;
   const horizontal = direction.dx !== 0, sign = horizontal ? direction.dx : direction.dy;
   const scope = current.closest('[data-gp-scope]');
-  const b = spatialNavigationRect(current);
+  const b = spatialNavigationRect(current, measurements);
   const pane = current.closest<HTMLElement>('[data-gp-pane]');
   const paneId = pane?.dataset.gpPane;
   const bx = b.left + b.width / 2, by = b.top + b.height / 2;
@@ -70,7 +82,7 @@ export function nearestSpatialTarget(
     el.closest('[data-gp-scope]') === scope && !el.closest('[hidden],[inert],[aria-hidden="true"]') &&
     !el.matches(':disabled,[aria-disabled="true"],[data-gp-ignore],[tabindex="-1"]'))
     .map(el => {
-      const r = spatialNavigationRect(el), style = getComputedStyle(el);
+      const r = spatialNavigationRect(el, measurements), style = measurements.style(el);
       const x = r.left + r.width / 2, y = r.top + r.height / 2;
       const forward = ((horizontal ? x - bx : y - by) * sign);
       const overlap = horizontal ? Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top)
@@ -120,8 +132,9 @@ export function spatialNavigationTarget(
   elements: readonly HTMLElement[],
   current: HTMLElement,
   direction: SpatialDirection,
+  measurements?: SpatialMeasurements,
 ): HTMLElement | null | undefined {
-  if (current.closest('[data-gp-spatial="nearest"]')) return nearestSpatialTarget(elements, current, direction);
+  if (current.closest('[data-gp-spatial="nearest"]')) return nearestSpatialTarget(elements, current, direction, measurements);
   const currentPosition = getSpatialPosition(current);
   if (!currentPosition) return undefined;
 

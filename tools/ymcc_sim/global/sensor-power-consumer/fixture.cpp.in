@@ -1,14 +1,23 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include "json.hpp"
 #include "sensor_thread_mailbox.h"
+#include "sensor_device_change.h"
+#include "sleep_notification_evidence.h"
+#include "sensor_virtual_link_wake.h"
+#include "input_frame_submission.h"
+#include "input_host_recovery_health.h"
 using json=nlohmann::json;
 using SensorThreadRequest=ymcc::sensors::ThreadRequest;
 enum class PowerLifecycle:uint8_t{Ready,Suspending,Suspended,Resuming};
@@ -17,59 +26,111 @@ static std::atomic<int> g_idleSessionDisplayState{1},g_idleLegacyMonitorState{1}
 static std::atomic<bool> g_inputCaptureSensorsSuspended{false},g_sensorPowerPausePending{false},g_sensorSuspendCallbackActive{false};
 static std::atomic<bool> g_sensorWakePollActive{true},g_gyroJudgeTaskEnabled{true};
 static bool g_inputCaptureReady=true;
+static std::atomic<bool> g_inputReady{true},g_exitRequested{false},g_externalPriorityVirtualSuspended{false},g_sleepRecoveryOutputWanted{true};
+static std::atomic<UINT64> fixtureHostEpoch{41},fixturePowerGeneration{7},fixtureClock{0};
+static std::atomic<bool> fixtureGameOverrideActive{false},fixtureSelectionWork{false};
+static std::atomic<bool> g_inputHostFaultHoldsStart{false},g_inputHostPowerAdmissionRevoked{false},g_inputHostRecoveryIntentReset{false},fixtureHostExitFence{false};
+static std::atomic<bool> g_inputHostRequestedPersonaMatchesBound{true};
+static bool g_inputHostActive=true;
+static std::atomic<UINT64>& g_inputHostEpoch=fixtureHostEpoch;
+static bool inputHostExitFenceRaised(){return fixtureHostExitFence.load();}
+// Only the extracted functions see this clock port. The STA integration case
+// leaves it at zero and uses the real Windows clock and timeout wait.
+static ULONGLONG fixtureSensorTick(){const auto tick=fixtureClock.load();return tick?tick:GetTickCount64();}
+static unsigned long long inputHostEpochToken(){return fixtureHostEpoch.load();}
+// Actual frame type; only unused feedback payload types are inert substitutes.
+namespace ymcc::touchhaptic {struct SourceToken{};}
+namespace ymcc::game_feedback {struct Sample{};}
+namespace ymcc::legion_motion {struct Sample;}
+// PRODUCTION_FRAME_TYPE
+static ymcc::input::frameSubmission::Current fixtureFrameCurrent;
+static ymcc::input::recoveryHealth::Context fixtureHealthContext;
+static ymcc::input::recoveryHealth::Source fixtureLatestSource;
+static ymcc::input::frameSubmission::Current inputHostFrameSubmissionCurrent(bool admitted,bool){auto current=fixtureFrameCurrent;current.sourceEligible=current.sourceEligible&&admitted;return current;}
+static ymcc::input::recoveryHealth::Context inputHostRecoveryHealthContextLocked(bool){return fixtureHealthContext;}
+static ymcc::input::recoveryHealth::Source inputHostRecoveryHealthLatestSourceLocked(){return fixtureLatestSource;}
+namespace ymcc::inputHost::switchVerificationRuntime {
+// PRODUCTION_READ_CURRENT
+}
+static unsigned long long gameInputOwnerSession(){return 1;}
+namespace ymcc {static bool gameInputOverrideActive(const json&,unsigned long long){return fixtureGameOverrideActive.load();}}
+static ymcc::sensors::virtual_link::Wake g_virtualGyroWake;
 static std::mutex g_sensorThreadMx,g_sensorMetaMx,fixtureLogMx;
 static ymcc::sensors::ThreadMailbox g_sensorThreadMailbox;
+static ymcc::sensors::device_change::Hint g_windowsSensorDeviceChange;
+static ymcc::sleepnotifications::Evidence g_sleepNotificationEvidence;
+static std::atomic<bool> g_sensorUnsubscribeRetained{false},g_windowsSourceProbeBusy{false};
 static HANDLE g_sensorThread=nullptr,g_sensorThreadWake=nullptr,fixtureOwnerGate=nullptr;
 static HWND g_hwnd=nullptr;
 static UINT64 g_inputCaptureSensorGeneration=10;
 static constexpr UINT32 kInputCaptureWakeSensorPollIntervalMs=10,kInputCaptureSensorPumpCheckMs=10,kInputCaptureRequestedSensorIntervalMs=100;
 static std::atomic<unsigned> fixturePolls{0},fixtureKeepalive{0},fixtureSelections{0},fixtureColdStarts{0},fixtureRevokes{0};
-static std::vector<json> fixtureLogs;
-static void appendDomainLog(const char*,const char* event,const json& d){std::lock_guard<std::mutex> l(fixtureLogMx);auto o=d;o["event"]=event;fixtureLogs.push_back(o);}
+static std::string fixtureScenario="power";
+static std::vector<json> fixtureLogs,fixtureAllLogs;
+static void appendDomainLog(const char*,const char* event,const json& d){std::lock_guard<std::mutex> l(fixtureLogMx);auto o=d;o["event"]=event;o["fixtureThreadId"]=GetCurrentThreadId();o["fixtureScenario"]=fixtureScenario;fixtureLogs.push_back(o);fixtureAllLogs.push_back(o);}
 static void appendNativeLifecycleLog(const char* e,const json& d){appendDomainLog("native",e,d);}
 static void writeLog(const char*,const std::string& text){appendDomainLog("test","writeLog",{{"text",text}});}
 static void inputCaptureAppend(const json&){}
-static UINT64 currentPowerGeneration(){return 7;}
+static UINT64 currentPowerGeneration(){return fixturePowerGeneration.load();}
 static const char* powerLifecycleName(PowerLifecycle p){return p==PowerLifecycle::Ready?"ready":p==PowerLifecycle::Resuming?"resuming":"suspended";}
-enum class YmccFamily{Other,LenovoLegionGo};
-static struct{YmccFamily family=YmccFamily::Other;}g_machineIdentity;
+enum class YmccFamily{Other,LenovoLegionGo,OneXPlayer,Rog};
+static struct{YmccFamily family=YmccFamily::Other;bool resolved=true;}g_machineIdentity;
+static bool inputCaptureHcWindowsLegacyNeeded(const decltype(g_machineIdentity)& identity,bool,bool){return identity.family==YmccFamily::OneXPlayer;}
+static bool machineIsRogAllyFamily(){return g_machineIdentity.family==YmccFamily::Rog;}
 static void legionMotionRevoke(){++fixtureRevokes;}
 struct FixtureSink{
  std::atomic<UINT64> activeBindingGeneration{10};std::mutex mx;
  UINT64 gyroHighMotionEpisode=0,accelMotionEpisode=0;
- void ResetSamples(){} void SetBindingGeneration(UINT64 g){activeBindingGeneration.store(g);}
- void OnGyro(int,UINT64){} void OnAccel(int,UINT64){}
+ bool gyroOk=false,accelOk=false;
+ UINT64 gyroBindingGeneration=0,accelBindingGeneration=0,gyroReceiptTick=0,accelReceiptTick=0;
+ UINT64 gyroSequence=0,accelSequence=0,gyroTimestamp100ns=0,accelTimestamp100ns=0;
+ void ResetSamples(){std::lock_guard<std::mutex> lock(mx);gyroOk=accelOk=false;
+  gyroBindingGeneration=accelBindingGeneration=gyroReceiptTick=accelReceiptTick=0;
+  gyroSequence=accelSequence=gyroTimestamp100ns=accelTimestamp100ns=0;}
+ void SetBindingGeneration(UINT64 g){activeBindingGeneration.store(g);}
+ void OnGyro(int,UINT64 g){std::lock_guard<std::mutex> lock(mx);if(g!=activeBindingGeneration.load()||!g)return;
+  gyroOk=true;gyroBindingGeneration=g;gyroReceiptTick=fixtureSensorTick();gyroTimestamp100ns=++gyroSequence*10000;}
+ void OnAccel(int,UINT64 g){std::lock_guard<std::mutex> lock(mx);if(g!=activeBindingGeneration.load()||!g)return;
+  accelOk=true;accelBindingGeneration=g;accelReceiptTick=fixtureSensorTick();accelTimestamp100ns=++accelSequence*10000;}
 };
 static auto g_inputCaptureSink=std::make_shared<FixtureSink>();
+static std::function<void()> fixtureDuringRevoke;
 struct FixtureSensor{
  bool present=true,failRevoke=false;UINT32 interval=100;
+ std::atomic<unsigned> subscriptions{0},revocations{0},releases{0};
+ void reset(){present=true;failRevoke=false;interval=100;subscriptions=revocations=releases=0;}
  explicit operator bool()const{return present;}
- FixtureSensor& operator=(std::nullptr_t){present=false;return *this;}
+ FixtureSensor& operator=(std::nullptr_t){present=false;++releases;return *this;}
  UINT32 MinimumReportInterval()const{return 10;}
  void ReportInterval(UINT32 v){interval=v;}
- void ReadingChanged(int){if(failRevoke)throw std::runtime_error("fixture revoke failure");}
- template<class F>int ReadingChanged(F){return 1;}
+ void ReadingChanged(int){if(failRevoke)throw std::runtime_error("fixture revoke failure");++revocations;auto action=std::move(fixtureDuringRevoke);if(action)action();}
+ template<class F>int ReadingChanged(F){return static_cast<int>(++subscriptions)+1;}
 };
 static FixtureSensor g_gyroSensor,g_accelSensor;
 static bool g_gyroReadingChangedSubscribed=true,g_accelReadingChangedSubscribed=true;
 static int g_gyroReadingChangedToken=1,g_accelReadingChangedToken=1;
-struct FixtureProvider{bool alive=true,blockStop=false;bool running()const{return alive;}bool stop(){if(blockStop)return false;alive=false;return true;}};
+struct FixtureProvider{bool alive=true,blockStop=false;bool running()const{return alive;}bool stop(DWORD=500){if(blockStop)return false;alive=false;return true;}bool stopped()const{return !alive&&!blockStop;}};
 static FixtureProvider g_msiSensorApiProvider,g_hcWindowsSensorApiProvider;
 static std::atomic<UINT64> g_msiSensorApiGeneration{10};
 struct InputCaptureSensorMeta{std::string gyroFamily="sensorapi",accelFamily="sensorapi";bool gyroPresent=true,accelPresent=true;};
 static InputCaptureSensorMeta g_sensorMeta;
+static InputCaptureSensorMeta inputCaptureSensorMetaSnapshot(){std::lock_guard<std::mutex> lock(g_sensorMetaMx);return g_sensorMeta;}
 static bool inputCaptureStopHcWindowsSensorApi(){return g_hcWindowsSensorApiProvider.stop();}
 static bool inputCaptureStartMsiSensorApi(UINT64){if(g_msiSensorApiProvider.running())return false;g_msiSensorApiProvider.alive=true;return true;}
 static bool inputCaptureStartHcWindowsSensorApi(UINT64){if(g_hcWindowsSensorApiProvider.running())return false;g_hcWindowsSensorApiProvider.alive=true;return true;}
 static void inputCaptureArmWakeSensorPollIfAbsent(){}
 enum class GyroJudgeState{Idle,Sampling};static GyroJudgeState g_gyroJudgeState=GyroJudgeState::Idle;
+enum class GyroCalibStage{None,Sampling};
+static std::atomic<bool> g_gyroCalibRequested{false};
+static std::atomic<GyroCalibStage> g_gyroCalibStageAtomic{GyroCalibStage::None};
+// Only pointer presence is consumed by the exact Busy helper.
+static std::shared_ptr<int> g_windowsDefaultSelectedRoute,g_windowsPrivateConsumerProjection;
 static UINT64 g_gyroJudgeArmTick=0,g_gyroJudgeDetectionStartTick=0,g_gyroJudgeSegStartTick=0,g_gyroJudgeSegAccum=0,g_gyroJudgeLastPumpSeq=0,g_gyroJudgeFirstFrameTick=0,g_gyroJudgeLastProgressTick=0,g_gyroJudgePeakSegmentSamples=0,g_gyroJudgeConsumedHighMotionEpisode=0,g_gyroJudgeConsumedAccelMotionEpisode=0;
-namespace ymcc::windows_motion{static int retain(const std::shared_ptr<FixtureSink>&,UINT64){return 0;}}
-namespace ymcc::sensors::inventory{struct Schedule{void reset(){}bool claim(int,UINT64){return false;}};}
-struct FixtureInventoryTicket{int binding;UINT64 power;};
+using FixtureInventoryTicket=ymcc::sensors::inventory::Ticket;
+static FixtureInventoryTicket inputCaptureWindowsInventoryTicket(){return {ymcc::windows_motion::retain(g_inputCaptureSink,g_inputCaptureSink->activeBindingGeneration.load()),currentPowerGeneration()};}
 namespace ymcc::sensors::sensorapi_inventory{struct Census{static bool pending(){return false;}static void cancel(){}static void request(FixtureInventoryTicket){}};}
 static void ymccLogThreadRole(const char*){WaitForSingleObject(fixtureOwnerGate,3000);}
-static bool inputCaptureWindowsSelectionHasWork(){return false;}
+static bool inputCaptureWindowsSelectionHasWork(){return fixtureSelectionWork.load();}
 static void inputCaptureWindowsProbeSetStaOpen(bool){}static void inputCaptureWindowsSelectionSetStaOpen(bool){}
 static void inputCaptureWindowsSelectionLifecycle(){}
 static void inputCaptureObserveWindowsInventory(FixtureInventoryTicket){}
@@ -78,13 +139,17 @@ static void inputCaptureRunWindowsSourceProbe(bool=false){}
 static void inputCaptureSensorWakePollStep(){++fixturePolls;}
 static void inputCaptureSensorHighMagKeepaliveStep(){++fixtureKeepalive;}
 static void inputCaptureStartWinRtSensorsImpl(){++fixtureColdStarts;}
+#define GetTickCount64 fixtureSensorTick
 // PRODUCTION_FUNCTIONS
+#undef GetTickCount64
 static json checks=json::array();
-static void check(const char* name,bool ok){checks.push_back({{"name",name},{"passed",ok}});}
+static json executedScenarios=json::array();
+static void check(const char* name,bool ok){checks.push_back({{"name",name},{"passed",ok},{"scenario",fixtureScenario}});}
 static size_t countLog(const char* event){std::lock_guard<std::mutex> l(fixtureLogMx);return std::count_if(fixtureLogs.begin(),fixtureLogs.end(),[&](const auto& o){return o.value("event","")==event;});}
 static json lastLog(const char* event){std::lock_guard<std::mutex> l(fixtureLogMx);for(auto i=fixtureLogs.rbegin();i!=fixtureLogs.rend();++i)if(i->value("event","")==event)return *i;return json::object();}
 static bool waitLog(const char* e,size_t n){const auto start=GetTickCount64();while(GetTickCount64()-start<2000){if(countLog(e)>=n)return true;Sleep(1);}return false;}
-int main(){
+static void powerCases(){
+ // ORIGINAL_POWER_CASES_BEGIN
  fixtureOwnerGate=CreateEventW(nullptr,TRUE,FALSE,nullptr);g_sensorThreadWake=CreateEventW(nullptr,FALSE,FALSE,nullptr);g_sensorThreadMailbox.open();
  g_sensorThread=CreateThread(nullptr,0,inputCaptureSensorThreadProc,nullptr,0,nullptr);
  const auto started=GetTickCount64();suspendResumeSubscriptionCallback(nullptr,PBT_APMSUSPEND,nullptr);
@@ -135,7 +200,255 @@ int main(){
  check("actual STA shuts down normally",WaitForSingleObject(g_sensorThread,3000)==WAIT_OBJECT_0);
  CloseHandle(g_sensorThread);CloseHandle(g_sensorThreadWake);CloseHandle(fixtureOwnerGate);g_sensorThread=nullptr;g_sensorThreadWake=nullptr;
  inputCaptureSuspendSensorsForPower();check("missing owner reports rejection and retains paused admission",g_inputCaptureSensorsSuspended&&countLog("gyro-power-command-rejected")>0);
- const bool ok=std::all_of(checks.begin(),checks.end(),[](const auto& c){return c.value("passed",false);});
- json result={{"ok",ok},{"cases",checks},{"logs",fixtureLogs},{"hardwareIo",false},{"normalYmccStarted",false}};
+ // ORIGINAL_POWER_CASES_END
+}
+
+static size_t countPhase(const char* phase){std::lock_guard<std::mutex> lock(fixtureLogMx);
+ return std::count_if(fixtureLogs.begin(),fixtureLogs.end(),[&](const auto& o){return o.value("event","")=="gyro-virtual-link-wake"&&o.value("phase","")==phase;});}
+static json lastPhase(const char* phase){std::lock_guard<std::mutex> lock(fixtureLogMx);
+ for(auto i=fixtureLogs.rbegin();i!=fixtureLogs.rend();++i)if(i->value("event","")=="gyro-virtual-link-wake"&&i->value("phase","")==phase)return *i;return json::object();}
+static bool waitPhase(const char* phase,size_t n){const auto start=GetTickCount64();
+ while(GetTickCount64()-start<2000){if(countPhase(phase)>=n)return true;Sleep(1);}return false;}
+static json fixtureInput(unsigned revision=1){return {{"outputTarget",{{"revision",revision},{"gyroEnabled",true}}},
+ {"gyroMotion",{{"enabled",true},{"outputMode","virtual-stick"},{"motionMode","on"}}}};}
+static void clearFixtureLogs(){std::lock_guard<std::mutex> lock(fixtureLogMx);fixtureLogs.clear();}
+static void resetBusy(){g_gyroJudgeState=GyroJudgeState::Idle;g_sensorWakePollActive=false;g_gyroCalibRequested=false;
+ g_gyroCalibStageAtomic=GyroCalibStage::None;fixtureSelectionWork=false;g_windowsSourceProbeBusy=false;
+ std::atomic_store(&g_windowsDefaultSelectedRoute,std::shared_ptr<int>{});std::atomic_store(&g_windowsPrivateConsumerProjection,std::shared_ptr<int>{});}
+static void cachePair(UINT64 receipt,UINT64 sequence=431){const auto sink=g_inputCaptureSink;std::lock_guard<std::mutex> lock(sink->mx);
+ sink->gyroOk=sink->accelOk=true;sink->gyroBindingGeneration=sink->accelBindingGeneration=sink->activeBindingGeneration.load();
+ sink->gyroReceiptTick=sink->accelReceiptTick=receipt;sink->gyroSequence=sink->accelSequence=sequence;
+ sink->gyroTimestamp100ns=sink->accelTimestamp100ns=sequence*10000;}
+static void prepareVirtual(bool enabled=true){
+ g_virtualGyroWake.configure(json{{"fixture-reset",true}},false);g_virtualGyroWake.cancelPending();
+ fixtureClock=100000;fixtureHostEpoch=41;fixturePowerGeneration=7;fixtureGameOverrideActive=false;
+ g_inputHostFaultHoldsStart=false;g_inputHostPowerAdmissionRevoked=false;g_inputHostRecoveryIntentReset=false;fixtureHostExitFence=false;
+ g_inputHostActive=true;g_inputHostRequestedPersonaMatchesBound=true;fixtureDuringRevoke={};
+ g_powerLifecycle=PowerLifecycle::Ready;g_idleSessionDisplayState=1;g_idleLegacyMonitorState=1;
+ g_inputCaptureSensorsSuspended=false;g_sensorPowerPausePending=false;g_sensorSuspendCallbackActive=false;
+ g_inputReady=true;g_exitRequested=false;g_externalPriorityVirtualSuspended=false;g_sleepRecoveryOutputWanted=true;g_inputCaptureReady=true;
+ g_machineIdentity.family=YmccFamily::Rog;g_machineIdentity.resolved=true;resetBusy();g_gyroJudgeTaskEnabled=false;
+ g_sensorThreadMailbox.close();g_sensorThreadMailbox.open();g_windowsSensorDeviceChange.reset();g_sensorUnsubscribeRetained=false;
+ g_inputCaptureSensorGeneration+=10;g_inputCaptureSink=std::make_shared<FixtureSink>();g_inputCaptureSink->SetBindingGeneration(g_inputCaptureSensorGeneration);
+ g_gyroSensor.reset();g_accelSensor.reset();g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=true;
+ g_gyroReadingChangedToken=g_accelReadingChangedToken=1;
+ g_msiSensorApiProvider.alive=g_hcWindowsSensorApiProvider.alive=false;g_msiSensorApiProvider.blockStop=g_hcWindowsSensorApiProvider.blockStop=false;
+ g_sensorMeta={"winrt","winrt",true,true};fixtureColdStarts=0;clearFixtureLogs();cachePair(fixtureSensorTick()-1000);
+ // The effective enable boolean and game owner admission are explicit memory
+ // inputs; the production Configure function and context construction execute.
+ inputCaptureConfigureVirtualGyroWake(fixtureInput(),enabled);
+}
+static bool beginVirtualCase(const char* name,const std::string& selected){if(!selected.empty()&&selected!=name)return false;
+ fixtureScenario=name;executedScenarios.push_back(name);return true;}
+static bool noResubscribe(){return g_gyroSensor.subscriptions==0&&g_accelSensor.subscriptions==0&&fixtureColdStarts==0;}
+static void virtualCases(const std::string& selected){
+ if(beginVirtualCase("disabled",selected)){
+  prepareVirtual(false);inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=100750;inputCaptureVirtualGyroWakeStep();
+  check("virtual link OFF rejects the ready notification",countPhase("queued")==0);
+  check("virtual link OFF leaves no deadline",g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  check("virtual link OFF never resubscribes",noResubscribe());
+ }
+ if(beginVirtualCase("healthy",selected)){
+  prepareVirtual();const auto generation=g_inputCaptureSensorGeneration;inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+  fixtureClock=100749;inputCaptureVirtualGyroWakeStep();check("virtual link waits the full 750ms and deduplicates ready",countPhase("queued")==1&&noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==1);
+  fixtureClock=100750;cachePair(fixtureSensorTick()-250,2);inputCaptureVirtualGyroWakeStep();
+  check("virtual link healthy pair never resubscribes",noResubscribe()&&g_inputCaptureSensorGeneration==generation&&countPhase("already-streaming")==1);
+  check("virtual link healthy result keeps game consumption unproven",!lastPhase("already-streaming").value("gameConsumptionProven",true));
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=110000;inputCaptureVirtualGyroWakeStep();
+  check("virtual link healthy result has no repeating deadline",countPhase("queued")==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE&&noResubscribe());
+ }
+ if(beginVirtualCase("reconfigured",selected)){
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());inputCaptureConfigureVirtualGyroWake(fixtureInput(2),true);
+  fixtureClock=100750;inputCaptureVirtualGyroWakeStep();
+  check("virtual link reconfiguration invalidates the pending old configuration",noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());check("virtual link new configuration gets its own settle window",g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==750);
+  inputCaptureConfigureVirtualGyroWake(fixtureInput(2),false);fixtureClock=101500;inputCaptureVirtualGyroWakeStep();
+  check("virtual link OFF invalidates a previously queued ON",noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+ }
+ if(beginVirtualCase("old-ack-configuration",selected)){
+  prepareVirtual();const auto frameConfig=g_virtualGyroWake.configuration();inputCaptureConfigureVirtualGyroWake(fixtureInput(2),true);
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),frameConfig);
+  check("virtual link rejects an ACK captured under the old configuration",countPhase("queued")==0&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  check("virtual link rejected old ACK does not consume current readiness",g_virtualGyroWake.needsReady(inputHostEpochToken(),currentPowerGeneration()));
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+  check("virtual link current-configuration ACK gets one fresh deadline",countPhase("queued")==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==750);
+ }
+ if(beginVirtualCase("expired-ready",selected)){
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=105001;inputCaptureVirtualGyroWakeStep();
+  check("virtual link drops a ready ticket after its original five-second lifetime",noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+  check("virtual link expired ticket does not loop on the same Host and configuration",countPhase("queued")==1&&noResubscribe());
+ }
+ if(beginVirtualCase("verification-expiry",selected)){
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=100750;
+  const auto original=g_virtualGyroWake.take(fixtureSensorTick(),inputHostEpochToken(),currentPowerGeneration());
+  check("virtual link ticket lifetime starts at the accepted ready time",original&&original->expires==105000);
+  if(original&&g_virtualGyroWake.commit(*original,inputHostEpochToken(),currentPowerGeneration(),fixtureSensorTick(),[]{return inputCaptureVirtualGyroHostMayWake();})){
+   inputCaptureResubscribeWinRtSensorsImpl();const auto sink=g_inputCaptureSink;
+   const bool scheduled=g_virtualGyroWake.verifyAfter(*original,ymcc::windows_motion::retain(sink,sink->activeBindingGeneration.load()),fixtureSensorTick());
+   fixtureClock=102250;const auto verification=g_virtualGyroWake.take(fixtureSensorTick(),inputHostEpochToken(),currentPowerGeneration());
+   check("virtual link verification retains the original ticket expiry",scheduled&&verification&&verification->verification&&verification->expires==original->expires);
+  }else check("virtual link verification retains the original ticket expiry",false);
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=104000;inputCaptureVirtualGyroWakeStep();fixtureClock=105001;inputCaptureVirtualGyroWakeStep();
+  check("virtual link late resubscribe cannot extend verification beyond ready lifetime",g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&countPhase("samples-still-stale")==0&&countPhase("samples-resumed")==0&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+ }
+ if(beginVirtualCase("host-fault",selected)){
+  prepareVirtual();const auto epoch=inputHostEpochToken();g_inputHostFaultHoldsStart=true;
+  inputCaptureNoteVirtualGyroReady(epoch,g_virtualGyroWake.configuration());
+  check("virtual link Host fault rejects ready without changing epoch",inputHostEpochToken()==epoch&&countPhase("queued")==0);
+  g_inputHostFaultHoldsStart=false;inputCaptureNoteVirtualGyroReady(epoch,g_virtualGyroWake.configuration());g_inputHostFaultHoldsStart=true;fixtureClock=100750;inputCaptureVirtualGyroWakeStep();
+  check("virtual link same-epoch Host fault cancels pending resubscribe",inputHostEpochToken()==epoch&&noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  fixtureClock=120000;inputCaptureNoteVirtualGyroReady(epoch,g_virtualGyroWake.configuration());inputCaptureVirtualGyroWakeStep();
+  check("virtual link held Host fault cannot reopen the same epoch",countPhase("queued")==1&&noResubscribe());
+ }
+ if(beginVirtualCase("commit-boundary",selected)){
+  const auto takeReady=[](){inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=100750;return g_virtualGyroWake.take(fixtureSensorTick(),inputHostEpochToken(),currentPowerGeneration());};
+  const auto allow=[](){return inputCaptureVirtualGyroHostMayWake();};
+  prepareVirtual();auto ticket=takeReady();inputCaptureConfigureVirtualGyroWake(fixtureInput(),false);
+  check("virtual link OFF before commit touches no sensors",ticket&&!g_virtualGyroWake.commit(*ticket,inputHostEpochToken(),currentPowerGeneration(),fixtureSensorTick(),allow)&&noResubscribe());
+  prepareVirtual();ticket=takeReady();g_inputHostFaultHoldsStart=true;
+  check("virtual link commit rechecks the Host and output predicate",ticket&&!g_virtualGyroWake.commit(*ticket,inputHostEpochToken(),currentPowerGeneration(),fixtureSensorTick(),allow)&&noResubscribe());
+  prepareVirtual();ticket=takeReady();const bool first=ticket&&g_virtualGyroWake.commit(*ticket,inputHostEpochToken(),currentPowerGeneration(),fixtureSensorTick(),allow);
+  check("virtual link duplicate commit is rejected",first&&!g_virtualGyroWake.commit(*ticket,inputHostEpochToken(),currentPowerGeneration(),fixtureSensorTick(),allow)&&noResubscribe());
+  prepareVirtual();ticket=takeReady();fixtureClock=105000;
+  check("virtual link commit rejects the original expiry boundary",ticket&&!g_virtualGyroWake.commit(*ticket,inputHostEpochToken(),currentPowerGeneration(),fixtureSensorTick(),allow)&&noResubscribe());
+  prepareVirtual();ticket=takeReady();const auto sink=g_inputCaptureSink;sink->activeBindingGeneration.fetch_add(1);
+  check("virtual link uncommitted ticket cannot schedule verification",ticket&&!g_virtualGyroWake.verifyAfter(*ticket,ymcc::windows_motion::retain(sink,sink->activeBindingGeneration.load()),fixtureSensorTick()));
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+  fixtureDuringRevoke=[]{g_sleepRecoveryOutputWanted=false;inputCaptureConfigureVirtualGyroWake(fixtureInput(),false);};
+  fixtureClock=100750;inputCaptureVirtualGyroWakeStep();
+  check("virtual link committed same-object transaction finishes cleanup after OFF",!g_sleepRecoveryOutputWanted&&g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&g_gyroSensor.revocations==1&&g_accelSensor.revocations==1&&g_gyroSensor.releases==0&&g_accelSensor.releases==0&&fixtureColdStarts==0);
+  check("virtual link OFF after commit forbids verification",countPhase("resubscribe-not-confirmed")==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  fixtureClock=120000;inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());inputCaptureVirtualGyroWakeStep();
+  check("virtual link OFF after commit forbids retry",countPhase("queued")==1&&g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&countPhase("samples-resumed")==0);
+ }
+ if(beginVirtualCase("ack-source-lineage",selected)){
+  for(unsigned cause=0;cause<15;++cause){prepareVirtual();const auto now=fixtureSensorTick();
+   fixtureFrameCurrent={};fixtureFrameCurrent.host=inputHostEpochToken();fixtureFrameCurrent.power=currentPowerGeneration();fixtureFrameCurrent.intent=13;
+   fixtureFrameCurrent.topology=2;fixtureFrameCurrent.identity=3;fixtureFrameCurrent.ready=true;fixtureFrameCurrent.sourceEligible=true;
+   fixtureHealthContext={inputHostEpochToken(),currentPowerGeneration(),13,2,3,true};
+   fixtureLatestSource={6,now-2,now,currentPowerGeneration(),2,3,true,true,9,ymcc::input::recoveryHealth::Route::XInput,4};
+   auto sentContext=fixtureHealthContext;auto sentSource=fixtureLatestSource;sentSource.sequence=5;sentSource.completed=now-1;
+   InputFrameSubmission frame;frame.ticket={inputHostEpochToken(),currentPowerGeneration(),13,false};
+   frame.sample.window={5,now-2,now-1,currentPowerGeneration(),2,true};frame.sample.identity=3;frame.sample.live=true;frame.sample.routeKnown=true;frame.physicalSourceAdmitted=true;
+   const auto config=g_virtualGyroWake.configuration();
+   if(cause==1)inputCaptureConfigureVirtualGyroWake(fixtureInput(2),true);
+   if(cause==2)g_inputHostActive=false;if(cause==3)g_inputHostRequestedPersonaMatchesBound=false;
+   if(cause==4)++frame.ticket.host;if(cause==5)frame.physicalSourceAdmitted=false;
+   if(cause==6){frame.ticket.neutral=true;frame.sample.live=false;}
+   if(cause==7)++sentContext.intent;if(cause==8)sentSource.route=ymcc::input::recoveryHealth::Route::MsiDinput;
+   if(cause==9)++sentSource.incarnation;if(cause==10)++sentSource.continuity;if(cause==11)sentSource.sequence=7;
+   if(cause==12){fixtureLatestSource.completed=now-1;sentSource.completed=now;}
+   if(cause==13)fixtureLatestSource.started=now-5000;if(cause==14)sentSource.started=now-5000;
+   inputHostNoteVirtualGyroAcceptedLocked(config,frame,sentContext,sentSource);
+   const auto label=std::string("virtual link actual ACK source lineage case ")+std::to_string(cause);
+   check(label.c_str(),countPhase("queued")==size_t(cause==0?1:0)&&noResubscribe());
+  }
+ }
+ if(beginVirtualCase("stale-resumed",selected)){
+  prepareVirtual();const auto owner=g_inputCaptureSink;const auto generation=g_inputCaptureSensorGeneration;
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=100750;inputCaptureVirtualGyroWakeStep();
+  check("virtual link stale frozen sequence resubscribes the same objects once",g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&g_gyroSensor.revocations==1&&g_accelSensor.revocations==1&&g_gyroSensor.releases==0&&g_accelSensor.releases==0&&fixtureColdStarts==0&&g_inputCaptureSink==owner&&g_inputCaptureSensorGeneration>generation);
+  check("virtual link resubscribe resets old sequence 431",owner->gyroSequence==0&&owner->accelSequence==0&&countPhase("resubscribed-awaiting-samples")==1);
+  check("virtual link schedules a finite 1500ms verification",g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==1500);
+  fixtureClock=102249;inputCaptureVirtualGyroWakeStep();check("virtual link verification cannot execute early",countPhase("samples-still-stale")==0&&countPhase("samples-resumed")==0);
+  fixtureClock=102250;const auto binding=owner->activeBindingGeneration.load();owner->OnGyro(0,binding);owner->OnAccel(0,binding);owner->OnGyro(0,binding);owner->OnAccel(0,binding);inputCaptureVirtualGyroWakeStep();
+  check("virtual link fresh generation sequence two proves software recovery",countPhase("samples-resumed")==1&&owner->gyroSequence==2&&owner->accelSequence==2&&lastPhase("samples-resumed").value("samplePairFresh",false));
+  inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=120000;inputCaptureVirtualGyroWakeStep();
+  check("virtual link recovered generation does not rearm the same Host",countPhase("queued")==1&&g_gyroSensor.subscriptions==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+ }
+ if(beginVirtualCase("stale-exhausted",selected)){
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=100750;inputCaptureVirtualGyroWakeStep();fixtureClock=102250;inputCaptureVirtualGyroWakeStep();
+  check("virtual link failed verification reports stale without success",countPhase("samples-still-stale")==1&&countPhase("samples-resumed")==0&&!lastPhase("samples-still-stale").value("samplePairFresh",true));
+  for(unsigned i=0;i<8;++i){fixtureClock.fetch_add(5000);inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());inputCaptureVirtualGyroWakeStep();}
+  check("virtual link permanently stale source has one attempt and no loop",countPhase("queued")==1&&g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&fixtureColdStarts==0&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+ }
+ if(beginVirtualCase("identity-fences",selected)){
+  for(unsigned cause=0;cause<4;++cause){prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+   if(cause==0)++fixtureHostEpoch;if(cause==1)++fixturePowerGeneration;if(cause==2)g_inputCaptureSink->activeBindingGeneration.fetch_add(1);
+   if(cause==3){const auto generation=g_inputCaptureSink->activeBindingGeneration.load();g_inputCaptureSink=std::make_shared<FixtureSink>();g_inputCaptureSink->SetBindingGeneration(generation);}
+   fixtureClock=100750;inputCaptureVirtualGyroWakeStep();const auto label=std::string("virtual link rejects replaced ")+std::vector<std::string>{"Host","power generation","sensor generation","sensor owner"}[cause];
+   check(label.c_str(),noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  }
+ }
+ if(beginVirtualCase("sample-contract",selected)){
+  for(unsigned cause=0;cause<8;++cause){prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());fixtureClock=100750;cachePair(fixtureSensorTick(),2);
+   {const auto sink=g_inputCaptureSink;std::lock_guard<std::mutex> lock(sink->mx);
+    if(cause==0)sink->gyroReceiptTick=fixtureSensorTick()-251;if(cause==1)sink->accelReceiptTick=fixtureSensorTick()+1;
+    if(cause==2)sink->gyroSequence=1;if(cause==3)sink->accelBindingGeneration=0;if(cause==4)sink->gyroTimestamp100ns=0;
+    if(cause==5)sink->accelTimestamp100ns=0;if(cause==6)sink->gyroOk=false;if(cause==7)sink->accelOk=false;}
+   inputCaptureVirtualGyroWakeStep();const auto label=std::string("virtual link rejects sample defect ")+std::to_string(cause);
+   check(label.c_str(),g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&countPhase("already-streaming")==0);
+  }
+ }
+ if(beginVirtualCase("unsupported-source",selected)){
+  for(unsigned cause=0;cause<3;++cause){prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+   if(cause==0)g_machineIdentity.family=YmccFamily::Other;if(cause==1)g_sensorMeta.gyroFamily="sensorapi";if(cause==2)g_accelSensor.present=false;
+   fixtureClock=100750;inputCaptureVirtualGyroWakeStep();const auto label=std::string("virtual link excludes unsupported source ")+std::to_string(cause);
+   check(label.c_str(),noResubscribe()&&countPhase("source-not-supported")==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  }
+ }
+ if(beginVirtualCase("busy",selected)){
+  for(unsigned cause=0;cause<8;++cause){prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+   if(cause==0)g_gyroJudgeState=GyroJudgeState::Sampling;if(cause==1)g_sensorWakePollActive=true;
+   if(cause==2)g_gyroCalibRequested=true;if(cause==3)g_gyroCalibStageAtomic=GyroCalibStage::Sampling;
+   if(cause==4)fixtureSelectionWork=true;if(cause==5)g_windowsSourceProbeBusy=true;
+   if(cause==6)std::atomic_store(&g_windowsDefaultSelectedRoute,std::make_shared<int>(1));
+   if(cause==7)std::atomic_store(&g_windowsPrivateConsumerProjection,std::make_shared<int>(1));
+   fixtureClock=100750;inputCaptureVirtualGyroWakeStep();const auto label=std::string("virtual link yields to existing source operation ")+std::to_string(cause);
+   check(label.c_str(),noResubscribe()&&countPhase("existing-source-operation-active")==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  }
+ }
+ if(beginVirtualCase("runtime-guards",selected)){
+  for(unsigned cause=0;cause<5;++cause){
+   const auto block=[&]{if(cause==0)g_exitRequested=true;if(cause==1)g_inputReady=false;if(cause==2)g_externalPriorityVirtualSuspended=true;if(cause==3)g_idleSessionDisplayState=0;if(cause==4)g_sleepRecoveryOutputWanted=false;};
+   prepareVirtual();block();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+   const auto before=std::string("virtual link ready admission respects runtime guard ")+std::to_string(cause);check(before.c_str(),countPhase("queued")==0);
+   prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());block();fixtureClock=100750;inputCaptureVirtualGyroWakeStep();
+   const auto after=std::string("virtual link pending work respects runtime guard ")+std::to_string(cause);check(after.c_str(),noResubscribe()&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  }
+ }
+ if(beginVirtualCase("unsubscribe",selected)){
+  prepareVirtual();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());inputCaptureUnsubscribeWinRtSensorsImpl();
+  check("virtual link actual unsubscribe cancels its pending deadline",g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
+  fixtureClock=100750;inputCaptureVirtualGyroWakeStep();check("virtual link late step cannot revive unsubscribed sensors",noResubscribe()&&!g_gyroReadingChangedSubscribed&&!g_accelReadingChangedSubscribed);
+ }
+ if(beginVirtualCase("sta-deadline",selected)){
+  prepareVirtual();fixtureClock=0;cachePair(GetTickCount64()-1000);const auto originalOwner=g_inputCaptureSink;
+  fixtureOwnerGate=CreateEventW(nullptr,TRUE,TRUE,nullptr);g_sensorThreadWake=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+  check("virtual link owns its STA wake and gate events",fixtureOwnerGate&&g_sensorThreadWake);
+  if(!fixtureOwnerGate||!g_sensorThreadWake){if(fixtureOwnerGate)CloseHandle(fixtureOwnerGate);if(g_sensorThreadWake)CloseHandle(g_sensorThreadWake);fixtureOwnerGate=nullptr;g_sensorThreadWake=nullptr;throw std::runtime_error("virtual link event creation failed");}
+  DWORD threadId=0;g_sensorThread=CreateThread(nullptr,0,inputCaptureSensorThreadProc,nullptr,0,&threadId);
+  check("virtual link creates one private STA thread",g_sensorThread!=nullptr);
+  if(!g_sensorThread){CloseHandle(fixtureOwnerGate);CloseHandle(g_sensorThreadWake);fixtureOwnerGate=nullptr;g_sensorThreadWake=nullptr;throw std::runtime_error("virtual link STA creation failed");}
+  const auto start=GetTickCount64();inputCaptureNoteVirtualGyroReady(inputHostEpochToken(),g_virtualGyroWake.configuration());
+  const bool refreshed=waitPhase("resubscribed-awaiting-samples",1);const auto refreshedAt=GetTickCount64();
+  check("virtual link real STA deadline wakes with old poll switches OFF",refreshed&&!g_sensorWakePollActive&&!g_gyroJudgeTaskEnabled&&refreshedAt-start>=750&&lastPhase("resubscribed-awaiting-samples").value("fixtureThreadId",DWORD{})==threadId);
+  const bool verified=waitPhase("samples-still-stale",1);
+  check("virtual link real STA performs one bounded 1500ms verification",verified&&lastPhase("samples-still-stale").value("fixtureThreadId",DWORD{})==threadId&&lastPhase("samples-still-stale").value("verification",false));
+  check("virtual link real STA returns to an infinite idle wait",g_virtualGyroWake.waitMs(GetTickCount64(),INFINITE)==INFINITE&&g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1&&g_inputCaptureSink==originalOwner&&fixtureColdStarts==0);
+  const auto terminal=g_sensorThreadMailbox.submit(SensorThreadRequest::Shutdown);SetEvent(g_sensorThreadWake);
+  const bool joined=WaitForSingleObject(g_sensorThread,3000)==WAIT_OBJECT_0;
+  check("virtual link private STA joins before owned handles close",terminal&&joined);
+  if(!joined)throw std::runtime_error("virtual link STA did not return owned resources");
+  CloseHandle(g_sensorThread);CloseHandle(g_sensorThreadWake);CloseHandle(fixtureOwnerGate);g_sensorThread=nullptr;g_sensorThreadWake=nullptr;fixtureOwnerGate=nullptr;
+ }
+}
+static void prepareOriginalPowerCases(){
+ prepareVirtual(false);fixtureClock=0;fixturePowerGeneration=7;g_machineIdentity.family=YmccFamily::Other;
+ g_sensorWakePollActive=true;g_gyroJudgeTaskEnabled=true;g_msiSensorApiProvider.alive=g_hcWindowsSensorApiProvider.alive=true;
+ g_sensorMeta={"sensorapi","sensorapi",true,true};clearFixtureLogs();fixtureScenario="power";
+}
+int main(int argc,char** argv){
+ const bool powerOnly=argc==2&&std::string(argv[1])=="--power-only";
+ const bool caseOnly=argc==3&&std::string(argv[1])=="--case";
+ if(argc!=1&&!powerOnly&&!caseOnly){fprintf(stderr,"Unsupported sensor-power selection\n");return 2;}
+ try{
+  if(!powerOnly)virtualCases(caseOnly?argv[2]:"");
+  if(caseOnly&&executedScenarios.empty())throw std::runtime_error("Unknown or empty virtual link case selection");
+  if(!caseOnly){prepareOriginalPowerCases();executedScenarios.push_back("power");powerCases();}
+ }catch(const std::exception& error){check(error.what(),false);}
+ const bool ok=!checks.empty()&&std::all_of(checks.begin(),checks.end(),[](const auto& c){return c.value("passed",false);});
+ json result={{"ok",ok},{"cases",checks},{"executedScenarios",executedScenarios},{"logs",fixtureAllLogs},{"hardwareIo",false},{"normalYmccStarted",false}};
  printf("%s\n",result.dump().c_str());return ok?0:1;
 }

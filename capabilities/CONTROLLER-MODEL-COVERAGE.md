@@ -2,7 +2,7 @@
 
 本页已按 **2026-10-25 23:25 新导出**重新核对：102 行及18条共享OEM关系未改变，JSON中的来源快照与锚点已刷新；最新三机支持和FanHost／虚拟InputHost身份区分见[修复支持说明](CONTROLLER-REPAIR-SUPPORT.md)。
 
-2026-10-25 来源检查快照。机器可读：[CONTROLLER-MODEL-COVERAGE.json](CONTROLLER-MODEL-COVERAGE.json)；任务入口：[CONTROLLER-REPAIR-SUPPORT.md](CONTROLLER-REPAIR-SUPPORT.md)。按 JSON 的 `models[].name/deviceClass` 读取具体行；不必每次加载整个历史。
+2026-10-25 来源检查快照。机器可读：[CONTROLLER-MODEL-COVERAGE.json](CONTROLLER-MODEL-COVERAGE.json)；任务入口：[CONTROLLER-REPAIR-SUPPORT.md](CONTROLLER-REPAIR-SUPPORT.md)。按 JSON 的 `models[].name/deviceClass` 读取具体行；不必每次加载整个历史。2026-10-31 仅将 OneXPlayer3 行按 f2e58468 后的当前选择器修正为 `OneXX3 / kOneXX3Keys`（六键）；其余行仍为 2026-10-25 快照。
 
 本表包含 **92 个冻结源码类（其中 80 个 factory 类）和 10 个已审查扩展类，共 102 条源码记录**。包含基类、通用类和桌面扩展，不能称为 102 款已支持掌机。`factoryInstantiable` 来自冻结源码，不证明当前 DLL、机型识别或设备存在。
 
@@ -155,7 +155,7 @@ F=冻结 factory；B=冻结非 factory/基类；E=审查扩展（不在旧冻结
 | AYANEOAIRPro1S | E | AyaneoCec / kAyaneoCecKeys | Reviewed | — | — | unsupported |
 | AYANEOFlip11 | E | AyaneoFlip1SKb / kAyaneoFlip1SKbKeys | Reviewed | — | — | unsupported |
 | AYANEONEXT2 | E | AyaneoNext2 / kAyaneoNext2Keys | Reviewed | — | — | unsupported |
-| OneXPlayer3 | E | OneXX1 / kOneXX2Keys | Reviewed | — | — | unsupported |
+| OneXPlayer3 | E | OneXX3 / kOneXX3Keys | Reviewed | — | — | unsupported |
 | OneXPlayerX2 | E | OneXX1 / kOneXX2Keys | Reviewed | — | — | unsupported |
 | OneXPlayerX2MiniPro | E | OneXX2MiniPro / kOneXX2MiniProKeys | Reviewed | — | — | unsupported |
 | SteamMachine | E | None / 无 | Default | — | — | unsupported |

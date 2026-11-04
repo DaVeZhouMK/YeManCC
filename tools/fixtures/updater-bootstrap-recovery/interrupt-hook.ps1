@@ -1,8 +1,8 @@
 $script:FixtureRemoveFile=(Get-Command Remove-YmccBootstrapStageFile).ScriptBlock
 $script:FixtureWriteStage=(Get-Command Write-YmccBootstrapStage).ScriptBlock
 $script:FixtureSetAtomic=(Get-Command Set-YmccDeckyAtomic).ScriptBlock
-function Write-YmccBootstrapStage([string]$Stage,[string]$Target,[string]$PackageVersion,[string]$PayloadSha256,[string]$Phase,[string[]]$ManagedPaths){
- & $script:FixtureWriteStage $Stage $Target $PackageVersion $PayloadSha256 $Phase $ManagedPaths
+function Write-YmccBootstrapStage([string]$Stage,[string]$Target,[string]$PackageVersion,[string]$PayloadSha256,[string]$Phase,[string[]]$ManagedPaths,[string]$PostCommitModuleSha256='',$TransactionPlan=$null,[switch]$SettlePostCommitCleanup){
+ & $script:FixtureWriteStage $Stage $Target $PackageVersion $PayloadSha256 $Phase $ManagedPaths $PostCommitModuleSha256 -TransactionPlan $TransactionPlan -SettlePostCommitCleanup:$SettlePostCommitCleanup
  if($script:FixturePhase -ceq 'source-read' -and $Phase -ceq 'preparing'){
   [IO.File]::WriteAllText($script:FixtureBarrier,$Stage)
   $wait=[Diagnostics.Stopwatch]::StartNew()

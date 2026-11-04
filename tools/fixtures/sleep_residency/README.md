@@ -67,3 +67,20 @@ reports operation counts; they do not establish physical CPU or power savings.
 
 <!-- STATIC-SCAN-COST-RECEIPT-20261026 -->
 2026-10-26：扫描/恢复只在原终态记录补operationEvidence，复用已有全局快照加载计数。loadAttempts包含调用者校验，不等于powercfg进程数或覆盖数；elapsedMs是操作运行时间，可能包含系统睡眠，不是CPU时间。取消/期限/锁拒绝也保留可用计数；无新查询、日志轮询、定时器或每项成功日志。现有消费者精确提取Native.run，配合内存端口验证实际接线、取消、180秒期限、锁拒绝及独立OFF，不新增ID或放宽90/85秒预算。
+
+
+<!-- SLEEP-SIGNAL-REVIEW-20261103 -->
+2026-11-03：复用原 sleep.residency-evidence-consumer，保留35条原始会计输入并追加3条真实字段边界：ROG最后526.475284秒双零、同包Reason32短暂退出、另一轮17630.439666秒双零。XML仍由导出raw字段重建，原ZIP、成员、行号和SHA记录在cases.json；这些用例只证明记账读取及“不能授权重睡”，不宣称物理睡死或正常睡眠。原第31条46.991064秒双零同时保留用户观察首次重睡成功的历史背景，不能把它凭零值改判失败。
+用户本轮再次明确：正常睡眠也可能双DRIPS为0。缺事件、未测、零计数、SleepEntered、屏幕关闭、API接受与物理低功耗仍分开。当前保守生产入口不启用历史高功耗阶段；历史ETW/计时器测试通过也不授予重新启用权限。新增真实数据不增加永久ID、父门或默认最小集。
+<!-- /SLEEP-SIGNAL-REVIEW-20261103 -->
+
+
+<!-- AMD-ROG-LATE-AUTOMATIC-WAKE-20261103 -->
+2026-11-03 用户要求将「AMD ROG 睡下较久后突然非人工唤醒，多发插电」纳入当前源码睡眠对比回归。场景继续归原 `sleep.residency-evidence-consumer`，精确选择 `late-wake`，不新增默认父门、ID、minimum或放宽原90/85秒预算。
+
+唯一原始输入 `tools/fixtures/sleep_non_user_wake/amd_rog_late_spontaneous_ac.json` 包含两份原ZIP的59条精确普通事实、ZIP/成员哈希和源行号：10-29的28分02.903893秒Reason5、醒来/发送时AC；10-25的88分08.755274秒Reason55、发送时DC。前者醒来附近有AC/DC变化，不能声称整个28分钟始终AC，也不能将关联当AMD驱动根因。另一个明确标synthetic-control的稳定插电20分钟场景用于检验没有供电/USB变化仍能识别非人工507。
+
+回归必须消费当前原生非人工唤醒准入/原始时间年龄/分类与实际共享发送器，检查三个FALSE及零关屏调用；只比较日志文本或mock高层请求计数不能算覆盖。人工电源键、开关OFF、缺原人工起点、重复通知、共享预算与2秒人工分类优先作为反向控制。零/缺DRIPS不应阻断该原有非人工唤醒流程；仅AC/DC变化没有Windows唤醒证据也不能发请求。
+
+标签按用户场景归「异常睡眠类/AMD ROG/插电常见」，不是AMD根因定责或全平台物理恢复保证；新240秒入睡超时保持独立。该补充只记录测试合同，实际结果以本轮回执为准，不用历史PASS代签当前源。实跑证据：Testing/YMCC/Evidence/ROG-LateAutomaticWake-20261103/FixtureRegression/。
+<!-- /AMD-ROG-LATE-AUTOMATIC-WAKE-20261103 -->

@@ -5,12 +5,38 @@
 #include <fstream>
 #include <condition_variable>
 #include <mutex>
+static std::filesystem::path cacheFaultRoot;
+static std::string cacheFault;
+static unsigned cacheFaultMetadata=0;
+static bool cacheFaultPath(const std::filesystem::path& path,const wchar_t* leaf){
+    return !cacheFault.empty()&&path.filename()==leaf&&path.native().find(cacheFaultRoot.native()+L"\\")!=std::wstring::npos;
+}
+static bool cacheFaultHandle(HANDLE file,const wchar_t* leaf){
+    wchar_t path[32768]{};const auto size=GetFinalPathNameByHandleW(file,path,32768,FILE_NAME_NORMALIZED);
+    return size&&size<32768&&cacheFaultPath(std::filesystem::path(path),leaf);
+}
+static BOOL WINAPI cacheFixtureFlush(HANDLE file){
+    if(cacheFault=="owner-flush"&&cacheFaultHandle(file,L"staging-owner.json")){SetLastError(ERROR_DISK_FULL);return FALSE;}
+    return ::FlushFileBuffers(file);
+}
+static BOOL WINAPI cacheFixtureMove(LPCWSTR source,LPCWSTR target,DWORD flags){
+    if((cacheFault=="metadata-replace"||(cacheFault=="complete-replace"&&cacheFaultMetadata==2))&&cacheFaultPath(source,L"metadata-stage.tmp")){SetLastError(ERROR_SHARING_VIOLATION);return FALSE;}
+    if(cacheFault=="live-replace"&&cacheFaultPath(source,L"copy-stage.tmp")&&std::filesystem::path(target).filename()==L"index.js"){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+    return ::MoveFileExW(source,target,flags);
+}
 static HANDLE cacheCrashReady=nullptr;
 static unsigned cacheCrashPhase=0,cacheMetadataWrites=0;
 static void cacheCrashCheckpoint(){SetEvent(cacheCrashReady);std::mutex mutex;std::condition_variable stopped;std::unique_lock lock(mutex);stopped.wait(lock,[]{return false;});}
 // Fault checkpoint at the Windows IO boundary. The real WriteFile still runs;
 // no product method or return value is replaced, and only owned children arm it.
 static BOOL WINAPI cacheFixtureWriteFile(HANDLE file,LPCVOID bytes,DWORD length,LPDWORD written,LPOVERLAPPED overlapped){
+    if(cacheFault=="owner-partial"&&cacheFaultHandle(file,L"staging-owner.json")){
+        ::WriteFile(file,bytes,length/2,written,overlapped);SetLastError(ERROR_DISK_FULL);return FALSE;
+    }
+    if(cacheFault=="metadata-write"&&cacheFaultHandle(file,L"metadata-stage.tmp")){
+        ::WriteFile(file,bytes,length/2,written,overlapped);SetLastError(ERROR_DISK_FULL);return FALSE;
+    }
+    if(cacheFaultHandle(file,L"metadata-stage.tmp"))++cacheFaultMetadata;
     const auto result=::WriteFile(file,bytes,length,written,overlapped);
     if(result&&cacheCrashReady&&(cacheCrashPhase==1||cacheCrashPhase==2)){
         wchar_t path[32768]{};const auto size=GetFinalPathNameByHandleW(file,path,32768,FILE_NAME_NORMALIZED);
@@ -21,8 +47,12 @@ static BOOL WINAPI cacheFixtureWriteFile(HANDLE file,LPCVOID bytes,DWORD length,
     return result;
 }
 #define WriteFile cacheFixtureWriteFile
+#define FlushFileBuffers cacheFixtureFlush
+#define MoveFileExW cacheFixtureMove
 #include "../native/decky_sidebar_setup.h"
 #undef WriteFile
+#undef FlushFileBuffers
+#undef MoveFileExW
 #include "../native/decky_sidebar_diagnostics.h"
 #include <bcrypt.h>
 #include <iostream>
@@ -160,6 +190,66 @@ int wmain(int argc,wchar_t** argv){try{
     check("cleanup touches only the two proven staging leaves and preserves unknown old-looking files",[&]{
         Fixture f(base,"unknown-legacy");f.seeded();put(f.cache/L"old-user.tmp","KEEP-UNKNOWN");put(f.home/L"plugins"/L"ymcc-sidebar"/L"dist"/L".ymcc-cache-user.tmp","KEEP-OLD-LOOKING");
         const auto state=f.prepare();need(state.value("ready",false)&&state.value("resourceCacheAvailable",false)&&text(f.cache/L"old-user.tmp")=="KEEP-UNKNOWN"&&text(f.home/L"plugins"/L"ymcc-sidebar"/L"dist"/L".ymcc-cache-user.tmp")=="KEEP-OLD-LOOKING","cleanup guessed ownership from a filename prefix");
+    });
+
+    // Configuration storms use the original setup -> cache -> disk -> setup
+    // consumer. No receipt or metadata substitutes for actual payload hashes.
+    const std::vector<std::pair<std::string,std::string>> ownerStorm={
+        {"empty",""},{"truncated","{\"owner\":"},{"array","[]"},{"null","null"},
+        {"oversize",std::string(1025,' ')},{"future",R"({"schemaVersion":2,"owner":"YMCC","purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]})"},
+        {"old-owner",R"({"schemaVersion":1,"owner":"old-YMCC","purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]})"},
+        {"float-schema",R"({"schemaVersion":1.0,"owner":"YMCC","purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]})"},
+        {"wrong-type",R"({"schemaVersion":1,"owner":true,"purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]})"},
+        {"duplicate",R"({"schemaVersion":1,"owner":"foreign","owner":"YMCC","purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]})"},
+        {"escaped-duplicate",R"({"schemaVersion":1,"\u006fwner":"foreign","owner":"YMCC","purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]})"},
+        {"trailing",R"({"schemaVersion":1,"owner":"YMCC","purpose":"resource-cache-staging","files":["copy-stage.tmp","metadata-stage.tmp"]} {})"}
+    };
+    for(const auto& [kind,bytes]:ownerStorm)check(("storm staging owner "+kind+" preserves unknown provenance").c_str(),[&]{
+        Fixture f(base,"storm-owner");f.seeded();put(f.cache/L"staging-owner.json",bytes);put(f.cache/L"copy-stage.tmp","KEEP-UNPROVEN");
+        for(int retry=0;retry<2;++retry){const auto state=f.prepare();need(state.value("ready",false)&&!state.value("resourceCacheAvailable",true),"invalid staging owner was trusted");need(text(f.cache/L"staging-owner.json")==bytes&&text(f.cache/L"copy-stage.tmp")=="KEEP-UNPROVEN","invalid provenance authorized cleanup");}
+    });
+    const std::vector<std::string> slotStorm={"empty","truncated","array","null","oversize","deep","future","old-owner","schema-string","schema-float","complete-missing","complete-string","complete-null","manifest-empty","manifest-bytes-string","duplicate","nested-duplicate","trailing"};
+    for(const auto& kind:slotStorm)check(("storm slot "+kind+" stays unowned and cannot repair").c_str(),[&]{
+        Fixture f(base,"storm-slot");f.seeded();auto metadata=Json::parse(text(f.cache/L"a"/L"manifest.json"));std::string bytes;
+        if(kind=="empty")bytes="";else if(kind=="truncated")bytes="{\"schemaVersion\":";else if(kind=="array")bytes="[]";else if(kind=="null")bytes="null";else if(kind=="oversize")bytes=std::string(131073,' ');else if(kind=="deep")bytes=std::string(80,'[')+"0"+std::string(80,']');
+        else {if(kind=="future")metadata["schemaVersion"]=2;else if(kind=="old-owner")metadata["owner"]="old-YMCC";else if(kind=="schema-string")metadata["schemaVersion"]="1";else if(kind=="schema-float")metadata["schemaVersion"]=1.0;else if(kind=="complete-missing")metadata.erase("complete");else if(kind=="complete-string")metadata["complete"]="true";else if(kind=="complete-null")metadata["complete"]=nullptr;else if(kind=="manifest-empty")metadata["manifest"]=Json::object();else if(kind=="manifest-bytes-string")metadata["manifest"]["files"][2]["bytes"]="1";
+            bytes=metadata.dump();if(kind=="duplicate")bytes.insert(1,"\"owner\":\"foreign\",");if(kind=="nested-duplicate"){const auto at=bytes.find("\"path\":");bytes.insert(at,"\"path\":\"foreign\",");}if(kind=="trailing")bytes+=" {}";}
+        put(f.cache/L"a"/L"manifest.json",bytes);put(f.cache/L"b"/L"manifest.json",bytes);const auto aBefore=text(f.cache/L"a"/L"2.bin");
+        const auto healthy=f.prepare();need(healthy.value("ready",false)&&!healthy.value("resourceCacheAvailable",true),"corrupt slots were adopted or reported verified");
+        need(text(f.cache/L"a"/L"manifest.json")==bytes&&text(f.cache/L"b"/L"manifest.json")==bytes,"corrupt slot original overwritten");
+        fs::remove(f.home/managedFiles[2]);const auto missing=f.prepare();need(!missing.value("ready",true)&&!fs::exists(f.home/managedFiles[2]),"corrupt metadata supplied live code");need(text(f.cache/L"a"/L"2.bin")==aBefore,"known cached bytes changed");
+    });
+    const std::vector<std::string> receiptStorm={"empty","truncated","array","null","oversize","future","old-owner","old-pin","schema-float","schema-string","files-object","bytes-string","bytes-bool","duplicate","nested-duplicate","escaped-duplicate","trailing"};
+    for(const auto& kind:receiptStorm)check(("storm managed receipt "+kind+" cannot borrow cache authority").c_str(),[&]{
+        Fixture f(base,"storm-receipt");f.seeded();auto manifest=f.manifest;std::string bytes;
+        if(kind=="empty")bytes="";else if(kind=="truncated")bytes="{\"owner\":";else if(kind=="array")bytes="[]";else if(kind=="null")bytes="null";else if(kind=="oversize")bytes=std::string(131073,' ');
+        else {if(kind=="future")manifest["schemaVersion"]=2;else if(kind=="old-owner")manifest["owner"]="old-YMCC";else if(kind=="old-pin")manifest["loaderSha256"]=std::string(64,'0');else if(kind=="schema-float")manifest["schemaVersion"]=1.5;else if(kind=="schema-string")manifest["schemaVersion"]="1";else if(kind=="files-object")manifest["files"]=Json::object();else if(kind=="bytes-string")manifest["files"][2]["bytes"]="1";else if(kind=="bytes-bool")manifest["files"][2]["bytes"]=true;
+            bytes=manifest.dump();if(kind=="duplicate")bytes.insert(1,"\"owner\":\"foreign\",");if(kind=="escaped-duplicate")bytes.insert(1,"\"\\u006fwner\":\"foreign\",");if(kind=="nested-duplicate"){const auto at=bytes.find("\"path\":");bytes.insert(at,"\"path\":\"foreign\",");}if(kind=="trailing")bytes+=" {}";}
+        put(f.receipt,bytes);Json admission,decoded;need(!readManagedContract(f.home,admission,decoded).empty(),"invalid managed receipt decoded as current contract");fs::remove(f.home/managedFiles[2]);for(int retry=0;retry<2;++retry){const auto state=f.prepare();need(!state.value("ready",true)&&!fs::exists(f.home/managedFiles[2]),"bad receipt authorized cached repair");need(text(f.receipt)==bytes,"bad authority original overwritten");}
+        put(f.receipt,f.manifest.dump());need(f.prepare().value("ready",false)&&inspect(f.steam,f.home,f.hash).value("ready",false),"explicit valid receipt retry did not recover");
+    });
+    for(const std::string kind:{"owner-partial","owner-flush","metadata-write","metadata-replace","complete-replace"})check(("storm IO "+kind+" explicit retry publishes verified cache").c_str(),[&]{
+        Fixture f(base,"storm-io");cacheFaultRoot=f.cache;cacheFault=kind;cacheFaultMetadata=0;const auto failed=f.prepare();cacheFault.clear();
+        need(failed.value("ready",false)&&!failed.value("resourceCacheAvailable",true),"failed publication claimed cache saved");
+        if(kind.starts_with("owner-"))need(!fs::exists(f.cache/L"staging-owner.json"),"failed new owner left a permanent partial journal");
+        if(kind=="complete-replace")need(Json::parse(text(f.cache/L"a"/L"manifest.json")).at("complete")==false,"failed complete publication became committed");
+        const auto retry=f.prepare();need(retry.value("ready",false)&&retry.value("resourceCacheAvailable",false),"released IO fault did not heal on explicit retry");need(Json::parse(text(f.cache/L"a"/L"manifest.json")).at("complete")==true,"retry marker not persisted");need(f.prepare().value("resourceCacheAvailable",false),"retry did not survive reread");
+    });
+    check("storm live atomic failure preserves target then explicit retry rehashes",[&]{Fixture f(base,"storm-live");f.seeded();put(f.home/managedFiles[2],"CONCURRENT-BAD");cacheFaultRoot=f.cache;cacheFault="live-replace";const auto failed=f.prepare();cacheFault.clear();need(!failed.value("ready",true)&&text(f.home/managedFiles[2])=="CONCURRENT-BAD"&&failed.value("resourcesRepaired",9u)==0,"failed live replacement claimed repair");need(f.prepare().value("ready",false)&&inspect(f.steam,f.home,f.hash).value("ready",false),"live retry not verified");});
+    check("storm missing publication marker preserves orphan payload and reuses only empty slot",[&]{Fixture f(base,"storm-marker");f.seeded();fs::remove(f.cache/L"a"/L"manifest.json");const auto original=text(f.cache/L"a"/L"2.bin");need(f.prepare().value("resourceCacheAvailable",false),"empty alternate slot unavailable");need(!fs::exists(f.cache/L"a"/L"manifest.json")&&text(f.cache/L"a"/L"2.bin")==original,"orphan slot silently adopted");fs::remove(f.home/managedFiles[2]);need(f.prepare().value("ready",false),"verified alternate slot failed recovery");});
+    check("storm incomplete slot rehashes actual bytes before repair and publication",[&]{Fixture f(base,"storm-half");f.seeded();auto m=Json::parse(text(f.cache/L"a"/L"manifest.json"));m["complete"]=false;put(f.cache/L"a"/L"manifest.json",m.dump());fs::remove(f.home/managedFiles[2]);need(f.prepare().value("ready",false)&&f.prepare().value("resourceCacheAvailable",false),"valid incomplete cache cannot recover");});
+    check("storm completed metadata never substitutes for absent blobs or Steam consent",[&]{Fixture f(base,"storm-authority");f.seeded();fs::remove(f.cache/L"a"/L"2.bin");fs::remove(f.home/managedFiles[2]);auto state=f.prepare();need(!state.value("ready",true)&&!fs::exists(f.home/managedFiles[2]),"complete flag invented payload");put(f.home/managedFiles[2],"fixture-plugins/ymcc-sidebar/dist/index.js");f.refreshManifest();need(f.prepare().value("ready",false),"explicit package restoration did not heal");fs::remove(f.steam/L".cef-enable-remote-debugging");state=inspect(f.steam,f.home,f.hash);need(!state.value("ready",true)&&!fs::exists(f.steam/L".cef-enable-remote-debugging"),"cache invented Steam authorization");});
+    check("storm old package cache cannot satisfy current contract",[&]{Fixture f(base,"storm-old-package");f.seeded();put(f.home/managedFiles[2],"new-current-package");f.refreshManifest();fs::remove(f.home/managedFiles[2]);need(!f.prepare().value("ready",true)&&!fs::exists(f.home/managedFiles[2]),"old cache hash substituted for current package");});
+    check("storm legal unknown fields remain compatible and preserve current ownership",[&]{Fixture f(base,"storm-unknown");f.manifest["unknownExtension"]={{"futureNote","preserve"}};put(f.receipt,f.manifest.dump());f.seeded();auto m=Json::parse(text(f.cache/L"a"/L"manifest.json"));m["unknownExtension"]="preserve";const auto bytes=m.dump();put(f.cache/L"a"/L"manifest.json",bytes);fs::remove(f.home/managedFiles[2]);need(f.prepare().value("ready",false)&&text(f.cache/L"a"/L"manifest.json")==bytes,"legal unknown fields lost or denied repair");});
+
+    for(const std::string kind:{"staging-owner","slot-metadata","managed-receipt"})check(("storm occupied read "+kind+" preserves bytes and explicit retry heals").c_str(),[&]{
+        Fixture f(base,"storm-occupied");f.seeded();const auto path=kind=="staging-owner"?f.cache/L"staging-owner.json":kind=="slot-metadata"?f.cache/L"a"/L"manifest.json":f.receipt;const auto original=text(path);
+        if(kind=="slot-metadata")put(f.cache/L"b"/L"manifest.json","{}");
+        {
+            ymcc::deckyresources::Handle lease;lease.value=CreateFileW(path.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);need(lease.value!=INVALID_HANDLE_VALUE,"fixture read lock unavailable");
+            const auto failed=f.prepare();if(kind=="managed-receipt")need(!failed.value("ready",true),"unreadable receipt reported ready");else need(failed.value("ready",false)&&!failed.value("resourceCacheAvailable",true),"unreadable journal was adopted");
+        }
+        need(text(path)==original,"occupied journal changed");const auto retry=f.prepare();need(retry.value("ready",false)&&retry.value("resourceCacheAvailable",false),"read lock release did not recover on explicit retry");
     });
     const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& c){return c.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"count",cases.size()},{"passed",passed},{"cases",cases},{"interruptionMeasurements",interruptionMeasurements},{"win32WriteBoundary","real WriteFile plus owned metadata publication pause"},{"realSteamActions",0},{"productProcessesLaunched",0},{"physicalSleep",false},{"officialLoaderExecuted",false},{"loaderFixtureAliasOnly",true}};put(argv[2],result.dump(2));std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;
  }catch(const std::exception& error){std::cerr<<error.what()<<std::endl;return 3;}}

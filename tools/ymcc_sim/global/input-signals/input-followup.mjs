@@ -16,7 +16,7 @@ const defaultRepo=path.resolve(here,'../../../..');
 const hash=data=>crypto.createHash('sha256').update(data).digest('hex');
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 function writeJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');}
-const relativeInputs=['native/main.cpp','native/input_shortcut_toggle.h','native/shortcut_frontend_button.h','deps/json/json.hpp','src/bridge/controllerShortcutRules.ts','src/bridge/controllerPersona.ts','tools/controller_shortcut_rules_selftest.ts','tools/ymcc_sim/global/runner.mjs'];
+const relativeInputs=['native/keyboard_shortcut_sequence.h','native/keyboard_shortcut_sequence_runtime.h','src/bridge/controllerKeyboardSequence.ts','native/main.cpp','native/input_shortcut_toggle.h','native/shortcut_frontend_button.h','deps/json/json.hpp','src/bridge/controllerShortcutRules.ts','src/bridge/controllerPersona.ts','tools/controller_shortcut_rules_selftest.ts','tools/ymcc_sim/global/runner.mjs'];
 const tools=['keyboard-contract.ts','source-extract.mjs','native-diagnostic-fixture.cpp','input-followup.mjs','input-followup.test.mjs'];
 export function followupSourceInputs(){return [...new Set([...relativeInputs,...tools.map(p=>'tools/ymcc_sim/global/input-signals/'+p),'tools/fixtures/hc_reviewed_calibration/toolchain.mjs',...FOLLOWUP_IDENTITY_SOURCES])];}
 /** Parent registers this descriptor; this module never edits the registry. */

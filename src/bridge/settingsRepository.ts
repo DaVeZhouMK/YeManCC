@@ -52,7 +52,7 @@ async function resolveSettingsLocation(): Promise<void> {
   if (!settingsLocationPromise) {
     const generation = getSettingsGeneration();
     const task = (async () => {
-      const location = await settingsStore.location();
+      const location = await boundedSettingsIO(settingsStore.location(), '配置位置读取');
       assertSettingsGeneration(generation);
       if (settingsLocationExplicit) return;
       const dir = typeof location?.directory === 'string'
@@ -268,6 +268,7 @@ const DEFAULTS: UnifiedSettings = {
     mode: 'custom',
     pauseGameOnSleep: true,
     retryOnEntryFailure: true,
+    retryOnSleepTimeout: true,
     retryOnNonUserWake: false,
     factMonitorEnabled: false,
     sleepPowerPlanOptimizationEnabled: true,
@@ -341,7 +342,7 @@ const DEFAULTS: UnifiedSettings = {
       // 用户裁决（2026-09-29）：虚拟手柄联动默认开启。
       virtualPadLink: true,
     },
-    ownership: { schemaVersion: 1, mode: 'ymcc-semantic', frontendSummonVirtualControl: false, externalControllerPriority: false },
+    ownership: { schemaVersion: 1, mode: 'ymcc-semantic', frontendSummonVirtualControl: false, frontendIsolationEnabled: true, externalControllerPriority: false },
     diagnostics: { inputLoggingEnabled: false },
   },
   extensions: {},
@@ -351,7 +352,82 @@ let settingsGeneration = 0;
 let cache: UnifiedSettings | null = null;
 let cacheStamp: string | null = null;
 
+const SETTINGS_IO_TIMEOUT_MS = 3000;
+const SETTINGS_LOAD_TIMEOUT_MS = 8000;
+const SETTINGS_MAX_BYTES = 4 * 1024 * 1024;
+export interface SettingsRecoveryState {
+  status: 'ready' | 'runtime-fallback';
+  reason: 'corrupt' | 'unsupported' | 'read-failed' | 'write-failed' | null;
+  source: 'main' | 'backup' | 'defaults' | 'cache';
+  persisted: boolean;
+  message: string;
+}
+let recoveryState: SettingsRecoveryState = {
+  status: 'ready', reason: null, source: 'main', persisted: false, message: '',
+};
+
+/** Runtime availability is separate from a durable save/Host acknowledgement. */
+export function getSettingsRecoveryState(): SettingsRecoveryState {
+  return { ...recoveryState };
+}
+
+async function boundedSettingsIO<T>(operation: Promise<T>, label: string, timeout = SETTINGS_IO_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([operation, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}超时`)), timeout);
+    })]);
+  } finally { if (timer !== undefined) clearTimeout(timer); }
+}
+
+function runtimeSettings(candidate: UnifiedSettings = normalizeSettings(DEFAULTS)): UnifiedSettings {
+  const next = snapshotSettingsData(candidate);
+  next.startupDesired = { ...next.startupDesired, virtualGamepadPersona: 'disabled', gyroPreset: 'off', fanControl: false, rtss: false, energyStar: false, memoryCleanup: false, steamCommunity: false };
+  next.performanceSchedule.enabled = false;
+  next.tdp.autoApply = { ...next.tdp.autoApply, boot: false, wake: false };
+  next.cpu.autoEnable = { ...next.cpu.autoEnable, mode: 'off' };
+  next.cpu.autostart.ccd.enabled = false;
+  next.cpu.autostart.uv.enabled = false;
+  next.fan.featureEnabled = false;
+  next.fan.motionEnabled = false;
+  next.sleep.autoWakeRecovery = false;
+  next.sleep.staticWakeAutoScanEnabled = false;
+  next.sleep.sleepPowerPlanOptimizationEnabled = false;
+  next.input.outputTarget.persona = 'disabled';
+  next.input.outputTarget.buttonMappingEnabled = false;
+  next.input.outputTarget.gyroEnabled = false;
+  next.input.outputTarget.descriptorHash = null;
+  next.input.outputTarget.closure = 'UNENCLOSED';
+  next.input.gyroMotion.enabled = false;
+  next.input.gyroMotion.outputMode = 'disabled';
+  next.input.gyroMotion.motionMode = 'off';
+  next.input.appliedRevision = null;
+  next.input.appliedConfigHash = null;
+  next.input.pendingConfigHash = null;
+  next.input.hostAcknowledgedRevision = null;
+  next.input.hostAcknowledgedConfigHash = null;
+  next.input.applyStatus = 'safe-stop';
+  return next;
+}
+
+class UnsupportedSettingsError extends Error {}
+
 export function getSettingsGeneration(): number { return settingsGeneration; }
+
+// Resident consumers compare the already observed section. Explicit reads and
+// successful commits replace cache; a steady controller never stats the file.
+// Section revisions avoid invalidation from unrelated input/logging changes.
+const observedSectionRevisions = new Map<SettingsSection, { document: UnifiedSettings; json: string; revision: number }>();
+export function getSettingsSectionRevision(section: SettingsSection): number | null {
+  if (!cache) return null;
+  const previous = observedSectionRevisions.get(section);
+  if (previous?.document === cache) return previous.revision;
+  const json = JSON.stringify(cache[section] ?? {});
+  const revision = previous ? previous.revision + (previous.json === json ? 0 : 1) : 1;
+  observedSectionRevisions.set(section, { document: cache, json, revision });
+  return revision;
+}
+
 
 export function assertSettingsGeneration(generation: number): void {
   if (generation !== settingsGeneration) throw new Error('配置缓存已失效或目录已切换，旧请求已取消');
@@ -399,8 +475,11 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
       if (isObject(expected)) {
         if (!isObject(value[key])) value[key] = structuredClone(expected);
         else repairShape(value[key], expected);
-      } else if (Array.isArray(expected) && !Array.isArray(value[key])) {
-        value[key] = structuredClone(expected);
+      } else if (Array.isArray(expected)) {
+        if (!Array.isArray(value[key])) value[key] = structuredClone(expected);
+      } else if (expected !== null && (typeof value[key] !== typeof expected ||
+          (typeof expected === 'number' && !Number.isFinite(value[key])))) {
+        value[key] = expected;
       }
     }
   }
@@ -436,16 +515,17 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   const input = merged.input as Partial<InputSettingsSnapshot>;
   input.schemaVersion = Number.isSafeInteger(Number(input.schemaVersion)) ? Math.max(1, Math.floor(Number(input.schemaVersion))) : 1;
   input.revision = Number.isSafeInteger(Number(input.revision)) ? Math.max(0, Math.floor(Number(input.revision))) : 0;
-  input.appliedRevision = input.appliedRevision == null ? null : (Number.isSafeInteger(Number(input.appliedRevision)) ? Math.max(0, Math.floor(Number(input.appliedRevision))) : null);
+  input.appliedRevision = input.appliedRevision == null ? null : ((typeof input.appliedRevision === 'number' && Number.isSafeInteger(input.appliedRevision)) ? Math.max(0, Math.floor(Number(input.appliedRevision))) : null);
   input.appliedConfigHash = typeof input.appliedConfigHash === 'string' ? input.appliedConfigHash : null;
   input.pendingConfigHash = typeof input.pendingConfigHash === 'string' ? input.pendingConfigHash : null;
-  input.hostAcknowledgedRevision = input.hostAcknowledgedRevision == null ? null : (Number.isSafeInteger(Number(input.hostAcknowledgedRevision)) ? Math.max(0, Math.floor(Number(input.hostAcknowledgedRevision))) : null);
+  input.hostAcknowledgedRevision = input.hostAcknowledgedRevision == null ? null : ((typeof input.hostAcknowledgedRevision === 'number' && Number.isSafeInteger(input.hostAcknowledgedRevision)) ? Math.max(0, Math.floor(Number(input.hostAcknowledgedRevision))) : null);
   input.hostAcknowledgedConfigHash = typeof input.hostAcknowledgedConfigHash === 'string' ? input.hostAcknowledgedConfigHash : null;
   const legacyApplyStatus = String(input.applyStatus);
   if (legacyApplyStatus === 'pending') input.applyStatus = 'saved-pending';
   else if (legacyApplyStatus === 'applied') input.applyStatus = 'active';
   else if (!['unknown', 'saved-pending', 'host-acknowledged', 'active', 'rejected', 'safe-stop'].includes(legacyApplyStatus)) input.applyStatus = 'unknown';
   const ownership = isObject(input.ownership) ? input.ownership : structuredClone(DEFAULTS.input.ownership);
+  ownership.frontendIsolationEnabled = ownership.frontendIsolationEnabled !== false;
   ownership.externalControllerPriority = ownership.externalControllerPriority === true;
   input.ownership = ownership;
   const target = isObject(input.outputTarget) ? input.outputTarget : {};
@@ -513,12 +593,12 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   if (!['virtual-stick', 'disabled'].includes(String(motion.outputMode))) motion.outputMode = 'disabled';
   if (!['local-space', 'player-space', 'world-space', 'joystick-steering'].includes(String(motion.motionInput))) motion.motionInput = 'local-space';
   // HC Profile.SteeringAxis: Roll=0, Yaw=1, Auto=2 (default Roll).
-  if (!['roll', 'yaw', 'auto'].includes(String(motion.steeringAxis))) motion.steeringAxis = 'roll';
+  if (!['roll', 'yaw', 'auto'].includes(motion.steeringAxis)) motion.steeringAxis = 'roll';
   if (!['off', 'on', 'toggle'].includes(String(motion.motionMode))) motion.motionMode = 'off';
   motion.motionTrigger = typeof motion.motionTrigger === 'string' && motion.motionTrigger.trim() ? motion.motionTrigger : null;
   const finite = (value: unknown, fallback: number, min: number, max: number) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+    return typeof value === 'number' && Number.isFinite(value)
+      ? Math.min(max, Math.max(min, value)) : fallback;
   };
   // HC ProfilesPage motion controls expose both producer multipliers as
   // 0.1..3.0; do not widen the durable schema to a YMCC-only 0..10 range.
@@ -537,8 +617,9 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   const sensitivityArray = Array.isArray(motion.motionSensitivityArray) ? motion.motionSensitivityArray : null;
   const normalizedSensitivityArray = sensitivityArray?.map((node: unknown) => {
     if (!Array.isArray(node) || node.length !== 2) return null;
-    const key = Number(node[0]);
-    const value = Number(node[1]);
+    if (typeof node[0] !== 'number' || typeof node[1] !== 'number') return null;
+    const key = node[0];
+    const value = node[1];
     return Number.isFinite(key) && Number.isFinite(value) && key >= 0 && key <= 1 && value >= 0 && value <= 1
       ? [key, value] as [number, number]
       : null;
@@ -559,8 +640,9 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   const responseCurve = Array.isArray(motion.responseCurvePoints) ? motion.responseCurvePoints : null;
   const normalizedResponseCurve = responseCurve?.map((node: unknown) => {
     if (!Array.isArray(node) || node.length !== 2) return null;
-    const ckey = Number(node[0]);
-    const cvalue = Number(node[1]);
+    if (typeof node[0] !== 'number' || typeof node[1] !== 'number') return null;
+    const ckey = node[0];
+    const cvalue = node[1];
     return Number.isFinite(ckey) && Number.isFinite(cvalue) && ckey >= 0 && ckey <= 1 && cvalue >= 0 && cvalue <= 1
       ? [ckey, cvalue] as [number, number]
       : null;
@@ -629,29 +711,41 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
 const normalize = normalizeSettings;
 
 async function readSettingsText(path: string, maxBytes: number): Promise<string | null> {
+  // Establish absence before reading. A failed/timed-out read must stay a fault,
+  // even if a later exists check would report false (deletion/permission race).
+  const exists = await boundedSettingsIO(fs.exists(path), '配置存在性读取');
+  if (exists !== true && exists !== false) throw new Error(`配置存在性读取回执无效：${path}`);
+  if (!exists) return null;
   try {
-    return await fs.readTextFile(path, maxBytes);
+    const raw = await boundedSettingsIO(fs.readTextFile(path, maxBytes), '配置读取');
+    if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > maxBytes) throw new Error('配置超过大小限制或读取回执无效');
+    return raw;
   } catch (e) {
-    // Missing files can use migration/defaults. Existing unreadable files must
-    // NOT be archived as corrupt or replaced by an empty document.
-    if (await fs.exists(path)) {
-      throw new Error(`读取配置文件失败：${path}；${(e as Error).message}`);
-    }
-    return null;
+    throw new Error(`读取配置文件失败：${path}；${(e as Error).message}`);
   }
+}
+
+function parseSettingsDocument(raw: string): JsonObject | null {
+  try {
+    const parsed = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+    if (!isObject(parsed)) return null;
+    const pending: Array<{ value: object; depth: number }> = [{ value: parsed, depth: 0 }];
+    while (pending.length) {
+      const { value, depth } = pending.pop()!;
+      if (depth > 64) return null;
+      for (const child of Object.values(value)) {
+        if (child !== null && typeof child === 'object') pending.push({ value: child, depth: depth + 1 });
+      }
+    }
+    return parsed;
+  } catch { return null; }
 }
 
 async function readJson(path: string, maxBytes = 4 * 1024 * 1024): Promise<JsonObject | null> {
   const raw = await readSettingsText(path, maxBytes);
   if (raw === null) return null;
-  try {
-    // Only JSON/schema failures are corrupt; I/O errors are surfaced above.
-    const normalized = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
-    const parsed = JSON.parse(normalized);
-    return isObject(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  // Only bounded JSON/document failures are corrupt; I/O faults stay separate.
+  return parseSettingsDocument(raw);
 }
 
 async function readLegacyJson(name: string, dir: string): Promise<JsonObject | null> {
@@ -674,39 +768,62 @@ async function readLegacyLaunchApps(dir: string): Promise<JsonObject | null> {
 async function readLegacyNumber(name: string, dir: string): Promise<number | null> {
   const raw = await readSettingsText(`${dir}\\${name}`, 128);
   if (raw === null) return null;
+  if (!raw.trim()) return null;
   const value = Number(raw.trim());
   return Number.isFinite(value) ? value : null;
 }
 
-async function migrateLegacySettings(dir = settingsDir): Promise<UnifiedSettings> {
+async function migrateLegacySettings(dir = settingsDir, check: () => void = () => {}): Promise<UnifiedSettings> {
+  check();
   let next = structuredClone(DEFAULTS);
   const set = (section: SettingsSection, value: unknown) => {
     if (isObject(value)) (next as any)[section] = mergeSettings((next as any)[section], value);
   };
   const ui = await readLegacyJson('ui-settings.json', dir);
+  check();
   const summon = await readLegacyJson('summon.json', dir);
+  check();
   const music = await readLegacyJson('music_player.json', dir);
+  check();
   const schedule = await readLegacyJson('performance-schedule.json', dir);
+  check();
   const control = await readLegacyJson('control-config.json', dir);
+  check();
   const legacyTdp = await readLegacyNumber('tdp.txt', dir);
+  check();
   const legacyFps = await readLegacyNumber('FPS-ac.txt', dir);
+  check();
   if (hasLegacyFrameRates({ tdp: control, performanceSchedule: schedule }) || legacyFps !== null) {
     delete next.rtss.frameRates;
   }
   const float = await readLegacyJson('autofloat.json', dir);
+  check();
   const tdpApply = await readLegacyJson('tdp-auto-apply.json', dir);
+  check();
   const cpuProfiles = await readLegacyJson('cpu_profiles.json', dir);
+  check();
   const cpuAutostart = await readLegacyJson('cpu_autostart.json', dir);
+  check();
   const cpuAutoEnable = await readLegacyJson('cpu_auto_enable.json', dir);
+  check();
   const cpuLock = await readLegacyJson('cpu_lock.json', dir);
+  check();
   const sleep = await readLegacyJson('Sleep\\sleepguard.json', dir);
+  check();
   const apps = await readLegacyLaunchApps(dir);
+  check();
   const boot = await readLegacyJson('boot_config.json', dir);
+  check();
   const power = await readLegacyJson('yeman-power-scheme.json', dir);
+  check();
   const tray = await readLegacyJson('tray_resident.json', dir);
+  check();
   const autoclose = await readLegacyJson('autoclose.json', dir);
+  check();
   const asset = await readLegacyJson('ui-background\\background.json', dir);
+  check();
   const dynamic = await readLegacyJson('ui-background\\dynamic-online.json', dir);
+  check();
 
   set('ui', ui);
   set('gamepad', summon);
@@ -739,22 +856,15 @@ async function migrateLegacySettings(dir = settingsDir): Promise<UnifiedSettings
   return normalize(next);
 }
 
-async function archiveCorruptMain(path: string): Promise<void> {
-  if (await fs.exists(path)) {
-    const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-    const ok = await fs.rename(path, `${path}.corrupt-${stamp}-${Math.random().toString(36).slice(2, 8)}`);
-    if (!ok) throw new Error(`无法保留损坏的配置文件：${path}`);
-  }
-}
-
 function assertCompatibleSchema(document: JsonObject): void {
-  assertSupportedSettingsBaseline(document);
+  try { assertSupportedSettingsBaseline(document); }
+  catch (error) { throw new UnsupportedSettingsError((error as Error).message); }
   const rawSchema = Object.prototype.hasOwnProperty.call(document, 'schemaVersion') ? document.schemaVersion : 0;
   const schema = typeof rawSchema === 'number' ? rawSchema : NaN;
   // Missing/schema 0 documents are legacy. Do not reinterpret an unknown or
   // future version as schema 1, including a recoverable backup document.
   if (!Number.isInteger(schema) || schema < 0 || schema > 1) {
-    throw new Error(`配置版本 ${String(document.schemaVersion)} 无法由本程序兼容读取。原文件已保留，请使用匹配版本或选择备份后重置应用配置。`);
+    throw new UnsupportedSettingsError(`配置版本 ${String(document.schemaVersion)} 无法由本程序兼容读取。原文件已保留，请使用匹配版本或选择备份后重置应用配置。`);
   }
 }
 
@@ -764,77 +874,121 @@ export async function loadSettings(): Promise<UnifiedSettings> {
   if (!loadPromise) {
     const generation = settingsGeneration;
     const cacheAtReadStart = cache;
-    const task = (async () => {
-      if (!settingsLocationResolved) await resolveSettingsLocation();
+    const trustedCache = recoveryState.persisted ? cache : null;
+    let active = true;
+    let reason: SettingsRecoveryState['reason'] = 'read-failed';
+    let source: SettingsRecoveryState['source'] = 'defaults';
+    let candidate: UnifiedSettings | undefined;
+    const check = () => {
       assertSettingsGeneration(generation);
+      if (!active) throw new Error('配置读取已超时，旧结果已取消');
+    };
+    const read = (async () => {
+      if (!settingsLocationResolved) await resolveSettingsLocation();
+      check();
       const path = SETTINGS_FILE;
       const backupPath = SETTINGS_BACKUP_FILE;
       let main: JsonObject | null;
       let stamp: string | null = null;
       let mainExists = false;
       if (settingsStore.read) {
-        const result = await settingsStore.read(path, cache ? cacheStamp : null);
-        assertSettingsGeneration(generation);
-        if (result.unchanged && cache) return cache;
+        const result = await boundedSettingsIO(settingsStore.read(path, cache ? cacheStamp : null), '共享配置读取');
+        check();
+        if (!result || typeof result.stamp !== 'string') throw new Error('共享配置读取回执无效');
+        const readFault = (result as { readFault?: unknown }).readFault;
+        const recoverable = readFault === 'content-too-large' || readFault === 'invalid-text-encoding' || readFault === 'invalid-document';
+        if (readFault !== undefined && !recoverable) throw new Error(`共享配置读取失败：${String(readFault)}`);
+        if (result.unchanged && cache && recoveryState.persisted && cacheStamp !== null) {
+          recoveryState = { status: 'ready', reason: null, source: 'main', persisted: true, message: '' };
+          return cache;
+        }
         stamp = result.stamp;
         mainExists = result.stamp !== 'missing';
-        try {
-          const raw = result.content || '';
-          const parsed = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
-          main = isObject(parsed) ? parsed : null;
-        } catch { main = null; }
+        const raw = result.content;
+        if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > SETTINGS_MAX_BYTES) {
+          throw new Error('共享配置超过大小限制或读取回执无效');
+        }
+        main = recoverable ? null : parseSettingsDocument(raw);
       } else {
-        // Isolated test/backward-compatible API adapters have no metadata read.
         main = await readJson(path);
-        mainExists = main !== null || await fs.exists(path);
+        mainExists = main !== null || await boundedSettingsIO(fs.exists(path), '配置存在性读取');
       }
-      assertSettingsGeneration(generation);
-      // A newer commit may publish while this earlier read is awaiting IO.
+      check();
       if (cache && cache !== cacheAtReadStart) return cache;
       let next: UnifiedSettings;
       if (main) {
         assertCompatibleSchema(main);
-        // A durable baseline receipt closes legacy imports forever. Missing/new
-        // sections after that point use this build's defaults, never stale mirrors.
+        source = 'main';
         const missingSection = SETTINGS_BASELINE.sections.some(({ name }) =>
           !Object.prototype.hasOwnProperty.call(main, name));
         const importLegacy = !hasCompletedSettingsBaseline(main) && missingSection;
-        const legacy = importLegacy ? await migrateLegacySettings() : DEFAULTS;
-        assertSettingsGeneration(generation);
+        const legacy = importLegacy ? await migrateLegacySettings(settingsDir, check) : DEFAULTS;
+        check();
         next = normalize(importLegacy ? mergeSettings(legacy, main) : main);
+        candidate = next;
         if (!equalSettingsDocuments(main, next)) {
-          // Apply only this migration's delta under the native lock. initialize
-          // only fills absent keys and cannot persist repairs to malformed shapes.
-          next = await writeSettings(next, main, generation, path);
+          reason = 'write-failed';
+          next = await writeSettings(next, main, generation, path, false, undefined, check);
           stamp = null;
         }
       } else {
-        const backup = await readJson(backupPath);
-        assertSettingsGeneration(generation);
-        if (backup) assertCompatibleSchema(backup);
-        else if (mainExists || await fs.exists(backupPath)) {
-          // A genuine first run may initialize defaults. Existing invalid
-          // files without a compatible backup require explicit user recovery;
-          // preserve BOTH originals, never silently archive/reset them here.
-          throw new Error('共享配置损坏或无法解析，且没有可兼容的备份。原文件已保留，请选择备份后重置应用配置。');
+        let backup: JsonObject | null = null;
+        let backupExists = false;
+        if (settingsStore.read) {
+          const result = await boundedSettingsIO(settingsStore.read(backupPath, null), '共享配置备份读取');
+          check();
+          if (!result || typeof result.stamp !== 'string') throw new Error('共享配置备份回执无效');
+          backupExists = result.stamp !== 'missing';
+          const fault = (result as { readFault?: unknown }).readFault;
+          const recoverable = fault === 'content-too-large' || fault === 'invalid-text-encoding' || fault === 'invalid-document';
+          if (fault !== undefined && !recoverable) throw new Error(`共享配置备份读取失败：${String(fault)}`);
+          if (typeof result.content !== 'string' || new TextEncoder().encode(result.content).byteLength > SETTINGS_MAX_BYTES)
+            throw new Error('共享配置备份超过大小限制或读取回执无效');
+          if (!recoverable) {
+            backup = parseSettingsDocument(result.content);
+          }
+        } else {
+          backup = await readJson(backupPath);
+          backupExists = backup !== null || await boundedSettingsIO(fs.exists(backupPath), '备份存在性读取');
         }
-        assertSettingsGeneration(generation);
-        await archiveCorruptMain(path);
-        assertSettingsGeneration(generation);
-        next = backup ? normalize(backup) : await migrateLegacySettings();
-        assertSettingsGeneration(generation);
-        // A recovered backup can need shape repair too: persist its delta.
-        // Only genuine first initialization uses fill-missing semantics.
-        next = await writeSettings(next, backup || {}, generation, path, backup === null);
+        check();
+        if (backup) assertCompatibleSchema(backup);
+        const corrupt = !backup && (mainExists || backupExists);
+        check();
+        source = backup ? 'backup' : 'defaults';
+        // initialize is a native recovery request, never permission to overwrite
+        // unseen/future files. Native must archive unusable originals under its
+        // lock before committing safe defaults; known size/encoding faults can be
+        // preserved, while access faults never reach here. A refusal stays retryable.
+        next = corrupt ? runtimeSettings() : backup ? normalize(backup) : await migrateLegacySettings(settingsDir, check);
+        check();
+        candidate = next;
+        reason = corrupt ? 'corrupt' : 'write-failed';
+        // Native owns preservation and the atomic commit under its lock. Never
+        // rename/delete the main document before asking native to recover it.
+        next = await writeSettings(next, backup || {}, generation, path, backup === null, undefined, check);
         stamp = null;
       }
-      assertSettingsGeneration(generation);
-      // A newer commit may publish while this earlier read is awaiting IO.
+      check();
       if (cache && cache !== cacheAtReadStart) return cache;
       cache = next;
       cacheStamp = stamp;
+      recoveryState = { status: 'ready', reason: null, source, persisted: true, message: '' };
       return next;
     })();
+    const task = boundedSettingsIO(read, '配置加载', SETTINGS_LOAD_TIMEOUT_MS).catch(error => {
+      active = false;
+      assertSettingsGeneration(generation);
+      if (cache && cache !== cacheAtReadStart) return cache;
+      if (error instanceof UnsupportedSettingsError) reason = 'unsupported';
+      const next = reason === 'read-failed' && trustedCache ? trustedCache : runtimeSettings(candidate);
+      recoveryState = { status: 'runtime-fallback', reason,
+        source: next === trustedCache ? 'cache' : candidate ? source : 'defaults',
+        persisted: next === trustedCache, message: String((error as Error)?.message || error) };
+      cache = next;
+      cacheStamp = null; // A fallback is never an unchanged native receipt.
+      return next;
+    });
     loadPromise = task;
   }
   const task = loadPromise;
@@ -851,6 +1005,23 @@ export class VirtualStartProtectionActive extends Error {
 
 class InputSettingsCommitConflict extends Error {
   constructor(readonly document: UnifiedSettings) { super('输入配置在提交前已变更'); }
+}
+
+/** Verify the requested delta against the actual receipt, allowing unrelated
+ * native/concurrent fields to advance. Input CAS has its stricter hash check. */
+function settingsDeltaCommitted(baseline: unknown, submitted: unknown, committed: unknown, root = true): boolean {
+  if (equalSettingsDocuments(baseline, submitted)) return true;
+  if (!isObject(submitted)) return equalSettingsDocuments(submitted, committed);
+  if (!isObject(committed)) return false;
+  const before = isObject(baseline) ? baseline : {};
+  const nativeOwned = (key: string) => root && (key === 'input' || key === 'domainLogs');
+  for (const key of Object.keys(before)) {
+    if (!nativeOwned(key) && !Object.prototype.hasOwnProperty.call(submitted, key) &&
+        Object.prototype.hasOwnProperty.call(committed, key)) return false;
+  }
+  return Object.entries(submitted).every(([key, value]) => nativeOwned(key) ||
+    equalSettingsDocuments(before[key], value) ||
+    (Object.prototype.hasOwnProperty.call(committed, key) && settingsDeltaCommitted(before[key], value, committed[key], false)));
 }
 
 const inputSettingsListeners=new Set<() => void>();
@@ -877,31 +1048,56 @@ async function writeSettings(
   path = SETTINGS_FILE,
   initialize = false,
   expectedInputRevision?: number,
+  validatedRead?: () => void,
 ): Promise<UnifiedSettings> {
   assertSettingsGeneration(generation);
-  const content = JSON.stringify(next, null, 2);
-  const result = await settingsStore.write(path, content, {
-    baseline, initialize, ...(expectedInputRevision === undefined ? {} : { expectedInputRevision }),
-  });
-  assertSettingsGeneration(generation);
-  if (typeof result === 'object' && !result.ok && result.reason === 'revision-conflict') {
-    throw new InputSettingsCommitConflict(normalize(JSON.parse(result.content)));
+  if (!settingsLocationResolved || (!validatedRead && recoveryState.status === 'runtime-fallback' &&
+      (recoveryState.reason === 'unsupported' || recoveryState.reason === 'read-failed'))) {
+    throw new Error(recoveryState.message || '尚未读取可写的配置文档');
   }
-  if (typeof result === 'object' && !result.ok && result.reason === 'virtual-start-protection-active') {
-    throw new VirtualStartProtectionActive(normalize(JSON.parse(result.content)), result.startProtection);
+  try {
+    validatedRead?.();
+    const content = JSON.stringify(next, null, 2);
+    const result = await boundedSettingsIO(settingsStore.write(path, content, {
+      baseline, initialize, ...(expectedInputRevision === undefined ? {} : { expectedInputRevision }),
+    }), '统一配置写入');
+    assertSettingsGeneration(generation);
+    validatedRead?.();
+    if (typeof result === 'object' && !result.ok && result.reason === 'revision-conflict') {
+      throw new InputSettingsCommitConflict(normalize(JSON.parse(result.content)));
+    }
+    if (typeof result === 'object' && !result.ok && result.reason === 'virtual-start-protection-active') {
+      throw new VirtualStartProtectionActive(normalize(JSON.parse(result.content)), result.startProtection);
+    }
+    if (!result || (typeof result === 'object' && !result.ok)) throw new Error(`统一配置写入失败: ${path}`);
+    // Cache the document actually committed under the native lock, never the
+    // pre-commit frontend snapshot (native writers may have advanced it).
+    const committed = typeof result === 'object' ? JSON.parse(result.content) : await readJson(path);
+    assertSettingsGeneration(generation);
+    validatedRead?.();
+    if (!isObject(committed) || (expectedInputRevision !== undefined && !isObject(committed.input))) {
+      throw new Error("输入配置写入回执缺少可验证的实际文档");
+    }
+    cacheStamp = null;
+    assertCompatibleSchema(committed);
+    if (!initialize && expectedInputRevision === undefined && !settingsDeltaCommitted(baseline, next, committed)) {
+      throw new Error('配置写入回执未确认请求的更改');
+    }
+    const normalized=normalize(committed);
+    recoveryState = { status: 'ready', reason: null, source: 'main', persisted: true, message: '' };
+    if(JSON.stringify(normalized.input)!==JSON.stringify(baseline.input))for(const listener of inputSettingsListeners){try{listener();}catch{}}
+    return normalized;
+  } catch (error) {
+    assertSettingsGeneration(generation);
+    validatedRead?.();
+    if (!(error instanceof InputSettingsCommitConflict) && !(error instanceof VirtualStartProtectionActive)) {
+      recoveryState = { status: 'runtime-fallback', reason: 'write-failed',
+        source: cache ? 'cache' : 'defaults', persisted: recoveryState.persisted,
+        message: String((error as Error)?.message || error) };
+      cacheStamp = null;
+    }
+    throw error;
   }
-  if (!result || (typeof result === 'object' && !result.ok)) throw new Error(`统一配置写入失败: ${path}`);
-  // Cache the document actually committed under the native lock, never the
-  // pre-commit frontend snapshot (native writers may have advanced it).
-  const committed = typeof result === 'object' ? JSON.parse(result.content) : await readJson(path);
-  assertSettingsGeneration(generation);
-  if (expectedInputRevision !== undefined && (!isObject(committed) || !isObject(committed.input))) {
-    throw new Error("输入配置写入回执缺少可验证的实际文档");
-  }
-  cacheStamp = null;
-  const normalized=normalize(committed || next);
-  if(JSON.stringify(normalized.input)!==JSON.stringify(baseline.input))for(const listener of inputSettingsListeners){try{listener();}catch{}}
-  return normalized;
 }
 
 export async function readSettingsSection<T extends JsonObject = JsonObject>(section: SettingsSection): Promise<T> {
@@ -916,10 +1112,9 @@ export async function saveSettingsSection(section: SettingsSection, value: JsonO
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    const current = await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
-    const current = await loadSettings();
     const next = normalize(current);
     (next as any)[section] = mergeSettings((next as any)[section], snapshot);
     cache = await writeSettings(next, current, generation, path);
@@ -943,18 +1138,26 @@ export async function compareAndSwapInputSettings(
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    if (!settingsLocationResolved) await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
     // 裁决20 §3（2026-09-18）：CAS 必须对**磁盘现值**判定。native 侧（统一日志
     // 开关、测试命令、迁移）会推进 input.revision；只比对内存缓存会让缓存里的过期
     // 快照通过，随后的整文档写盘就把 input（persona/gyro 等）回退。磁盘不可读时
     // 才退回缓存。
-    const onDisk = await readJson(SETTINGS_FILE).catch(() => null);
-    if (onDisk) assertCompatibleSchema(onDisk);
+    let onDisk = await readJson(path).catch(() => null);
+    assertSettingsGeneration(generation);
+    try { if (onDisk) assertCompatibleSchema(onDisk); } catch { onDisk = null; }
     // A first CAS must complete legacy import before it can publish the receipt.
-    const current = onDisk && hasCompletedSettingsBaseline(onDisk) ? normalize(onDisk) : await loadSettings();
+    const diskReady = onDisk && hasCompletedSettingsBaseline(onDisk);
+    const current = diskReady ? normalize(onDisk) : await loadSettings();
+    assertSettingsGeneration(generation);
     const snapshot = current.input;
+    if (!onDisk || (!diskReady && recoveryState.status !== 'ready')) {
+      result = { ok: false, reason: 'write-failed', currentRevision: snapshot.revision, value: snapshotSettingsData(snapshot) };
+      return;
+    }
+    if (diskReady) recoveryState = { status: 'ready', reason: null, source: 'main', persisted: true, message: '' };
     const globalPatch = prepareGlobalShortcutEdit(patch);
     // Recheck at the queued commit boundary, after disk I/O, not only in the caller.
     if (isCurrent && !isCurrent()) {
@@ -1009,10 +1212,9 @@ export async function recordInputHostAcknowledgement(
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    const current = await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
-    const current = await loadSettings();
     if (current.input.revision !== configRevision || current.input.pendingConfigHash !== configHash) return;
     const next = normalize(current);
     next.input.hostAcknowledgedRevision = configRevision;
@@ -1041,10 +1243,9 @@ export async function recordInputAppliedRevision(
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    const current = await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
-    const current = await loadSettings();
     const input = current.input;
     if (input.revision !== configRevision || input.pendingConfigHash !== configHash ||
         input.hostAcknowledgedRevision !== configRevision || input.hostAcknowledgedConfigHash !== configHash ||
@@ -1072,10 +1273,9 @@ export async function recordInputActivationFailure(
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    const current = await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
-    const current = await loadSettings();
     if (current.input.revision !== configRevision || current.input.pendingConfigHash !== configHash) return;
     const next = normalize(current);
     next.input.applyStatus = status;
@@ -1099,10 +1299,9 @@ export async function replaceSettingsSection(section: SettingsSection, value: Js
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    const current = await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
-    const current = await loadSettings();
     const next = normalize(current);
     (next as any)[section] = snapshot;
     cache = await writeSettings(next, current, generation, path);
@@ -1115,10 +1314,9 @@ export async function updateSettings(mutator: (settings: UnifiedSettings) => voi
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
-    if (!settingsLocationResolved) await resolveSettingsLocation();
+    const current = await loadSettings();
     assertSettingsGeneration(generation);
     const path = SETTINGS_FILE;
-    const current = await loadSettings();
     const next = normalize(current);
     mutator(next);
     const snapshot = normalize(next);
@@ -1146,4 +1344,6 @@ export function clearSettingsCache(): void {
   cache = null;
   cacheStamp = null;
   loadPromise = null;
+  settingsLocationPromise = null;
+  recoveryState = { status: 'ready', reason: null, source: 'main', persisted: false, message: '' };
 }

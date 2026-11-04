@@ -1,12 +1,14 @@
 ﻿<# Reuses the established real-component/engine UI harness with memory IO.
    Outputs live in a new evidence directory; no installed app is contacted. #>
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$EvidenceDir)
+param([Parameter(Mandatory=$true)][string]$EvidenceDir,[ValidateSet("all","lossless")][string]$Scope="all")
 $ErrorActionPreference='Stop'
-$uiToolEnvKeys=@('YMCC_UI_TOOL_MANIFEST','YMCC_UI_TOOL_HELPER_URL','YMCC_SIM_BROWSER_RUNTIME_ENTRY','ESBUILD_BINARY_PATH','NODE_OPTIONS','NODE_PATH','PLAYWRIGHT_NODEJS_PATH','PSModulePath')
+$uiToolEnvKeys=@('YMCC_UI_TOOL_MANIFEST','YMCC_UI_TOOL_HELPER_URL','YMCC_SIM_BROWSER_RUNTIME_ENTRY','ESBUILD_BINARY_PATH','NODE_OPTIONS','NODE_PATH','PLAYWRIGHT_NODEJS_PATH','PSModulePath','YMCC_UI_SCOPE')
 $uiToolEnvironment=@{};foreach($key in $uiToolEnvKeys){$uiToolEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 # The outer owned Job remains supplied by the shared runner; this pins only this script and its tool children.
 $env:PSModulePath=$PSHOME+[IO.Path]::DirectorySeparatorChar+'Modules'
+if($PSBoundParameters.ContainsKey('Scope')){$env:YMCC_UI_SCOPE=$Scope}
+$scopeEffective=if($env:YMCC_UI_SCOPE){$env:YMCC_UI_SCOPE}else{'all'}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..'))
 $EvidenceDir=[IO.Path]::GetFullPath($EvidenceDir)
 if($EvidenceDir.StartsWith($repo.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'UI evidence must be outside source'}
@@ -58,7 +60,8 @@ try {
  & $node (Join-Path $EvidenceDir 'verify.mjs') *> (Join-Path $EvidenceDir 'verify.log')
  if($LASTEXITCODE -ne 0){throw 'REAL_ENGINE_NAVIGATION_FAILED'}
  $stage='source-gate'
- & $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir *> (Join-Path $EvidenceDir 'release-gate.txt')
+ if($scopeEffective -eq 'lossless'){& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir --lossless *> (Join-Path $EvidenceDir 'release-gate.txt')}
+ else{& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir *> (Join-Path $EvidenceDir 'release-gate.txt')}
  if($LASTEXITCODE -ne 0){throw 'CURRENT_UI_SOURCE_GATE_FAILED'}
  $build=Get-Content -LiteralPath (Join-Path $EvidenceDir 'build-result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
  $nav=Get-Content -LiteralPath (Join-Path $EvidenceDir 'navigation-gate.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -85,7 +88,7 @@ try {
  foreach($name in @('build-tool-runtime.json','verify-tool-runtime.json')){if(-not(Test-Path -LiteralPath (Join-Path $EvidenceDir $name))){throw 'UI_TOOL_STAGE_RECEIPT_MISSING'}}
 }catch{$status='FAIL';$uiToolFailure=@{stage='tool-postflight';code='UI_TOOL_RUNTIME_CLOSURE_UNCONFIRMED'};if($failure){$failure['toolPostflight']=$uiToolFailure}else{$failure=$uiToolFailure}}
 foreach($key in $uiToolEnvKeys){[Environment]::SetEnvironmentVariable($key,$uiToolEnvironment[$key],'Process')}
-[ordered]@{schemaVersion=1;status=$status;sourceHashes=$sourceHashes;failure=$failure;states=$(if($nav){$nav.states}else{0});directions=$(if($nav){$nav.directions}else{0});actionCases=$(if($nav){$nav.actionCases}else{0});sourceChanges=$templateChanges;templateSourceStable=$templateStable;executedProductModules=(@($build.components | Where-Object {$_ -match '^src[\\/]'} )+@('src/gamepad/engine.ts','src/gamepad/spatial.ts','src/gamepad/focus.ts'));sourceScopeMeaning='repository-relative keys are product/tool sources; absolute case keys are run-local fixture sources';hardwareValidated=$false;operatingSystemSleepPerformed=$false;installedApplicationMutated=$false;ownServerClosed=$closed;serverPid=$serverPid;serverCreatedUtc=$createdUtc;boundary='real components and engine with explicit memory IO; not physical controller acceptance'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'verification.json') -Encoding UTF8
+[ordered]@{schemaVersion=1;status=$status;scope=$scopeEffective;fullUiAccepted=($scopeEffective -eq 'all' -and $status -eq 'PASS');sourceHashes=$sourceHashes;failure=$failure;states=$(if($nav){$nav.states}else{0});directions=$(if($nav){$nav.directions}else{0});actionCases=$(if($nav){$nav.actionCases}else{0});sourceChanges=$templateChanges;templateSourceStable=$templateStable;executedProductModules=(@($build.components | Where-Object {$_ -match '^src[\\/]'} )+@('src/gamepad/engine.ts','src/gamepad/spatial.ts','src/gamepad/focus.ts'));sourceScopeMeaning='repository-relative keys are product/tool sources; absolute case keys are run-local fixture sources';hardwareValidated=$false;operatingSystemSleepPerformed=$false;installedApplicationMutated=$false;ownServerClosed=$closed;serverPid=$serverPid;serverCreatedUtc=$createdUtc;boundary='real components and engine with explicit memory IO; not physical controller acceptance'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'verification.json') -Encoding UTF8
 Write-Output ('UI_NAVIGATION '+$status)
 if($status -ne 'PASS'){exit 2}
 exit 0

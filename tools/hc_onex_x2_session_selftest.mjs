@@ -23,13 +23,15 @@ for (let i = 0; i < args.length; ++i) {
   if (['--out', '--vcvars'].includes(args[i]) && args[i + 1]) options[args[i].slice(2)] = args[++i];
   else throw Error(`Unknown/incomplete argument: ${args[i]}`);
 }
-const validation = path.join(workspace, 'Build/Validation/HC-ModelCapabilities-20261017/OneXApplication/Session-R3');
+let validation = path.join(workspace, 'Build/Validation/HC-ModelCapabilities-20261017/OneXApplication/Session-R3');
 const out = path.resolve(options.out || path.join(validation, new Date().toISOString().replace(/[:.]/g, '-')));
 const inside = (base, target) => {
   const rel = path.relative(base, target);
   return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`));
 };
-if (!inside(validation, out)) throw Error('Output must stay under OneXApplication/Session-R3');
+const coreEvidence=path.join(workspace,'Testing/YMCC/Evidence');
+if(inside(coreEvidence,out)&&out!==coreEvidence)validation=coreEvidence;
+if (!inside(validation, out)) throw Error('Output must stay under OneXApplication/Session-R3 or Testing/YMCC/Evidence');
 fs.mkdirSync(validation, { recursive: true });
 const realRoot = fs.realpathSync(validation);
 if (!inside(path.resolve(validation), realRoot)) throw Error('Validation root redirected');
@@ -97,6 +99,8 @@ try {
     return { header: headers[i], quoted, system };
   });
   const expected = expectations(workspace, protocolFixtures);
+  receipt.inputs.push(...expected.protocol.upgrades.map(({path,sha256})=>({path,sha256})));
+  receipt.upstreamOverrides=expected.protocol.upgrades;
   receipt.upstream = {
     commit: expected.protocol.commit, files: expected.protocol.provenance,
     manifestSha256: expected.protocol.manifestSha256, treeSha256: expected.protocol.treeSha256,

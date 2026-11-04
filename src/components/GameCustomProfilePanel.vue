@@ -7,11 +7,13 @@ import { virtualTargetOptions, virtualTargetSelectionError, requireVirtualTarget
 import ContinuousPerformancePanel from './ContinuousPerformancePanel.vue';
 import OverflowGameName from './OverflowGameName.vue';
 import GameProfileRemoveDialog from './GameProfileRemoveDialog.vue';
+import { captureGameCustomProfileTarget } from '@/bridge/gameCustomProfileTarget';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, toRaw } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { focusGamepadElement } from '@/gamepad/focus';
 import Dropdown from '@/components/Dropdown.vue';
 import {
+  SkipApplyError,
   getContinuousPerformanceSnapshot,
   loadGameCustomConfig,
   loadPerformanceSchedule,
@@ -168,7 +170,7 @@ function togglePanel(): void {
 function captureProfileTarget() {
   const target = props.game;
   if (!target || !key.value) throw new Error('当前游戏已变化，请重新打开专属配置');
-  return { exe: key.value, pid: target.pid, processCreated: String(target.processCreated || ''), generation: getSettingsGeneration() };
+  return captureGameCustomProfileTarget(target, getSettingsGeneration());
 }
 
 async function saveInputPatch(patch: Partial<GameCustomProfile>, successMessage: string): Promise<void> {
@@ -306,20 +308,29 @@ async function enableDirectly(): Promise<void> {
   const blocked = virtualTargetSelectionError(previous?.padPersona, currentVirtualTargetPolicy(), true);
   if (blocked) { release(); announce('', blocked); return; }
   busy.value = true;
+  let saved = false;
   try {
     const currentSchedule = schedule.value || await loadPerformanceSchedule();
     const controls = (await getContinuousPerformanceSnapshot('global')).controls;
     const seed = { ...makeEntry(previous, currentSchedule, controls), enabled: true };
     await patchGameCustomProfile(target, { enabled: true }, seed,
       previous ? { expectedEnabled: false } : { expectedAbsent: true });
+    saved = true;
+    expanded.value = true;
     config.value = await loadGameCustomConfig(); syncInputState();
     const owner = await restorePerformanceScheduleIfConfigured();
     if (owner === 'none') throw new Error('配置已启用，性能调度未能接管，请稍后重试');
     announce(`已设为专属：${gameName.value}`); emit('changed');
   } catch (e) {
     config.value = await loadGameCustomConfig().catch(() => config.value); syncInputState();
-    announce('', `启用专属失败：${(e as Error).message}`);
-  } finally { busy.value = false; release(); }
+    const detail = e instanceof SkipApplyError
+      ? '当前操作已失效，请重新打开专属配置后重试'
+      : (e as Error).message;
+    announce('', `${saved ? '专属配置已保存，应用尚未完成' : '启用专属失败'}：${detail}`);
+  } finally {
+    busy.value = false; release();
+    if (expanded.value) focusExpandedEntry();
+  }
 }
 
 function requestRemoval(): void {
@@ -439,7 +450,7 @@ onUnmounted(() => {
 
     <Transition name="custom-submenu-pop" @before-leave="disableLeavingBody">
       <div v-if="expanded && gameAvailable" class="custom-top-body" data-gp-custom-body>
-      <ContinuousPerformancePanel v-if="hasConfiguration" scope="dedicated" @changed="load(); emit('changed')" />
+      <ContinuousPerformancePanel v-if="hasConfiguration" scope="dedicated" summary-only />
       <div class="game-setting-bubble" data-gp-group="custom-input-override">
         <div class="game-setting-fields">
           <div class="game-setting-field" data-gp-game-row="custom-input-pad">
@@ -482,7 +493,7 @@ onUnmounted(() => {
         >
           <AppIcon :name="customEnabled ? 'close' : 'bolt'" />{{ customEnabled ? '关闭专属配置' : '点击启用配置' }}
         </button>
-        <button type="button" data-gp-custom-action class="custom-close-action" @click.stop="closePanel"><strong>B</strong>关闭页面</button>
+        <button type="button" data-gp-custom-action class="custom-close-action" @click.stop="closePanel"><span class="controller-key" data-controller-key="B">B</span>关闭页面</button>
       </div>
 
       <small v-if="!game" class="custom-top-hint">识别到游戏后可选择专属性能档位</small>

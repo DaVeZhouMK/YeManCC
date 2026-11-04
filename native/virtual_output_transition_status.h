@@ -34,6 +34,9 @@ public:
     void clear(const Request& request) noexcept {
         if (current(request)) waiting_ = false;
     }
+    void clear(const Request& request, const Context& context) noexcept {
+        if (pending(request, context)) waiting_ = false;
+    }
     bool pending(const Request& request, const Context& context) const noexcept {
         return waiting_ && current(request) && request.enabled && request.persona != "disabled" &&
             context.powerGeneration != 0 && waitingGeneration_ == request.generation && context_ == context;

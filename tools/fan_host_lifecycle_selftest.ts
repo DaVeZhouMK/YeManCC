@@ -12,9 +12,12 @@ import {
 import type { FanApiAdapter, FanHandshake, FanLease, FanNode, FanPreset, FanState } from '../src/bridge/fanApi';
 import { FanApiError } from '../src/bridge/fanApi';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
+import { unlinkSync, renameSync } from 'node:fs';
 
 let lifecycleAssertions = 0;
 const assert = (condition: unknown, message: string): asserts condition => {
@@ -329,7 +332,525 @@ class TokenRebindAdapter extends FakeAdapter {
   setSessionToken(token: string): void { this.tokenRebinds.push(token); }
 }
 
+
+/** Existing A deployment assertions, selected without lifecycle/HC startup. */
+async function originalDeploymentRecordCases(base = tmpdir()): Promise<void> {
+    const root = mkdtempSync(join(base, 'fan927-deploy-'));
+    const payloadRoot = join(root, 'PowerControl', 'fan-host-v2');
+    const runtimeRoot = join(root, 'PowerControl', 'handheldcompanion-runtime', 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902');
+    const stateRoot = join(root, 'state');
+    mkdirSync(payloadRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+    mkdirSync(stateRoot, { recursive: true });
+    const runtimeId = 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902';
+    const payloadManifestPath = join(payloadRoot, 'YeManFanHost.payload.json');
+    const runtimeManifestPath = join(runtimeRoot, 'HandheldCompanion.runtime.json');
+    writeFileSync(payloadManifestPath, JSON.stringify({
+      schemaVersion: 2,
+      runtimeManifest: `..\\handheldcompanion-runtime\\${runtimeId}\\HandheldCompanion.runtime.json`,
+      runtimeId,
+      files: [{ path: 'YeManFanHost.dll', sha256: 'a'.repeat(64) }],
+    }));
+    writeFileSync(runtimeManifestPath, JSON.stringify({
+      schemaVersion: 1, runtimeId, files: [{ path: 'HandheldCompanion.dll', sha256: 'b'.repeat(64) }],
+    }));
+    const sha256FileSync = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+    const recordPath = join(stateRoot, 'YeManFanHost.deployment.json');
+    const writeRecord = (overrides: Record<string, unknown> = {}) => writeFileSync(recordPath, JSON.stringify({
+      schemaVersion: 1,
+      validationRulesVersion: 1,
+      payloadRoot: payloadRoot.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase(),
+      runtimeRoot: runtimeRoot.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase(),
+      payloadManifestSha256: sha256FileSync(payloadManifestPath),
+      runtimeManifestSha256: sha256FileSync(runtimeManifestPath),
+      runtimeId,
+      result: 'ok',
+      ...overrides,
+    }));
+    const config = resolveFanHostConfig(join(root, 'PowerControl'));
+    config.hcRuntimeDirectory = runtimeRoot;
+    config.hcAssemblyPath = join(runtimeRoot, 'HandheldCompanion.dll');
+    const counters = { exists: 0, readPaths: [] as string[], hashPaths: [] as string[], installerRuns: 0, installerCalls: 0 };
+    const io: FanHostDeploymentIo = {
+      exists: async (path) => { counters.exists += 1; return existsSync(path); },
+      readTextFile: async (path) => { counters.readPaths.push(path); return readFileSync(path, 'utf8'); },
+      sha256File: async (path) => { counters.hashPaths.push(path); return sha256FileSync(path); },
+      runInstaller: async () => {
+        counters.installerCalls += 1;
+        // 模拟安装脚本的完整验证：只有它成功才会写出部署记录。
+        if (counters.installerRuns++ === 0) writeRecord();
+      },
+    };
+    // 记录命中：必须**零安装器调用**，且只对两个小清单取摘要（不遍历依赖目录、不读 DLL）。
+    writeRecord();
+    counters.readPaths.length = 0; counters.hashPaths.length = 0;
+    assert(await resolveFanHostDeployment(config, stateRoot, io) === 'record-hit',
+      'a matching deployment record must take the fast path');
+    assert(counters.installerCalls === 0,
+      `a matching deployment record must never run the installer (calls=${counters.installerCalls})`);
+    assert(counters.hashPaths.length === 2 &&
+      counters.hashPaths.every((path) => path === payloadManifestPath || path === runtimeManifestPath),
+    `the fast path may hash only the two small manifests (hashed=${counters.hashPaths.length})`);
+    assert(counters.readPaths.every((path) => path === payloadManifestPath || path === runtimeManifestPath || path === recordPath),
+      `the fast path must not read dependency files (read=${counters.readPaths.join(',')})`);
+    // 便携包/旧安装（记录缺失）：恰好一次完整初始化，成功后即可继续。
+    const absentRoot = join(root, 'state-absent');
+    mkdirSync(absentRoot, { recursive: true });
+    counters.installerCalls = 0; counters.installerRuns = 0;
+    const absentIo: FanHostDeploymentIo = { ...io, runInstaller: async () => {
+      counters.installerCalls += 1;
+      writeFileSync(join(absentRoot, 'YeManFanHost.deployment.json'), readFileSync(recordPath));
+    } };
+    assert(await resolveFanHostDeployment(config, absentRoot, absentIo) === 'initialized',
+      'a portable/legacy install without a record must initialize exactly once');
+    assert(counters.installerCalls === 1,
+      `a missing record must run the full validation exactly once (calls=${counters.installerCalls})`);
+    // 记录不匹配（包代描述变更）：同样只允许一次重新验证。
+    writeRecord({ runtimeId: 'HC-CANDIDATE-0.0.0.0-deadbeef-20990101' });
+    counters.installerCalls = 0;
+    counters.installerRuns = 0;
+    assert(await resolveFanHostDeployment(config, stateRoot, io) === 'initialized',
+      'a stale package-generation record must trigger one revalidation');
+    assert(counters.installerCalls === 1,
+      `an identity mismatch must run the full validation exactly once (calls=${counters.installerCalls})`);
+    // 安装器没有产出匹配记录 ⇒ 必须诚实拒绝，不能放行启动。
+    writeRecord({ result: 'failed' });
+    let refused = false;
+    try { await resolveFanHostDeployment(config, stateRoot, { ...io, runInstaller: async () => { counters.installerCalls += 1; } }); }
+    catch { refused = true; }
+    assert(refused, 'a missing/unowned deployment record after validation must refuse to start');
+
+}
+
+/** Exact existing deployment-consumer selection. Never enters Host/lifecycle main. */
+async function deploymentConfigOnly(): Promise<void> {
+  const at = process.argv.indexOf('--deployment-config');
+  const output = process.argv[at + 1];
+  if (!output || !/^(?:[a-z]:[\\/]|\\\\)/i.test(output)) throw Error('Deployment config requires an explicit owned absolute Evidence root');
+  if (existsSync(output)) throw Error('Preserve prior output; choose a fresh owned directory');
+  mkdirSync(output, { recursive: true });
+  const caseAt = process.argv.indexOf('--case-filter'), filter = caseAt < 0 ? '' : process.argv[caseAt + 1];
+  const sourceNames = ['src/bridge/fanHost/deployment.ts','src/bridge/fanHost/startupConfiguration.ts','src/bridge/fanDiagnostics.ts','tools/fan_host_lifecycle_selftest.ts'];
+  const pins = () => sourceNames.map(name => ({ path: resolvePath(name), sha256: createHash('sha256').update(readFileSync(name)).digest('hex') }));
+  const inputs = pins(), started = performance.now(), cases: Array<Record<string, unknown>> = [], skipped: string[] = [];
+  const check = async (name: string, fn: () => Promise<void>) => { if (filter && !name.includes(filter)) { skipped.push(name); return; } try { await fn(); cases.push({ name, ok: true }); } catch (error) { cases.push({ name, ok: false, error: String(error instanceof Error ? error.stack : error) }); } };
+  const rejected = async (fn: () => Promise<unknown>) => { let failed = false; try { await fn(); } catch { failed = true; } assert(failed, 'Untrusted deployment was accepted'); };
+  function fixture() {
+    const root = mkdtempSync(join(output, 'owned-')), payload = join(root,'PowerControl','fan-host-v2'), runtimeId = 'YMCC-DEVICECORE-20261018-v1', runtime = join(root,'PowerControl','handheldcompanion-runtime',runtimeId), state = join(root,'state');
+    for (const p of [payload,runtime,state]) mkdirSync(p,{recursive:true});
+    const payloadPath = join(payload,'YeManFanHost.payload.json'), runtimePath = join(runtime,'HandheldCompanion.runtime.json'), recordPath = join(state,'YeManFanHost.deployment.json');
+    const payloadDoc: any = {schemaVersion:2,runtimeManifest:'..\\handheldcompanion-runtime\\'+runtimeId+'\\HandheldCompanion.runtime.json',runtimeId,files:[{path:'YeManFanHost.dll',sha256:'a'.repeat(64)}],unknown:{keep:'payload'}}, runtimeDoc: any = {schemaVersion:1,runtimeId,files:[{path:'HandheldCompanion.dll',sha256:'b'.repeat(64)}],unknown:{keep:'runtime'}};
+    writeFileSync(payloadPath,JSON.stringify(payloadDoc));writeFileSync(runtimePath,JSON.stringify(runtimeDoc));
+    const safe = (p: string) => { const n=resolvePath(p.replace(/\\/g,'/'));assert(n.startsWith(root+'\\') || n.startsWith(root+'/'),'IO outside owned root');return n; };
+    const hash = (p: string) => createHash('sha256').update(readFileSync(safe(p))).digest('hex');
+    const normal = (p: string) => p.replace(/[\\/]+$/,'').replace(/\//g,'\\').toLowerCase();
+    const config=resolveFanHostConfig(join(root,'PowerControl'));config.hcRuntimeDirectory=runtime;config.hcAssemblyPath=join(runtime,'HandheldCompanion.dll');
+    const record = (extra: Record<string,unknown>={}) => ({schemaVersion:1,validationRulesVersion:1,payloadRoot:normal(payload),runtimeRoot:normal(runtime),payloadManifestSha256:hash(payloadPath),runtimeManifestSha256:hash(runtimePath),runtimeId,result:'ok',payloadFileCount:1,runtimeFileCount:1,deployedAtUtc:'2026-11-01T00:00:00.000Z',unknown:{keep:'record'},...extra});
+    const writeRecord = (extra: Record<string,unknown>={}) => { const temp=recordPath+'.owned-stage';writeFileSync(temp,JSON.stringify(record(extra)));renameSync(temp,recordPath); };
+    const calls={installer:0,hashes:[] as string[],reads:[] as string[],hardware:0};
+    const io: FanHostDeploymentIo={exists:async p=>existsSync(safe(p)),readTextFile:async p=>{calls.reads.push(p);return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(readFileSync(safe(p)));},sha256File:async p=>{calls.hashes.push(p);return hash(p);},runInstaller:async()=>{calls.installer++;writeRecord();}};
+    writeRecord();return{root,payload,runtime,state,payloadPath,runtimePath,recordPath,payloadDoc,runtimeDoc,record,writeRecord,config,calls,io,run:()=>resolveFanHostDeployment(config,state,io)};
+  }
+  await check('deployment-config: valid record and BOM retain unknown metadata with two-manifest fast path',async()=>{
+    const f=fixture();const raw='\uFEFF'+JSON.stringify(f.record());writeFileSync(f.recordPath,raw);assert(await f.run()==='record-hit','Legal BOM record missed');assert(f.calls.installer===0,'Fast hit ran installer');assert(f.calls.hashes.length===2,'Fast hit hashed more than two manifests');assert(f.calls.reads.every(p=>/payload\.json$|runtime\.json$|deployment\.json$/.test(p)),'Read dependency files');assert(readFileSync(f.recordPath,'utf8')===raw,'Legal unknowns or BOM overwritten');
+  });
+  await check('deployment-config: corrupt types duplicate UTF depth and oversize never become initializer permission',async()=>{
+    const f=fixture(),base=f.record();const bads=['','{','null','[]',JSON.stringify({...base,schemaVersion:'1'}),JSON.stringify({...base,validationRulesVersion:'1'}),'{"result":"failed",'+JSON.stringify(base).slice(1),JSON.stringify({...base,unknown:'\ud800'}),JSON.stringify({...base,payloadRoot:42}),JSON.stringify({...base,payloadFileCount:'1'}),' '.repeat(65537)];
+    for(const raw of bads){writeFileSync(f.recordPath,raw);f.calls.installer=0;await rejected(f.run);assert(f.calls.installer===0,'Malformed record authorized installer');assert(readFileSync(f.recordPath,'utf8')===raw,'Malformed original lost');}
+    writeFileSync(f.recordPath,Buffer.from([0xc3,0x28]));await rejected(f.run);assert(f.calls.installer===0,'Bad UTF authorized installer');
+  });
+  await check('deployment-config: future schema and future validation keep originals without downgrade',async()=>{
+    for(const extra of [{schemaVersion:2},{validationRulesVersion:2}]){const f=fixture(),raw=JSON.stringify(f.record(extra));writeFileSync(f.recordPath,raw);await rejected(f.run);assert(f.calls.installer===0,'Future record authorized overwrite');assert(readFileSync(f.recordPath,'utf8')===raw,'Future original lost');}
+  });
+  await check('deployment-config: IO refusal is not missing and explicit retry can recover',async()=>{
+    const f=fixture(),read=f.io.readTextFile;f.io.readTextFile=async(p,max)=>{if(p.endsWith('deployment.json'))throw Error('owned sharing refusal');return read(p,max);};await rejected(f.run);assert(f.calls.installer===0,'Read refusal treated as missing');f.io.readTextFile=read;assert(await f.run()==='record-hit','Explicit retry did not recover');const exists=f.io.exists;f.io.exists=async p=>{if(p.endsWith('deployment.json'))throw Error('owned existence refusal');return exists(p);};await rejected(f.run);assert(f.calls.installer===0,'Existence refusal authorized installer');
+  });
+  await check('deployment-config: manifest future metadata type runtime binding and duplicate refuse',async()=>{
+    for(const kind of ['payload-future','runtime-future','wrong-runtime','wrong-files','duplicate','missing-runtime-path','path-escape']){const f=fixture();if(kind==='payload-future')f.payloadDoc.schemaVersion=3;if(kind==='runtime-future')f.runtimeDoc.schemaVersion=2;if(kind==='wrong-runtime')f.runtimeDoc.runtimeId='OTHER';if(kind==='wrong-files')f.payloadDoc.files=[{path:'x',sha256:42}];if(kind==='missing-runtime-path')delete f.payloadDoc.runtimeManifest;if(kind==='path-escape')f.payloadDoc.runtimeManifest='..\\..\\other\\HandheldCompanion.runtime.json';writeFileSync(f.payloadPath,JSON.stringify(f.payloadDoc));writeFileSync(f.runtimePath,JSON.stringify(f.runtimeDoc));if(kind==='duplicate')writeFileSync(f.payloadPath,'{"runtimeId":"spoof",'+JSON.stringify(f.payloadDoc).slice(1));f.writeRecord();await rejected(f.run);assert(f.calls.installer===0,'Invalid identity granted repair authority: '+kind);}
+  });
+  await check('deployment-config: confirmed absence and legal generation mismatch initialize once and reread',async()=>{
+    const f=fixture();unlinkSync(f.recordPath);assert(await f.run()==='initialized','Missing record did not initialize');assert(f.calls.installer===1,'Missing did not initialize exactly once');assert(await f.run()==='record-hit','Committed record did not reread');f.writeRecord({runtimeId:'OLD'});assert(await f.run()==='initialized','Stale legal record did not initialize');assert(f.calls.installer===2,'Mismatch did not run once');
+  });
+  await check('deployment-config: writer rejection and unconfirmed result never report deployed and explicit retry recovers',async()=>{
+    const f=fixture();unlinkSync(f.recordPath);f.io.runInstaller=async()=>{f.calls.installer++;throw Error('owned replacement refusal');};await rejected(f.run);assert(!existsSync(f.recordPath),'Failed writer faked record');f.io.runInstaller=async()=>{f.calls.installer++;};await rejected(f.run);f.io.runInstaller=async()=>{f.calls.installer++;f.writeRecord();};assert(await f.run()==='initialized','Writer retry did not recover');assert(f.calls.installer===3,'Unexpected automatic retry');
+  });
+  await check('deployment-config: concurrent explicit resolve shares one writer and late identity change refuses admission',async()=>{
+    const f=fixture();unlinkSync(f.recordPath);let release!:()=>void;f.io.runInstaller=async()=>{f.calls.installer++;await new Promise<void>(r=>release=r);f.writeRecord();};const a=f.run(),b=f.run();for(let n=0;n<120;n++)await Promise.resolve();assert(f.calls.installer===1,'Concurrent initializer started duplicate writers');release();assert((await Promise.all([a,b])).every(x=>x==='initialized'),'Shared result failed');
+    const g=fixture();unlinkSync(g.recordPath);g.io.runInstaller=async()=>{g.calls.installer++;g.writeRecord();g.payloadDoc.unknown='concurrent';writeFileSync(g.payloadPath,JSON.stringify(g.payloadDoc));};await rejected(g.run);assert(g.calls.installer===1,'Identity drift retried automatically');
+  });
+  await check('deployment-config: changed record during identity read is rechecked before granting writer',async()=>{
+    const f=fixture();f.writeRecord({runtimeId:'OLD'});const raw=JSON.stringify(f.record({schemaVersion:2})),read=f.io.readTextFile;let reads=0;f.io.readTextFile=async(p,max)=>{const text=await read(p,max);if(p.endsWith('deployment.json')&&++reads===1)writeFileSync(f.recordPath,raw);return text;};await rejected(f.run);assert(f.calls.installer===0,'Late future replacement overwritten');assert(readFileSync(f.recordPath,'utf8')===raw,'Replacement lost');
+  });
+
+  await check('deployment-config: supplement original A record-hit absence mismatch unconfirmed regression',async()=>{
+    await originalDeploymentRecordCases(output);
+  });
+  await check('deployment-config: supplement parser escaped duplicates BOM UTF and depth16 depth17 boundaries',async()=>{
+    const f=fixture();
+    for(const shape of ['array','object'])for(const depth of [16,17]){let nested:any='终点😀';for(let n=0;n<depth;n++)nested=shape==='array'?[nested]:{next:nested};const raw='\uFEFF'+JSON.stringify(f.record({unknown:nested}));writeFileSync(f.recordPath,raw);if(depth===16)assert(await f.run()==='record-hit','Legal depth16 rejected');else await rejected(f.run);assert(readFileSync(f.recordPath,'utf8')===raw,'Depth original changed');}
+    for(const raw of ['{"resul\\u0074":"failed",'+JSON.stringify(f.record()).slice(1),JSON.stringify(f.record({unknown:'界'.repeat(22000)}))]){writeFileSync(f.recordPath,raw);await rejected(f.run);assert(readFileSync(f.recordPath,'utf8')===raw,'Duplicate/byte-limit original changed');}
+    writeFileSync(f.recordPath,Buffer.concat([Buffer.from('{"unknown":"'),Buffer.from([0xc3,0x28]),Buffer.from('",'+JSON.stringify(f.record()).slice(1))]));await rejected(f.run);assert(f.calls.installer===0,'Parser/UTF faults initialized');f.writeRecord();assert(await f.run()==='record-hit','Repaired parser input did not recover');
+  });
+  await check('deployment-config: supplement fast hit refuses manifest replacement during record observation',async()=>{
+    const f=fixture(),read=f.io.readTextFile;let changed=false;f.io.readTextFile=async(p,max)=>{const raw=await read(p,max);if(!changed&&p.endsWith('deployment.json')){changed=true;f.payloadDoc.unknown={replacement:true};writeFileSync(f.payloadPath,JSON.stringify(f.payloadDoc));}return raw;};await rejected(f.run);assert(f.calls.installer===0,'Observed replacement silently repaired');assert(JSON.parse(readFileSync(f.payloadPath,'utf8')).unknown.replacement===true,'New identity overwritten');f.io.readTextFile=read;f.writeRecord();assert(await f.run()==='record-hit','Explicit coherent identity retry did not recover');
+  });
+  await check('deployment-config: supplement deadlines detach bad reads and keep unsettled installer single flight',async()=>{
+    const nativeTimer=globalThis.setTimeout,requested:number[]=[];
+    globalThis.setTimeout=((fn:any,ms?:number,...args:any[])=>{if(ms===5000||ms===60000){requested.push(ms);return nativeTimer(fn,0,...args);}return nativeTimer(fn,ms,...args);}) as typeof setTimeout;
+    try {
+      const readFault=fixture(),read=readFault.io.readTextFile;readFault.io.readTextFile=async(p,max)=>p.endsWith('deployment.json')?new Promise<string>(()=>{}):read(p,max);await rejected(readFault.run);assert(readFault.calls.installer===0,'Timed out read initialized');readFault.io.readTextFile=read;assert(await readFault.run()==='record-hit','Timeout read explicit retry failed');
+      const f=fixture();unlinkSync(f.recordPath);let release!:()=>void;f.io.runInstaller=async()=>{f.calls.installer++;await new Promise<void>(r=>release=r);f.writeRecord();};await rejected(f.run);await rejected(f.run);assert(f.calls.installer===1,'Unsettled timeout started a second writer');release();for(let n=0;n<80;n++)await Promise.resolve();assert(await f.run()==='record-hit','Settled writer could not be explicitly confirmed');assert(requested.includes(5000)&&requested.includes(60000),'Original deadline classes were not exercised');
+    } finally {globalThis.setTimeout=nativeTimer;}
+  });
+  await check('deployment-config: supplement unknown existence and readonly UI defaults never grant deployment',async()=>{
+    const f=fixture(),before=readFileSync(f.recordPath,'utf8'),exists=f.io.exists;
+    for(const bad of [null,undefined,'false',1]){f.io.exists=async()=>bad as any;await rejected(f.run);assert(f.calls.installer===0,'Unknown existence became missing');assert(readFileSync(f.recordPath,'utf8')===before,'Read fault changed record');}
+    f.io.exists=exists;assert(await f.run()==='record-hit','Existence fault retry failed');
+    const missingConfig=resolveFanHostConfig('R:\\isolated-no-host\\PowerControl');assert(missingConfig.sessionToken===''&&missingConfig.confirmationToken==='','Default UI config forged credentials');assert(f.calls.hardware===0,'Config inspection touched hardware');
+  });
+
+  const record={ok:cases.every(x=>x.ok),passed:cases.filter(x=>x.ok).length,failed:cases.filter(x=>!x.ok).length,cases,skipped,selected:'deployment-config',inputs,sourceDrift:pins().filter((x,i)=>x.sha256!==inputs[i].sha256),node:{path:process.execPath,sha256:createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),version:process.version},elapsedMs:performance.now()-started,assertions:lifecycleAssertions,hardwareCalls:0,realInstallerCalls:0,scope:'Actual deployment TS; original deployment consumer selected alone; real files under owned Evidence; installer is a fake callback, never actual PS/Host/HC/device/control'};
+  writeFileSync(join(output,'RESULT.json'),JSON.stringify(record,null,2));console.log(JSON.stringify(record,null,2));if(!record.ok||record.sourceDrift.length)process.exitCode=1;
+}
+
+/** Actual NativeLauncher + native IPC; this selection never enters the broad lifecycle main. */
+async function authConfigOnly(): Promise<void> {
+  const arg = (name: string) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
+  const output = arg('--auth-config');
+  assert(output && /^(?:[a-z]:[\\/]|\\\\)/i.test(output), 'Auth config requires a new owned absolute Evidence directory');
+  assert(!existsSync(output), 'Preserve prior auth output'); mkdirSync(output, { recursive: true });
+  const started = performance.now(), root = resolvePath('.'), filter = arg('--case-filter') ?? '';
+  const privateSource = arg('--auth-source'), actualSource = privateSource ?? resolvePath('src/bridge/fanHost.ts');
+  const source = readFileSync(actualSource, 'utf8');
+  const esbuild = createRequire(resolvePath('package.json'))('esbuild');
+  let injected = 0;
+  const built = await esbuild.build({stdin:{contents:"export {NativeFanHostLauncher,resolveFanHostConfig,authTokenForSelfTest} from './src/bridge/fanHost';export {setLogSink} from './src/bridge/ipc';",resolveDir:root,sourcefile:'fan-auth-inert-entry.ts'},bundle:true,write:false,metafile:true,format:'iife',globalName:'FanAuth',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:[{name:'auth-actual-bridge',setup(b: any){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/]fanHost\.ts$/},(a: any)=>{injected++;return {contents:source+'\nexport const authTokenForSelfTest={createSessionToken,isSessionToken};\n',loader:'ts',resolveDir:join(root,'src/bridge')};});}}]});
+  assert(injected === 1, 'Auth selection must bundle exactly one actual launcher');
+  const sourceNames = [...new Set([...Object.keys(built.metafile.inputs).filter(p=>!p.startsWith('<')&&!p.endsWith('fan-auth-inert-entry.ts')).map(p=>resolvePath(p)),resolvePath('tools/fan_host_lifecycle_selftest.ts'),actualSource])];
+  const pins = () => sourceNames.map(path=>({path,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')}));
+  const inputs = pins(), cases: any[] = [], skipped: string[] = [];
+  const redact = (value: unknown) => String(value).replace(/[0-9a-f]{64}/gi,'[synthetic-credential-redacted]');
+  const check = async (name: string, work: () => Promise<void>) => { if(filter && !name.includes(filter)){skipped.push(name);return;}try{await work();cases.push({name,ok:true});}catch(e){cases.push({name,ok:false,error:redact(e instanceof Error?e.message:e)});} };
+  const tokenA = createHash('sha256').update('owned fixture A').digest('hex');
+  const tokenB = createHash('sha256').update('owned fixture B').digest('hex');
+  const EXE='R:\\fan-auth-owned\\PowerControl\\fan-host\\YeManFanHost.exe', STATE='R:\\fan-auth-owned\\FANSTATE', APPDATA='R:\\fan-auth-owned\\APPDATA';
+  const STABLE=STATE+'\\YeManFanHost.session', LEGACY=APPDATA+'\\fan-host\\YeManFanHost.session', PID=246801;
+  const metrics={physicalCommands:0,fixtures:0,syntheticLaunches:0,syntheticHttp:0};
+  function fixture(options: any = {}) {
+    metrics.fixtures++; let now=0,sequence=0,listener: any, reads=0, writes=0, launches=0, deployments=0;
+    const timers=new Map<number,{at:number;fn:()=>void}>(),files=new Map<string,string>(),calls: any[]=[],logs: string[]=[];
+    const control: any={resident:options.resident??false,remoteToken:options.remoteToken??tokenA,denied:new Set<string>(),existsDenied:new Set<string>(),drop:false,write:'ok',readReceipt:undefined,held:[]};
+    if(options.stable!==null)files.set(STABLE,options.stable??tokenA); if(options.legacy!==undefined)files.set(LEGACY,options.legacy);
+    const timer=(fn:()=>void,ms:number)=>{const id=++sequence;timers.set(id,{fn,at:now+Math.max(0,Number(ms))});return id;};
+    const clear=(id:number)=>{timers.delete(id);};
+    const win:any=new EventTarget();win.setTimeout=timer;win.clearTimeout=clear;
+    const reply=(m:any,result?:unknown,error?:string)=>listener?.({data:error?{id:m.id,error}:{id:m.id,result}});
+    const respond=(m:any)=>{
+      const {cmd,args={}}=m; const route=cmd==='http.request'?new URL(args.url).pathname:undefined;
+      // Never retain raw IPC arguments: writes, headers and --confirm contain credentials.
+      calls.push({cmd,path:args.path,route,at:now}); let result:any;
+      if(cmd==='app.aiFanMockSession')result={schemaVersion:1,enabled:false};
+      else if(cmd==='app.fanStateDir')result=STATE;
+      else if(cmd==='app.dataDir')result=APPDATA;
+      else if(cmd==='app.pid')result=19;
+      else if(cmd==='app.fanActivity'||cmd==='app.fanLifecycleEvidence')result=null;
+      else if(cmd==='fs.exists'){
+        if(control.existsDenied.has(args.path)){reply(m,undefined,'owned-existence-denied');return;}
+        if(control.unknownExists===args.path)result=null;else result=args.path===EXE||files.has(args.path);
+      }
+      else if(cmd==='fs.mkdir')result=true;
+      else if(cmd==='fs.readTextRange'){
+        reads++;
+        if(control.denied.has(args.path)){reply(m,undefined,'owned-read-denied');return;}
+        if(!files.has(args.path)){reply(m,undefined,'Cannot open: '+args.path);return;}
+        const raw=files.get(args.path)!; result=control.readReceipt??{content:Buffer.from(raw).subarray(0,args.maxBytes).toString('utf8'),offset:0,size:Buffer.byteLength(raw)};
+        if(control.drop&&args.path===STABLE){control.held.push({m,result});return;}
+      }
+      else if(cmd==='fs.writeTextFileAtomic'){
+        writes++;
+        if(control.beforeWrite)control.beforeWrite();
+        if(args.textEncoding==='windows-config'&&args.expectedContent===null&&files.has(args.path)){reply(m,undefined,'CONFIG_TEXT_CHANGED');return;}
+        if(control.write==='reject'){reply(m,undefined,'owned-replace-denied');return;}
+        if(control.write==='false'){reply(m,false);return;}
+        if(control.write==='lost'){return;}
+        const content=control.write==='case'?String(args.content).toUpperCase():control.write==='replace'?tokenB:args.content;
+        files.set(args.path,content);if(control.denyReadback)control.denied.add(args.path);result=true;
+      }
+      else if(cmd==='proc.findExact')result={found:control.resident,pid:control.resident?PID:0};
+      else if(cmd==='shell.run'){
+        assert(args.program==='netstat.exe','Auth fixture refused non-netstat program');
+        result={exitCode:0,stdout:control.resident?' TCP 127.0.0.1:8765 0.0.0.0:0 LISTENING '+PID:'',stderr:''};
+      }
+      else if(cmd==='process.identity')result={valid:control.resident,pid:PID,path:control.foreign?'R:\\fan-auth-owned\\Other.exe':EXE,processCreated:'133001111111111111'};
+      else if(cmd==='http.request'){
+        metrics.syntheticHttp++;
+        assert(route==='/api/state'||route==='/health','Auth fixture refused mutating HTTP');
+        if(!control.resident){reply(m,undefined,'owned-listener-absent');return;}
+        const accepted=args.headers?.['X-YeMan-Fan-Session']===control.remoteToken;
+        result={status:control.httpStatus??(accepted?200:401),body:route==='/api/state'?JSON.stringify({state:{state:'Ready'}}):JSON.stringify({host:'YeManFanHost',protocolVersion:2}),headers:''};
+      }
+      else if(cmd==='shell.hidden'){
+        assert(args.program===EXE,'Auth fixture refused non-fixture launch');
+        assert(!args.args.includes('--allow-hardware-writes')&&!args.args.includes('--authorization')&&!args.args.includes('--confirm'),'Unknown fixture auth authorized hardware');
+        assert(typeof files.get(STABLE)==='string'&&files.get(STABLE)!.trim()===config.sessionToken,'Launch did not use exact persisted credential');
+        launches++;metrics.syntheticLaunches++;control.resident=true;control.remoteToken=files.get(STABLE)!.trim();result={ok:true,pid:PID};
+      }
+      else {metrics.physicalCommands++;reply(m,undefined,'forbidden-native-command');return;}
+      reply(m,result);
+    };
+    win.chrome={webview:{postMessage:respond,addEventListener:(_type:string,fn:any)=>{listener=fn;}}};
+    const context=vm.createContext({window:win,document:Object.assign(new EventTarget(),{hidden:false,visibilityState:'visible',createElement:()=>({style:{},content:{}}),querySelector:()=>null}),console:{log:()=>{},warn:()=>{},error:()=>{},debug:()=>{}},Event,EventTarget,CustomEvent:class extends Event{detail:unknown;constructor(type:string,init:any){super(type);this.detail=init?.detail;}},setTimeout:timer,clearTimeout:clear,setInterval:timer,clearInterval:clear,TextEncoder,TextDecoder,URL,crypto:webcrypto,performance:{now:()=>now},structuredClone,queueMicrotask});
+    vm.runInContext(built.outputFiles[0].text,context,{timeout:5000});const api=(context as any).FanAuth;
+    api.setLogSink((e:any)=>logs.push(redact(JSON.stringify(e))));
+    const launcher=new api.NativeFanHostLauncher(),config=api.resolveFanHostConfig('R:\\fan-auth-owned\\PowerControl');config.hostExecutable=EXE;config.hostDirectory='R:\\fan-auth-owned\\PowerControl\\fan-host';config.allowHardwareWrites=false;
+    launcher.ensureFanHostDeployment=async()=>{deployments++;}; // sibling payload boundary only; real auth chain stays intact.
+    const observe=(promise:Promise<any>)=>{const s:any={status:'pending'};void promise.then(value=>{s.status='fulfilled';s.value=value;},e=>{s.status='rejected';s.error=redact(e instanceof Error?e.message:e);});return s;};
+    const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();await new Promise<void>(setImmediate);};
+    const settle=async(s:any)=>{for(let i=0;i<1000&&s.status==='pending';i++){await flush();if(s.status!=='pending')break;const next=[...timers.entries()].sort((a,b)=>a[1].at-b[1].at)[0];if(next){assert(next[1].at<=40000,'Auth episode exceeded bounded virtual budget');now=next[1].at;timers.delete(next[0]);next[1].fn();}}assert(s.status!=='pending','Auth read did not settle');return s;};
+    return {api,launcher,config,files,control,calls,logs,timers,observe,flush,settle,launch:()=>settle(observe(launcher.start(config))),counts:()=>({reads,writes,launches,deployments,virtualMs:now}),release:()=>{control.drop=false;for(const h of control.held.splice(0))reply(h.m,h.result);}};
+  }
+  const blocked=(f:ReturnType<typeof fixture>,result:any)=>{assert(result.status==='rejected','Unknown credential was accepted');assert(f.counts().writes===0&&f.counts().launches===0,'Fault rewrote original or launched Host');assert(f.timers.size===0,'Fault left retry polling');};
+  await check('auth-config: token format and safe config defaults do not authorize hardware',async()=>{
+    const f=fixture();assert(!f.config.sessionToken&&!f.config.confirmationToken&&!f.config.allowHardwareWrites,'Default config forged auth');
+    const generated=new Set<string>();for(let i=0;i<4;i++){const v=f.api.authTokenForSelfTest.createSessionToken();assert(f.api.authTokenForSelfTest.isSessionToken(v)&&v.length===64,'Generator produced malformed credential');generated.add(v);}assert(generated.size===4,'Generator repeated credential');
+    for(const bad of [undefined,null,1,{},[],true,'','x'.repeat(64),'a'.repeat(63),'a'.repeat(65)])assert(!f.api.authTokenForSelfTest.isSessionToken(bad),'Malformed token accepted');
+  });
+  await check('auth-config: valid stable uppercase BOM whitespace adopts exact resident without write',async()=>{
+    for(const value of [tokenA,tokenA.toUpperCase(),'\uFEFF'+tokenA+'\r\n']){const f=fixture({stable:value,resident:true,remoteToken:value.trim()});const r=await f.launch();assert(r.status==='fulfilled'&&r.value.adopted===true,'Valid stable credential did not adopt');assert(f.config.sessionToken===value.trim()&&f.config.confirmationToken===value.trim(),'Valid persisted case changed');assert(f.counts().writes===0&&f.counts().deployments===0&&f.counts().launches===0,'Adoption mutated payload or credential');}
+  });
+  await check('auth-config: denied stable read never becomes missing and explicit retry recovers',async()=>{
+    const f=fixture({legacy:tokenB});f.control.denied.add(STABLE);blocked(f,await f.launch());assert(f.files.get(STABLE)===tokenA,'Denied original changed');f.control.denied.clear();const r=await f.launch();assert(r.status==='fulfilled','Read denial did not recover on explicit retry');assert(f.config.sessionToken===tokenA,'Retry used legacy instead of current stable');
+  });
+  await check('auth-config: malformed empty UTF future-shaped and oversize sidecars remain preserved',async()=>{
+    for(const raw of ['', ' ', 'a'.repeat(63),'a'.repeat(65),'z'.repeat(64),'[]','{"schemaVersion":999,"token":"future"}','\u0000'+tokenA,'\ufffd'+tokenA,tokenA+'\u200b','a'.repeat(4097)]){const f=fixture({stable:raw,legacy:tokenB});blocked(f,await f.launch());assert(f.files.get(STABLE)===raw,'Malformed original overwritten');}
+    for(const receipt of [{content:1,offset:0,size:1},{content:tokenA,offset:1,size:64},{content:tokenA,offset:0,size:63}]){const f=fixture();f.control.readReceipt=receipt;blocked(f,await f.launch());}
+  });
+  await check('auth-config: unknown existence and denied legacy read never mint permission',async()=>{
+    const f=fixture();f.control.existsDenied.add(STABLE);blocked(f,await f.launch());
+    const u=fixture();u.control.unknownExists=STABLE;blocked(u,await u.launch());
+    const legacy=fixture({stable:null,legacy:tokenA});legacy.control.denied.add(LEGACY);blocked(legacy,await legacy.launch());legacy.control.denied.clear();assert((await legacy.launch()).status==='fulfilled','Legacy denial failed explicit retry');
+  });
+  await check('auth-config: confirmed absence initializes once and subsequent read adopts same credential',async()=>{
+    const f=fixture({stable:null});const r=await f.launch();assert(r.status==='fulfilled'&&!r.value.adopted,'Absent sidecar did not initialize');assert(f.counts().writes===1&&f.counts().launches===1,'Absent sidecar initialization replayed');assert(f.api.authTokenForSelfTest.isSessionToken(f.files.get(STABLE)),'Initialized sidecar invalid');const before=f.files.get(STABLE);assert((await f.launch()).value?.adopted===true,'Second explicit read did not adopt');assert(f.files.get(STABLE)===before&&f.counts().writes===1,'Second read rotated credential');
+  });
+  await check('auth-config: legacy migration requires exact readback before resident adoption',async()=>{
+    const f=fixture({stable:null,legacy:tokenA,resident:true});const r=await f.launch();assert(r.status==='fulfilled'&&r.value.adopted===true,'Valid legacy migration failed');assert(f.counts().writes===1&&f.files.get(LEGACY)===tokenA&&f.files.get(STABLE)===tokenA,'Legacy original or migration changed');assert(f.counts().reads>=2,'Legacy adopted before stable readback');
+    for(const mode of ['false','reject','case','replace']){const bad=fixture({stable:null,legacy:tokenA,resident:true});bad.control.write=mode;const no=await bad.launch();assert(no.status==='rejected','Unconfirmed legacy migration adopted resident');assert(bad.counts().launches===0&&!bad.config.confirmationToken,'Failed migration published authorization');assert(bad.files.get(LEGACY)===tokenA,'Failed migration lost legacy original');}
+  });
+  await check('auth-config: failed write explicit retry does not retain uncommitted cache',async()=>{
+    const f=fixture({stable:null});f.control.write='false';assert((await f.launch()).status==='rejected','Atomic false reported success');assert(!f.config.sessionToken&&!f.config.confirmationToken,'Failed write retained uncommitted credential');assert(f.counts().launches===0,'Failed write launched');f.control.write='ok';assert((await f.launch()).status==='fulfilled','Explicit retry could not save');assert(f.counts().writes===2&&f.counts().launches===1,'Write retry looped');
+  });
+  await check('auth-config: same config retry rereads replaced sidecar and exact case is required',async()=>{
+    const f=fixture({resident:true});assert((await f.launch()).status==='fulfilled','Initial fixture adoption failed');f.files.set(STABLE,tokenB);f.control.remoteToken=tokenB;assert((await f.launch()).status==='fulfilled','Cached config skipped corrected sidecar');assert(f.config.sessionToken===tokenB&&f.counts().writes===0,'Retry retained stale credential');
+    for(const mode of ['case','replace']){const bad=fixture({stable:null});bad.control.write=mode;const r=await bad.launch();assert(r.status==='rejected','Mismatched readback was accepted');assert(bad.counts().launches===0,'Mismatched readback launched');}
+  });
+  await check('auth-config: bounded timeout ignores late old reply then explicit reread recovers',async()=>{
+    const f=fixture();f.control.drop=true;const first=await f.launch();assert(first.status==='rejected'&&f.counts().virtualMs<=5000,'Read timeout did not settle once');assert(f.counts().writes===0&&f.counts().launches===0,'Timed out read became missing');f.files.set(STABLE,tokenB);f.release();await f.flush();assert(!f.config.sessionToken&&!f.config.confirmationToken,'Late old read published auth');const r=await f.launch();assert(r.status==='fulfilled'&&f.config.sessionToken===tokenB,'Post-timeout explicit reread failed');assert(f.timers.size===0,'Timeout left polling');
+  });
+  await check('auth-config: resident 401 403 or foreign owner never rewrites credentials or grants control',async()=>{
+    for(const patch of [{remoteToken:tokenB},{httpStatus:403},{foreign:true}]){const f=fixture({resident:true});Object.assign(f.control,patch);const r=await f.launch();assert(r.status==='rejected','Unknown owner/auth accepted');assert(f.counts().writes===0&&f.counts().launches===0&&f.counts().deployments===0,'Auth refusal mutated or started owner');assert(!f.config.confirmationToken,'Refusal published confirmation');}
+  });
+  await check('auth-config: lost write acknowledgement remains bounded and explicit retry reads current disk',async()=>{
+    const f=fixture({stable:null});f.control.write='lost';const r=await f.launch();assert(r.status==='rejected'&&f.counts().virtualMs===15000,'Lost write did not settle at one deadline');assert(f.counts().launches===0&&!f.config.sessionToken&&!f.config.confirmationToken,'Unconfirmed write published auth');assert(f.counts().writes===1&&f.timers.size===0,'Lost write retried automatically');f.control.write='ok';assert((await f.launch()).status==='fulfilled','Lost write failed explicit recovery');
+  });
+  await check('auth-config: concurrent new sidecar is preserved by observed-absence write guard',async()=>{
+    const f=fixture({stable:null});f.control.beforeWrite=()=>{f.files.set(STABLE,tokenB);f.control.beforeWrite=null;};const r=await f.launch();assert(r.status==='rejected','Stale absence overwrote concurrent credential');assert(f.files.get(STABLE)===tokenB&&f.counts().launches===0,'Concurrent original lost or launched');assert(!f.config.sessionToken&&!f.config.confirmationToken,'Concurrent writer failure published auth');assert((await f.launch()).status==='fulfilled'&&f.config.sessionToken===tokenB,'Concurrent replacement failed explicit reread');
+  });
+  await check('auth-config: committed migration with unreadable readback stays unconfirmed then recovers',async()=>{
+    const f=fixture({stable:null,legacy:tokenA,resident:true});f.control.denyReadback=true;assert((await f.launch()).status==='rejected','Unreadable migration readback adopted');assert(!f.config.sessionToken&&!f.config.confirmationToken&&f.counts().launches===0,'Unreadable readback published auth');assert(f.files.get(LEGACY)===tokenA&&f.files.get(STABLE)===tokenA,'Committed original lost');f.control.denyReadback=false;f.control.denied.clear();assert((await f.launch()).value?.adopted===true,'Readback fault failed explicit retry');assert(f.counts().writes===1,'Retry replayed committed migration');
+  });
+  const sourceDrift=pins().filter((p,i)=>p.sha256!==inputs[i].sha256);
+  const record={atUtc:new Date().toISOString(),ok:cases.every(c=>c.ok)&&sourceDrift.length===0,selected:'auth-config',passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases,skipped,inputs,sourceDrift,privateSource:privateSource??null,node:{path:process.execPath,version:process.version,sha256:createHash('sha256').update(readFileSync(process.execPath)).digest('hex')},esbuild:{version:esbuild.version},elapsedMs:performance.now()-started,assertions:lifecycleAssertions,metrics,credentialPolicy:'Only own synthetic values in VM memory; raw IPC arguments never recorded; no credential values in output',scope:'Actual NativeFanHostLauncher, actual API/native IPC with in-memory sidecars and virtual clock. Sibling deployment replaced with recording-only callback. No Host/HC/real IO/HTTP/process/device/registry/service/install.'};
+  writeFileSync(join(output,'RESULT.json'),JSON.stringify(record,null,2));console.log(JSON.stringify({ok:record.ok,passed:record.passed,failed:record.failed,assertions:record.assertions,elapsedMs:record.elapsedMs,failures:cases.filter(c=>!c.ok)}));if(!record.ok)process.exitCode=1;
+}
+
+/** Selected actual deployment PS producer: no top-level installer/HC/ACL/CIM entry. */
+async function deploymentWriterOnly(): Promise<void> {
+  const at=process.argv.indexOf('--deployment-writer'),output=process.argv[at+1];
+  assert(output&&/^(?:[a-z]:[\\/]|\\\\)/i.test(output)&&!existsSync(output),'Writer requires a new owned absolute Evidence directory');mkdirSync(output,{recursive:true});
+  const sourceAt=process.argv.indexOf('--writer-source'),source=sourceAt<0?resolvePath('PowerControl/fan-host/install-fan-host-payload.ps1'):resolvePath(process.argv[sourceAt+1]);
+  const sourcePin={path:source,sha256:createHash('sha256').update(readFileSync(source)).digest('hex')};
+  const filterAt=process.argv.indexOf('--writer-case-filter'),filter=filterAt<0?'':process.argv[filterAt+1];
+  const worker=join(output,'selected-producer.ps1');
+  const script=String.raw`param([string]$Source,[string]$Root,[string]$Filter)
+$ErrorActionPreference='Stop'
+if ((Test-Path -LiteralPath $Root)) { throw 'Use new owned root' }
+New-Item -ItemType Directory -Path $Root | Out-Null
+$tokens=$null; $parseErrors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw 'Source AST parse failed' }
+foreach($name in @('Get-FullPath','Get-Sha256')) {
+  $f=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+  if($f.Count -ne 1) { throw 'Actual helper missing/ambiguous' }
+  . ([ScriptBlock]::Create($f[0].Extent.Text))
+}
+$nodes=$ast.FindAll({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if (-not $SkipStateDirectory)')},$true)
+if($nodes.Count -ne 1) { throw 'Actual producer block missing/ambiguous' }
+$producer=$nodes[0].Extent.Text
+foreach($name in @('Initialize-FanDeploymentRecordStore','Get-FanDeploymentRecordSnapshot','Write-FanDeploymentRecord')) {
+  $f=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+  if($f.Count -gt 1){throw 'Ambiguous persistence helper'}
+  if($f.Count -eq 1){$body=$f[0].Extent.Text
+    if($name -eq 'Initialize-FanDeploymentRecordStore'){
+      $body=$body.Replace('if(expected.Bytes==null)File.Move(stagePath,path);else File.Replace(stagePath,path,null,true);','if(File.Exists(path+".owned-commit-fault"))throw new IOException("OWNED_COMMIT_REFUSED");if(expected.Bytes==null)File.Move(stagePath,path);else File.Replace(stagePath,path,null,true);')
+    }
+    if($Filter -eq 'supplement readback' -and $name -eq 'Initialize-FanDeploymentRecordStore'){
+      $body=$body.Replace('// Confirm the committed bytes before a producer can acknowledge success.','File.WriteAllText(path,"{}"); // owned readback fault seam')
+    }
+    . ([ScriptBlock]::Create($body))
+  }
+}
+$checkpoint=$ast.FindAll({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if ($SkipStateDirectory -eq $false)')},$true)
+function Invoke-OwnedProducer([string]$CaseRoot,[string]$Code,[ScriptBlock]$BeforeCommit) {
+  $StateDirectory=Join-Path $CaseRoot 'state'
+  $payloadFull=Join-Path $CaseRoot 'payload';$runtimeFull=Join-Path $CaseRoot 'runtime'
+  New-Item -ItemType Directory -Force -Path $payloadFull,$runtimeFull,$StateDirectory | Out-Null
+  $manifestPath=Join-Path $payloadFull 'YeManFanHost.payload.json'
+  $runtimeManifestPath=Join-Path $runtimeFull 'HandheldCompanion.runtime.json'
+  [IO.File]::WriteAllText($manifestPath,(@{schemaVersion=2;runtimeManifest='..\runtime\HandheldCompanion.runtime.json';runtimeId='owned-runtime-v1';files=@(@{path='owned.bin';sha256=('a'*64)})}|ConvertTo-Json -Depth 6))
+  [IO.File]::WriteAllText($runtimeManifestPath,(@{schemaVersion=1;runtimeId='owned-runtime-v1';files=@(@{path='owned-runtime.bin';sha256=('b'*64)})}|ConvertTo-Json -Depth 6))
+  $manifest=@{files=@(@{path='owned.bin'})};$runtimeManifest=@{files=@(@{path='owned-runtime.bin'})};$manifestRuntimeId='owned-runtime-v1';$SkipStateDirectory=$false
+  if($checkpoint.Count -gt 1){throw 'Ambiguous snapshot checkpoint'}
+  if($checkpoint.Count -eq 1){. ([ScriptBlock]::Create($checkpoint[0].Extent.Text))}
+  if($BeforeCommit){& $BeforeCommit $StateDirectory}
+  . ([ScriptBlock]::Create($Code)) | Out-Null
+}
+$results=New-Object Collections.Generic.List[object]
+function Check([string]$Name,[ScriptBlock]$Work) {if($Filter -and -not $Name.Contains($Filter)){return};try{& $Work;$results.Add(@{name=$Name;ok=$true})}catch{$results.Add(@{name=$Name;ok=$false;error=$_.Exception.Message})}}
+function Need([bool]$Yes,[string]$Message){if(-not $Yes){throw $Message}}
+Check 'actual producer saves absent record with full identity then reads back' {
+  $r=Join-Path $Root 'initial';Invoke-OwnedProducer $r $producer
+  $p=Join-Path $r 'state/YeManFanHost.deployment.json';$o=[IO.File]::ReadAllText($p)|ConvertFrom-Json
+  Need ($o.schemaVersion -eq 1 -and $o.validationRulesVersion -eq 1 -and $o.result -ceq 'ok') 'Bad schema/rules/result'
+  Need ($o.runtimeId -ceq 'owned-runtime-v1' -and $o.payloadFileCount -eq 1 -and $o.runtimeFileCount -eq 1) 'Producer identity/count missing'
+  Need ($o.payloadManifestSha256 -ceq (Get-Sha256 (Join-Path $r 'payload/YeManFanHost.payload.json'))) 'Producer payload SHA missing'
+  Need ($o.runtimeManifestSha256 -ceq (Get-Sha256 (Join-Path $r 'runtime/HandheldCompanion.runtime.json'))) 'Producer runtime SHA missing'
+}
+Check 'commit refusal preserves exact prior original and explicit retry recovers' {
+  $r=Join-Path $Root 'commit-fault';New-Item -ItemType Directory -Path (Join-Path $r 'state') -Force|Out-Null
+  $p=Join-Path $r 'state/YeManFanHost.deployment.json';$prior='{"schemaVersion":1,"unknown":{"keep":true}}';[IO.File]::WriteAllText($p,$prior)
+  $code=$producer.Replace('[IO.File]::Move($recordTemp, $recordPath)',"throw 'OWNED_COMMIT_REFUSED'").Replace('[IO.File]::Replace($recordTemp, $recordPath, $null, $true)',"throw 'OWNED_COMMIT_REFUSED'").Replace('[IO.File]::Replace($recordTemp, $recordPath, [NullString]::Value, $true)',"throw 'OWNED_COMMIT_REFUSED'")
+  $helper=Get-Command Write-FanDeploymentRecord -CommandType Function -ErrorAction SilentlyContinue
+  if($helper){[IO.File]::WriteAllText(($p+'.owned-commit-fault'),'owned');$code=$producer}
+  Need ($code -cne $producer -or $helper) 'Missing exact atomic commit seam'
+  $failed=$false;try{Invoke-OwnedProducer $r $code}catch{$failed=$true};Need $failed 'Commit fault reported success'
+  Need ([IO.File]::Exists($p) -and [IO.File]::ReadAllText($p) -ceq $prior) 'Commit failure deleted/replaced original'
+  if($helper){Remove-Item -LiteralPath ($p+'.owned-commit-fault')}
+  Invoke-OwnedProducer $r $producer;Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Explicit retry failed'
+}
+Check 'unrelated fixed staging file is preserved' {
+  $r=Join-Path $Root 'stage';New-Item -ItemType Directory -Path (Join-Path $r 'state') -Force|Out-Null
+  $temp=Join-Path $r 'state/YeManFanHost.deployment.json.tmp';[IO.File]::WriteAllText($temp,'owned-other-writer')
+  Invoke-OwnedProducer $r $producer;Need ([IO.File]::Exists($temp) -and [IO.File]::ReadAllText($temp) -ceq 'owned-other-writer') 'Writer consumed/replaced another staging file'
+}
+Check 'real owned file sharing refusal retains original and release allows retry' {
+  $r=Join-Path $Root 'sharing';New-Item -ItemType Directory -Path (Join-Path $r 'state') -Force|Out-Null
+  $p=Join-Path $r 'state/YeManFanHost.deployment.json';$prior='{"schemaVersion":1,"owner":"owned"}';[IO.File]::WriteAllText($p,$prior)
+  $hold=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+  try{$failed=$false;try{Invoke-OwnedProducer $r $producer}catch{$failed=$true};Need $failed 'Sharing refusal reported success';Need ([IO.File]::ReadAllText($p) -ceq $prior) 'Sharing refusal changed original'}finally{$hold.Dispose()}
+  Invoke-OwnedProducer $r $producer;Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Sharing release retry failed'
+}
+function Seed([string]$r,[byte[]]$raw){New-Item -ItemType Directory -Path (Join-Path $r 'state') -Force|Out-Null;[IO.File]::WriteAllBytes((Join-Path $r 'state/YeManFanHost.deployment.json'),$raw)}
+function Bytes([string]$s){return ,((New-Object Text.UTF8Encoding($false)).GetBytes($s))}
+function Legacy([string]$extra){return '{"schemaVersion":1,"validationRulesVersion":0,"payloadRoot":"C:\\owned-old\\payload","runtimeRoot":"C:\\owned-old\\runtime","payloadManifestSha256":"'+('a'*64)+'","runtimeManifestSha256":"'+('b'*64)+'","runtimeId":"owned-legacy","result":"failed"'+$extra+'}'}
+function EqualBytes([byte[]]$a,[byte[]]$b){return [Convert]::ToBase64String($a) -ceq [Convert]::ToBase64String($b)}
+function Rejected([ScriptBlock]$work){$failed=$false;try{& $work|Out-Null}catch{$failed=$true};Need $failed 'Unconfirmed operation reported success'}
+function MainPath([string]$r){return Join-Path $r 'state/YeManFanHost.deployment.json'}
+function ArchivePath([string]$p){return $p+'.corrupt.'+(Get-Sha256 $p)+'.json'}
+Check 'supplement strict valid BOM legacy and raw unknown remain preserved' {
+  $r=Join-Path $Root 'valid-unknown';$rawUnknown='{"big":1234567890123456789,"escaped":"\uD83D\uDE80","nested":[null,true,{"Keep":1,"keep":2}]}'
+  Seed $r (Bytes ([char]0xFEFF+(Legacy (',"unknown":'+$rawUnknown+',"SchemaVersion":"case-sensitive-unknown"'))))
+  Invoke-OwnedProducer $r $producer;$saved=[IO.File]::ReadAllText((MainPath $r))
+  Need ($saved.Contains('"unknown":'+$rawUnknown)) 'Raw unknown JSON changed/lost'
+  Need ($saved.Contains('"SchemaVersion":"case-sensitive-unknown"')) 'Case-distinct unknown key lost'
+  Need ($saved.Contains('"schemaVersion":1') -and $saved.Contains('"validationRulesVersion":1') -and $saved.Contains('"result":"ok"')) 'Legacy record did not update'
+  Need (@(Get-ChildItem -LiteralPath (Join-Path $r 'state') -Filter '*.corrupt.*.json').Count -eq 0) 'Valid legacy falsely archived'
+  $deep=Join-Path $Root 'depth16';$nested=('['*15)+'0'+(']'*15);Seed $deep (Bytes (Legacy (',"unknown":'+$nested)))
+  Invoke-OwnedProducer $deep $producer;Need ([IO.File]::ReadAllText((MainPath $deep)).Contains('"unknown":'+$nested)) 'Depth16 value not retained'
+}
+Check 'supplement malformed UTF duplicate type depth and empty originals archive exactly' {
+  $raws=New-Object Collections.Generic.List[byte[]]
+  foreach($text in @('', ' ', '{', '[]', 'null', 'true', '"text"', '{"schemaVersion":1,', '{"x":1,"\u0078":2}', '{"x":NaN}', '{"x":1e309}', '{"x":"\uD800"}', ('{"x":'+('['*16)+'0'+(']'*16)+'}'))){$raws.Add((Bytes $text))}
+  $raws.Add([byte[]]@(0xc3,0x28));$raws.Add([byte[]]@(0xff,0xfe,0x7b,0x00))
+  foreach($extra in @('"schemaVersion":"1"','"validationRulesVersion":null','"payloadRoot":[]','"runtimeRoot":false','"payloadManifestSha256":1','"runtimeManifestSha256":"bad"','"runtimeId":{}','"result":false','"payloadFileCount":0','"deployedAtUtc":1')){
+    $base=Legacy ',"unknown":{"keep":true}'
+    $key=($extra -split ':',2)[0].Trim('"');$pattern='"'+$key+'":(?:"[^"]*"|[0-9]+|false|true|null)'
+    if($base -match $pattern){$base=[regex]::Replace($base,$pattern,$extra)}else{$base=$base.Substring(0,$base.Length-1)+','+$extra+'}'}
+    $raws.Add((Bytes $base))
+  }
+  $i=0;foreach($raw in $raws){$r=Join-Path $Root ('bad-'+$i++);Seed $r $raw;$p=MainPath $r;$archive=ArchivePath $p;Invoke-OwnedProducer $r $producer
+    Need ([IO.File]::Exists($archive)) 'Missing exact original archive'
+    Need (EqualBytes ([IO.File]::ReadAllBytes($archive)) $raw) 'Archived bytes differ'
+    Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Corrupt record did not rebuild'
+    if((New-Object Text.UTF8Encoding($false)).GetString($raw).Contains('"unknown":{"keep":true}')){Need ([IO.File]::ReadAllText($p).Contains('"unknown":{"keep":true}')) 'Typed-corrupt object lost unknown'}
+  }
+}
+Check 'supplement future schema rules and escaped duplicate future stay untouched' {
+  $i=0;foreach($raw in @('{"schemaVersion":2}','{"schemaVersion":1,"validationRulesVersion":2}','{"schemaVersion":999,"\u0073chemaVersion":1}','{"schemaVersion":2,"broken":')){
+    $r=Join-Path $Root ('future-'+$i++);$bytes=Bytes $raw;Seed $r $bytes;$p=MainPath $r;Rejected {Invoke-OwnedProducer $r $producer}
+    Need (EqualBytes ([IO.File]::ReadAllBytes($p)) $bytes) 'Future original changed'
+    Need (@(Get-ChildItem -LiteralPath (Join-Path $r 'state') -Filter '*.corrupt.*.json').Count -eq 0) 'Future was archived as corrupt permission'
+  }
+}
+Check 'supplement oversized and unreadable are not missing explicit repair retries' {
+  $r=Join-Path $Root 'oversize';$bytes=Bytes (' '*65537);Seed $r $bytes;$p=MainPath $r;Rejected {Invoke-OwnedProducer $r $producer};Need (EqualBytes ([IO.File]::ReadAllBytes($p)) $bytes) 'Oversize overwritten'
+  Seed $r (Bytes (Legacy ''));Invoke-OwnedProducer $r $producer;Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Oversize repair retry failed'
+  $r=Join-Path $Root 'read-denied';$bytes=Bytes (Legacy '');Seed $r $bytes;$p=MainPath $r;$hold=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+  try{Rejected {Invoke-OwnedProducer $r $producer}}finally{$hold.Dispose()};Need (EqualBytes ([IO.File]::ReadAllBytes($p)) $bytes) 'Unreadable original changed'
+  Invoke-OwnedProducer $r $producer;Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Read denial retry failed'
+}
+Check 'supplement archive refusal and mismatched archive preserve original then recover' {
+  foreach($kind in @('directory','mismatch')){
+    $r=Join-Path $Root ('archive-'+$kind);$bytes=Bytes '{';Seed $r $bytes;$p=MainPath $r;$archive=ArchivePath $p
+    if($kind -eq 'directory'){New-Item -ItemType Directory -Path $archive|Out-Null}else{[IO.File]::WriteAllText($archive,'owned-other-original')}
+    Rejected {Invoke-OwnedProducer $r $producer};Need (EqualBytes ([IO.File]::ReadAllBytes($p)) $bytes) 'Archive refusal changed source'
+    Remove-Item -LiteralPath $archive -Force
+    Invoke-OwnedProducer $r $producer;Need (EqualBytes ([IO.File]::ReadAllBytes($archive)) $bytes) 'Archive retry bytes differ'
+    Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Archive retry did not rebuild'
+  }
+}
+Check 'supplement stale snapshot and lock contention cannot overwrite next owner' {
+  $r=Join-Path $Root 'cas';Seed $r (Bytes (Legacy ''));$p=MainPath $r;$next='{"schemaVersion":999}'
+  Rejected {Invoke-OwnedProducer $r $producer {param($state)[IO.File]::WriteAllText((Join-Path $state 'YeManFanHost.deployment.json'),'{"schemaVersion":999}')}}
+  Need ([IO.File]::ReadAllText($p) -ceq $next) 'Stale snapshot overwrote next owner'
+  Seed $r (Bytes (Legacy ''));$prior=[IO.File]::ReadAllBytes($p);$hold=[IO.File]::Open(($p+'.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+  try{Rejected {Invoke-OwnedProducer $r $producer}}finally{$hold.Dispose()};Need (EqualBytes ([IO.File]::ReadAllBytes($p)) $prior) 'Lock refusal changed original'
+  Invoke-OwnedProducer $r $producer;Need (([IO.File]::ReadAllText($p)|ConvertFrom-Json).result -ceq 'ok') 'Lock release retry failed'
+}
+Check 'supplement pipeline saved identity will be consumed by actual frontend' {
+  Invoke-OwnedProducer (Join-Path $Root 'pipeline') $producer
+}
+if($Filter -eq 'supplement readback'){
+  Check 'supplement readback fault never acknowledges a different committed document' {
+    $r=Join-Path $Root 'readback';Rejected {Invoke-OwnedProducer $r $producer};Need ([IO.File]::ReadAllText((MainPath $r)) -ceq '{}') 'Readback seam did not execute actual disk change'
+  }
+}
+
+$debt=@()
+$record=@{psVersion=$PSVersionTable.PSVersion.ToString();cases=@($results.ToArray());debt=@($debt);scope='AST selected actual producer/helper functions only; actual owned file IO; injected commit seam only in commit-fault; no full installer/admin/CIM/Host/HC/network'}
+$record|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $Root 'RESULT.json') -Encoding UTF8
+if(@($results.ToArray()|Where-Object{-not $_.ok}).Count -gt 0){exit 1}
+`;
+  writeFileSync(worker,script,'utf8');
+  const {spawnSync}=await import('node:child_process');const shells=['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe','C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe'];const runs:any[]=[];
+  for(const [i,shell] of shells.entries()){assert(existsSync(shell),'Required existing PS runtime missing');const dir=join(output,'ps-'+i),temp=join(output,'ps-'+i+'-temp');mkdirSync(temp);const args=['-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',worker,'-Source',source,'-Root',dir,...(filter?['-Filter',filter]:[])],started=performance.now();const r=spawnSync(shell,args,{windowsHide:true,encoding:'utf8',timeout:15000,env:{...process.env,TEMP:temp,TMP:temp}});writeFileSync(join(output,'ps-'+i+'.stdout.log'),r.stdout??'');writeFileSync(join(output,'ps-'+i+'.stderr.log'),r.stderr??'');runs.push({pid:r.pid,declaredEnvironment:{TEMP:temp,TMP:temp},shell,sha256:createHash('sha256').update(readFileSync(shell)).digest('hex'),exitCode:r.status,signal:r.signal,elapsedMs:performance.now()-started,args,result:existsSync(join(dir,'RESULT.json'))?JSON.parse(readFileSync(join(dir,'RESULT.json'),'utf8').replace(/^\uFEFF/,'')):null,error:r.error?String(r.error):null});}
+  const frontend:any[]=[];
+  if(!filter || 'supplement pipeline saved identity will be consumed by actual frontend'.includes(filter)){
+    for(const [i,run] of runs.entries()){
+      try{
+        assert(run.exitCode===0,'PS producer failed before frontend consume');const froot=join(output,'ps-'+i,'pipeline'),config=resolveFanHostConfig(froot);config.hostDirectory=join(froot,'payload');config.hcRuntimeDirectory=join(froot,'runtime');config.hcAssemblyPath=join(config.hcRuntimeDirectory,'HandheldCompanion.dll');let installerCalls=0;
+        const io:FanHostDeploymentIo={exists:async p=>existsSync(p),readTextFile:async p=>new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(readFileSync(p)),sha256File:async p=>createHash('sha256').update(readFileSync(p)).digest('hex'),runInstaller:async()=>{installerCalls++;throw Error('Pipeline must use actual producer record');}};
+        const decision=await resolveFanHostDeployment(config,join(froot,'state'),io);assert(decision==='record-hit'&&installerCalls===0,'Actual frontend rejected or reinstalled actual PS record');frontend.push({ps:run.result.psVersion,ok:true,decision,installerCalls});
+      }catch(error){frontend.push({ps:run.result?.psVersion,ok:false,error:String(error)});}
+    }
+  }
+  const record={atUtc:new Date().toISOString(),source:sourcePin,consumer:{path:resolvePath('tools/fan_host_lifecycle_selftest.ts'),sha256:createHash('sha256').update(readFileSync('tools/fan_host_lifecycle_selftest.ts')).digest('hex')},runs,frontend,ok:runs.every(x=>x.exitCode===0&&x.result)&&frontend.every(x=>x.ok),familyComplete:false,sourceDrift:createHash('sha256').update(readFileSync(source)).digest('hex')!==sourcePin.sha256};writeFileSync(join(output,'RESULT.json'),JSON.stringify(record,null,2));console.log(JSON.stringify({ok:record.ok,runs:runs.map(x=>({ps:x.result?.psVersion,exitCode:x.exitCode,failed:x.result?.cases.filter((c:any)=>!c.ok),debt:x.result?.debt,error:x.error}))}));if(!record.ok)process.exitCode=1;
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes('--deployment-writer')) { await deploymentWriterOnly(); return; }
+  if (process.argv.includes('--auth-config')) { await authConfigOnly(); return; }
+  if (process.argv.includes('--deployment-config')) { await deploymentConfigOnly(); return; }
   assert(isLegacyUnauthenticatedFanHostHealth({ status: 200, body: '{"host":"YeManFanHost","protocolVersion":2}' }, 2),
     'legacy host health classifier must accept an unauthenticated protocol-2 response');
   assert(!isLegacyUnauthenticatedFanHostHealth({ status: 401, body: '{"error":"API_SESSION_REQUIRED"}' }, 2),
@@ -2079,92 +2600,7 @@ async function main(): Promise<void> {
   // "正常开启：逐文件 certutil=0、重复安装验证=0、全文件遍历/哈希=0"，
   // 而"记录缺失/不匹配"才允许**恰好一次**完整初始化（含便携包/旧安装首次开启）。
   // ---------------------------------------------------------------------------
-  {
-    const root = mkdtempSync(join(tmpdir(), 'fan927-deploy-'));
-    const payloadRoot = join(root, 'PowerControl', 'fan-host-v2');
-    const runtimeRoot = join(root, 'PowerControl', 'handheldcompanion-runtime', 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902');
-    const stateRoot = join(root, 'state');
-    mkdirSync(payloadRoot, { recursive: true });
-    mkdirSync(runtimeRoot, { recursive: true });
-    mkdirSync(stateRoot, { recursive: true });
-    const runtimeId = 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902';
-    const payloadManifestPath = join(payloadRoot, 'YeManFanHost.payload.json');
-    const runtimeManifestPath = join(runtimeRoot, 'HandheldCompanion.runtime.json');
-    writeFileSync(payloadManifestPath, JSON.stringify({
-      schemaVersion: 2,
-      runtimeManifest: `..\\handheldcompanion-runtime\\${runtimeId}\\HandheldCompanion.runtime.json`,
-      runtimeId,
-      files: [{ path: 'YeManFanHost.dll', sha256: 'a'.repeat(64) }],
-    }));
-    writeFileSync(runtimeManifestPath, JSON.stringify({
-      schemaVersion: 1, runtimeId, files: [{ path: 'HandheldCompanion.dll', sha256: 'b'.repeat(64) }],
-    }));
-    const sha256FileSync = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-    const recordPath = join(stateRoot, 'YeManFanHost.deployment.json');
-    const writeRecord = (overrides: Record<string, unknown> = {}) => writeFileSync(recordPath, JSON.stringify({
-      schemaVersion: 1,
-      validationRulesVersion: 1,
-      payloadRoot: payloadRoot.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase(),
-      runtimeRoot: runtimeRoot.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase(),
-      payloadManifestSha256: sha256FileSync(payloadManifestPath),
-      runtimeManifestSha256: sha256FileSync(runtimeManifestPath),
-      runtimeId,
-      result: 'ok',
-      ...overrides,
-    }));
-    const config = resolveFanHostConfig(join(root, 'PowerControl'));
-    config.hcRuntimeDirectory = runtimeRoot;
-    config.hcAssemblyPath = join(runtimeRoot, 'HandheldCompanion.dll');
-    const counters = { exists: 0, readPaths: [] as string[], hashPaths: [] as string[], installerRuns: 0, installerCalls: 0 };
-    const io: FanHostDeploymentIo = {
-      exists: async (path) => { counters.exists += 1; return existsSync(path); },
-      readTextFile: async (path) => { counters.readPaths.push(path); return readFileSync(path, 'utf8'); },
-      sha256File: async (path) => { counters.hashPaths.push(path); return sha256FileSync(path); },
-      runInstaller: async () => {
-        counters.installerCalls += 1;
-        // 模拟安装脚本的完整验证：只有它成功才会写出部署记录。
-        if (counters.installerRuns++ === 0) writeRecord();
-      },
-    };
-    // 记录命中：必须**零安装器调用**，且只对两个小清单取摘要（不遍历依赖目录、不读 DLL）。
-    writeRecord();
-    counters.readPaths.length = 0; counters.hashPaths.length = 0;
-    assert(await resolveFanHostDeployment(config, stateRoot, io) === 'record-hit',
-      'a matching deployment record must take the fast path');
-    assert(counters.installerCalls === 0,
-      `a matching deployment record must never run the installer (calls=${counters.installerCalls})`);
-    assert(counters.hashPaths.length === 2 &&
-      counters.hashPaths.every((path) => path === payloadManifestPath || path === runtimeManifestPath),
-    `the fast path may hash only the two small manifests (hashed=${counters.hashPaths.length})`);
-    assert(counters.readPaths.every((path) => path === payloadManifestPath || path === recordPath),
-      `the fast path must not read dependency files (read=${counters.readPaths.join(',')})`);
-    // 便携包/旧安装（记录缺失）：恰好一次完整初始化，成功后即可继续。
-    const absentRoot = join(root, 'state-absent');
-    mkdirSync(absentRoot, { recursive: true });
-    counters.installerCalls = 0; counters.installerRuns = 0;
-    const absentIo: FanHostDeploymentIo = { ...io, runInstaller: async () => {
-      counters.installerCalls += 1;
-      writeFileSync(join(absentRoot, 'YeManFanHost.deployment.json'), readFileSync(recordPath));
-    } };
-    assert(await resolveFanHostDeployment(config, absentRoot, absentIo) === 'initialized',
-      'a portable/legacy install without a record must initialize exactly once');
-    assert(counters.installerCalls === 1,
-      `a missing record must run the full validation exactly once (calls=${counters.installerCalls})`);
-    // 记录不匹配（包代描述变更）：同样只允许一次重新验证。
-    writeRecord({ runtimeId: 'HC-CANDIDATE-0.0.0.0-deadbeef-20990101' });
-    counters.installerCalls = 0;
-    counters.installerRuns = 0;
-    assert(await resolveFanHostDeployment(config, stateRoot, io) === 'initialized',
-      'a stale package-generation record must trigger one revalidation');
-    assert(counters.installerCalls === 1,
-      `an identity mismatch must run the full validation exactly once (calls=${counters.installerCalls})`);
-    // 安装器没有产出匹配记录 ⇒ 必须诚实拒绝，不能放行启动。
-    writeRecord({ result: 'failed' });
-    let refused = false;
-    try { await resolveFanHostDeployment(config, stateRoot, { ...io, runInstaller: async () => { counters.installerCalls += 1; } }); }
-    catch { refused = true; }
-    assert(refused, 'a missing/unowned deployment record after validation must refuse to start');
-  }
+  await originalDeploymentRecordCases();
 
   // ---------------------------------------------------------------------------
   // FAN-929（2026-09-27 用户裁决）：运行期周期成本消除的承重验证

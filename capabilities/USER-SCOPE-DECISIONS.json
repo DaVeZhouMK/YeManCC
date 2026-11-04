@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "date": "2026-10-19",
-  "updatedAt": "2026-10-19T11:47:09.607Z",
+  "updatedAt": "2026-11-03",
   "authority": "direct-human-user",
   "scopeRule": "Only model/hardware capabilities and their necessary actual consumer/lifecycle dependencies belong in this total-library goal. Generic settings UI is not imported merely because HC or an old test contains it.",
   "entries": [
@@ -34,6 +34,51 @@
       "userWords": "风扇、陀螺仪、手柄输入、机身灯光、背部按键、专用按键、震动、充电上限等已经启用的能力继续补全；未启用能力如副屏只记录缺口，准备收口不要无限扩大",
       "doesNotActivateDormantSourceHooks": true,
       "countsInactiveCapabilitiesAsCurrentIntegrationGap": false
+    },
+    {
+      "id": "performance.tdp-local-uxtu-library",
+      "status": "USER_AUTHORIZED_MINIMAL_CAPABILITY_UPGRADE",
+      "userWords": [
+        "开始 Universal-x86-Tuning-Utility 能力库升级，使用本地 G:/YeManCC-Work/Archives/Universal-x86-Tuning-Utility",
+        "TDP调度此次升级一起接回YMCC机型能力总库",
+        "核心开关和电压调度升级但是依然保持未激活"
+      ],
+      "requiredCapability": true,
+      "scope": "Unified TDP data and existing consumer binding; no scheduler rewrite, core/UV activation or real hardware operation. Logic-dependent new writers/HSMP remain deferred.",
+      "policy": "capabilities/uxtu-tdp-policy.json",
+      "existingCpuGpuMetadata": "Retain HC CPU/GPU identity declarations as source facts, not hardware admission; current independent engine stays in use.",
+      "deployment": "Not authorized by this library scope; installed state unchanged.",
+      "authorizedOn": "2026-10-31",
+      "integrationContract": "capabilities/TDP-INTEGRATION.md",
+      "supersedes": "2026-10-19 TDP library-wiring exclusion only; retained engine, HC CPU/GPU metadata and inactive core/UV/GPU boundaries remain."
+    },
+    {
+      "id": "performance.manual-ccd-cpu-offset-library",
+      "status": "USER_CONFIRMED_EXISTING_MANUAL_CONSUMERS_AND_LIBRARY_DATA",
+      "authorizedOn": "2026-11-03",
+      "authority": "direct-human-user",
+      "userWords": [
+        "能力总库开始补齐降压数据",
+        "已经交给能力总库补能力，你补消费端并和他保持通讯"
+      ],
+      "scope": "Confirm existing ccdControl.activation=true/voltageOffset.activation=true and explicit_settings_apply in sole uxtu-tdp-policy; complete existing all-core CPU offset candidate declarations, source validation and generated consumers. Consumer owner implements/runtime-tests separately.",
+      "policy": "capabilities/uxtu-tdp-policy.json",
+      "supersedes": "Only old statements that all core/UV paths remain inactive;2026-10-31 history retained. Legacy coreSwitch/voltageScheduling/autostart and automatic reapply remain false.",
+      "preserved": {
+        "cpuIdentityAdmission": true,
+        "physicalCcdPowerOff": false,
+        "voltageConsumerPlanes": [
+          "core",
+          "cache"
+        ],
+        "amdScope": "all_core",
+        "gpuAndSaConsumers": false,
+        "hardwareAcceptanceFromDeclaration": false,
+        "hardwareAndDeploymentAuthorizationUnchanged": true
+      },
+      "integrationContract": "capabilities/TDP-INTEGRATION.md",
+      "consumerCoordination": "01a18e11-5454-72c3-82c2-4add8d8b6179",
+      "evidence": "Current policy manual flags and existing native/helper/Settings consumers; this record does not activate new product paths."
     }
   ],
   "futureAiRules": [
@@ -41,7 +86,7 @@
     "Do not reintroduce it on HC update or solely to complete generic UI coverage.",
     "Require specific hardware consumer/lifecycle dependency before adding generic settings UI candidates.",
     "Continue fan, motion, controller/input/feedback and required release/recovery work.",
-    "CPU/GPU metadata and current independent CPU/TDP consumption stay unchanged."
+    "HC CPU/GPU metadata remains reference-only. The 2026-10-31 TDP upgrade binds existing TDP consumers to the sole YMCC capability library; manual CCD affinity and CPU static offset use their explicit Settings admission; legacy startup, automatic voltage scheduling and GPU/SA remain inactive. HC limits do not override current values."
   ],
   "installedApplicationChanged": false
 }

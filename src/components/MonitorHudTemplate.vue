@@ -228,8 +228,8 @@ const boardStyle = computed(() => ({
   ...(emptyHidden.value ? { width: '1px', height: '1px', padding: '0', visibility: 'hidden' as const, backgroundColor: 'transparent' } : {}),
   width: emptyHidden.value ? '1px' : horizontal.value && summary.value ? 'max-content' :
     horizontal.value && barWidth.value !== null ? barWidth.value + 'px' : undefined,
-  // Scale the complete board, not just text: spacing, tiles, borders and radius.
-  fontSize: '13px', '--hud-text-scale':textScale.value, '--hud-fps-value-scale':metricScale('fps'), fontFamily: hudFontFamily(props.appearance.font), '--hud-fps-font': props.appearance.fpsFont === 'inherit' || !props.appearance.fpsFont ? 'inherit' : hudFontFamily(props.appearance.fpsFont), zoom: props.appearance.scale,
+  // Whole-board zoom remains independent from the glyph scale below.
+  fontSize: '13px', '--hud-text-scale':textScale.value, '--hud-type-ratio':textScale.value/1.2, '--hud-fps-value-scale':metricScale('fps'), fontFamily: hudFontFamily(props.appearance.font), '--hud-fps-font': props.appearance.fpsFont === 'inherit' || !props.appearance.fpsFont ? 'inherit' : hudFontFamily(props.appearance.fpsFont), zoom: props.appearance.scale,
   '--hud-fps-size': fpsEmphasis.value ? fpsEmphasisSize.value : '1.65em',
   backgroundColor: emptyHidden.value || honeycomb.value ? 'transparent' : `rgba(16,22,31,${props.appearance.opacity})`, borderRadius: props.appearance.radius + 'px',
   '--hud-opacity': props.appearance.opacity, '--hud-image-opacity': props.appearance.underlayOpacity ?? .28,
@@ -420,10 +420,10 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud { position:relative;isolation:isolate;contain:layout paint;color:#f1f5fa;padding:.8em 1em;width:max-content;max-width:none;box-sizing:border-box;font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;line-height:1.35;font-variant-numeric:tabular-nums;pointer-events:none;opacity:1; }
 .hud-column { display:contents; }
 .hud-group { display:flex;gap:var(--hud-gap);padding:.5em 0;min-width:0;align-self:start; }
-.hud-group-content { min-width:0; }.hud-group-label { color:var(--hud-accent);font-size:calc(.78em * var(--hud-text-scale,1));font-weight:600;letter-spacing:.06em;margin-bottom:.4em; }
+.hud-group-content { min-width:0; }.hud-group-label { color:var(--hud-accent);font-size:calc(.9em * var(--hud-text-scale,1));font-weight:600;letter-spacing:.06em;margin-bottom:.4em; }
 /* Intrinsic tracks replace the old fixed 22em board and stretching FPS cell. */
 .hud-values { display:grid;grid-template-columns:repeat(var(--hud-value-cols),minmax(4em,max-content));gap:.5em .8em; }
-.hud-metric { display:flex;flex-direction:column;min-width:0; }.hud-metric-label { font-size:calc(.76em * var(--hud-text-scale,1));color:var(--hud-secondary);white-space:nowrap; }.hud-number { font-size:calc(1em * var(--hud-text-scale,1));white-space:nowrap; }.hud-number small { font-size:.72em;margin-left:.25em;color:var(--hud-secondary); }
+.hud-metric { display:flex;flex-direction:column;min-width:0; }.hud-metric-label { font-size:calc(.85em * var(--hud-text-scale,1));color:var(--hud-secondary);white-space:nowrap; }.hud-number { font-size:calc(1em * var(--hud-text-scale,1));white-space:nowrap; }.hud-number small { font-size:.8em;margin-left:.25em;color:var(--hud-secondary); }
 .hud-value-digits { display:inline-block;text-align:left;font-variant-numeric:tabular-nums; }
 .hud-unit--hidden,.hud-temp-warning--inactive { visibility:hidden; }
 .hud-fps-low-value { display:inline-block;min-width:3ch;text-align:left;font-variant-numeric:tabular-nums; }
@@ -468,7 +468,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--summary-split [data-hud-group="CPU"]::before { content:'';grid-column:2;grid-row:1/span 2;align-self:stretch;width:1px;background:rgba(232,242,252,.1); }
 /* Eight memory switches: two compact rows, preserving the overall board zoom. */
 .ymcc-hud [data-hud-group="内存"] .hud-values { grid-template-columns:repeat(var(--hud-value-cols),minmax(0,max-content)); }
-.ymcc-hud--dense [data-hud-group="内存"] .hud-values { font-size:.88em; }
+.ymcc-hud--dense [data-hud-group="内存"] .hud-values { font-size:1em; }
 /* Battery scalars use short inline captions. The level spans their two rows;
    without a level, power/time become a single stack with no reserved blank cell.
    These selectors apply to all base layouts and their line styles, including inline capsules. */
@@ -505,8 +505,8 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 
 .ymcc-hud--cinema { padding:.45em .9em;outline:1px solid rgb(225 233 242 / calc(var(--hud-opacity) * .16)); }
 .ymcc-hud--cinema .hud-fps strong { font-size:calc(2.7em * var(--hud-text-scale,1) * var(--hud-fps-value-scale,1)); }
-.ymcc-hud--cinema .hud-metric-label { font-size:calc(.7em * var(--hud-text-scale,1)); }
-.ymcc-hud--cinema .hud-group-label { font-size:calc(.68em * var(--hud-text-scale,1));letter-spacing:.14em; }
+.ymcc-hud--cinema .hud-metric-label { font-size:calc(.85em * var(--hud-text-scale,1)); }
+.ymcc-hud--cinema .hud-group-label { font-size:calc(.85em * var(--hud-text-scale,1));letter-spacing:.14em; }
 .ymcc-hud--cinema .hud-chart svg { height:1.6em; }
 .ymcc-hud--cinema .hud-core-bars { --hud-core-row-height:.85em; }
 
@@ -550,9 +550,9 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-group-label { margin-bottom:.6em;letter-spacing:.08em; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-values { grid-template-columns:repeat(var(--hud-value-cols),minmax(0,1fr));gap:.65em .7em; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-metric { flex-direction:column;align-items:stretch;gap:.1em; }
-.ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-metric-label { font-size:calc(.75em * var(--hud-text-scale,1)); }
+.ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-metric-label { font-size:calc(.85em * var(--hud-text-scale,1)); }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-number { font-size:calc(1.13em * var(--hud-text-scale,1));line-height:1.2; }
-.ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-number small { font-size:.65em; }
+.ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-number small { font-size:.8em; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] { display:grid;grid-template-columns:9em minmax(0,1fr);gap:.4em 1em;padding:.25em .25em .55em;background:none;border-radius:0; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-group-content { display:contents; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-values { grid-column:2;display:flex;flex-direction:column;gap:.5em;justify-content:center; }
@@ -565,8 +565,8 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-percent-graph--inline .hud-percent-track { height:.3em;min-width:0; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) .hud-core-bars { --hud-core-row-height:1.25em;gap:.2em;min-width:0; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) :is([data-hud-section="ram"],[data-hud-section="vram"]) { grid-column:auto; }
-.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-values { font-size:.92em;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em .35em; }
-.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-metric-label { font-size:calc(.72em * var(--hud-text-scale,1)); }
+.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-values { font-size:1em;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em .35em; }
+.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-metric-label { font-size:calc(.85em * var(--hud-text-scale,1)); }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-number { font-size:calc(1.1em * var(--hud-text-scale,1)); }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] :is([data-hud-metric="ramUsage"],[data-hud-metric="vramUsage"]) { grid-column:1/-1;display:grid;grid-template-columns:1fr auto;gap:.1em;align-items:baseline; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-percent-graph--inline { grid-column:1/-1; }
@@ -592,7 +592,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) { padding:.9em 1em;border-radius:0 !important;outline:0;border-top:2px solid rgb(225 233 242 / calc(var(--hud-opacity) * .55)); }
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-group { background:none;border-radius:0;padding:.35em 0 .6em;border-bottom:1px solid rgb(225 233 242 / calc(var(--hud-opacity) * .18)); }
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-column { gap:.3em .9em; }
-.ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-group-label { font-size:calc(.72em * var(--hud-text-scale,1));letter-spacing:.18em;margin-bottom:.6em; }
+.ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-group-label { font-size:calc(.85em * var(--hud-text-scale,1));letter-spacing:.18em;margin-bottom:.6em; }
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) :is([data-hud-group="CPU"],[data-hud-group="GPU"],[data-hud-group="读写"]) .hud-values { grid-template-columns:repeat(2,minmax(0,1fr));gap:.5em .8em; }
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-metric { flex-direction:row;align-items:baseline;justify-content:space-between;gap:.3em; }
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-number { font-size:calc(.96em * var(--hud-text-scale,1)); }
@@ -602,7 +602,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) .hud-core-track { border-radius:0;border:0; }
 
 .ymcc-hud--verticalLedger:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-metric { flex-direction:column;align-items:stretch;gap:.15em; }
-.ymcc-hud--verticalLedger:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-metric-label { font-size:calc(.72em * var(--hud-text-scale,1)); }
+.ymcc-hud--verticalLedger:not(.ymcc-hud--compact) [data-hud-group="内存"] .hud-metric-label { font-size:calc(.85em * var(--hud-text-scale,1)); }
 
 /* The FPS-family table has one numerical edge and one unit start in every
    vertical layout. Per-metric reservation slots must not left-align readings. */
@@ -613,7 +613,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-metric { display:grid;grid-template-columns:minmax(0,1fr) max-content;align-items:baseline;gap:.4em; }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-number { display:grid;grid-template-columns:7ch 2.6em;column-gap:.5em;align-items:baseline;font-size:calc(1.13em * var(--hud-text-scale,1)); }
 .ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-value-digits { width:auto;text-align:right;justify-self:end; }
-.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-number small { display:block;margin:0;text-align:left;font-size:.65em; }
+.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] .hud-number small { display:block;margin:0;text-align:left;font-size:.8em; }
 /* Keep the common FPS grid stronger than each vertical's body layout. */
 .ymcc-hud.ymcc-hud--vertical:not(.ymcc-hud--compact) [data-hud-group="帧率"] { display:grid;grid-template-columns:9em minmax(0,1fr);padding:0 0 .55em;gap:.4em 1em;align-items:center;border:0; }
 
@@ -641,17 +641,17 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--duet-summary .hud-duet-hero { grid-column:1;grid-row:1;position:relative;min-width:0;min-height:var(--duet-height); }
 .hud-duet-fps { display:block; }
 .hud-duet-caption { position:absolute;left:50%;bottom:0;transform:translateX(-50%);white-space:nowrap; }
-.hud-duet .hud-duet-caption,.hud-duet-reading .hud-metric-label { color:rgb(227 237 249 / .62);font-size:calc(10px * var(--hud-text-scale));font-weight:450;line-height:1.4;letter-spacing:0; }
+.hud-duet .hud-duet-caption,.hud-duet-reading .hud-metric-label { color:rgb(227 237 249 / .85);font-size:calc(12px * var(--hud-text-scale));font-weight:450;line-height:1.4;letter-spacing:0; }
 .hud-duet-line { position:absolute;display:flex;align-items:baseline;left:var(--duet-left);top:var(--duet-top);width:max-content; }
 .hud-duet-line strong { display:flex;align-items:baseline;flex:none;font-family:var(--hud-fps-font);font-size:var(--duet-font-size);font-weight:500;line-height:1.05;letter-spacing:0;color:#f0f4fa;font-variant-numeric:normal; }
 .hud-duet-digit { display:inline-block;flex:none;width:var(--duet-cell);text-align:left;letter-spacing:0; }
 .hud-duet-placeholder { font-size:.42em;line-height:1.05;letter-spacing:0; }
 .hud-duet-baseline { display:inline-block;width:0;height:0;flex:none;align-self:baseline; }
-.hud-duet .hud-duet-readouts { grid-column:2;grid-row:1;display:grid;align-content:start;row-gap:21px;border-left:1px solid rgb(225 239 253 / .16);padding-left:18px; }
+.hud-duet .hud-duet-readouts { grid-column:2;grid-row:1;display:grid;align-self:start;align-content:start;row-gap:calc(21px * var(--hud-type-ratio));border-left:1px solid rgb(225 239 253 / .16);padding-left:18px; }
 .hud-duet:not(:has(.hud-duet-hero)) .hud-duet-readouts { grid-column:1;border-left:0;padding-left:0; }
 .ymcc-hud--duet-summary .hud-duet-readouts::before { display:none;content:none; }
 .hud-duet-reading { display:flex;flex-direction:column;min-width:max-content; }
-.hud-duet-reading .hud-metric-label { order:2;margin-top:5px;text-align:center; }
+.hud-duet-reading .hud-metric-label { order:2;margin-top:calc(5px * var(--hud-type-ratio));text-align:center; }
 .hud-duet-value { position:relative;display:flex;justify-content:center;align-items:baseline;white-space:nowrap;margin:0; }
 .hud-duet-value b { display:inline-block;flex:none;font-size:var(--duet-reading-size);font-weight:550;line-height:1.1;letter-spacing:0;font-variant-numeric:tabular-nums;color:#f0f4fa; }
 .hud-duet-reserve { display:flex;align-items:baseline;gap:5px;visibility:hidden;pointer-events:none; }
@@ -659,7 +659,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .hud-duet-live>.hud-duet-warning { position:absolute;left:calc(100% + 5px);bottom:0; }
 .hud-duet-number { white-space:nowrap; }
 .hud-duet-warning--quiet { visibility:hidden; }
-.hud-duet-value small { font-size:calc(11px * var(--hud-text-scale));font-weight:450;color:rgb(232 241 253 / .72);line-height:1.3; }
+.hud-duet-value small { font-size:calc(13px * var(--hud-text-scale));font-weight:450;color:rgb(232 241 253 / .88);line-height:1.3; }
 .hud-duet--unmeasured .hud-duet-line { left:50%;top:4px;transform:translateX(-50%); }
 .hud-duet--unmeasured .hud-duet-caption { left:50%; }
 .hud-duet-warning { color:#ff6575;font-size:calc(12px * var(--hud-text-scale));font-weight:750; }
@@ -667,12 +667,13 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 
 /* 蜂窝监控: static decoration over the existing data/visibility pipeline. */
 .ymcc-hud--honeycomb { contain:layout;display:grid;grid-template-columns:repeat(2,minmax(max-content,1fr));gap:16px 25px;padding:calc(25px * var(--hud-honeycomb-text)) calc(33px * var(--hud-honeycomb-text)) calc(19px * var(--hud-honeycomb-text)) calc(37px * var(--hud-honeycomb-text));border-radius:0!important;outline:0;color:var(--hud-accent);--hud-secondary:color-mix(in srgb,var(--hud-accent) 48%,#b09c92); }
+.ymcc-hud.ymcc-hud--honeycomb:not(.ymcc-hud--honeycomb-summary) { display:grid; }
 .ymcc-hud--honeycomb:has(.hud-honeycomb-topline) { min-width:calc(560px * var(--hud-honeycomb-text)); }
 .ymcc-hud--honeycomb .hud-column { display:contents; }
 .ymcc-hud--honeycomb .hud-group { padding:0 0 10px;border:0;border-bottom:1px solid color-mix(in srgb,var(--hud-accent) 20%,transparent);background:none;align-items:start; }
 .ymcc-hud--honeycomb [data-hud-group="帧率"].hud-group { grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:24px; }
 .ymcc-hud--honeycomb .hud-fps { display:flex;flex-direction:column;align-items:center;gap:9px; }
-.ymcc-hud--honeycomb .hud-fps-label { order:2;font-weight:450;line-height:16px;color:var(--hud-secondary); }
+.ymcc-hud--honeycomb .hud-fps-label { order:2;font-weight:450;line-height:1.4;color:var(--hud-secondary); }
 .ymcc-hud--honeycomb .hud-values { gap:9px 16px; }
 .ymcc-hud--honeycomb .hud-number,.ymcc-hud--honeycomb .hud-duet-value b { color:var(--hud-accent); }
 .hud-honeycomb-topline { grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:calc(13px * var(--hud-honeycomb-text));border-bottom:1px solid color-mix(in srgb,var(--hud-accent) 23%,transparent); }
@@ -688,15 +689,15 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--honeycomb .hud-fps strong.hud-honeycomb-fps-value { font-size:calc(var(--hud-honeycomb-fps-height) * .9);line-height:1;letter-spacing:0; }
 .hud-honeycomb-accessible-value { position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap; }
 .hud-honeycomb-placeholder,.ymcc-hud--honeycomb .hud-fps-placeholder { font-size:.48em;line-height:1;letter-spacing:.055em; }
-.hud-honeycomb-fps-caption { font-size:calc(11px * var(--hud-honeycomb-text));line-height:16px;letter-spacing:.055em;color:var(--hud-secondary);margin-top:calc(9px * var(--hud-honeycomb-text)); }
+.hud-honeycomb-fps-caption { font-size:calc(14px * var(--hud-honeycomb-text));line-height:1.4;letter-spacing:.055em;color:var(--hud-secondary);margin-top:calc(9px * var(--hud-honeycomb-text)); }
 .hud-honeycomb-readouts { grid-column:2;grid-row:1;display:grid;gap:calc(14px * var(--hud-honeycomb-text));border-left:1px solid color-mix(in srgb,var(--hud-accent) 26%,transparent);padding-left:calc(21px * var(--hud-honeycomb-text));align-content:center;min-width:calc(188px * var(--hud-honeycomb-text)); }
 .hud-honeycomb-primary:not(:has(.hud-honeycomb-fps)) { grid-template-columns:max-content; }
 .hud-honeycomb-primary:not(:has(.hud-honeycomb-fps)) .hud-honeycomb-readouts { grid-column:1;border-left:0;padding-left:0; }
 .ymcc-hud--honeycomb .hud-honeycomb-readouts::before { display:none;content:none; }
 .hud-honeycomb-reading { text-align:center;min-width:0; }
 .hud-honeycomb-reading .hud-duet-value b { font-weight:500; }
-.hud-honeycomb-reading .hud-duet-value small { font-size:calc(11px * var(--hud-honeycomb-text));color:var(--hud-secondary); }
-.hud-honeycomb-reading-caption { display:block;margin-top:calc(4px * var(--hud-honeycomb-text));font-size:calc(10px * var(--hud-honeycomb-text));line-height:14px;color:var(--hud-secondary); }
+.hud-honeycomb-reading .hud-duet-value small { font-size:calc(15px * var(--hud-honeycomb-text));color:var(--hud-secondary); }
+.hud-honeycomb-reading-caption { display:block;margin-top:calc(4px * var(--hud-honeycomb-text));font-size:calc(14px * var(--hud-honeycomb-text));line-height:1.4;color:var(--hud-secondary); }
 .hud-honeycomb-bottomline { grid-column:1/-1;display:flex;align-items:center;gap:12px;margin-top:calc(18px * var(--hud-honeycomb-text));font:500 calc(8px * var(--hud-honeycomb-text))/1 Consolas,monospace;letter-spacing:.15em;color:var(--hud-secondary); }
 .hud-honeycomb-bottomline>span:nth-child(2) { margin-left:auto; }
 .hud-honeycomb-bottomline>span:last-child { font-size:18px;line-height:10px; }

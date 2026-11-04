@@ -1,5 +1,99 @@
+#if defined(YMCC_MEDIA_NORMALIZATION_CONSTANT_ONLY)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#include <cstdlib>
+#include <new>
+#include <iostream>
+#include <atomic>
+static thread_local bool normalizationMeasure=false;
+static thread_local unsigned long long normalizationAllocs=0,normalizationBytes=0;
+void* operator new(std::size_t n){if(void* p=std::malloc(n?n:1)){if(normalizationMeasure){++normalizationAllocs;normalizationBytes+=n;}return p;}throw std::bad_alloc();}
+void operator delete(void* p)noexcept{std::free(p);}
+void operator delete(void* p,std::size_t)noexcept{std::free(p);}
+#include "../native/shared_game_media.h"
+using namespace ymcc::media;
+static unsigned constantChecks=0;
+static void constantCheck(bool value,const char* label){++constantChecks;if(!value)throw std::runtime_error(label);}
+static unsigned long long threadCpu(){FILETIME c{},e{},k{},u{};constantCheck(GetThreadTimes(GetCurrentThread(),&c,&e,&k,&u)!=FALSE,"thread time");ULARGE_INTEGER a{},b{};a.LowPart=k.dwLowDateTime;a.HighPart=k.dwHighDateTime;b.LowPart=u.dwLowDateTime;b.HighPart=u.dwHighDateTime;return a.QuadPart+b.QuadPart;}
+static Json constantEntry(int id){return {{"key","steam-"+std::to_string(id)},{"appId",id},{"bindingRevision",4},{"status","missing"},{"name","Fixture "+std::to_string(id)},{"assets",Json::object()},{"manualSlots",Json::object()},{"deletedSlots",Json::object()},{"invalidSlots",Json::object()},{"playback",{{"start",8},{"end",38},{"fit","cover"}}},{"playbackExplicit",false},{"modeExplicit",false},{"wallpaperMode","static"},{"unknownField",{{"preserved",true}}}};}
+static std::string constantReadBytes(const fs::path& p){std::ifstream f(p,std::ios::binary);return {std::istreambuf_iterator<char>(f),{}};}
+int wmain(int argc,wchar_t** argv){try{
+ constantCheck(argc==2||(argc==3&&std::wstring_view(argv[2])==L"--default-ownership-only"),"fresh owned root and known selection required");const fs::path root=fs::absolute(argv[1]);constantCheck(!fs::exists(root),"owned root must be fresh");fs::create_directories(root);Store store(root);const auto index=root/L"config"/L"game-media.json";Json costs=Json::array(),semantics=Json::array();
+
+ if(argc==3){
+  auto entry=constantEntry(570);entry.erase("playback");entry.erase("playbackExplicit");auto second=entry;second["key"]="steam-571";second["appId"]=571;atomicWrite(index,{{"schemaVersion",1},{"entries",{{"steam-570",entry},{"steam-571",second}}}});const auto disk=constantReadBytes(index);
+  std::vector<fs::path> paths;for(int i=0;i<8;i++){const auto path=root/(L"concurrent-"+std::to_wstring(i));paths.push_back(path);atomicWrite(path/L"config"/L"game-media.json",{{"schemaVersion",1},{"entries",{{"steam-570",entry}}}});}
+  std::vector<Json> results(8);std::vector<std::string> errors(8);std::atomic<unsigned> ready=0;std::atomic<bool> go=false;std::vector<std::thread> threads;
+  for(int i=0;i<8;i++)threads.emplace_back([&,i]{ready.fetch_add(1);while(!go.load())std::this_thread::yield();try{results[i]=Store(paths[i]).resolve({{"appId",570}});}catch(const std::exception& e){errors[i]=e.what();}});
+  while(ready.load()!=8)std::this_thread::yield();go.store(true);for(auto& t:threads)t.join();const Json expected={{"start",8},{"end",38},{"fit","cover"}};
+  for(int i=0;i<8;i++)constantCheck(errors[i].empty()&&results[i]["playback"]==expected,"concurrent first-use default is complete and stable");
+  results[0]["playback"]["start"]=99;for(int i=1;i<8;i++)constantCheck(results[i]["playback"]==expected,"returned record does not alias another record");
+  auto first=store.resolve({{"appId",570}});constantCheck(first["playback"]==expected,"caller mutation cannot alter immutable default");first["playback"]["end"]=99;auto next=store.resolve({{"appId",571}});constantCheck(next["playback"]==expected,"other record receives independent default");constantCheck(store.resolve({{"appId",570}})["playback"]==expected,"subsequent read remains fresh and independent");constantCheck(constantReadBytes(index)==disk,"default ownership checks cannot write source index");
+  std::cout<<Json({{"status","PASS_NORMALIZATION_DEFAULT_OWNERSHIP_ONLY"},{"checks",constantChecks},{"storeResolveCalls",11},{"threadResults",results},{"next",next},{"threadCount",8},{"sourceIndexUnchanged",true},{"networkOrAppControl",false}}).dump()<<'\n';return 0;
+ }
+ for(int count:{16,128,512}){Json entries=Json::object();for(int i=0;i<count;i++)entries["steam-"+std::to_string(570+i)]=constantEntry(570+i);atomicWrite(index,{{"schemaVersion",1},{"revision",7},{"entries",entries}});const auto disk=constantReadBytes(index);const Json request={{"appId",570}},expected=store.resolve(request);LARGE_INTEGER from{},to{},frequency{};QueryPerformanceFrequency(&frequency);QueryPerformanceCounter(&from);const auto cpu=threadCpu();normalizationAllocs=normalizationBytes=0;normalizationMeasure=true;std::vector<Json> results;results.reserve(12);for(int i=0;i<12;i++)results.push_back(store.resolve(request));normalizationMeasure=false;const auto usedCpu=threadCpu()-cpu;QueryPerformanceCounter(&to);const auto allocs=normalizationAllocs,bytes=normalizationBytes;for(const auto& result:results)constantCheck(result==expected,"repeated normalized result unchanged");constantCheck(constantReadBytes(index)==disk,"read-only resolve cannot rewrite index");costs.push_back({{"entries",count},{"resolveCalls",12},{"allocations",allocs},{"allocatedBytes",bytes},{"cpuMs",double(usedCpu)/10000.0},{"wallMs",double(to.QuadPart-from.QuadPart)*1000.0/double(frequency.QuadPart)},{"result",expected}});}
+ const Json image={{"id","fixture-static"},{"kind","image"},{"extension","jpg"},{"mime","image/jpeg"},{"revision","1"},{"bytes",4}};const Json video={{"id","fixture-video"},{"kind","video"},{"extension","mp4"},{"mime","video/mp4"},{"revision","1"},{"bytes",12}};fs::create_directories(store.assetPath(image).parent_path());{std::ofstream file(store.assetPath(image),std::ios::binary);file<<"jpeg";}{std::ofstream file(store.assetPath(video),std::ios::binary);file<<"ftypisom";}
+ for(const auto& kind:{"defaults","legacy-image","legacy-video","explicit-trim","deleted-video","invalid-video","static-fallback","alias"}){auto entry=constantEntry(570);if(std::string(kind)!="defaults")entry["asset"]=std::string(kind)=="legacy-image"?image:video;if(std::string(kind)=="legacy-image")entry["manual"]=true;if(std::string(kind)=="explicit-trim"){entry["playback"]={{"start",3},{"end",19},{"fit","contain"}};entry["playbackExplicit"]=true;}if(std::string(kind)=="deleted-video")entry["deletedSlots"]["dynamic"]=true;if(std::string(kind)=="invalid-video"){entry["assets"]["dynamic"]=video;entry["invalidSlots"]["dynamic"]="fixture-video";}if(std::string(kind)=="static-fallback"){entry["assets"]={{"static",image},{"dynamic",video}};entry["invalidSlots"]["dynamic"]="fixture-video";entry["wallpaperMode"]="dynamic";entry["modeExplicit"]=true;}Json document={{"schemaVersion",1},{"entries",{{"steam-570",entry}}}};if(std::string(kind)=="alias")document["aliases"]={{"steam-571","steam-570"}};atomicWrite(index,document);const auto before=constantReadBytes(index);const auto result=store.resolve({{"appId",std::string(kind)=="alias"?571:570}});constantCheck(result["unknownField"]["preserved"]==true,"unrelated metadata preserved");constantCheck(constantReadBytes(index)==before,"semantic read does not write");semantics.push_back({{"case",kind},{"result",result}});}
+ for(const auto& bad:{std::string("{"),std::string("{\"schemaVersion\":2,\"entries\":{}}"),std::string("{\"entries\":[]}")}){fs::create_directories(index.parent_path());{std::ofstream file(index,std::ios::binary);file<<bad;}bool rejected=false;try{store.resolve({{"appId",570}});}catch(...){rejected=true;}constantCheck(rejected,"bad index remains rejected");constantCheck(constantReadBytes(index)==bad,"bad index remains unchanged");}
+ std::cout<<Json({{"status","PASS_NORMALIZATION_PUBLIC_STORE_ONLY"},{"checks",constantChecks},{"costs",costs},{"semantics",semantics},{"sampleScope","Actual Store resolve and owned file IO, warm immutable literal, fixed12 lookups per16/128/512 entries"},{"networkOrAppControl",false},{"globalCpuPercent",nullptr}}).dump()<<'\n';return 0;
+}catch(const std::exception& e){normalizationMeasure=false;std::cerr<<e.what()<<'\n';return 1;}}
+#else
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#ifdef YMCC_IDENTITY_STORM_PORTS
+// Owned-file fault ports for this original consumer's narrow identity mode.
+#include <winsock2.h>
+#include <windows.h>
+#include <winioctl.h>
+#include <algorithm>
+#include <cwctype>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <mutex>
+#include <map>
+#include <vector>
+#include <thread>
+namespace identityFixture {
+inline bool active=false;
+inline std::wstring root,canonical;
+inline std::string fault;
+inline std::function<void()> beforeStage,afterCommit;
+inline std::mutex mx;
+inline std::map<HANDLE,std::wstring> handles;
+inline unsigned faults=0,network=0,process=0,outside=0;
+inline std::wstring clean(std::wstring x){if(x.starts_with(L"\\\\?\\"))x=x.substr(4);std::replace(x.begin(),x.end(),L'/',L'\\');for(auto& c:x)c=static_cast<wchar_t>(towlower(c));return x;}
+inline HANDLE WINAPI createFile(LPCWSTR name,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES security,DWORD disposition,DWORD attributes,HANDLE prototype){
+ const auto file=clean(name);if(active&&!file.starts_with(clean(root)+L"\\")){++outside;SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
+ if(active&&file.find(L".identity-next-")!=std::wstring::npos&&(access&GENERIC_WRITE)&&beforeStage){auto f=std::move(beforeStage);beforeStage={};f();}
+ if(active&&fault=="create"&&file.find(L".identity-next-")!=std::wstring::npos){++faults;SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
+ const auto h=CreateFileW(name,access,share,security,disposition,attributes,prototype);if(h!=INVALID_HANDLE_VALUE){std::lock_guard<std::mutex> guard(mx);handles[h]=file;}return h;
+}
+inline BOOL WINAPI closeHandle(HANDLE h){{std::lock_guard<std::mutex> guard(mx);handles.erase(h);}return CloseHandle(h);}
+inline bool stage(HANDLE h){std::lock_guard<std::mutex> guard(mx);const auto i=handles.find(h);return i!=handles.end()&&i->second.find(L".identity-next-")!=std::wstring::npos;}
+inline BOOL WINAPI readFile(HANDLE h,LPVOID p,DWORD n,LPDWORD read,LPOVERLAPPED over){bool canonicalRead=false;{std::lock_guard<std::mutex> guard(mx);const auto i=handles.find(h);canonicalRead=i!=handles.end()&&i->second==clean(canonical);}if(active&&fault=="read"&&canonicalRead){++faults;if(read)*read=0;SetLastError(ERROR_READ_FAULT);return FALSE;}return ReadFile(h,p,n,read,over);}
+inline BOOL WINAPI writeFile(HANDLE h,LPCVOID p,DWORD n,LPDWORD written,LPOVERLAPPED over){if(active&&stage(h)&&(fault=="write"||fault=="short")){++faults;if(written)*written=0;SetLastError(ERROR_WRITE_FAULT);return fault=="short"?TRUE:FALSE;}return WriteFile(h,p,n,written,over);}
+inline BOOL WINAPI flush(HANDLE h){if(active&&stage(h)&&fault=="flush"){++faults;SetLastError(ERROR_WRITE_FAULT);return FALSE;}return FlushFileBuffers(h);}
+inline BOOL WINAPI move(LPCWSTR from,LPCWSTR to,DWORD flags){const bool commit=active&&clean(to)==clean(canonical)&&clean(from).find(L".identity-next-")!=std::wstring::npos;
+ if(commit&&(fault=="rename"||fault=="false-ack")){++faults;SetLastError(ERROR_WRITE_FAULT);return fault=="false-ack"?TRUE:FALSE;}
+ if(active&&fault=="backup"&&clean(to).find(L".identity-corrupt-")!=std::wstring::npos){++faults;SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+ const auto ok=MoveFileExW(from,to,flags);if(ok&&commit&&afterCommit){auto f=std::move(afterCommit);afterCommit={};f();}return ok;}
+inline HANDLE WINAPI createMutex(LPSECURITY_ATTRIBUTES attr,BOOL owned,LPCWSTR name){if(active&&name&&std::wstring(name)==L"Local\\YeManCustomSteamLibraryDataTransaction")return CreateMutexW(attr,owned,(L"Local\\YMCC-LibraryIdentity-Owned-"+std::to_wstring(GetCurrentProcessId())).c_str());return CreateMutexW(attr,owned,name);}
+inline HANDLE WINAPI openProcess(DWORD a,BOOL b,DWORD c){if(active){++process;SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return OpenProcess(a,b,c);}
+inline BOOL WINAPI createProcess(LPCWSTR a,LPWSTR b,LPSECURITY_ATTRIBUTES c,LPSECURITY_ATTRIBUTES d,BOOL e,DWORD f,LPVOID g,LPCWSTR h,LPSTARTUPINFOW i,LPPROCESS_INFORMATION j){if(active){++process;SetLastError(ERROR_ACCESS_DENIED);return FALSE;}return CreateProcessW(a,b,c,d,e,f,g,h,i,j);}
+inline SOCKET WSAAPI socketPort(int a,int b,int c){if(active){++network;WSASetLastError(WSAEACCES);return INVALID_SOCKET;}return socket(a,b,c);}
+}
+#define CreateFileW identityFixture::createFile
+#define CloseHandle identityFixture::closeHandle
+#define ReadFile identityFixture::readFile
+#define WriteFile identityFixture::writeFile
+#define FlushFileBuffers identityFixture::flush
+#define MoveFileExW identityFixture::move
+#define CreateMutexW identityFixture::createMutex
+#define OpenProcess identityFixture::openProcess
+#define CreateProcessW identityFixture::createProcess
+#define socket(...) identityFixture::socketPort(__VA_ARGS__)
+#endif
 #include "../native/shared_game_media_server.h"
 #include "../native/shared_game_media_shortcut.h"
 #include "../native/decky_sidebar_diagnostics.h"
@@ -14,7 +108,134 @@ static std::string httpGet(const std::string& url,const std::string& method="GET
  const auto request=method+" "+target+" HTTP/1.1\r\nHost: "+(validHost?"127.0.0.1":"untrusted.invalid")+":"+std::to_string(port)+"\r\nConnection: close\r\n"+extra+"\r\n";
  send(socketHandle,request.data(),static_cast<int>(request.size()),0);std::string result;char bytes[4096];for(;;){const int count=recv(socketHandle,bytes,sizeof bytes,0);if(count<=0)break;result.append(bytes,count);}closesocket(socketHandle);return result;
 }
+
+#ifdef YMCC_IDENTITY_STORM_PORTS
+namespace identityStorm {
+static unsigned assertions=0;
+static void require(bool condition,const char* why){++assertions;if(!condition)throw std::runtime_error(why);}
+static void bytes(const fs::path& path,const std::string& text){fs::create_directories(path.parent_path());std::ofstream out(custom_steam_library::ioPath(path),std::ios::binary|std::ios::trunc);out.write(text.data(),static_cast<std::streamsize>(text.size()));require(bool(out),"owned-file-write");}
+static std::string bytes(const fs::path& path){std::ifstream in(custom_steam_library::ioPath(path),std::ios::binary);return {std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>()};}
+static Json match(int64_t id=555){return {{"appId",id},{"formalName","Owned Game"},{"primaryProvider","steam"},{"identityStatus","verified"},{"steamVerificationStatus","steam-verified"},{"resolverVersion","steam-official-fuzzy-global-v4"}};}
+struct Fixture {fs::path root,manifest,cache;std::string exe;Store store;
+ explicit Fixture(const fs::path& base):root(base/L"data"),manifest(base/L"worker.json"),exe(utf8((base/L"games"/L"Game.exe").wstring())),store(root){auto key=normalized(exe);for(auto& c:key)if(!std::isalnum(static_cast<unsigned char>(c))&&c!='-'&&c!='_')c='_';cache=root/L"cache"/L"identity"/wide(key+".json");identityFixture::canonical=cache.wstring();observation();}
+ void observation(const Json& m=match()){bytes(manifest,Json{{"exe",exe},{"match",m},{"metadata",Json::object()}}.dump());}
+ Json record(const Json& m=match())const{return {{"executable",exe},{"match",m},{"updatedAt",now()},{"steamAppId",m.value("appId",int64_t{0})},{"metadata",Json::object()}};}
+ void saved(const Json& j){bytes(cache,j.dump());}
+ Json remember(int64_t start=now()){return store.rememberIdentity(exe,manifest,start);}
+ bool unknown()const{return !store.identity(exe).value("verified",false);}
+ bool preserved(const std::string& raw)const{if(!fs::exists(cache.parent_path()))return false;for(const auto& e:fs::directory_iterator(cache.parent_path()))if(e.is_regular_file()&&e.path()!=cache&&bytes(e.path())==raw)return true;return false;}
+};
+static int run(const fs::path& requested,const std::string& selected){
+ const auto root=fs::absolute(requested);if(fs::exists(root))throw std::runtime_error("fresh-identity-root-required");fs::create_directories(root);identityFixture::active=true;identityFixture::root=root.wstring();Json cases=Json::array();
+ auto test=[&](const char* name,auto fn){if(!selected.empty()&&selected!=name)return;identityFixture::fault={};identityFixture::beforeStage={};identityFixture::afterCommit={};identityFixture::faults=0;Json row={{"name",name}};const auto start=assertions;try{Fixture f(root/std::to_wstring(cases.size()));fn(f);row["passed"]=true;}catch(const std::exception& e){row["passed"]=false;row["reason"]=e.what();}catch(...){row["passed"]=false;row["reason"]="unknown-exception";}row["assertions"]=assertions-start;cases.push_back(row);};
+ test("identity-original-valid-roundtrip",[](auto& f){auto value=f.remember();require(value.value("verified",false)&&value.value("appId",0)==555,"valid-observation-not-reusable");require(f.store.identity(f.exe).value("appId",0)==555,"canonical-reread-failed");});
+ test("identity-no-hints-grant-id",[](auto& f){f.observation({{"appId",555},{"formalName","Owned Game"}});require(!f.remember().value("verified",false)&&f.unknown(),"numeric-title-hints-granted-id");});
+ test("identity-future-cache-unknown-preserved",[](auto& f){auto record=f.record();record["schemaVersion"]=99;f.saved(record);const auto raw=bytes(f.cache);require(f.unknown(),"future-cache-consumed");auto result=f.remember();require(!result.value("cachePersisted",false)&&bytes(f.cache)==raw,"future-cache-overwritten");});
+ test("identity-future-manifest-unknown",[](auto& f){auto value=Json::parse(bytes(f.manifest));value["schemaVersion"]=99;bytes(f.manifest,value.dump());require(!f.remember().value("verified",false)&&f.unknown(),"future-worker-document-consumed");});
+ test("identity-duplicate-authority-unknown",[](auto& f){bytes(f.cache,"{\"executable\":"+Json(f.exe).dump()+",\"match\":{},\"match\":"+match().dump()+"}");require(f.unknown(),"duplicate-authority-promoted");});
+ test("identity-duplicate-manifest-unknown",[](auto& f){bytes(f.manifest,"{\"exe\":"+Json(f.exe).dump()+",\"match\":{},\"match\":"+match().dump()+"}");require(!f.remember().value("verified",false)&&f.unknown(),"duplicate-worker-authority-promoted");});
+ test("identity-deep-cache-unknown",[](auto& f){auto record=f.record();Json nesting=0;for(int n=0;n<90;++n)nesting=Json::array({nesting});record["extension"]=nesting;f.saved(record);require(f.unknown(),"deep-cache-consumed");});
+ test("identity-root-fields-types",[](auto& f){for(const char* key:{"updatedAt","steamAppId","metadata","manifestPath","schemaVersion"}){auto record=f.record();record[key]=Json::array();f.saved(record);require(f.unknown(),"wrong-root-field-consumed");}});
+ test("identity-match-authority-types",[](auto&){for(const char* key:{"matchedContentAppId","baseGameAppId","source","query","formalName"}){auto m=match();m[key]=Json::array();require(!custom_steam_library::verifiedSteamIdentityMatch(m),"wrong-match-field-promoted");}});
+ test("identity-future-timestamp-unknown",[](auto& f){auto record=f.record();record["updatedAt"]=now()+86400000;f.saved(record);require(f.unknown(),"future-observation-consumed");});
+ test("identity-numeric-range-and-excluded",[](auto&){for(const auto& id:Json::array({-1,0,2147483648LL,18446744073709551615ULL,228980})){auto m=match();m["appId"]=id;require(!custom_steam_library::verifiedSteamIdentityMatch(m),"invalid-appid-promoted");}auto m=match();m["source"]="local-install-metadata-offline";require(!custom_steam_library::verifiedSteamIdentityMatch(m),"offline-title-promoted");});
+ test("identity-invalid-executable-no-throw",[](auto& f){for(const auto& exe:std::vector<std::string>{"", "relative.exe", "C:relative.exe", "C:\\Games\\..\\Other.exe", std::string("C:\\bad")+static_cast<char>(static_cast<unsigned char>(255))+".exe"})require(!f.store.identity(exe).value("verified",false),"invalid-executable-accepted");});
+ test("identity-cached-executable-mismatch",[](auto& f){auto record=f.record();record["executable"]=f.exe+".other";f.saved(record);require(f.unknown(),"other-executable-promoted");});
+ test("identity-cache-path-collision-preserved",[](auto& f){auto record=f.record();record["executable"]=f.exe+".other";f.saved(record);const auto original=bytes(f.cache);auto value=f.remember();require(!value.value("cachePersisted",false)&&bytes(f.cache)==original,"foreign-binding-overwritten");});
+ test("identity-manifest-target-mismatch-safe",[](auto& f){bytes(f.manifest,Json{{"exe",f.exe+".other"},{"match",match()}}.dump());require(!f.remember().value("verified",false)&&f.unknown(),"other-worker-target-promoted");});
+ test("identity-preserve-corrupt-original-retry",[](auto& f){const std::string raw=std::string("{broken\0raw",11);bytes(f.cache,raw);require(f.unknown(),"corrupt-cache-promoted");auto result=f.remember();require(result.value("verified",false)&&result.value("cachePersisted",false)&&f.preserved(raw),"corrupt-original-not-preserved-and-rebuilt");require(f.store.identity(f.exe).value("appId",0)==555,"rebuilt-cache-not-reused");});
+ test("identity-empty-and-root-shapes-rebuild",[](auto& f){for(const auto& raw:std::vector<std::string>{"","null","[]","7","{","true"}){bytes(f.cache,raw);require(f.unknown(),"bad-root-consumed");require(f.remember().value("verified",false)&&f.preserved(raw),"bad-root-not-preserved-before-rebuild");}});
+ test("identity-oversize-preserve-rebuild",[](auto& f){const std::string raw(16*1024*1024+1,'x');bytes(f.cache,raw);require(f.unknown(),"oversize-cache-consumed");require(f.remember().value("verified",false)&&f.preserved(raw),"oversize-raw-bytes-not-preserved");});
+ test("identity-readable-unknown-extension-retained",[](auto& f){auto record=f.record();record["extension"]={{"keep",7}};f.saved(record);require(f.remember().value("verified",false),"healthy-edit-failed");require(Json::parse(bytes(f.cache)).value("extension",Json::object()).value("keep",0)==7,"unknown-extension-lost");});
+ test("identity-read-denial-does-not-overwrite",[](auto& f){f.saved(f.record());const auto raw=bytes(f.cache);const auto h=CreateFileW(f.cache.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);require(h!=INVALID_HANDLE_VALUE,"deny-port-setup");Json result;try{require(f.unknown(),"denied-cache-promoted");result=f.remember();}catch(...){CloseHandle(h);throw;}CloseHandle(h);require(!result.value("cachePersisted",false)&&bytes(f.cache)==raw,"denied-cache-treated-missing");require(f.remember().value("verified",false),"read-denial-did-not-recover");});
+ for(const auto fault:{"create","write","short","flush","rename","false-ack"})test((std::string("identity-write-fault-")+fault).c_str(),[fault](auto& f){identityFixture::fault=fault;auto result=f.remember();require(identityFixture::faults>0,"fault-port-not-reached");require(!result.value("cachePersisted",false)&&!result.value("verified",false)&&f.unknown(),"write-failure-reported-success");identityFixture::fault={};require(f.remember().value("verified",false),"explicit-write-retry-failed");});
+ test("identity-backup-failure-preserves-and-retries",[](auto& f){const std::string raw="{broken";bytes(f.cache,raw);identityFixture::fault="backup";auto result=f.remember();require(identityFixture::faults>0&&!result.value("cachePersisted",false)&&bytes(f.cache)==raw,"backup-failure-overwrote-original");identityFixture::fault={};require(f.remember().value("verified",false)&&f.preserved(raw),"backup-release-retry-failed");});
+ test("identity-concurrent-stage-change-refuses",[](auto& f){f.saved(f.record());auto foreign=f.record(match(777));foreign["extension"]="foreign";identityFixture::beforeStage=[&]{bytes(f.cache,foreign.dump());};auto result=f.remember();require(!identityFixture::beforeStage,"concurrent-port-not-reached");require(!result.value("cachePersisted",false)&&Json::parse(bytes(f.cache))["extension"]=="foreign","concurrent-new-snapshot-clobbered");require(f.remember().value("verified",false),"concurrent-retry-failed");});
+ test("identity-canonical-readback-detects-change",[](auto& f){identityFixture::afterCommit=[&]{bytes(f.cache,"{");};auto result=f.remember();require(!identityFixture::afterCommit,"readback-port-not-reached");require(!result.value("cachePersisted",false)&&!result.value("verified",false),"changed-readback-reported-success");});
+ test("identity-newer-cache-beats-old-observation",[](auto& f){auto record=f.record(match(777));record["updatedAt"]=now()+1000;f.saved(record);const auto raw=bytes(f.cache);auto result=f.remember(now()-2000);require(result.value("appId",0)==777&&bytes(f.cache)==raw&&!result.value("cachePersisted",false),"old-observation-overwrote-newer-cache");});
+ test("identity-64-parallel-read-snapshots",[](auto& f){require(f.remember().value("verified",false),"parallel-seed");std::vector<Json> results(64);std::vector<std::thread> threads;for(size_t n=0;n<results.size();++n)threads.emplace_back([&,n]{results[n]=f.store.identity(f.exe);});for(auto& thread:threads)thread.join();for(const auto& result:results)require(result.value("appId",0)==555,"parallel-read-changed-identity");results[0]["appId"]=777;require(results[1]["appId"]==555&&f.store.identity(f.exe)["appId"]==555,"read-snapshots-not-independent");});
+ test("identity-recovery-storm-no-fabrication",[](auto& f){for(int n=0;n<24;++n){bytes(f.cache,n%2?"{":"null");for(int i=0;i<8;++i)require(f.unknown(),"storm-bad-cache-promoted");require(f.remember().value("verified",false),"explicit-good-observation-did-not-recover");}require(f.store.identity(f.exe).value("appId",0)==555,"storm-final-reread");});
+
+ test("identity-read-io-fault-is-not-corruption",[](auto& f){f.saved(f.record());const auto raw=bytes(f.cache);identityFixture::fault="read";require(f.unknown(),"failed-read-consumed");auto value=f.remember();require(identityFixture::faults>0&&!value.value("cachePersisted",false)&&bytes(f.cache)==raw&&!f.preserved(raw),"io-failure-reclassified-as-bad-json");identityFixture::fault={};require(f.remember().value("verified",false),"explicit-read-io-retry-failed");});
+ test("identity-manifest-change-during-stage-refuses",[](auto& f){identityFixture::beforeStage=[&]{f.observation(match(777));};auto value=f.remember();require(!identityFixture::beforeStage,"manifest-race-port-not-reached");require(!value.value("verified",false)&&!value.value("cachePersisted",false)&&f.unknown(),"changed-worker-snapshot-published");require(f.remember().value("appId",0)==777,"new-worker-observation-could-not-retry");});
+ test("identity-interruption-after-backup-retries",[](auto& f){const std::string raw="{interrupted";bytes(f.cache,raw);identityFixture::fault="rename";const auto value=f.remember();require(identityFixture::faults>0&&!value.value("cachePersisted",false)&&f.preserved(raw),"interrupted-publish-lost-original");require(f.unknown(),"interrupted-publish-fabricated-cache");identityFixture::fault={};require(f.remember().value("verified",false)&&f.preserved(raw),"post-interruption-retry-failed");});
+ test("identity-hardlink-file-refused",[](auto& f){const auto other=f.root/L"owned-original.json";bytes(other,f.record().dump());fs::create_directories(f.cache.parent_path());require(CreateHardLinkW(f.cache.c_str(),other.c_str(),nullptr)!=FALSE,"owned-hardlink-setup");const auto raw=bytes(other);require(f.unknown(),"hardlink-cache-consumed");const auto value=f.remember();require(!value.value("cachePersisted",false)&&bytes(other)==raw&&bytes(f.cache)==raw,"hardlink-alias-overwritten");});
+ test("identity-64-read-and-eight-writer-storm",[](auto& f){require(f.remember().value("verified",false),"writer-storm-seed");std::vector<std::thread> threads;std::vector<Json> readers(64),writers(8);const auto started=now();for(size_t n=0;n<writers.size();++n)threads.emplace_back([&,n]{try{writers[n]=f.remember(started);}catch(const std::exception& e){writers[n]={{"verified",false},{"error",e.what()}};}catch(...){writers[n]={{"verified",false},{"error","original-writer-unknown-exception"}};}});for(size_t n=0;n<readers.size();++n)threads.emplace_back([&,n]{readers[n]=f.store.identity(f.exe);});for(auto& thread:threads)thread.join();for(const auto& result:readers)require(result.empty()||result.value("appId",0)==555,"mixed-read-invented-identity");for(const auto& result:writers)require(result.value("appId",0)==555,"cooperating-writer-failed");require(f.store.identity(f.exe).value("appId",0)==555,"writer-storm-final-reread");});
+
+ test("identity-invalid-cache-path-can-rebuild",[](auto& f){auto record=f.record();record["executable"]="relative.exe";f.saved(record);const auto raw=bytes(f.cache);require(f.unknown(),"relative-binding-consumed");require(f.remember().value("verified",false)&&f.preserved(raw),"bad-path-not-rebuildable");});
+ test("identity-same-stat-new-bytes-refuse",[](auto& f){auto previous=f.record();f.saved(previous);const auto stamp=fs::last_write_time(f.cache);auto foreign=previous;foreign["match"]["appId"]=777;foreign["steamAppId"]=777;const auto foreignBytes=foreign.dump();identityFixture::beforeStage=[&]{bytes(f.cache,foreignBytes);fs::last_write_time(f.cache,stamp);};const auto value=f.remember();require(!identityFixture::beforeStage&&!value.value("cachePersisted",false)&&bytes(f.cache)==foreignBytes,"same-stat-writer-clobbered");});
+ test("identity-concurrent-missing-now-created-refuses",[](auto& f){const auto foreign=f.record(match(777)).dump();identityFixture::beforeStage=[&]{bytes(f.cache,foreign);};const auto value=f.remember();require(!identityFixture::beforeStage&&!value.value("cachePersisted",false)&&bytes(f.cache)==foreign,"concurrent-creation-overwritten");});
+ test("identity-directory-obstruction-refuses-retry",[](auto& f){fs::create_directories(f.cache);auto value=f.remember();require(!value.value("cachePersisted",false)&&fs::is_directory(f.cache)&&f.unknown(),"directory-obstruction-overwritten");fs::remove(f.cache);require(f.remember().value("verified",false),"obstruction-release-did-not-retry");});
+ test("identity-junction-ancestor-refused",[](auto& f){
+  const auto target=f.root/L"owned-junction-target",junction=f.root/L"cache";fs::create_directories(target/L"identity");fs::create_directories(junction);
+  const auto substitute=L"\\??\\"+target.wstring();const auto printable=target.wstring();std::vector<unsigned char> buffer(16+(substitute.size()+1+printable.size()+1)*sizeof(wchar_t));
+  const DWORD tag=IO_REPARSE_TAG_MOUNT_POINT;const WORD size=static_cast<WORD>(buffer.size()-8),zero=0,subSize=static_cast<WORD>(substitute.size()*sizeof(wchar_t)),printOffset=static_cast<WORD>((substitute.size()+1)*sizeof(wchar_t)),printSize=static_cast<WORD>(printable.size()*sizeof(wchar_t));
+  memcpy(buffer.data(),&tag,4);memcpy(buffer.data()+4,&size,2);memcpy(buffer.data()+6,&zero,2);memcpy(buffer.data()+8,&zero,2);memcpy(buffer.data()+10,&subSize,2);memcpy(buffer.data()+12,&printOffset,2);memcpy(buffer.data()+14,&printSize,2);memcpy(buffer.data()+16,substitute.c_str(),(substitute.size()+1)*sizeof(wchar_t));memcpy(buffer.data()+16+printOffset,printable.c_str(),(printable.size()+1)*sizeof(wchar_t));
+  const auto handle=CreateFileW(junction.c_str(),GENERIC_WRITE,0,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS,nullptr);require(handle!=INVALID_HANDLE_VALUE,"owned-junction-handle");DWORD returned=0;const bool ok=DeviceIoControl(handle,FSCTL_SET_REPARSE_POINT,buffer.data(),static_cast<DWORD>(buffer.size()),nullptr,0,&returned,nullptr)!=FALSE;CloseHandle(handle);require(ok,"owned-junction-setup");
+  const auto actual=target/L"identity"/f.cache.filename();const auto raw=f.record().dump();bytes(actual,raw);require(f.unknown(),"reparse-ancestor-consumed");const auto value=f.remember();require(!value.value("cachePersisted",false)&&bytes(actual)==raw,"reparse-ancestor-target-overwritten");
+ });
+ unsigned passed=0;for(const auto& row:cases)if(row.value("passed",false))++passed;require(!cases.empty(),"selection-empty");Json result={{"schema","ymcc.library-identity-owned-consumer.v1"},{"success",passed==cases.size()&&identityFixture::network==0&&identityFixture::process==0&&identityFixture::outside==0},{"tests",cases.size()},{"passed",passed},{"assertions",assertions},{"cases",cases},{"networkOperations",identityFixture::network},{"processOperations",identityFixture::process},{"outsideRootIo",identityFixture::outside},{"scope","Original Store rememberIdentity and identity with real owned files; native socket/process ports inert; no installed application or worker launched"}};std::cout<<result.dump(2)<<'\n';identityFixture::active=false;return result["success"].get<bool>()?0:1;
+}
+}
+#endif
+
+static int normalizationCost(const fs::path& root){
+ if(fs::exists(root))throw std::runtime_error("fresh-normalization-root-required");fs::create_directories(root/L"config");
+ Json entries=Json::object();const Json dynamic={{"id",digestKey("normalization-video")},{"revision","1"},{"extension","mp4"},{"kind","video"},{"mime","video/mp4"},{"bytes",4096}},poster={{"id",digestKey("normalization-image")},{"revision","1"},{"extension","jpg"},{"kind","image"},{"mime","image/jpeg"},{"bytes",1024}};
+ for(int id=1;id<=512;++id){const auto key="steam-"+std::to_string(id);Json e={{"key",key},{"appId",id},{"identityVerified",true},{"bindingRevision",uint64_t(id)},{"status","ready"},{"name","Recorded game "+std::to_string(id)},{"unknownMetadata",{{"source","retained"},{"labels",Json::array({"installed","known"})}}}};
+  if(id%4==0){e["asset"]=dynamic;e["manual"]=true;}else if(id%4==1){e["assets"]={{"static",poster},{"dynamic",dynamic}};e["modeExplicit"]=true;e["wallpaperMode"]="static";}else if(id%4==2){e["asset"]=dynamic;e["deletedSlots"]={{"dynamic",true}};}else{e["playback"]={{"start",5},{"end",35},{"fit","contain"}};e["manualSlots"]={{"dynamic",true}};}entries[key]=std::move(e);
+ }
+ const Json input={{"schemaVersion",1},{"revision",7},{"updatedAt",0},{"entries",entries},{"aliases",{{"exe-legacy","steam-1"}}}};const auto file=root/L"config"/L"game-media.json";atomicWrite(file,input);const auto raw=input.dump();Store store(root);
+ const auto cpu=[](){FILETIME a{},z{},k{},u{};if(!GetProcessTimes(GetCurrentProcess(),&a,&z,&k,&u))throw std::runtime_error("normalization-cpu-unavailable");ULARGE_INTEGER x{},y{};x.LowPart=k.dwLowDateTime;x.HighPart=k.dwHighDateTime;y.LowPart=u.dwLowDateTime;y.HighPart=u.dwHighDateTime;return x.QuadPart+y.QuadPart;};
+ IO_COUNTERS a{},z{};if(!GetProcessIoCounters(GetCurrentProcess(),&a))throw std::runtime_error("normalization-io-unavailable");const auto started=GetTickCount64(),used=cpu();Json snapshot,result;
+ for(int n=0;n<64;++n){snapshot=store.snapshot();result=store.resolve({{"appId",1+n%4}});if(snapshot["entries"].size()!=512||!result.contains("bindingRevision"))throw std::runtime_error("normalization-workload-result-invalid");}
+ const auto spent=cpu()-used,elapsed=GetTickCount64()-started;if(!GetProcessIoCounters(GetCurrentProcess(),&z))throw std::runtime_error("normalization-io-unavailable");
+ // Corrupt unrelated records must still reject a selected-entry read, and a
+ // future schema cannot be accepted. Failed/pure reads never persist changes.
+ auto corrupted=input;corrupted["entries"]["steam-512"]["playbackExplicit"]="invalid";atomicWrite(file,corrupted);bool rejected=false;try{store.resolve({{"appId",1}});}catch(...){rejected=true;}if(!rejected||read(file)!=corrupted)throw std::runtime_error("unrelated-malformed-entry-not-rejected");auto future=input;future["schemaVersion"]=99;atomicWrite(file,future);rejected=false;try{store.resolve({{"appId",1}});}catch(...){rejected=true;}if(!rejected||read(file)!=future)throw std::runtime_error("future-store-not-rejected");atomicWrite(file,input);
+ auto next=input;next["entries"]["steam-1"]["bindingRevision"]=999;atomicWrite(file,next);if(store.resolve({{"appId",1}})["bindingRevision"]!=999)throw std::runtime_error("lookup-reused-an-older-operation");atomicWrite(file,input);if(read(file)!=input)throw std::runtime_error("read-mutated-input");
+ const Json output={{"snapshot",snapshot},{"resolved",result}};atomicWrite(root/L"normalized-output.json",output);atomicWrite(root/L"input.json",input);const Json metrics={{"ok",true},{"items",512},{"cycles",64},{"snapshotCalls",64},{"resolveCalls",64},{"cpuMs",double(spent)/10000.0},{"elapsedMs",elapsed},{"readOperations",z.ReadOperationCount-a.ReadOperationCount},{"readBytes",z.ReadTransferCount-a.ReadTransferCount},{"writeOperations",z.WriteOperationCount-a.WriteOperationCount},{"writtenBytes",z.WriteTransferCount-a.WriteTransferCount},{"inputDigest",digestKey(raw)},{"outputDigest",digestKey(output.dump())},{"unrelatedCorruptionRejected",true},{"futureSchemaRejected",true},{"sequentialFreshReadPreserved",true},{"scope","fixed isolated Store reads and normalization; no installed CPU measurement"}};atomicWrite(root/L"normalization-cost.json",metrics);std::cout<<metrics.dump()<<std::endl;return 0;
+}
+// Explicit maintenance only: the caller supplies independent successful decode
+// evidence. A held media file and the normal root mutex bind its hash to the CAS.
+static std::string recoveryFileHash(HANDLE file){
+ struct Hash {BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE value=nullptr;std::vector<unsigned char> object;~Hash(){if(value)BCryptDestroyHash(value);if(algorithm)BCryptCloseAlgorithmProvider(algorithm,0);}} hash;
+ if(BCryptOpenAlgorithmProvider(&hash.algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0)throw std::runtime_error("recovery-hash-unavailable");
+ DWORD length=0,received=0;if(BCryptGetProperty(hash.algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&length),sizeof length,&received,0)<0)throw std::runtime_error("recovery-hash-unavailable");
+ hash.object.resize(length);if(BCryptCreateHash(hash.algorithm,&hash.value,hash.object.data(),length,nullptr,0,0)<0)throw std::runtime_error("recovery-hash-unavailable");
+ unsigned char buffer[65536];for(;;){DWORD count=0;if(!ReadFile(file,buffer,sizeof buffer,&count,nullptr))throw std::runtime_error("recovery-file-read-failed");if(!count)break;if(BCryptHashData(hash.value,buffer,count,0)<0)throw std::runtime_error("recovery-hash-failed");}
+ unsigned char digest[32];if(BCryptFinishHash(hash.value,digest,sizeof digest,0)<0)throw std::runtime_error("recovery-hash-failed");std::string result;for(auto byte:digest){result+="0123456789abcdef"[byte>>4];result+="0123456789abcdef"[byte&15];}return result;
+}
+static int recoverDecodedPlayback(int argc,char** argv){
+ if(argc!=8)throw std::runtime_error("usage: --recover-playback[-check] absolute-root canonical-key slot asset-id binding-revision verified-sha256");
+ const bool apply=std::string(argv[1])=="--recover-playback";const auto root=fs::path(wide(argv[2]));
+ if(!root.is_absolute()||!fs::is_directory(root))throw std::runtime_error("recovery-explicit-existing-root-required");
+ const std::string key=argv[3],slot=argv[4],assetId=argv[5],rawRevision=argv[6],expectedHash=argv[7];
+ if(rawRevision.empty()||!std::all_of(rawRevision.begin(),rawRevision.end(),[](char c){return c>='0'&&c<='9';})||expectedHash.size()!=64||!std::all_of(expectedHash.begin(),expectedHash.end(),[](char c){return c>='0'&&c<='9'||c>='a'&&c<='f';}))throw std::runtime_error("recovery-verified-identity-required");
+ const auto revision=std::stoull(rawRevision);Lock transaction(root);Store store(root);const auto index=root/L"config"/L"game-media.json";
+ const auto before=read(index);if(!before.value("entries",Json::object()).contains(key))throw std::runtime_error("recovery-entry-missing");const auto previous=before["entries"][key];
+ if(previous.value("bindingRevision",uint64_t{0})!=revision||!previous.value("assets",Json::object()).contains(slot)||previous["assets"][slot].value("id",std::string{})!=assetId||previous.value("invalidSlots",Json::object()).value(slot,std::string{})!=assetId)throw std::runtime_error("recovery-verified-binding-changed");
+ const auto path=store.assetPath(previous["assets"][slot]);struct File {HANDLE value=INVALID_HANDLE_VALUE;~File(){if(value!=INVALID_HANDLE_VALUE)CloseHandle(value);}} file;
+ file.value=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(file.value==INVALID_HANDLE_VALUE)throw std::runtime_error("recovery-file-not-stable");
+ const auto actualHash=recoveryFileHash(file.value);if(actualHash!=expectedHash)throw std::runtime_error("recovery-decoded-file-hash-mismatch");
+ const auto entry=store.resolve({{"key",key}});if(entry.value("deleted",false)||entry.value("deletedSlots",Json::object()).value(slot,false)||entry.value("leaseUntil",int64_t{0})!=0||!entry.value("taskSlots",Json::array()).empty())throw std::runtime_error("recovery-state-not-quiescent");
+ if(entry.value("key",std::string{})!=key||entry.value("bindingRevision",uint64_t{0})!=revision||entry.value("invalidSlots",Json::object()).value(slot,std::string{})!=assetId||entry.value("assets",Json::object())[slot].value("id",std::string{})!=assetId)throw std::runtime_error("recovery-verified-binding-changed");
+ LARGE_INTEGER size{};if(!GetFileSizeEx(file.value,&size)||size.QuadPart<=0||static_cast<uint64_t>(size.QuadPart)!=previous["assets"][slot].value("bytes",uint64_t{0}))throw std::runtime_error("recovery-verified-size-changed");
+ Json receipt={{"ok",true},{"applied",apply},{"root",utf8(root.wstring())},{"key",key},{"slot",slot},{"assetId",assetId},{"verifiedSha256",actualHash},{"before",previous},{"recordedAt",now()},{"scope","explicit decoded-file maintenance; no download or installed process control"}};
+ if(apply){
+  auto restored=store.edit({{"action","playback-recovered"},{"key",key},{"slot",slot},{"assetId",assetId},{"bindingRevision",revision}});const auto after=read(index);auto expected=before;
+  expected["entries"][key]=after["entries"][key];for(const auto* field:{"revision","updatedAt","schemaVersion"})expected[field]=after[field];
+  if(after!=expected||!restored.value(slot+"Ready",false)||restored.value("bindingRevision",uint64_t{0})!=revision+1||restored.value("assets",Json::object())[slot].value("id",std::string{})!=assetId)throw std::runtime_error("recovery-applied-but-readback-failed");
+  receipt["after"]=after["entries"][key];receipt["otherEntriesAndMetadataUnchanged"]=true;receipt["beforeIndexRevision"]=before.value("revision",uint64_t{0});receipt["afterIndexRevision"]=after.value("revision",uint64_t{0});
+ }else receipt["wouldInvoke"]={{"action","playback-recovered"},{"key",key},{"slot",slot},{"assetId",assetId},{"bindingRevision",revision}};
+ std::cout<<receipt.dump(2)<<std::endl;return 0;
+}
 int main(int argc,char** argv){try{
+ if(argc>1&&(std::string(argv[1])=="--recover-playback"||std::string(argv[1])=="--recover-playback-check"))return recoverDecodedPlayback(argc,argv);
+ if(argc==3&&std::string(argv[1])=="--normalize-cost")return normalizationCost(fs::path(wide(argv[2])));
+#ifdef YMCC_IDENTITY_STORM_PORTS
+ if((argc==3||argc==4)&&std::string(argv[1])=="--identity-storm")return identityStorm::run(fs::path(wide(argv[2])),argc==4?argv[3]:"");
+#endif
  if(argc==3&&std::string(argv[1])=="--inventory"){const auto root=fs::path(wide(argv[2]));return publishInventoryFile(root,root/L"state"/L"library-scan.json")?0:2;}
  if(argc==3&&std::string(argv[1])=="--lease"){Store(fs::path(wide(argv[2]))).begin({{"appId",333},{"name","dead-owner"}});return 0;}
  if(argc==4&&std::string(argv[1])=="--writer"){Store store(fs::path(wide(argv[2])));const int first=std::stoi(argv[3]);for(int i=0;i<12;i++)store.registerEntry({{"appId",first+i},{"name","concurrent fixture"}});return 0;}
@@ -86,6 +307,59 @@ int main(int argc,char** argv){try{
  auto dynamicView=selected;dynamicView["asset"]=selected["assets"]["dynamic"];const auto oldVideoUrl=server.expose(store,dynamicView);
  auto failedVideo=store.edit(bad);check(!failedVideo.value("dynamicReady",true)&&failedVideo.value("staticReady",false),"bad video falls back to retained static");check(failedVideo["assets"].contains("dynamic"),"manual bad source remains recoverable");server.expose(store,failedVideo);check(httpGet(oldVideoUrl).starts_with("HTTP/1.1 404"),"invalidated asset URL revoked");
  bool staleError=false;try{store.edit(bad);}catch(...){staleError=true;}check(staleError,"old failure cannot invalidate a newer revision");
+ // A successfully decoded retained file can be restored only by exact maintenance CAS.
+ // This consumer uses synthetic headers; the incident's real decode/seek evidence is separate.
+ {
+  const auto recoveryRoot=fixtureRoot/L"playback-recovery";Store recovery(recoveryRoot);Server recoveryServer;
+  auto prepared=recovery.begin({{"appId",1361510},{"name","TMNT retained-video recovery"},{"verified",true}});
+  prepared=recovery.publish(prepared,mp4,false);prepared=recovery.publish(prepared,jpg,false);recovery.finish(prepared);
+  auto original=recovery.resolve({{"appId",1361510}});const auto recoveryAsset=original["assets"]["dynamic"];
+  const auto revokedUrl=recoveryServer.expose(recovery,original);
+  auto report=original;report["action"]="playback-failed";report["slot"]="dynamic";report["assetId"]=recoveryAsset["id"];
+  auto invalid=recovery.edit(report);recoveryServer.expose(recovery,invalid);
+  check(!invalid.value("dynamicReady",true)&&invalid.value("staticReady",false),"retained current-game failure has static fallback");
+  check(httpGet(revokedUrl).starts_with("HTTP/1.1 404"),"retained video token revoked before successful revalidation");
+  const auto index=recoveryRoot/L"config"/L"game-media.json";
+  const auto bytesAt=[](const fs::path& file){std::ifstream in(file,std::ios::binary);return std::string(std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>());};
+  auto saved=recovery.snapshot();auto& retained=saved["entries"]["steam-1361510"];
+  retained["refreshRequested"]=true;retained["refreshSlot"]="static";retained["manualSlots"]["static"]=true;
+  retained["playback"]={{"start",3},{"end",42},{"fit","contain"}};retained["playbackExplicit"]=true;
+  retained["selectedVideo"]={{"appId",1361510},{"url","https://fixture.invalid/selected.mp4"}};
+  retained["unrelatedMetadata"]={{"keep",true}};saved["aliases"]["exe-recovery-alias"]="steam-1361510";atomicWrite(index,saved);
+  saved["entries"]["steam-999999"]={{"key","steam-999999"},{"bindingRevision",7},{"legacyUnknown",{{"preserve",true}}}};atomicWrite(index,saved);
+  const Json recover={{"action","playback-recovered"},{"key","steam-1361510"},{"slot","dynamic"},{"assetId",recoveryAsset["id"]},{"bindingRevision",invalid["bindingRevision"]}};
+  const auto reject=[&](Json request,const char* label){const auto before=bytesAt(index);bool rejected=false;try{recovery.edit(request);}catch(...){rejected=true;}check(rejected,label);check(bytesAt(index)==before,"rejected recovery leaves index byte-identical");};
+  auto staleRecovery=recover;staleRecovery["bindingRevision"]=invalid["bindingRevision"].get<uint64_t>()-1;reject(staleRecovery,"stale decoded recovery rejected");
+  auto otherAsset=recover;otherAsset["assetId"]="different-asset";reject(otherAsset,"decoded recovery cannot clear another asset");
+  auto otherSlot=recover;otherSlot["slot"]="static";reject(otherSlot,"dynamic decode does not authorize static recovery");
+  auto noKey=recover;noKey.erase("key");noKey["appId"]=1361510;reject(noKey,"recovery requires explicit canonical key");
+  auto aliasKey=recover;aliasKey["key"]="exe-recovery-alias";reject(aliasKey,"alias cannot stand in for exact recovery key");
+  auto noSlot=recover;noSlot.erase("slot");reject(noSlot,"recovery never infers slot from current mode");
+  auto noRevision=recover;noRevision.erase("bindingRevision");reject(noRevision,"recovery requires explicit binding revision");
+  auto floatingRevision=recover;floatingRevision["bindingRevision"]=invalid["bindingRevision"].get<double>();reject(floatingRevision,"fractional representation cannot authorize recovery CAS");
+  auto missingKey=recover;missingKey["key"]="steam-1361511";reject(missingKey,"missing recovery key cannot create an entry");
+  auto deletedState=saved;deletedState["entries"]["steam-1361510"]["deleted"]=true;atomicWrite(index,deletedState);reject(recover,"deleted entry cannot be recovered by decode");atomicWrite(index,saved);
+  deletedState=saved;deletedState["entries"]["steam-1361510"]["deletedSlots"]["dynamic"]=true;atomicWrite(index,deletedState);reject(recover,"deleted dynamic slot cannot be recovered by decode");atomicWrite(index,saved);
+  auto replacedState=saved;replacedState["entries"]["steam-1361510"]["assets"]["dynamic"]["id"]="replacement-asset";atomicWrite(index,replacedState);reject(recover,"replacement asset cannot consume previous decode");atomicWrite(index,saved);
+  auto preparingState=saved;preparingState["entries"]["steam-1361510"]["leaseUntil"]=now()+600000;preparingState["entries"]["steam-1361510"]["taskSlots"]=Json::array({"static"});preparingState["entries"]["steam-1361510"]["taskId"]="another-owner";atomicWrite(index,preparingState);reject(recover,"recovery does not take over active preparation");atomicWrite(index,saved);
+  auto malformedUnrelated=saved;malformedUnrelated["entries"]["steam-999999"]["modeExplicit"]="malformed";atomicWrite(index,malformedUnrelated);reject(recover,"recovery retains full unrelated-entry normalization validation");atomicWrite(index,saved);
+  const auto cachedPath=recovery.assetPath(recoveryAsset),heldPath=fs::path(cachedPath.wstring()+L".held");fs::rename(cachedPath,heldPath);reject(recover,"missing retained file cannot be marked recovered");fs::rename(heldPath,cachedPath);
+  {std::ofstream append(cachedPath,std::ios::binary|std::ios::app);append.put('x');}reject(recover,"changed retained file size cannot consume decode");fs::copy_file(mp4,cachedPath,fs::copy_options::overwrite_existing);
+  const auto queuePath=recoveryRoot/L"config"/L"game-media-downloads.json";atomicWrite(queuePath,{{"enabled",true},{"pauseReason","game-running"},{"workerPid",0},{"jobs",{{"steam-1361510",{{"state","pending"}}}}}});const auto queueBefore=bytesAt(queuePath);
+  const auto fileBefore=bytesAt(cachedPath);auto restored=recovery.edit(recover);
+  check(restored.value("dynamicReady",false)&&restored.value("staticReady",false)&&restored["asset"]["id"]==recoveryAsset["id"],"verified retained video restored without replacement download");
+  check(restored["bindingRevision"].get<uint64_t>()==invalid["bindingRevision"].get<uint64_t>()+1,"successful recovery advances exact binding revision");
+  check(restored["invalidSlots"].empty()&&restored.value("error",std::string{}).empty()&&restored.value("status",std::string{})=="ready","successful recovery clears only resolved playback failure");
+  check(restored["assets"]==retained["assets"]&&bytesAt(cachedPath)==fileBefore,"recovery preserves retained asset identity and bytes");
+  for(const auto* field:{"manualSlots","deletedSlots","refreshRequested","refreshSlot","playback","playbackExplicit","wallpaperMode","modeExplicit","selectedVideo","unrelatedMetadata","taskId","taskSlots","leaseUntil"})check(restored.value(field,Json())==retained.value(field,Json()),"recovery retains independent edits and download intent");
+  check(bytesAt(queuePath)==queueBefore,"decode recovery does not alter game-running download policy or queue");
+  check(read(index)["entries"]["steam-999999"]==saved["entries"]["steam-999999"],"recovery leaves unrelated legacy entry exactly unchanged");
+  const auto newUrl=recoveryServer.expose(recovery,restored);check(httpGet(newUrl).starts_with("HTTP/1.1 200"),"restored retained video obtains fresh serving token");check(recovery.resolve({{"key","steam-1361510"}}).value("bindingRevision",uint64_t{0})==restored["bindingRevision"].get<uint64_t>(),"explicit successful recovery serves the current binding");
+  reject(recover,"replayed recovery cannot consume old binding twice");auto replayCurrent=recover;replayCurrent["bindingRevision"]=restored["bindingRevision"];reject(replayCurrent,"already recovered slot cannot consume another recovery");
+  auto twoInvalid=saved;auto& two=twoInvalid["entries"]["steam-1361510"];two["invalidSlots"]["static"]=two["assets"]["static"]["id"];atomicWrite(index,twoInvalid);auto partial=recovery.edit(recover);check(partial.value("dynamicReady",false)&&!partial.value("staticReady",true)&&partial["invalidSlots"].contains("static")&&partial.value("error",std::string{})=="playback-failed","one-slot recovery preserves other invalid slot and failure");
+  auto otherFailure=saved;otherFailure["entries"]["steam-1361510"]["error"]="download-network-failed";atomicWrite(index,otherFailure);auto keptFailure=recovery.edit(recover);check(keptFailure.value("dynamicReady",false)&&keptFailure.value("error",std::string{})=="download-network-failed"&&keptFailure["retryAt"]==retained["retryAt"]&&keptFailure["attempts"]==retained["attempts"],"recovery never clears independent download failure or backoff");
+  auto manualState=saved;manualState["entries"]["steam-1361510"]["manualSlots"]["dynamic"]=true;manualState["entries"]["steam-1361510"]["wallpaperMode"]="static";manualState["entries"]["steam-1361510"]["modeExplicit"]=true;atomicWrite(index,manualState);auto manualRestored=recovery.edit(recover);check(manualRestored.value("dynamicReady",false)&&manualRestored["manualSlots"].value("dynamic",false)&&manualRestored["asset"]["kind"]=="image","decode recovery retains manual ownership and explicit static selection");
+ }
  // Cleanup excludes referenced media and original library artwork.
  const auto orphan=fixtureRoot/L"artwork"/L"video"/L"00000000000000000000000000000001.mp4";fs::copy_file(mp4,orphan);fs::last_write_time(orphan,fs::file_time_type::clock::now()-std::chrono::hours(48));const auto cleaned=store.collectOrphans();check(cleaned.value("removed",0)==1&&!fs::exists(orphan),"old owned orphan cleaned");check(fs::exists(store.assetPath(merged["assets"]["dynamic"]))&&fs::exists(existing),"cleanup retains live media and library original");
  check(shortcutAppId("4294967295")==UINT32_MAX,"full unsigned shortcut appid preserved");check(shortcutAppId(std::to_string((uint64_t{0xffffffff}<<32)|0x02000000ull))==UINT32_MAX,"full 64-bit GameID preserved");bool badId=false;try{shortcutAppId("18446744073709551615");}catch(...){badId=true;}check(badId,"unconfirmed GameID type rejected");
@@ -181,3 +455,5 @@ int main(int argc,char** argv){try{
  }
  std::cout<<Json({{"ok",true},{"checks",checks},{"abortedStreamReleaseMs",abortedStreamReleaseMs},{"scope","production paired store, actual HTTP/aborted streams and cross-process writers; synthetic media headers"}}).dump()<<std::endl;return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<std::endl;return 1;}}
+
+#endif // YMCC_MEDIA_NORMALIZATION_CONSTANT_ONLY

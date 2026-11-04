@@ -16,6 +16,7 @@ import { clearRouteFallback, showRouteFallback } from './robust/routeFallback';
 import { APP_VERSION } from './version';
 import './styles/tokens.css';
 import './styles/gamepad.css';
+import '../CustomSteamLibrary/workspace-ui/controller-keys.css';
 import './styles/integratedConsole.css';
 
 const app = createApp(App);

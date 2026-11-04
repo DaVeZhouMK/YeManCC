@@ -186,7 +186,55 @@ int wmain(int argc, wchar_t** argv) {
             p.resolveCover=[&](const oc::Candidate&){++lookups;return "D:\\Cache\\tall.png";};
             check(oc::supplement({c},p).covers==1&&lookups==1&&m.copies==1&&m.steps==1,"Missing cover was not resolved once");
         });
+        test("serial pacing admits one row only after its predecessor completes", [] {
+            Memory m;auto p=m.ports();std::vector<std::string> events;
+            auto a=manual(),b=a;b.installPath="E:/Games/Second";b.executablePath=b.installPath+"/Game.exe";
+            p.pace=[&]{events.push_back("pace");};
+            p.copyCover=[&](const auto& item){events.push_back(item.installPath);return "cover.jpg";};
+            const auto r=oc::supplement({a,b},p);
+            check(r.added==2&&events==std::vector<std::string>{"pace",a.installPath,"pace",b.installPath},"Optional items overlapped or escaped pacing");
+        });
+        test("budget before admission creates neither ID nor partial row", [] {
+            Memory m;auto p=m.ports();p.pace=[]{throw oc::WorkLimit{};};
+            const auto r=oc::supplement({manual()},p);
+            check(r.status=="idle"&&r.workLimited&&r.nextCandidate==oc::candidateKey(manual())&&!m.ids&&!m.writes&&!m.backups&&!m.copies&&m.games().empty(),"Budget created unfinished catalog work");
+        });
+        test("budget commits completed prefix and resumes at the next item", [] {
+            Memory m;auto p=m.ports();auto a=manual(),b=a,c=a;
+            b.installPath="E:/Games/Second";b.executablePath=b.installPath+"/Game.exe";
+            c.installPath="F:/Games/Third";c.executablePath=c.installPath+"/Game.exe";
+            m.onPace=[&]{if(m.steps==2)throw oc::WorkLimit{};};
+            const auto first=oc::supplement({a,b,c},p);
+            check(first.status=="synced"&&first.workLimited&&first.added==1&&m.games().size()==1&&m.ids==1&&m.backups==1,"Completed prefix lost or unfinished row committed");
+            std::vector<oc::Candidate> rest{a,b,c};check(oc::resumeCandidates(rest,first.nextCandidate)&&oc::candidateKey(rest[0])==oc::candidateKey(b),"Wrong continuation item");
+            m.onPace={};const auto second=oc::supplement(rest,p);
+            check(second.added==2&&!second.workLimited&&m.games().size()==3&&m.steps==4&&m.games()[1]["InstallPath"]==b.installPath,"Next invocation repeated a complete item or missed the tail");
+        });
+        test("missing artwork cannot starve the later candidates", [] {
+            Memory m;auto a=manual(),b=a;b.installPath="E:/Games/Second";b.executablePath=b.installPath+"/Game.exe";
+            m.set(json::array({{{"InstallPath",a.installPath},{"ExecutablePath",a.executablePath},{"Name",a.name}}}));
+            auto p=m.ports();p.copyCover=[](const auto&){return std::string{};};m.onPace=[&]{if(m.steps==2)throw oc::WorkLimit{};};
+            const auto first=oc::supplement({a,b},p);std::vector<oc::Candidate> rest{a,b};
+            check(first.workLimited&&oc::resumeCandidates(rest,first.nextCandidate),"Unresolved cover did not retain a continuation");
+            m.onPace={};const auto second=oc::supplement(rest,p);
+            check(second.added==1&&m.games().size()==2&&m.games()[1]["InstallPath"]==b.installPath,"Unresolved cover blocked the next game");
+        });
+        test("work deadline inside lazy artwork discards only the staged current row", [] {
+            Memory m;auto p=m.ports();p.resolveCover=[](const auto&)->std::string{throw oc::WorkLimit{};};auto a=manual();a.coverPath.clear();
+            const auto r=oc::supplement({a},p);check(r.workLimited&&m.games().empty()&&!m.writes&&!m.copies,"Interrupted lazy lookup leaked a partial row");
+        });
+        test("partial pass retains original concurrent-write and cancellation guards", [] {
+            Memory m;auto p=m.ports();auto a=manual(),b=a;b.installPath="E:/Games/Second";b.executablePath=b.installPath+"/Game.exe";
+            m.onPace=[&]{if(m.steps==2){m.bytes="[{\"External\":true}]";throw oc::WorkLimit{};}};
+            const auto r=oc::supplement({a,b},p);check(r.status=="deferred"&&r.reason=="catalog-changed"&&!m.writes&&!m.backups&&m.games()[0]["External"]==true,"Partial pass overwrote a concurrent edit");
+        });
+        test("absent continuation key preserves candidate order", [] {
+            auto a=manual(),b=a;b.steamAppId=99;std::vector<oc::Candidate> items{a,b};
+            check(!oc::resumeCandidates(items,"removed")&&oc::candidateKey(items[0])==oc::candidateKey(a),"Stale cursor redirected queue");
+        });
         g_dataRoot = fixture / L"library-data";
+        fs::create_directories(g_dataRoot);
+        { std::ofstream out(g_dataRoot/L"data-root.json");out<<json{{"schemaVersion",2},{"dataLayoutVersion",2},{"dataRoot",toUtf8(g_dataRoot.wstring())}}.dump();check(bool(out),"Root identity seed failed"); }
         const auto joinedRoot = fixture / L"Joined";
         const auto nativeRoot = fixture / L"Native";
         const auto unjoinedRoot = fixture / L"NotJoined";
@@ -202,7 +250,7 @@ int wmain(int argc, wchar_t** argv) {
         const auto utf = [](const fs::path& path) { return toUtf8(path.wstring()); };
         writeJsonWithLocalBackup(g_dataRoot / L"state" / L"library-scan.json", {{"games", json::array({
             {{"gameDirectory", utf(joinedRoot)}, {"primaryExecutable", utf(joinedExe)}, {"status", "ready"}, {"directoryName", "Joined"}},
-            {{"gameDirectory", utf(nativeRoot)}, {"primaryExecutable", nullptr}, {"steamNative", true}, {"nativeSteamAppId", 123}, {"directoryName", "Native"}},
+            {{"gameDirectory", utf(nativeRoot)}, {"primaryExecutable", ""}, {"steamNative", true}, {"nativeSteamAppId", 123}, {"directoryName", "Native"}},
             {{"gameDirectory", utf(unjoinedRoot)}, {"primaryExecutable", utf(unjoinedExe)}, {"status", "ready"}, {"directoryName", "Not joined"}}
         })}}, false);
         writeJsonWithLocalBackup(workspacePlanPath(), {{"libraryState", utf(g_dataRoot / L"state" / L"library-scan.json")},
@@ -273,7 +321,7 @@ int wmain(int argc, wchar_t** argv) {
             check(r["status"] == "deferred" && readText(root / L"games.json") == "[]" && !fs::exists(root / L"Covers") && !fs::exists(root / L"games.json.ymcc.bak"), "Running client mutated");
         });
         test("unregistered old UI timer cannot start OPT work", [] {
-            check(oc::startupDelayMs == 30000 && oc::itemDelayMs == 50, "Startup/pacing contract changed");
+            check(oc::startupDelayMs == 30000 && oc::itemDelayMs == 1500 && oc::workBudgetMs == 240000 && ymcc::optiStartup::workerBudgetMs == 300000, "Startup/pacing contract changed");
             g_updateHealthOnly = true;
             windowProcedure(nullptr, WM_TIMER, 0x54, 0);
             g_updateHealthOnly = false; g_shuttingDown = true;
@@ -287,6 +335,28 @@ int wmain(int argc, wchar_t** argv) {
             auto next=manual();next.installPath="E:\\Games\\Other";next.executablePath=next.installPath+"\\Other.exe";
             throws([&]{oc::supplement({manual(),next},p);});
             check(attempted==1&&!m.writes&&!m.backups&&m.bytes=="[]"&&m.steps==1,"Error continued/retried or wrote catalog");
+        });
+        test("real cooperative deadline commits prefix and receipt resumes the next normal pass", [&] {
+            const auto root=fixture/L"BoundedClient";writeHostBytesAtomic(root/L"games.json","[]");
+            std::vector<oc::Candidate> rows;json inventory=json::array();
+            for(int i=0;i<3;++i){const auto directory=fixture/toWide("BoundedGame"+std::to_string(i));fs::create_directories(directory);
+                rows.push_back({utf(directory),"","Bounded"+std::to_string(i),utf(image),200+i});
+                inventory.push_back({{"gameDirectory",utf(directory)},{"primaryExecutable",""},{"steamNative",true},{"nativeSteamAppId",200+i},{"directoryName",rows.back().name}});
+            }
+            oc::WorkBudget budget([]{return false;},1900);
+            auto receipt=supplementOptiCatalog(root,rows,[]{return false;},[]{return false;},[]{return true;},&budget);
+            auto stored=json::parse(readText(root/L"games.json"));
+            check(receipt["status"]=="synced"&&receipt["workLimited"]==true&&receipt["added"]==1&&stored.size()==1&&stored[0]["AppId"]=="200"&&receipt["nextCandidate"]==oc::candidateKey(rows[1]),"Real deadline failed completed-prefix commit");
+            const auto oldInventory=readJson(g_dataRoot/L"state"/L"library-scan.json",json::object());
+            writeJsonWithLocalBackup(g_dataRoot/L"state"/L"library-scan.json",{{"games",inventory}},false);
+            receipt["clientRoot"]=toUtf8(normalizedPathKey(root));
+            writeJsonWithLocalBackup(g_dataRoot/L"state"/L"last-opti-client-supplement.json",receipt,false);
+            const auto skipped=runOptiCatalogSupplement([]{return false;},[]{return true;},"fixture-client-open",[&]{return root;},[]{return true;});
+            check(skipped["status"]=="deferred"&&skipped["reason"]=="client-running"&&skipped["workLimited"]==true&&skipped["nextCandidate"]==receipt["nextCandidate"],"Skipped startup erased the continuation cursor");
+            const auto next=runOptiCatalogSupplement([]{return false;},[]{return true;},"fixture-next-normal-start",[&]{return root;},[]{return false;});
+            stored=json::parse(readText(root/L"games.json"));
+            check(next["status"]=="synced"&&next["resumed"]==true&&next["added"]==2&&next["workLimited"]==false&&stored.size()==3&&stored[1]["AppId"]=="201"&&stored[2]["AppId"]=="202","Actual receipt failed cursor continuation or duplicated prefix");
+            writeJsonWithLocalBackup(g_dataRoot/L"state"/L"library-scan.json",oldInventory,false);
         });
         writeJsonWithLocalBackup(fixture / L"summary.json", {{"status", "PASS"}, {"cases", passed},
             {"realHostConsumer", true}, {"isolatedStorageOnly", true}, {"physicalAcceptance", false}}, false);

@@ -6,22 +6,33 @@ export interface UpdaterClientState {connected:boolean;supported:boolean;view:Up
 interface UpdaterPortSession {clientId:string;sequence:number;owner:DeckyUpdaterClient|null;}
 const portSessions=new WeakMap<Port,UpdaterPortSession>();
 export class DeckyUpdaterClient {
-  private opened=false;private sessionState:UpdaterPortSession;private state:UpdaterClientState={connected:false,supported:false,view:null,pending:false,error:''};private listeners=new Set<()=>void>();private stopExtra:(()=>void)|null=null;private stopConnection:(()=>void)|null=null;private firstTimer:any=null;private pending:{id:number;resolve:()=>void;reject:(e:Error)=>void;timer:any}|null=null;
+  private opened=false;private sessionState:UpdaterPortSession;private state:UpdaterClientState={connected:false,supported:false,view:null,pending:false,error:''};private listeners=new Set<()=>void>();private stopExtra:(()=>void)|null=null;private stopConnection:(()=>void)|null=null;private firstTimer:{timer:ReturnType<typeof setTimeout>}|null=null;private pending:{id:number;resolve:()=>void;reject:(e:Error)=>void;timer:any}|null=null;
   constructor(private port:Port,private clientId:string,private timeout=8000){const prior=portSessions.get(port);this.sessionState=prior??{clientId,sequence:0,owner:null};if(!prior)portSessions.set(port,this.sessionState);this.clientId=this.sessionState.clientId;}
   snapshot(){return this.state;}
   subscribe(fn:()=>void){this.listeners.add(fn);return()=>{this.listeners.delete(fn);};}
-  private publish(patch:Partial<UpdaterClientState>){this.state={...this.state,...patch};for(const fn of this.listeners)fn();}
-  private cancelFirst(){if(this.firstTimer!==null)clearTimeout(this.firstTimer);this.firstTimer=null;}
+  private publish(patch:Partial<UpdaterClientState>){this.state={...this.state,...patch};for(const fn of this.listeners){try{fn();}catch{}}}
+  private cancelFirst(){if(this.firstTimer!==null)clearTimeout(this.firstTimer.timer);this.firstTimer=null;}
+  // One unanswered status read owns one deadline. Ready notifications may be
+  // duplicated during renderer recovery; they cannot extend this wait or turn
+  // it into a status storm. A retired callback owns neither a new wait nor UI.
+  private requestStatus(){
+    if(!this.opened||!this.state.connected||!this.state.supported||this.firstTimer!==null)return;
+    const pending={timer:null as unknown as ReturnType<typeof setTimeout>};this.firstTimer=pending;
+    pending.timer=setTimeout(()=>{
+      if(this.firstTimer!==pending||!this.opened||this.sessionState.owner!==this)return;
+      this.firstTimer=null;this.publish({view:null,error:'YMCC 更新器未响应，请重新打开 YMCC 后重试。'});
+    },this.timeout);
+    if(!this.port.sendUpdater('updater.status',{subscribe:true})&&this.firstTimer===pending){this.cancelFirst();this.publish({view:null,error:'无法连接 YMCC 更新器。'});}
+  }
   private failPending(message:string){const p=this.pending;if(!p)return;this.pending=null;clearTimeout(p.timer);p.reject(Error(message));}
   session(){return this.port.updaterRunId();}
   open(){if(this.opened)return;this.sessionState.owner?.close();this.sessionState.owner=this;this.opened=true;this.stopExtra=this.port.subscribeExtra(value=>this.receive(value));this.port.setPassiveDemand('updater',true);this.stopConnection=this.port.subscribe(state=>{
     this.cancelFirst();if(!state.connected){this.failPending('更新连接已断开，结果未确认，请查看 YMCC 状态。');this.publish({connected:false,supported:false,view:null,pending:false,error:''});return;}
     const supported=this.port.updaterSupported();this.publish({connected:true,supported,view:null,error:supported?'':'请重新打开支持兼容更新的新版 YMCC。'});if(!supported)return;
-    this.firstTimer=setTimeout(()=>{this.firstTimer=null;this.publish({view:null,error:'YMCC 更新器未响应，请重新打开 YMCC 后重试。'});},this.timeout);
-    if(!this.port.sendUpdater('updater.status',{subscribe:true})){this.cancelFirst();this.publish({error:'无法连接 YMCC 更新器。'});}
+    this.requestStatus();
   },{connectionOnly:true});}
   private receive(raw:any){if(!this.opened)return;
-    if(raw?.type==='ymcc-updater-ready'&&raw.protocol===1&&this.state.connected&&this.state.supported){this.failPending('YMCC 更新器已恢复，请查看实际状态后重新确认。');this.cancelFirst();this.publish({view:null,pending:false,error:''});this.firstTimer=setTimeout(()=>{this.firstTimer=null;this.publish({view:null,error:'YMCC 更新器未响应，请重新打开 YMCC 后重试。'});},this.timeout);this.port.sendUpdater('updater.status',{subscribe:true});return;}
+    if(raw?.type==='ymcc-updater-ready'&&raw.protocol===1&&this.state.connected&&this.state.supported){this.failPending('YMCC 更新器已恢复，请查看实际状态后重新确认。');if(this.firstTimer!==null)return;this.publish({view:null,pending:false,error:''});this.requestStatus();return;}
     if(raw?.type==='ymcc-updater'){
       if(!validUpdaterView(raw.view)){this.cancelFirst();this.publish({view:null,error:'更新状态格式不匹配，已停用安装，请更新 YMCC。'});return;}
       if(this.state.view&&raw.view.revision<this.state.view.revision)return;this.cancelFirst();this.publish({view:raw.view,error:''});return;

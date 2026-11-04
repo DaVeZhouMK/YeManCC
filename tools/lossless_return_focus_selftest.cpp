@@ -3,6 +3,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <winternl.h>
+#include <tlhelp32.h>
 #include <dwmapi.h>
 #include <algorithm>
 #include <atomic>
@@ -61,7 +63,13 @@ static HANDLE fakeOpen(DWORD flags,BOOL,DWORD pid) {
     return reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(pid));
 }
 static DWORD fakeWait(HANDLE p,DWORD timeout) { assert(timeout==0); return processes.at(processPid(p)).alive?WAIT_TIMEOUT:WAIT_OBJECT_0; }
-static BOOL fakeClose(HANDLE) { ++closes; return TRUE; }
+static HANDLE inventorySnapshotHandle() { return reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(0xF0C05)); }
+static HANDLE fakeInventorySnapshot(DWORD,DWORD) { SetLastError(ERROR_SUCCESS);return inventorySnapshotHandle(); }
+static BOOL fakeInventoryFirst(HANDLE snapshot,PROCESSENTRY32W*) { assert(snapshot==inventorySnapshotHandle());SetLastError(ERROR_NO_MORE_FILES);return FALSE; }
+static BOOL fakeInventoryNext(HANDLE snapshot,PROCESSENTRY32W*) { assert(snapshot==inventorySnapshotHandle());SetLastError(ERROR_NO_MORE_FILES);return FALSE; }
+static HMODULE fakeInventoryModule(LPCWSTR) { return reinterpret_cast<HMODULE>(static_cast<UINT_PTR>(1)); }
+static FARPROC fakeInventoryProc(HMODULE,LPCSTR) { return nullptr; }
+static BOOL fakeClose(HANDLE handle) { if(handle==inventorySnapshotHandle())return TRUE;++closes;return TRUE; }
 static BOOL fakeQuery(HANDLE p,DWORD,wchar_t* text,DWORD* size) {
     if(onQuery){auto fn=std::move(onQuery);onQuery={};fn();}
     const auto& proc=processes.at(processPid(p)); if(!proc.query)return FALSE;
@@ -117,6 +125,13 @@ static BOOL fakePost(HWND,UINT msg,WPARAM w,LPARAM l) { assert(msg==WM_TIMER&&l=
 #define KillTimer fakeKill
 #define SetTimer fakeTimer
 #define PostMessageW fakePost
+// ResolveBasic cannot reach NtQuerySystemInformation in this executable.
+#define GetModuleHandleW fakeInventoryModule
+#define GetProcAddress fakeInventoryProc
+#define CreateToolhelp32Snapshot fakeInventorySnapshot
+#define Process32FirstW fakeInventoryFirst
+#define Process32NextW fakeInventoryNext
+#include "process_inventory.h" // Actual owner, fake resolver/empty Toolhelp/tick/close.
 #include "resume_focus.h" // Actual foreground request implementation, Fake OS.
 static std::wstring U2W(const std::string& text) { return std::wstring(text.begin(),text.end()); }
 static bool focusQueryProcessIdentity(DWORD pid,std::wstring* path,ULONGLONG* birth) {

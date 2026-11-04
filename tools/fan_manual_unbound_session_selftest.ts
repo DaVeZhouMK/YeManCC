@@ -23,12 +23,12 @@ class Host extends NoIoHost {
  reset(){this.owner++;this.opened=this.events=this.closed=false;this.lease=null;this.generation=this.attempt=0;this.stateName='Stopped';this.powerState='Unknown';this.overrideState={};}
  halfOpen(events=false){this.opened=true;this.events=events;this.closed=false;this.stateName=events?'Ready':'Open';this.overrideState={hardwareWritesObserved:true};}
 }
-function make(host:Host,adopt=false,repeatUnbound=false){let current=native(),starts=0,stops=0,stopFail=false,rescueEnabled=false,wakeCalls=0;let launchHold:Promise<void>|null=null;let launchReached:(()=>void)|null=null;const life=new FanHostLifecycle({enabled:true,adapter:host,
+function make(host:Host,adopt=false,repeatUnbound=false,initialize=true){let current=native(),starts=0,stops=0,stopFail=false,rescueEnabled=false,wakeCalls=0;let launchHold:Promise<void>|null=null;let launchReached:(()=>void)|null=null;let nativeHold:Promise<void>|null=null;let nativeReached:(()=>void)|null=null;const life=new FanHostLifecycle({enabled:true,adapter:host,
  launcher:{async start(){starts++;assert(starts<=3,'unbounded replacement count');if(starts>1){host.reset();if(repeatUnbound)host.halfOpen();}host.trace.push(host.owner+':launch');if(launchHold){launchReached?.();await launchHold;}return {pid:98300+starts,executable:'fixture-fan.exe',adopted:adopt&&(starts===1||repeatUnbound)};},
  async stop(){stops++;host.trace.push(host.owner+':exit');if(stopFail){stopFail=false;throw new Error('exact-exit-unconfirmed');}}},
- readNativeActivity:async()=>null,readNativePowerState:async()=>({...current}),requestManualWake:async generation=>{wakeCalls++;if(rescueEnabled&&current.phase==='suspended')current=native(current.generation);return {ok:current.phase==='ready'&&current.hardwareWritesAllowed===true,generation,phase:current.phase};},
- heartbeatIntervalMs:0,resumeWaitDeadlineMs:500});life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);
- return {life,starts:()=>starts,stops:()=>stops,setNative:(v:PowerLifecycleState)=>{current=v;},failExit:()=>{stopFail=true;},allowStaleWake:()=>{rescueEnabled=true;},wakeCalls:()=>wakeCalls,holdLaunch:()=>{let reached!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>{reached=resolve;});launchHold=new Promise<void>(resolve=>{release=resolve;});launchReached=reached;return {ready,release:()=>{launchHold=null;release();}};}};}
+ readNativeActivity:async()=>null,readNativePowerState:async()=>{const snapshot={...current};if(nativeHold){nativeReached?.();await nativeHold;}return snapshot;},requestManualWake:async generation=>{wakeCalls++;if(rescueEnabled&&current.phase==='suspended')current=native(current.generation);return {ok:current.phase==='ready'&&current.hardwareWritesAllowed===true,generation,phase:current.phase};},
+ heartbeatIntervalMs:0,resumeWaitDeadlineMs:500});if(initialize){life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);}
+ return {life,starts:()=>starts,stops:()=>stops,setNative:(v:PowerLifecycleState)=>{current=v;},failExit:()=>{stopFail=true;},allowStaleWake:()=>{rescueEnabled=true;},wakeCalls:()=>wakeCalls,holdNative:()=>{let reached!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>{reached=resolve;});nativeHold=new Promise<void>(resolve=>{release=resolve;});nativeReached=reached;return {ready,release:()=>{nativeHold=null;release();}};},holdLaunch:()=>{let reached!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>{reached=resolve;});launchHold=new Promise<void>(resolve=>{release=resolve;});launchReached=reached;return {ready,release:()=>{launchHold=null;release();}};}};}
 let checks=0;const failures:string[]=[];async function check(name:string,work:()=>Promise<void>){checks++;try{await work();console.log('PASS '+name);}catch(e){failures.push(name+': '+String(e));console.log('FAIL '+name+': '+String(e));}}
 async function cleanup(h:Host,life:FanHostLifecycle){h.overrideState={};h.stateFailure=false;h.closeComplete=true;h.onClose=null;await life.close().catch(()=>{});}
 async function main(){
@@ -91,18 +91,91 @@ async function main(){
    assert.equal(fx.wakeCalls(),1);assert.deepEqual(h.closedOwners,[1]);assert.deepEqual(h.enabledOwners,[2]);
   }finally{await cleanup(h,fx.life);}
  });
- for(const action of ['apply','preset'] as const)for(const events of [false,true])await check('direct '+action+' retires adopted unbound session before admission '+events,async()=>{
+ // apply/preset are accepted control intents regardless of whether a UI click
+ // or an enabled automatic-control preference submitted them. An intent-free
+ // start/observation still owns none of these writes (the original negative above).
+ for(const preStart of [true,false])for(const action of ['apply','preset'] as const)for(const events of [false,true])await check('direct '+action+' retires adopted unbound session before admission '+events+' preStart='+preStart,async()=>{
   const h=new Host('MSI.ClawCG3EM'),fx=make(h,true);h.halfOpen(events);
-  try{await fx.life.start().catch(()=>{});
+  try{if(preStart)await fx.life.start().catch(()=>{});
+   // No second explicit request is permitted: this one original action must
+   // carry its intent through the first adoption and exact-owner replacement.
    if(action==='apply')await fx.life.apply(curve);else await fx.life.applyPreset('aggressive',curve);
    // FAN-996: this is the 2026-10-15 field shape after an expired resume
    // receipt: an already-open, generation-zero HC shell must be retired and
    // reopened directly. It must never manufacture a fictional /api/resume.
    assert.equal(h.calls.includes('resume'),false,'expired/unbound shell must not call resume');
    assert.deepEqual(h.closedOwners,[1]);assert.equal(fx.starts(),2);assert.equal(fx.stops(),1);
-   assert.deepEqual(h.eventsOwners,[2]);assert(h.trace.indexOf('1:exit')<h.trace.indexOf('2:launch'));
+   assert.deepEqual(h.eventsOwners,[2]);assert(h.trace.indexOf('1:close')<h.trace.indexOf('1:exit'));
+   assert(h.trace.indexOf('1:exit')<h.trace.indexOf('2:launch'));
    assert.equal(h.owner,2);assert.deepEqual(action==='apply'?h.enabledOwners:h.presetOwners,[2]);
+   assert.deepEqual(h.submitted,[{kind:action,nodes:curve}],'one original intent writes its exact curve only on the successor');
   }finally{await cleanup(h,fx.life);}
+ });
+ for(const action of ['apply','preset'] as const)await check('first direct '+action+' adopts Suspended Host and resumes the current native-ready generation once',async()=>{
+  const h=new Host('MSI.ClawCG3EM'),fx=make(h,true);
+  h.stateName='Suspended';h.powerState='Suspended';h.opened=h.events=false;
+  h.generation=6;h.attempt=0;h.completeResume=true;
+  try{
+   // No preStart and no manual-start options: the actual requested write owns
+   // recovery. Only this Host's real same-generation resume completes HC flags.
+   assert.equal(fx.life.processId,null);assert.equal(fx.starts(),0);
+   if(action==='apply')await fx.life.apply(curve);else await fx.life.applyPreset('aggressive',curve);
+   assert.equal(h.calls.filter(call=>call==='resume').length,1,'one accepted same-generation resume instead of a second click');
+   assert.equal(h.generation,6);assert.equal(h.attempt,1);
+   assert.equal(h.powerState,'On');assert(h.opened&&h.events);
+   assert.equal(fx.starts(),1);assert.equal(fx.stops(),0);assert.deepEqual(h.closedOwners,[],'a resumable current Host is not an unbound owner to replace');
+   assert.deepEqual(action==='apply'?h.enabledOwners:h.presetOwners,[1]);
+   assert.deepEqual(h.submitted,[{kind:action,nodes:curve}],'the original direct control writes once after actual Host resume');
+   assert(fx.life.currentLease);assert.equal(fx.life.state,'ready');
+  }finally{await cleanup(h,fx.life);}
+ });
+ // These first requests have no observed power boundary, public startup or PID.
+ // The opaque initial native identity may bind once; it is not a resume edge.
+ for(const generation of [6,16860])for(const shape of ['half-open','events-open','suspended'] as const)for(const action of ['apply','preset'] as const)await check('first uninitialized direct '+action+' adopts '+shape+' at native generation '+generation,async()=>{
+  const h=new Host('MSI.ClawCG3EM'),fx=make(h,true,false,false);
+  fx.setNative({...native(generation),resumeReady:false});
+  if(shape==='suspended'){h.stateName='Suspended';h.powerState='Suspended';h.generation=generation;h.completeResume=true;}
+  else h.halfOpen(shape==='events-open');
+  try{assert.equal(fx.life.state,'stopped');assert.equal(fx.life.processId,null);assert.equal(fx.starts(),0);
+   if(action==='apply')await fx.life.apply(curve);else await fx.life.applyPreset('aggressive',curve);
+   if(shape==='suspended'){
+    assert.equal(h.calls.filter(call=>call==='resume').length,1,'the first intent must finish this Host resume');
+    assert.equal(h.generation,generation);assert.equal(h.attempt,1);assert.equal(h.powerState,'On');
+    assert.equal(fx.starts(),1);assert.equal(fx.stops(),0);assert.deepEqual(h.closedOwners,[]);
+    assert.deepEqual(action==='apply'?h.enabledOwners:h.presetOwners,[1]);
+   }else if(shape==='events-open'){
+    // A complete healthy session may bind the one opaque initial identity.
+    // Its zero receipt alone does not require retirement or another HC Open.
+    assert.equal(h.calls.includes('resume'),false);assert.deepEqual(h.closedOwners,[]);
+    assert.equal(fx.starts(),1);assert.equal(fx.stops(),0);assert.equal(h.owner,1);
+    assert.equal(h.calls.includes('open'),false);assert.equal(h.calls.includes('events'),false);assert.deepEqual(h.eventsOwners,[]);
+    assert.equal(h.calls.filter(call=>call==='acquire').length,1);assert.deepEqual(action==='apply'?h.enabledOwners:h.presetOwners,[1]);
+   }else{
+    assert.equal(h.calls.includes('resume'),false,'zero-receipt Open cannot fabricate a resume');
+    assert.deepEqual(h.closedOwners,[1]);assert.equal(fx.starts(),2);assert.equal(fx.stops(),1);
+    assert(h.trace.indexOf('1:close')<h.trace.indexOf('1:exit'));assert(h.trace.indexOf('1:exit')<h.trace.indexOf('2:launch'));
+    assert.deepEqual(h.eventsOwners,[2]);assert.deepEqual(action==='apply'?h.enabledOwners:h.presetOwners,[2]);
+   }
+   assert.deepEqual(h.submitted,[{kind:action,nodes:curve}],'only the original first request writes its exact curve');
+   assert(h.opened&&h.events&&fx.life.currentLease);assert.equal(fx.life.state,'ready');assert.equal(fx.wakeCalls(),0);
+  }finally{await cleanup(h,fx.life);}
+ });
+ for(const action of ['apply','preset'] as const)for(const cancellation of ['off','new-ready-generation'] as const)await check('first uninitialized direct '+action+' retires on '+cancellation+' during initial native read',async()=>{
+  const generation=16860,h=new Host('MSI.ClawCG3EM'),fx=make(h,true,false,false);
+  fx.setNative({...native(generation),resumeReady:false});
+  h.halfOpen();
+  const hold=fx.holdNative();let off:Promise<unknown>|null=null;
+  try{const pending=(action==='apply'?fx.life.apply(curve):fx.life.applyPreset('aggressive',curve)).then(()=> 'accepted',error=>String(error));
+   let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([hold.ready,new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error('initial native read not reached')),1500);})]);}finally{clearTimeout(timer);}
+   assert.equal(fx.life.processId,null);assert.equal(fx.starts(),0,'the held read precedes first Host ownership');
+   if(cancellation==='off')off=fx.life.disable();else{
+    fx.setNative(native(generation+1,'suspending'));fx.life.setPowerGeneration(generation+1);fx.life.observePowerBoundary('suspending',generation+1);
+    fx.life.observePowerBoundary('resuming',generation+1);fx.setNative(native(generation+1));fx.life.observePowerBoundary('resume-ready',generation+1);
+   }
+   hold.release();assert.match(await pending,/FAN_CONTROL_INTENT_SUPERSEDED/,'the delayed initial snapshot cannot rebind an expired request');if(off)await off;
+   assert.equal(fx.starts(),0);assert.equal(fx.stops(),0);assert.deepEqual(h.closedOwners,[]);assert.deepEqual(h.submitted,[]);
+   assert.equal(h.calls.includes('resume'),false);assert.equal(fx.life.hasControlIntent,false,'a newer ready generation cannot revive old intent');assert.equal(fx.life.processId,null);
+  }finally{hold.release();if(off)await off.catch(()=>{});await cleanup(h,fx.life);}
  });
  for(const blocked of ['sleep','auth','cleanup','active-lease','bad-generation'] as const)await check('direct control refuses invalid retirement boundary '+blocked,async()=>{
   const h=new Host('MSI.ClawCG3EM'),fx=make(h,true);h.halfOpen();

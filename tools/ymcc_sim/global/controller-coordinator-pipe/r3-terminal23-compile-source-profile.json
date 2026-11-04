@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "kind": "CURRENT105_TERMINAL23_COMPILE_SOURCE_GUARD_V1",
+  "managedInputContract": "current105-terminal23-sd-decoder-v1",
+  "baselineNativeSpecSha256": "f6916a908291a9246d3638278fa6579e173330a4a1a4b1278ecff1a491ac8107",
+  "baselineSourceProfileSha256": "8c8a5803990da252418f91be0dc5df13b89efd589b14a197f962e12ba9943674",
+  "runtimeHeader": {
+    "relative": "native/steam_original_recovery_runtime.h",
+    "sha256": "6c7d3d2131824b1ae4a8632641cdcb123584a8ce3b333ba81fa2c3a247372e11"
+  },
+  "extraCompileHeaders": [
+    {
+      "relative": "native/steam_original_recovery_policy.h",
+      "sha256": "f99ca447a14c6dab1f79e8b75d575a314436f1e685f1ae649a7dac067350787c"
+    },
+    {
+      "relative": "native/steam_original_recovery_dual_route.h",
+      "sha256": "4e8fca5da0859521ff02c328a867d4167164ddbb39e0425320728468f57c5fd0"
+    },
+    {
+      "relative": "native/steam_original_recovery_config.h",
+      "sha256": "ddd746052f886f15cdf44352a320ff19a5c7147e96ecb4a665a204be8212ebd0"
+    },
+    {
+      "relative": "native/steam_original_recovery_wake_watch.h",
+      "sha256": "c3675a51d2805596e5b886704da2affafa3b5e6a7fb905d5b3f6471d1879bf08"
+    },
+    {
+      "relative": "native/steam_original_recovery_storage.h",
+      "sha256": "169b2f51778909e4e8f115e3af3753666551dec6b9f1e24f5ac83f61b64b0c1c"
+    },
+    {
+      "relative": "native/steam_original_recovery_worker.h",
+      "sha256": "4ad4fa640321b42ed3d45f708d574ff9e98b745142fb13019773e044604ff69c"
+    }
+  ],
+  "extraCompileSources": [
+    {
+      "relative": "native/steam_original_recovery_engine.cpp",
+      "sha256": "31ac928001eb88910c0cd6ead8625a110fa4226d009603db585c481c8b63fdb6"
+    },
+    {
+      "relative": "native/steam_original_recovery_engine.h",
+      "sha256": "0fa13b0dcdcc4f1033ab44ee043ea8df344eae31b3c28c1fab3f8ed0634bd455"
+    }
+  ],
+  "startSha256": "1ecc2924740231d168096fd1e0ffafbf5d74d071b122b37f16e81e21e3333bc4",
+  "exportSnapshotSha256": "9b469a75e62f6227c5b8d0a177fad66aba012a1293b7b0e7b2024f3f561ed1a8",
+  "bridgeSha256": "e11e62dc1dbd443d301523c46d4bfa5093e3000d7417de10bc20202bb2b497dd",
+  "fixture": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/fixture.cpp",
+    "sha256": "69a76d593ee21bf40c24097027d8a907a6b22ef623b6b8e4919a42987431076e"
+  },
+  "fixtureObservationChanges": [
+    {
+      "label": "annotate existing check/failure without changing bool or assertion",
+      "before": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks}});if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name}});fixtureOffCheckpoint(\"assertion\",name,good?1:0);}",
+      "after": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");\n const auto ordinal=cases.size();unsigned occurrence=0;for(const auto& item:cases)if(item.value(\"name\",\"\")==owner)++occurrence;\n if(!cases.empty()){cases.back()[\"sourceOrdinal\"]=ordinal;cases.back()[\"nameOccurrence\"]=occurrence;}\n assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence}});\n if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence},{\"checkIndex\",checks}});fixtureOffCheckpoint(\"assertion\",name,good?1:0);}",
+      "count": 1
+    },
+    {
+      "label": "read-only boundary snapshots",
+      "before": "int wmain(",
+      "after": "// Read-only observations at the old95 boundary and after the B49 tail.\n// Same resource fields/lock as the original grouped witness; no new check,\n// seed, Stop, debt assignment, process query or file/device operation.\nstatic json fixtureCurrentOrderedReturn=json::object();\nstatic json fixtureCurrentOrderedBoundary(){\n std::lock_guard<std::mutex> work(g_inputHostLifecycleWorkMx);\n return json{{\"afterSourceOrdinal\",cases.size()},{\"lastCaseName\",cases.empty()?\"\":cases.back().value(\"name\",\"\")},{\"checks\",checks},{\"nativeEvents\",fixtureEvents},{\"resources\",json{{\"hostHandle\",g_inputHostProcess!=nullptr},{\"pipeHandle\",g_inputHostServerPipe!=nullptr},{\"pipeConnected\",g_inputHostPipeConnected},{\"prepared\",g_inputHostPrepared},{\"quarantined\",g_inputHostReleaseQuarantined},{\"visibility\",g_hidHideVisibilityJournal.active},{\"childObservers\",fullPipeChildObservers.size()},{\"workQueue\",g_inputHostLifecycleWorkQueue.size()},{\"workRequested\",g_inputHostLifecycleWorkRequested.load()},{\"workInFlight\",g_inputHostLifecycleWorkInFlight.load()},{\"psRetirement\",g_psEndpointOwnership.retirementRequired()},{\"msiSdDebt\",g_msiSteamDeckReleaseDebt.required()},{\"msiModeDebt\",g_msiDinputReturnOwed.load()},{\"msiModeDebtEpisode\",g_msiDinputReturnDebtEpisode.load()},{\"startBlocked\",g_inputHostStartBlocked},{\"spawnCount\",fullPipeSpawnCount},{\"receiptPaths\",fullPipeReceipts.size()}}}};\n}\nint wmain(",
+      "count": 1
+    },
+    {
+      "label": "preserve both calls and record separate boundaries",
+      "before": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureTargetReturnFullPipeCases();ok=failures.empty();}",
+      "after": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureCurrentOrderedReturn[\"preTargetReturnBody\"]=fixtureCurrentOrderedBoundary();fixtureTargetReturnFullPipeCases();fixtureCurrentOrderedReturn[\"postTargetReturnTail\"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}",
+      "count": 1
+    },
+    {
+      "label": "retain raw report and exception with extra boundary field",
+      "before": "{\"assertionTrace\",assertionTrace},{\"cases\",cases}",
+      "after": "{\"assertionTrace\",assertionTrace},{\"orderedReturn\",fixtureCurrentOrderedReturn},{\"cases\",cases}",
+      "count": 2
+    }
+  ],
+  "producerData": {
+    "schemaVersion": 1,
+    "relative": "tools/input_coordinator_lifecycle_selftest.mjs",
+    "key": "appendNativeLifecycleLog",
+    "decodedUtf8Bytes": 905,
+    "decodedUtf8Sha256": "0d1ce123abecf8e263d1157b0daa5bd64bbfd93139ae5bd884677385adb02e12"
+  },
+  "review": {
+    "scope": "Versioned compile-only adaptation of current source, not old22 semantic equivalence or runtime qualification. Public Start and ExportSnapshot are renamed at their exact include and replaced with unconditional throws; engine bridge body is replaced with an unconditional throw. Original business check expressions, order, counters and OFF checkpoints are retained.",
+    "publicEntriesDenied": [
+      "steamOriginalRecoveryStart",
+      "steamOriginalRecoveryExportSnapshot",
+      "steamOriginalRecoveryEngineHandle"
+    ],
+    "startNameOccurrencesInReviewedHeader": 1,
+    "exportNameOccurrencesInReviewedHeader": 1,
+    "globalWorkerDefaultStartsThread": false,
+    "controlCreationOnlyInRenamedStart": true,
+    "compileOnly": true,
+    "sourceApprovalGranted": false,
+    "publicRuntimeAccepted": false,
+    "normalProductMainMayExecute": false,
+    "vendorRuntimeClosureAccepted": false,
+    "actualCompilerLedgerStillRequired": true,
+    "old22ProfileAndDefaultUnchanged": true
+  },
+  "sourceReviewProvenance": {
+    "steamReviewSha256": "f1ff4d0e9b8272fd81d80968c858176a4dd9dd8d4e39683f344aa5a337114d2a",
+    "fixtureMetadataReviewSha256": "76de1d2f0ae70632bca8281d24b49cc93118741082783643cacff194aa2dd9ca",
+    "fullSourceExpectationApproved": false
+  }
+}

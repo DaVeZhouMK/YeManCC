@@ -36,7 +36,38 @@ export function toolSourceInputs(repo){
  files.push(...globalSources.map(p=>path.join(repo,p)));
  return files.sort((a,b)=>key(a).localeCompare(key(b))).map(p=>({path:path.resolve(p),sha256:fileHash(p)}));
 }
-export function installToolPolicyPlan({repoRoot,toolLoadPlan,toolLoadPlanSha256}){
+// Optional source identity view only. Logical call/policy roots and artifact
+// authority are unchanged; this does not project Host/compiler inputs or argv.
+function sourceViewInputs(viewPin,repoRoot,planned){
+ const view=read(viewPin);
+ if(view.schemaVersion!==1||view.kind!=='EXPLICIT_READONLY_ORIGINAL_TOOL_SOURCE_VIEW'||view.role!=='readonly-tool-source-only'||(view.roleSourceViews!==undefined&&(!Array.isArray(view.roleSourceViews)||view.roleSourceViews.length!==0)))fail('ONEX_TOOL_SOURCE_VIEW_ROLE');
+ if(typeof view.originalLogicalRepoRoot!=='string'||!same(view.originalLogicalRepoRoot,repoRoot))fail('ONEX_TOOL_SOURCE_VIEW_LOGICAL_ROOT');
+ const root=view.physicalRepoRoot;
+ if(typeof root!=='string'||!path.isAbsolute(root)||same(root,repoRoot)||!fs.existsSync(root)||!fs.statSync(root).isDirectory())fail('ONEX_TOOL_SOURCE_VIEW_PHYSICAL_ROOT');
+ const plainRoot=()=>{for(let cursor=path.resolve(root);;){if(fs.lstatSync(cursor).isSymbolicLink())fail('ONEX_TOOL_SOURCE_FORWARDING',{path:cursor});const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;}if(!same(fs.realpathSync.native(root),root))fail('ONEX_TOOL_SOURCE_FORWARDING',{path:root});};
+ plainRoot();
+ const manifest=read(view.originalManifest),snapshot=read(view.originalSourceSnapshot);
+ if(!same(manifest.repoRoot,repoRoot)||!manifest.sourceInputBefore||!same(manifest.sourceInputBefore.path,view.originalSourceSnapshot.path)||manifest.sourceInputBefore.sha256!==view.originalSourceSnapshot.sha256)fail('ONEX_TOOL_SOURCE_VIEW_LINEAGE');
+ const original=snapshot.toolSources;
+ if(!Array.isArray(original)||original.length!==planned.size)fail('ONEX_TOOL_SOURCE_VIEW_ORIGINAL_SET');
+ const originalSeen=new Set;
+ for(const member of original){const id=key(member.path);if(originalSeen.has(id)||!planned.has(id)||planned.get(id).sha256!==member.sha256)fail('ONEX_TOOL_SOURCE_VIEW_ORIGINAL_SET');originalSeen.add(id);}
+ if(view.sourceCount!==planned.size||!Array.isArray(view.bindings)||view.bindings.length!==planned.size)fail('ONEX_TOOL_SOURCE_VIEW_BINDING');
+ const logicalSeen=new Set,physicalSeen=new Set,physical=new Map;
+ for(const row of view.bindings){
+  if(typeof row.logical?.path!=='string'||typeof row.physical?.path!=='string'||!path.isAbsolute(row.logical.path)||!path.isAbsolute(row.physical.path))fail('ONEX_TOOL_SOURCE_VIEW_BINDING');
+  const id=key(row.logical.path),relative=path.relative(repoRoot,row.logical.path),target=path.resolve(root,relative);
+  if(!relative||path.isAbsolute(relative)||relative.split(/[\\/]/).some(part=>part==='..'||part.includes(':'))||!planned.has(id)||logicalSeen.has(id)||physicalSeen.has(key(row.physical.path))||!same(row.physical.path,target)||row.logical.sha256!==planned.get(id).sha256||row.physical.sha256!==row.logical.sha256||!Number.isSafeInteger(row.physical.bytes)||row.physical.bytes<0)fail('ONEX_TOOL_SOURCE_VIEW_BINDING');
+  logicalSeen.add(id);physicalSeen.add(key(row.physical.path));physical.set(key(row.physical.path),row);
+ }
+ const current=toolSourceInputs(root);
+ if(current.length!==physical.size||current.some(member=>!physical.has(key(member.path))))fail('ONEX_TOOL_SOURCE_SET_CHANGED');
+ const rebased=current.map(member=>{const row=physical.get(key(member.path));if(fs.statSync(member.path).size!==row.physical.bytes)fail('ONEX_TOOL_SOURCE_VIEW_MEMBER_CHANGED',{path:member.path});return {path:row.logical.path,sha256:member.sha256};});
+ plainRoot();checkedFile(viewPin,'ONEX_TOOL_SOURCE_VIEW_CHANGED');
+ return rebased;
+}
+export function installToolPolicyPlan({repoRoot,toolLoadPlan,toolLoadPlanSha256,toolSourceViewPin}){
+ const sourceViewPin=toolSourceViewPin===undefined?undefined:Object.freeze({...toolSourceViewPin});
  if(!toolLoadPlan||!toolLoadPlanSha256)fail('ONEX_TOOL_LOAD_PLAN_REQUIRED',{required:['toolLoadPlan','toolLoadPlanSha256']});
  const planPin={path:toolLoadPlan,sha256:toolLoadPlanSha256},plan=read(planPin);
  if(plan.schemaVersion!==1||!same(plan.repoRoot,repoRoot)||!Array.isArray(plan.sources)||!Array.isArray(plan.tools)||!Array.isArray(plan.calls))fail('ONEX_TOOL_PLAN_SHAPE');
@@ -44,7 +75,7 @@ export function installToolPolicyPlan({repoRoot,toolLoadPlan,toolLoadPlanSha256}
  for(const call of plan.calls)if(!['Harness','JoinedFactoryProbe'].includes(call.kind)||!/^[a-f0-9]{64}$/.test(call.argvSha256??'')||!call.policy||!path.isAbsolute(call.policy.path??'')||!/^[a-f0-9]{64}$/.test(call.policy.sha256??''))fail('ONEX_TOOL_INVOCATION_PLAN_SHAPE');
  unique(plan.sources,'SOURCE');if(!Array.isArray(plan.buildInputs))fail('ONEX_TOOL_BUILD_INPUT_PINS_REQUIRED');unique(plan.buildInputs,'BUILD_INPUT');unique(plan.calls.map(c=>({path:c.policy?.path??''})),'POLICY');
  const planned=new Map(plan.sources.map(p=>[key(p.path),p]));
- function verifySources(){checkedFile(planPin,'ONEX_TOOL_PLAN_CHANGED');const current=toolSourceInputs(repoRoot);if(current.length!==planned.size||current.some(p=>!planned.has(key(p.path))))fail('ONEX_TOOL_SOURCE_SET_CHANGED');for(const p of current)if(planned.get(key(p.path)).sha256!==p.sha256)fail('ONEX_TOOL_SOURCE_CHANGED',{path:p.path});}
+ function verifySources(){checkedFile(planPin,'ONEX_TOOL_PLAN_CHANGED');const current=sourceViewPin===undefined?toolSourceInputs(repoRoot):sourceViewInputs(sourceViewPin,repoRoot,planned);if(current.length!==planned.size||current.some(p=>!planned.has(key(p.path))))fail('ONEX_TOOL_SOURCE_SET_CHANGED');for(const p of current)if(planned.get(key(p.path)).sha256!==p.sha256)fail('ONEX_TOOL_SOURCE_CHANGED',{path:p.path});}
  verifySources();
  if(plan.tools.length!==TOOL_KINDS.length||new Set(plan.tools.map(t=>t.kind)).size!==TOOL_KINDS.length||TOOL_KINDS.some(k=>!plan.tools.some(t=>t.kind===k)))fail('ONEX_TOOL_FIVE_PROJECT_BINDINGS_REQUIRED');
  const tools=new Map(plan.tools.map(t=>[t.kind,t]));

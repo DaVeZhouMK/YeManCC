@@ -45,7 +45,7 @@ $taskMutationDefinitions=@(
   @{name='stale-rollback-snapshot';from='if ($now -cne $entry.after) { throw ''DECKY_ROLLBACK_CONCURRENT_CHANGE'' }';to='Write-Verbose "injected stale rollback snapshot"';case='rollback revalidates every file after its initial snapshot before restoring it';failure='Expected rejection ROLLBACK_CONCURRENT_CHANGE, got '}
 )
 # A child may select only the original assertion owned by its semantic mutation.
-# The ordinary parent always declares and executes the full original 32 cases.
+# The ordinary parent executes all original 32 cases and the configuration storms.
 if($MutationCase -and !$SkipMutationProof){throw 'DECKY_PACKAGE_MUTATION_SCOPE_REQUIRES_SKIP_MUTATION_PROOF'}
 $taskSelectedCase=if($MutationCase){@($taskMutationDefinitions|Where-Object{$_.name -ceq $MutationCase})[0].case}else{$null}
 $taskDeclaredCases=New-Object 'System.Collections.Generic.List[string]'
@@ -107,7 +107,7 @@ function New-Case([string]$Name) {
   [IO.Directory]::CreateDirectory($installed) | Out-Null
   foreach ($name in Get-YmccDeckyFiles) { Put $incoming $name ('inert-v330-'+$name) | Out-Null }
   Put $incoming 'plugins/ymcc-sidebar/plugin.json' '{"name":"ymcc-sidebar"}' | Out-Null
-  $lock=[ordered]@{repository='SteamDeckHomebrew/decky-loader';origin='official-release';byteIdentical=$true;loaderPatches=0;version='v3.3.0';asset=@{sha256=(Get-YmccDeckyHash (Join-Path $incoming 'PluginLoader_noconsole.exe'));size=([IO.FileInfo](Join-Path $incoming 'PluginLoader_noconsole.exe')).Length}}
+  $lock=[ordered]@{schemaVersion=1;repository='SteamDeckHomebrew/decky-loader';origin='official-release';byteIdentical=$true;loaderPatches=0;version='v3.3.0';asset=@{sha256=(Get-YmccDeckyHash (Join-Path $incoming 'PluginLoader_noconsole.exe'));size=([IO.FileInfo](Join-Path $incoming 'PluginLoader_noconsole.exe')).Length}}
   $lockFile=Put $caseRoot 'inert-lock.json' ($lock | ConvertTo-Json -Depth 8 -Compress)
   $manifest=New-YmccDeckyManifest $incoming $lockFile
   return [pscustomobject]@{home=$caseRoot;source=$incoming;target=$installed;manifest=$manifest;lock=$lockFile}
@@ -409,6 +409,79 @@ Check 'native updater includes production transaction and excludes generic merge
   }
   Need ($native.IndexOf('$deckyPlan = Get-YmccDeckyPlan') -lt $native.IndexOf('  Register-TreeForRollback $programSource')) 'Decky validation occurs after mutations'
 }
+
+# Configuration storms stay on the original embedded transaction consumer.
+foreach($kind in @('empty','truncated','duplicate','escaped-duplicate','case-duplicate','array','future','schema-string','schema-float','owner-type','bytes-string','bytes-bool','oversize','trailing')) {
+ Check ('storm installed receipt '+$kind+' preserves originals and rejects ownership') {
+  $c=New-Case 'storm-receipt';Seed $c|Out-Null
+  $good=$c.manifest|ConvertTo-Json -Depth 12 -Compress
+  $bad=$good
+  switch($kind){
+   'empty'{$bad=''}
+   'truncated'{$bad='{"owner":'}
+   'duplicate'{$bad='{"owner":"foreign",'+$good.Substring(1)}
+   'escaped-duplicate'{$bad='{"\u006fwner":"foreign",'+$good.Substring(1)}
+   'case-duplicate'{$bad='{"OWNER":"foreign",'+$good.Substring(1)}
+   'array'{$bad='[]'}
+   'future'{$bad=$good.Replace('"schemaVersion":1','"schemaVersion":2')}
+   'schema-string'{$bad=$good.Replace('"schemaVersion":1','"schemaVersion":"1"')}
+   'schema-float'{$bad=$good.Replace('"schemaVersion":1','"schemaVersion":1.0')}
+   'owner-type'{$bad=$good.Replace('"owner":"YMCC"','"owner":true')}
+   'bytes-string'{$bad=[regex]::Replace($good,'"bytes":(\d+)','"bytes":"$1"')}
+   'bytes-bool'{$bad=[regex]::Replace($good,'"bytes":\d+','"bytes":true')}
+   'oversize'{$bad=' '*131073}
+   'trailing'{$bad=$good+' {}'}
+  }
+  Need ($bad -cne $good) 'storm mutation unchanged'
+  $receipt=Put $c.target '.ymcc-managed.receipt' $bad;$before=Snapshot $c.target
+  Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} ''
+  Need ((Snapshot $c.target) -ceq $before -and [IO.File]::ReadAllText($receipt) -ceq $bad) 'Invalid ownership original was overwritten'
+  Put $c.target '.ymcc-managed.receipt' $good|Out-Null
+  Need (@((Get-YmccDeckyPlan $c.source $c.target $c.manifest).entries).Count -eq 0) 'Explicit valid receipt retry failed'
+ }
+}
+Check 'storm legacy duplicate ownership cannot retire prior receipt' {
+ $c=New-Case 'storm-legacy';Seed $c|Out-Null;$good=$c.manifest|ConvertTo-Json -Depth 12 -Compress
+ Put $c.target '.ymcc-managed.json' ('{"owner":"foreign",'+$good.Substring(1))|Out-Null
+ $before=Snapshot $c.target;Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} ''
+ Need ((Snapshot $c.target) -ceq $before) 'Invalid legacy receipt retired'
+}
+Check 'storm package lock duplicate owner fields cannot attest official bytes' {
+ $c=New-Case 'storm-lock';$good=[IO.File]::ReadAllText($c.lock)
+ [IO.File]::WriteAllText($c.lock,('{"origin":"foreign",'+$good.Substring(1)))
+ Reject {New-YmccDeckyManifest $c.source $c.lock} ''
+ [IO.File]::WriteAllText($c.lock,$good);Need ((New-YmccDeckyManifest $c.source $c.lock).files.Count -eq 7) 'Valid lock retry failed'
+}
+Check 'storm incoming manifest numeric strings cannot claim a managed file length' {
+ $c=New-Case 'storm-consume';$c.manifest.files[2].bytes=[string]$c.manifest.files[2].bytes
+ Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} ''
+ Need ((Snapshot $c.target) -ceq '') 'Bad consumed manifest wrote target'
+}
+Check 'storm receipt atomic replacement lock preserves old identity and explicit retry recovers' {
+ $c=New-Case 'storm-atomic';Seed $c|Out-Null;$receipt=Join-Path $c.target '.ymcc-managed.receipt';$old=[IO.File]::ReadAllText($receipt)
+ $new=$old.Replace('"origin":"official-release"','"origin":"official-release","unknownExtension":"retry"');$bytes=[Text.Encoding]::UTF8.GetBytes($new)
+ $sha=[Security.Cryptography.SHA256]::Create();try{$expected=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+ $lease=[IO.File]::Open($receipt,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+ try{Reject {Set-YmccDeckyAtomic $c.target '.ymcc-managed.receipt' '' $bytes $expected} '';Need ([IO.File]::ReadAllText($receipt) -ceq $old) 'Failed atomic receipt replaced old identity'}finally{$lease.Dispose()}
+ Need (@(Get-ChildItem -LiteralPath $c.target -File -Force -Filter '.ymcc-*.tmp').Count -eq 0) 'Failed atomic write leaked scratch'
+ Set-YmccDeckyAtomic $c.target '.ymcc-managed.receipt' '' $bytes $expected
+ Need ([IO.File]::ReadAllText($receipt) -ceq $new) 'Released atomic writer did not commit exact valid bytes'
+ Seed $c|Out-Null
+ Need (@((Get-YmccDeckyPlan $c.source $c.target $c.manifest).entries).Count -eq 0) 'Released valid transaction cannot persist and reread current identity'
+}
+
+
+foreach($kind in @('future','schema-string','schema-float')) {
+ Check ('storm package lock '+$kind+' cannot downgrade its schema') {
+  $c=New-Case 'storm-lock-schema';$good=[IO.File]::ReadAllText($c.lock)
+  $replacement=switch($kind){'future'{'"schemaVersion":2'};'schema-string'{'"schemaVersion":"1"'};'schema-float'{'"schemaVersion":1.0'}}
+  $bad=$good.Replace('"schemaVersion":1',$replacement);Need ($bad -cne $good) 'Lock schema mutation unchanged'
+  [IO.File]::WriteAllText($c.lock,$bad);Reject {New-YmccDeckyManifest $c.source $c.lock} ''
+  Need ([IO.File]::ReadAllText($c.lock) -ceq $bad) 'Future lock original overwritten'
+  [IO.File]::WriteAllText($c.lock,$good);Need ((New-YmccDeckyManifest $c.source $c.lock).files.Count -eq 7) 'Current lock explicit retry failed'
+ }
+}
+
 $taskOrdinaryDeclaredCount=$taskDeclaredCases.Count
 $taskOrdinaryExecutedCount=@($cases|Where-Object{$_.executed -eq $true}).Count
 # Candidate fixture owner only. New Add-Type/compiler authority must be reviewed
@@ -573,7 +646,7 @@ $taskMutationsComplete=$SkipMutationProof -or (@($taskMutationStates.Values|Wher
 if(!$taskMutationsComplete){$taskIncomplete=$true}
 $taskComplete=!$taskBudgetExhausted -and !$taskIncomplete -and $taskMutationsComplete
 $taskStatus=if($taskBudgetExhausted){'TIMEOUT'}elseif(!$taskComplete){'INCOMPLETE'}elseif($failures.Count){'FAIL'}else{'PASS'}
-$result=[ordered]@{pass=($failures.Count -eq 0 -and $taskComplete);status=$taskStatus;complete=$taskComplete;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=$taskCleanupUsedMs;executionScope=$taskExecutionScope;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;declaredOrdinaryCaseCount=$taskOrdinaryDeclaredCount;executedOrdinaryCaseCount=$taskOrdinaryExecutedCount;omittedOrdinaryCases=$taskOmittedCases.ToArray();mutations=$taskMutationStates;mutationRetirement=$taskMutationReceipts.ToArray();count=$cases.Count;passed=($cases.Count-$failures.Count);cases=$cases.ToArray();sourceSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance.ps1'));embeddedSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance_script.h'));realSteamActions=0;hardwareWrites=0;productProcessesLaunched=0;productionGlobalMutexAccessed=$false;fixtureMutexNamespaceRemapped=$fixtureMutexRemapped;scope=$(if($MutationCase){'Selected original assertion only: '+$taskSelectedCase+'; other 31 ordinary cases omitted. '}else{'Full original 32 ordinary assertions. '})+'Exact embedded production PowerShell executes real file transactions in isolated evidence; inert Loader bytes, no installed/physical acceptance'}
+$result=[ordered]@{pass=($failures.Count -eq 0 -and $taskComplete);status=$taskStatus;complete=$taskComplete;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=$taskCleanupUsedMs;executionScope=$taskExecutionScope;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;declaredOrdinaryCaseCount=$taskOrdinaryDeclaredCount;executedOrdinaryCaseCount=$taskOrdinaryExecutedCount;omittedOrdinaryCases=$taskOmittedCases.ToArray();mutations=$taskMutationStates;mutationRetirement=$taskMutationReceipts.ToArray();count=$cases.Count;passed=($cases.Count-$failures.Count);cases=$cases.ToArray();sourceSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance.ps1'));embeddedSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance_script.h'));realSteamActions=0;hardwareWrites=0;productProcessesLaunched=0;productionGlobalMutexAccessed=$false;fixtureMutexNamespaceRemapped=$fixtureMutexRemapped;scope=$(if($MutationCase){'Selected original assertion only: '+$taskSelectedCase+'; other '+($taskOrdinaryDeclaredCount-1)+' ordinary cases omitted. '}else{('Original 32 ordinary assertions plus '+($taskOrdinaryDeclaredCount-32)+' configuration storm assertions. ')})+'Exact embedded production PowerShell executes real file transactions in isolated evidence; inert Loader bytes, no installed/physical acceptance'}
 $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'result.json') -Encoding UTF8
 if (!$taskComplete){Write-Error ('DECKY_PACKAGE_TEST_'+$taskStatus) -ErrorAction Continue;exit 124}
 if ($failures.Count) { $failures | Format-Table -Wrap; throw ('Decky package maintenance failed '+$failures.Count+'/'+$cases.Count) }

@@ -12,7 +12,7 @@ export function isGyroPresetKey(value: unknown): value is GyroPresetKey {
  * （陀螺仪页调整预设默认时，这里要同步。）
  */
 const GYRO_PRESET_DEFINING_FIELDS: Record<GyroPresetKey, Record<string, unknown>> = {
-  fps: { motionMode: 'on', motionTrigger: '', outputStick: 'right', outputAxis: 'xy', motionInput: 'local-space', aimingSightsTrigger: 'LT' },
+  fps: { motionMode: 'on', motionTrigger: '', outputStick: 'right', outputAxis: 'xy', motionInput: 'local-space', aimingSightsTrigger: 'LT', gyroWeight: 1.3 },
   racing: { motionMode: 'on', motionTrigger: '', outputStick: 'left', outputAxis: 'x', motionInput: 'joystick-steering' },
   steam: { motionMode: 'on', motionTrigger: '', motionInput: 'local-space' },
   custom: { motionMode: 'on', motionTrigger: '' },
@@ -35,7 +35,27 @@ export function gyroMotionParamsForPreset(kind: GyroPresetKey, presets: unknown)
   const params: Record<string, unknown> = { ...source };
   delete params.gyroMode; // legacy 死字段：陀螺仪页落盘时同样剔除。
   params.motionMode = uiMode === 'suppress' ? 'on' : uiMode;
-  params.motionTrigger = uiMode === 'on' ? null : (trigger || null);
+  params.motionTrigger = uiMode === 'on' ? null : (trigger || 'LT');
   return params;
 }
 
+
+/** Expand an explicit power/link action, never page hydration or boot intent.
+ * A remembered preset wins. Legacy configured top-level parameters remain usable;
+ * the untouched off/empty-trigger baseline gets the selected preset's defaults.
+ */
+export function gyroMotionForEnable(value: unknown): Record<string, unknown> {
+  const motion = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  const kind = isGyroPresetKey(motion.activePreset) ? motion.activePreset
+    : isGyroPresetKey(motion.preset) ? motion.preset : 'fps';
+  const presets = motion.presets && typeof motion.presets === 'object' && !Array.isArray(motion.presets)
+    ? motion.presets as Record<string, unknown> : {};
+  const stored = presets[kind];
+  const hasStored = stored && typeof stored === 'object' && !Array.isArray(stored);
+  const trigger = typeof motion.motionTrigger === 'string' ? motion.motionTrigger.trim() : '';
+  const configured = motion.motionMode === 'on' ||
+    (['off', 'toggle'].includes(String(motion.motionMode)) && trigger !== '');
+  const params = hasStored || !configured ? gyroMotionParamsForPreset(kind, presets) : {};
+  return { ...motion, ...params, preset: kind, activePreset: kind, enabled: true, outputMode: 'virtual-stick' };
+}

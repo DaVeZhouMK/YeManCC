@@ -8,15 +8,25 @@ const vue = require('vue');
 const { parse, compileScript } = require('vue/compiler-sfc');
 const { transformSync } = require('esbuild');
 const root = process.cwd();
+const detectionOnly = process.argv.includes('--detection-only');
+const inputRuntimeOnly = process.argv.includes('--input-runtime-only');
+const uiOnly = process.argv.includes('--ui-only');
+assert([detectionOnly, inputRuntimeOnly, uiOnly].filter(Boolean).length <= 1, 'Select exactly one bounded scope');
+const scope = uiOnly ? 'ui-only' : inputRuntimeOnly ? 'input-runtime-only' : detectionOnly ? 'detection-only' : 'default';
+const uiEvidence = [];
+const scopeDetails = uiOnly ? { uiFixtures:uiEvidence, scope, completeRegression:false, notExecutedDomains:['input-runtime', 'detection', 'native-wire'] } : {};
+// Selection uses the current original section, never a case-name match or an assertion bypass.
+let currentSection = 'input-runtime';
 const cases = [];
 async function check(name, run) {
+  if (uiOnly && currentSection !== 'ui') return;
   try { await run(); cases.push(name); }
-  catch(error) { console.error(JSON.stringify({failedCase:name,passedBeforeFailure:cases.length,passedCases:cases,error:String(error)},null,2));throw error; }
+  catch(error) { console.error(JSON.stringify({...scopeDetails,failedCase:name,passedBeforeFailure:cases.length,passedCases:cases,error:String(error)},null,2));throw error; }
 }
 function evaluate(source, imports = {}, globals = {}) {
   const module = { exports: {} };
   vm.runInNewContext(transformSync(source, { loader: 'ts', format: 'cjs' }).code, {
-    module, exports: module.exports, console, structuredClone, performance, TextEncoder,
+    module, exports: module.exports, console, structuredClone, performance, TextEncoder, setTimeout, clearTimeout, queueMicrotask,
     require(name) { if (name === 'vue') return vue; if (name in imports) return imports[name]; throw Error('Unexpected import ' + name); },
     ...globals,
   });
@@ -34,13 +44,14 @@ await check('策略租约比较包含可选身份代次与路径；旧mock及路
   assert(hysteresis.samePolicyGame({...a,identityGeneration:undefined},a));
   assert(hysteresis.samePolicyGame(null,null));assert(!hysteresis.samePolicyGame(a,null));
 });
-const detectionOnly = process.argv.includes('--detection-only');
+const nativeWireEvidence={status:'NOT_RUN',reason:uiOnly ? '--ui-only excludes native-wire, including an explicitly supplied evidence path' : 'Explicit --native-wire-evidence was not supplied'};
 if (!detectionOnly) {
 const hash = load('src/bridge/inputConfigHash.ts');
 const hc = load('src/bridge/hcInputUtils.ts');
 const personas = load('src/bridge/controllerPersona.ts');
 const baseline = load('src/bridge/settingsBaseline.ts', { '../../PowerControl/settings-baseline.json': JSON.parse(fs.readFileSync(path.join(root,'PowerControl/settings-baseline.json'),'utf8')) });
-const repo = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './api': {}, './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts') });
+const shortcuts = load('src/bridge/bootModeSharedShortcuts.ts', { './settingsSnapshot': load('src/bridge/settingsSnapshot.ts') });
+const repo = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './bootModeSharedShortcuts': shortcuts, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './api': {}, './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts') });
 const A = { pid: 101, processCreated: '1001', name: 'a.exe', path: 'C:\\Games\\a.exe', ts: 0 };
 const B = { pid: 202, processCreated: '2002', name: 'b.exe', path: 'C:\\Games\\b.exe', ts: 0 };
 const C = { pid: 303, processCreated: '3003', name: 'c.exe', path: 'C:\\Games\\c.exe', ts: 0 };
@@ -71,7 +82,9 @@ await check('PID复用立即换身份；标题和来源变化不算进程切换�
 async function flush() { for (let i = 0; i < 35; i++) { await Promise.resolve(); await vue.nextTick(); } }
 async function fixture(options = {}) {
   let now = 0, timerSeq = 0, raw = options.raw === undefined ? A : options.raw;
-  const timers = new Map(), scheduled = new Map(), rawListeners = new Set(), configListeners = new Set(), scheduleListeners = new Set();
+  const timers = new Map(), scheduled = new Map(), rawListeners = new Set(), configListeners = new Set(), scheduleListeners = new Set(), inputListeners = new Set();
+  const reads = { input: 0, config: 0 };
+  let quickBusy = !!options.quickBusy, powerPhase = options.powerPhase || 'ready', coreProbeFailures = options.coreProbeFailures || 0;
   const calls = { cas: [], performance: [], core: [], clearCore: 0, conflicts: options.conflicts || 0, writeFailures: options.writeFailures || 0 };
   let settings = options.input || base();
   let config = { version: 1, entries: { 'a.exe': profile('steamdeck', 'fps'), 'b.exe': profile('follow', 'off') }, ...options.config };
@@ -98,20 +111,21 @@ async function fixture(options = {}) {
   const scheduler = { registerScheduledTask(name, ms, run, opts) { scheduled.set(name, { ms, run, opts }); return () => scheduled.delete(name); } };
   const repository = {
     mergeSettings: repo.mergeSettings,
-    async loadSettings() { return { input: structuredClone(settings) }; },
+    onInputSettingsChanged(cb) { inputListeners.add(cb); return () => inputListeners.delete(cb); },
+    async loadSettings() { reads.input++; return { input: structuredClone(settings) }; },
     async compareAndSwapInputSettings(revision, patch, isCurrent) {
       if (resolveBlockedCas) await new Promise(resolve => { resolveBlockedCas.resolve = resolve; });
       if (isCurrent && !isCurrent()) return { ok: false, reason: 'cancelled', value: structuredClone(settings) };
       if (calls.writeFailures > 0) { calls.writeFailures--; return repo.evaluateInputCasWrite(settings, revision, patch, false); }
       if (calls.conflicts > 0) { calls.conflicts--; settings.revision++; return { ok: false, reason: 'revision-conflict', value: structuredClone(settings) }; }
       const result = repo.evaluateInputCas(settings, revision, patch);
-      if (result.ok) { settings = result.value; calls.cas.push(structuredClone(patch)); }
+      if (result.ok) { settings = result.value; calls.cas.push(structuredClone(patch)); for (const cb of inputListeners) cb(); }
       return result;
     },
   };
   const perf = {
     isPerformanceScheduleBusy: () => false,
-    async loadGameCustomConfig() { if (resolveBlockedConfig) await new Promise(resolve => { resolveBlockedConfig.resolve = resolve; }); return structuredClone(config); },
+    async loadGameCustomConfig() { reads.config++; if (resolveBlockedConfig) await new Promise(resolve => { resolveBlockedConfig.resolve = resolve; }); return structuredClone(config); },
     onGameCustomConfigChanged(cb) { configListeners.add(cb); return () => configListeners.delete(cb); },
     async clearGameInputRestoreSnapshot(expected) { if (clearRestoreFailures > 0) { clearRestoreFailures--; throw Error('simulated clear failure'); } if (JSON.stringify(expected) === JSON.stringify(config.inputRestore)) { delete config.inputRestore; for (const cb of configListeners) cb(config); } },
     async loadPerformanceSchedule() { return { configured: true, enabled: true, active: { ac: 'balanced', dc: 'balanced' }, profiles: { ac: {}, dc: {} } }; },
@@ -129,10 +143,10 @@ async function fixture(options = {}) {
     './gamePolicyTarget': target, './performanceSchedule': perf, '@/scheduler': scheduler,
     './powerSource': {powerSourceMode:vue.ref('ac')}, './yeman':{detectPowerMode:async()=> 'ac'}, './autofloat':{setFloatRtssLinked(){}},
     './frameRateLimits':{loadGlobalFrameRates:async()=>({ac:{fps:60,lastFps:60,ceiling:60},dc:{fps:30,lastFps:30,ceiling:30}}),onFrameRatesChanged:()=>()=>{},dedicatedFrameRatePair:(_,global)=>global,applyIndependentFrameRates:async()=>true},
-    './api': { powerLifecycle: { get: async () => ({ phase: 'ready', hardwareWritesAllowed: true }) } },
-    './quickActionLock': { isQuickActionBusy: () => false },
+    './api': { powerLifecycle: { get: async () => ({ phase: powerPhase, hardwareWritesAllowed: powerPhase === 'ready' }) } },
+    './quickActionLock': { isQuickActionBusy: () => quickBusy },
     './gameCorePolicy': {
-      detectGameCorePolicy: async () => ({ heterogeneous: true, smtAvailable: true }),
+      detectGameCorePolicy: async () => { if (coreProbeFailures > 0) { coreProbeFailures--; throw Error('probe unavailable'); } return { heterogeneous: true, smtAvailable: true }; },
       applyGameCorePolicy: async (game, mode, hyper) => { calls.core.push([game.pid, mode, hyper]); return { ok: true, applied: true }; },
       clearGameCorePolicy: async () => { calls.clearCore++; return true; },
     },
@@ -148,9 +162,13 @@ async function fixture(options = {}) {
   }
   input.startGameInputOverrideWatch(); runtime.startGamePolicyRuntime(); await flush();
   return {
-    target, input, calls, clock, scheduled, emit, tick, repository,
+    target, input, calls, reads, inputListeners, clock, scheduled, emit, tick, repository,
+    async pollRetries() { for (const task of [...scheduled.values()]) await task.run(); await flush(); },
+    async nativeInputCommit(patch) { settings = repo.mergeSettings(settings, patch); settings.revision++; for (const cb of inputListeners) cb(); await flush(); },
     get settings() { return settings; }, get config() { return config; }, get locked() { return locked; },
     failWrites(count) { calls.writeFailures=count; },
+    set quickBusy(value) { quickBusy=value; },
+    set powerPhase(value) { powerPhase=value; },
     set strictFailure(value) { strictFailure = value; },
     async changeEntry(key, entry) { config.entries[key] = entry; for (const cb of configListeners) cb(config); await flush(); },
     async retry() { await detector.refreshGameStatusStrict().catch(()=>{}); for (const task of scheduled.values()) await task.run(); await flush(); },
@@ -161,6 +179,59 @@ async function fixture(options = {}) {
     stop() { input.stopGameInputOverrideWatch(); runtime.stopGamePolicyRuntime(); },
   };
 }
+await check('后台覆盖确认后注销重试；两分钟空闲不再读输入或专属配置', async () => {
+  for (const raw of [null, A]) {
+    const f = await fixture({ raw });
+    assert(!f.scheduled.has('game-input-overlay-retry'));
+    assert(!f.scheduled.has('game-policy-runtime-retry'));
+    const before = { ...f.reads };
+    for (let i = 0; i < 60; i++) await f.pollRetries();
+    assert.deepEqual(f.reads, before);
+    f.stop(); assert.equal(f.inputListeners.size, 0);
+  }
+});
+await check('权威输入提交事件刷新follow覆盖；自身CAS通知合并并回到零重试', async () => {
+  const f = await fixture({ config: { entries: { 'a.exe': profile('follow', 'on') } } });
+  assert.equal(f.settings.gameOverride.outputTarget.persona, 'disabled');
+  await f.nativeInputCommit({
+    outputTarget: { persona: 'elite', buttonMappingEnabled: true },
+    gyroMotion: { gyroMultiplier: 4 },
+  });
+  assert.equal(f.settings.gameOverride.outputTarget.persona, 'elite');
+  assert.equal(f.settings.gameOverride.gyroMotion.gyroMultiplier, 4);
+  assert(!f.scheduled.has('game-input-overlay-retry'));
+  const before = { ...f.reads }; await f.pollRetries(); assert.deepEqual(f.reads, before);
+  f.stop();
+});
+await check('未解决的覆盖仍有后台重试；归还后晚到通知不能重新登记', async () => {
+  const f = await fixture({ writeFailures: 3 });
+  assert(f.scheduled.has('game-input-overlay-retry'));
+  const late = [...f.inputListeners];
+  await f.pollRetries(); assert(f.settings.gameOverride); assert(!f.scheduled.has('game-input-overlay-retry'));
+  f.stop(); const before = { ...f.reads };
+  for (const cb of late) cb(); await flush();
+  assert.deepEqual(f.reads, before); assert(!f.scheduled.has('game-input-overlay-retry'));
+});
+await check('策略忙碌与电源未就绪保留后台重试；解除后确认并注销', async () => {
+  for (const options of [{quickBusy:true}, {powerPhase:'resuming'}, {coreProbeFailures:1}]) {
+    const f = await fixture(options);
+    assert(f.scheduled.has('game-policy-runtime-retry'));
+    f.quickBusy=false; f.powerPhase='ready'; await f.pollRetries();
+    assert(!f.scheduled.has('game-policy-runtime-retry'));
+    const before = JSON.stringify(f.calls); const reads = { ...f.reads };
+    for (let i=0;i<60;i++) await f.pollRetries();
+    assert.equal(JSON.stringify(f.calls),before); assert.deepEqual(f.reads,reads); f.stop();
+  }
+});
+await check('已确认策略遇新专属变化时重新登记；停止后的旧retry不复活', async () => {
+  const f = await fixture(); assert(!f.scheduled.has('game-policy-runtime-retry'));
+  f.quickBusy=true; await f.changeEntry('a.exe', {...profile('elite','off'), ac:{cpuPreset:'balanced'}});
+  assert(f.scheduled.has('game-policy-runtime-retry'));
+  const late = [...f.scheduled.values()]; f.stop();
+  const before=JSON.stringify(f.calls), reads={...f.reads};
+  for (const task of late) await task.run(); await flush();
+  assert.equal(JSON.stringify(f.calls),before); assert.deepEqual(f.reads,reads); assert.equal(f.scheduled.size,0);
+});
 await check('专属覆盖只写overlay；页面本机设置和预设快照逐字节不变', async () => {
   const f = await fixture();
   assert.equal(f.settings.outputTarget.persona, 'disabled'); assert.equal(f.settings.gyroMotion.enabled, false);
@@ -251,10 +322,11 @@ await check('overlay原子替换并参与配置哈希；退出不需要写回本
 });
 await check('queued CAS在磁盘读取后复核取消条件，旧任务不落盘', async () => {
   let current = true, releaseRead, writes = 0;
-  const durable = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts'),
-    './api': { fs: { readTextFile: async () => new Promise(resolve => { releaseRead = resolve; }) },
+  const durable = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './bootModeSharedShortcuts': shortcuts, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts'),
+    './api': { fs: { exists: async () => true, readTextFile: async () => new Promise(resolve => { releaseRead = resolve; }) },
       settingsStore: { write: async () => { writes++; return true; } } } });
-  const document = repo.normalizeSettings({ input: base() });
+  durable.setSettingsDirectory(String.raw`C:\SOFT\YeMan\PowerControl`);
+  const document = repo.normalizeSettings({ input: base() }); baseline.stampSettingsBaseline(document);
   const pending = durable.compareAndSwapInputSettings(document.input.revision, { gameOverride: { identity:'A' } }, () => current);
   await flush(); assert(releaseRead); current = false; releaseRead(JSON.stringify(document));
   const result = await pending; assert.equal(result.reason, 'cancelled'); assert.equal(writes, 0);
@@ -298,9 +370,13 @@ await check('同会话native开机基线不被旧游戏恢复快照覆盖', asyn
   assert.deepEqual(f.settings.outputTarget,initial.outputTarget); assert.deepEqual(f.settings.gyroMotion,initial.gyroMotion);
   assert.equal(f.settings.startupAppliedSession,'native-session-1');assert(!f.config.inputRestore);f.stop();
 });
+if (!inputRuntimeOnly) {
+currentSection = 'ui';
 // Actual compiled pages with in-memory renderer: no WebView, real hardware, process or disk calls.
-function element(type, text = '') { return { type, text, props: {}, children: [], parent: null, get textContent() { return this.text + this.children.map(n => n.textContent).join(''); } }; }
+function element(type, text = '') { return { type, text, style:{display:''}, props: {}, children: [], parent: null, get textContent() { return this.text + this.children.map(n => n.textContent).join(''); } }; }
+const uiBody=element('body');
 const renderer = vue.createRenderer({
+  querySelector:selector=>{assert.equal(selector,'body');return uiBody;},
   createElement: type => element(type), createText: text => element('#text',text), createComment: text => element('#comment',text),
   setText: (node,text) => { node.text = text; }, setElementText: (node,text) => { node.text = text; node.children = []; },
   parentNode: node => node.parent, nextSibling: node => node.parent?.children[node.parent.children.indexOf(node)+1] || null,
@@ -310,50 +386,206 @@ const renderer = vue.createRenderer({
 });
 const descendants = node => [node, ...node.children.flatMap(descendants)];
 async function pageFixture(file, initial = base()) {
-  const source = fs.readFileSync(path.join(root,file),'utf8'); const { descriptor } = parse(source, { filename:file });
-  const compiled = compileScript(descriptor, { id: 'game-policy-test', inlineTemplate:true, templateOptions:{ compilerOptions:{ hoistStatic:false } } });
-  let settings = structuredClone(initial), state = { locked:false, identity:'' }, callback, writes=0, joy=0, now=0, seq=0;
-  const timers = new Map();
-  const window = { addEventListener(){}, removeEventListener(){}, dispatchEvent(){}, setTimeout(fn,ms){const id=++seq;timers.set(id,{fn,at:now+ms});return id;},clearTimeout(id){timers.delete(id);} };
-  const child = { props:['modelValue','disabled'], emits:['update:modelValue'], setup:(props,{emit})=>()=>vue.h('button', { disabled:props.disabled, 'data-stub-control':true, 'data-stub-model':props.modelValue, onTestUpdate:value=>emit('update:modelValue',value) }, String(props.modelValue ?? '')) };
-  const imports = {
-    '@/bridge/settingsRepository': { onInputSettingsChanged:()=>()=>{},loadSettings:async()=>({input:structuredClone(settings)}),compareAndSwapInputSettings:async(revision,patch)=>{ writes++;const result=repo.evaluateInputCas(settings,revision,patch);if(result.ok)settings=result.value;return result;} },
-    '@/bridge/gameInputOverride': { getGameInputOverrideState:()=>state,subscribeGameInputOverrideState(cb){callback=cb;cb(state);return()=>{};} },
-    '@/bridge/ipc': { on:()=>()=>{}, invoke:async()=>({status:'not-calibrated'}) }, '@/bridge/api':{shell:{open:async()=>{}}},
-    '@/bridge/gameproc': { closeJoyxoffIfRunning:async()=>{joy++;} },
-    '@/bridge/inputContracts':{ normalizeGyroTelemetry:()=>null }, '@/bridge/gyroMotionMapperMock':{mapGyroSample:()=>({x:0,y:0})},
-    '@/bridge/virtualReportAssembler':{assembleCanonicalFrame:()=>({})},
-    // R17: this newly imported helper is pure presentation; use its actual implementation.
-    '@/bridge/virtualOutputStatus':load('src/bridge/virtualOutputStatus.ts'),
-    '@/bridge/controllerShortcutRules':load('src/bridge/controllerShortcutRules.ts'),
-    '@/bridge/yeman':{oemKeysGet:async()=>({familyId:'unknown',supported:false,keys:[]})},
-    '@/bridge/uiLifecycle':{isUiVisible:()=>true,onUiVisibilityChange:()=>()=>{}},
-    '@/bridge/gyroPresentation':load('src/bridge/gyroPresentation.ts',{}, {
-      requestAnimationFrame:fn=>window.setTimeout(fn,16), cancelAnimationFrame:id=>window.clearTimeout(id),
-    }),
+  // Stateful memory ports replace persistence/native ownership only. Editor,
+  // snapshot unwrapping, CAS evaluation, overlay and gyro save stay real.
+  let settings = structuredClone(initial), game = null, config = { entries:{}, rtss:{} };
+  const settingsGeneration = 1, inputListeners = new Set(), gameListeners = new Set(), configListeners = new Set();
+  const globalCas = [], dedicatedWrites = [], refusals = [], ipcCalls = [], traces = [];
+  let joy = 0, now = 0, seq = 0, casGate = null, pendingCas = 0;
+  const timers = new Map(), ipcListeners = new Map();
+  const window = { addEventListener(){}, removeEventListener(){}, dispatchEvent(){},
+    setTimeout(fn,ms){const id=++seq;timers.set(id,{fn,at:now+Math.max(0,Number(ms)||0)});return id;},
+    clearTimeout(id){timers.delete(id);} };
+  const document = { addEventListener(){}, removeEventListener(){}, querySelector:()=>null, activeElement:null };
+  const clock = {window,document,performance:{now:()=>now},setTimeout:window.setTimeout,clearTimeout:window.clearTimeout,
+    requestAnimationFrame:fn=>window.setTimeout(fn,16),cancelAnimationFrame:window.clearTimeout};
+  const subscribe = (listeners,cb) => { listeners.add(cb); return ()=>listeners.delete(cb); };
+  const snapshots = load('src/bridge/settingsSnapshot.ts');
+  const copy = snapshots.snapshotSettingsData;
+  const settingsPort = {
+    loadSettings:async()=>({input:copy(settings)}),
+    getSettingsGeneration:()=>settingsGeneration,
+    assertSettingsGeneration(value){assert.equal(value,settingsGeneration,'stale settings generation');},
+    mergeSettings:repo.mergeSettings, VirtualStartProtectionActive:repo.VirtualStartProtectionActive,
+    onInputSettingsChanged:cb=>subscribe(inputListeners,cb),
+    async compareAndSwapInputSettings(revision,patch,isCurrent=()=>true){
+      const attempt={revision,patch:copy(patch),status:'PENDING'};globalCas.push(attempt);
+      if(casGate){const gate=casGate;casGate=null;pendingCas++;await gate.promise;pendingCas--;}
+      if(!isCurrent()){attempt.status='CANCELLED';refusals.push('global-owner-cancelled');return {ok:false,reason:'cancelled',revision:settings.revision,value:copy(settings)};}
+      const result=repo.evaluateInputCas(settings,revision,patch);
+      attempt.status=result.ok?'COMMITTED':result.reason;
+      if(result.ok){settings=copy(result.value);for(const cb of [...inputListeners])cb();}
+      return result;
+    },
   };
-  for(const name of ['ScreenTouchpadsSettings','InlineIcon','ControllerShortcutsCard','ControllerFeedbackCapabilitiesCard','SteamDeckMouseSensitivity','SegButton','Slider','Toggle','Dropdown'])imports['@/components/'+name+'.vue']={__esModule:true,default:child};
-  imports['@/views/ControllerShortcutEditorView.vue']={__esModule:true,default:child};
+  const policyPort = {
+    detectPolicyGame:async()=>copy(game),getPolicyGame:()=>copy(game),gamePolicyKey:hysteresis.gamePolicyKey,
+    isPolicyGameInitialized:()=>true,subscribePolicyGameStatus:cb=>subscribe(gameListeners,cb),
+  };
+  // Extract the exact real function, erase its type with the existing evaluator;
+  // this does not start performanceSchedule or run its service test a second time.
+  const scheduleSource=fs.readFileSync(path.join(root,'src/bridge/performanceSchedule.ts'),'utf8');
+  const revisionFunction=scheduleSource.match(/^export function gameProfileInputRevision\([^]*?^\}/m);
+  assert(revisionFunction,'real gameProfileInputRevision source must exist');
+  const {gameProfileInputRevision}=evaluate(revisionFunction[0]);
+  const assertTarget = expected => {
+    if(expected.generation!==settingsGeneration || expected.exe!==hysteresis.gamePolicyKey(game) ||
+       expected.pid!==(game?.pid||0) || expected.processCreated!==String(game?.processCreated||'')){
+      refusals.push('dedicated-stale-target');throw Error('当前游戏已变化');
+    }
+  };
+  const perfPort = {
+    gameProfileInputRevision,loadGameCustomConfig:async()=>copy(config),
+    onGameCustomConfigChanged:cb=>subscribe(configListeners,cb),
+    async patchGameCustomProfile(expected,fields,_unused,options){
+      assertTarget(expected);
+      const entry=config.entries[expected.exe];
+      if(!entry || options?.expectedEnabled!==true || entry.enabled===false ||
+          options.expectedInputRevision!==gameProfileInputRevision(entry)){
+        refusals.push('dedicated-revision-conflict');throw Error('专属输入配置已变化');
+      }
+      assert(Object.keys(fields).every(key=>['padPersona','gyroOverride','gyroPreset','inputOverrides'].includes(key)),'input editor write scope');
+      config.entries[expected.exe]=repo.mergeSettings(entry,fields);
+      dedicatedWrites.push({target:copy(expected),fields:copy(fields)});
+      for(const cb of [...configListeners])cb(copy(config));
+    },
+    async removeGameCustomProfile(){throw Error('Profile removal is outside these six cases');},
+    async restorePerformanceScheduleIfConfigured(){throw Error('Performance scheduling is outside these six cases');},
+    async clearGameInputRestoreSnapshot(){throw Error('Legacy restore is outside the UI scope');},
+  };
+  const pageIpc = {
+    getLastGamepadState:()=>null,
+    on:(name,cb)=>{if(!ipcListeners.has(name))ipcListeners.set(name,new Set());return subscribe(ipcListeners.get(name),cb);},
+    async invoke(name,args){
+      ipcCalls.push({name,args:copy(args)});
+      switch(name){
+        case 'oem.keys.status':return null;
+        case 'oem.keys.get':return {familyId:'unknown',supported:false,keys:[]};
+        case 'input.shortcutRuntime.get':return {active:false};
+        case 'input.shortcutRuntime.clear':return {ok:true}; // memory ACK, never native admission
+        case 'gyro.calibrate.status':return {status:'not-calibrated',trusted:false};
+        default:throw Error('Unexpected UI IPC '+name);
+      }
+    },
+  };
+  const overlay = load('src/bridge/gameInputOverride.ts', {
+    './gyroPresetModel':load('src/bridge/gyroPresetModel.ts'),
+    '@/bridge/settingsRepository':settingsPort,'@/bridge/gamePolicyTarget':policyPort,
+    '@/bridge/performanceSchedule':perfPort,'@/bridge/ipc':pageIpc,
+    '@/scheduler':{registerScheduledTask(){throw Error('Resident overlay scheduling is outside UI-only');}},
+  },clock);
+  const editor = load('src/bridge/gameInputEditor.ts', {
+    './settingsSnapshot':snapshots,'./settingsRepository':settingsPort,'./performanceSchedule':perfPort,
+    './gamePolicyTarget':policyPort,'./gameInputOverride':overlay,
+    './gamedetect':{detectedGameName:target=>target?.title||target?.name||''}, // explicit in-memory identity label
+  },clock);
+  const virtualTargetPolicy=load('src/bridge/virtualTargetPolicy.ts');
+  const radialAvailability=load('src/radial/availability.ts');
+  const radialTestingState=load('src/radial/testingState.ts',{'./availability':radialAvailability});
+  const controllerShortcutRules=load('src/bridge/controllerShortcutRules.ts',{'./controllerPersona':personas,'../radial/testingState':radialTestingState});
+  const mousePresentation=load('src/bridge/mouseModePresentation.ts');
+  const imports = {
+    '@/bridge/controllerPersona':personas,'@/bridge/settingsRepository':settingsPort,'@/bridge/ipc':pageIpc,
+    '@/bridge/performanceSchedule':perfPort,'@/bridge/gameInputEditor':editor,
+    '@/bridge/gyroPresetSave':load('src/bridge/gyroPresetSave.ts',{'./gameInputEditor':editor}),
+    '@/bridge/virtualTargetPolicy':virtualTargetPolicy,
+    '@/bridge/virtualTargetPolicyState':load('src/bridge/virtualTargetPolicyState.ts',{'./ipc':pageIpc,'./virtualTargetPolicy':virtualTargetPolicy}),
+    '@/bridge/virtualOutputStatus':load('src/bridge/virtualOutputStatus.ts',{'./virtualTargetPolicy':virtualTargetPolicy}),
+    '@/bridge/controllerShortcutRules':controllerShortcutRules,
+    '@/bridge/controllerFeatureStatus':load('src/bridge/controllerFeatureStatus.ts',{'./controllerShortcutRules':controllerShortcutRules}),
+    '@/bridge/virtualStartProtectionView':load('src/bridge/virtualStartProtectionView.ts'),
+    '@/bridge/inputContracts':load('src/bridge/inputContracts.ts',{'./controllerPersona':personas}),
+    '@/bridge/gamepadEnvironmentNotice':load('src/bridge/gamepadEnvironmentNotice.ts',{'./hidHideSetupPrompt':load('src/bridge/hidHideSetupPrompt.ts')}),
+    '@/bridge/mouseModePresentation':mousePresentation,
+    '@/bridge/mouseModeState':load('src/bridge/mouseModeState.ts',{'./mouseModePresentation':mousePresentation}),
+    '@/bridge/quickActionLock':load('src/bridge/quickActionLock.ts'),
+    '@/gamepad/focus':load('src/gamepad/focus.ts',{},clock),
+    '@/bridge/gameproc':{closeJoyxoffIfRunning:async()=>{joy++;}}, // process boundary: counter only
+    '@/robust/frontendDiagnostics':{reportFrontendTrace:(...args)=>traces.push(copy(args))},
+    '@/bridge/uiLifecycle':{isUiVisible:()=>true,onUiVisibilityChange:()=>()=>{}},
+    '@/bridge/gyroPresentation':load('src/bridge/gyroPresentation.ts',{},clock),
+    '@/bridge/gyroAxisFormat':load('src/bridge/gyroAxisFormat.ts'),
+  };
+  // Explicit child boundaries: layout/preview stubs forward all named/default
+  // slots and props, so real page controls mount. No browser, focus or sensor claim.
+  const layout={inheritAttrs:false,setup:(_,{attrs,slots})=>()=>vue.h('div',attrs,Object.values(slots).filter(slot=>typeof slot==='function').flatMap(slot=>slot()))};
+  const child={inheritAttrs:false,props:['modelValue','disabled','label'],emits:['update:modelValue'],
+    setup:(props,{emit,attrs})=>()=>vue.h('button',{...attrs,label:props.label,disabled:props.disabled,'data-stub-control':true,'data-stub-model':props.modelValue,onTestUpdate:value=>emit('update:modelValue',value)},String(props.modelValue??''))};
+  for(const name of ['ScreenTouchpadsSettings','ControllerShortcutsCard','ControllerFeedbackCapabilitiesCard','SteamDeckMouseSensitivity','SegButton','Slider','Toggle','Dropdown'])imports['@/components/'+name+'.vue']={__esModule:true,default:child};
+  for(const name of ['ControllerChannelStatus','GameProfileRemoveDialog','UsbipUpgradeStatus','ControllerCalibrationCard','GyroInputOutputPreview','GyroSimulationWindow','GyroStatusPreview'])imports['@/components/'+name+'.vue']={__esModule:true,default:layout};
+  imports['@/views/ControllerShortcutEditorView.vue']={__esModule:true,default:layout};
   imports['@/components/InlineIcon.vue']={__esModule:true,default:{setup:()=>()=>vue.h('span')}};
-  const component=evaluate(compiled.content,imports,{window,document:{addEventListener(){},removeEventListener(){}},requestAnimationFrame:()=>{}}).default;
-  const container=element('root');const app=renderer.createApp(component);app.mount(container);await flush();
-  return { container, get settings(){return settings;}, get timerCount(){return timers.size;}, get writes(){return writes;},get joy(){return joy;}, async lock(){settings.gameOverride={identity:'A',sessionId:'S',outputTarget:{persona:'steamdeck'},gyroMotion:{enabled:true}};state={locked:true,identity:'A'};callback(state);await flush();}, async unlock(){settings.gameOverride=null;state={locked:false,identity:''};callback(state);await flush();}, async tick(ms){now+=ms;for(const[id,timer]of [...timers])if(timer.at<=now){timers.delete(id);timer.fn();}await flush();},unmount(){app.unmount();} };
+  function component(file,bindings=imports){
+    const {descriptor}=parse(fs.readFileSync(path.join(root,file),'utf8'),{filename:file});
+    const compiled=compileScript(descriptor,{id:'game-policy-test',inlineTemplate:true,templateOptions:{compilerOptions:{hoistStatic:false}}});
+    return evaluate(compiled.content,bindings,clock).default;
+  }
+  imports['@/components/IntegratedPage.vue']={__esModule:true,default:component('src/components/IntegratedPage.vue')};
+  imports['@/components/GameProfileModeBanner.vue']={__esModule:true,default:component('src/components/GameProfileModeBanner.vue',{
+    './OverflowGameName.vue':{__esModule:true,default:{props:['name'],setup:props=>()=>vue.h('span',{'data-stub-game-name':true},props.name)}},
+  })};
+  const container=element('root'),app=renderer.createApp(component(file));app.mount(container);await flush();
+  async function enterDedicated(target=A,entry=profile()){
+    game={...target,title:target.pid===A.pid?'Game A':'Game B'};
+    const exe=hysteresis.gamePolicyKey(game);
+    if(!config.entries[exe])config.entries[exe]={...copy(entry),displayName:game.title};
+    for(const cb of [...gameListeners])cb(copy(game));
+    for(const cb of [...configListeners])cb(copy(config));
+    await flush();
+  }
+  async function enterGlobal(){game=null;for(const cb of [...gameListeners])cb(null);await flush();}
+  return {
+    container,editor,perfPort,overlay,globalCas,dedicatedWrites,refusals,ipcCalls,traces,
+    get settings(){return settings;},get config(){return config;},get timerCount(){return timers.size;},get pendingCas(){return pendingCas;},
+    get writes(){return globalCas.filter(row=>row.status==='COMMITTED').length;},get joy(){return joy;},
+    enterDedicated,enterGlobal,
+    holdNextGlobalCas(){assert(!casGate);let release;const promise=new Promise(resolve=>{release=resolve;});casGate={promise};return async()=>{release();await flush();};},
+    async tick(ms){const end=now+ms;let calls=0;while(true){const due=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;assert(++calls<100,'bounded memory timer drain');const[id,timer]=due;now=timer.at;timers.delete(id);timer.fn();await flush();}now=end;await flush();},
+    unmount(){app.unmount();assert.equal(timers.size,0,'page timers disposed');assert([...ipcListeners.values()].every(set=>set.size===0),'page IPC subscriptions disposed');uiEvidence.push({page:file,globalCas:copy(globalCas),dedicatedWrites:copy(dedicatedWrites),refusals:copy(refusals),joy,ipcMethods:ipcCalls.map(call=>call.name),timersAfterUnmount:timers.size});},
+  };
 }
-await check('真实控制器页面显示本机选项，接管时提示和禁用；旁路点击无副作用', async()=>{
-  const f=await pageFixture('src/views/ButtonMappingView.vue');await f.lock();
-  assert(f.container.textContent.includes('游戏专属配置生效中'));
-  const buttons=descendants(f.container).filter(n=>n.type==='button'&&n.props.class?.includes('persona-btn'));
-  assert(buttons.length>=4);assert(buttons.every(n=>n.props.disabled));assert(buttons.find(n=>n.textContent==='关闭虚拟手柄').props.class.includes('active'));
-  buttons.find(n=>n.textContent==='SteamDeck').props.onClick();await flush();assert.equal(f.writes,0);assert.equal(f.joy,0);
-  await f.unlock();assert(!f.container.textContent.includes('游戏专属配置生效中'));assert(descendants(f.container).filter(n=>n.props.class?.includes('persona-btn')).every(n=>!n.props.disabled));f.unmount();
+await check('真实控制器页面直接编辑游戏专属；公用不变且旧owner写入被拒绝', async()=>{
+  const f=await pageFixture('src/views/ButtonMappingView.vue'),baseBytes=JSON.stringify(f.settings);
+  await f.enterDedicated();
+  assert(f.container.textContent.includes('专属模式'));assert(f.container.textContent.includes('Game A'));
+  assert(descendants(f.container).some(n=>n.props['aria-label']==='当前编辑专属游戏配置'));
+  const buttons=()=>descendants(f.container).filter(n=>n.type==='button'&&n.props.class?.includes('persona-btn'));
+  assert(buttons().length>=4);assert(buttons().every(n=>!n.props.disabled));
+  assert(buttons().find(n=>n.textContent==='关闭虚拟手柄').props.class.includes('active'));
+  buttons().find(n=>n.textContent==='SteamDeck').props.onClick();await flush();
+  assert.equal(f.config.entries['a.exe'].padPersona,'steamdeck');assert.equal(f.dedicatedWrites.length,1);
+  assert.equal(f.writes,0);assert.equal(f.globalCas.length,0);assert.equal(JSON.stringify(f.settings),baseBytes);assert.equal(f.joy,1);
+  assert(buttons().find(n=>n.textContent==='SteamDeck').props.class.includes('active'));
+  buttons().find(n=>n.textContent==='关闭虚拟手柄').props.onClick();await flush();
+  const off=await f.editor.readGameInputEditor();assert.equal(off.input.outputTarget.persona,'disabled');
+  assert.equal(off.input.outputTarget.gyroEnabled,false);assert.equal(off.input.gyroMotion.enabled,false);
+  assert.equal(f.dedicatedWrites.length,2);assert.equal(JSON.stringify(f.settings),baseBytes);
+  await assert.rejects(f.perfPort.patchGameCustomProfile(off.target,{},undefined,{expectedEnabled:true,expectedInputRevision:'stale'}),/专属输入配置已变化/);
+  await f.enterDedicated(B);
+  await assert.rejects(f.editor.saveGameInputEditor(off,{outputTarget:{persona:'elite'}}),/当前编辑对象已变化/);
+  await assert.rejects(f.perfPort.patchGameCustomProfile(off.target,{},undefined,{expectedEnabled:true,expectedInputRevision:f.perfPort.gameProfileInputRevision(off.profile)}),/当前游戏已变化/);
+  assert.equal(f.dedicatedWrites.length,2);assert(f.dedicatedWrites.every(row=>row.target.exe==='a.exe'&&row.target.pid===A.pid));
+  assert.equal(f.globalCas.length,0);assert.equal(JSON.stringify(f.settings),baseBytes);
+  await f.enterGlobal();assert(!f.container.textContent.includes('专属模式'));assert(buttons().every(n=>!n.props.disabled));f.unmount();
 });
-await check('真实陀螺仪页面保留本机状态并锁住开关、联动、预设和参数；不自动保存', async()=>{
-  const f=await pageFixture('src/views/GyroMotionView.vue');await f.lock();assert(f.container.textContent.includes('游戏专属配置生效中'));
-  const nodes=descendants(f.container);const power=nodes.filter(n=>n.type==='button'&&n.props.class?.includes('gyro-power-btn'));
-  assert.equal(power.length,2);assert(power.every(n=>n.props.disabled));assert(!power[0].textContent.includes('已开启'));
-  const controls=nodes.filter(n=>n.props['data-stub-control']);assert(controls.length>4);assert(controls.every(n=>n.props.disabled));
-  power.forEach(n=>n.props.onClick());await f.tick(5000);assert.equal(f.writes,0);
-  await f.unlock();await f.tick(5000);assert.equal(f.writes,0);f.unmount();
+await check('真实陀螺仪页面直接细调同一专属；公用预设不变且载入不自动保存', async()=>{
+  const initial=base();initial.outputTarget.persona='steamdeck';initial.outputTarget.buttonMappingEnabled=true;
+  const f=await pageFixture('src/views/GyroMotionView.vue',initial),baseBytes=JSON.stringify(f.settings);
+  await f.enterDedicated();await f.tick(5000);
+  assert(f.container.textContent.includes('专属模式'));assert(f.container.textContent.includes('Game A'));
+  const nodes=descendants(f.container),power=nodes.filter(n=>n.type==='button'&&n.props.class?.includes('gyro-power-btn'));
+  assert.equal(power.length,2);assert(!power[0].textContent.includes('已开启'));assert(!power[1].props.disabled);
+  const controls=nodes.filter(n=>n.props['data-stub-control']);assert(controls.length>4);assert(controls.some(n=>!n.props.disabled));
+  assert.equal(f.writes,0);assert.equal(f.dedicatedWrites.length,0);
+  const slider=controls.find(n=>n.props.label==='陀螺仪权重【倍率】');assert(slider);assert(!slider.props.disabled);
+  slider.props.onTestUpdate(2.5);await flush();assert(f.timerCount>0);assert.equal(f.dedicatedWrites.length,0);
+  await f.tick(5000);assert.equal(f.dedicatedWrites.length,1);assert.equal(f.globalCas.length,0);
+  const saved=f.config.entries['a.exe'];assert.equal(saved.inputOverrides.gyroMotion.gyroWeight,2.5);
+  assert.equal(saved.inputOverrides.gyroMotion.presets.racing.gyroWeight,2.5);
+  const effective=await f.editor.readGameInputEditor();assert.equal(effective.input.gyroMotion.gyroWeight,2.5);
+  assert.equal(effective.input.gyroMotion.enabled,false);assert.equal(JSON.stringify(f.settings),baseBytes);
+  assert.equal(f.dedicatedWrites[0].target.exe,'a.exe');assert.equal(f.dedicatedWrites[0].target.pid,A.pid);
+  await f.enterGlobal();await f.tick(5000);assert.equal(f.dedicatedWrites.length,1);assert.equal(f.writes,0);assert.equal(JSON.stringify(f.settings),baseBytes);f.unmount();
 });
 await check('运行手柄实际关闭→开启保留联动，关闭联动时不启gyro；切人格不重启已关闭gyro',async()=>{
   for(const linked of [true,false]) {
@@ -367,29 +599,53 @@ await check('运行手柄实际关闭→开启保留联动，关闭联动时不�
   const f=await pageFixture('src/views/ButtonMappingView.vue',initial);descendants(f.container).find(n=>n.type==='button'&&n.props.class?.includes('persona-btn')&&n.textContent==='PS5').props.onClick();await flush();
   assert.equal(f.settings.gyroMotion.enabled,false);assert.equal(f.settings.outputTarget.gyroEnabled,false);f.unmount();
 });
-await check('开机手柄开启但gyro关闭：陀螺仪内页加载/解锁不自动联动开启或保存', async () => {
+await check('开机手柄开启但gyro关闭：陀螺仪内页载入及专属切换不自动联动开启或保存', async () => {
   const initial = base(); initial.outputTarget.persona = 'steamdeck'; initial.outputTarget.buttonMappingEnabled = true;
   initial.gyroMotion.enabled = false; initial.gyroMotion.virtualPadLink = true;
   const f=await pageFixture('src/views/GyroMotionView.vue',initial);await f.tick(5000);
-  const power=descendants(f.container).filter(n=>n.type==='button'&&n.props.class?.includes('gyro-power-btn'));
-  assert(!power[0].textContent.includes('已开启')); assert.equal(f.settings.gyroMotion.enabled,false); assert.equal(f.writes,0);
-  await f.lock();await f.unlock();await f.tick(5000);assert.equal(f.settings.gyroMotion.enabled,false);assert.equal(f.writes,0);f.unmount();
+  const power=()=>descendants(f.container).filter(n=>n.type==='button'&&n.props.class?.includes('gyro-power-btn'));
+  assert(!power()[0].textContent.includes('已开启')); assert.equal(f.settings.gyroMotion.enabled,false); assert.equal(f.writes,0);
+  await f.enterDedicated();assert(!power()[0].textContent.includes('已开启'));
+  assert.equal((await f.editor.readGameInputEditor()).input.gyroMotion.enabled,false);
+  await f.enterGlobal();await f.tick(5000);assert.equal(f.settings.gyroMotion.enabled,false);assert.equal(f.writes,0);
+  assert.equal(f.globalCas.length,0);assert.equal(f.dedicatedWrites.length,0);f.unmount();
 });
-await check('接管前已排队的陀螺仪自动保存被取消，解锁也不重放', async()=>{
-  const f=await pageFixture('src/views/GyroMotionView.vue');
-  const slider=descendants(f.container).find(n=>n.props['data-stub-control'] && n.props.label==='陀螺仪权重【倍率】');
-  assert(slider); slider.props.onTestUpdate(2.5); await flush(); assert(f.timerCount>0);
-  assert.equal(f.writes,0); await f.lock(); await f.tick(5000); assert.equal(f.writes,0);
-  await f.unlock(); await f.tick(5000); assert.equal(f.writes,0); f.unmount();
+await check('owner切换取消陀螺仪排队保存；晚到公用CAS拒绝且回归后不重放', async()=>{
+  const f=await pageFixture('src/views/GyroMotionView.vue'),baseBytes=JSON.stringify(f.settings);
+  const slider=()=>descendants(f.container).find(n=>n.props['data-stub-control']&&n.props.label==='陀螺仪权重【倍率】');
+  assert(slider());slider().props.onTestUpdate(2.5);await flush();assert(f.timerCount>0);assert.equal(f.writes,0);
+  await f.enterDedicated();await f.tick(5000);assert.equal(f.writes,0);assert.equal(f.dedicatedWrites.length,0);
+  await f.enterGlobal();await f.tick(5000);assert.equal(f.writes,0);assert.equal(f.globalCas.length,0);
+  // Let the next original queued callback enter the real editor/global CAS, then
+  // move owner while persistence is held; commit must re-check isCurrent.
+  const release=f.holdNextGlobalCas();slider().props.onTestUpdate(2.7);await flush();await f.tick(3000);
+  assert.equal(f.pendingCas,1);assert.equal(f.globalCas.length,1);assert.equal(f.writes,0);
+  await f.enterDedicated(B);await release();await f.tick(5000);
+  assert.equal(f.globalCas[0].status,'CANCELLED');assert(f.refusals.includes('global-owner-cancelled'));
+  assert.equal(f.writes,0);assert.equal(f.dedicatedWrites.length,0);assert.equal(JSON.stringify(f.settings),baseBytes);
+  await f.enterGlobal();await f.tick(5000);assert.equal(f.globalCas.length,1);assert.equal(f.writes,0);assert.equal(f.dedicatedWrites.length,0);f.unmount();
 });
 await check('常驻轮询/重试不随窗口隐藏暂停；原始终止游戏动作未改成延迟目标',()=>{
   const detect=fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8');assert(detect.includes('{ pauseWhenHidden: false, runImmediately: true }'));
-  const quick=fs.readFileSync(path.join(root,'src/components/GameQuickActions.vue'),'utf8');assert(quick.includes(':game="policyGame"'));assert(quick.includes('validateLockedGameTarget'));
+  const quick=fs.readFileSync(path.join(root,'src/components/GameQuickActions.vue'),'utf8');assert(quick.includes(':game="policyGame"'));// Validation moved behind ensureTarget -> captureAndLockGameTarget. Keep
+  // the same immediate/current-identity invariant instead of a stale direct-import token.
+  const close=quick.match(/^async function closeCurrentGame\(\)[^]*?^\}/m)?.[0];assert(close);
+  assert.match(close,/target = await ensureTarget\(\);\s*assertActionTarget\(target\);\s*const result = await closeGame\(target.pid, target.name, target.processCreated\)/);
+  assert(!/setTimeout|setInterval|registerScheduledTask/.test(close));
+  assert(quick.includes("await captureAndLockGameTarget(candidate, 'action')"));
+  const session=fs.readFileSync(path.join(root,'src/bridge/gameQuickSession.ts'),'utf8');
+  assert(session.includes('return validateLockedGameTarget()'));
+  assert(session.includes('const detected = await validateGameTarget(current)'));
+  assert(session.includes('lockGeneration !== current.lockGeneration'));
+  assert(session.includes('!isGameTargetSame(current, detected) || !isCurrentGameTarget(detected)'));
   const perf=fs.readFileSync(path.join(root,'src/bridge/performanceSchedule.ts'),'utf8');assert(perf.includes('isPolicyTargetCurrent(expectedTarget)')); assert(perf.includes('ContinuousPerformancePanel'));
 });
 
 }
+}
 
+if (!inputRuntimeOnly && !uiOnly) {
+currentSection = 'detection';
 // Actual shared detector + IPC timeout + scheduler + policy owner. All native
 // process replies and browser time are inert; no game or device is accessed.
 async function flushDetection() { for(let i=0;i<100;i++) await Promise.resolve(); }
@@ -757,7 +1013,8 @@ await check('自愈：最后订阅撤销时在途观察至多八秒释放且不�
   f.reply(pending.id,versionedGame(NEXT_GAME,11));f.signal('ipc:power.resumed');await f.advance(10000);assert.equal(f.timers.size,0);assert.equal(f.messages.length,expected);assert.equal(f.detector.getCurrentGame()?.pid,foreground?NEXT_GAME.pid:TMNT.pid);block();
  }
 });const nativeWireFlag=process.argv.indexOf('--native-wire-evidence');
-const nativeWireEvidence={status:'NOT_RUN',reason:'Explicit --native-wire-evidence was not supplied'};
+currentSection = 'native-wire';
+
 if(nativeWireFlag>=0){
  const file=process.argv[nativeWireFlag+1];nativeWireEvidence.path=file??null;
  if(!file||!fs.existsSync(file))nativeWireEvidence.reason='Requested native evidence does not exist';
@@ -775,7 +1032,8 @@ if(nativeWireFlag>=0){
   nativeWireEvidence.status='PASS';delete nativeWireEvidence.reason;nativeWireEvidence.nativeChecks=positive.result.checks;nativeWireEvidence.nativeReaderCases=positive.result.readerCases;nativeWireEvidence.sampleGenerations=samples.map(x=>[x.generation,x.identityGeneration]);
  });
 }
-console.log(JSON.stringify({passed:cases.length,cases,nativeWireEvidence},null,2));
+}
+console.log(JSON.stringify({scope,...scopeDetails,passed:cases.length,cases,nativeWireEvidence},null,2));
 
 
 

@@ -174,13 +174,14 @@ static void sgWakeRecoveryDiscoverFallback() {
     }
     DWORD session = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) return;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W process{}; process.dwSize = sizeof(process);
+    // Reuse the same owning topology as nativeScanGame. Partial/unavailable
+    // rows cannot authorize a recovery; do not invalidate or force a refresh.
+    const auto topology = ymcc::processInventory::read();
+    if (topology->status != ymcc::processInventory::Status::Complete) return;
     unsigned admitted = 0;
-    if (Process32FirstW(snap, &process)) do {
-        const DWORD pid = process.th32ProcessID;
-        const std::wstring name = sgBaseName(process.szExeFile);
+    for (const auto& process : topology->rows) {
+        const DWORD pid = process.pid;
+        const std::wstring name = sgBaseName(process.name);
         // Blacklist ALWAYS wins in broad recovery, including contradictory
         // whitelist/custom rules. Respect system and user lists together.
         if (nativeMonitorExcluded(name) || sgNameExcludedBy(name, excludes)) continue;
@@ -220,8 +221,7 @@ static void sgWakeRecoveryDiscoverFallback() {
             {"threads", threads.total}, {"systemAndUserBlacklistApplied", true}
         });
         if (++admitted >= 64) { sgRecordFact("sleep-game-recovery-fallback-limit", {{"limit", 64}}); break; }
-    } while (Process32NextW(snap, &process));
-    CloseHandle(snap);
+    }
 }
 static void sgBeginWakeGameRecovery(unsigned long long generation) {
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);
@@ -234,16 +234,22 @@ static void sgBeginWakeGameRecovery(unsigned long long generation) {
     g_sgWakeRecovery.started = GetTickCount64();
     g_sgWakeRecovery.manualState = sgReadFile(SG_DIR + L"\\quickapp_suspended.json");
     SgSleepTarget target;
-    if (sgReadSleepTarget(target) && target.markerOwned && target.powerGeneration == generation &&
+    const bool ownedSleepTarget = sgReadSleepTarget(target) && target.markerOwned;
+    if (ownedSleepTarget && target.powerGeneration != 0 &&
         sgMarkerCreated(SG_SLEEP_LEASE_DIR, target.pid) == 0) {
         HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, target.pid);
         if (h && nativeProcessCreatedFromHandle(h) == target.processCreated)
-            (void)sgWriteWakeRecoveryMarker(target.pid, target.processCreated, generation);
+            (void)sgWriteWakeRecoveryMarker(target.pid, target.processCreated, target.powerGeneration);
         if (h) CloseHandle(h);
     }
     sgWakeRecoverySnapshotDirectory(SG_SLEEP_LEASE_DIR);
     sgWakeRecoverySnapshotDirectory(SG_MANUAL_DIR);
-    sgWakeRecoveryDiscoverFallback();
+    // A manual/old-generation marker is still an exact recovery target.
+    // Retained owner/marker evidence (including unavailable marker IO) must
+    // not turn an access failure or a filtered new manual pause into a scan.
+    if (g_sgWakeRecovery.entries.empty() && !ownedSleepTarget &&
+        !sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) && !sgHasMarkerFiles(SG_MANUAL_DIR))
+        sgWakeRecoveryDiscoverFallback();
     g_sgWakeRecoveryPending.store(!g_sgWakeRecovery.entries.empty(), std::memory_order_release);
     sgRecordFact("sleep-game-recovery-queued", {
         {"generation", generation}, {"targets", g_sgWakeRecovery.entries.size()},

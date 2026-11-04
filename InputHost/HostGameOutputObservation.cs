@@ -23,6 +23,11 @@ internal sealed class HostGameOutputObservation
     private ulong _motorRevision;
     private HostClassicMotorProtocol.Motors _motors;
     internal bool HasPending => Volatile.Read(ref _pending) != 0;
+    internal bool HasPendingFor(bool includeRaw, bool includeMotors)
+    {
+        int selected = (includeRaw ? RawPending : 0) | (includeMotors ? MotorPending : 0);
+        return (Volatile.Read(ref _pending) & selected) != 0;
+    }
 
     internal sealed class Binding
     {
@@ -107,9 +112,9 @@ internal sealed class HostGameOutputObservation
         }
     }
 
-    internal string TryAppend(string response, object controller, int maximumMessageBytes, bool includeMotors = false)
+    internal string TryAppend(string response, object controller, int maximumMessageBytes, bool includeMotors = false, bool includeRaw = true)
     {
-        int selected = RawPending | (includeMotors ? MotorPending : 0);
+        int selected = (includeRaw ? RawPending : 0) | (includeMotors ? MotorPending : 0);
         if ((Volatile.Read(ref _pending) & selected) == 0) return response;
         lock (_gate)
         {
@@ -117,7 +122,7 @@ internal sealed class HostGameOutputObservation
                 response.Length == 0 || response[^1] != '}') return response;
             var candidate = response;
             int delivered = 0;
-            if ((_pending & RawPending) != 0)
+            if (includeRaw && (_pending & RawPending) != 0)
             {
                 var fields = JsonSerializer.Serialize(new
                 {

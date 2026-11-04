@@ -65,3 +65,7 @@ export async function stopPerformanceScheduleAndUseWindowsBalanced(){
  const current=await loadPerformanceSchedule();await savePerformanceSchedule({...current,suspended:true,enabled:false});
  fixture().writes.push({scope:'windows-balanced-memory-port'});
 }
+
+// These newly imported performance ports are outside the UI navigation fixture's memory contract.
+export class SkipApplyError extends Error { constructor() { super('outdated'); } }
+export async function applyPerformanceConfiguration() { throw new Error('Performance configuration apply is outside the UI navigation fixture'); }

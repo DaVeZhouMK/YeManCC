@@ -174,6 +174,65 @@ static bool msiCrashRetryableRecordReadError(DWORD error) {
         error==ERROR_BUSY || error==ERROR_RETRY || error==ERROR_NOT_READY ||
         error==ERROR_IO_DEVICE || error==ERROR_DEVICE_NOT_CONNECTED;
 }
+static bool msiCrashNativeLegacyRecord(msiRecovery::Record& record) {
+    if(!msiRecovery::validRecord(record) || msiCrashHasDuty(record) || record.nativeLegacyImported)return false;
+    std::map<DWORD,std::string> creations;
+    for(const auto* suffix:{L"\\msi-controller-visibility.log.1",L"\\msi-controller-visibility.log",
+            L"\\msi-controller-visibility-wake-1.log.1",L"\\msi-controller-visibility-wake-1.log",
+            L"\\msi-controller-visibility-wake-2.log.1",L"\\msi-controller-visibility-wake-2.log"}) {
+        std::string text;if(!msiCrashReadBounded(app_data_dir()+suffix,8u<<20,text))continue;
+        std::istringstream input(text);std::string line;
+        while(std::getline(input,line)) {
+            if(line.size()>32768 || line.find("\"event\":\"start\"")==std::string::npos)continue;
+            try {
+                const auto row=json::parse(line);if(row.at("event")!="start")continue;
+                const auto pid=row.at("parentPid").get<DWORD>();
+                const auto creation=std::to_string(row.at("parentCreationTime").get<uint64_t>());
+                const auto found=creations.find(pid);
+                if(found!=creations.end() && found->second!=creation)found->second.clear();
+                else if(found==creations.end()){
+                    if(creations.size()>=64)return false;
+                    creations.emplace(pid,creation);
+                }
+            }catch(const json::exception&){}
+        }
+    }
+    std::map<DWORD,std::pair<std::string,msiRecovery::Record>> candidates;
+    for(const auto* suffix:{L"\\native-lifecycle.log.1",L"\\native-lifecycle.log"}) {
+        const auto path=app_data_dir()+suffix;
+        std::string text;if(!msiCrashReadBounded(path,8u<<20,text)){
+            const auto attributes=GetFileAttributesW(path.c_str());const auto error=GetLastError();
+            if(std::wstring(suffix)==L"\\native-lifecycle.log.1" && attributes==INVALID_FILE_ATTRIBUTES &&
+                (error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND))continue;
+            return false;
+        }
+        std::istringstream input(text);std::string line;
+        while(std::getline(input,line)) {
+            if(line.size()>65536 || line.find("msi-native-foreground-isolation")==std::string::npos)continue;
+            try {
+                const auto row=json::parse(line);const auto pid=row.at("pid").get<DWORD>();
+                const auto owner=creations.find(pid);
+                if(pid==GetCurrentProcessId() || owner==creations.end() || owner->second.empty())continue;
+                msiRecovery::Record candidate;
+                if(!msiRecovery::nativeForegroundLegacyClaim(row,record,owner->second,candidate))continue;
+                const auto time=row.at("time").get<std::string>();
+                if(time.size()!=23)continue;
+                const auto previous=candidates.find(pid);
+                if(previous!=candidates.end() && time<previous->second.first)return false;
+                if(previous==candidates.end() && candidates.size()>=64)return false;
+                candidates[pid]={time,std::move(candidate)};
+            }catch(const json::exception&){}
+        }
+    }
+    std::string newest;msiRecovery::Record recovered;
+    for(const auto& [pid,entry]:candidates) {
+        if(entry.second.hiddenPaths.empty() || !msiCrashOldOwnerDead(entry.second))continue;
+        if(!newest.empty())return false;
+        newest=entry.first;recovered=entry.second;
+    }
+    if(newest.empty())return false;
+    record=std::move(recovered);return true;
+}
 // Read a bounded ordinary file from one handle. A changing/short read is
 // uncertainty, never decoded authority. No writes, legacy migration or device IO.
 static DWORD msiCrashReadOwnedRecord(const std::wstring& path,std::string& text) {
@@ -240,6 +299,10 @@ static void msiCrashLoadLocked() {
         }
         g_msiCrashRecord=decoded.record;
         msiCrashNote("loaded","persisted-owned-responsibility");
+        auto nativeLegacy=g_msiCrashRecord;
+        if(msiCrashNativeLegacyRecord(nativeLegacy) && !msiCrashStoreLocked(nativeLegacy,"legacy-native-exact-owned-admission")) {
+            g_msiCrashLoaded=true;g_msiCrashStoreInvalid=true;return;
+        }
     } else if((error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND) &&
             !g_msiCrashReadRetryPending.load(std::memory_order_acquire)) {
         msiRecovery::Record legacy;
@@ -274,7 +337,8 @@ static bool msiCrashPrepareOwner(msiRecovery::Record& next,const std::string& ro
         if(next.boardKey!=msiCrashBoardKey() || !msiRecovery::sameDeviceRoot(next,root,locations))return false;
         const auto previous=std::to_string(next.ownerPid)+":"+next.ownerCreationTime;
         if(previous!=owner && !msiCrashOldOwnerDead(next))return false;
-    } else {next={};next.boardKey=msiCrashBoardKey();next.rootInstance=root;next.locationPaths=locations;}
+    } else {const bool nativeImported=next.nativeLegacyImported;next={};next.nativeLegacyImported=nativeImported;
+        next.boardKey=msiCrashBoardKey();next.rootInstance=root;next.locationPaths=locations;}
     if(next.locationPaths.empty() && !locations.empty())next.locationPaths=locations;
     next.ownerPid=GetCurrentProcessId();next.ownerCreationTime=msiCrashProcessCreation(GetCurrentProcess());return true;
 }
@@ -340,23 +404,33 @@ static bool msiCrashRecoveryBeforeModeWrite(BYTE mode,const MsiClawHidDiag& diag
     if(mode==2) {g_msiCrashInheritedPending.store(false,std::memory_order_release);g_msiCrashStartupAttempted=false;}
     return true;
 }
-static bool msiCrashRecoveryBeforeHide(const HidHidePhysicalIdentity& physical,const std::vector<std::string>& targets,
-                                     const HidHideVisibilitySnapshot& before,const std::string& transaction) {
+static bool msiCrashRecoveryBeforeHideImpl(const HidHidePhysicalIdentity& physical,const std::vector<std::string>& targets,
+                                     const HidHideVisibilitySnapshot& before,const std::string& transaction,bool virtualJournal) {
     if(!msiClawKnownBoardAuthority() || ymStartSeamActive())return true;
     const auto capturedPower=currentPowerGeneration();const auto capturedEpoch=inputHostEpochToken();
     std::lock_guard<std::mutex> lock(g_msiCrashMx);msiCrashLoadLocked();if(g_msiCrashStoreInvalid || !before.valid)return false;
+    if(!virtualJournal && g_msiCrashInheritedPending.load(std::memory_order_acquire))return false;
     auto next=g_msiCrashRecord;if(!msiCrashPrepareOwner(next,physical.baseContainerDeviceInstanceId,msiCrashLocations(physical.baseContainerDeviceInstanceId)))return false;
     std::vector<std::string> additions;
     for(const auto& path:targets)if(!hidHideContainsPath(before.hidden,path))additions.push_back(path);
     if(!msiRecovery::mergeOwnedPaths(next,additions))return false;next.transactionId=transaction;
+    if(!virtualJournal)next.nativeLegacyImported=true;
     if(!msiCrashStoreLocked(next,"before-owned-hide"))return false;
     if(!hardwareWriteAllowed() || currentPowerGeneration()!=capturedPower || inputHostEpochToken()!=capturedEpoch || inputHostExitFenceRaised()) {
         msiCrashNote("blocked","context-changed-after-durable-hide-claim");return false;
     }
     // Carry only recorded ownership, including pre-existing entries from a dead owner.
-    for(const auto& path:next.hiddenPaths)if(!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,path))
+    if(virtualJournal)for(const auto& path:next.hiddenPaths)if(!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,path))
         g_hidHideVisibilityJournal.hiddenByUs.push_back(U2W(path));
     return true;
+}
+static bool msiCrashRecoveryBeforeHide(const HidHidePhysicalIdentity& physical,const std::vector<std::string>& targets,
+        const HidHideVisibilitySnapshot& before,const std::string& transaction) {
+    return msiCrashRecoveryBeforeHideImpl(physical,targets,before,transaction,true);
+}
+static bool msiCrashRecoveryBeforeNativeHide(const HidHidePhysicalIdentity& physical,const std::vector<std::string>& targets,
+        const HidHideVisibilitySnapshot& before,const std::string& transaction) {
+    return msiCrashRecoveryBeforeHideImpl(physical,targets,before,transaction,false);
 }
 static void msiCrashRecoveryAfterOwnedRestore(const HidHideVisibilitySnapshot& after,bool readback) {
     if(!msiClawKnownBoardAuthority() || ymStartSeamActive() || !readback || !after.valid)return;
@@ -517,6 +591,44 @@ static void msiCrashRetryOwnedRecordLoad(ULONGLONG now) {
     if(lock.owns_lock() && g_msiCrashReadRetryPending.load(std::memory_order_acquire) && now>=g_msiCrashReadRetryAt)
         msiCrashLoadLocked();
 }
+static bool msiCrashReturnNativeConfiguration(const msiRecovery::Record& record) {
+    if(record.modeReturnPending || (record.transactionId.rfind("native-foreground:",0)!=0 &&
+        record.transactionId.rfind("native-legacy:",0)!=0))return false;
+    const auto power=currentPowerGeneration(),epoch=inputHostEpochToken();
+    const auto contextEligible=[&] {
+        if(!hardwareWriteAllowed() || inputHostExitFenceRaised() || g_realStickTest.virtualTargetEnabled ||
+            inputHostConfiguredPersona()!="disabled" || g_inputHostProcess || g_inputHostPrepared ||
+            g_powerLifecycle.load()!=PowerLifecycle::Ready || g_hidHideVisibilityJournal.active ||
+            g_msiNativeForegroundCyclePending.load() || g_msiNativeForegroundPowerHold.load() ||
+            msiForegroundIsolationBorrowBusy() || currentPowerGeneration()!=power || inputHostEpochToken()!=epoch)return false;
+        return true;
+    };
+    const auto eligible=[&] {
+        if(!contextEligible())return false;
+        const auto locations=msiCrashLocations(record.rootInstance);
+        return !locations.empty() && locations==record.locationPaths && contextEligible();
+    };
+    if(!eligible()){msiCrashDecision("native-owned-return-waiting-exact-root-location-and-idle-owner");return true;}
+    g_msiCrashStartupAttempted=true;
+    if(g_msiCrashUnhideAttempts<3){
+        ++g_msiCrashUnhideAttempts;
+        for(const auto& path:record.hiddenPaths){
+            if(!eligible())return true;
+            (void)hidHideRun(L"--dev-unhide \""+U2W(path)+L"\"");
+        }
+    }
+    if(g_msiCrashSettlementChecks>=kMsiCrashSettlementMaxChecks)return true;
+    ++g_msiCrashSettlementChecks;
+    HidHideVisibilitySnapshot after;
+    const bool readback=hidHideCaptureVisibilitySnapshot(after);
+    if(!eligible())return true;
+    msiCrashRecoveryAfterOwnedRestore(after,readback);
+    bool duty=true;
+    {std::lock_guard<std::mutex> lock(g_msiCrashMx);duty=msiCrashHasDuty(g_msiCrashRecord);}
+    if(!duty)g_msiCrashInheritedPending.store(false,std::memory_order_release);
+    msiCrashDecision(duty?"native-owned-configuration-return-unconfirmed":"native-owned-configuration-returned;physical-input-unverified");
+    return true;
+}
 static void msiCrashRecoveryMaintenance(ULONGLONG now) {
     msiCrashRetryOwnedRecordLoad(now);
     if(!g_msiCrashInheritedPending.load(std::memory_order_acquire) || now<g_msiCrashNextTick)return;
@@ -535,6 +647,7 @@ static void msiCrashRecoveryMaintenance(ULONGLONG now) {
         return;
     }
     if(!g_msiCrashStartupAttempted && !msiCrashOldOwnerDead(record)) {msiCrashDecision("previous-owner-alive-or-unknown");return;}
+    if(msiCrashReturnNativeConfiguration(record))return;
     if(g_msiCrashStartupAttempted && record.modeReturnPending && record.hiddenPaths.empty()) {
         // The new observer owns signal confirmation and its one retry. Do not
         // let this older startup path clear the durable half ahead of it.

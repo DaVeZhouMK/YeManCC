@@ -28,6 +28,16 @@ await check('strict stable version comparison is numeric',()=>{assert.equal(comp
 const magic=Buffer.from([77,69,73,12,11,10,11,14]),cookie=bytes.lastIndexOf(magic);assert(cookie>0&&cookie+88===bytes.length);
 const archiveStart=bytes.length-bytes.readUInt32BE(cookie+8),tableStart=archiveStart+bytes.readUInt32BE(cookie+12),tableEnd=tableStart+bytes.readUInt32BE(cookie+16),entries=[];
 for(let pos=tableStart;pos<tableEnd;){const n=bytes.readUInt32BE(pos);assert(n>=19&&pos+n<=tableEnd);entries.push({name:bytes.subarray(pos+18,pos+n).toString('utf8').replace(/\0+$/,''),offset:bytes.readUInt32BE(pos+4),size:bytes.readUInt32BE(pos+8),compressed:!!bytes[pos+16]});pos+=n;}
+// Same UTF-16 budget as the native consumer; an upstream filename increase
+// needs review before shipping, not a patched public Loader or OS policy change.
+await check('actual official onefile paths fit the owned extraction budget',()=>{
+ const tempSource=fs.readFileSync(path.join(ROOT,'native/decky_sidebar_temp.h'),'utf8');
+ const max=Number(tempSource.match(/maxRunPathUnits=(\d+)/)?.[1]);
+ const reserve=Number(tempSource.match(/extractionReserveUnits=(\d+)/)?.[1]);
+ assert.equal(max,190);assert.equal(reserve,68);assert(max+reserve<260);
+ assert(entries.every(e=>!path.win32.isAbsolute(e.name)&&!e.name.split(/[\\/]/).includes('..')));
+ assert(Math.max(...entries.map(e=>e.name.length))+12<=reserve,'Review increased official onefile extraction paths');
+});
 const unpack=e=>{const b=bytes.subarray(archiveStart+e.offset,archiveStart+e.offset+e.size);return e.compressed?zlib.inflateSync(b):b;};
 const bootEntry=entries.find(e=>e.name.replaceAll('\\','/')==='decky_loader/static/index.js');assert(bootEntry);
 const boot=unpack(bootEntry).toString('utf8');

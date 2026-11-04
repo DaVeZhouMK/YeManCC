@@ -23,7 +23,7 @@ function Fixture {
   foreach($entry in [regex]::Matches($requiredBlock.Groups[1].Value,"'([^']+)'")){Text (Join-Path $project $entry.Groups[1].Value) 'inert'}
   # Inert fixture only: satisfy the shared battery payload identity contract.
   # No BatteryHost executable is launched and no production battery source is changed.
-  $batteryFixturePayload=@('YeManBatteryHost.exe','YeManBatteryHost.dll','YeManBatteryHost.deps.json','YeManBatteryHost.runtimeconfig.json','LibreHardwareMonitorLib.dll','RAMSPDToolkit-NDD.dll','System.Management.dll','THIRD-PARTY-NOTICES.md','LICENSE.LibreHardwareMonitor.txt','LICENSE.System.Management.txt','battery-host.payload.json')
+  $batteryFixturePayload=@('YeManBatteryHost.dll','YeManBatteryHost.deps.json','YeManBatteryHost.runtimeconfig.json','LibreHardwareMonitorLib.dll','RAMSPDToolkit-NDD.dll','System.Management.dll','THIRD-PARTY-NOTICES.md','LICENSE.LibreHardwareMonitor.txt','LICENSE.System.Management.txt','battery-host.payload.json')
   Text (Join-Path $project 'native/BatteryHost/payload-files.json') ($batteryFixturePayload|ConvertTo-Json)
   foreach($name in $batteryFixturePayload) {
     Text (Join-Path $project ('PowerControl/battery-host/'+$name)) 'inert-battery'

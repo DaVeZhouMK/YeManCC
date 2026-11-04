@@ -1,0 +1,24 @@
+{
+  "name": "cpu-optimization",
+  "developmentOnly": true,
+  "runtimeEntryPoints": [],
+  "shipping": false,
+  "execution": "Manual explicit source execution in an external developer process only",
+  "manualSources": [
+    "Observe-CandidateCpu.ps1",
+    "Capture-YmccCpuStacks.ps1",
+    "YmccCpu.wprp",
+    "analyze-candidate-cpu.mjs",
+    "Observe-MonitorRelay.mjs",
+    "YmccCpuScheduling.wprp",
+    "PreciseCpu/PreciseCpu.csproj",
+    "PreciseCpu/Program.cs",
+    "PreciseCpu/SelfTests.cs",
+    "rog-field/Observe-RogCpu.ps1",
+    "rog-field/ReadOnlyCounters.cs",
+    "rog-field/Start-RogCapture.ps1",
+    "rog-field/RogCpu.wprp",
+    "rog-field/README.zh-CN.md"
+  ],
+  "description": "Descriptive source manifest only; not a product, publisher, fixture or permission gate."
+}

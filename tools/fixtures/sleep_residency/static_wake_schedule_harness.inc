@@ -21,6 +21,27 @@ static unsigned staticWakeSchedulePolicyTests() {
     expect(d.poll(1065000,true,true).dispatch,"late callback dispatches once based on absolute time");
     expect(!d.poll(1100000,true,true).dispatch,"late message storm cannot repeat scan");
     expect(!d.arm(UINT64_MAX-1000,false,7),"overflow cannot wrap to immediate inventory");
+    // Actual production read-admission algorithm, with an inert clock/wait.
+    // These waits never invoke a device API or sleep the test process.
+    using ymcc::staticwake::CollectionReadPace;
+    CollectionReadPace pace;std::uint64_t now=100;bool allowed=true;unsigned sleeps=0;
+    const auto clock=[&](){return now;};const auto permit=[&](){return allowed;};
+    const auto wait=[&](std::uint64_t ms){expect(ms>0&&ms<=4,"collection waits are bounded to four ms");now+=ms;++sleeps;};
+    expect(pace.before(clock,permit,wait)&&sleeps==0&&pace.admitted==1,"first collection read has no startup wait");
+    expect(pace.before(clock,permit,wait)&&now==104&&sleeps==1&&pace.admitted==2,"subsequent collection read is spaced");
+    now=1000;expect(pace.before(clock,permit,wait)&&pace.next==1004,"slow API or suspension admits once without banked credits");
+    expect(pace.before(clock,permit,wait)&&now==1004,"late work cannot catch up with a burst");
+    allowed=false;const auto admitted=pace.admitted;
+    expect(!pace.before(clock,permit,wait)&&pace.admitted==admitted,"OFF or stale generation cancels before a query");
+    allowed=true;
+    expect(!pace.before(clock,permit,[&](std::uint64_t ms){now+=ms;allowed=false;})&&pace.admitted==admitted,"cancel during wait cannot admit a query");
+    allowed=true;pace.reset();now=2000;
+    expect(pace.before(clock,permit,wait),"new collection starts with one unbanked admission");
+    const auto deadline=now+2;
+    expect(!pace.before(clock,[&](){return now<deadline;},wait),"pacing consumes the original absolute deadline");
+    pace.reset();now=0;allowed=true;
+    for(unsigned item=0;item<65;++item)expect(pace.before(clock,permit,wait),"paced collection retains every read unit");
+    expect(pace.admitted==65&&now==256,"complete inventory is spread without dropping or batching reads");
     return checks;
 }
 

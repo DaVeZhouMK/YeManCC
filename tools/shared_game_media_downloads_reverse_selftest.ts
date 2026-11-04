@@ -62,4 +62,31 @@ await run('startup-S0-Ready-refreshes-true-policy-without-duplicate-reads',async
   f.stop();f.bus.dispatchEvent(new CustomEvent('ipc:gameMedia.resume-ready',{detail:{generation:3}}));await tick();check(f.calls.length===before+1,'disposed S0 event cannot restart status reads');
  }finally{f.stop();}
 });
+await run('older-recheck-cannot-resubmit-settings-after-newer-native-push',async()=>{
+ const f=fixture(),stop=f.service.start();try{f.pending.shift()!.resolve({statusRevision:1,enabled:true,pauseReason:'capacity-unavailable',cpuThreshold:15});await tick();const checking=f.service.recheck(),old=f.pending.shift()!;
+ f.emit({statusRevision:3,enabled:true,pauseReason:'capacity-unavailable',cpuThreshold:15});const calls=f.calls.length;old.resolve({statusRevision:2,enabled:false,pauseReason:'game-running',cpuThreshold:5});await checking;await tick();
+ check(f.service.state.statusRevision===3,'older recheck replaced a newer native push');check(f.calls.length===calls,'rejected old recheck still resubmitted settings and woke native work');}finally{stop();}
+});
+await run('same-revision-recheck-still-repairs-a-real-native-setting-mismatch',async()=>{
+ const f=fixture(),stop=f.service.start();try{f.pending.shift()!.resolve({statusRevision:1,enabled:true,pauseReason:'capacity-unavailable',cpuThreshold:15});await tick();f.emit({statusRevision:2,enabled:false,pauseReason:'capacity-unavailable',cpuThreshold:15});const checking=f.service.recheck();f.pending.shift()!.resolve({statusRevision:2,enabled:false,pauseReason:'capacity-unavailable',cpuThreshold:15});await checking;await tick();
+ check(f.calls.length===3&&f.calls.at(-1).args.enabled===true,'equal-revision authoritative mismatch did not repair settings');f.pending.shift()!.resolve({statusRevision:3,enabled:true});await tick();check(f.service.state.enabled===true,'valid repair response was lost');}finally{stop();}
+});
+for(const command of ['requestNow','cancelManual'] as const)for(const boundary of ['restart','resume'])await run(`manual-${command}-receipt-cannot-cross-${boundary}`,async()=>{
+ const f=fixture();let stop=f.service.start();try{f.pending.shift()!.resolve({statusRevision:1,enabled:true});await tick();const pending=f.service[command](),old=f.pending.shift()!;let fresh:any;
+ if(boundary==='restart'){stop();stop=f.service.start();fresh=f.pending.shift()!;}else{f.bus.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:7}}));f.bus.dispatchEvent(new CustomEvent('ipc:gameMedia.resume-ready',{detail:{generation:7}}));fresh=f.pending.shift()!;}
+ // Native revision order remains 1 -> old command 2 -> new read/config 3.
+ // The old return lands while the new generation is still waiting for truth.
+ await tick();let updates=0;const off=f.service.subscribe(()=>updates++);const receipt={statusRevision:2,enabled:true,manualState:command==='requestNow'?'requested':'cancelled',manualUntil:command==='requestNow'?Date.now()+60000:0};old.resolve(receipt);const returned=await pending;await tick();off();
+ check(returned===receipt,'caller lost the actual native command return');check(f.service.state.statusRevision===1&&updates===0,'old explicit command return mutated a new owner/read generation');fresh.resolve({statusRevision:3,enabled:true});await tick();check(f.service.state.statusRevision===3,'current native state failed to publish after the old command return');}finally{stop();}
+});
+await run('suspended-recheck-is-inert-and-new-generation-can-check-independently',async()=>{
+ const f=fixture(),stop=f.service.start();let old:any;try{f.pending.shift()!.resolve({statusRevision:1,enabled:true,pauseReason:'capacity-unavailable',cpuThreshold:15});await tick();const previous=f.service.recheck();old=f.pending.shift()!;f.bus.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:8}}));const calls=f.calls.length;
+ void f.service.recheck();check(f.calls.length===calls,'suspended coordinator started a repair IPC');f.bus.dispatchEvent(new CustomEvent('ipc:gameMedia.resume-ready',{detail:{generation:8}}));const freshRead=f.pending.shift()!;const next=f.service.recheck();check(next!==previous&&f.calls.length===calls+2,'old pre-suspend repair blocks a current-generation repair');const freshCheck=f.pending.shift()!;
+ freshCheck.resolve({statusRevision:3,enabled:true,pauseReason:'capacity-unavailable',cpuThreshold:15,resourcePauseReason:'on-battery'});await next;old.resolve({statusRevision:2,enabled:false});await previous;freshRead.resolve({statusRevision:4,enabled:true,resourcePauseReason:'on-battery'});await tick();
+ check(f.service.state.statusRevision===4&&f.service.state.resourcePauseReason==='on-battery','old repair return published or repaired policy across a read generation');check(f.calls.length===calls+2,'old repair return created an extra settings IPC');}finally{stop();old?.resolve({});for(const p of f.pending)p.resolve({});}
+});
+for(const command of ['requestNow','cancelManual'] as const)await run(`current-${command}-receipt-remains-visible-and-returned`,async()=>{
+ const f=fixture(),stop=f.service.start();try{f.pending.shift()!.resolve({statusRevision:1,enabled:true});await tick();let updates=0;const off=f.service.subscribe(()=>updates++);const waiting=f.service[command]();const value={statusRevision:2,enabled:true,manualState:command==='requestNow'?'requested':'cancelled'};f.pending.shift()!.resolve(value);const actual=await waiting;off();
+ check(actual===value&&f.service.state===value&&updates===1,'current command did not return and publish its real native receipt exactly once');}finally{stop();}
+});
 const ok=reports.every(x=>x.ok);console.log(JSON.stringify({ok,checks,cases:reports,scope:'production settings/progress/refresh coordinators with deterministic IPC and lifecycle returns'}));if(!ok)process.exitCode=1;

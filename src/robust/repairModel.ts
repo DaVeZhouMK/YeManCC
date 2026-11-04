@@ -103,9 +103,14 @@ export function selectWebViewHostMode(capabilities: WebViewHostCapabilities): We
 export type TdpCapabilityState = 'unknown' | 'supported' | 'unsupported' | 'transient-failed';
 export type TdpFailureClass = 'unsupported' | 'transient' | 'permission' | 'unknown';
 
+export class TdpRequestSupersededError extends Error {
+  constructor() { super('TDP request superseded before hardware dispatch'); this.name = 'TdpRequestSupersededError'; }
+}
+
 export interface TdpWriteResult {
   applied: boolean;
   skipped: boolean;
+  superseded?: boolean;
   state: TdpCapabilityState;
   error?: string;
 }
@@ -129,6 +134,8 @@ export class TdpCapabilityCircuitBreaker {
   private state: TdpCapabilityState = 'unknown';
   private nextRetryAt = 0;
   private lastUnsupportedError = 'TDP capability unsupported';
+  private powerTransitionFailure = false;
+  private resetEpoch = 0;
   private tail: Promise<void> = Promise.resolve();
 
   constructor(
@@ -141,13 +148,39 @@ export class TdpCapabilityCircuitBreaker {
   }
 
   reset(): void {
+    ++this.resetEpoch;
     this.state = 'unknown';
     this.nextRetryAt = 0;
+    this.lastUnsupportedError = 'TDP capability unsupported';
+    this.powerTransitionFailure = false;
+  }
+
+  // Called only after an authoritative Ready reconciliation. It does not
+  // unlock unsupported hardware or retry an uncertain completed command.
+  reconcilePowerReady(): void {
+    if (this.state !== 'transient-failed' || !this.powerTransitionFailure) return;
+    this.state = 'unknown';
+    this.nextRetryAt = 0;
+    this.powerTransitionFailure = false;
+  }
+
+  // A fresh capability check on an explicit session/show edge may rearm a
+  // previous unsupported receipt. The next request still goes through the
+  // actual backend; this never applies or replays a setting by itself.
+  reconcileCapabilityReady(): void {
+    if (this.state !== 'unsupported') return;
+    this.state = 'unknown';
     this.lastUnsupportedError = 'TDP capability unsupported';
   }
 
   run(task: () => Promise<void>): Promise<TdpWriteResult> {
+    const epoch = this.resetEpoch;
+    const superseded = (): TdpWriteResult => ({
+      applied: false, skipped: true, superseded: true, state: this.state,
+      error: 'TDP request superseded by circuit breaker reset',
+    });
     const operation = this.tail.then(async (): Promise<TdpWriteResult> => {
+      if (epoch !== this.resetEpoch) return superseded();
       if (this.state === 'unsupported') {
         return { applied: false, skipped: true, state: this.state, error: this.lastUnsupportedError };
       }
@@ -157,10 +190,14 @@ export class TdpCapabilityCircuitBreaker {
 
       try {
         await task();
+        if (epoch !== this.resetEpoch) return superseded();
         this.state = 'supported';
         this.nextRetryAt = 0;
         return { applied: true, skipped: false, state: this.state };
       } catch (error) {
+        if (epoch !== this.resetEpoch) return superseded();
+        if (error instanceof TdpRequestSupersededError)
+          return { applied: false, skipped: true, superseded: true, state: this.state, error: error.message };
         const failure = classifyTdpFailure(error);
         if (failure === 'unsupported') {
           this.state = 'unsupported';
@@ -174,6 +211,7 @@ export class TdpCapabilityCircuitBreaker {
           };
         }
         this.state = 'transient-failed';
+        this.powerTransitionFailure = /hardware writes are blocked during power transition|系统电源恢复尚未完成|TDP 会话等待当前电源代次恢复|hardware_resume_not_ready|stale_resume_generation|resume_hardware_failed/i.test(String(error instanceof Error ? error.message : error));
         this.nextRetryAt = this.now() + this.transientBackoffMs;
         throw error;
       }

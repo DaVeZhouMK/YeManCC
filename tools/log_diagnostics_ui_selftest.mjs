@@ -132,6 +132,7 @@ try {
     const f = fixture(async () => successfulArchive);
     await f.exportAllLogs();
     assert.equal(f.calls[0][0], 'logs.exportAll');
+    assert.equal(f.calls[0][2].timeoutMs, 900000, '15-minute UI wait covers two five-minute attempts and snapshot work');
     assert.equal(f.detailLogStatus.value, exportText);
     assert.equal(f.detailLogBusy.value, false);
     assert.equal(f.messages.length, 0);

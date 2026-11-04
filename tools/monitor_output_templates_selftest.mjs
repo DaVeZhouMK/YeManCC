@@ -25,11 +25,11 @@ check('Retired peak graph is discarded; legacy extra category migrates into batt
  assert.equal(Object.hasOwn(old.ymcc.fields,'cpuPeakBar'),false);assert.equal(old.ymcc.fieldGroup,'电池');
  assert(!m.HUD_METRICS.some(x=>x.id==='cpuPeakBar'));assert(!m.HUD_PERCENT_GRAPHS.some(x=>x.id==='cpuPeakBar'));
 });
-check('Text defaults 120 percent and clamps both banks at 200; individual values retain 300',()=>{
+check('Text defaults 120 percent, admits 300 and clamps both banks at 400; individual values retain 300',()=>{
  const p=m.normalizeMonitorOutput({ymccTemplate:'A',ymcc:{textScale:3,valueScales:{fps:3}},ymccTemplates:{B:{textScale:9,valueScales:{cpuPower:3}}}});
- assert.equal(defaults.ymcc.textScale,1.2);assert.equal(p.ymcc.textScale,2);assert.equal(p.ymcc.valueScales.fps,3);
- const b=m.switchMonitorHudTemplate(p,'B');assert.equal(b.ymcc.textScale,2);assert.equal(b.ymcc.valueScales.cpuPower,3);
- const a=m.switchMonitorHudTemplate(b,'A');assert.equal(a.ymcc.textScale,2);assert.equal(a.ymcc.valueScales.fps,3);
+ assert.equal(defaults.ymcc.textScale,1.2);assert.equal(p.ymcc.textScale,3);assert.equal(p.ymcc.valueScales.fps,3);
+ const b=m.switchMonitorHudTemplate(p,'B');assert.equal(b.ymcc.textScale,4);assert.equal(b.ymcc.valueScales.cpuPower,3);
+ const a=m.switchMonitorHudTemplate(b,'A');assert.equal(a.ymcc.textScale,3);assert.equal(a.ymcc.valueScales.fps,3);
  assert.deepEqual(m.HUD_TEMPLATES.map(x=>x.label),['A模板','B模板']);
 });
 check('CPU metadata and selected GPU identity survive the common display wire; absent GPU clears',()=>{
@@ -133,19 +133,20 @@ check('Existing OVL has 80 sources / 74 layers, hardware aliases and actual 8/16
   assert.match(ovl, /Name=Core 0 Clock/); assert.match(ovl, /Name=P-core 0 Clock/); assert.match(ovl, /<G=GPU D3D Usage/); assert.match(ovl, /<G=Frametime/);
 });
 function harness(options = {}) {
-  const calls = []; let active = new Set(['rtss']); let backend = true;
+  const calls = [], loadedLayouts = []; let active = new Set(options.active ?? ['rtss']); let backend = true; let layout = options.layout ?? 'YeManOBS-W-1.ovl';
   const deps = {
-    async capabilities() { calls.push('capabilities'); return { steam: options.steam !== false, ymcc: options.ymcc !== false }; },
-    async ensureRtss() { calls.push('ensure-rtss'); backend = true; },
+    ownsYmcc(){return options.ymccOwned===true||options.ownsYmcc===true;},
+    async capabilities() { calls.push('capabilities'); if(options.failCapabilities)throw Error('capability query unavailable');return { steam: options.steam !== false, steamAbsent: options.steamAbsent === true, ymcc: options.ymcc !== false, ymccOwned: options.ymccOwned === true, ymccGlobal: options.ymccGlobal === true }; },
+    async ensureRtss() { calls.push('ensure-rtss'); if(options.failEnsure)throw Error('backend unavailable'); backend = true; },
     async setSteam(pos) { calls.push('steam:' + pos); if (options.fail === 'steam:' + pos) return { confirmed: false, reason: 'queued' }; pos ? active.add('steam') : active.delete('steam'); if(pos)assert(active.size<=1); return { confirmed: true }; },
-    async setRtss(show) { calls.push('rtss:' + show); if (options.fail === 'rtss:' + show) return { confirmed: false }; show ? active.add('rtss') : active.delete('rtss'); if(show)assert(active.size<=1); return { confirmed: true }; },
-    async setYmcc(show, prefs) { calls.push('ymcc:' + show); if (options.fail === 'ymcc:' + show) return { confirmed: false }; if (show) assert.equal(prefs.ymcc.layout, 'capsule'); show ? active.add('ymcc') : active.delete('ymcc'); if(show)assert(active.size<=1); return { confirmed: true }; },
+    async setRtss(show, prefs) { calls.push('rtss:' + show); if (options.fail === 'rtss:' + show) return { confirmed: false }; layout = show ? ({W:'YeManOBS-W-1.ovl',L:'YeManOBS-L-1.ovl',J:'YeManOBS-JJ-1.ovl'})[prefs.rtssTemplate] : 'Empty.ovl'; loadedLayouts.push(layout); show ? active.add('rtss') : active.delete('rtss'); if(show)assert(active.size<=1); return { confirmed: true }; },
+    async setYmcc(show, prefs) { calls.push('ymcc:' + show); if (!show && options.closeGate && !(await options.closeGate).confirmed) return {confirmed:false}; if (options.fail === 'ymcc:' + show) return { confirmed: false }; if (show) assert.equal(prefs.ymcc.layout, 'capsule'); show ? active.add('ymcc') : active.delete('ymcc'); if(show)assert(active.size<=1); return { confirmed: true }; },
   };
-  return { router: m.createMonitorOutputCoordinator(deps), calls, active: () => [...active], backend: () => backend };
+  return { router: m.createMonitorOutputCoordinator(deps), calls, active: () => [...active], backend: () => backend, layout: () => layout, loadedLayouts };
 }
 for (const output of ['steam', 'ymcc', 'rtss']) {
   const h = harness(); const result = await h.router.apply({ ...defaults, output });
-  check('One output + retained RTSS backend: ' + output, () => { assert(result.ok); assert.equal(result.applied, output); assert.deepEqual(h.active(), [output]); assert(h.backend()); assert.deepEqual(h.calls.slice(0, 5), ['capabilities', 'ensure-rtss', 'steam:0', 'rtss:false', 'ymcc:false']); });
+  check('One output + retained RTSS backend: ' + output, () => { assert(result.ok); assert.equal(result.applied, output); assert.deepEqual(h.active(), [output]); assert(h.backend()); assert.deepEqual(h.calls.slice(0, 5), output === 'rtss' ? ['capabilities', 'ensure-rtss', 'steam:0', 'ymcc:false', 'rtss:true'] : ['capabilities', 'ensure-rtss', 'steam:0', 'rtss:false', 'ymcc:false']); });
 }
 {
   const h = harness(); const result = await h.router.apply({ ...defaults, enabled: false });
@@ -168,6 +169,80 @@ for (const fail of ['steam:0', 'rtss:false', 'ymcc:false']) {
   await a; await b;
   check('Serial requests snapshot intent and converge to last output without overlap', () => { assert.deepEqual(h.active(), ['rtss']); assert(h.calls.includes('ymcc:true')); });
 }
+for (const template of ['W', 'L', 'J']) {
+  const h = harness({active:['ymcc'],layout:'Empty.ovl'});
+  const result = await h.router.apply({...defaults,output:'rtss',rtssTemplate:template});
+  check('RTSS target loads directly without blank intermediate: '+template,()=>{
+    assert(result.ok);assert.deepEqual(h.loadedLayouts,[({W:'YeManOBS-W-1.ovl',L:'YeManOBS-L-1.ovl',J:'YeManOBS-JJ-1.ovl'})[template]]);
+    assert(!h.calls.includes('rtss:false'));assert.deepEqual(h.active(),['rtss']);
+    assert(h.calls.indexOf('ymcc:false')<h.calls.indexOf('rtss:true'));
+  });
+}
+{
+  const h = harness({fail:'ymcc:false'}),result=await h.router.apply({...defaults,output:'rtss'});
+  check('failed custom-output close cannot replace an existing horizontal RTSS layout with Empty',()=>{
+    assert(!result.ok);assert.equal(result.phase,'hide-ymcc');assert.equal(h.layout(),'YeManOBS-W-1.ovl');assert.deepEqual(h.loadedLayouts,[]);assert(!h.calls.includes('rtss:true'));
+  });
+}
+{
+  let finish;const closeGate=new Promise(resolve=>{finish=resolve}),h=harness({closeGate});
+  const pending=h.router.apply({...defaults,output:'rtss'});for(let i=0;i<25;i++)await Promise.resolve();
+  const waitingLayout=h.layout(),waitingLoads=[...h.loadedLayouts];finish({confirmed:false});const result=await pending;
+  check('waiting or timed-out close leaves the previous RTSS layout intact',()=>{
+    assert.equal(waitingLayout,'YeManOBS-W-1.ovl');assert.deepEqual(waitingLoads,[]);assert(!result.ok);assert(!h.calls.includes('rtss:true'));
+  });
+}
+{
+  const h=harness({fail:'rtss:true'}),result=await h.router.apply({...defaults,output:'rtss',rtssTemplate:'L'});
+  check('RTSS target load failure is unconfirmed and never pre-clears to Empty',()=>{
+    assert(!result.ok);assert.equal(result.phase,'show-rtss');assert.equal(result.applied,'unknown');assert.equal(h.layout(),'YeManOBS-W-1.ovl');assert.deepEqual(h.loadedLayouts,[]);
+  });
+}
+{
+  const h=harness({fail:'ymcc:false'});await h.router.apply({...defaults,output:'rtss'});
+  const recovered=harness();const result=await recovered.router.apply({...defaults,output:'rtss'});
+  check('default RTSS selection resolves to horizontal and completes one native target load',()=>{
+    assert.equal(m.normalizeMonitorOutput({output:'rtss'}).rtssTemplate,'W');assert(result.ok);assert.equal(recovered.layout(),'YeManOBS-W-1.ovl');assert.deepEqual(recovered.loadedLayouts,['YeManOBS-W-1.ovl']);
+  });
+}
+
+// OFF must release owned windows even after a failed switch. These checks use
+// the same production coordinator and original memory-only output ports.
+const offBoundaries=[];
+for(const scenario of [
+ {name:'backend-start-fails',active:['ymcc'],failEnsure:true},
+ {name:'steam-read-unconfirmed',active:['ymcc'],steam:false},
+ {name:'rtss-hide-unconfirmed',active:['ymcc'],fail:'rtss:false'},
+ {name:'steam-hide-unconfirmed',active:['ymcc'],fail:'steam:0'},
+ {name:'unavailable-but-owned-carrier',active:['ymcc'],ymcc:false,ymccOwned:true,failEnsure:true},
+ {name:'native-hide-unconfirmed-still-closes-others',active:['ymcc','rtss','steam'],fail:'ymcc:false'},
+]){
+ const h=harness(scenario);const result=await h.router.apply({...defaults,enabled:false,output:'rtss'});
+ const knownNativeClosed=scenario.fail==='ymcc:false'?h.active().includes('ymcc'):!h.active().includes('ymcc');
+ const otherClosesContinue=scenario.fail==='ymcc:false'?h.calls.includes('rtss:false')&&h.calls.includes('steam:0'):true;
+ const failure=scenario.steam===false||scenario.fail;
+ offBoundaries.push({name:scenario.name,ok:knownNativeClosed&&otherClosesContinue&&!h.calls.includes('ensure-rtss')&&!h.calls.some(c=>c==='rtss:true'||c==='ymcc:true'||c==='steam:1')&&(failure?!result.ok&&result.applied==='unknown':result.ok&&result.applied==='off'),calls:h.calls,active:h.active(),result});
+}
+{
+ const h=harness({active:['ymcc'],failEnsure:true});const first=await h.router.apply({...defaults,output:'rtss'});const closed=await h.router.apply({...defaults,enabled:false,output:'rtss'});
+ offBoundaries.push({name:'failed-switch-followed-by-OFF-releases-owned-carrier',ok:!first.ok&&closed.ok&&closed.applied==='off'&&!h.active().includes('ymcc')&&h.calls.filter(c=>c==='ensure-rtss').length===1,calls:h.calls,active:h.active(),first,closed});
+}
+
+for(const scenario of [
+ {name:'owned-close-before-rejected-capabilities',active:['ymcc'],ownsYmcc:true,failCapabilities:true},
+ {name:'failed-owned-close-not-retried-after-rejected-capabilities',active:['ymcc'],ownsYmcc:true,failCapabilities:true,fail:'ymcc:false'},
+ {name:'no-registered-owner-no-early-close',active:['rtss'],ownsYmcc:false,ymcc:false,failCapabilities:true},
+ {name:'global-OFF-reuses-early-close-ack',active:['ymcc'],ownsYmcc:true,ymccGlobal:true},
+]){
+ const h=harness(scenario);const result=await h.router.apply({...defaults,enabled:false,output:scenario.ymccGlobal?'ymcc':'rtss'});
+ const closeCalls=h.calls.filter(c=>c==='ymcc:false').length;
+ const ok=scenario.failCapabilities?
+  !result.ok&&result.applied==='unknown'&&!h.calls.includes('ensure-rtss')&&closeCalls===(scenario.ownsYmcc?1:0)&&(scenario.ownsYmcc?h.calls[0]==='ymcc:false'&&(scenario.fail?h.active().includes('ymcc'):!h.active().includes('ymcc')):!h.calls.some(c=>c==='ymcc:false'||c==='rtss:false'||c==='steam:0')):
+  result.ok&&result.applied==='off'&&closeCalls===1&&h.calls[0]==='ymcc:false'&&!h.active().includes('ymcc')&&!h.calls.includes('rtss:false')&&!h.calls.includes('steam:0');
+ offBoundaries.push({name:scenario.name,ok,calls:h.calls,active:h.active(),result});
+}
+fs.writeFileSync(path.join(out,'OFF-FAILURE-BOUNDARIES.json'),JSON.stringify({ok:offBoundaries.every(c=>c.ok),cases:offBoundaries,scope:'Original production coordinator; synthetic dependency failures; no installed/native control'},null,2));
+for(const c of offBoundaries)check('OFF failure boundary: '+c.name,()=>assert(c.ok,JSON.stringify(c)));
 for (const layout of ['corner', 'bar', 'capsule']) {
   const prefs = structuredClone(defaults); prefs.ymcc.layout = layout;
   fs.writeFileSync(path.join(out, 'ymcc-' + layout + '.json'), JSON.stringify(m.monitorTemplateDocument(prefs), null, 2));

@@ -8,7 +8,7 @@ const prefs=m.normalizeMonitorOutput(),optional=m.normalizeMonitorOutput({ymccCa
 const check=(name,fn)=>{fn();cases.push(name)};
 function harness(options={}){
  const calls=[],states={steam:options.steamState??'hidden',desktop:options.desktopState??'hidden'};let available=options.steamAvailable??true;
- const ports={steam:{available:async()=>{calls.push('probe-steam');if(options.throwSteamProbe)throw Error('Steam probe unavailable');return available},visible:()=>states.steam==='shown',state:()=>states.steam,async setVisible(show,p){calls.push('steam:'+show);if(show&&options.failSteamShow){states.steam='unknown';return {confirmed:false,reason:'create failed'}}if(!show&&options.failSteamClose){states.steam='unknown';return {confirmed:false,reason:'close unknown'}}states.steam=show?'shown':'hidden';if(!show&&options.bindingLost)available=false;return {confirmed:true}}},desktop:{available:async()=>{calls.push('probe-desktop');return options.desktopAvailable!==false},visible:()=>states.desktop==='shown',state:()=>states.desktop,async setVisible(show,p){calls.push('desktop:'+show);if(show&&options.failDesktopShow)return {confirmed:false,reason:'desktop paint failed'};states.desktop=show?'shown':'hidden';return {confirmed:true}}}};
+ const ports={steam:{available:async()=>{calls.push('probe-steam');if(options.throwSteamProbe)throw Error('Steam probe unavailable');return available},visible:()=>states.steam==='shown',state:()=>states.steam,async setVisible(show,p){calls.push('steam:'+show);if(!show&&options.throwSteamClose){states.steam='unknown';throw Error('Steam close threw')}if(!show&&options.steamCloseGate){const ack=await options.steamCloseGate;if(!ack.confirmed){states.steam='unknown';return ack}}if(show&&options.failSteamShow){states.steam='unknown';return {confirmed:false,reason:'create failed'}}if(!show&&options.failSteamClose){states.steam='unknown';return {confirmed:false,reason:'close unknown'}}states.steam=show?'shown':'hidden';if(!show&&options.bindingLost)available=false;return {confirmed:true}}},desktop:{available:async()=>{calls.push('probe-desktop');return options.desktopAvailable!==false},visible:()=>states.desktop==='shown',state:()=>states.desktop,async setVisible(show,p){calls.push('desktop:'+show);if(!show&&options.failDesktopClose){states.desktop='unknown';return {confirmed:false,reason:'desktop close unknown'}}if(show&&options.failDesktopShow)return {confirmed:false,reason:'desktop paint failed'};states.desktop=show?'shown':'hidden';return {confirmed:true}}}};
  return {calls,states,router:m.createHudCarrierRouter(ports.steam,ports.desktop,'desktop-global'),ports,setAvailable(v){available=v}};
 }
 check('Old/invalid preferences default to the desktop; optional Steam remains internal while two public choices are shown',()=>{assert.equal(prefs.ymccCarrier,'desktop');assert.equal(m.normalizeMonitorOutput({ymccCarrier:'bad'}).ymccCarrier,'desktop');assert.equal(optional.ymccCarrier,'steam-preferred');assert.deepEqual(m.MONITOR_OUTPUTS.map(v=>v.value),['desktop','rtss'])});
@@ -54,4 +54,31 @@ for(const setup of [{steamAvailable:false,steamState:'unknown'},{throwSteamProbe
  check('Queued migrations snapshot preference intents and finish with exactly the requested last carrier',()=>{assert(h.calls.includes('steam:true'));assert.equal(h.router.active(),'desktop');assert.deepEqual(h.states,{steam:'hidden',desktop:'shown'})});
  assert((await h.router.setVisible(false,prefs)).confirmed);check('Master off reclaims owned output and leaves no shown carrier',()=>assert.deepEqual(h.states,{steam:'hidden',desktop:'hidden'}));
 }
+
+const offCases=[];
+const caught=async work=>{try{return await work()}catch(error){return {confirmed:false,thrown:true,reason:String(error)}}};
+for(const failure of ['unconfirmed','throw']){
+ const options={},h=harness(options);assert((await h.router.setVisible(true,prefs)).confirmed);
+ options[failure==='throw'?'throwSteamClose':'failSteamClose']=true;
+ const failed=await caught(()=>h.router.setVisible(true,optional));assert(!failed.confirmed);assert.equal(h.states.desktop,'shown');const start=h.calls.length;
+ const closed=await caught(()=>h.router.setVisible(false,prefs));
+ offCases.push({name:'OFF-releases-desktop-despite-Steam-'+failure,ok:!closed.confirmed&&h.states.desktop==='hidden'&&h.router.active()===null&&h.router.state()==='unknown'&&h.calls.slice(start).filter(c=>c.includes(':')).join(',')==='desktop:false,steam:false',calls:h.calls.slice(start),states:{...h.states},closed});
+ options.throwSteamClose=false;options.failSteamClose=false;const retry=await h.router.setVisible(false,prefs);
+ offCases.push({name:'explicit-OFF-retry-after-Steam-'+failure,ok:retry.confirmed&&h.states.desktop==='hidden'&&h.states.steam==='hidden'&&h.router.active()===null&&h.router.state()==='hidden',retry});
+}
+{
+ const options={},h=harness(options);await h.router.setVisible(true,prefs);options.failSteamClose=true;await h.router.setVisible(true,optional);options.failSteamClose=false;options.failDesktopClose=true;const start=h.calls.length;
+ const closed=await caught(()=>h.router.setVisible(false,prefs));offCases.push({name:'desktop-close-failure-still-cleans-Steam',ok:!closed.confirmed&&h.states.steam==='hidden'&&h.states.desktop==='unknown'&&h.router.active()==='desktop'&&h.calls.slice(start).filter(c=>c.includes(':')).join(',')==='desktop:false,steam:false',calls:h.calls.slice(start),states:{...h.states},closed});
+}
+{
+ const options={},h=harness(options);await h.router.setVisible(true,optional);options.failSteamClose=true;const start=h.calls.length;const closed=await caught(()=>h.router.setVisible(false,prefs));offCases.push({name:'active-Steam-failure-still-cleans-desktop',ok:!closed.confirmed&&h.router.active()==='steam'&&h.calls.slice(start).filter(c=>c.includes(':')).join(',')==='steam:false,desktop:false'&&h.router.state()==='unknown',calls:h.calls.slice(start),closed});
+}
+{
+ const options={},h=harness(options);await h.router.setVisible(true,prefs);options.failSteamClose=true;await h.router.setVisible(true,optional);options.failSteamClose=false;let release;options.steamCloseGate=new Promise(resolve=>{release=resolve});let settled=false;
+ const pending=h.router.setVisible(false,prefs).then(value=>{settled=true;return value});for(let i=0;i<8;++i)await new Promise(resolve=>setImmediate(resolve));const immediate={desktop:h.states.desktop,settled,active:h.router.active()};release({confirmed:false,reason:'held unknown Steam close'});const closed=await pending;
+ offCases.push({name:'known-desktop-closes-before-held-Steam-ACK',ok:immediate.desktop==='hidden'&&!immediate.settled&&immediate.active===null&&!closed.confirmed&&h.router.state()==='unknown',immediate,closed});
+ delete options.steamCloseGate;options.failSteamClose=true;const start=h.calls.length;const shown=await h.router.setVisible(true,prefs);offCases.push({name:'enable-still-blocked-by-unconfirmed-old-Steam',ok:!shown.confirmed&&!h.calls.slice(start).includes('desktop:true')&&!h.calls.slice(start).includes('steam:true')&&h.states.desktop==='hidden',calls:h.calls.slice(start),shown});
+}
+fs.writeFileSync(path.join(out,'CARRIER-OFF-BOUNDARIES.json'),JSON.stringify({ok:offCases.every(c=>c.ok),cases:offCases,scope:'Original public carrier-router sequence with synthetic ports; full host reachability of mixed state not claimed.'},null,2));
+for(const c of offCases)check('Carrier OFF boundary: '+c.name,()=>assert(c.ok,JSON.stringify(c)));
 const report={passed:cases.length,cases,scope:'Exact production optional router/coordinator/model using synthetic carrier ACKs; not installed Steam/desktop pixel acceptance. Default desktop behavior and sole telemetry layer retained.'};fs.writeFileSync(path.join(out,'OPTIONAL-STEAM-CARRIER-SELFTEST.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

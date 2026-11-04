@@ -4,6 +4,7 @@
 import { performancePanelTarget } from './performanceNavigation';
 import { EDIT_REPEAT_BASE_MS, editRepeatInterval } from './sliderRepeat';
 import { emitNativeEvent } from '@/bridge/ipc';
+import { watchMouseModeState } from '@/bridge/mouseModeState';
 // gamepad/engine.ts — 手柄全量导航引擎（对齐 PLAN §五）
 //
 // Native Raw Input/XInput supplies page actions; this module maps those
@@ -29,7 +30,7 @@ import { focusGamepadElement, setGamepadFocused, recoverGamepadFocus } from '@/g
 import { enqueueGamepadTaskDetached, gamepadSerialPending } from '@/gamepad/serial';
 import { reportFrontendTrace } from '@/robust/frontendDiagnostics';
 import { residentNavigationRoutes } from '@/bridge/residentNavigation';
-import { spatialNavigationTarget } from '@/gamepad/spatial';
+import { spatialNavigationTarget, createSpatialMeasurements, type SpatialMeasurements } from '@/gamepad/spatial';
 import { InputOwnerRuntime, type RuntimeStopReason } from '@/bridge/inputOwnerRuntime';
 import { withGamepadActivation } from '@/gamepad/activationEvidence';
 
@@ -83,7 +84,7 @@ let gpSettings: GamepadSettings = {
   mouseBackend: 'joyxoff',
 };
 // 快捷应用「模拟鼠标」开启时：屏蔽内页按键选择/功能（上下导航、A/X），
-// 保留 LR 切页、B 返回和 Y 编辑游戏；由 QuickAppView 通过 gp:mouse-mode 事件驱动。
+// 保留 LR 切页、B 返回和 Y 编辑游戏；只消费统一准入后的鼠标状态。
 let mouseModeSuppress = false;
 export function isMouseModeSuppressed(): boolean {
   return mouseModeSuppress;
@@ -661,13 +662,13 @@ function scheduleSummonFocus(): void {
 // ── 页面内焦点列表 ──
 // 若有自绘模态浮层（data-gp-modal，如确认弹窗），导航范围收窄到浮层内部，
 // 防止方向键从弹窗按钮跳出到下层页面误触其它按钮；浮层关闭后恢复全页。
-function focusables(): HTMLElement[] {
+function focusables(measurements?: SpatialMeasurements): HTMLElement[] {
   // Transitions can leave the old panel in the DOM briefly. Use the last
   // visible modal so a newly opened Teleport overlay owns navigation.
   const modals = Array.from(document.querySelectorAll<HTMLElement>('[data-gp-modal]'))
     .filter((el) => {
-      const style = getComputedStyle(el);
-      const r = el.getBoundingClientRect();
+      const style = (measurements ? measurements.style(el) : getComputedStyle(el));
+      const r = (measurements ? measurements.rect(el) : el.getBoundingClientRect());
       return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
     });
   const modal = modals[modals.length - 1] ?? null;
@@ -677,8 +678,8 @@ function focusables(): HTMLElement[] {
   const roots: ParentNode[] = [modal || document];
   const openDropdowns = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"]'))
     .filter((el) => {
-      const style = getComputedStyle(el);
-      const r = el.getBoundingClientRect();
+      const style = (measurements ? measurements.style(el) : getComputedStyle(el));
+      const r = (measurements ? measurements.rect(el) : el.getBoundingClientRect());
       return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
     });
   roots.push(...openDropdowns);
@@ -697,9 +698,9 @@ function focusables(): HTMLElement[] {
       const submenuBody = el.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body], [data-gp-timeout-body]');
       const submenuPanel = submenuBody?.closest<HTMLElement>('[data-gp-expanded]');
       if (submenuBody && submenuPanel?.dataset.gpExpanded !== 'true') return false;
-      const style = getComputedStyle(el);
+      const style = (measurements ? measurements.style(el) : getComputedStyle(el));
       if (style.display === 'none' || style.visibility === 'hidden') return false;
-      const r = el.getBoundingClientRect();
+      const r = (measurements ? measurements.rect(el) : el.getBoundingClientRect());
       // 必须可见且有实际尺寸
       return r.width > 0 && r.height > 0;
     }
@@ -896,6 +897,7 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
     'rules-entry',
     'actions-1',
     'actions-2',
+    'actions-3',
     'footer',
   ];
   const rulesPanel = menu.querySelector<HTMLElement>('[data-gp-game-rules][data-gp-expanded="true"]');
@@ -928,9 +930,8 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   // Follow the visible order, including the new profile/rules rows above FSR.
   for (let i = index + (dy > 0 ? 1 : -1); i >= 0 && i < rows.length; i += dy > 0 ? 1 : -1) {
     if (rows[i] === pairSibling) continue;
-    // The quick actions form a visual 2x2 grid. Preserve the column across
-    // rows: FSR <-> trainer, frame generation <-> game speed. Choosing the
-    // first control in every row incorrectly sends the right column left.
+    // FSR spans one row, then LS toggle/unbind and trainer/speed each form
+    // a pair. Preserve the visible column across enabled action rows.
     const actionPair = currentRow.startsWith('actions-') && rows[i].startsWith('actions-');
     const sameColumn = actionPair ? focusables().find((el) =>
       menu.contains(el) && el.dataset.gpCol === base.dataset.gpCol &&
@@ -952,7 +953,8 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
 
 function moveFocus(dx: number, dy: number) {
   if (offerPageCommand(dx < 0 ? 'nav-left' : dx > 0 ? 'nav-right' : dy < 0 ? 'nav-up' : 'nav-down')) return;
-  const els = focusables();
+  const measurements = createSpatialMeasurements();
+  const els = focusables(measurements);
   if (els.length === 0) return;
   const activeGameMenu = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]');
   // The expanded header, performance rows and trailing input/action rows remain real focus targets.
@@ -996,6 +998,8 @@ function moveFocus(dx: number, dy: number) {
       detail: { dx: dx > 0 ? 1 : dx < 0 ? -1 : 0, dy: dy > 0 ? 1 : dy < 0 ? -1 : 0 },
     });
     if (!inlineEditor.dispatchEvent(editEvent)) return;
+    // A custom handler may synchronously change layout even without consuming.
+    measurements.clear();
   }
 
   // Feature pages may declare an exact row/column map. This is intentionally
@@ -1038,7 +1042,7 @@ function moveFocus(dx: number, dy: number) {
     : spatialNavigationTarget(explicitCandidates, base, {
         dx: dx === 0 ? 0 : dx > 0 ? 1 : -1,
         dy: dy === 0 ? 0 : dy > 0 ? 1 : -1,
-      });
+      }, measurements);
   if (explicitTarget !== undefined) {
     if (explicitTarget) {
       try {
@@ -1766,13 +1770,10 @@ export function startGamepad(opts: GamepadEngineOptions): () => void {
   if (rafId) return () => stopGamepad();
   prevButtons = [];
   prevAxes = [];
-  const onMouseMode = (e: Event) => {
-    mouseModeSuppress = Boolean((e as CustomEvent<{ on?: boolean }>).detail?.on);
-  };
-  window.addEventListener('gp:mouse-mode', onMouseMode);
-  mouseModeCleanup = () => {
-    window.removeEventListener('gp:mouse-mode', onMouseMode);
-  };
+  mouseModeCleanup?.();
+  mouseModeCleanup = watchMouseModeState((state) => {
+    mouseModeSuppress = state?.on === true;
+  });
   summonGet().then((s) => { gpSettings = { ...gpSettings, ...s }; });
   // 仅检测到手柄时才启动 60fps 循环；无手柄保持停止，由连接/可见/唤醒事件拉起（省 CPU）
   if (hasConnectedPad() && browserLoopAllowed()) {

@@ -112,9 +112,79 @@ run('builtin-steam-tool-strict-id-and-exact-name', () => {
   for(const name of ['Steamworks Simulator','My Steamworks Shared Adventure','Steamworks Shared 2','Unreal Tournament','UnrealEngineGame','UE Game','游戏 Steamworks Shared']) assert.equal(context.isBuiltinExcludedSteamTool({formalName:name}),false);
   assert.equal(context.isBuiltinExcludedSteamTool({igdbId:228980,artwork:{appId:228980}}),false);
 });
-const report = { allPassed: reports.every(test => test.passed), caseCount: reports.length, fuzzCombinationCount: 1000, artworkPriorityCombinationCount: 1000, cases: reports, realSteamFilesModified: false };
+// Reuse the actual identity and merge functions. No media identity gate is mocked.
+const mergeContext=vm.createContext({snapshot:{},activeTab:'not-in-steam',selectedGameDirectories:null,selectedSteamDirectories:null,selectedCategoryDirectories:{unclassified:new Set(),'non-game':new Set()}});
+const mergeBegin=source.indexOf('function defaultSelectedDirectories('),mergeEnd=source.indexOf('const WAITING_KEEP_STATUSES',mergeBegin);
+assert(mergeBegin>=0&&mergeEnd>mergeBegin,'Missing production library merge boundaries');
+vm.runInContext(source.slice(mergeBegin,mergeEnd),mergeContext);
+for(const name of ['formalSteamAppId','confirmedMediaAppId','pageSelectable','pageSelectionKeys','isPageSelected']){
+ const line=source.split(/\r?\n/).find(value=>value.startsWith('function '+name+'('));assert(line,'Missing production '+name);
+ if(name==='pageSelectionKeys'){const begin=source.indexOf('function pageSelectionKeys('),end=source.indexOf('\nfunction defaultPageKeys(',begin);assert(end>begin);vm.runInContext(source.slice(begin,end),mergeContext);}else vm.runInContext(line,mergeContext);
+}
+const mergeMetrics=[];
+function mergeFixture(n){const games=[],plans=[],entries={};for(let i=0;i<n;i++){const primaryExecutable='G:/Fixture/Game'+String(i).padStart(4,'0')+'/game.exe',gameDirectory='G:/Fixture/Game'+String(i).padStart(4,'0');games.push({primaryExecutable,gameDirectory,directoryName:'Game '+String(i).padStart(4,'0')});plans.push({primaryExecutable,gameDirectory,status:'ready-to-add',appId:1000+i});entries['steam-'+(1000+i)]={key:'steam-'+(1000+i),appId:1000+i,executable:primaryExecutable,staticReady:true,dynamicReady:true};}return {config:{},manualOverrides:{items:{}},resolvedIdentities:{},library:{games},steamPlan:{items:plans},gameMedia:{entries}};}
+run('cached-wallpaper-merge-has-linear-path-work',()=>{
+ mergeContext.snapshot=mergeFixture(400);vm.runInContext('var pathWork=0;var actualPath=normalizedUiPath;normalizedUiPath=(value)=>{++pathWork;return actualPath(value);};',mergeContext);
+ const started=performance.now(),games=mergeContext.mergedGames();mergeMetrics.push({games:400,mediaEntries:400,pathNormalizations:mergeContext.pathWork,elapsedMs:performance.now()-started});
+ assert.equal(games.length,400);assert(games.every(game=>game.gameMedia?.appId===game.steam.appId),'Cached media ownership changed');
+ assert(mergeContext.pathWork<=400*20,'Merging cached wallpapers still scans the game list for every entry');
+});
+run('media-merge-keeps-original-first-match-precedence',()=>{
+ const state=mergeFixture(3);state.steamPlan.items[0].appId=10;state.steamPlan.items[1].appId=20;state.steamPlan.items[2].appId=10;state.gameMedia.entries={conflict:{key:'conflict',appId:10,executable:state.library.games[1].primaryExecutable}};mergeContext.snapshot=state;
+ const games=mergeContext.mergedGames();assert.equal(games[0].gameMedia.key,'conflict');assert.equal(games[1].gameMedia,undefined);assert.equal(games[2].gameMedia,undefined);
+});
+run('media-merge-normalizes-exact-executable-and-last-record-wins',()=>{
+ const state=mergeFixture(1),exe=state.library.games[0].primaryExecutable.toUpperCase().replaceAll('/','\\');state.gameMedia.entries={first:{key:'first',executable:exe},last:{key:'last',executable:exe}};mergeContext.snapshot=state;assert.equal(mergeContext.mergedGames()[0].gameMedia.key,'last');
+});
+run('unconfirmed-id-never-becomes-a-wallpaper-alias',()=>{
+ const state=mergeFixture(1);state.steamPlan.items[0].status='needs-identity-confirmation';state.steamPlan.items[0].steamVerificationStatus='unconfirmed';state.gameMedia.entries={only:{key:'only',appId:1000}};mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games.length,2);assert.equal(games[0].gameMedia,undefined);assert.equal(games[1].mediaOnly,true);
+});
+run('unmatched-media-records-stay-distinct-and-cleared-id-stays-cleared',()=>{
+ const state=mergeFixture(1);state.manualOverrides.items[mergeContext.normalizedUiPath(state.library.games[0].primaryExecutable)]={idCleared:true};state.gameMedia.entries={a:{key:'a',appId:1000},b:{key:'b',appId:1000}};mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games.length,3);assert.equal(games[0].gameMedia,undefined);assert.equal(games[0].steam.appId,'');
+});
+run('card-selection-does-not-rebuild-or-copy-the-entire-library',()=>{
+ const state=mergeFixture(2);mergeContext.snapshot=state;const game=mergeContext.mergedGames()[0];vm.runInContext('var actualMerged=mergedGames;var selectionMergeReads=0;mergedGames=()=>{++selectionMergeReads;return actualMerged();};',mergeContext);
+ assert.equal(mergeContext.isPageSelected(game),true);assert.equal(mergeContext.selectionMergeReads,0);
+ mergeContext.selectedGameDirectories=new Set();assert.equal(mergeContext.isPageSelected(game),false);mergeContext.selectedGameDirectories.add(mergeContext.keyFor(game));assert.equal(mergeContext.isPageSelected(game),true);
+ mergeContext.activeTab='native-steam';assert.equal(mergeContext.isPageSelected(game),false);mergeContext.activeTab='not-in-steam';mergeContext.selectedGameDirectories=null;
+});
+const legacyLookupMetrics=[];
+const lookupScope=callback=>typeof mergeContext.withLibraryPathLookups==='function'?mergeContext.withLibraryPathLookups(callback):callback();
+run('legacy-path-override-and-identity-lookups-have-linear-batch-work',()=>{
+ const state=mergeFixture(400);state.gameMedia.entries={};state.manualOverrides.items={};state.resolvedIdentities={};
+ for(let i=0;i<400;i++){const exe=state.library.games[i].primaryExecutable;state.manualOverrides.items[exe.toUpperCase().replaceAll('/','\\')+'\\']={name:'Manual '+i};state.resolvedIdentities['legacy-'+i]={executable:exe,formalName:'Resolved '+i};}
+ mergeContext.snapshot=state;mergeContext.pathWork=0;const started=performance.now(),games=mergeContext.mergedGames();legacyLookupMetrics.push({games:400,pathNormalizations:mergeContext.pathWork,elapsedMs:performance.now()-started});
+ assert(games.every((game,i)=>game.override.name==='Manual '+i&&game.resolvedIdentity.formalName==='Resolved '+i));assert(mergeContext.pathWork<=400*30,'Historical path spelling still makes every lookup scan the inventory');
+});
+run('override-index-retains-direct-precedence-and-first-falsy-fallback',()=>{
+ const key='g:\\fixture\\mixed\\game.exe',legacy='G:/Fixture/Mixed/Game.exe/';const items={[legacy]:{name:'legacy-first'},[key]:{name:'direct'}};mergeContext.snapshot={manualOverrides:{items}};
+ assert.equal(lookupScope(()=>mergeContext.manualOverride(key)).name,'direct');delete items[key];assert.equal(lookupScope(()=>mergeContext.manualOverride(key)).name,'legacy-first');items[legacy]=null;items['G:\\FIXTURE\\MIXED\\GAME.EXE']={name:'must-not-win'};assert.equal(lookupScope(()=>mergeContext.manualOverride(key)).name,undefined);
+});
+run('identity-index-retains-alias-order-and-exact-direct-precedence',()=>{
+ const key='g:\\fixture\\mixed\\game.exe';const items={earlier:{executable:key,formalName:'alias-first'},'G:/Fixture/Mixed/Game.exe':{formalName:'stored-later'},[key]:{formalName:'direct'}};mergeContext.snapshot={resolvedIdentities:items};
+ assert.equal(lookupScope(()=>mergeContext.resolvedIdentity(key)).formalName,'direct');delete items[key];assert.equal(lookupScope(()=>mergeContext.resolvedIdentity(key)).formalName,'alias-first');
+});
+run('bucket-index-retains-directory-direct-executable-and-entry-order',()=>{
+ const game={gameDirectory:'G:/Fixture/Mixed',primaryExecutable:'G:/Fixture/Mixed/Game.exe'},dir=mergeContext.normalizedUiPath(game.gameDirectory),exe=mergeContext.normalizedUiPath(game.primaryExecutable);
+ const buckets={'G:/Fixture/Mixed/Game.exe':{bucket:'unclassified'},'G:/FIXTURE/Mixed/':{bucket:'not-in-steam'},[exe]:{bucket:'non-game'},[dir]:{bucket:'unsupported-user-choice'}};mergeContext.snapshot={config:{manualBuckets:buckets}};
+ assert.equal(lookupScope(()=>mergeContext.manualBucket(game)),'auto');delete buckets[dir];assert.equal(lookupScope(()=>mergeContext.manualBucket(game)),'non-game');delete buckets[exe];assert.equal(lookupScope(()=>mergeContext.manualBucket(game)),'unclassified');buckets['G:/Fixture/Mixed/Game.exe'].bucket='';assert.equal(lookupScope(()=>mergeContext.manualBucket(game)),'not-in-steam');
+});
+run('lookup-scope-releases-indexes-on-error-and-next-in-place-update',()=>{
+ const key='g:\\fixture\\mixed\\game.exe',legacy='G:/Fixture/Mixed/Game.exe';const state={manualOverrides:{items:{[legacy]:{name:'old'}}}};mergeContext.snapshot=state;let failed=false;
+ try{lookupScope(()=>{assert.equal(mergeContext.manualOverride(key).name,'old');throw Error('fixture-lookup-failure');});}catch(error){failed=error.message==='fixture-lookup-failure';}
+ state.manualOverrides.items[legacy]={name:'new'};assert(failed);assert.equal(lookupScope(()=>mergeContext.manualOverride(key)).name,'new');
+ const other={manualOverrides:{items:{[legacy]:{name:'nested'}}}};lookupScope(()=>{mergeContext.snapshot=other;assert.equal(lookupScope(()=>mergeContext.manualOverride(key)).name,'nested');mergeContext.snapshot=state;assert.equal(mergeContext.manualOverride(key).name,'new');});
+});
+run('changed-primary-does-not-inherit-old-directory-plan-or-media',()=>{
+ const state=mergeFixture(1),original=state.library.games[0].primaryExecutable;state.library.games[0].primaryExecutable=original.replace('game.exe','Alternate.exe');state.steamPlan.items[0].status='added-to-steam';mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games[0].steam.appId,undefined);assert.equal(games[0].gameMedia,undefined);assert.equal(games[1].mediaOnly,true);
+});
+run('directory-plan-without-an-executable-retains-legacy-display-fallback',()=>{
+ const state=mergeFixture(1);delete state.steamPlan.items[0].primaryExecutable;mergeContext.snapshot=state;assert.equal(mergeContext.mergedGames()[0].steam.appId,1000);
+});
+const report = { legacyLookupMetrics, mergeMetrics, allPassed: reports.every(test => test.passed), caseCount: reports.length, fuzzCombinationCount: 1000, artworkPriorityCombinationCount: 1000, cases: reports, realSteamFilesModified: false };
 const build = path.resolve(root, '../../Build');
 const output = path.resolve(process.argv[2] || path.join(build, 'CustomSteamLibrary/ui-datachain-summary.json'));
-assert(output.startsWith(build + path.sep), 'Report must stay inside workspace Build');
+const evidence = path.resolve(root, '../../../Testing/YMCC/Evidence');
+assert(output.startsWith(build + path.sep) || output.startsWith(evidence + path.sep), 'Report must stay inside workspace Build or the core Evidence directory');
 fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, JSON.stringify(report, null, 2));
 console.log(JSON.stringify(report, null, 2)); if (!report.allPassed) process.exitCode = 1;

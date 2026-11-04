@@ -60,14 +60,34 @@ struct Startup {
     bool authorized()const{std::wstring text;return read(text)&&!command.empty()&&lower(trim(text))==lower(command);}
     bool migrate()const{std::wstring text;if(!read(text))return false;if(trim(text).empty()||!recognized(text)||authorized())return true;return writeText(file,command+L"\r\n");}
     bool set(bool on,bool repairCommand=false)const{
-        std::wstring text;if(command.empty()||!read(text))return false;
-        if(!trim(text).empty()&&!recognized(text)){
+        std::wstring text;if(command.empty()||file.empty())return false;
+        const bool readable=read(text);
+        if(!readable){
+            // Explicit four-mode repair may replace malformed text only after
+            // preserving its raw bytes. Access errors/reparse points still fail.
+            WIN32_FILE_ATTRIBUTE_DATA data{};
+            if(!repairCommand||!GetFileAttributesExW(file.c_str(),GetFileExInfoStandard,&data)||
+                (data.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))||
+                data.nFileSizeHigh||data.nFileSizeLow>1024u*1024u)return false;
+        }
+        if(!readable||(!trim(text).empty()&&!recognized(text))){
             if(!repairCommand)return false;
             static volatile LONG backupSequence=0;
             const auto backup=file.wstring()+L".ymcc-before-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(InterlockedIncrement(&backupSequence));
             if(!CopyFileW(file.c_str(),backup.c_str(),TRUE))return false;
         }
-        const auto expected=on?command+L"\r\n":std::wstring{};
+        if(!on){
+            // Absence is the inverse of creating the advanced logon entry. Do
+            // not leave an empty .earlystart for the shared service to consume.
+            const auto attr=GetFileAttributesW(file.c_str());
+            if(attr==INVALID_FILE_ATTRIBUTES){const auto error=GetLastError();return error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND;}
+            if(attr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))return false;
+            if(!DeleteFileW(file.c_str()))return false;
+            const auto observed=GetFileAttributesW(file.c_str());
+            const auto error=GetLastError();
+            return observed==INVALID_FILE_ATTRIBUTES&&(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND);
+        }
+        const auto expected=command+L"\r\n";
         if(!writeText(file,expected))return false;
         std::wstring observed;return read(observed)&&observed==expected;
     }

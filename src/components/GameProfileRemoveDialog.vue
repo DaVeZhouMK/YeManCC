@@ -15,7 +15,7 @@ onBeforeUnmount(() => window.removeEventListener('ipc:gamepad-back', back));
       <h2 id="profile-remove-title"><AppIcon name="warning" />解除专属游戏模式</h2>
       <p id="profile-remove-description">删除 <strong>{{ gameName }}</strong> 的专属配置？性能、虚拟手柄与陀螺仪将恢复使用公用设置。</p>
       <p v-if="error" class="remove-error" role="alert">{{ error }}</p>
-      <div class="profile-remove-actions"><button ref="cancel" :disabled="busy" data-gp-row="0" data-gp-col="0" @click="emit('cancel')"><b>B</b> 取消</button><button class="confirm" :disabled="busy" data-gp-row="0" data-gp-col="1" @click="emit('confirm')">{{ busy ? '正在解除…' : '确认解除' }}</button></div>
+      <div class="profile-remove-actions"><button ref="cancel" :disabled="busy" data-gp-row="0" data-gp-col="0" @click="emit('cancel')"><span class="controller-key" data-controller-key="B">B</span> 取消</button><button class="confirm" :disabled="busy" data-gp-row="0" data-gp-col="1" @click="emit('confirm')">{{ busy ? '正在解除…' : '确认解除' }}</button></div>
     </section>
   </div></Teleport>
 </template>

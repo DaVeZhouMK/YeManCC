@@ -1,0 +1,141 @@
+#include <Windows.h>
+#include <Xinput.h>
+#include <cfgmgr32.h>
+#include <winrt/Windows.Devices.Sensors.h>
+#include <json.hpp>
+#include <atomic>
+#include <algorithm>
+#include <cmath>
+#include <memory>
+#include <mutex>
+#include <limits>
+#include <string>
+#include <vector>
+#include <iostream>
+#include "input_shortcut_toggle.h"
+#include "input_startup_policy.h"
+using json=nlohmann::json;
+static ULONGLONG fixtureTick=1000;
+static ULONGLONG testNow(){return fixtureTick;}
+#define GetTickCount64 testNow
+static std::vector<json> events;
+static void appendNativeLifecycleLog(const char* event,json data){data["event"]=event;events.push_back(std::move(data));}
+static void appendDomainLog(const char*,const char* event,json data){appendNativeLifecycleLog(event,std::move(data));}
+static std::string W2U(const std::wstring& s){return {s.begin(),s.end()};}
+static std::wstring U2W(const std::string& s){return {s.begin(),s.end()};}
+// PRODUCTION_CONSTANTS
+// PRODUCTION_SINK
+static std::shared_ptr<InputCaptureSensorSink> g_inputCaptureSink;
+static bool g_inputCaptureSensorsSuspended=false;
+enum class PowerLifecycle{Ready,Suspended};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<bool> g_inputReady{true};
+// PRODUCTION_META
+static InputCaptureSensorMeta fixtureMeta;
+static InputCaptureSensorMeta inputCaptureSensorMetaSnapshot(){return fixtureMeta;}
+static int disables=0,enables=0,rebuilds=0;
+static bool fixtureRog=true;
+static bool machineIsRogAllyFamily(){return fixtureRog;}
+static CONFIGRET testLocate(DEVINST* p,DEVINSTID_W,ULONG){*p=1;return CR_SUCCESS;}
+static CONFIGRET testDisable(DEVINST,ULONG){++disables;return CR_SUCCESS;}
+static CONFIGRET testEnable(DEVINST,ULONG){++enables;return CR_SUCCESS;}
+static void testSleep(DWORD ms){fixtureTick+=ms;}
+#define CM_Locate_DevNodeW testLocate
+#define CM_Disable_DevNode testDisable
+#define CM_Enable_DevNode testEnable
+#define Sleep testSleep
+static void inputCaptureStartWinRtSensorsImpl(){++rebuilds;const auto gen=g_inputCaptureSink->activeBindingGeneration.load()+1;g_inputCaptureSink->ResetSamples();g_inputCaptureSink->SetBindingGeneration(gen);}
+static std::string ascii_lower(std::string v);
+// PRODUCTION_JUDGE
+static unsigned checks=0;
+static void check(bool ok,const std::string& name){++checks;if(!ok)throw std::runtime_error(name);}
+static const json* findEvent(const char* name){for(auto it=events.rbegin();it!=events.rend();++it)if((*it)["event"]==name)return &*it;return nullptr;}
+static void reset(const char* family="winrt",UINT32 interval=10,const char* device="\\\\?\\ACPI#BOSC0200#1#{sensor}",bool rog=true){
+ g_gyroJudgeTaskEnabled.store(false);g_gyroJudgeTaskEpoch.fetch_add(1);inputCaptureSensorHighMagKeepaliveStep();
+ fixtureTick=1000;events.clear();disables=enables=rebuilds=0;g_sensorRebindCount=0;fixtureRog=rog;
+ g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;g_inputCaptureSensorsSuspended=false;
+ g_inputCaptureSink=std::make_shared<InputCaptureSensorSink>();g_inputCaptureSink->SetBindingGeneration(1);
+ fixtureMeta={};fixtureMeta.gyroFamily=family;fixtureMeta.gyroDeviceId=device;fixtureMeta.gyroPresent=true;fixtureMeta.gyroIntervalMs=interval;
+ g_inputCaptureSawRealGyro=true;g_gyroJudgeTaskEnabled=true;g_gyroJudgeTaskEpoch.fetch_add(1);
+ inputCaptureSensorHighMagKeepaliveStep();
+}
+static UINT64 sourceTs=1000000000;
+static void feed(unsigned hz,unsigned duration=1000,bool duplicate=false,double magnitude=0){
+ const auto start=fixtureTick;const auto gen=g_inputCaptureSink->activeBindingGeneration.load();
+ for(unsigned i=0;i<hz*duration/1000;++i){fixtureTick=start+UINT64(i+1)*1000/hz;if(!duplicate)sourceTs+=10000000/hz;
+  g_inputCaptureSink->OnRawGyro(magnitude,0,0,sourceTs,fixtureTick,gen);}
+ fixtureTick=start+duration;inputCaptureSensorHighMagKeepaliveStep();
+}
+static void healthy(unsigned hz,UINT32 interval=10,const char* family="winrt",const char* device="\\\\?\\ACPI#BOSC0200#1#{sensor}"){
+ reset(family,interval,device);for(int n=0;n<33;++n)feed(hz);
+ const auto verdict=findEvent("gyro-judge-verdict");
+ check(verdict&&verdict->value("result","")=="success",std::to_string(hz)+"Hz source reaches healthy cadence");
+ check(verdict&&verdict->value("observationOnly",false),"healthy source is observed without repair");
+ check(disables==0&&enables==0&&rebuilds==0,"healthy source never restarts or touches PnP");
+ check(!g_gyroJudgeTaskEnabled,"healthy observation finishes its finite task");
+}
+static void failInitialAndMove(){for(int n=0;n<12;++n)feed(10);feed(10,1000,false,150);feed(10,1000,false,150);}
+static std::string ascii_lower(std::string v){for(auto&c:v)c=static_cast<char>(tolower(static_cast<unsigned char>(c)));return v;}
+struct MotionConfig{bool motionEnabled=true,motionActionEnabled=true,motionTriggerResolved=true,motionTogglePressed=false,motionToggleStatus=false;std::string motionMode="off",motionTrigger;};
+static MotionConfig g_realStickTest;
+// PRODUCTION_TRIGGER
+static bool admitted(const json& motion,bool held=false){g_realStickTest={};g_realStickTest.motionMode=motion.value("motionMode",std::string("off"));g_realStickTest.motionTrigger=motion.value("motionTrigger",json()).is_string()?motion["motionTrigger"].get<std::string>():"";XINPUT_GAMEPAD pad{};if(held)pad.bLeftTrigger=255;return inputCaptureMotionTriggered(pad);}
+static std::string inputHostPersona(){return "steamdeck";}
+static void statusCases(){
+ const XINPUT_GAMEPAD canonicalPad{};const bool motionTriggered=true,motionProcessorReady=true;
+ const ULONGLONG statusTick=fixtureTick,gyroReceiptTick=fixtureTick-5,accelReceiptTick=fixtureTick-10;
+ const UINT64 gyroSequence=500,accelSequence=200,g_gyroFirstFrameTs=123;
+ const float scx=0,scy=0,scz=0;const double mgx=0,mgy=0,mgz=0;
+ const auto sensorMeta=fixtureMeta;const HANDLE g_inputHostProcess=reinterpret_cast<HANDLE>(1);
+ const std::string g_inputHostRunId="memory-host";const int g_inputHostEpoch=1;
+ const bool hostAlive=g_inputHostProcess!=nullptr&&!g_inputHostRunId.empty();
+ g_realStickTest={};g_realStickTest.motionMode="on";
+ // PRODUCTION_STATUS
+ const auto status=findEvent("gyro-status-second");
+ check(status&&!status->value("triggerPressed",true)&&status->value("triggerResolved",false),"diagnostics distinguish a resolved trigger from an actual press");
+ check(status&&status->value("motionTriggered",false)&&status->value("processorReady",false),"diagnostics distinguish trigger admission from processor readiness");
+ check(status&&status->value("gyroReceiptAgeMs",999)==5&&status->value("accelReceiptAgeMs",999)==10,"diagnostics retain independent sensor freshness");
+}
+static void activationCases(){
+ json input={{"revision",1},{"outputTarget",{{"persona","disabled"},{"buttonMappingEnabled",false},{"gyroEnabled",false}}},{"gyroMotion",{{"enabled",false},{"motionMode","off"},{"motionTrigger",nullptr},{"outputMode","disabled"},{"activePreset","fps"},{"gyroMultiplier",2.4}}}};
+ const auto frozen=input;ymcc::InputShortcutRuntime runtime;auto on=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");
+ check(on.ok&&on.enabled&&admitted(on.effective["gyroMotion"]),"first virtual-link enable admits motion without a preset click");
+ check(on.effective["gyroMotion"]["gyroMultiplier"]==2.4,"legacy tuning survives first activation");check(input==frozen,"runtime linkage never writes durable settings");
+ for(const auto mode:{"off","suppress","toggle"}){runtime.clear();input["gyroMotion"]["presets"]["fps"]={{"motionMode",mode},{"motionTrigger","LT"},{"gyroMultiplier",1.7}};auto next=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");auto m=next.effective["gyroMotion"];
+  check(m["gyroMultiplier"]==1.7&&m["motionTrigger"]=="LT","linked activation expands the selected saved preset");
+  check(mode==std::string("suppress")?admitted(m)&&!admitted(m,true):!admitted(m)&&admitted(m,true),"saved trigger semantics survive linked activation");}
+ runtime.clear();input["gyroMotion"].erase("presets");input["gyroMotion"]["motionTrigger"]="LT";auto held=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");check(!admitted(held.effective["gyroMotion"])&&admitted(held.effective["gyroMotion"],true),"legacy held trigger is preserved");
+ runtime.clear();input["gyroMotion"]["virtualPadLink"]=false;auto unlinked=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");check(!unlinked.effective["gyroMotion"]["enabled"].get<bool>(),"link OFF leaves gyro OFF");
+}
+int main(){try{
+#ifdef YMCC_CADENCE_HIGH_RATE_ONLY
+ healthy(500);
+ std::cout<<json{{"status","pass"},{"checks",checks},{"selection","high-rate"}}.dump()<<std::endl;return 0;
+#endif
+#ifdef YMCC_CADENCE_ACTIVATION_ONLY
+ activationCases();
+ std::cout<<json{{"status","pass"},{"checks",checks},{"selection","activation"}}.dump()<<std::endl;return 0;
+#endif
+ healthy(33);healthy(100);healthy(200);healthy(500);healthy(1000);healthy(20,50);healthy(500,10,"sensorapi");
+ healthy(100,10,"winrt","\\\\?\\ACPI#OTHER123#1#{sensor}");healthy(1000,1,"winrt","\\\\?\\ACPI#OTHER123#1#{sensor}");healthy(20,50,"winrt","\\\\?\\ACPI#OTHER123#1#{sensor}");
+ reset("winrt",10,"\\\\?\\ACPI#OTHER123#1#{sensor}");for(int i=0;i<33;++i)feed(33);check(findEvent("gyro-judge-locked")==nullptr&&disables==0,"a generic 100Hz-request source degraded to 33Hz cannot inherit the Bosch healthy floor");
+ reset();for(int i=0;i<18;++i)feed(500,2000);check(findEvent("gyro-judge-locked")!=nullptr&&disables==0,"delayed pump does not misclassify a legitimate high-rate source");
+ reset();for(int i=0;i<8;++i)feed(500,1000,true);check(findEvent("gyro-judge-locked")==nullptr&&g_inputCaptureSink->gyroCadenceSequence==1,"duplicate source timestamps cannot fake healthy cadence");
+ const auto count=g_inputCaptureSink->gyroCadenceSequence;g_inputCaptureSink->OnRawGyro(0,0,0,sourceTs-1,fixtureTick,1);check(g_inputCaptureSink->gyroCadenceSequence==count,"backward timestamps do not increase cadence");
+ g_inputCaptureSink->OnRawGyro(std::numeric_limits<double>::quiet_NaN(),0,0,sourceTs+1,fixtureTick,1);check(g_inputCaptureSink->gyroCadenceSequence==count,"non-finite reports do not increase cadence");
+ g_inputCaptureSink->OnRawGyro(0,0,0,sourceTs+2,fixtureTick,0);check(g_inputCaptureSink->gyroCadenceSequence==count,"old binding callbacks do not increase cadence");
+ reset();failInitialAndMove();check(disables==1&&enables==1&&rebuilds==1,"low Bosch source plus new motion uses one targeted repair");for(int i=0;i<40;++i)feed(33);check(findEvent("gyro-judge-locked")!=nullptr,"repaired source requires actual post-repair cadence");
+ reset("winrt",10,"\\\\?\\ACPI#OTHER123#1#{sensor}");failInitialAndMove();check(disables==0&&enables==0&&rebuilds==1,"other WinRT providers never receive Bosch device-level PnP repair");
+ reset("sensorapi");failInitialAndMove();check(disables==0&&rebuilds==0&&findEvent("gyro-judge-skipped"),"SensorAPI observes rates without invoking an unrelated WinRT repair");
+ reset();feed(500);g_inputCaptureSink->SetBindingGeneration(2);inputCaptureSensorHighMagKeepaliveStep();check(findEvent("gyro-judge-verdict")&&findEvent("gyro-judge-verdict")->value("reason","")=="sensor-binding-changed","binding replacement invalidates old observation");for(int i=0;i<34;++i)feed(500);check(findEvent("gyro-judge-locked")!=nullptr&&disables==0,"new binding is independently observed");
+ reset();g_gyroJudgeTaskEnabled=false;for(int i=0;i<35;++i)feed(500);check(findEvent("gyro-judge-locked")==nullptr&&disables==0,"OFF cancels the observation task");
+ reset();g_powerLifecycle=PowerLifecycle::Suspended;for(int i=0;i<35;++i)feed(500);check(findEvent("gyro-judge-locked")==nullptr&&disables==0,"suspended power cannot complete or repair a source");
+ reset("winrt",10,"\\\\?\\ACPI#BOSC0200#1#{sensor}",false);for(int i=0;i<33;++i)feed(500,1000,false,150);
+ check(findEvent("gyro-judge-skipped")&&findEvent("gyro-judge-skipped")->value("reason","")=="rog-only-policy","GPD/other families explicitly skip the ROG-only task");
+ check(!g_gyroJudgeTaskEnabled&&!findEvent("gyro-judge-observe")&&disables==0&&rebuilds==0,"non-ROG high-rate motion never starts observation or repair");
+ check(g_inputCaptureSink->gyroSequence>10000,"non-ROG raw motion delivery stays live after skipping the workaround");
+ check(!inputCapturePnPReArmSensorDevice()&&disables==0&&enables==0,"non-ROG cannot invoke Bosch PnP even with the same sensor ID");
+ activationCases();statusCases();
+ const auto bootParams=ymcc::startupGyroPresetParams("fps",json{{"fps",{{"motionMode","off"},{"motionTrigger",""}}}});check(!admitted(bootParams)&&admitted(bootParams,true),"cold-start malformed held preset uses the same LT safety fallback");
+ std::cout<<json{{"status","pass"},{"checks",checks},{"deviceIo",false},{"actualNativeConsumers",true}}.dump()<<std::endl;return 0;
+}catch(const std::exception& e){std::cout<<json{{"status","fail"},{"checks",checks},{"failure",e.what()},{"deviceIo",false}}.dump()<<std::endl;return 1;}}

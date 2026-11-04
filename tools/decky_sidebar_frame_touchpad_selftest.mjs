@@ -1,6 +1,83 @@
 // Exact production host, relay, original stores and adapters; memory-only IO.
 import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';
-import {root,task} from './fixtures/decky_task_paths.mjs';import {load,seed,profile,main} from './fixtures/decky_game_memory_store.mjs';import {createMirrorHostFixture} from './fixtures/decky_mirror_host_fixture.mjs';
+import {root,task} from './fixtures/decky_task_paths.mjs';import {load,seed,profile,main,fixture as memoryStoreFixture,functions,gamePolicyKey} from './fixtures/decky_game_memory_store.mjs';
+import {createHash} from 'node:crypto';
+if (process.argv.includes('--queued-save-only')) {
+  // Reuse the complete original memory store and the actual current action.
+  // The two hooks below pause only external settings/atomic-ACK boundaries.
+  const model=load(fs.readFileSync(path.join(root,'src/bridge/frameRateModel.ts'),'utf8'));
+  const identity=load(functions('src/bridge/deckyGameActions.ts',['gameMirrorIdentity']),{}, {gamePolicyKey}).gameMirrorIdentity;
+  const {createFrameMirrorActions}=load(fs.readFileSync(path.join(root,'src/bridge/deckyFrameActions.ts'),'utf8'),{'./frameRateModel':model,'./deckyGameActions':{gameMirrorIdentity:identity}});
+  const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
+  const selected=[];
+  for(const kind of ['different-game','aba-lease','pending-only','same-live-target','committed-then-revoked']) {
+    const state={game:{name:'game.exe',path:'C:\\Games\\game.exe',pid:10,processCreated:'100',identityGeneration:1},allowed:true};
+    let armed=false,powerReads=0,applies=0,released=0,running,timer,observed;
+    const entered=deferred(),gate=deferred(),initial=seed();
+    const pair=()=>model.frameRatePair({ac:{fps:120,ceiling:120,lastFps:120},dc:{fps:60,ceiling:60,lastFps:60}});
+    initial.rtss['game.exe']=model.dedicatedFrameRateRecord(pair());
+    const memory=memoryStoreFixture(initial,{
+      generation:()=>1,game:()=>state.game,
+      loadSettings:async()=>{if(armed){armed=false;entered.resolve();await gate.promise;}},
+      afterWrite:async target=>{if(kind==='committed-then-revoked'&&target===main){entered.resolve();await gate.promise;}},
+    });
+    const checks=[];
+    const verify=(label,condition)=>{checks.push({label,passed:condition});assert(condition,label);};
+    try {
+      await memory.store.loadGameCustomConfig();
+      const before=structuredClone(memory.raw()),beforeWrites=memory.stats().fakeWrites;
+      const action=createFrameMirrorActions({
+        allowed:()=>state.allowed,game:()=>state.game,side:()=> 'ac',
+        power:async()=>{if(++powerReads===2&&kind!=='same-live-target'&&kind!=='committed-then-revoked')armed=true;return {generation:9,phase:'ready',hardwareWritesAllowed:true};},
+        acquire:()=>()=>{released++;},
+        read:async()=>({pair:pair(),global:model.frameRatePair({}),config:await memory.store.loadGameCustomConfig(),schedule:{enabled:true},game:state.game,dedicated:true,source:'actual-store-source'}),
+        key:gamePolicyKey,label:()=> 'Game',gyro:async()=>{throw Error('FPS-only action cannot use gyro');},
+        save:memory.store.saveGameCustomConfig,saveGlobal:async()=>{throw Error('Dedicated action cannot create global config');},
+        apply:async current=>{if(!current())return false;applies++;return true;},
+      });
+      const context={generation:9,gameIdentity:identity(state.game),controlAdmission:{frames:'actual-store-source'},checkpoint:()=>{}};
+      running=action.execute({field:'acFps',value:'90'},context).then(value=>({ok:true,value}),error=>({ok:false,error:String(error)}));
+      if(kind!=='same-live-target') {
+        try{await Promise.race([entered.promise,running.then(()=>{throw Error('QUEUED_SAVE_BOUNDARY_NOT_REACHED');}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('QUEUED_SAVE_BOUNDARY_NOT_REACHED')),1200);})]);}finally{clearTimeout(timer);}
+        if(kind==='different-game')state.game={name:'other.exe',path:'C:\\Games\\other.exe',pid:20,processCreated:'200',identityGeneration:2};
+        else if(kind==='aba-lease')state.game={...state.game,identityGeneration:3};
+        else state.allowed=false;
+        gate.resolve();
+      }
+      const outcome=await running,unchanged=JSON.stringify(before)===JSON.stringify(memory.raw());
+      observed={outcome,unchanged,beforeWrites,afterWrites:memory.stats().fakeWrites,applies,released,raw:memory.raw(),pendingDeadlineTimers:memory.stats().pendingDeadlineTimers};
+      if(kind==='same-live-target') {
+        verify('stable save succeeds and confirms application',outcome.ok===true&&outcome.value.saved===true&&outcome.value.applied===true);
+        verify('stable dedicated cap committed',memory.raw().rtss['game.exe'].acFps===90);
+        verify('stable applies once',applies===1);
+      } else if(kind==='committed-then-revoked') {
+        verify('accepted atomic data stays committed',memory.raw().rtss['game.exe'].acFps===90);
+        verify('accepted atomic data publishes in original store cache',memory.store.getGameCustomConfig().rtss['game.exe']?.acFps===90);
+        verify('committed revoked request reports saved and pending',outcome.ok===true&&outcome.value.saved===true&&outcome.value.pending===true&&outcome.value.applied===false);
+        verify('revoked request does not apply',applies===0);
+      } else {
+        verify('queued revoked save rejects for actual target cancellation',outcome.ok===false&&outcome.error.includes('FRAME_MIRROR_TARGET_CHANGED'));
+        verify('queued revoked save leaves durable data untouched',unchanged);
+        verify('queued revoked save performs no fake write',memory.stats().fakeWrites===beforeWrites);
+        verify('queued revoked save does not apply',applies===0);
+      }
+      verify('original acquisition released exactly once',released===1);
+      verify('original store deadline timers returned',memory.stats().pendingDeadlineTimers===0);
+      selected.push({case:kind,status:'PASS',checks,observed});
+    } catch(error) {
+      selected.push({case:kind,status:'FAIL',checks,observed,error:{name:error.name,message:error.message,stack:error.stack}});
+    } finally {
+      clearTimeout(timer);gate.resolve();if(running)await running;
+    }
+  }
+  const sourceBindings=['src/bridge/deckyFrameActions.ts','src/bridge/performanceSchedule.ts','src/bridge/frameRateModel.ts','src/bridge/deckyGameActions.ts','tools/fixtures/decky_game_memory_store.mjs'].map(file=>({file,sha256:createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')}));
+  const result={suite:'decky_sidebar_frame_touchpad_selftest',selection:'queued-save',option:'--queued-save-only',selected:selected.length,passed:selected.filter(row=>row.status==='PASS').length,failed:selected.filter(row=>row.status==='FAIL').length,cases:selected,sourceBindings,actualCurrentFrameAction:true,actualCompleteOriginalStore:true,fullOriginalSuiteExecuted:false,hostRelayTopologyExecuted:false,identityClosureComplete:false,realConfigWrites:0,hardwareWrites:0};
+  fs.writeFileSync(path.join(task,'validation/FRAME-QUEUED-SAVE.json'),JSON.stringify(result,null,2)+'\n');
+  console.log(JSON.stringify({suite:result.suite,selection:result.selection,passed:result.passed,failed:result.failed}));
+  if(result.failed)process.exitCode=1;
+
+} else {
+const {createMirrorHostFixture}=await import('./fixtures/decky_mirror_host_fixture.mjs');
 const runId='d'.repeat(32),peer={connection:'1',runId},cases=[];let sequence=0;
 const flush=async()=>{for(let i=0;i<200;i++)await Promise.resolve();};const stripLegacyProfile=(value)=>{const copy=JSON.parse(JSON.stringify(value));for(const key of ['acMode','dcMode','corePolicyEnabled','corePolicyMode','hyperThreadPolicyEnabled','hyperThreadPolicy','tdpMax','cpuPreset','coreMode','fpsTarget','cpuTarget','tdpStrategy'])delete copy[key];return copy;};
 async function fixture(initial,options={}){const f=await createMirrorHostFixture({initial,...options});f.ready();f.read=async()=>{f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return f.replies.at(-1).message.snapshot;};f.edit=async(command,field,value,expected)=>{const s=expected??await f.read(),n=++sequence;f.emit('deckySidebar.mirrorRequest',{...peer,request:{command,runId,clientId:'newcontrols',id:'newcontrols:'+n,sequence:n,generation:s.generation,revision:s.revision,identity:command==='frame.setField'?s.game?.identity??'':undefined,args:{field,value}}});await flush();return f.replies.findLast(r=>r.message.id==='newcontrols:'+n)?.message;};return f;}
@@ -112,3 +189,5 @@ await check('a committed FPS edit cannot dispatch an old apply across a new powe
 });
 
 fs.writeFileSync(path.join(task,'validation/MAINLINE23-FRAME-TOUCHPAD.json'),JSON.stringify({cases:cases.length,results:cases,productionHostRelayAdapters:true,originalStore:true,independentFrameModel:true,touchpadsGlobalOnly:true,realConfigWrites:0,hardwareWrites:0},null,2));console.log('Frame/touchpad PASS '+cases.length);
+
+}

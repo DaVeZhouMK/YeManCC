@@ -914,7 +914,36 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "selectedA1EvidenceC07": {
+        "stepId": "HC-CN-005-C07",
+        "resultId": "HC-CN-005-RESULT-015",
+        "evidenceClasses": {
+          "genuineFrozenSetterReceipt": "RESULT-004/C02 and RESULT-006 80-check (includes the prior 69, not 149 unique) lower A1 SetFanControl/SetFanDuty semantics at the fixture-only derived EcWriteByte terminal; not parent Open/Close.",
+          "coldHostNegative": "RESULT-006/C04 exact A1 403 REAL_WRITE_AUTH_REQUIRED and 409 HOST_NOT_OPEN; refusal boundaries only.",
+          "sourceOnlyMappings": "EcWriteByte -> OpenLibSys.EcWriteByte -> WindowsEmbeddedControllerIO; CompatCallbackNoScope/OpenLibHandleOpen owner predicate; historical fcd7 Host stop/disable/close chain; OneXAOKZOE parent Open/Close F1/F2 takeover/release, readback and exception ordering; fixed parent virtual takeover and two source-defined Thread.Sleep(50) waits; fixed flag scope.",
+          "sharedEngineSnapshots": "552be336133f39149ff73ae9adafb55e03e926c34641eae9dfcf8d2c120fe026 (prior journal/control-intent sample) and bb345b923fb7c2d82d9c195b2066c798b23748a81d7706ea879bd4fb18aeadbe (pinned durable-completion sample) are separate source identities; live versions uncertified.",
+          "fixedFlagScope": "hasAppliedSoftwareFanProfile gates only the IDevice base fan-disable branch; it does not suppress OneXAOKZOE parent F1/F2 OEM-key release, readbacks, static waits, openLibSys dispose or DeviceOpen=false, and it is not equivalent to Host activeCurveDuties."
+        },
+        "sourceIdentities": {
+          "frozenA1": "2d9e27c7e47e0cd55940417eb6c511397f7a9d68170d5e0280f1c3389c4e077e",
+          "frozenParentOneXAOKZOE": "da6ff4abe3bdf6d2879f6681921867ef10b62759d4dadc2eb0b18d12d7b39b3b",
+          "frozenIDevice": "fbaed1dfd329e3328376488b8ec70c3a7fdcf97d70dcb37f1525ee33aa169c20",
+          "frozenOpenLibSys": "cbdf9546e559d97aa133b59320dc130c073dee8552bb1de110d2e31032cb3be0",
+          "frozenGamepadMotion": "7ba36f0dcb0e280d526e5b09e95888af58b98927b3c83001858817ec12fb23ed",
+          "fixedA1": "ef8b01d6912c2cc88370ace767bca5ff340dcb83b2a56be78898122acd4f6d75",
+          "fixedParentOneXAOKZOE": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718",
+          "fixedIDevice": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47",
+          "actualRunProgram": "fcd7da7b778f0ecad24666c540fd1addab4a8a67d0f8d7d2f93a40c93cf29a4d"
+        },
+        "notRun": [
+          "positive admitted Host action",
+          "owned-session/generation/stale-callback/stop-return",
+          "parent Open/Close controlled-terminal proof",
+          "physical effect"
+        ],
+        "retainedGap": "No genuine controlled terminal executes A1 parent Open/Close or a positive Return: constructor-native GamepadMotion and kernel-backed OpenLibSys EC transport remain outside the executed scope."
+      }
     },
     {
       "deviceId": "hc.device.AOKZOEA1Pro",
@@ -5154,6 +5183,134 @@
       "runtimeCodeChanged": false,
       "physicalAcceptancePromoted": false,
       "report": "Docs/Tasks/Fan/FAN-920/FAN-1293-C8EX-MSI-HANDBACK-ADOPTION-REVIEW-20261019.md"
+    },
+    {
+      "date": "2026-11-03",
+      "atUtc": "2026-11-02T18:16:58.831578+00:00",
+      "kind": "EXISTING_SOURCE_FAN_RETIREMENT_AND_PARENT_SETTLEMENT_SOFTWARE_REVIEWED_NORMAL_EXPORT",
+      "scope": "Nine source descriptors and actual public bridge/host retirement/ordinary reopen/parent stop software scope; not all70 route/hardware or full fixed-HC binary revalidation",
+      "executionId": "HC-CODEX-042",
+      "currentComponentId": "candidate-source-recovery-20261103-r2",
+      "review": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-FAN-6840e59d0432.json",
+        "sha256": "c26b488be9ac1336f9539b9b30de522afdfe26e0a177b7b04894ce74b792caeb",
+        "bytes": 2667
+      },
+      "actualNormalExport": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-R18-87c1577ad7ec.json",
+        "sha256": "3e14d31f78620b2b90cd0ef62ee6381a2ddf731fc73c52e7f6d3cb27acc0e67d",
+        "bytes": 1450
+      },
+      "consumerEvidence": {
+        "executionId": "HC-CODEX-042",
+        "recordedAtUtc": "2026-11-02T18:16:58.831578+00:00",
+        "status": "ACCEPTED_SOFTWARE_SCOPE_PRESENT_IN_NORMAL_R18_EXPORT",
+        "normalExport": {
+          "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+          "sha256": "87c1577ad7ec436bcf136dbb19a359ef541a0c031e57bc8c6d1f778c84b6ae4c",
+          "bytes": 111370831
+        },
+        "exportReview": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-R18-87c1577ad7ec.json",
+          "sha256": "3e14d31f78620b2b90cd0ef62ee6381a2ddf731fc73c52e7f6d3cb27acc0e67d",
+          "bytes": 1450
+        },
+        "actualArchiveEntriesChecked": 621,
+        "wholeGoalComplete": false,
+        "physicalAcceptance": false,
+        "installationScope": "Publisher terminal reported installed; capability-library owner accepted package/source identity only",
+        "originalFailuresPreserved": true,
+        "countsAreSeparateScopesNotAdditive": true,
+        "evidenceManifest": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-042-CONSUMER-KEYED-CALIBRATION-AND-FAN-RECOVERY\\REFERENCE-MANIFEST-042.json",
+          "sha256": "dbd1cf4357f75b288424d5097b6de63d2190475152d6791f6366adcee867e8fc",
+          "bytes": 89155
+        },
+        "review": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-042-FAN-6840e59d0432.json",
+          "sha256": "c26b488be9ac1336f9539b9b30de522afdfe26e0a177b7b04894ce74b792caeb",
+          "bytes": 2667
+        },
+        "componentId": "candidate-source-recovery-20261103-r2",
+        "identities": {
+          "hostDllSha256": "4aea8d9849810b59acaf6803306010c2d0370d0ad47019890b808fcb69dbc697",
+          "backendDllSha256": "9079348b26e916dbbee865745064cde137aec488379889ad657ffa50485040c7",
+          "apphostSha256": "f1163d7aafacaa376e32d6ab14f10dd1b3c51380ff9be7b392573f9aeba77c0e",
+          "payloadManifestSha256": "ec030c85e2bd00df3b77cd83c85f78ed45a04aef98fff936b77c2db79d003d45",
+          "sourceBundleManifestSha256": "de40793fa39706fec367d097372feb18c3bd524a05a80220b83e348f546bba15"
+        },
+        "sourceDescriptorCount": 9,
+        "registrationAuthority": "Existing FanCapabilityCatalog partial facade; existing source selection/consumer/engine/session and transports",
+        "consumerEntry": [
+          "FanLab/real-host/PinnedSourceFanConsumer.cs",
+          "FanLab/real-host/PinnedSourceFanEngine.cs",
+          "src/bridge/fanHost.ts"
+        ],
+        "softwareEvidence": {
+          "bridgeOriginalCases": 45,
+          "sourceRetirementBoundaries": 27,
+          "bridgeSemanticNegativesCaught": 7,
+          "hostSourceOnlyChecks": 1954,
+          "hostSemanticNegativesCaughtInThisTask": 2,
+          "contractUnitTests": 15,
+          "metadataVariants": 2,
+          "metadataModules": 4,
+          "pdbDocumentRows": 98
+        },
+        "ordinaryFaultRecovery": "Same-source generation safe return and exact terminalClosed precede actual native admission and Open/OpenEvents/Acquire/Enable; process/session/epoch/source identities are checked across awaits.",
+        "parentStopSettlement": "Consume the already completed matching retirement cycle without reopening its time budget.",
+        "unknownModeOrFailedRetirement": "Do not retake foreign or unknown mode; retain unresolved source owner/generation and restoration obligations.",
+        "oldFieldModeAndChangingActor": "UNKNOWN",
+        "frozenRuntimeReplaced": false,
+        "oldRuntimeFactoryConstructedForSource": false,
+        "defaultWriteAuthorizationUnchanged": true,
+        "newReaderWriterOrProviderAddedByThisDocumentationSync": false
+      },
+      "routeContractChanged": false,
+      "runtimeCodeChangedByThisDocumentationAmendment": false,
+      "registeredRouteCountsChanged": false,
+      "physicalAcceptancePromoted": false,
+      "originalFailuresAndHistoricalContractsPreserved": true
+    },
+    {
+      "date": "2026-11-03",
+      "atUtc": "2026-11-02T19:59:25.822248+00:00",
+      "kind": "ACTUAL_NORMAL_R19_SOURCE_FAN_PAYLOAD_CARRYOVER_IDENTITY",
+      "scope": "Existing reviewed9source fan descriptors and4current source-recovery payload files; normalR19 package identity only",
+      "normalExport": {
+        "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+        "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+        "bytes": 111371083
+      },
+      "review": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+        "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+        "bytes": 2110
+      },
+      "routeContractChanged": false,
+      "runtimeCodeChangedByThisDocumentationAmendment": false,
+      "physicalAcceptancePromoted": false
     }
-  ]
+  ],
+  "latestObservedSourceFanExport": {
+    "executionId": "HC-CODEX-045",
+    "atUtc": "2026-11-02T19:59:25.822248+00:00",
+    "scope": "Existing reviewed9source fan descriptors and4current source-recovery payload files; normalR19 package identity only",
+    "normalExport": {
+      "path": "G:\\YeManCC-Work\\Mainline\\Release\\Packages\\YeManCC.zip",
+      "sha256": "f4fc274b3a67c52d3b64810abb021f3897d0f507860cb7ecf824ca2a521e7ae0",
+      "bytes": 111371083
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-045-R19-COMPONENTS-f4fc274b3a67.json",
+      "sha256": "9435c060815be5d503a555a1a56cf074fda3d3ba333e4855eb1468926535af94",
+      "bytes": 2110
+    },
+    "softwareProofOrigin": "HC-CODEX-042; unchanged relevant source and selected Fan payload only",
+    "fanComponentId": "candidate-source-recovery-20261103-r2",
+    "payloadSha256": "ec030c85e2bd00df3b77cd83c85f78ed45a04aef98fff936b77c2db79d003d45",
+    "noNewFanFixtureRunOrWhole70RouteHardwareAcceptance": true,
+    "physicalAcceptance": false,
+    "wholeGoalComplete": false
+  }
 }

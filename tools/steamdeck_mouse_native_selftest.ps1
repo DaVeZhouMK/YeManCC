@@ -1,10 +1,14 @@
-param([string]$OutputDirectory='G:\YeManCC-Work\_scratch\steamdeck-mouse-20261005\native-selftest')
+param([string]$OutputDirectory='G:\YeManCC-Work\_scratch\steamdeck-mouse-20261005\native-selftest', [string]$CompilerEnvironment='C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat', [switch]$ReceiptStormOnly)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot
 $main=[IO.File]::ReadAllText((Join-Path $root 'native\main.cpp'))
 $start=$main.IndexOf('// SteamDeck desktop right-stick sensitivity.')
 $end=$main.IndexOf('#include "steam_settings_runtime.h"',$start)
 if($start -lt 0 -or $end -lt $start){throw 'Production SteamDeck mouse runtime block not found'}
+$storm=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixtures\steamdeck-mouse\receipt_storm.inc'))
+if($ReceiptStormOnly){
+ $fixture=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixtures\steamdeck-mouse\receipt_harness.cpp')).Replace('//__PRODUCTION_RUNTIME__',$main.Substring($start,$end-$start)).Replace('//__RECEIPT_STORM__',$storm)
+}else{
 $fixture=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'steamdeck_mouse_native_fixture.cpp')).Replace('//__PRODUCTION_RUNTIME__',$main.Substring($start,$end-$start).Replace('static json steamDeckMouseSet(', 'static json fixtureMouseEnqueue('))
 $overlayStart=$main.IndexOf('static std::atomic<bool> g_sofQueued{false};')
 $overlayEnd=$main.IndexOf('// SteamDeck desktop right-stick sensitivity.',$overlayStart)
@@ -23,13 +27,16 @@ $observerStart=$main.IndexOf('static void steamSettingsObserverStart() {')
 $observerEnd=$main.IndexOf('static bool sofApplyValueToConfigText(const std::string& in, int target, std::string* out) {',$observerStart)
 $fixture=$fixture.Replace('//__PRODUCTION_OBSERVER__',$main.Substring($observerStart,$observerEnd-$observerStart))
 
+ $fixture=$fixture.Replace('//__RECEIPT_STORM__',$storm)
+}
+
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $source=Join-Path $OutputDirectory 'native-selftest.cpp'
 [IO.File]::WriteAllText($source,$fixture,[Text.UTF8Encoding]::new($false))
 $bat=Join-Path $OutputDirectory 'compile.bat'
 @"
 @echo off
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "$CompilerEnvironment" >nul
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /I"$root\deps\json" /I"$root\native" "$source" /Fo"$OutputDirectory\native-selftest.obj" /Fe"$OutputDirectory\native-selftest.exe"
 if errorlevel 1 exit /b 1

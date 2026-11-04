@@ -3,6 +3,7 @@ import {buildControllerConfigurationArtifacts} from './lib/hc_controller_configu
 import {buildControllerFeedbackArtifacts} from './lib/hc_controller_feedback_catalog.mjs';
 import {buildControllerMotionArtifacts} from './lib/hc_controller_motion_catalog.mjs';
 import {buildPerformanceMetadata} from './lib/hc_performance_metadata.mjs';
+import {buildTdpArtifacts} from './lib/tdp_capability_catalog.mjs';
 import {buildControllerArtifacts} from './lib/hc_controller_catalog.mjs';
 import {controllerInventoryErrors} from './lib/hc_controller_inventory.mjs';
 import {buildMotionArtifacts} from './lib/hc_motion_catalog.mjs';
@@ -17,8 +18,9 @@ import {spawnSync} from 'node:child_process';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const json=f=>JSON.parse(fs.readFileSync(f,'utf8').replace(/^\uFEFF/,''));
-const args=process.argv.slice(2);let check=false,out=null,generatedRoot=repo;
-for(let i=0;i<args.length;i++){if(args[i]==='--check')check=true;else if(args[i]==='--out'&&args[i+1])out=path.resolve(args[++i]);else if(args[i]==='--generated-root'&&args[i+1])generatedRoot=path.resolve(args[++i]);else throw Error('Usage: [--check] [--out scratch-directory] [--generated-root output-root]');}
+const args=process.argv.slice(2);let check=false,out=null,generatedRoot=repo,lightingOnly=false,performanceOnly=false;
+for(let i=0;i<args.length;i++){if(args[i]==='--performance-only')performanceOnly=true;else if(args[i]==='--lighting-only')lightingOnly=true;else if(args[i]==='--check')check=true;else if(args[i]==='--out'&&args[i+1])out=path.resolve(args[++i]);else if(args[i]==='--generated-root'&&args[i+1])generatedRoot=path.resolve(args[++i]);else throw Error('Usage: [--check] [--lighting-only|--performance-only] [--out scratch-directory] [--generated-root output-root]');}
+if(lightingOnly&&performanceOnly)throw Error('SCOPED_GENERATION_MODES_CONFLICT');
 const scratch=out??fs.mkdtempSync(path.join(os.tmpdir(),'ymcc-hc-catalog-'));fs.mkdirSync(scratch,{recursive:true});
 const baseDir=path.join(repo,'deps/handheldcompanion-runtime'),base=json(path.join(baseDir,'HC-BASELINE.json'));
 const sourceIndex=fs.readFileSync(path.join(baseDir,base.sourceFilesIndex));
@@ -84,16 +86,77 @@ const mask=(values,names)=>values.reduce((bits,name)=>bits+2**names.indexOf(name
 const nativeAliases=devices.flatMap((d,i)=>d.aliases.map(alias=>({alias,index:i}))).sort((a,b)=>a.alias<b.alias?-1:a.alias>b.alias?1:0);
 const nativeCatalog=['// Generated from the same frozen HC identity and declaration catalog as C#.','#pragma once','#include <array>','#include <cstddef>','#include <cstdint>','#include <string_view>','namespace ymcc::capabilities {','struct Device {std::string_view deviceId, factoryType, consumerClass; bool factoryInstantiable; std::uint64_t declaredMinimum, declaredPossible;};','struct Alias {std::string_view name; std::size_t device;};','inline constexpr std::array<Device, '+devices.length+'> devices = {{',...devices.map(d=>'    {'+[q(d.deviceId),q(d.runtimeType??d.sourceType),q(d.consumerClass),String(d.factoryInstantiable),mask(d.declared.Capabilities.minimum,capabilities)+'ULL',mask(d.declared.Capabilities.possible,capabilities)+'ULL'].join(', ')+'},'),' }};','inline constexpr std::array<Alias, '+nativeAliases.length+'> aliases = {{',...nativeAliases.map(a=>'    {'+q(a.alias)+', '+a.index+'},'),' }};','inline const Device* find(std::string_view name) noexcept {','    std::size_t lo=0,hi=aliases.size();','    while(lo<hi){const auto mid=lo+(hi-lo)/2;if(aliases[mid].name<name)lo=mid+1;else hi=mid;}','    return lo<aliases.size()&&aliases[lo].name==name?&devices[aliases[lo].device]:nullptr;','}','inline std::string_view deviceId(std::string_view name) noexcept {const auto* d=find(name);return d?d->deviceId:std::string_view{};}','} // namespace ymcc::capabilities',''].join('\n');
 const mainPath=path.join(repo,'native/main.cpp'),mainBefore=fs.readFileSync(mainPath,'utf8');
+if(performanceOnly){
+ const rootFile=path.join(repo,'capabilities/hc-device-catalog.json'),current=json(rootFile);
+ if(JSON.stringify(current.devices)!==JSON.stringify(catalog.devices)||current.sourceFilesIndexSha256!==catalog.sourceFilesIndexSha256)
+  throw Error('FROZEN_IDENTITY_ROOT_CHANGED');
+ const file='capabilities/hc-performance-metadata.json',text=JSON.stringify(buildPerformanceMetadata({catalog:{...catalog,domains:current.domains},inventory}),null,2)+'\n';
+ const target=path.join(generatedRoot,file),before=fs.existsSync(target)?fs.readFileSync(target,'utf8'):null;
+ if(check){if(before!==text)throw Error('STALE_HC_PERFORMANCE_METADATA');}
+ else{fs.mkdirSync(path.dirname(target),{recursive:true});if(before!==null&&fs.readFileSync(target,'utf8')!==before)throw Error('CONCURRENT_PERFORMANCE_METADATA_CHANGE');if(before!==text)fs.writeFileSync(target,text);}
+ const proof=buildArtifactManifest({[file]:text});proof.scope='performance-metadata-only';
+ fs.writeFileSync(path.join(scratch,MANIFEST_FILE),JSON.stringify(proof,null,2)+'\n');
+ console.log(JSON.stringify({status:check?'CURRENT_PERFORMANCE_METADATA':'GENERATED_PERFORMANCE_METADATA',frozenRootClasses:catalog.devices.length,pinnedUpstreamClasses:102,runtimeConsumersAdded:0,tdpDomainRebuilt:false,hardwareIo:false,assemblyLoaded:false}));
+ process.exit(0);
+}
 const lighting=buildLightingArtifacts({repo,catalog,policy:json(path.join(repo,'capabilities/hc-lighting-policy.json')),main:mainBefore});
+// Scoped generation still authenticates/extracts the original frozen inventory.
+// It changes only the lighting domain and its original generated consumers.
+// Other domains (including the independently owned TDP domain) are never rebuilt.
+if(lightingOnly){
+ const rootFile=path.join(repo,'capabilities/hc-device-catalog.json');
+ const readCurrent=()=>{const bytes=fs.readFileSync(rootFile,'utf8'),value=JSON.parse(bytes.replace(/^\uFEFF/,''));
+  for(const key of ['sourceBaseline','runtimeAliasSource','scope','devices'])if(JSON.stringify(value[key])!==JSON.stringify(catalog[key]))throw Error('LIGHTING_SCOPE_FROZEN_ROOT_CHANGED: '+key);
+  return {bytes,value};};
+ const initial=readCurrent();
+ const updated={...initial.value,domains:{...initial.value.domains,lighting:lighting.metadata}};
+ const selected={...lighting.artifacts,'capabilities/hc-device-catalog.json':JSON.stringify(updated,null,2)+'\n'};
+ const signatures=['static const std::vector<std::string>& ymccDeviceClassLightingSet()',
+  'static const std::vector<std::string>& ymccDeviceClassSecondColorSet()',
+  'static std::vector<std::string> ymccDeviceClassLedEffects(const std::string& deviceClass)'];
+ const take=(text,signature)=>{const a=text.indexOf(signature),b=text.indexOf('\n}',a);if(a<0||b<0)throw Error('LIGHTING_SCOPE_FUNCTION_MISSING');return {a,b:b+2,text:text.slice(a,b+2)};};
+ for(const [file,text] of Object.entries(selected)){
+  const target=path.join(generatedRoot,file);
+  if(check){
+   if(!fs.existsSync(target))throw Error('STALE_HC_CAPABILITY_CATALOG: '+file);
+   const actual=fs.readFileSync(target,'utf8');
+   if(file==='native/main.cpp'){
+    for(const signature of signatures)if(take(actual,signature).text.replace(/\r\n/g,'\n')!==take(text,signature).text.replace(/\r\n/g,'\n'))throw Error('STALE_HC_CAPABILITY_CATALOG: '+file+':'+signature);
+   }else if(file==='capabilities/hc-device-catalog.json'){
+    if(JSON.stringify(JSON.parse(actual.replace(/^\uFEFF/,'')).domains.lighting)!==JSON.stringify(lighting.metadata))throw Error('STALE_HC_CAPABILITY_CATALOG: '+file+':lighting');
+   }else if(actual!==text)throw Error('STALE_HC_CAPABILITY_CATALOG: '+file);
+  }else{
+   fs.mkdirSync(path.dirname(target),{recursive:true});let output=text;
+   if(generatedRoot===repo&&file==='native/main.cpp'){
+    const fresh=fs.readFileSync(target,'utf8');output=fresh;
+    for(const signature of signatures){
+     const before=take(mainBefore,signature).text,after=take(text,signature).text,current=take(output,signature);
+     if(current.text!==before&&current.text!==after)throw Error('CONCURRENT_LIGHTING_NATIVE_FUNCTION_CHANGE');
+     output=output.slice(0,current.a)+after+output.slice(current.b);
+    }
+    if(fs.readFileSync(target,'utf8')!==fresh)throw Error('CONCURRENT_NATIVE_SOURCE_CHANGE');
+   }else if(generatedRoot===repo&&file==='capabilities/hc-device-catalog.json'){
+    const fresh=readCurrent();output=JSON.stringify({...fresh.value,domains:{...fresh.value.domains,lighting:lighting.metadata}},null,2)+'\n';
+    if(fs.readFileSync(target,'utf8')!==fresh.bytes)throw Error('CONCURRENT_CAPABILITY_DOMAIN_CHANGE');
+   }
+   if(!fs.existsSync(target)||fs.readFileSync(target,'utf8')!==output)fs.writeFileSync(target,output);
+  }
+ }
+ const proof=buildArtifactManifest(selected);proof.scope='lighting-only';
+ fs.writeFileSync(path.join(scratch,MANIFEST_FILE),JSON.stringify(proof,null,2)+'\n');
+ console.log(JSON.stringify({status:check?'CURRENT_LIGHTING':'GENERATED_LIGHTING',scope:'lighting-only',frozenRootClasses:catalog.devices.length,frozenLightingRows:lighting.metadata.rows.length,reviewedExtensions:lighting.metadata.extensionRows.length,hardwareIo:false,assemblyLoaded:false}));
+ process.exit(0);
+}
 const battery=buildBatteryArtifacts({repo,catalog});
 const motion=buildMotionArtifacts({repo,catalog});
 const controller=buildControllerArtifacts({repo,catalog});
 const controllerConfiguration=buildControllerConfigurationArtifacts({repo,catalog});
 const controllerMotion=buildControllerMotionArtifacts({repo,catalog});
 const controllerFeedback=buildControllerFeedbackArtifacts({repo,catalog});
+const tdp=buildTdpArtifacts({catalog,policy:json(path.join(repo,'capabilities/uxtu-tdp-policy.json')),helper:fs.readFileSync(path.join(repo,'PowerControl/pawnio/YeManTdpCtl.py'),'utf8')});
+catalog.domains={lighting:lighting.metadata,battery:battery.metadata,motion:motion.metadata,controller:controller.metadata,controllerConfiguration:controllerConfiguration.metadata,controllerMotion:controllerMotion.metadata,controllerFeedback:controllerFeedback.metadata,tdp:tdp.metadata};
 const performanceMetadata=buildPerformanceMetadata({catalog,inventory});
-catalog.domains={lighting:lighting.metadata,battery:battery.metadata,motion:motion.metadata,controller:controller.metadata,controllerConfiguration:controllerConfiguration.metadata,controllerMotion:controllerMotion.metadata,controllerFeedback:controllerFeedback.metadata};
-const artifacts={'capabilities/hc-performance-metadata.json':JSON.stringify(performanceMetadata,null,2)+'\n','capabilities/hc-device-catalog.json':JSON.stringify(catalog,null,2)+'\n','capabilities/HcDeviceCapabilityCatalog.generated.cs':cs,'capabilities/hc-device-catalog.generated.h':nativeCatalog,...lighting.artifacts,...battery.artifacts,...motion.artifacts,...controller.artifacts,...controllerConfiguration.artifacts,...controllerMotion.artifacts,...controllerFeedback.artifacts};
+const artifacts={...tdp.artifacts,'capabilities/hc-performance-metadata.json':JSON.stringify(performanceMetadata,null,2)+'\n','capabilities/hc-device-catalog.json':JSON.stringify(catalog,null,2)+'\n','capabilities/HcDeviceCapabilityCatalog.generated.cs':cs,'capabilities/hc-device-catalog.generated.h':nativeCatalog,...lighting.artifacts,...battery.artifacts,...motion.artifacts,...controller.artifacts,...controllerConfiguration.artifacts,...controllerMotion.artifacts,...controllerFeedback.artifacts};
 if(!check&&generatedRoot===repo&&fs.readFileSync(mainPath,'utf8')!==mainBefore)throw Error('CONCURRENT_NATIVE_SOURCE_CHANGE');
 for(const [file,text] of Object.entries(artifacts)){const p=path.join(generatedRoot,file);if(check){if(!fs.existsSync(p)||fs.readFileSync(p,'utf8')!==text)throw Error('STALE_HC_CAPABILITY_CATALOG: '+file);}else {fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,text);}}
 fs.writeFileSync(path.join(scratch,MANIFEST_FILE),JSON.stringify(buildArtifactManifest(artifacts),null,2)+'\n');

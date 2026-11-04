@@ -1,6 +1,8 @@
 #pragma once
 #include <windows.h>
 #include <utility>
+#include <cstdint>
+#include <limits>
 
 namespace ymcc::fan_process {
 struct ProcessApi {
@@ -22,6 +24,7 @@ template<class Api = ProcessApi>
 class KeepaliveSelection {
     typename Api::Handle process_{};
     DWORD pid_ = 0;
+    std::uint64_t revision_ = 0;
 public:
     KeepaliveSelection() = default;
     ~KeepaliveSelection() { reset(); }
@@ -30,6 +33,11 @@ public:
     void reset() noexcept {
         if (process_) Api::close(std::exchange(process_, {}));
         pid_ = 0;
+        if (revision_ != (std::numeric_limits<std::uint64_t>::max)()) ++revision_;
+    }
+    // Transport resource binding only. An unavailable/overflowed identity must not be reused.
+    std::uint64_t revision() const noexcept {
+        return process_ && revision_ != (std::numeric_limits<std::uint64_t>::max)() ? revision_ : 0;
     }
     void remember(DWORD pid) noexcept {
         reset();

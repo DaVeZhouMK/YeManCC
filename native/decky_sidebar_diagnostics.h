@@ -20,11 +20,11 @@ inline Json frontendRecord(const Json& args) {
        event!="lossless-action-start"&&event!="lossless-action-timeout"&&event!="lossless-action-finished"&&
        event!="snapshot-demand"&&event!="snapshot-read-start"&&event!="snapshot-read-finished")return Json{};
     Json result={{"event",event}};
-    for(const auto* key:{"elapsedMs","powerMs","powerSourceMs","scheduleMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs"})
+    for(const auto* key:{"elapsedMs","powerMs","powerSourceMs","scheduleMs","performanceMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs"})
         if(args.contains(key)&&args[key].is_number_unsigned())result[key]=(std::min)(args[key].get<unsigned long long>(),3600000ull);
     for(const auto* key:{"readId","demandEpoch"})
         if(args.contains(key)&&args[key].is_number_unsigned())result[key]=(std::min)(args[key].get<unsigned long long>(),9007199254740991ull);
-    for(const auto* key:{"ok","subscribe","discarded","completed","applied","pending"})if(args.contains(key)&&args[key].is_boolean())result[key]=args[key];
+    for(const auto* key:{"ok","ready","subscribe","discarded","completed","applied","pending"})if(args.contains(key)&&args[key].is_boolean())result[key]=args[key];
     if(args.contains("stage")&&args["stage"].is_string()){
         const auto stage=args["stage"].get<std::string>();if(stage=="settled"||stage=="late"||stage=="failed"||stage=="partial")result["stage"]=stage;
     }
@@ -33,7 +33,7 @@ inline Json frontendRecord(const Json& args) {
 inline Json record(const std::string& event,const Json& detail) {
     Json result={{"event",event}};
     if(!detail.is_object())return result;
-    for(const auto* key:{"generation","bindingRequested","scope","recoveryPhase","attempted","uncertain","elapsedMs","stage","ready","enabled","phase","reason","error","pid","revision","bindingRetry","bindingAttempts",
+    for(const auto* key:{"stageBudgetMs","stageRemainingMs","recoveryTrigger","generation","bindingRequested","preparationRequested","admissionRequested","connectionRequested","recoveryEpisode","nextRetryMs","scope","recoveryPhase","attempted","uncertain","elapsedMs","stage","ready","enabled","phase","reason","error","pid","revision","bindingRetry","bindingAttempts",
       "launchStage","launchMode","admissionRetry","admissionAttempts","admissionDetail","admissionElapsedMs","admissionNextRetryMs","admissionRecovery","deadlineMs","bootstrapStage","contextPid","contextCreated","contextGeneration","watching","ok","mutated","active","connected","steamKnown","steamRunning","steamDirectory","resourceDirectory","loaderPath","pluginPath","missingPath",
       "powerControlDirectory","directorySource","configuredOverride","logPath","createdSteamDebugMarker"})
       if(detail.contains(key)&&detail[key].is_primitive())result[key]=detail[key];
@@ -63,7 +63,7 @@ inline Json record(const std::string& event,const Json& detail) {
     if(event=="lossless-action-finished")for(const auto* key:{"completed","applied","pending"})
         if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
     if(event=="mirror-snapshot-request"||event=="snapshot-demand"||event=="snapshot-read-start"||event=="snapshot-read-finished") {
-        for(const auto* key:{"subscribe","readId","demandEpoch","discarded","powerMs","powerSourceMs","scheduleMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs"})
+        for(const auto* key:{"subscribe","readId","demandEpoch","discarded","powerMs","powerSourceMs","scheduleMs","performanceMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs"})
             if(detail.contains(key)&&detail[key].is_primitive())result[key]=detail[key];
     }
     if((event=="bootstrap"||event=="bootstrap-watch")&&detail.contains("sessionCheck")&&detail["sessionCheck"].is_string()){
@@ -71,9 +71,17 @@ inline Json record(const std::string& event,const Json& detail) {
         if(check=="steam-process-or-birth"||check=="steam-user-or-session"||check=="steam-process-exited"||
            check=="steam-windows-session"||check=="steam-account"||check=="steam-root"||check=="steam-registered-pid")result["sessionCheck"]=check;
     }
+    if(event=="connection-recovery"&&detail.value("scope",std::string{})=="global-connection"){
+        if(detail.contains("runtimeReason")&&detail["runtimeReason"].is_string()&&detail["runtimeReason"].get_ref<const std::string&>().size()<=128)result["runtimeReason"]=detail["runtimeReason"];
+        if(detail.contains("steamPid")&&detail["steamPid"].is_number_unsigned()&&detail["steamPid"]<=0xffffffffull)result["steamPid"]=detail["steamPid"];
+        if(detail.contains("steamBirth")&&detail["steamBirth"].is_string()){
+            const auto& birth=detail["steamBirth"].get_ref<const std::string&>();
+            if(!birth.empty()&&birth.size()<=20&&birth.find_first_not_of("0123456789")==std::string::npos)result["steamBirth"]=birth;
+        }
+    }
     if(event=="steam-session-check") {
         result={{"event",event}};
-        for(const auto* key:{"pidPresent","birthPresent","accountPresent","rootPresent"})
+        for(const auto* key:{"pidPresent","birthPresent","accountPresent","rootPresent","uiAccountConfirmed"})
             if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
         for(const auto* key:{"steamPid","error"})
             if(detail.contains(key)&&detail[key].is_number_unsigned()&&detail[key].get<unsigned long long>()<=0xffffffffull)result[key]=detail[key];
@@ -81,9 +89,10 @@ inline Json record(const std::string& event,const Json& detail) {
             const auto& birth=detail["steamBirth"].get_ref<const std::string&>();
             if(!birth.empty()&&birth.size()<=20&&birth.find_first_not_of("0123456789")==std::string::npos)result["steamBirth"]=birth;
         }
+        if(detail.contains("accountSource")&&detail["accountSource"]=="verified-steam-ui")result["accountSource"]="verified-steam-ui";
         if(detail.contains("stage")&&detail["stage"].is_string()){
             const auto& stage=detail["stage"].get_ref<const std::string&>();
-            if(stage=="launch-identity-incomplete"||stage=="binding-identity-incomplete"||stage=="windows-session-query"||stage=="session-changed")result["stage"]=stage;
+            if(stage=="binding-identity-verified"||stage=="launch-identity-incomplete"||stage=="binding-identity-incomplete"||stage=="windows-session-query"||stage=="session-changed")result["stage"]=stage;
         }
     }
     if(event=="wallpaper-inventory"||event=="wallpaper-prepare") {
@@ -93,6 +102,43 @@ inline Json record(const std::string& event,const Json& detail) {
         const auto allow=[&](const char* key,std::initializer_list<const char*> choices){if(!detail.contains(key)||!detail[key].is_string())return;const auto& value=detail[key].get_ref<const std::string&>();for(const auto* choice:choices)if(value==choice){result[key]=value;break;}};
         allow("stage",{"started","finished","superseded","failed"});
         allow("reason",{"ready","waiting-steam-account","shortcut-inventory-unavailable","account-changed","inventory-read-failed","identity-unconfirmed","superseded","network-failed","prepare-failed"});
+    }
+    if(event=="bootstrap-watch" &&
+       ((detail.value("scope",Json{})=="loader-environment"&&detail.value("bootstrapStage",Json{})=="loader-temp-prepared")||
+        (detail.value("scope",Json{})=="loader-exit"&&detail.value("bootstrapStage",Json{})=="loader-exited"))){
+        // Consumer lifecycle facts only. Never export TEMP itself, dialog bodies,
+        // inherited environment blocks, bootstrap credentials or request contents.
+        if(detail.contains("tempPathUnits")&&detail["tempPathUnits"].is_number_unsigned()&&detail["tempPathUnits"].get<unsigned long long>()<=32767ull)result["tempPathUnits"]=detail["tempPathUnits"];
+        if(detail.contains("tempShortRoot")&&detail["tempShortRoot"].is_boolean())result["tempShortRoot"]=detail["tempShortRoot"];
+        if(detail.contains("loaderUptimeMs")&&detail["loaderUptimeMs"].is_number_unsigned())result["loaderUptimeMs"]=(std::min)(detail["loaderUptimeMs"].get<unsigned long long>(),604800000ull);
+        if(detail.contains("crashFailures")&&detail["crashFailures"].is_number_unsigned()&&detail["crashFailures"].get<unsigned long long>()<=5ull)result["crashFailures"]=detail["crashFailures"];
+    }
+    if(event=="managed-lifecycle"){
+        // Framing facts only: no raw frame, payload, pipe handle or credentials.
+        if(detail.contains("cleanupWorkerReadError")&&detail["cleanupWorkerReadError"].is_number_unsigned()&&
+           detail["cleanupWorkerReadError"]<=4294967295ull)result["cleanupWorkerReadError"]=detail["cleanupWorkerReadError"];
+        if(detail.contains("cleanupWorkerReadKind")&&(detail["cleanupWorkerReadKind"]=="ended"||detail["cleanupWorkerReadKind"]=="failed"))
+            result["cleanupWorkerReadKind"]=detail["cleanupWorkerReadKind"];
+        for(const auto* key:{"cleanupWorkerReplyReceived","readbackPending"})
+            if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
+    }
+    if(event=="steam-mode-signal"){
+        // The mode callback already reports both versions. Keep only bounded
+        // numeric release facts so old-document refusal is diagnosable without
+        // recording a raw residue object, endpoint, token or JS source.
+        for(const auto* key:{"observedLoaderVersion","installedLoaderVersion"}){
+            if(!detail.contains(key)||!detail[key].is_string())continue;
+            const auto& value=detail[key].get_ref<const std::string&>();
+            if(value.size()<6||value.size()>32||value.front()!='v')continue;
+            unsigned dots=0,digits=0;bool valid=true;
+            for(size_t at=1;at<value.size();++at){
+                const char ch=value[at];
+                if(ch=='.'){if(!digits||++dots>2){valid=false;break;}digits=0;}
+                else if(ch>='0'&&ch<='9')++digits;
+                else {valid=false;break;}
+            }
+            if(valid&&dots==2&&digits)result[key]=value;
+        }
     }
     if(event=="plugin-build"&&detail.contains("buildId")&&validBuildId(detail["buildId"]))result["buildId"]=detail["buildId"];
     if(event=="prepare"||event=="environment") {
@@ -113,7 +159,7 @@ inline Json record(const std::string& event,const Json& detail) {
     }
     // CSS callbacks already provide these bounded facts, but the generic
     // allowlist previously dropped them, making cleanup look verified by error=0.
-    if(event=="steam-css-use"||event=="steam-css-guard"||event=="steam-mode-signal") {
+    if(event=="steam-css-use"||event=="steam-css-guard"||event=="steam-css-resume"||event=="steam-mode-signal") {
         for(const auto* key:{"policyVersion","steamPid","steamBirth","loaderPid","linked","attempts","verified","handleFallback",
             "remaining","unverified","secondaryCheckPending","minimumHoldPending","secondaryDelayMs","minimumHoldMs","helperExitKnown","helperExitCode","helperResultKnown","helperPhase","helperReason","helperFailureCode","helperHResult","backendReady","configuredMatchesBackend","domConfirmed","minimumWindowConfirmed","backendExitConfirmed","backendProcessCount","editorProtected","editorStateUnknown"})
             if(detail.contains(key)&&detail[key].is_primitive())result[key]=detail[key];

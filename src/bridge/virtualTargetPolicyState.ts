@@ -8,7 +8,13 @@ export function currentVirtualTargetPolicy() {
 }
 export function useVirtualTargetPolicy() {
   const policy = shallowRef(currentVirtualTargetPolicy());
-  const stop = on('gamepad.state', state => { policy.value = readVirtualTargetPolicy(state); });
+  const stop = on('gamepad.state', state => {
+    const next = readVirtualTargetPolicy(state);
+    const previous = policy.value;
+    if (next?.steamDeckSelfOutputBlocked === previous?.steamDeckSelfOutputBlocked &&
+        next?.reason === previous?.reason) return;
+    policy.value = next;
+  });
   onScopeDispose(stop);
   return readonly(policy);
 }

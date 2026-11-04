@@ -113,6 +113,44 @@ struct LoopbackSocket {
         check(progressed,"reading actual receiver bytes restores real sender progress");
     }
 };
+// Explicit bounded current-peer branch; default protocol and write tests stay separate.
+static int peerAdmissionTests(){
+    Broker broker;std::mutex queueMutex;std::vector<Json> queued;
+    const auto accept=[&](const Json& packet){return broker.acceptsRequest(packet.value("connection",std::string{}),packet.value("runId",std::string{}),packet.value("connectionRevision",0ull));};
+    check(!broker.acceptsRequest("1",std::string(32,'a'),1),"inactive transport refuses a purported current request");
+    const Config config{[&](const std::string& connection,const Json& request){
+        const auto current=broker.status();std::lock_guard lock(queueMutex);
+        queued.push_back({{"connection",connection},{"runId",current["runId"]},{"connectionRevision",current["connectionRevision"]},{"request",request}});
+    },{}};
+    check(broker.start(config),"start owned loopback broker");
+    const auto boot=broker.bootstrap();Json oldPacket,newPacket;
+    {
+        LoopbackSocket first(boot);
+        first.sendFrame(Json{{"command","snapshot"},{"runId",boot["runId"]},{"isCurrent",true},{"connectionRevision",999999}}.dump());
+        check(waitUntil([&]{std::lock_guard lock(queueMutex);return queued.size()==1;},1000),"original authenticated A request reaches native callback");
+        {std::lock_guard lock(queueMutex);oldPacket=queued.front();}
+        check(accept(oldPacket),"A is accepted only while its native receipt is current");
+        first.close();check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual A socket close retires the native peer");
+        check(!accept(oldPacket),"queued A cannot dispatch after its actual disconnect");
+        LoopbackSocket second(boot);
+        second.sendFrame(Json{{"command","snapshot"},{"runId",boot["runId"]},{"isCurrent",false},{"connectionRevision",0}}.dump());
+        check(waitUntil([&]{std::lock_guard lock(queueMutex);return queued.size()==2;},1000),"authenticated B request reaches native callback");
+        {std::lock_guard lock(queueMutex);newPacket=queued.back();}
+        check(oldPacket["connection"]!=newPacket["connection"],"new socket receives a distinct native connection");
+        check(accept(newPacket),"native B fact is valid even when client says isCurrent false");
+        check(!accept(oldPacket),"retired A stays refused even when client says isCurrent true");
+        auto forged=newPacket;forged["runId"]=std::string(32,'f');check(!accept(forged),"wrong native run is refused");
+        forged=newPacket;forged["connection"]="999999";check(!accept(forged),"unknown connection is refused");
+        forged=newPacket;forged["connectionRevision"]=newPacket["connectionRevision"].get<unsigned long long>()+1;check(!accept(forged),"unobserved future native serial is refused");
+        forged=newPacket;forged["connectionRevision"]=0;check(!accept(forged),"missing native serial cannot borrow client payload metadata");
+        const auto stable=broker.status();for(unsigned i=0;i<100;++i)check(accept(newPacket),"stable reads retain native B");
+        check(broker.status()==stable,"dispatch checks do not change transport revision or state");
+        second.close();check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual B close is observed");
+        check(!accept(newPacket),"B request cannot dispatch after its socket closes");
+    }
+    broker.stop();check(!accept(newPacket),"OFF/stop cannot be revived by a queued request");check(broker.bootstrap().empty(),"stopped broker exposes no endpoint");
+    std::cout<<Json{{"ok",true},{"mode","peer-admission"},{"checks",checks},{"actualWinsock",true},{"realSteam",false},{"clientCurrentFlagsTrusted",false},{"queuedRequestsReplayed",false},{"brokerStopped",true}}.dump()<<std::endl;return 0;
+}
 static void fillUntilBlocked(Broker& broker,const Json& boot){
     const auto blocked=writeProbe::blocked.load();const auto connection=broker.status()["connection"].get<std::string>();
     const Json message={{"type","write-deadline-test"},{"runId",boot["runId"]},{"payload",std::string(32768,'x')}};
@@ -184,6 +222,7 @@ static int writeDeadlineTests(){
 }
 
 int main(int argc,char** argv){
+    if(argc>1&&std::string(argv[1])=="--peer-admission"){if(argc!=2)return 2;try{return peerAdmissionTests();}catch(const std::exception& error){std::cerr<<"FAIL peer-admission: "<<error.what()<<std::endl;return 1;}}
     if(argc>1&&std::string(argv[1])=="--write-deadline"){try{return writeDeadlineTests();}catch(const std::exception& error){std::cerr<<"FAIL write-deadline: "<<error.what()<<std::endl;return 1;}}
     if(argc<2)return protocolTests();
     const bool relayMode = std::string(argv[1])=="--serve-relay-fixture";
@@ -191,7 +230,7 @@ int main(int argc,char** argv){
     Broker broker;std::atomic<int> snapshots{0},mutations{0};
     std::mutex stdoutMutex;
     auto emit=[&](const Json& value){std::lock_guard lock(stdoutMutex);std::cout<<value.dump()<<std::endl;};
-    if(!broker.start({[&](const std::string& connection,const Json& message){
+    const Config relayConfig{[&](const std::string& connection,const Json& message){
         const auto runId=message["runId"].get<std::string>();
         if(relayMode){
             if(message["command"]=="snapshot")++snapshots;else ++mutations;
@@ -206,13 +245,16 @@ int main(int argc,char** argv){
         }else{++mutations;broker.reply(connection,{{"type","reply"},{"runId",runId},{"id",message.value("id",std::string{})},{"ok",false},{"error","READ_ONLY_IMPLEMENTATION"}});}
     },[&](const std::string& connection,const std::string& runId,bool connected) {
         if(relayMode)emit({{"type","peer"},{"connection",connection},{"runId",runId},{"connected",connected},{"revision",broker.status()["revision"]}});
-    }}))return 3;
+    }};
+    if(!broker.start(relayConfig))return 3;
     const auto firstBootstrap=broker.bootstrap();emit(firstBootstrap);
     std::string line;
     while(std::getline(std::cin,line)) {
         if(line=="stop")break;
-        if(line=="attach"){ auto value=broker.status();value["type"]="attach";emit(value);continue; }
-        if(relayMode){const auto reply=Json::parse(line);broker.reply(reply.value("connection",std::string{}),reply["message"]);}
+        if(line=="attach"){ auto value=broker.status();value["type"]="attach";value["owner"]="YMCC-native";value["pid"]=GetCurrentProcessId();emit(value);continue; }
+        // Fixture-only demand exercises the original Broker lifecycle.
+        if(relayMode&&line=="rotate"){broker.stop();check(broker.start(relayConfig),"fixture broker renewal succeeds");emit(broker.bootstrap());continue;}
+        if(relayMode){const auto reply=Json::parse(line);const bool accepted=broker.reply(reply.value("connection",std::string{}),reply["message"]);if(reply.contains("fixtureReplyProbe"))emit({{"type","deliveryProbe"},{"probe",reply["fixtureReplyProbe"]},{"accepted",accepted}});}
         else break;
     }
     broker.stop();

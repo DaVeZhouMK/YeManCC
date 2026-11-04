@@ -29,11 +29,44 @@ static bool sgRunExeSync(const std::wstring& exe,const std::wstring& args,DWORD 
     DWORD code=STILL_ACTIVE;GetExitCodeProcess(pi.hProcess,&code);CloseHandle(pi.hThread);CloseHandle(pi.hProcess);
     return wait==WAIT_OBJECT_0&&code==0;
 }
+// The data sampler owns this cache in production. This isolated template
+// consumer records admission only; it must not start sensor/provider threads.
+namespace ymcc::monitorrtss {
+static std::wstring registeredDirectory;
+static void registerDirectory(const std::wstring& dir) { registeredDirectory=dir; }
+}
+#ifndef YMCC_RTSS_MAIN_ATOMIC
+// Controlled file port for the real client normalizer. The main image uses its
+// existing path-locked atomic writer; this fixture retains only owned-file IO.
+static bool sgWriteFileAtomic(const std::wstring&path,const std::string&bytes){
+    static std::atomic<unsigned> sequence{0};const auto temporary=path+L".probe-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(++sequence);
+    HANDLE file=CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(file==INVALID_HANDLE_VALUE)return false;
+    DWORD written=0;bool ok=bytes.empty()||WriteFile(file,bytes.data(),static_cast<DWORD>(bytes.size()),&written,nullptr)&&written==bytes.size();if(ok)ok=FlushFileBuffers(file)!=FALSE;if(!CloseHandle(file))ok=false;
+    if(ok&&MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return true;const auto error=GetLastError();DeleteFileW(temporary.c_str());SetLastError(error);return false;
+}
+#endif
 #include "../../native/rtss_client.h"
 static void require(bool ok,const char* label){if(!ok)throw std::runtime_error(label);std::cout<<"PASS "<<label<<"\n";}
 static void write(const fspath::path& p,const std::string& text){std::ofstream f(p,std::ios::binary);f<<text;}
 int wmain(int argc,wchar_t**argv){
  try {
+    if(argc==3&&!std::wcscmp(argv[1],L"--persist-retry")){
+        const fspath::path root=argv[2],privateRoot=exe_dir();
+        require(sameFinalPath(root.wstring(),(privateRoot/L"host").wstring())&&file_exists((privateRoot/L".owned-persist-fixture").wstring()),"retry mutations require exact owned private fixture");
+        const auto config=root/L"Plugins/Client/OverlayEditor.cfg";const auto before=sha256File(config.wstring());json checks=json::array();
+        HANDLE locked=CreateFileW(config.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);require(locked!=INVALID_HANDLE_VALUE,"private config lock");
+        const auto denied=nativeRtssLoadOverlay(root.wstring(),"YeManOBS-W-1.ovl");CloseHandle(locked);
+        checks.push_back({{"name","exclusive root read fault does not LOAD or consume retry"},{"ok",!denied["ok"].get<bool>()&&denied.value("errorCode",std::string{})=="RTSS_CONFIG_READ_FAILED"&&sha256File(config.wstring())==before},{"result",denied}});
+        require(SetFileAttributesW(config.c_str(),FILE_ATTRIBUTE_READONLY)!=FALSE,"owned readonly attribute");
+        const auto readonly=nativeRtssLoadOverlay(root.wstring(),"YeManOBS-W-1.ovl");SetFileAttributesW(config.c_str(),FILE_ATTRIBUTE_NORMAL);
+        checks.push_back({{"name","failed normalization preserves source and returns explicit write fault"},{"ok",!readonly["ok"].get<bool>()&&readonly.value("errorCode",std::string{})=="RTSS_CONFIG_WRITE_FAILED"&&sha256File(config.wstring())==before},{"result",readonly}});
+        const auto recovered=nativeRtssLoadOverlay(root.wstring(),"YeManOBS-W-1.ovl");
+        checks.push_back({{"name","next explicit call in same client recovers without a restart"},{"ok",recovered.value("ok",false)&&recovered.value("configurationConfirmed",false)},{"result",recovered}});
+        const auto backup=config.wstring()+L".ymcc-encoding-original.bak";const auto saved=sha256File(backup);
+        const auto repeated=nativeRtssLoadOverlay(root.wstring(),"YeManOBS-W-1.ovl");
+        checks.push_back({{"name","repeated explicit layout keeps first byte backup and no repeat normalization"},{"ok",repeated.value("ok",false)&&!repeated.value("configurationEncodingNormalized",true)&&saved==before&&sha256File(backup)==saved},{"result",repeated}});
+        bool ok=true;for(const auto&check:checks)ok=ok&&check["ok"].get<bool>();std::cout<<json{{"ok",ok},{"checks",checks},{"scope","same original client, same private x86 host, explicit caller retries only"}}.dump(2)<<"\n";return ok?0:1;
+    }
     // On-machine diagnostics use only window IPC/the actual client, never a
     // mock host, DLL injection, local hook loading, or automatic restarts.
     if(argc == 3 && !std::wcscmp(argv[1], L"--live-status")) {

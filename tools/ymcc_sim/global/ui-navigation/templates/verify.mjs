@@ -10,7 +10,7 @@ import {radialCases} from './radialCases.mjs';
 import {monitorEditorCases} from './monitorEditorCases.mjs';
 import {naturalNavigationCases} from './naturalNavigationCases.mjs';
 import {scrollStabilityCases} from './scrollStabilityCases.mjs';
-import {gyroNavigationCases,gyroFullscreenCases,gyroPowerRecoveryCases,gyroPresetSwitchCases} from './gyroNavigationCases.mjs';
+import {gyroPageNavigationCases,gyroControlCases,gyroFullscreenCases,gyroPowerRecoveryCases,gyroPresetSwitchCases} from './gyroNavigationCases.mjs';
 import {virtualStartProtectionCases} from './virtualStartProtectionCases.mjs';
 import os from 'node:os';import {createHash} from 'node:crypto';import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 const uiGuarded=Boolean(process.env.YMCC_UI_TOOL_HELPER_URL||process.env.YMCC_SIM_GLOBAL_RUN==='1');
@@ -22,9 +22,8 @@ if(uiTools)uiGuard.verifyUiNodeAndCjs(uiTools,req.cache);
 
 const task=import.meta.dirname;
 const uiScope=process.env.YMCC_UI_SCOPE||'all';
-assert.ok(['all','sleep'].includes(uiScope),'Unsupported UI scope');
+assert.ok(['all','sleep','lossless','gyro-control'].includes(uiScope),'Unsupported UI scope');
 const proofInputs=['backgroundPreviewCases.mjs','site/settings-preview/SteamDeck.mp4','controllerPageCases.mjs','fxSoundRecoveryCases.mjs','batterySettingsCases.mjs','steamDesktopMouseCases.mjs','steamDiagnosticsCases.mjs','trainerMenuCases.mjs','radialUtilitiesFixture.ts','radialUtilityCases.mjs','radialInputFixture.ts','radialInputCases.mjs','radialFanCases.mjs','fanStatusCases.mjs','fanStatusAudit-hook.inc.ts','radialTouchCases.mjs','radialGestureCases.mjs','radialCases.mjs','monitorEditorCases.mjs','virtualStartProtectionCases.mjs','performanceCombinedNavigation.mjs','naturalNavigationCases.mjs','scrollStabilityCases.mjs','gyroNavigationCases.mjs','build-result.json','site/index.html','site/product.html','site/product.js','site/product.css','verify.mjs','engineAudit.ts','entry.ts','memoryIpc.ts','scheduleFixture.ts','policyFixture.ts','monitorFixture.ts','sleepPageFixture.ts','sleepRecoveryFixture.ts','Shell.vue','app-shell.css'];
-proofInputs.push(...fs.readdirSync(path.join(task,'site/performance-simulation'),{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>path.relative(task,path.join(e.parentPath||e.path,e.name))));
 proofInputs.push(...fs.readdirSync(path.join(task,'site/gyro-simulation'),{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>path.relative(task,path.join(e.parentPath||e.path,e.name))));
 const hash=file=>createHash('sha256').update(fs.readFileSync(path.join(task,file))).digest('hex');
 const testedInputs=Object.fromEntries(proofInputs.map(file=>[file,hash(file)]));
@@ -156,6 +155,8 @@ async function checkShortcutRetirement(height){
 
 
   let f;
+  if(uiScope==='lossless'){await trainerMenuCases({height,open,command,press,actionCase,state,page,task,scope:'lossless'});return;}
+  if(uiScope==='gyro-control'){await gyroControlCases({height,open,command,press,actionCase,state,shot,page,task});await gyroPageNavigationCases({height,open,command,press,actionCase,state,shot,page,task});return;}
   if(uiScope==='all'){
   await controllerPageCases({height,open,command,press,actionCase,state,page,task});
   await naturalNavigationCases({page,height,open,command,press,actionCase,state,task,recordState:result=>{states.push(result);if(result.issues.length)failures.push({name:result.name,height,issues:result.issues});}});
@@ -163,7 +164,7 @@ async function checkShortcutRetirement(height){
   await gyroPresetSwitchCases({page,height,open,command,press,actionCase,task});
   await gyroFullscreenCases({page,height,open,command,press,actionCase,task});
   await gyroPowerRecoveryCases({page,height,open,command,press,actionCase,task});
-  for(const route of ['/fan','/schedule','/button-mapping','/gyro-motion','/settings','/power','/rtss','/steam','/sleep','/quick','/radial']){const f=await open(route,height);await state(f,route,height);}
+  for(const route of ['/fan','/schedule','/button-mapping','/touch-mouse','/gyro-motion','/settings','/power','/rtss','/steam','/sleep','/quick','/radial']){const f=await open(route,height);await state(f,route,height);}
   await actionCase('Controller inventory advisory is neutral and navigable',height,async()=>{
    const f=await open('/button-mapping',height);
    await f.evaluate(()=>window.__emitNativeEvent('gamepad.state',{driverSetup:8,backendFaultHold:false}));
@@ -242,7 +243,7 @@ async function checkShortcutRetirement(height){
   f=await open('/sleep',height);
   await actionCase('Sleep abnormal recovery retains switch, concise disclosure, and removes long timing note',height,async()=>{
     await press(f,f.locator('[data-settings-section="protection"]'));
-    const powerChange=f.getByRole('switch',{name:'意外唤醒重睡',exact:true});
+    const powerChange=f.getByRole('switch',{name:'供电变动唤醒重睡',exact:true});
     assert.equal(await powerChange.count(),1);
     assert.match(await powerChange.locator('xpath=ancestor::*[contains(@class,"toggle-row")]').locator('.toggle-desc').innerText(),/电源变动/);
     await press(f,powerChange);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnNonUserWake),false);
@@ -255,6 +256,28 @@ async function checkShortcutRetirement(height){
     for(const value of ['休眠','关机','持续异常'])assert.equal(description.includes(value),false);
     await press(f,toggle);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnEntryFailure),false);
     await press(f,toggle);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnEntryFailure),true);
+  });
+  await actionCase('Sleep timeout independently enables guard and preserves the other retry choices',height,async()=>{
+    const timeout=f.getByRole('switch',{name:'睡眠超时',exact:true});
+    const entry=f.getByRole('switch',{name:'入睡失败重试',exact:true});
+    const wake=f.getByRole('switch',{name:'供电变动唤醒重睡',exact:true});
+    const pause=f.getByRole('switch',{name:'睡眠暂停游戏',exact:true});
+    assert.equal(await timeout.getAttribute('aria-checked'),'false');
+    assert.equal(await timeout.locator('xpath=ancestor::*[contains(@class,"toggle-row")]').locator('.toggle-desc').innerText(),'电源键睡眠满240秒仍在运行时重试，唤醒优先');
+    await press(f,pause);await press(f,entry);await press(f,wake);
+    assert.equal(await f.evaluate(()=>window.__sleepFixture.enabled),false);
+    await press(f,timeout);
+    assert.deepEqual(await f.evaluate(()=>({enabled:window.__sleepFixture.enabled,timeout:window.__sleepFixture.retryOnSleepTimeout,entry:window.__sleepFixture.retryOnEntryFailure,pause:window.__sleepFixture.pauseGameOnSleep,wake:window.__sleepFixture.retryOnNonUserWake})),{enabled:true,timeout:true,entry:false,pause:false,wake:false});
+    await press(f,entry);await press(f,pause);await press(f,wake);
+    assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnSleepTimeout),true,'Other partial saves retain the timeout choice');
+    await f.evaluate(()=>window.__sleepRefresh());
+    assert.equal(await timeout.getAttribute('aria-checked'),'true','Reload retains saved timeout');
+    await state(f,'sleep/timeout-only-and-partial-config',height);
+    await press(f,timeout);
+    assert.equal(await f.evaluate(()=>window.__sleepFixture.enabled),true,'Other selected functions keep guard enabled');
+    await press(f,pause);await press(f,entry);await press(f,wake);await press(f,timeout);await press(f,timeout);
+    assert.equal(await f.evaluate(()=>window.__sleepFixture.enabled),false,'Turning off the only active function disables guard');
+    await press(f,pause);await press(f,entry);await press(f,wake);
   });
   await actionCase('Sleep static wake has no immediate scan, refreshes native completion, and preserves power repair',height,async()=>{
     const summary=f.getByRole('status',{name:'静态唤醒屏蔽状态',exact:true});
@@ -460,20 +483,7 @@ async function checkShortcutRetirement(height){
   await press(f,f.locator('[data-settings-section="power"]'));
   await actionCase('Sleep hibernate off requires confirmation; B/actions preserve original state',height,async()=>{await press(f,f.getByRole('switch',{name:'系统休眠开关',exact:true}));assert.equal(await f.locator('.sleep-confirm').count(),1);assert.equal(await f.evaluate(()=>window.__sleepFixture.hibernate),true);await state(f,'sleep/hibernate-confirm',height,'.sleep-confirm');await command(f,'back');assert.equal(await f.locator('.sleep-confirm').count(),0);assert.equal(await f.evaluate(()=>window.__sleepFixture.hibernate),true);});
   if(uiScope==='sleep')return;
-  f=await open('/gyro-motion',height);
-  await actionCase('Gyro unrecognized state retains equal actions and usable settings',height,async()=>{await f.evaluate(async()=>{window.__fixture.profileInput.gyroOverride='off';await window.__profileChanged();});await f.locator('.gyro-power-btn.unknown').waitFor();assert.ok(await f.locator('.gyro-power-btn.unknown').isDisabled());await state(f,'gyro/unrecognized',height);const layout=await f.locator('.gyro-power-row>.gyro-power-btn').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().toJSON()));assert.ok(Math.abs(layout[0].y-layout[1].y)<1&&Math.abs(layout[0].width-layout[1].width)<1);});
-  f=await open('/gyro-motion',height);await press(f,f.getByRole('button',{name:'展开',exact:true}));await state(f,'gyro/advanced',height);await press(f,f.getByRole('button',{name:'赛车',exact:true}));await state(f,'gyro/racing',height);await press(f,f.locator('.seg-btn').filter({hasText:/^Steam$/}));await state(f,'gyro/steam',height);await press(f,f.getByRole('button',{name:'自定义',exact:true}));await state(f,'gyro/custom',height);
-  f=await open('/gyro-motion',height);await press(f,f.getByRole('button',{name:'模拟陀螺仪',exact:true}));await f.locator('.gyro-simulation-window').waitFor();await page.waitForTimeout(130);await state(f,'gyro/simulation',height,'.gyro-simulation-window');
-  await gyroNavigationCases({f,height,command,press,actionCase,task});
-  await actionCase('Gyro simulation dropdown B stays inside; LB/RB page lock',height,async()=>{const trigger=f.locator('.gyro-simulation-window .dd-trigger').first();await press(f,trigger);await f.locator('[role="listbox"]').waitFor();await command(f,'nav-down');await command(f,'back');await f.waitForFunction(()=>!document.querySelector('[role="listbox"]'));assert.equal(await f.locator('.gyro-simulation-window').count(),1);await command(f,'page-next');assert.equal(await f.locator('.gyro-simulation-window').count(),1);assert.ok(await f.locator('.route-view[data-route="/gyro-motion"]').count());});
-  await press(f,f.getByRole('button',{name:'展开',exact:true}));await state(f,'gyro/simulation-advanced',height,'.gyro-simulation-window');await shot('gyro-simulation-'+height);
-  await actionCase('Gyro nested deletion B stays in simulation then B exits',height,async()=>{await press(f,f.locator('[data-gyro-profile-exit]'));await f.locator('.profile-remove-dialog').waitFor();await state(f,'gyro/simulation-delete',height,'.profile-remove-dialog');await command(f,'back');assert.equal(await f.locator('.profile-remove-dialog').count(),0);assert.equal(await f.locator('.gyro-simulation-window').count(),1);await command(f,'back');assert.equal(await f.locator('.gyro-simulation-window').count(),0);assert.equal(await f.locator('.gyro-integrated-page').count(),1);});
-  await actionCase('Native Start outside simulator does not open global debug',height,async()=>{
-   const before=await f.evaluate(()=>window.__startDebugEvents);assert.equal(before,0);await command(f,'debug');assert.equal(await f.evaluate(()=>window.__startDebugEvents),before);
-  });
-  await actionCase('Browser Start outside simulator does not open global debug',height,async()=>{
-   const before=await f.evaluate(()=>window.__startDebugEvents);assert.equal(before,0);await f.evaluate(()=>window.__gamepadAudit.browserStart(false,true,false));assert.equal(await f.evaluate(()=>window.__startDebugEvents),before);
-  });
+  await gyroPageNavigationCases({height,open,command,press,actionCase,state,shot,page,task});
   f=await open('/rtss',height);
   await actionCase('Real route scroll policy restores gyro title below fixed monitor',height,async()=>{await f.evaluate(()=>{const content=document.querySelector('.app-content');content.scrollTop=content.scrollHeight;window.__navigate('/gyro-motion');});await f.locator('.gyro-page-heading').waitFor();await page.waitForTimeout(80);const result=await f.evaluate(()=>{const content=document.querySelector('.app-content'),header=document.querySelector('.gyro-page-heading'),bar=document.querySelector('.topmon-bar');return {scrollTop:content.scrollTop,header:header.getBoundingClientRect().top,bar:bar.getBoundingClientRect().bottom,content:content.getBoundingClientRect().top};});assert.ok(result.scrollTop<1&&result.header>=result.content&&result.header>result.bar,JSON.stringify(result));});
   for(const [route,ids] of [['/settings',['appearance','device','diagnostics','updates']],['/power',[]],['/rtss',[]]]){
@@ -531,9 +541,9 @@ try{
  if(!inputsUnchanged)failures.push({kind:'test-inputs-changed'});
  const buildIdentity=JSON.parse(fs.readFileSync(path.join(task,'build-result.json'),'utf8'));
  const sourceRoot=process.env.YMCC_UI_SOURCE_ROOT;
- const changedSourceInputs=uiScope==='sleep'?Object.entries(buildIdentity.sourceHashes).filter(([file,expected])=>{const absolute=path.isAbsolute(file)?file:path.resolve(sourceRoot,file);return !fs.existsSync(absolute)||createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')!==expected;}).map(([file])=>file):[];
+ const changedSourceInputs=uiScope!=='all'?Object.entries(buildIdentity.sourceHashes).filter(([file,expected])=>{const absolute=path.isAbsolute(file)?file:path.resolve(sourceRoot,file);return !fs.existsSync(absolute)||createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')!==expected;}).map(([file])=>file):[];
  if(changedSourceInputs.length)failures.push({kind:'source-inputs-changed',files:changedSourceInputs});
- const report={scope:uiScope,formalReleaseGate:'NOT_RUN',changedSourceInputs,pass:failures.length===0&&pageErrors.length===0,testedAt:new Date().toISOString(),testedInputs,inputsUnchanged,source:'Current mainline Vue and complete production gamepad engine; only memory IPC and test adapter',physicalController:false,viewportContracts:['1280x720 / YMCC 535x720','1280x800 / YMCC 595x800'],states:states.length,focusStops:states.reduce((n,s)=>n+s.count,0),directions:states.reduce((n,s)=>n+s.directions,0),actionCases:actions.length,failures,pageErrors,actions,shortcutRetirement,results:states};fs.writeFileSync(path.join(task,'navigation-gate.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({pass:report.pass,states:report.states,focusStops:report.focusStops,directions:report.directions,actions:report.actionCases,failures:failures.length}));await browser.close();await uiBrowserServer.close();const uiTerminal=await uiBrowserTerminal;
+ const report={scope:uiScope,fullUiAccepted:uiScope==='all'&&failures.length===0&&pageErrors.length===0,formalReleaseGate:'NOT_RUN',changedSourceInputs,pass:failures.length===0&&pageErrors.length===0,testedAt:new Date().toISOString(),testedInputs,inputsUnchanged,source:'Current mainline Vue and complete production gamepad engine; only memory IPC and test adapter',physicalController:false,viewportContracts:['1280x720 / YMCC 535x720','1280x800 / YMCC 595x800'],states:states.length,focusStops:states.reduce((n,s)=>n+s.count,0),directions:states.reduce((n,s)=>n+s.directions,0),actionCases:actions.length,failures,pageErrors,actions,shortcutRetirement,results:states};fs.writeFileSync(path.join(task,'navigation-gate.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({pass:report.pass,states:report.states,focusStops:report.focusStops,directions:report.directions,actions:report.actionCases,failures:failures.length}));await browser.close();await uiBrowserServer.close();const uiTerminal=await uiBrowserTerminal;
  if(uiTools){
   const owned=uiGuard.checkUiBrowserTerminal(uiTools,uiBrowserProcess,uiTerminal);
   uiGuard.observeUiNodeStage({stage:'verify',requireCache:req.cache,sourceRoot:process.env.YMCC_UI_SOURCE_ROOT,evidenceRoot:task});

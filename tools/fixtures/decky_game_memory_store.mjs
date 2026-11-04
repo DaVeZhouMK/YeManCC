@@ -9,7 +9,16 @@ const root=path.resolve(import.meta.dirname,'../..');
 const require=createRequire(path.join(root,'package.json'));
 const {transformSync}=require('esbuild');
 const ts=require('typescript');
-function load(text,modules={},globals={}){const module={exports:{}};vm.runInNewContext(transformSync(text,{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,console,queueMicrotask,setTimeout:()=>{throw new Error('No timers/hardware retries allowed in store fixture');},...globals,require:name=>{if(name==='./performanceModel'||name==='../../decky-plugin/src/performanceModel')return performanceModelModule;if(name==='./screenTouchpadDefaults')return screenDefaultsModule;if(name==='./controllerPersona')return personaModule;if(name==='./virtualTargetPolicy')return policyModule;if(name==='./virtualTargetPolicyState'&&!Object.hasOwn(modules,name))return {currentVirtualTargetPolicy:()=>null};assert.ok(Object.hasOwn(modules,name),'Unmocked import: '+name);return modules[name];}});return module.exports;}
+// Process-local compilation only. Callers still read source before load().
+// The captured compiler and fixed ts/cjs options stay unchanged. Exact source
+// text keys cannot hit a different fault input. No module, VM, globals, require,
+// business instance or result is cached; every load below executes a fresh VM.
+const compiledTypeScript=new Map();
+function load(text,modules={},globals={}){
+ let code;
+ if(typeof text==='string'&&compiledTypeScript.has(text))code=compiledTypeScript.get(text);
+ else{code=transformSync(text,{loader:'ts',format:'cjs'}).code;if(typeof text==='string')compiledTypeScript.set(text,code);}
+ const module={exports:{}};vm.runInNewContext(code,{module,exports:module.exports,structuredClone,console,queueMicrotask,setTimeout:()=>{throw new Error('No timers/hardware retries allowed in store fixture');},...globals,require:name=>{if(name==='./performanceModel'||name==='../../decky-plugin/src/performanceModel')return performanceModelModule;if(name==='./screenTouchpadDefaults')return screenDefaultsModule;if(name==='./controllerPersona')return personaModule;if(name==='./virtualTargetPolicy')return policyModule;if(name==='./virtualTargetPolicyState'&&!Object.hasOwn(modules,name))return {currentVirtualTargetPolicy:()=>null};assert.ok(Object.hasOwn(modules,name),'Unmocked import: '+name);return modules[name];}});return module.exports;}
 const screenDefaultsModule=load(fs.readFileSync(path.join(root,'src/bridge/screenTouchpadDefaults.ts'),'utf8'));
 const performanceModelModule=load(fs.readFileSync(path.join(root,'decky-plugin/src/performanceModel.ts'),'utf8'));
 const performanceControlsModule=load(fs.readFileSync(path.join(root,'src/bridge/performanceControls.ts'),'utf8'));
@@ -41,17 +50,19 @@ const blockedModule=name=>new Proxy({}, {get:(_,key)=>blocked(name+'.'+String(ke
 function fixture(initial=seed(),ownerContext={}){
   const documents=new Map([[main,JSON.stringify(initial)]]),calls=[];
   let failMain=0,waitMain=null,notifications=0;
+  const generation=ownerContext.generation??(()=>1),deadlineTimers=new Set();
+  const deadlines={TextEncoder,setTimeout:(run,delay)=>{assert.ok([2000,8000].includes(delay),"Only original bounded config I/O deadlines belong to this store fixture");const timer=setTimeout(()=>{deadlineTimers.delete(timer);run();},delay);deadlineTimers.add(timer);return timer;},clearTimeout:timer=>{clearTimeout(timer);deadlineTimers.delete(timer);}};
   const fakeFs={
     exists:async target=>{calls.push(['exists',target]);return documents.has(target);},
     readTextFile:async target=>{calls.push(['read',target]);if(!documents.has(target))throw new Error('Memory document absent');return documents.get(target);},
-    writeTextFileAtomic:async(target,text)=>{calls.push(['write',target]);if(target===main&&failMain>0){failMain--;throw new Error('injected memory-only write failure');}if(target===main&&waitMain){const waiting=waitMain;waitMain=null;await waiting;}documents.set(target,text);},
+    writeTextFileAtomic:async(target,text)=>{calls.push(['write',target]);if(target===main&&failMain>0){failMain--;throw new Error('injected memory-only write failure');}if(target===main&&waitMain){const waiting=waitMain;waitMain=null;await waiting;}documents.set(target,text);if(ownerContext.afterWrite)await ownerContext.afterWrite(target,text);},
   };
   const frameModel=load(fs.readFileSync(path.join(root,'src/bridge/frameRateModel.ts'),'utf8'));
-  const modules={'./powerSource':{powerSourceMode:{value:'ac'}},'./performanceControls':performanceControlsModule,'./gameCorePolicy':blockedModule('gameCorePolicy'),'./frameRateLimits':{...frameModel,ensureGlobalFrameRates:async()=>frameModel.frameRatePair({})},'./api':{fs:fakeFs,powerLifecycle:blockedModule('powerLifecycle')},'./settingsRepository':{mergeSettings,readSettingsSection:blocked('legacy settings read'),replaceSettingsSection:blocked('legacy settings replace'),getSettingsGeneration:ownerContext.generation??blocked('settings generation'),assertSettingsGeneration:ownerContext.generation?(expected=>{if(expected!==ownerContext.generation())throw Error('settings generation changed');}):blocked('settings assert'),saveSettingsSection:blocked('settings save')},'./gamePolicyTarget':ownerContext.game?{getPolicyGame:ownerContext.game,gamePolicyKey}:blockedModule('policyGame'),'./gamedetect':blockedModule('gameDetect'),'./yeman':blockedModule('hardware'),'./cpuProfiles':blockedModule('cpuProfiles'),'./autofloat':blockedModule('autofloat')};
+  const modules={'./settingsSnapshot':{snapshotSettingsData},'./powerSource':{powerSourceMode:{value:'ac'}},'./performanceControls':performanceControlsModule,'./gameCorePolicy':blockedModule('gameCorePolicy'),'./frameRateLimits':{...frameModel,ensureGlobalFrameRates:async()=>frameModel.frameRatePair({})},'./api':{fs:fakeFs,powerLifecycle:blockedModule('powerLifecycle')},'./settingsRepository':{SETTINGS_FILE:main.replace('game-custom.json','yeman-settings.json'),loadSettings:ownerContext.loadSettings?async()=>{await ownerContext.loadSettings();return {};}:async()=>({}),mergeSettings,readSettingsSection:blocked('legacy settings read'),replaceSettingsSection:blocked('legacy settings replace'),getSettingsGeneration:generation,assertSettingsGeneration:expected=>{if(expected!==generation())throw Error('settings generation changed');},saveSettingsSection:blocked('settings save')},'./gamePolicyTarget':ownerContext.game?{getPolicyGame:ownerContext.game,gamePolicyKey}:blockedModule('policyGame'),'./gamedetect':blockedModule('gameDetect'),'./yeman':blockedModule('hardware'),'./cpuProfiles':blockedModule('cpuProfiles'),'./autofloat':blockedModule('autofloat')};
   // Test-only access to the ORIGINAL pure normalizer. No production export/edit.
-  const store=load(storeSource+'\nexport function normalizeGameMemoryView(value){return normalizeGameCustom(value);}',modules);
+  const store=load(storeSource+'\nexport function normalizeGameMemoryView(value){return normalizeGameCustom(value);}',modules,deadlines);
   store.onGameCustomConfigChanged(()=>{notifications++;});
-  return {store,documents,calls,view:()=>store.normalizeGameMemoryView(JSON.parse(documents.get(main))),lock:load(lockSource),raw:()=>JSON.parse(documents.get(main)),failNext:()=>{failMain++;},holdNext:promise=>{waitMain=promise;},stats:()=>({fakeReads:calls.filter(x=>x[0]==='read').length,fakeWrites:calls.filter(x=>x[0]==='write').length,notifications})};
+  return {store,documents,calls,view:()=>store.normalizeGameMemoryView(JSON.parse(documents.get(main))),lock:load(lockSource),raw:()=>JSON.parse(documents.get(main)),failNext:()=>{failMain++;},holdNext:promise=>{waitMain=promise;},stats:()=>({pendingDeadlineTimers:deadlineTimers.size,fakeReads:calls.filter(x=>x[0]==='read').length,fakeWrites:calls.filter(x=>x[0]==='write').length,notifications})};
 }
 
 export {root,load,functions,fixture,base,profile,seed,gamePolicyKey,gameDisplayName,detectedGameName,main,backup};

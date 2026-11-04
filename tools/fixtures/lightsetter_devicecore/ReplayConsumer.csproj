@@ -8,6 +8,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../FanLab/LightSetter/Program.cs" Link="Program.cs" />
+    <Compile Include="../../../FanLab/LightSetter/Oxp3LightingWriter.cs" Link="Oxp3LightingWriter.cs" />
+    <Compile Include="../../../FanLab/LightSetter/Oxp3OwnerLease.cs" Link="Oxp3OwnerLease.cs" Condition="'$(ReplayOwnerSource)' == ''" />
+    <Compile Include="$(ReplayOwnerSource)" Link="Oxp3OwnerLease.cs" Condition="'$(ReplayOwnerSource)' != ''" />
+    <Compile Include="$(ReplayEntrySource)" Link="X2MiniReplayEntry.cs" Condition="'$(ReplayEntrySource)' != ''" />
+    <Compile Include="$(X2MiniOracleSource)" Link="FixedSourceOracle.g.cs" Condition="'$(X2MiniOracleSource)' != ''" />
     <Compile Include="../../../FanLab/LightSetter/OneXQueuedLighting.cs" Link="OneXQueuedLighting.cs" />
     <Compile Include="../../../FanLab/LightSetter/DeviceCoreConsumer.cs" Link="DeviceCoreConsumer.cs" />
     <Compile Include="../../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
@@ -18,6 +23,7 @@
     <Compile Include="../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
   </ItemGroup>
   <Target Name="RequireReplayPin" BeforeTargets="BeforeCompile">
+    <Error Condition="'$(ReplayEntrySource)' != '' And '$(ReplayOwnerSource)' == ''" Text="Directed owner entry must use the namespace-isolated actual owner source." />
     <Error Condition="'$(ReplayPinSource)' == ''" Text="ReplayPinSource must point to the scratch-only compiled fixture pin." />
   </Target>
   <ItemGroup>
@@ -25,5 +31,13 @@
     <Compile Include="../../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs" />
     <Compile Include="../../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
     <Compile Include="../../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../FanLab/LightSetter/AyaneoSuperJoyLighting.cs" Link="AyaneoSuperJoyLighting.cs" />
+    <Compile Include="../../../FanLab/LightSetter/AyaneoSuperJoyConsumer.cs" Link="AyaneoSuperJoyConsumer.cs" />
+    <Compile Include="../../../FanLab/LightSetter/AyaneoCeWindowsEcTransport.cs" Link="AyaneoCeWindowsEcTransport.cs" />
+    <Compile Include="../../../FanLab/LightSetter/SuperJoyOwnerLease.cs" Link="SuperJoyOwnerLease.cs" />
+    <Compile Include="../../../FanLab/LightSetter/SuperJoyWindowsHidTransport.cs" Link="SuperJoyWindowsHidTransport.cs" />
   </ItemGroup>
 </Project>

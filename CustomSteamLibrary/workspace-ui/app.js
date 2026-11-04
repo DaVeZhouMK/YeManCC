@@ -19,6 +19,9 @@ let selectedGameDirectories = null;
 let selectedSteamDirectories = null;
 let selectedCategoryDirectories = { unclassified: new Set(), 'non-game': new Set() };
 let selectedActionGame = null;
+let editPresentationEpoch=0;
+let editorArtworkRenderPending=false;
+let nativeArtworkRefreshOwner=null;
 let pendingSteamCommitArguments = null;
 let steamCommitRequestInFlight = false;
 let editDraft = null;
@@ -37,7 +40,11 @@ let artworkTaskToken = 0;
 let artworkTaskInFlight = false;
 const ARTWORK_PREFETCH_TTL_MS = 5 * 60 * 1000;
 const ARTWORK_PREFETCH_MAX_PRELOADS = 16;
+const ARTWORK_PREFETCH_MAX_SETTLED = 96;
+const ARTWORK_PREFETCH_RETRY_BASE_MS = 30 * 1000;
+const ARTWORK_SEARCH_TIMEOUT_MS = 185 * 1000;
 const artworkPrefetchCache = new Map();
+const artworkPreviewWarmups = new Map();
 let artworkPrefetchPendingCount = 0;
 let cancelInFlight = false;
 let searchReturnToEdit = false;
@@ -45,6 +52,41 @@ let identitySearchInFlight = false;
 let steamIdClearPending = false;
 let identitySearchCancelled = false;
 let editSaveInFlight = false;
+const editorSaveTasks = new Map();
+const steamCommitTasks = new Map();
+function activeCardOperation(game) {
+  const key=typeof game==='string'?game:keyFor(game||{});
+  return editorSaveTasks.get(key)||steamCommitTasks.get(key);
+}
+function renderEditorOperationState() {
+  if(!selectedActionGame)return;
+  const key=keyFor(selectedActionGame),saving=editorSaveTasks.has(key),steam=steamCommitTasks.get(key);
+  const save=$('#edit-save-content');if(save){save.disabled=saving;save.textContent=saving?'正在保存…':'保存内容';}
+  const join=$('#edit-add-to-steam');if(join){join.disabled=Boolean(selectedActionGame.mediaOnly)||isNativeSteamGame(selectedActionGame)||!selectedActionGame.primaryExecutable||!key||['queued','running'].includes(steam?.phase);join.textContent=steam?.phase==='queued'?'排队加入中…':steam?.phase==='running'?'正在加入…':'加入 Steam';}
+  decorateLibrarySteamButton(join);
+  const operation=activeCardOperation(key);if(operation){const badge=$('#edit-status');badge.textContent=operation.label;badge.className='badge '+(operation.phase==='failed'?'warning':'');badge.title=operation.label;}
+}
+let cardOperationFrame=0,cardOperationPending=false,cardOperationEditorPending=false;
+function suspendCardOperationState(){
+  if(cardOperationFrame)cancelAnimationFrame(cardOperationFrame);
+  cardOperationFrame=0;
+}
+function refreshCardOperationState(includeEditor=true) {
+  cardOperationPending=true;cardOperationEditorPending||=includeEditor;
+  suspendCardOperationState();
+  if(!libraryRenderAllowed())return;
+  cardOperationPending=false;
+  syncScrapeCardStates();
+  if(cardOperationEditorPending){
+    cardOperationEditorPending=false;
+    if(selectedActionGame&&!$('#edit-modal').classList.contains('hidden'))renderEditDraft(selectedActionGame);
+  }
+}
+function scheduleCardOperationState(includeEditor=false){
+  cardOperationPending=true;cardOperationEditorPending||=includeEditor;
+  if(!libraryRenderAllowed()||cardOperationFrame)return;
+  cardOperationFrame=requestAnimationFrame(()=>{cardOperationFrame=0;refreshCardOperationState(false);});
+}
 let identitySearchToken = 0;
 let identitySearchJobId = '';
 let identitySearchExecutable = '';
@@ -56,7 +98,9 @@ let identitySearchManualCandidate = null;
 const manualIdentifyGenerations = new Map();
 let identitySearchEllipsisTimer = 0;
 let identitySearchEllipsisStep = 0;
+let identitySearchLoadingWanted=false,identitySearchOwner=null,identitySearchFocusFrame=0;
 let currentCardDirectory = '';
+let editReturnFocusFrame=0;
 let libraryFocusMemory = null;
 let manualRefreshProgress = { phase: 'idle', current: 0, total: 0 };
 let controllerBackLastAt = 0;
@@ -489,20 +533,23 @@ function normalizeWorkspaceSnapshot(value, previous = {}) {
   return next;
 }
 function workspaceBridgeResult(command, result) {
-  const snapshotCommands = new Set(['state', 'scan', 'prepare', 'openLibrary', 'plan', 'commit', 'deleteFromSteam', 'refreshSteamArtwork']);
+  const snapshotCommands = new Set(['state', 'scan', 'prepare', 'openLibrary', 'plan', 'commit', 'saveEditor', 'deleteFromSteam', 'refreshSteamArtwork']);
   const isSnapshot = isWorkspaceRecord(result) && ('library' in result || 'steamPlan' in result || 'config' in result);
   if (!isSnapshot && snapshotCommands.has(command)) throw new Error('游戏库没有返回有效快照；已保留当前数据。');
   return isSnapshot ? normalizeWorkspaceSnapshot(result, snapshot) : result;
 }
 
 function invoke(command, arguments_ = {}, timeoutMs = 0) {
+  if (command === 'cancelArtwork') retireArtworkSearchReads();
+  else if (command === 'downloadArtworkCandidate' || command === 'mediaSearchVideos') retireArtworkSearchReads(arguments_);
   const id = requestId++;
   return new Promise((resolve, reject) => {
     const timer = timeoutMs > 0 ? window.setTimeout(() => {
       if (!pending.delete(id)) return;
-      reject(new Error("下载接口暂未响应，状态会自动复查；请稍后重试。"));
+      reject(new Error(command==='searchIdentity'?"搜索任务暂未响应，请稍后重试。":"下载接口暂未响应，状态会自动复查；请稍后重试。"));
     }, timeoutMs) : 0;
-    pending.set(id, { resolve, reject, command, timer });
+    pending.set(id, { resolve, reject, command, timer,
+      artworkWorkerKey: command === 'searchArtwork' ? artworkWorkerKey(arguments_) : '' });
     try {
       window.chrome.webview.postMessage({ id, command, arguments: arguments_ });
     } catch (error) {
@@ -542,25 +589,97 @@ function setBusy(visible, title = '正在处理', detail = '弱网环境下可�
   }
 }
 async function cancelActiveTask() { if (identitySearchInFlight) return cancelIdentitySearch(); if (cancelInFlight || busy.classList.contains('hidden')) return; cancelInFlight = true; setBusy(true, '正在取消当前任务', '正在终止隔离 worker，不会删除游戏文件或真实 Steam 数据。'); try { await invoke('cancelTask'); } catch (error) { showError(error, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); cancelInFlight = false; setBusy(true, '正在处理', '取消请求失败，请稍后重试。'); } }
-function startIdentitySearchLoading() { identitySearchJobId = ''; const loading = $('#identity-search-loading'); const dots = $('#identity-search-loading-dots'); if (!loading || !dots) return; loading.classList.remove('hidden'); if (identitySearchEllipsisTimer) clearInterval(identitySearchEllipsisTimer); identitySearchEllipsisStep = 0; const paint = () => { dots.textContent = '。'.repeat((identitySearchEllipsisStep++ % 3) + 1); }; paint(); identitySearchEllipsisTimer = window.setInterval(paint, 450); }
-function stopIdentitySearchLoading() { if (identitySearchEllipsisTimer) { clearInterval(identitySearchEllipsisTimer); identitySearchEllipsisTimer = 0; } $('#identity-search-loading')?.classList.add('hidden'); }
-async function cancelIdentitySearch() { identitySearchManualCandidate = null; if (!identitySearchInFlight) { $('#identity-search-modal').classList.add('hidden'); if (selectedActionGame) openEdit(selectedActionGame); return; } identitySearchCancelled = true; identitySearchToken++; identitySearchInFlight = false; stopIdentitySearchLoading(); $('#identity-search-modal').classList.add('hidden'); const executable = selectedActionGame?.primaryExecutable || identitySearchExecutable; identitySearchJobId = ''; if (selectedActionGame) openEdit(selectedActionGame); invoke('cancelIdentitySearch', { executable }).catch(() => {}); }
+function pauseIdentitySearchLoading(){
+  if(identitySearchEllipsisTimer)clearInterval(identitySearchEllipsisTimer);
+  identitySearchEllipsisTimer=0;
+}
+function identitySearchOwnerCurrent(owner=identitySearchOwner){
+  const modal=$('#identity-search-modal');
+  return Boolean(modal?.isConnected&&owner&&owner===identitySearchOwner&&owner.token===identitySearchToken&&owner.epoch===silentRefreshEpoch&&!silentRefreshClosed&&selectedActionGame&&keyFor(selectedActionGame)===owner.key&&normalizedUiPath(selectedActionGame.primaryExecutable)===owner.executable&&!modal.classList.contains('hidden'));
+}
+function syncIdentitySearchLoading(){
+  const owner=identitySearchOwner;let handle=0;
+  const allowed=()=>identitySearchLoadingWanted&&identitySearchOwnerCurrent(owner)&&!owner.terminal&&libraryRenderAllowed();
+  if(!allowed()){pauseIdentitySearchLoading();return;}
+  if(identitySearchEllipsisTimer)return;
+  const paint=()=>{if(identitySearchEllipsisTimer!==handle)return;if(!allowed()){pauseIdentitySearchLoading();return;}const dots=$('#identity-search-loading-dots'),text='。'.repeat((identitySearchEllipsisStep++%3)+1);if(dots&&dots.textContent!==text)dots.textContent=text;};
+  paint();handle=window.setInterval(paint,450);identitySearchEllipsisTimer=handle;
+}
+function startIdentitySearchLoading(){
+  identitySearchJobId='';identitySearchLoadingWanted=true;identitySearchEllipsisStep=0;pauseIdentitySearchLoading();
+  $('#identity-search-loading')?.classList.remove('hidden');syncIdentitySearchLoading();
+}
+function stopIdentitySearchLoading(){
+  identitySearchLoadingWanted=false;pauseIdentitySearchLoading();const loading=$('#identity-search-loading');if(loading&&!loading.classList.contains('hidden'))loading.classList.add('hidden');
+}
+function cancelIdentitySearchFocus(){if(identitySearchFocusFrame)cancelAnimationFrame(identitySearchFocusFrame);identitySearchFocusFrame=0;}
+function requestIdentitySearchFocus(target,owner=identitySearchOwner){
+  if(!owner||!target)return;owner.focusTarget=target;cancelIdentitySearchFocus();
+  if(!libraryRenderAllowed()||!identitySearchOwnerCurrent(owner))return;
+  identitySearchFocusFrame=requestAnimationFrame(()=>{
+    identitySearchFocusFrame=0;if(!identitySearchOwnerCurrent(owner)||!libraryRenderAllowed()||activeWorkspaceModal()!==$('#identity-search-modal')||owner.focusTarget!==target||!target.isConnected||target.closest('.hidden'))return;
+    owner.focusTarget=null;target.focus({preventScroll:true});
+  });
+}
+function retireIdentitySearch(cancelNative=true){
+  const active=identitySearchInFlight,executable=identitySearchOwner?.executable||identitySearchExecutable;
+  if(identitySearchOwner?.deadline)clearTimeout(identitySearchOwner.deadline);
+  identitySearchOwner=null;identitySearchToken++;identitySearchCancelled=true;identitySearchInFlight=false;identitySearchJobId='';searchReturnToEdit=false;identitySearchManualCandidate=null;
+  cancelIdentitySearchFocus();stopIdentitySearchLoading();$('#identity-search-modal')?.classList.add('hidden');
+  if(cancelNative&&active&&executable)invoke('cancelIdentitySearch',{executable}).catch(()=>{});
+}
+async function cancelIdentitySearch(){retireIdentitySearch();if(selectedActionGame)openEdit(selectedActionGame);}
 function cancelEditorBackgroundTasks() {
-  if (identitySearchInFlight) {
-    const executable = selectedActionGame?.primaryExecutable || identitySearchExecutable;
-    identitySearchCancelled = true;
-    identitySearchToken++;
-    identitySearchInFlight = false;
-    identitySearchJobId = '';
-    stopIdentitySearchLoading();
-    invoke('cancelIdentitySearch', { executable }).catch(() => {});
-  }
+  cancelArtworkPreviewWarmups();retireArtworkSearchPresentation(true);
+  if(identitySearchOwner||identitySearchInFlight)retireIdentitySearch();
   if (artworkTaskInFlight || artworkPrefetchPendingCount > 0) {
     artworkTaskToken++;
     artworkTaskInFlight = false;
     downloadingCandidateUrl = '';
     invoke('cancelArtwork').catch(() => {});
   }
+}
+function presentIdentitySearch(owner){
+  if(!identitySearchOwnerCurrent(owner)||!libraryRenderAllowed()||!owner.presentation)return;
+  const next=owner.presentation;owner.presentation=null;
+  stopIdentitySearchLoading();
+  if(next.kind==='candidates'){
+    if(owner.terminal)searchReturnToEdit=false;
+    renderSearchCandidates({...selectedActionGame,directoryName:owner.query,_searchQuery:owner.query},next.candidates,owner.query);
+    if(next.notice)showNotice(next.notice,false,libraryNotice);
+  }else if(next.cancelled){
+    retireIdentitySearch(false);if(selectedActionGame)openEdit(selectedActionGame);
+  }else{
+    searchReturnToEdit=false;$('#identity-search-list').innerHTML='<div class="identity-search-empty">候选名称暂未返回，可再次点击自动识别。</div>';
+    if(next.error)showError(next.error,libraryNotice);else showNotice('自动识别暂未完成，原页面保持不变，可稍后重试。',false,libraryNotice);
+  }
+}
+function finishIdentitySearch(owner,presentation){
+  if(!identitySearchOwnerCurrent(owner))return;
+  if(owner.deadline)clearTimeout(owner.deadline);owner.deadline=0;
+  owner.terminal=true;owner.presentation=presentation;identitySearchInFlight=false;identitySearchJobId='';identitySearchLoadingWanted=false;pauseIdentitySearchLoading();
+  presentIdentitySearch(owner);
+}
+function consumeIdentitySearchEvent(message){
+  if(!identityEventMatches(message))return;
+  const owner=identitySearchOwner;
+  if(message.event==='identity-search-started'){
+    if(libraryRenderAllowed())showNotice('候选名称正在后台搜索；结果会自动填入下拉菜单。',false,libraryNotice);
+  }else if(message.event==='identity-search-complete'){
+    finishIdentitySearch(owner,{kind:'candidates',candidates:Array.isArray(message.candidates)?message.candidates:[]});
+  }else finishIdentitySearch(owner,{kind:'failed',cancelled:message.cancelled===true});
+}
+function syncEditorSearchActivity(){
+  if(!libraryRenderAllowed()){
+    pauseIdentitySearchLoading();cancelIdentitySearchFocus();cancelArtworkSearchFocus();cancelArtworkPreviewWarmups();return;
+  }
+  const owner=identitySearchOwner;
+  if(identitySearchOwnerCurrent(owner)){
+    presentIdentitySearch(owner);syncIdentitySearchLoading();
+    if(owner.focusTarget)requestIdentitySearchFocus(owner.focusTarget,owner);
+  }else pauseIdentitySearchLoading();
+  presentArtworkSearch();const artOwner=artworkSearchPresentationOwner;if(artworkSearchPresentationCurrent(artOwner)&&artOwner.focusTarget)requestArtworkSearchFocus(artOwner.focusTarget,artOwner);
+  resumeArtworkPreviewWarmups();
 }
 function showNextNotice() {
   if (noticeActive || !noticeQueue.length) return;
@@ -642,19 +761,19 @@ function ensureSteamTarget() {
   else if (accounts.length === 1) selectedSteamTarget = { accountId: accounts[0].accountId, steamRoot: accounts[0].steamRoot || '' };
   else if (accounts.length > 1) selectedSteamTarget = { accountId: '', steamRoot: '' };
 }
-function defaultSelectedDirectories() { return mergedGames().filter(game => isSteamImportReady(game) && category(game) === 'not-in-steam').map(keyFor); }
-function defaultSelectedSteamDirectories() { return mergedGames().filter(game => category(game) === 'in-steam').map(keyFor); }
+function defaultSelectedDirectories() { return mergedGames().filter(game => isSteamImportReady(game) && category(game) === 'not-in-steam' && librarySidebarMatches(game)).map(keyFor); }
+function defaultSelectedSteamDirectories() { return mergedGames().filter(game => category(game) === 'in-steam' && librarySidebarMatches(game)).map(keyFor); }
 function selectedCommitDirectories() {
   if (activeTab === 'not-in-steam') {
     const selected = selectedGameDirectories === null ? new Set(defaultSelectedDirectories()) : selectedGameDirectories;
-    return mergedGames().filter(game => category(game) === 'not-in-steam' && selected.has(keyFor(game))).map(keyFor);
+    return mergedGames().filter(game => category(game) === 'not-in-steam' && selected.has(keyFor(game)) && librarySidebarMatches(game)).map(keyFor);
   }
   if (activeTab === 'unclassified' || activeTab === 'non-game') {
     // Selection sets survive a background scan so a user does not lose an
     // in-progress choice. They must still be intersected with the current
     // inventory; otherwise a removed/renamed directory is sent to the native
     // worker as an unmatched selection and the whole commit is rejected.
-    const available = new Set(mergedGames().filter(game => category(game) === activeTab).map(keyFor));
+    const available = new Set(mergedGames().filter(game => category(game) === activeTab && librarySidebarMatches(game)).map(keyFor));
     return [...(selectedCategoryDirectories[activeTab] || [])].filter(key => available.has(keyFor({ gameDirectory: key })));
   }
   return [];
@@ -714,8 +833,41 @@ function planMap() {
   return result;
 }
 function normalizedUiPath(value) { return String(value || '').replaceAll('/', '\\').replace(/[\\]+$/, '').toLocaleLowerCase(); }
-function manualOverride(executable) { const key = normalizedUiPath(executable); if (!key) return {}; const items = snapshot.manualOverrides?.items || {}; if (items[key]) return items[key]; const found = Object.entries(items).find(([stored]) => normalizedUiPath(stored) === key); return found?.[1] || {}; }
-function resolvedIdentity(executable) { const key = normalizedUiPath(executable); if (!key) return {}; const items = snapshot.resolvedIdentities || {}; if (items[key]) return items[key]; const found = Object.entries(items).find(([stored, value]) => normalizedUiPath(stored) === key || normalizedUiPath(value?.executable) === key); return found?.[1] || {}; }
+// These indexes belong to one synchronous merge/render only. Source changes,
+// nested snapshot views and exceptions cannot leave a long-lived stale cache.
+let libraryPathLookups = null;
+function withLibraryPathLookups(action){
+  if(libraryPathLookups?.snapshot===snapshot)return action();
+  const previous=libraryPathLookups;
+  libraryPathLookups={snapshot,indexes:new Map()};
+  try{return action();}finally{libraryPathLookups=previous;}
+}
+function libraryPathIndex(kind,items){
+  if(libraryPathLookups?.snapshot!==snapshot)return null;
+  const prior=libraryPathLookups.indexes.get(kind);
+  if(prior?.source===items)return prior.values;
+  const values=new Map();let order=0;
+  for(const [stored,value] of Object.entries(items)){
+    const keys=kind==='identities'?[normalizedUiPath(stored),normalizedUiPath(value?.executable)]:[normalizedUiPath(stored)];
+    if(kind!=='buckets'||value?.bucket)for(const key of keys)if(!values.has(key))values.set(key,{value,order});
+    ++order;
+  }
+  libraryPathLookups.indexes.set(kind,{source:items,values});return values;
+}
+function manualOverride(executable) {
+  const key=normalizedUiPath(executable);if(!key)return {};
+  const items=snapshot.manualOverrides?.items||{};if(items[key])return items[key];
+  const index=libraryPathIndex('overrides',items);
+  if(index)return index.get(key)?.value||{};
+  const found=Object.entries(items).find(([stored])=>normalizedUiPath(stored)===key);return found?.[1]||{};
+}
+function resolvedIdentity(executable) {
+  const key=normalizedUiPath(executable);if(!key)return {};
+  const items=snapshot.resolvedIdentities||{};if(items[key])return items[key];
+  const index=libraryPathIndex('identities',items);
+  if(index)return index.get(key)?.value||{};
+  const found=Object.entries(items).find(([stored,value])=>normalizedUiPath(stored)===key||normalizedUiPath(value?.executable)===key);return found?.[1]||{};
+}
 function executableLikeName(value) { return /\\.(exe|dll|bin|bat|cmd)$/i.test(String(value || '').trim()) || /^(setup|unins|launcher|start|game)\\d*$/i.test(String(value || '').trim()); }
 function gameDisplayName(game) { const overrideName = game.override?.name; if (overrideName) return overrideName; const formal = game.resolvedIdentity?.formalName || game.steam?.formalName; if (formal && !executableLikeName(formal)) return formal; return game.primaryProductName || game.primaryFileDescription || game.steam?.suggestedName || game.directoryName || formal || '未命名项目'; }
 const MANUAL_BUCKETS = new Set(['auto', 'not-in-steam', 'in-steam', 'native-steam', 'unclassified', 'non-game']);
@@ -728,15 +880,28 @@ function manualBucket(game) {
   if (direct?.bucket) return validManualBucket(direct.bucket);
   const executable = buckets[executableKey];
   if (executable?.bucket) return validManualBucket(executable.bucket);
+  const index=libraryPathIndex('buckets',buckets);
+  if(index){
+    const directory=index.get(directoryKey),executable=index.get(executableKey);
+    const first=directory&&executable?(directory.order<=executable.order?directory:executable):directory||executable;
+    return validManualBucket(first?.value?.bucket);
+  }
   const found = Object.entries(buckets).find(([stored, value]) =>
     (normalizedUiPath(stored) === directoryKey || normalizedUiPath(stored) === executableKey) && value?.bucket);
   return validManualBucket(found?.[1]?.bucket);
 }
+let libraryRenderGames = null;
+let libraryRenderSnapshot = null;
 function mergedGames() {
+  if(libraryRenderGames&&libraryRenderSnapshot===snapshot)return libraryRenderGames;
+  return withLibraryPathLookups(()=>{
   const plans = planMap();
   const games=(snapshot.library?.games || []).map(game => {
     const key = normalizedUiPath(game.primaryExecutable);
-    const steam = plans.get(key) || plans.get(`dir:${keyFor(game)}`) || {};
+    const directoryPlan=plans.get(`dir:${keyFor(game)}`);
+    // A directory match cannot lend the old EXE's identity after an explicit
+    // primary change. Legacy plans with no EXE keep their display fallback.
+    const steam=plans.get(key)||(directoryPlan&&(!directoryPlan.primaryExecutable||normalizedUiPath(directoryPlan.primaryExecutable)===key)?directoryPlan:null)||{};
     const override = manualOverride(game.primaryExecutable);
     const resolved = resolvedIdentity(game.primaryExecutable);
     const idCleared = override.idCleared === true;
@@ -751,11 +916,24 @@ function mergedGames() {
       ...(canonicalSteamId ? { steamStoreAppId: canonicalSteamId, storefrontAppId: steam.storefrontAppId || canonicalSteamId, formalName: steam.formalName || resolved.formalName || '' } : {})
     }, override, resolvedIdentity: resolved };
   }).sort((a, b) => String(a.directoryName || '').localeCompare(String(b.directoryName || ''), 'zh-Hans'));
+  // Preserve Array.find's first match across both EXE and verified AppID,
+  // including their original sorted order, without scanning every game again.
+  const byExecutable=new Map(),byAppId=new Map();
+  const indexGame=(game,index)=>{
+    const row={game,index},exe=normalizedUiPath(game.primaryExecutable),appId=String(confirmedMediaAppId(game));
+    if(!byExecutable.has(exe))byExecutable.set(exe,row);
+    if(!byAppId.has(appId))byAppId.set(appId,row);
+  };
+  games.forEach(indexGame);
   for(const record of Object.values(snapshot.gameMedia?.entries||{})){
-    const match=games.find(game=>(record.executable&&normalizedUiPath(record.executable)===normalizedUiPath(game.primaryExecutable))||(record.appId&&String(record.appId)===String(confirmedMediaAppId(game))));
-    if(match){match.gameMedia=record;continue;}
-    games.push({mediaOnly:true,mediaKey:record.key,directoryName:record.name||'动态壁纸',primaryProductName:record.name||'动态壁纸',gameMedia:record,steam:{},override:{}});
+    const exe=record.executable?byExecutable.get(normalizedUiPath(record.executable)):null;
+    const app=record.appId?byAppId.get(String(record.appId)):null;
+    const match=exe&&app?(exe.index<=app.index?exe:app):exe||app;
+    if(match){match.game.gameMedia=record;continue;}
+    const game={mediaOnly:true,mediaKey:record.key,directoryName:record.name||'动态壁纸',primaryProductName:record.name||'动态壁纸',gameMedia:record,steam:{},override:{}};
+    games.push(game);indexGame(game,games.length-1);
   }return games;
+  });
 }
 function isNativeSteamGame(game) {
   return game?.steamNative === true || game?.contentType === 'steam-native' ||
@@ -840,10 +1018,31 @@ let mediaManualBusy=false;
 let mediaRecoveryTimer=0;
 let mediaRecoveryRequest=null;
 let mediaPageClosed=false;
+let mediaDownloadPaintPending=false;
+let mediaDownloadPaintFrame=0;
+function cancelMediaDownloadPaint(){
+  if(mediaDownloadPaintFrame)cancelAnimationFrame(mediaDownloadPaintFrame);
+  mediaDownloadPaintFrame=0;
+}
+function suspendMediaDownloadPaint(){
+  cancelMediaDownloadPaint();
+  const bar=document.getElementById('media-download-bar');
+  if(bar&&!bar.hasAttribute('value')){mediaDownloadPaintPending=true;bar.value=0;}
+  const wallpaperBar=document.querySelector('#shared-wallpaper-download-status progress');
+  if(wallpaperBar&&!wallpaperBar.hasAttribute('value')){mediaDownloadPaintPending=true;wallpaperBar.value=0;}
+}
+function requestMediaDownloadPaint(){
+  if(!mediaDownloadPaintPending||mediaDownloadPaintFrame||mediaPageClosed||!libraryRenderAllowed())return;
+  mediaDownloadPaintFrame=requestAnimationFrame(()=>{mediaDownloadPaintFrame=0;if(mediaDownloadPaintPending)paintMediaDownloads();});
+}
+function syncMediaDownloadDisplayActivity(){
+  scheduleMediaDownloadRecovery();
+  if(mediaPageClosed||!libraryRenderAllowed())suspendMediaDownloadPaint();else requestMediaDownloadPaint();
+}
 function scheduleMediaDownloadRecovery(state=snapshot.mediaDownloads) {
   const retained=state&&((Number(state.remaining||0)>0)||state.catalogPending||Number(state.activeCount||0)>0);
   const enabled=state&&(state.enabled!==false||Number(state.manualUntil||0)>Date.now());
-  if(mediaPageClosed||document.hidden||!retained||!enabled) {
+  if(mediaPageClosed||document.hidden||!document.hasFocus()||!retained||!enabled) {
     if(mediaRecoveryTimer)clearTimeout(mediaRecoveryTimer);mediaRecoveryTimer=0;return;
   }
   if(!mediaRecoveryTimer&&!mediaRecoveryRequest)mediaRecoveryTimer=window.setTimeout(()=>{mediaRecoveryTimer=0;void recheckMediaDownloads();},20000);
@@ -858,24 +1057,36 @@ function recheckMediaDownloads() {
   });
   mediaRecoveryRequest=request;return request;
 }
-window.addEventListener('pagehide',()=>{mediaPageClosed=true;if(mediaRecoveryTimer)clearTimeout(mediaRecoveryTimer);mediaRecoveryTimer=0;});
-window.addEventListener('pageshow',()=>{mediaPageClosed=false;scheduleMediaDownloadRecovery();});
-document.addEventListener('visibilitychange',()=>scheduleMediaDownloadRecovery());
+window.addEventListener('pagehide',()=>{mediaPageClosed=true;if(mediaRecoveryTimer)clearTimeout(mediaRecoveryTimer);mediaRecoveryTimer=0;suspendMediaDownloadPaint();});
+window.addEventListener('pageshow',()=>{mediaPageClosed=false;syncMediaDownloadDisplayActivity();});
+document.addEventListener('visibilitychange',syncMediaDownloadDisplayActivity);
+window.addEventListener('focus',syncMediaDownloadDisplayActivity);
+window.addEventListener('blur',syncMediaDownloadDisplayActivity);
 document.getElementById('media-download-now')?.addEventListener('click',async()=>{if(mediaManualBusy)return;mediaManualBusy=true;const button=document.getElementById('media-download-now');button.disabled=true;try{const manual=Number(snapshot.mediaDownloads?.manualUntil||0)>Date.now();renderMediaDownloads(await invoke(manual?'mediaDownloadCancel':'mediaDownloadNow',{},8000));}catch(error){showError(error,libraryNotice);}finally{mediaManualBusy=false;button.disabled=false;void recheckMediaDownloads();}});
-function renderMediaDownloads(state = snapshot.mediaDownloads) {
+function renderMediaDownloads(state = snapshot.mediaDownloads, options = {}) {
   if (state && lastMediaDownloadDisplay && Number(state.statusRevision || 0) < Number(lastMediaDownloadDisplay.statusRevision || 0)) state = lastMediaDownloadDisplay;
   const previousCompleted=lastMediaDownloadDisplay?.completed;
   if (state) {lastMediaDownloadDisplay=state;snapshot.mediaDownloads=state;}
   scheduleMediaDownloadRecovery(state);
   if(previousCompleted!=null&&Number(state?.completed||0)!==Number(previousCompleted))scheduleSilentRefresh();
+  mediaDownloadPaintPending=true;
+  if(mediaPageClosed||!libraryRenderAllowed()){suspendMediaDownloadPaint();return;}
+  if(options.defer===true){requestMediaDownloadPaint();return;}
+  cancelMediaDownloadPaint();paintMediaDownloads();
+}
+function paintMediaDownloads(){
+  if(mediaPageClosed||!libraryRenderAllowed())return;
+  mediaDownloadPaintPending=false;
+  const state=snapshot.mediaDownloads;
+  renderSharedWallpaperDownloadStatus();
   const wrap = document.getElementById('media-download-progress');
   if (!wrap) return;
   const known = state && typeof state === 'object';
-  wrap.classList.toggle('hidden', !known);
+  if(wrap.classList.contains('hidden')===Boolean(known))wrap.classList.toggle('hidden', !known);
   if (!known) return;
   const pauses = {'game-running':'游戏运行中，后台下载已暂停','battery-saver':'节电模式下暂停后台下载','low-battery':'低电量，后台下载已暂停','capacity-unavailable':'正在检查下载条件','media-storage-unavailable':'存储暂不可用，等待恢复后继续下载','media-disk-space-low':'磁盘余量不足，后台下载已暂停','media-cache-budget-full':'壁纸缓存已满，后台下载已暂停'};
   const resources={'startup-protection':'启动保护：前 30 秒不自动下载','on-battery':'电池模式，自动下载已停止','power-unknown':'正在确认供电，暂不自动下载','cpu-unknown':'正在检测 CPU 负载','cpu-busy':`CPU 占用超过 ${state.cpuThreshold || 15}%，自动下载已暂停`,'cpu-recovering':'CPU 负载下降，稳定后继续下载'};
-  const manual=Number(state.manualUntil||0)>Date.now();const nowButton=document.getElementById('media-download-now');if(nowButton){nowButton.textContent=manual?'停止本轮补齐':'立即补齐壁纸';nowButton.title='本轮忽略 CPU 和游戏暂停；电池、启动与磁盘保护保留';}
+  const manual=Number(state.manualUntil||0)>Date.now();const nowButton=document.getElementById('media-download-now');if(nowButton){const text=manual?'停止本轮补齐':'立即补齐壁纸',title='本轮忽略 CPU 和游戏暂停；电池、启动与磁盘保护保留';if(nowButton.textContent!==text)nowButton.textContent=text;if(nowButton.title!==title)nowButton.title=title;}
   const active = ['starting','identifying','resolving','downloading','publishing'].includes(state.phase);
   const count = manual&&state.manualTotal>0?`${state.manualCompleted||0} / ${state.manualTotal}`:`${state.completed || 0} / ${state.total || 0}`;
   const reason=state.pendingReason||state.reason||'';
@@ -884,11 +1095,13 @@ function renderMediaDownloads(state = snapshot.mediaDownloads) {
   const preparing=Number(state.inventoryAwaitUntil||0)>Date.now()&&state.inventoryReadyId!==state.inventoryRequestId;
   const waitingLabel=`${manual?'手动补齐':'后台下载'}等待重试 · ${failureReason||'本轮剩余任务暂不可用'} · 约 ${Math.max(1,Math.ceil((Number(state.nextDueAt)-Date.now())/1000))} 秒后复查 · ${count}`;
   const label = state.enabled === false&&!manual ? '壁纸后台下载已关闭'+(failureReason?' · '+failureReason:'') : state.resourcePauseReason ? resources[state.resourcePauseReason] || '后台下载等待恢复' : state.pauseReason&&!(manual&&state.pauseReason==='game-running') ? (pauses[state.pauseReason] || '壁纸后台下载已暂停，条件恢复后继续')+(/video-selection-expired/.test(state.reason||'')?' · '+failureReason:'') : waiting ? waitingLabel : manual ? `手动补齐中 · ${state.current?.name||(preparing?'正在准备本轮队列':failureReason||'等待下载进程接入')} · ${count}` : active ? `${state.activeCount > 1 ? `正在下载 ${state.activeCount} 个` : state.current?.name || '正在准备壁纸'}${state.resumedBytes ? ' · 断点续传' : ''} · ${count}${state.totalBytes ? ` · ${Math.min(100,Math.floor((state.bytes || 0)*100/state.totalBytes))}%` : ''}` : ['deferred','paused'].includes(state.phase) ? `${failureReason || '壁纸后台下载等待恢复'} · ${count}` : state.total ? `本轮已处理 · ${count}${state.unavailable ? ` · ${state.unavailable} 个已跳过，不影响其他游戏` : ''}` : '等待补齐动态壁纸';
-  document.getElementById('media-download-label').textContent = label;
+  const labelNode=document.getElementById('media-download-label');
+  if(labelNode.textContent!==label)labelNode.textContent=label;
   const bar = document.getElementById('media-download-bar');
-  bar.max = state.totalBytes || state.total || 1;
-  if (active && !state.totalBytes) bar.removeAttribute('value');
-  else bar.value = state.totalBytes ? state.bytes || 0 : state.completed || 0;
+  const maximum=state.totalBytes||state.total||1;
+  if(bar.max!==Number(maximum))bar.max=maximum;
+  if (active && !state.totalBytes) {if(bar.hasAttribute('value'))bar.removeAttribute('value');}
+  else {const value=state.totalBytes?state.bytes||0:state.completed||0;if(!bar.hasAttribute('value')||bar.value!==Number(value))bar.value=value;}
 }
 
 function applyLibrarySnapshot(next, options = {}) {
@@ -898,27 +1111,29 @@ function applyLibrarySnapshot(next, options = {}) {
   const previousGames = mergedGames();
   const previousVisibleKeys = new Set(previousGames.filter(game => category(game) === previousTab).map(keyFor));
   const previousWaitingKeys = previousGames.filter(game => category(game) === 'not-in-steam').map(keyFor);
-  snapshot = normalizeWorkspaceSnapshot(next, snapshot);
+  snapshot = options.normalized === true ? next : normalizeWorkspaceSnapshot(next, snapshot);
   if (next.mediaDownloads) snapshot.mediaDownloads=next.mediaDownloads;
-  renderMediaDownloads();
+  if (options.deferRender !== true) renderMediaDownloads();
   if (preserveWaiting && previousWaitingKeys.length) snapshot._preservedWaitingKeys = previousWaitingKeys;
   const games = mergedGames();
-  const visible = games.filter(game => category(game) === activeTab);
+  const visible = games.filter(game => category(game) === activeTab && librarySidebarMatches(game));
   if (visible.length === 0 && games.length > 0) {
     const switched = tabContainingKeys(games, previousVisibleKeys) || firstPopulatedTab(games);
     if (switched && switched !== activeTab) {
       activeTab = switched;
       const label = CATEGORY_DEFINITIONS[switched]?.label || switched;
-      if (!$('#library-view').classList.contains('hidden')) {
+      if (options.deferRender !== true && !$('#library-view').classList.contains('hidden')) {
         showNotice(`当前页暂无项目，已切换到「${label}」。`, false, libraryNotice);
       }
     }
   }
-  renderEntry();
-  if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+  if (options.deferRender !== true) {
+    renderEntry();
+    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+  }
 }
 function selectedReadyCount() { const selected = new Set(selectedCommitDirectories()); return mergedGames().filter(game => category(game) === activeTab && selected.has(keyFor(game))).length; }
-function selectedSteamCount() { return mergedGames().filter(game => category(game) === 'in-steam' && (selectedSteamDirectories === null || selectedSteamDirectories.has(keyFor(game)))).length; }
+function selectedSteamCount() { return selectedVisibleSteamDirectories().length; }
 function formatCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[${count}个]`; }
 function formatSelectedCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[已选${count}个]`; }
 function pageSelectable(game, page = activeTab) { if(game?.mediaOnly)return false; const itemCategory = category(game); if (itemCategory !== page || page === 'native-steam') return false; return true; }
@@ -927,14 +1142,14 @@ function pageSelectionKeys(page = activeTab) {
   if (page === 'in-steam') return new Set(selectedSteamDirectories === null ? defaultSelectedSteamDirectories() : selectedSteamDirectories);
   return new Set(selectedCategoryDirectories[page] || []);
 }
-function defaultPageKeys(page = activeTab) { return mergedGames().filter(game => pageSelectable(game, page)).map(keyFor); }
+function defaultPageKeys(page = activeTab) { return mergedGames().filter(game => pageSelectable(game, page) && librarySidebarMatches(game)).map(keyFor); }
 function storePageSelection(page, selected, all) {
   if (page === 'not-in-steam') selectedGameDirectories = selected.size === all.length ? null : selected;
   else if (page === 'in-steam') selectedSteamDirectories = selected.size === all.length ? null : selected;
   else selectedCategoryDirectories[page] = selected;
 }
-function selectedPageCount(page = activeTab) { const selected = pageSelectionKeys(page); return mergedGames().filter(game => pageSelectable(game, page) && selected.has(keyFor(game))).length; }
-function isPageSelected(game) { return pageSelectable(game) && pageSelectionKeys(activeTab).has(keyFor(game)); }
+function selectedPageCount(page = activeTab) { const selected = pageSelectionKeys(page); return mergedGames().filter(game => pageSelectable(game, page) && selected.has(keyFor(game)) && librarySidebarMatches(game)).length; }
+function isPageSelected(game) { if(!pageSelectable(game))return false;const selected=activeTab==='not-in-steam'?selectedGameDirectories:activeTab==='in-steam'?selectedSteamDirectories:selectedCategoryDirectories[activeTab];return selected===null||selected?.has(keyFor(game))===true; }
 
 function statusLabel(game) {
   const definition = categoryDefinition(game);
@@ -948,9 +1163,12 @@ function scrapeStatusFor(game) {
   if (isNativeSteamGame(game)) return null;
   const executable = normalizedUiPath(game?.primaryExecutable || '');
   if (!executable) return null;
-  const items = snapshot.scrape?.items || {};
+  const items = snapshot.scrape?.items;
+  if(!items)return null;
   const direct = items[executable] || items[String(game.primaryExecutable || '').toLocaleLowerCase()];
   if (direct) return direct;
+  const index=libraryPathIndex('scrape',items);
+  if(index)return index.get(executable)?.value||null;
   const found = Object.entries(items).find(([key, value]) => normalizedUiPath(key) === executable);
   return found?.[1] || null;
 }
@@ -959,24 +1177,34 @@ function applyScrapeCardState(card, gameOrExecutable) {
   const game = typeof gameOrExecutable === 'string'
     ? { primaryExecutable: gameOrExecutable }
     : gameOrExecutable;
-  const item = scrapeStatusFor(game);
+  const operation=activeCardOperation(card.dataset.directory||keyFor(game));
+  const item = operation?{status:['queued','running'].includes(operation.phase)?operation.phase==='running'?'loading':'queued':operation.phase}:scrapeStatusFor(game);
   const active = item?.status === 'queued' || item?.status === 'loading';
   const loading = item?.status === 'loading';
-  card.classList.toggle('scrape-active', active);
-  card.classList.toggle('scrape-loading', loading);
-  card.setAttribute('aria-busy', active ? 'true' : 'false');
-  card.dataset.scrapeStatus = item?.status || '';
+  if(card.classList.contains('scrape-active')!==active)card.classList.toggle('scrape-active',active);
+  if(card.classList.contains('scrape-loading')!==loading)card.classList.toggle('scrape-loading',loading);
+  const busy=active?'true':'false',status=item?.status||'';
+  if(card.getAttribute('aria-busy')!==busy)card.setAttribute('aria-busy',busy);
+  if(card.dataset.scrapeStatus!==status)card.dataset.scrapeStatus=status;
   const overlay = card.querySelector('.game-card-scrape-overlay');
   if (overlay) {
     const label = overlay.querySelector('.game-card-scrape-label');
-    if (label) label.textContent = loading ? '正在刮削' : '等待刮削';
+    const text=operation?.label||(loading?'正在刮削':'等待刮削'),title=operation?.label||'';
+    if(label&&label.textContent!==text)label.textContent=text;
+    if(overlay.title!==title)overlay.title=title;
+    const terminal=operation?.phase==='failed'||operation?.phase==='completed';
+    const style=(node,key,value)=>{if(node&&node.style[key]!==value)node.style[key]=value;};
+    style(overlay,'display',terminal?'grid':'');style(overlay,'opacity',terminal?'1':'');
+    style(overlay,'visibility',terminal?'visible':'');style(overlay,'pointerEvents',terminal?'none':'');
+    style(overlay.querySelector('.spinner'),'display',terminal?'none':'');
   }
 }
 function syncScrapeCardStates() {
-  libraryCards().forEach(card => applyScrapeCardState(card, card.dataset.executable || ''));
+  return withLibraryPathLookups(()=>libraryCards().forEach(card => applyScrapeCardState(card, card.dataset.executable || '')));
 }
 
 function renderEntry() {
+  return withLibraryPathLookups(()=>{
   const games = mergedGames();
   const counts = categoryCounts(games);
   $('#entry-summary').innerHTML = CATEGORY_ORDER.map(code => {
@@ -987,6 +1215,7 @@ function renderEntry() {
   if ($('#entry-view') && !$('#entry-view').classList.contains('hidden') && !document.querySelector('.modal:not(.hidden)')) {
     requestAnimationFrame(() => { if (!document.querySelector('.modal:not(.hidden)') && !$('#entry-view').contains(document.activeElement)) $('#open-library-button')?.focus(); });
   }
+  });
 }
 function closeLibraryMenuPanels(except = '') {
   for (const id of ['directory-settings-panel', 'manual-game-panel']) {
@@ -1119,7 +1348,7 @@ function renderSteamRuntimeState() {
   if (!button || activeTab === 'in-steam' || activeTab === 'native-steam') return;
   const running = steamRuntimeState.running;
   const label = '点击加入';
-  button.innerHTML = `${label} <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`;
+  button.innerHTML = `${librarySidebarState()?'加入 Steam':label} <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`;decorateLibrarySteamButton(button);
   // Closing Steam is an independent safety action; it must remain available
   // even when the current page has no selected game.
   button.disabled = running === null || (running !== true && selectedReadyCount() === 0);
@@ -1388,7 +1617,7 @@ function libraryPageTabs() { return [...document.querySelectorAll('#library-view
 function libraryToolbarItems() { return [...document.querySelectorAll('#library-view:not(.hidden) #directory-settings-toggle, #library-view:not(.hidden) #manual-game-settings-toggle, #library-view:not(.hidden) .steam-bar .button:not(.hidden):not(:disabled)')].filter(isVisuallyPresent); }
 function libraryPopupItems() { return [...document.querySelectorAll('#library-view:not(.hidden) .menu-popover-panel:not(.hidden) button:not(:disabled), #library-view:not(.hidden) .menu-popover-panel:not(.hidden) [tabindex]:not([tabindex="-1"])')].filter(isVisuallyPresent); }
 function libraryHeaderItems() { return [...document.querySelectorAll('#library-view:not(.hidden) #steam-runtime-state, #library-view:not(.hidden) #back-entry-button')].filter(isVisuallyPresent); }
-function libraryFocusItems() { return [...libraryHeaderItems(), ...libraryPageTabs(), ...libraryToolbarItems(), ...libraryPopupItems(), ...libraryCards().filter(item => !item.classList.contains('hidden'))]; }
+function libraryFocusItems() { if(librarySidebarState())return visibleFocusables($('#library-view'));return [...libraryHeaderItems(), ...libraryPageTabs(), ...libraryToolbarItems(), ...libraryPopupItems(), ...libraryCards().filter(item => !item.classList.contains('hidden'))]; }
 function focusLibraryItem(item) { return focusWorkspaceElement(item); }
 function moveFocusWithinRow(items, active, key) {
   if (!items.length) return false;
@@ -1409,6 +1638,7 @@ function libraryFocusZone() {
   return { name: 'none', item: active };
 }
 function moveLibraryDirectional(key) {
+  if(librarySidebarState())return librarySidebarMove(key);
   const activeCard = activeLibraryCard();
   if (activeCard) {
     currentCardDirectory = activeCard.dataset.directory.toLocaleLowerCase();
@@ -1797,6 +2027,7 @@ function handleEntryGamepadKey(event) {
 }
 function libraryModalOpen() { return Boolean(activeWorkspaceModal()); }
 function handleLibraryGamepadKey(event) {
+  if(librarySidebarState()&&!libraryModalOpen()&&event.key==='Enter'&&document.activeElement?.id==='library-search'){event.preventDefault();requestGamepadKeyboard(document.activeElement);return true;}
   if ($('#library-view').classList.contains('hidden') || libraryModalOpen()) return false;
   const cards = libraryCards(); if (!cards.length && !libraryFocusItems().length) return false;
   const key = event.key;
@@ -1826,7 +2057,7 @@ function cycleLibraryTab(direction) {
   index = (index + direction + tabs.length) % tabs.length;
   activeTab = tabs[index].dataset.tab; renderLibrary(); focusLibraryCard(libraryCards()[0]);
 }
-function pageSelectableGames() { return mergedGames().filter(game => pageSelectable(game, activeTab)); }
+function pageSelectableGames() { return mergedGames().filter(game => pageSelectable(game, activeTab) && librarySidebarMatches(game)); }
 function setPageSelection(mode) {
   const keys = pageSelectableGames().map(keyFor); const current = pageSelectionKeys(activeTab);
   if (mode === 'all') {
@@ -1855,6 +2086,7 @@ function libraryCardViewportTop(card) {
 }
 function captureLibraryViewport() {
   if (library._renderedTab !== activeTab) return null;
+  const scroll=$('#library-sidebar-scroll');if(scroll){const top=scroll.getBoundingClientRect().top;return {sidebar:true,x:scroll.scrollLeft,y:scroll.scrollTop,anchors:libraryCards().filter(card=>{const r=card.getBoundingClientRect();return r.bottom>top&&r.top<top+scroll.clientHeight;}).map(card=>({directory:card.dataset.directory,top:card.getBoundingClientRect().top-top}))};}
   return { x: window.scrollX, y: window.scrollY,
     anchors: libraryCards().filter(card => {
       const rect = card.getBoundingClientRect();
@@ -1863,6 +2095,7 @@ function captureLibraryViewport() {
 }
 function restoreLibraryViewport(viewport) {
   if (!viewport) return;
+  if(viewport.sidebar){const scroll=$('#library-sidebar-scroll');if(!scroll)return;const cards=new Map(libraryCards().map(card=>[card.dataset.directory,card])),anchor=viewport.anchors.find(item=>cards.has(item.directory));const y=viewport.y<=0?0:anchor?scroll.scrollTop+cards.get(anchor.directory).getBoundingClientRect().top-scroll.getBoundingClientRect().top-anchor.top:viewport.y;scroll.scrollTo({left:viewport.x,top:Math.max(0,y),behavior:'instant'});return;}
   const cards = new Map(libraryCards().map(card => [card.dataset.directory, card]));
   const anchor = viewport.anchors.find(item => cards.has(item.directory));
   const y = viewport.y <= 0 ? 0 : anchor ? window.scrollY + libraryCardViewportTop(cards.get(anchor.directory)) - anchor.top : viewport.y;
@@ -1894,6 +2127,10 @@ function updateLibraryCards(games) {
   library._renderedTab = activeTab;
 }
 function renderLibrary() {
+  return withLibraryPathLookups(()=>{
+  const previousGames=libraryRenderGames,previousSnapshot=libraryRenderSnapshot;
+  libraryRenderGames=mergedGames();libraryRenderSnapshot=snapshot;
+  try {
   renderMediaDownloads();
   const viewport = captureLibraryViewport();
   const focusedDescriptor = libraryFocusDescriptor(document.activeElement) || libraryFocusMemory;
@@ -1903,7 +2140,7 @@ function renderLibrary() {
   document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const nativeSteam = activeTab === 'native-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam || nativeSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入 <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`; $('#delete-button').innerHTML = `点击删除 <span class="count-label">${formatSelectedCount(selectedSteamCount())}</span>`; $('#commit-button').disabled = inSteam || nativeSteam || selectedReadyCount() === 0; $('#commit-button').title = nativeSteam ? '原生 Steam 游戏不能通过自定义库重复导入' : '加入当前页中已选中的项目（SteamID、封面和壁纸可为空）'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots(); renderSteamRuntimeState();
   renderArtworkRefreshControl();
   renderSteamTarget();
-  const visible = games.filter(game => category(game) === activeTab);
+  const visible = games.filter(game => category(game) === activeTab && librarySidebarMatches(game));
   updateLibraryCards(visible);
   $('#empty').classList.toggle('hidden', visible.length !== 0); library.classList.toggle('hidden', visible.length === 0);
   if (visible.length > 0 && !libraryModalOpen()) {
@@ -1914,6 +2151,10 @@ function renderLibrary() {
   // Restore synchronously before paint. An older animation-frame callback
   // must never move the view after the user has already scrolled again.
   restoreLibraryViewport(viewport);
+  syncUpdateSteamArtworkButton();
+  syncLibrarySidebar();
+  } finally {libraryRenderGames=previousGames;libraryRenderSnapshot=previousSnapshot;}
+  });
 }
 function candidateDataFor(game) {
   const key = normalizedUiPath(game.primaryExecutable);
@@ -1973,29 +2214,33 @@ function renderIdentityNameCandidates(game) {
   refreshWorkspaceDropdown(select);
 }
 function cloneEditGame(game) { return JSON.parse(JSON.stringify(game || {})); }
+function editorIdentityName(game) { return String(game?.override?.name || game?.steam?.suggestedName || game?.primaryProductName || game?.directoryName || ''); }
 function draftFor(game) {
   const cloned = cloneEditGame(game);
   cloned.override = { ...(cloned.override || {}) };
   cloned.override.artwork = { ...(cloned.override.artwork || {}) };
-  return { game: cloned, original: game, originalBucket: manualBucket(game), bucket: manualBucket(game), artworkDirty: false, artworkChanged: { cover: false, long: false, wallpaper: false }, identityDirty: false, primaryDirty: false };
+  return { game: cloned, original: cloneEditGame(game), originalBucket: manualBucket(game), bucket: manualBucket(game), artworkDirty: false, artworkChanged: { cover: false, long: false, wallpaper: false }, identityDirty: false, primaryDirty: false,
+    identityBaseline: {name:editorIdentityName(game).trim(),steamId:String(formalSteamAppId(game)||'')},nameEdits:0,steamIdEdits:0 };
 }
 function draftName() { return $('#identity-name')?.value.trim() || ''; }
 function draftSteamId() { return $('#identity-steam-id')?.value.trim() || ''; }
-function syncIdentityDraft() {
-  if (!editDraft?.game) return;
-  const game = editDraft.game;
-  const name = draftName();
-  const steamId = draftSteamId();
-  game.override = { ...(game.override || {}) };
-  if (name) game.override.name = name; else delete game.override.name;
-  if (isNativeSteamGame(game)) {
-    delete game.override.steamId;
-    delete game.override.igdbId;
-    delete game.override.idCleared;
-  } else if (steamId) { game.override.steamId = Number(steamId); delete game.override.igdbId; delete game.override.idCleared; }
-  else if (steamIdClearPending || game.override.idCleared === true) { delete game.override.steamId; game.override.idCleared = true; }
-  editDraft.identityDirty = true;
-  selectedActionGame = game;
+function syncIdentityDraft(field = '') {
+  if(!editDraft?.game)return;
+  if(field==='name')++editDraft.nameEdits;
+  if(field==='steamId')++editDraft.steamIdEdits;
+  const game=editDraft.game,name=draftName(),steamId=draftSteamId(),baseline=editDraft.identityBaseline;
+  const nameChanged=name!==baseline.name||editDraft.nameEdits>0;
+  const idChanged=steamId!==baseline.steamId||editDraft.steamIdEdits>0;
+  game.override={...(game.override||{})};
+  // Displayed defaults are not a manual override. A real input/candidate
+  // action can still explicitly accept exactly the displayed value.
+  if(nameChanged){if(name)game.override.name=name;else delete game.override.name;}
+  if(isNativeSteamGame(game)){
+    delete game.override.steamId;delete game.override.igdbId;delete game.override.idCleared;
+  }else if(steamId&&idChanged){game.override.steamId=Number(steamId);delete game.override.igdbId;delete game.override.idCleared;}
+  else if(!steamId&&(steamIdClearPending||game.override.idCleared===true)){delete game.override.steamId;game.override.idCleared=true;}
+  editDraft.identityDirty=nameChanged||idChanged||steamIdClearPending;
+  selectedActionGame=game;
 }
 function renderEditDraft(game = selectedActionGame) {
   if (!game) return;
@@ -2005,21 +2250,27 @@ function renderEditDraft(game = selectedActionGame) {
   $('#edit-status').className = `badge ${tone}`; $('#edit-status').textContent = label;
   setBucketOptions(editDraft?.bucket || manualBucket(game));
   renderArtworkDraft();
+  renderEditorOperationState();
+}
+function cancelEditReturnFocus(){
+  if(editReturnFocusFrame)cancelAnimationFrame(editReturnFocusFrame);
+  editReturnFocusFrame=0;
 }
 function restoreEditReturnFocus(directory) {
+  cancelEditReturnFocus();
   if (!directory || $('#library-view')?.classList.contains('hidden')) return false;
+  currentCardDirectory=directory;libraryFocusMemory={type:'card',directory};
+  if(!libraryRenderAllowed())return false;
   const card = libraryCards().find(item => String(item.dataset.directory || '').toLocaleLowerCase() === directory);
   if (!card) return false;
-  currentCardDirectory = directory;
-  libraryCards().forEach(item => item.classList.toggle('current-card', item === card));
-  requestAnimationFrame(() => {
-    if ($('#edit-modal')?.classList.contains('hidden') && !libraryModalOpen()) {
+  const highlight=target=>libraryCards().forEach(item=>{const active=item===target;if(item.classList.contains('current-card')!==active)item.classList.toggle('current-card',active);});
+  highlight(card);
+  const epoch=silentRefreshEpoch;
+  editReturnFocusFrame=requestAnimationFrame(() => {
+    editReturnFocusFrame=0;
+    if (libraryRenderAllowed()&&epoch===silentRefreshEpoch&&currentCardDirectory===directory&&$('#edit-modal')?.classList.contains('hidden')&&!libraryModalOpen()) {
       const latest = libraryCards().find(item => String(item.dataset.directory || '').toLocaleLowerCase() === directory);
-      if (latest) {
-        currentCardDirectory = directory;
-        libraryCards().forEach(item => item.classList.toggle('current-card', item === latest));
-        focusLibraryCard(latest);
-      }
+      if (latest) {highlight(latest);focusLibraryCard(latest);}
     }
   });
   return true;
@@ -2034,33 +2285,45 @@ function focusEditModal() {
 }
 function refreshNativeArtworkForEdit(game) {
   if (!isNativeSteamGame(game) || !game.primaryExecutable) return;
-  const executable = normalizedUiPath(game.primaryExecutable);
-  invoke('refreshNativeArtwork', { executable: game.primaryExecutable }).then(result => {
-    if (!result) return;
-    snapshot = result;
-    renderEntry();
-    const refreshed = mergedGames().find(item => normalizedUiPath(item.primaryExecutable) === executable);
-    if (!refreshed || normalizedUiPath(selectedActionGame?.primaryExecutable || '') !== executable) {
-      if (!$('#library-view').classList.contains('hidden')) renderLibrary();
-      return;
-    }
-    selectedActionGame = refreshed;
-    editDraft = draftFor(refreshed);
-    artworkDraft = artworkDraftFromGame(refreshed);
-    artworkPageBase = {
-      cover: artworkDraft.cover ? { ...artworkDraft.cover } : null,
-      long: artworkDraft.long ? { ...artworkDraft.long } : null,
-      wallpaper: artworkDraft.wallpaper ? { ...artworkDraft.wallpaper } : null
+  const owner={epoch:editPresentationEpoch,key:keyFor(game),executable:normalizedUiPath(game.primaryExecutable),appId:formalSteamAppId(game)};
+  nativeArtworkRefreshOwner=owner;
+  const current=()=>nativeArtworkRefreshOwner===owner&&owner.epoch===editPresentationEpoch&&selectedActionGame&&keyFor(selectedActionGame)===owner.key&&normalizedUiPath(selectedActionGame.primaryExecutable)===owner.executable;
+  return invoke('refreshNativeArtwork', { executable: game.primaryExecutable }).then(result => {
+    if(!current()||normalizedUiPath(result?.dataRoot||'')!==normalizedUiPath(snapshot?.dataRoot||''))return;
+    const belongs=item=>{
+      if(normalizedUiPath(item.primaryExecutable)!==owner.executable)return false;
+      if(typeof item.gameDirectory==='string'&&item.gameDirectory&&keyFor(item)!==owner.key)return false;
+      const appId=String(item.nativeSteamAppId||item.steamStoreAppId||item.storefrontAppId||item.appId||'');
+      return !owner.appId||!appId||appId===owner.appId;
     };
-    renderEditDraft(refreshed);
+    const refreshed=Array.isArray(result?.steamPlan?.items)?result.steamPlan.items.find(belongs):null;
+    if(!refreshed)return;
+    // This reply owns native artwork only. Never replace a newer whole model,
+    // media preference or unsaved editor fields with its older snapshot.
+    const previews=isWorkspaceRecord(refreshed.artworkPreview)?structuredClone(refreshed.artworkPreview):{};
+    const items=(snapshot.steamPlan?.items||[]).map(item=>belongs(item)?{...item,artworkPreview:previews}:item);
+    snapshot={...snapshot,steamPlan:{...snapshot.steamPlan,items}};
+    selectedActionGame.steam={...selectedActionGame.steam,artworkPreview:previews};
+    if(editDraft?.original)editDraft.original.steam={...editDraft.original.steam,artworkPreview:previews};
+    const inherited=artworkDraftFromGame(selectedActionGame);
+    for(const type of ['cover','long','wallpaper'])if(!artworkDraft.dirty[type]&&!editDraft?.artworkChanged?.[type]){
+      artworkDraft[type]=inherited[type];artworkPageBase[type]=inherited[type]?{...inherited[type]}:null;
+      // Native cache files can be overwritten at an unchanged URL. A direct
+      // refresh invalidates inherited image presentation, never a shared video.
+      const shared=type==='wallpaper'&&(sharedWallpaperMode()==='dynamic'||selectedActionGame.gameMedia?.staticPreviewUrl&&(!inherited[type]?.asset||selectedActionGame.mediaOnly));
+      if(inherited[type]?.state==='inherit'&&!shared){const target=document.getElementById('artwork-'+type+'-preview');if(target)target._editorArtworkProjection=null;}
+    }
     renderArtworkDraft();
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
-  }).catch(error => showError(error, libraryNotice));
+    if(libraryRenderAllowed())renderLibrary();else silentRenderPending=true;
+  }).catch(error=>{if(current())showError(error,libraryNotice);})
+    .finally(()=>{if(nativeArtworkRefreshOwner===owner)nativeArtworkRefreshOwner=null;});
 }
 function openEdit(game) {
   if (!game) return;
-  if ($('#edit-modal').classList.contains('hidden') || keyFor(selectedActionGame || {}) !== keyFor(game)) sharedWallpaperPreviewChoice = null;
-  void prepareSharedWallpaperPreview(game);
+  cancelEditReturnFocus();
+  if ($('#edit-modal').classList.contains('hidden') || keyFor(selectedActionGame || {}) !== keyFor(game) || normalizedUiPath(selectedActionGame?.primaryExecutable||'')!==normalizedUiPath(game.primaryExecutable||'')) {
+    ++editPresentationEpoch;nativeArtworkRefreshOwner=null;editorArtworkRenderPending=false;sharedWallpaperPreviewChoice=null;
+  }
     try {
     const previousExecutable = normalizedUiPath(selectedActionGame?.primaryExecutable || '');
     const nextExecutable = normalizedUiPath(game.primaryExecutable || '');
@@ -2074,7 +2337,7 @@ function openEdit(game) {
     steamIdClearPending = selectedActionGame.override?.idCleared === true;
     renderEditDraft(selectedActionGame);
     const override = selectedActionGame.override || {};
-    $('#identity-name').value = override.name || selectedActionGame.steam?.suggestedName || selectedActionGame.primaryProductName || selectedActionGame.directoryName || '';
+    $('#identity-name').value = editorIdentityName(selectedActionGame);
     $('#identity-steam-id').value = formalSteamAppId(selectedActionGame);
     const nativeSteam = isNativeSteamGame(selectedActionGame);
     configureControllerTextInput($('#identity-name'));
@@ -2093,9 +2356,10 @@ function openEdit(game) {
     refreshWorkspaceDropdown($('#edit-bucket-select'));
     const primaryDropdown = workspaceDropdownForSelect(select);
     primaryDropdown?.wrapper.classList.toggle('hidden', candidates.length <= 1);
-    $('#edit-add-to-steam').disabled = Boolean(game.mediaOnly) || nativeSteam || !game.primaryExecutable || !keyFor(game);
+    renderEditorOperationState();
     $('#identity-name').disabled=Boolean(game.mediaOnly);$('#identity-steam-id').disabled=Boolean(game.mediaOnly)||nativeSteam;$('#identity-steam-id-clear').disabled=Boolean(game.mediaOnly)||nativeSteam;
     $('#edit-modal').classList.remove('hidden'); requestAnimationFrame(focusEditModal);
+    void prepareSharedWallpaperPreview(selectedActionGame);
     if(!selectedActionGame.mediaOnly)startArtworkPrefetch(selectedActionGame);
     if (nativeSteam) refreshNativeArtworkForEdit(selectedActionGame);
   } catch (error) {
@@ -2142,17 +2406,18 @@ function renderSearchCandidates(game, candidatesOverride = null, queryOverride =
   confirm.textContent = '选择名称和 ID';
   confirm.addEventListener('click', () => identifyCandidate(candidates[Number(select.value) || 0]));
   list.append(select, confirm); upgradeWorkspaceSelect(select);
-  requestAnimationFrame(() => workspaceDropdownTriggerForSelect(select)?.focus());
+  requestIdentitySearchFocus(workspaceDropdownTriggerForSelect(select));
 }
 async function identifyCandidate(candidate) {
   if (!selectedActionGame || !candidate?.name) return;
   const game = selectedActionGame;
-  $('#identity-search-modal').classList.add('hidden');
-  stopIdentitySearchLoading();
+  retireIdentitySearch();
   identitySearchManualCandidate = null;
   searchReturnToEdit = false;
   game.override = { ...(game.override || {}) };
   game.override.name = candidate.name;
+  ++editDraft.nameEdits;
+  if(candidate.steamAppId)++editDraft.steamIdEdits;
   if (candidate.igdbId && !candidate.steamAppId) {
     // Keep IGDB visible as a lower-priority search result, but never persist
     // it as the game's identity. Only a Steam AppID may move the card toward
@@ -2186,16 +2451,15 @@ async function identifyCandidate(candidate) {
   showNotice('名称和 ID 已暂存，请点击“保存内容”后写入配置。', false, libraryNotice);
 }
 function identityEventMatches(message) {
-  const executable = normalizedUiPath(message?.executable || '');
-  const expectedExecutable = normalizedUiPath(selectedActionGame?.primaryExecutable || '');
-  const expectedQuery = String($('#identity-search-query')?.textContent || '').trim();
-  if (expectedExecutable && executable !== expectedExecutable) return false;
-  if (expectedQuery && message?.query && String(message.query) !== expectedQuery) return false;
-  if (message?.jobId) {
-    if (identitySearchJobId && message.jobId !== identitySearchJobId) return false;
-    identitySearchJobId = message.jobId;
+  const owner=identitySearchOwner;
+  if(!identitySearchOwnerCurrent(owner)||owner.terminal||normalizedUiPath(message?.executable)!==owner.executable||String(message?.query||'').trim()!==owner.query||typeof message?.jobId!=='string'||!message.jobId)return false;
+  if(!owner.acknowledged){
+    // The native generation is monotonic for this EXE. Retain one newest
+    // terminal event until the request receipt binds its exact job ID.
+    if(message.event!=='identity-search-started'&&(!owner.earlyTerminal||Number(message.generation||0)>=Number(owner.earlyTerminal.generation||0)))owner.earlyTerminal=message;
+    return false;
   }
-  return true;
+  return message.jobId===owner.jobId&&(!message.generation||!owner.generation||Number(message.generation)===owner.generation);
 }
 function manualIdentifyEventMatches(message) {
   const executable = normalizedUiPath(message?.executable || '');
@@ -2208,38 +2472,32 @@ function manualIdentifyEventMatches(message) {
 }
 async function searchGame() {
   if (!selectedActionGame?.primaryExecutable) return showNotice('当前项目还没有可验证的主程序。', true, libraryNotice);
-  const game = selectedActionGame;
-  const steamId = $('#identity-steam-id').value.trim();
-  const name = $('#identity-name').value.trim() || artworkSearchQuery(game);
-  if (steamId && !/^[1-9]\d*$/.test(steamId)) return showNotice('Steam AppID 必须是正整数。', true, libraryNotice);
-  const token = ++identitySearchToken;
-  identitySearchInFlight = true; identitySearchCancelled = false; searchReturnToEdit = true;
-  identitySearchExecutable = game.primaryExecutable; identitySearchQuery = name;
-  identitySearchManualCandidate = steamId ? {
-    name, steamAppId: Number(steamId), provider: '当前输入', manualSelection: true, score: 1, year: 0
-  } : null;
-  $('#identity-search-query').textContent = name;
-  $('#identity-search-summary').textContent = `名称：${name} · 正在后台搜索候选，不会阻塞编辑页面`;
-  $('#identity-search-list').replaceChildren(); startIdentitySearchLoading();
-  $('#identity-search-modal').classList.remove('hidden');
-  requestAnimationFrame(() => $('#identity-search-cancel')?.focus({ preventScroll: true }));
-  try {
-    const result = await invoke('searchIdentity', { executable: game.primaryExecutable, query: name });
-    if (token !== identitySearchToken || identitySearchCancelled) return;
-    const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
-    if (candidates.length || identitySearchManualCandidate) {
-      renderSearchCandidates({ ...game, directoryName: name, _searchQuery: name }, candidates, name);
-      showNotice(result.cached ? '已显示缓存候选，网络结果会继续更新。' : '自动识别已在后台搜索，请选择名称和 ID。', false, libraryNotice);
-    }
-    if (result?.pending) return;
-    identitySearchInFlight = false; searchReturnToEdit = false;
-    if (!candidates.length && !identitySearchManualCandidate) renderSearchCandidates({ ...game, directoryName: name, _searchQuery: name }, [], name);
-  } catch (error) {
-    identitySearchInFlight = false; stopIdentitySearchLoading(); searchReturnToEdit = false;
-    const text = error?.message || String(error);
-    if (text.includes('TASK_CANCELLED') || text.includes('ERROR_CANCELLED') || identitySearchCancelled) {
-      if (!identitySearchCancelled) { $('#identity-search-modal').classList.add('hidden'); openEdit(game); showNotice('已取消自动识别，返回当前游戏。', false, libraryNotice); }
-    } else { $('#identity-search-list').innerHTML = '<div class="identity-search-empty">自动识别暂未完成，可稍后再次点击自动识别。</div>'; showError(error, libraryNotice); }
+  const game=selectedActionGame,steamId=$('#identity-steam-id').value.trim(),name=$('#identity-name').value.trim()||artworkSearchQuery(game);
+  if(steamId&&!/^[1-9]\d*$/.test(steamId))return showNotice('Steam AppID 必须是正整数。',true,libraryNotice);
+  const owner={token:++identitySearchToken,epoch:silentRefreshEpoch,key:keyFor(game),executable:normalizedUiPath(game.primaryExecutable),query:name,acknowledged:false,jobId:'',generation:0,terminal:false,presentation:null,earlyTerminal:null,focusTarget:null};
+  identitySearchOwner=owner;identitySearchInFlight=true;identitySearchCancelled=false;searchReturnToEdit=true;identitySearchExecutable=game.primaryExecutable;identitySearchQuery=name;
+  identitySearchManualCandidate=steamId?{name,steamAppId:Number(steamId),provider:'当前输入',manualSelection:true,score:1,year:0}:null;
+  $('#identity-search-query').textContent=name;$('#identity-search-summary').textContent=`名称：${name} · 正在后台搜索候选，不会阻塞编辑页面`;
+  $('#identity-search-list').replaceChildren();$('#identity-search-modal').classList.remove('hidden');startIdentitySearchLoading();requestIdentitySearchFocus($('#identity-search-cancel'),owner);
+  try{
+    const result=await invoke('searchIdentity',{executable:game.primaryExecutable,query:name},8000);
+    if(!identitySearchOwnerCurrent(owner))return;
+    owner.acknowledged=true;owner.jobId=typeof result?.jobId==='string'?result.jobId:'';owner.generation=Number(result?.generation||0);
+    if(result?.pending&&!owner.jobId)throw new Error('搜索任务未返回有效回执，请重新搜索。');
+    identitySearchJobId=owner.jobId;
+    if(result?.pending)owner.deadline=window.setTimeout(()=>{
+      if(!identitySearchOwnerCurrent(owner)||owner.terminal)return;
+      finishIdentitySearch(owner,{kind:'failed',error:new Error('搜索候选等待超时，请重新搜索。')});invoke('cancelIdentitySearch',{executable:owner.executable}).catch(()=>{});
+    },95000);
+    const early=owner.earlyTerminal;owner.earlyTerminal=null;
+    if(early&&early.jobId===owner.jobId&&(!early.generation||!owner.generation||Number(early.generation)===owner.generation)){consumeIdentitySearchEvent(early);return;}
+    const candidates=Array.isArray(result?.candidates)?result.candidates:[];
+    if(!result?.pending){finishIdentitySearch(owner,{kind:'candidates',candidates});return;}
+    if(candidates.length||identitySearchManualCandidate){owner.presentation={kind:'candidates',candidates,notice:result.cached?'已显示缓存候选，网络结果会继续更新。':'自动识别已在后台搜索，请选择名称和 ID。'};presentIdentitySearch(owner);}
+  }catch(error){
+    if(!identitySearchOwnerCurrent(owner)||owner.terminal)return;
+    const text=error?.message||String(error);finishIdentitySearch(owner,{kind:'failed',cancelled:text.includes('TASK_CANCELLED')||text.includes('ERROR_CANCELLED'),error});
+    if(!owner.jobId)invoke('cancelIdentitySearch',{executable:owner.executable}).catch(()=>{});
   }
 }
 function artworkOverride(game) {
@@ -2288,20 +2546,21 @@ function artworkSlotIsSteamPreview(type) {
   return artworkCandidateIsSteam({ provider: entry.provider, url: raw }) || Boolean(formalSteamAppId(selectedActionGame));
 }
 async function downloadIgdbArtworkFallback(target, label, type) {
-  const game = selectedActionGame;
-  const token = ++artworkTaskToken;
+  const game=selectedActionGame,slot=artworkDraft[type],epoch=editPresentationEpoch,key=keyFor(selectedActionGame),executable=normalizedUiPath(selectedActionGame.primaryExecutable||'');
+  const token = ++artworkTaskToken;target._artworkFallbackToken=token;
+  const current=()=>token===artworkTaskToken&&epoch===editPresentationEpoch&&selectedActionGame===game&&keyFor(selectedActionGame)===key&&normalizedUiPath(selectedActionGame.primaryExecutable||'')===executable&&artworkDraft[type]===slot;
   artworkTaskInFlight = true;
   try {
     const requestType = artworkSearchTypeForSlot(type);
-    const result = await ensureArtworkSearch(game, requestType);
-    if (token !== artworkTaskToken || selectedActionGame !== game) return;
+    const result = await ensureArtworkSearch(game, requestType, { automatic: true });
+    if(!current())return;
     const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
     const fallback = candidates.find(candidate => String(candidate?.provider || '').toLocaleLowerCase() === 'playnite-igdb' && candidate?.url) ||
       candidates.find(candidate => String(candidate?.provider || '').toLocaleLowerCase() === 'baidu-image' && candidate?.url);
     if (!fallback) throw new Error('没有可用的 IGDB 备用图片');
     downloadingCandidateUrl = fallback.url;
     const downloaded = await invoke('downloadArtworkCandidate', { executable: game.primaryExecutable, type: requestType, url: fallback.url });
-    if (token !== artworkTaskToken || selectedActionGame !== game) return;
+    if(!current())return;
     artworkDraft[type] = { state: 'set', asset: {
       path: downloaded.path, file: downloaded.path, width: downloaded.width, height: downloaded.height,
       provider: fallback.provider || 'playnite-igdb', source: 'automatic-fallback'
@@ -2310,48 +2569,74 @@ async function downloadIgdbArtworkFallback(target, label, type) {
     renderArtworkDraft();
     showNotice(`${label}的 Steam 图片预览失败，已自动切换为 ${fallback.provider === 'playnite-igdb' ? 'IGDB' : '备用'} 图片；点击“保存内容”应用。`, false, libraryNotice);
   } catch (error) {
-    if (token === artworkTaskToken) {
-      target.innerHTML = `<span class="artwork-empty">${escapeHtml(label)}加载失败，可重新搜索或指定图片</span>`;
+    if(current()){
+      slot.previewError=label+'加载失败，可重新搜索或指定图片';renderArtworkDraft();
       if (!String(error?.message || error).includes('CANCELLED')) showNotice(`${label}的 Steam 图片不可用，IGDB 备用图片也未获取成功。`, true, libraryNotice);
     }
   } finally {
-    if (token === artworkTaskToken) artworkTaskInFlight = false;
-    downloadingCandidateUrl = '';
+    if(token===artworkTaskToken){
+      artworkTaskInFlight=false;downloadingCandidateUrl='';
+      if(target._artworkFallbackToken===token){
+        target._artworkFallbackToken=null;target._editorArtworkProjection=null;
+        if(epoch===editPresentationEpoch&&selectedActionGame&&keyFor(selectedActionGame)===key&&normalizedUiPath(selectedActionGame.primaryExecutable||'')===executable)renderArtworkDraft();
+      }
+    }
   }
 }
 function bindArtworkImageFallback(target, label, type) {
-  const image = target.querySelector('img');
-  if (!image) return;
-  image.addEventListener('error', () => {
-    if (artworkSlotIsSteamPreview(type)) {
-      target.innerHTML = `<span class="artwork-empty">${escapeHtml(label)}预览失败，正在切换 IGDB</span>`;
-      downloadIgdbArtworkFallback(target, label, type).catch(() => {});
-    } else {
-      target.innerHTML = `<span class="artwork-empty">${escapeHtml(label)}加载失败，可重新指定</span>`;
+  const image=target.querySelector('img');if(!image)return;
+  const epoch=editPresentationEpoch,key=keyFor(selectedActionGame||{}),executable=normalizedUiPath(selectedActionGame?.primaryExecutable||'');
+  const fail=()=>{
+    if(epoch!==editPresentationEpoch||!selectedActionGame||keyFor(selectedActionGame)!==key||normalizedUiPath(selectedActionGame.primaryExecutable||'')!==executable||!image.isConnected||target.querySelector('img')!==image)return;
+    if(!libraryRenderAllowed()){target._deferredArtworkError=fail;editorArtworkRenderPending=true;return;}
+    target._deferredArtworkError=null;
+    if(artworkSlotIsSteamPreview(type)){
+      target.innerHTML=`<span class="artwork-empty">${escapeHtml(label)}预览失败，正在切换 IGDB</span>`;
+      void downloadIgdbArtworkFallback(target,label,type);
+    }else{
+      artworkDraft[type].previewError=label+'加载失败，可重新指定';renderArtworkDraft();
     }
-  }, { once: true });
+  };
+  image.addEventListener('error',fail,{once:true});
+}
+function editorArtworkProjection(kind,value){
+  return JSON.stringify([editPresentationEpoch,keyFor(selectedActionGame||{}),normalizedUiPath(selectedActionGame?.primaryExecutable||''),kind,value]);
+}
+function replaceEditorArtworkMarkup(target,kind,markup,type){
+  const projection=editorArtworkProjection(kind,markup);
+  if(target._artworkFallbackToken!=null&&target._artworkFallbackToken!==artworkTaskToken)target._editorArtworkProjection=null;
+  if(target._editorArtworkProjection!==projection){
+    const video=target.querySelector('video');if(video){video.pause();video.removeAttribute('src');video.load();}
+    target._editorArtworkProjection=projection;target._deferredArtworkError=null;target._artworkFallbackToken=null;
+    target.innerHTML=markup;
+    if(type&&artworkDraft[type]?.state!=='deleted')bindArtworkImageFallback(target,artworkLabel(type),type);
+  }
+  const deferred=target._deferredArtworkError;
+  if(deferred&&libraryRenderAllowed()){target._deferredArtworkError=null;deferred();}
 }
 function artworkSlotMarkup(slot, type) {
   const label = artworkLabel(type);
   if (slot?.state === "deleted") return `<span class="artwork-empty artwork-deleted">${label}已删除，保存后不自动补回</span>`;
+  if(slot?.previewError)return `<span class="artwork-empty">${escapeHtml(slot.previewError)}</span>`;
   return artworkDropMarkup(slot?.asset || null, label);
 }
 function renderArtworkDraft() {
-  if (!selectedActionGame) return;
-  for (const type of ["cover", "long", "wallpaper"]) {
-    const target = $(`#artwork-${type}-preview`);
-    if (!target) {
-      reportUiError('artwork-preview-missing', new Error(`缺少素材预览节点：${type}`));
-      continue;
-    }
-    const slot = artworkDraft[type];
-    target.dataset.artworkType = type;
-    target.dataset.editRow = `artwork-${type}`;
-    target.setAttribute('aria-label', `${artworkLabel(type)}操作，按 A 打开`);
-    target.innerHTML = artworkSlotMarkup(slot, type);
-    if (slot?.state !== "deleted") bindArtworkImageFallback(target, artworkLabel(type), type);
+  if(!selectedActionGame)return;
+  if(!libraryRenderAllowed()){editorArtworkRenderPending=true;return;}
+  editorArtworkRenderPending=false;
+  for(const type of ['cover','long','wallpaper']){
+    const target=$(`#artwork-${type}-preview`);
+    if(!target){reportUiError('artwork-preview-missing',new Error(`缺少素材预览节点：${type}`));continue;}
+    if(target.dataset.artworkType!==type)target.dataset.artworkType=type;
+    if(target.dataset.editRow!==`artwork-${type}`)target.dataset.editRow=`artwork-${type}`;
+    const label=`${artworkLabel(type)}操作，按 A 打开`;if(target.getAttribute('aria-label')!==label)target.setAttribute('aria-label',label);
+    if(type!=='wallpaper')replaceEditorArtworkMarkup(target,'slot:'+type,artworkSlotMarkup(artworkDraft[type],type),type);
   }
   renderSharedWallpaperPreview();
+}
+function resumeEditorArtworkPresentation(){
+  if(editorArtworkRenderPending&&selectedActionGame&&!$('#edit-modal').classList.contains('hidden')&&libraryRenderAllowed())renderArtworkDraft();
+  syncSharedWallpaperPreviewActivity();
 }
 function openArtworkActionMenu(type) {
   if (!selectedActionGame) return false;
@@ -2406,39 +2691,112 @@ function artworkPrefetchEntryFresh(entry) {
   const completedAt = Number(entry.completedAt || 0);
   return Boolean(entry.result) && completedAt > 0 && Date.now() - completedAt <= ARTWORK_PREFETCH_TTL_MS;
 }
-function warmArtworkPreviewCache(result) {
-  const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
-  const urls = [...new Set(candidates.slice(0, ARTWORK_PREFETCH_MAX_PRELOADS)
-    .map(candidate => candidate?.previewUrl || candidate?.url)
-    .filter(url => typeof url === 'string' && /^https?:/i.test(url)))];
-  if (!urls.length) return;
-  const preload = () => {
-    for (const url of urls) {
-      const image = new Image();
-      image.decoding = 'async';
-      image.loading = 'eager';
-      image.src = url;
-    }
-  };
-  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(preload, { timeout: 1200 });
-  else window.setTimeout(preload, 0);
+function artworkPreviewWarmupCurrent(key,result){
+  return libraryRenderAllowed()&&selectedActionGame&&!$('#edit-modal').classList.contains('hidden')&&artworkPrefetchCache.get(key)?.result===result&&['cover','long','wallpaper'].some(slot=>artworkSearchCacheKey(selectedActionGame,artworkSearchTypeForSlot(slot))===key);
 }
-function ensureArtworkSearch(game, type) {
+function cancelArtworkPreviewWarmups(){
+  for(const task of artworkPreviewWarmups.values()){
+    if(task.idle&&typeof window.cancelIdleCallback==='function')window.cancelIdleCallback(task.handle);else clearTimeout(task.handle);
+  }
+  artworkPreviewWarmups.clear();
+}
+function warmArtworkPreviewCache(result,key){
+  const entry=artworkPrefetchCache.get(key);
+  if(!entry||entry.warmed||artworkPreviewWarmups.has(key)||!artworkPreviewWarmupCurrent(key,result))return;
+  const candidates=Array.isArray(result?.candidates)?result.candidates:[],urls=[...new Set(candidates.slice(0,ARTWORK_PREFETCH_MAX_PRELOADS).map(candidate=>candidate?.previewUrl||candidate?.url).filter(url=>typeof url==='string'&&/^https?:/i.test(url)))];
+  if(!urls.length){entry.warmed=true;return;}
+  const task={handle:0,idle:typeof window.requestIdleCallback==='function'};
+  const preload=()=>{
+    if(artworkPreviewWarmups.get(key)!==task)return;artworkPreviewWarmups.delete(key);
+    if(!artworkPreviewWarmupCurrent(key,result)||artworkPrefetchCache.get(key)!==entry)return;
+    entry.warmed=true;for(const url of urls){const image=new Image();image.decoding='async';image.loading='eager';image.src=url;}
+  };
+  artworkPreviewWarmups.set(key,task);
+  task.handle=task.idle?window.requestIdleCallback(preload,{timeout:1200}):window.setTimeout(preload,0);
+}
+function resumeArtworkPreviewWarmups(){
+  if(!selectedActionGame||$('#edit-modal').classList.contains('hidden'))return;
+  for(const slot of ['cover','long','wallpaper']){const key=artworkSearchCacheKey(selectedActionGame,artworkSearchTypeForSlot(slot)),entry=artworkPrefetchCache.get(key);if(artworkPrefetchEntryFresh(entry)&&entry.result)warmArtworkPreviewCache(entry.result,key);}
+}
+function discardArtworkPrefetchEntry(key) {
+  const task = artworkPreviewWarmups.get(key);
+  if (task) {
+    if (task.idle && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(task.handle);
+    else clearTimeout(task.handle);
+    artworkPreviewWarmups.delete(key);
+  }
+  artworkPrefetchCache.delete(key);
+}
+function touchArtworkPrefetchEntry(key, entry) {
+  artworkPrefetchCache.delete(key);
+  artworkPrefetchCache.set(key, entry);
+}
+function pruneArtworkPrefetchCache() {
+  const now = Date.now();
+  let settled = 0;
+  for (const [key, entry] of artworkPrefetchCache) {
+    if (entry.pending) continue;
+    if (now - entry.completedAt > ARTWORK_PREFETCH_TTL_MS) discardArtworkPrefetchEntry(key);
+    else settled++;
+  }
+  if (settled <= ARTWORK_PREFETCH_MAX_SETTLED) return;
+  const protectedKeys = new Set(selectedActionGame && !$('#edit-modal')?.classList.contains('hidden')
+    ? ['cover', 'long', 'wallpaper'].map(slot => artworkSearchCacheKey(selectedActionGame, artworkSearchTypeForSlot(slot))) : []);
+  // Pending promises retain their waiters and same-key deduplication until settlement.
+  for (const [key, entry] of artworkPrefetchCache) {
+    if (settled <= ARTWORK_PREFETCH_MAX_SETTLED) break;
+    if (entry.pending || protectedKeys.has(key)) continue;
+    discardArtworkPrefetchEntry(key);
+    settled--;
+  }
+}
+function artworkPrefetchBackoffActive(entry) {
+  return Boolean(entry?.error && Date.now() < entry.retryAt);
+}
+function artworkWorkerKey(request) {
+  return `${normalizedUiPath(request.executable) || 'query:' + String(request.query || '')}|${request.type || 'cover'}`;
+}
+function retireArtworkSearchReads(request = null) {
+  const workerKey = request ? artworkWorkerKey(request) : null;
+  // Native jobs replace reads by EXE/type, and cancelArtwork cancels all artwork jobs.
+  // Retire only read receipts; accepted downloads, saves and Steam commits keep their owners.
+  for (const [key, entry] of artworkPrefetchCache) {
+    if (entry.pending && (workerKey === null || entry.workerKey === workerKey)) discardArtworkPrefetchEntry(key);
+  }
+  for (const [id, item] of pending) {
+    if (item.command !== 'searchArtwork' || (workerKey !== null && item.artworkWorkerKey !== workerKey)) continue;
+    pending.delete(id);
+    if (item.timer) clearTimeout(item.timer);
+    item.reject(new Error('ERROR_CANCELLED: 素材任务已取消或被新请求替代'));
+  }
+}
+function ensureArtworkSearch(game, type, { automatic = false } = {}) {
+  pruneArtworkPrefetchCache();
   const key = artworkSearchCacheKey(game, type);
   const existing = artworkPrefetchCache.get(key);
   if (artworkPrefetchEntryFresh(existing)) {
+    touchArtworkPrefetchEntry(key, existing);
+    if (existing.result) warmArtworkPreviewCache(existing.result, key);
     return existing.pending || Promise.resolve(existing.result);
   }
-  if (existing) artworkPrefetchCache.delete(key);
-  const entry = { key, startedAt: Date.now(), completedAt: 0, result: null, error: null, pending: null };
-  const request = invoke('searchArtwork', artworkSearchRequest(game, type));
+  if (automatic && artworkPrefetchBackoffActive(existing)) return Promise.reject(new Error(existing.error));
+  if (existing) discardArtworkPrefetchEntry(key);
+  const searchRequest = artworkSearchRequest(game, type);
+  retireArtworkSearchReads(searchRequest);
+  const entry = { key, workerKey: artworkWorkerKey(searchRequest), startedAt: Date.now(), completedAt: 0, result: null, error: null, pending: null,
+    failureCount: existing?.failureCount || 0, retryAt: 0 };
+  // The native read worker has a 180s budget. Release a lost IPC receipt without replaying it.
+  const request = invoke('searchArtwork', searchRequest, ARTWORK_SEARCH_TIMEOUT_MS);
   entry.pending = request.then(result => {
     if (artworkPrefetchCache.get(key) === entry) {
       entry.result = result;
       entry.completedAt = Date.now();
       entry.pending = null;
       entry.error = null;
-      warmArtworkPreviewCache(result);
+      entry.failureCount = 0;
+      touchArtworkPrefetchEntry(key, entry);
+      pruneArtworkPrefetchCache();
+      warmArtworkPreviewCache(result, key);
     }
     return result;
   }).catch(error => {
@@ -2446,6 +2804,12 @@ function ensureArtworkSearch(game, type) {
       entry.pending = null;
       entry.completedAt = Date.now();
       entry.error = String(error?.message || error || '素材搜索失败');
+      const cancelled = /CANCELLED|取消/i.test(entry.error);
+      entry.failureCount = cancelled ? 0 : Math.min(5, entry.failureCount + 1);
+      entry.retryAt = cancelled ? 0 : entry.completedAt + Math.min(ARTWORK_PREFETCH_TTL_MS,
+        ARTWORK_PREFETCH_RETRY_BASE_MS * 2 ** (entry.failureCount - 1));
+      touchArtworkPrefetchEntry(key, entry);
+      pruneArtworkPrefetchCache();
     }
     throw error;
   });
@@ -2454,13 +2818,19 @@ function ensureArtworkSearch(game, type) {
 }
 function startArtworkPrefetch(game) {
   if (!game) return;
+  pruneArtworkPrefetchCache();
   for (const slot of ['cover', 'long', 'wallpaper']) {
     const type = artworkSearchTypeForSlot(slot);
     const key = artworkSearchCacheKey(game, type);
     const cached = artworkPrefetchCache.get(key);
-    if (artworkPrefetchEntryFresh(cached)) continue;
+    if (artworkPrefetchEntryFresh(cached)) {
+      touchArtworkPrefetchEntry(key, cached);
+      if (cached.result) warmArtworkPreviewCache(cached.result, key);
+      continue;
+    }
+    if (artworkPrefetchBackoffActive(cached)) continue;
     artworkPrefetchPendingCount++;
-    ensureArtworkSearch(game, type).catch(() => {}).finally(() => {
+    ensureArtworkSearch(game, type, { automatic: true }).catch(() => {}).finally(() => {
       artworkPrefetchPendingCount = Math.max(0, artworkPrefetchPendingCount - 1);
     });
   }
@@ -2516,11 +2886,32 @@ function artworkCandidateCard(candidate) {
     .find(item => item.dataset.candidateKey === key) || null;
 }
 function artworkSearchContext() {
-  return { token: artworkTaskToken, executable: selectedActionGame?.primaryExecutable || '', slot: artworkSearchSlot, type: artworkSearchType };
+  return { token: artworkTaskToken, epoch:silentRefreshEpoch, executable: selectedActionGame?.primaryExecutable || '', slot: artworkSearchSlot, type: artworkSearchType };
 }
 function artworkSearchContextCurrent(context) {
-  return Boolean(context && context.token === artworkTaskToken && context.executable === (selectedActionGame?.primaryExecutable || '') &&
-    context.slot === artworkSearchSlot && context.type === artworkSearchType && !$("#artwork-search-modal")?.classList.contains("hidden"));
+  const modal=$('#artwork-search-modal');
+  return Boolean(modal?.isConnected && context && !silentRefreshClosed && context.epoch===silentRefreshEpoch && context.token === artworkTaskToken && context.executable === (selectedActionGame?.primaryExecutable || '') &&
+    context.slot === artworkSearchSlot && context.type === artworkSearchType && !modal.classList.contains("hidden"));
+}
+let artworkSearchPresentationOwner=null,artworkSearchFocusFrame=0;
+function cancelArtworkSearchFocus(){if(artworkSearchFocusFrame)cancelAnimationFrame(artworkSearchFocusFrame);artworkSearchFocusFrame=0;}
+function retireArtworkSearchPresentation(hide=false){
+  artworkSearchPresentationOwner=null;cancelArtworkSearchFocus();
+  if(hide){artworkCandidates=[];$('#artwork-search-modal')?.classList.add('hidden');}
+}
+function artworkSearchPresentationCurrent(owner){return Boolean(owner&&owner===artworkSearchPresentationOwner&&!silentRefreshClosed&&owner.epoch===silentRefreshEpoch&&owner.current());}
+function beginArtworkSearchPresentation(current){retireArtworkSearchPresentation();return artworkSearchPresentationOwner={epoch:silentRefreshEpoch,current,render:null,focusTarget:null,onError:null};}
+function presentArtworkSearch(owner=artworkSearchPresentationOwner){
+  if(!artworkSearchPresentationCurrent(owner)||!libraryRenderAllowed()||!owner.render)return;
+  const render=owner.render;owner.render=null;
+  try{render();}catch(error){const fallback=owner.onError;owner.onError=null;if(fallback)fallback(error);else showError(error,libraryNotice);}
+}
+function queueArtworkSearchPresentation(owner,render){if(!artworkSearchPresentationCurrent(owner))return false;owner.render=render;presentArtworkSearch(owner);return true;}
+function requestArtworkSearchFocus(target,owner=artworkSearchPresentationOwner,context=artworkSearchContext()){
+  if(!target)return;if(owner)owner.focusTarget=target;cancelArtworkSearchFocus();
+  const current=()=>owner?artworkSearchPresentationCurrent(owner)&&owner.focusTarget===target:artworkSearchContextCurrent(context);
+  if(!current()||!libraryRenderAllowed())return;
+  artworkSearchFocusFrame=requestAnimationFrame(()=>{artworkSearchFocusFrame=0;if(!current()||!libraryRenderAllowed()||activeWorkspaceModal()!==$('#artwork-search-modal')||!target.isConnected)return;if(owner)owner.focusTarget=null;target.focus({preventScroll:true});});
 }
 async function fallbackArtworkCandidate(candidate, card, reason = 'preview', context = artworkSearchContext()) {
   // Loading a thumbnail is not user consent to download or apply another image.
@@ -2548,7 +2939,7 @@ async function fallbackArtworkCandidate(candidate, card, reason = 'preview', con
   showNotice(`${artworkCandidateIsSteam(candidate) ? 'Steam' : '当前'}图片${reason === 'preview' ? '预览' : '下载'}失败，已切换到${label}候选，请点击选择。`, false, libraryNotice);
   return true;
 }
-function renderArtworkCandidates(result) {
+function renderArtworkCandidates(result,owner=artworkSearchPresentationOwner) {
   const context = artworkSearchContext();
   artworkCandidates = Array.isArray(result?.candidates) ? result.candidates.filter(candidate => candidate?.url || candidate?.previewUrl) : [];
   artworkUnavailableUrls.clear();
@@ -2561,13 +2952,13 @@ function renderArtworkCandidates(result) {
     card.dataset.candidateKey = artworkCandidateKey(candidate);
     const dimensions = `${Number(candidate.width || 0)}×${Number(candidate.height || 0)}`;
     card.innerHTML = `<span class="artwork-candidate-preview"><img src="${escapeHtml(candidate.previewUrl || candidate.url)}" alt="候选图片" loading="lazy"></span><strong class="artwork-candidate-title">${escapeHtml(candidate.title || artworkCandidateFallbackTitle(candidate))}</strong><span class="artwork-candidate-meta"><span>${escapeHtml(artworkProviderLabel(candidate.provider))}</span><span>${dimensions}</span><span>${candidate.preferred ? "优选" : "合格"}</span></span>`;
-    card.addEventListener("click", () => applyArtworkCandidate(candidate, card));
+    card.addEventListener("click", () => applyArtworkCandidate(candidate, card, context));
      card.addEventListener("keydown", event => {
        if (event.target !== card) return;
        if (event.key === "Enter" || event.key === " ") {
          event.preventDefault();
          event.stopPropagation();
-         applyArtworkCandidate(candidate, card);
+         applyArtworkCandidate(candidate, card, context);
          return;
        }
        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
@@ -2589,10 +2980,13 @@ function renderArtworkCandidates(result) {
      image?.addEventListener("error", () => { fallbackArtworkCandidate(candidate, card, 'preview', context).catch(error => { if (artworkSearchContextCurrent(context)) showError(error, libraryNotice); }); }, { once: true });
     list.appendChild(card);
   }
-  requestAnimationFrame(() => list.querySelector(".artwork-candidate")?.focus());
+  requestArtworkSearchFocus(list.querySelector(".artwork-candidate"),owner,context);
 }
-async function applyArtworkCandidate(candidate, card) {
-  if (!selectedActionGame || !candidate?.url || downloadingCandidateUrl || artworkUnavailableUrls.has(artworkCandidateKey(candidate))) return false;
+async function applyArtworkCandidate(candidate, card, galleryContext) {
+  if (!selectedActionGame || !candidate?.url || downloadingCandidateUrl || !card?.isConnected ||
+    !artworkCandidates.includes(candidate) || artworkUnavailableUrls.has(artworkCandidateKey(candidate))) return false;
+  // A failed download advances the write token; other cards in this same gallery remain selectable.
+  if (!galleryContext || !artworkSearchContextCurrent({ ...galleryContext, token: artworkTaskToken })) return false;
   const context = artworkSearchContext();
   const token = ++artworkTaskToken;
   context.token = token;
@@ -2633,11 +3027,12 @@ async function searchArtwork(type) {
   $("#artwork-search-list").innerHTML = '<div class="search-loading"><strong>正在获取候选图片</strong><span>搜索完成后可直接选择素材</span></div>';
   $("#artwork-search-empty").classList.add("hidden");
   $("#artwork-search-modal").classList.remove("hidden");
-  try { const result = await ensureArtworkSearch(selectedActionGame, artworkSearchType); if (token === artworkTaskToken) renderArtworkCandidates(result); }
-  catch (error) { if (token === artworkTaskToken && !String(error?.message || error).includes("CANCELLED")) { $("#artwork-search-list").innerHTML = '<div class="search-loading error">搜索失败，可返回后改用“指定图片”</div>'; showError(error, libraryNotice); } }
+  const game=selectedActionGame,context=artworkSearchContext(),key=artworkSearchCacheKey(game,artworkSearchType),owner=beginArtworkSearchPresentation(()=>artworkSearchContextCurrent(context)&&artworkSearchCacheKey(selectedActionGame,context.type)===key);
+  try { const result = await ensureArtworkSearch(game, artworkSearchType); queueArtworkSearchPresentation(owner,()=>renderArtworkCandidates(result,owner)); }
+  catch (error) { if (!String(error?.message || error).includes("CANCELLED")) queueArtworkSearchPresentation(owner,()=>{ $("#artwork-search-list").innerHTML = '<div class="search-loading error">搜索失败，可返回后改用“指定图片”</div>'; showError(error, libraryNotice); }); }
   finally { if (token === artworkTaskToken) artworkTaskInFlight = false; }
 }
-function cancelArtworkTask() { artworkTaskToken++; artworkTaskInFlight = false; downloadingCandidateUrl = ""; $("#artwork-search-modal")?.classList.add("hidden"); invoke("cancelArtwork").catch(() => {}); if(artworkSearchType==='dynamic'&&selectedActionGame)renderSharedWallpaperPreview(); }
+function cancelArtworkTask() { retireArtworkSearchPresentation();artworkTaskToken++; artworkTaskInFlight = false; downloadingCandidateUrl = ""; $("#artwork-search-modal")?.classList.add("hidden"); invoke("cancelArtwork").catch(() => {}); if(artworkSearchType==='dynamic'&&selectedActionGame)renderSharedWallpaperPreview(); }
 function syncArtworkDraftToEdit() {
   if (!selectedActionGame || !editDraft?.game) return;
   selectedActionGame.override = { ...(selectedActionGame.override || {}) };
@@ -2668,60 +3063,105 @@ function cancelArtworkEditor() {
   $('#artwork-status').classList.add('hidden');
   renderArtworkDraft();
 }
-async function persistEditDraft() {
-  if (!editDraft?.game || editSaveInFlight) return false;
-  const saveButton = $('#edit-save-content');
-  editSaveInFlight = true;
-  if (saveButton) { saveButton.disabled = true; saveButton.textContent = '正在保存…'; }
-  showNotice('正在写入隔离配置并刷新当前游戏素材…', false, libraryNotice);
-  syncIdentityDraft();
-  syncArtworkDraftToEdit();
-  const game = editDraft.game;
-  const original = editDraft.original;
-  try {
-    const originalName = original.override?.name || '';
-    const name = game.override?.name || '';
-    if (name && name !== originalName) snapshot = await invoke('saveManualName', { executable: game.primaryExecutable, name });
-    const originalId = String(formalSteamAppId(original) || '');
-    const id = game.override?.idCleared ? '' : String(game.override?.steamId || '');
-    const originalIgdbId = Number(original.override?.igdbId || 0);
-    const igdbId = game.override?.idCleared ? Number(game.override?.igdbId || 0) : 0;
-    if (game.override?.idCleared && originalId) snapshot = await invoke('clearManualSteamId', { executable: game.primaryExecutable });
-    if (id && id !== originalId) snapshot = await invoke('identifyOne', { executable: game.primaryExecutable, manualName: name, steamId: id });
-    else if (igdbId && igdbId !== originalIgdbId) snapshot = await invoke('identifyOne', { executable: game.primaryExecutable, manualName: name, igdbId: String(igdbId) });
-    if (editDraft.artworkDirty) {
-      const args = { executable: game.primaryExecutable };
-      for (const type of ['cover', 'long', 'wallpaper']) {
-        if (!editDraft.artworkChanged[type]) continue;
-        const value = game.override?.[type]?.path || game.override?.[type]?.file || game.override?.[type]?.portableFile || game.override?.[type]?.url || '';
-        args[`${type}Path`] = value;
-        args[`clear${type[0].toUpperCase()}${type.slice(1)}`] = !value;
-      }
-      snapshot = await invoke('saveArtworkOverride', args);
+function preserveNewerEditorMedia(next) {
+  if(normalizedUiPath(next?.dataRoot)!==normalizedUiPath(snapshot?.dataRoot))return next;
+  const incoming=next?.gameMedia?.entries,current=snapshot?.gameMedia?.entries;
+  if(!isWorkspaceRecord(incoming)||!isWorkspaceRecord(current))return next;
+  let merged=null;
+  for(const [key,entry] of Object.entries(incoming)){
+    const prior=current[key];
+    if(entry?.key===key&&prior?.key===key&&Number(prior.bindingRevision||0)>Number(entry.bindingRevision||0)){
+      merged||={...incoming};merged[key]=prior;
     }
-    if (editDraft.bucket !== editDraft.originalBucket) snapshot = await invoke('setBucket', { gameDirectory: game.gameDirectory, bucket: editDraft.bucket });
-    snapshot = await invoke('state');
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
-    const refreshed = mergedGames().find(item => normalizedUiPath(item.primaryExecutable) === normalizedUiPath(game.primaryExecutable));
-    if (refreshed) {
-      // Rebuild from the committed snapshot so new artwork is visible immediately.
-      editDraft = draftFor(refreshed);
-      selectedActionGame = editDraft.game;
-      openEdit(selectedActionGame);
-      artworkDraft = artworkDraftFromGame(selectedActionGame);
-      renderArtworkDraft();
-    }
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
-    showNotice('编辑内容已保存；封面和壁纸已立即应用，无需切换页面或重启工作台。', false, libraryNotice);
-    return true;
-  } catch (error) { showError(error, libraryNotice); return false; }
-  finally {
-    editSaveInFlight = false;
-    if (saveButton) { saveButton.disabled = false; saveButton.textContent = '保存内容'; }
   }
+  return merged?{...next,gameMedia:{...next.gameMedia,entries:merged}}:next;
+}
+function rebaseSavedEditor(submitted,saved,refreshed,fields) {
+  if(editDraft!==submitted||$('#edit-modal').classList.contains('hidden'))return;
+  const nameLater=draftName()!==fields.name||submitted.nameEdits!==saved.nameEdits;
+  const idLater=draftSteamId()!==fields.steamId||submitted.steamIdEdits!==saved.steamIdEdits;
+  syncIdentityDraft();syncArtworkDraftToEdit();
+  const primaryLater=normalizedUiPath(submitted.game.primaryExecutable)!==normalizedUiPath(saved.game.primaryExecutable);
+  const bucketLater=submitted.bucket!==saved.bucket;
+  const changed={};
+  for(const type of ['cover','long','wallpaper'])changed[type]=
+    JSON.stringify(submitted.game.override?.[type])!==JSON.stringify(saved.game.override?.[type])||
+    submitted.game.override?.artworkProtection?.[type]!==saved.game.override?.artworkProtection?.[type]||
+    submitted.artworkChanged[type]&&!saved.artworkChanged[type];
+  const media=submitted.game.gameMedia;
+  if(media?.key&&refreshed.gameMedia?.key===media.key&&Number(media.bindingRevision||0)>Number(refreshed.gameMedia.bindingRevision||0)){
+    // Preferences saved independently while the editor batch was pending
+    // remain authoritative over its older whole-library snapshot.
+    refreshed={...refreshed,gameMedia:structuredClone(media)};
+    snapshot.gameMedia.entries[media.key]=structuredClone(media);
+  }
+  const base=draftFor(refreshed);
+  if(!nameLater&&!idLater&&!primaryLater&&!bucketLater&&!Object.values(changed).some(Boolean))editDraft=base;
+  else{
+    const copy=(target,source,key)=>{if(Object.prototype.hasOwnProperty.call(source||{},key))target[key]=structuredClone(source[key]);else delete target[key];};
+    submitted.original=base.original;submitted.originalBucket=base.originalBucket;submitted.identityBaseline=base.identityBaseline;
+    submitted.nameEdits=nameLater?1:0;submitted.steamIdEdits=idLater?1:0;
+    if(!nameLater)copy(submitted.game.override,refreshed.override,'name');
+    if(!idLater)for(const field of ['steamId','igdbId','idCleared'])copy(submitted.game.override,refreshed.override,field);
+    if(!primaryLater){submitted.game.primaryExecutable=refreshed.primaryExecutable;submitted.game.steam=structuredClone(refreshed.steam||{});}
+    if(!bucketLater)submitted.bucket=base.bucket;
+    submitted.game.override.artworkProtection||={};
+    for(const type of ['cover','long','wallpaper']){
+      if(!changed[type]){copy(submitted.game.override,refreshed.override,type);copy(submitted.game.override.artworkProtection,refreshed.override?.artworkProtection,type);}
+      submitted.artworkChanged[type]=changed[type];
+    }
+    if(!Object.keys(submitted.game.override.artworkProtection).length)delete submitted.game.override.artworkProtection;
+    submitted.artworkDirty=Object.values(changed).some(Boolean);
+    submitted.primaryDirty=normalizedUiPath(submitted.game.primaryExecutable)!==normalizedUiPath(refreshed.primaryExecutable);
+    submitted.identityDirty=nameLater||idLater;
+  }
+  selectedActionGame=editDraft.game;
+  if(!nameLater)$('#identity-name').value=editorIdentityName(selectedActionGame);
+  if(!idLater)$('#identity-steam-id').value=formalSteamAppId(selectedActionGame);
+  steamIdClearPending=selectedActionGame.override?.idCleared===true;
+  artworkDraft=artworkDraftFromGame(selectedActionGame);renderEditDraft(selectedActionGame);
+}
+async function persistEditDraft() {
+  if(!editDraft?.game)return false;
+  const submitted=editDraft,key=keyFor(submitted.game);
+  if(editorSaveTasks.has(key))return false;
+  syncIdentityDraft();syncArtworkDraftToEdit();
+  // The accepted submission owns its values even after Back clears the form.
+  const saved=structuredClone(submitted),game=saved.game,original=saved.original;
+  const submittedFields={name:draftName(),steamId:draftSteamId()};
+  const operations=[],add=(command,args)=>operations.push({command,arguments:args});
+  const primaryChanged=normalizedUiPath(game.primaryExecutable)!==normalizedUiPath(original.primaryExecutable);
+  if(primaryChanged)add('setPrimary',{gameDirectory:game.gameDirectory,executable:game.primaryExecutable,previousExecutable:original.primaryExecutable||''});
+  const originalName=original.override?.name||'',name=game.override?.name||'';
+  if(name&&name!==originalName)add('saveManualName',{executable:game.primaryExecutable,name});
+  const originalId=String(formalSteamAppId(original)||''),id=game.override?.idCleared?'':String(game.override?.steamId||'');
+  const igdbId=game.override?.idCleared?Number(game.override?.igdbId||0):0;
+  if(game.override?.idCleared&&originalId)add('clearManualSteamId',{executable:game.primaryExecutable});
+  if(id&&(id!==originalId||saved.steamIdEdits>0&&id!==String(original.override?.steamId||'')))add('identifyOne',{executable:game.primaryExecutable,manualName:name,steamId:id});
+  else if(igdbId&&igdbId!==Number(original.override?.igdbId||0))add('identifyOne',{executable:game.primaryExecutable,manualName:name,igdbId:String(igdbId)});
+  if(saved.artworkDirty){
+    const args={executable:game.primaryExecutable};
+    for(const type of ['cover','long','wallpaper'])if(saved.artworkChanged[type]){
+      const value=game.override?.[type]?.path||game.override?.[type]?.file||game.override?.[type]?.portableFile||game.override?.[type]?.url||'';
+      args[type+'Path']=value;args['clear'+type[0].toUpperCase()+type.slice(1)]=!value;
+    }
+    add('saveArtworkOverride',args);
+  }
+  if(saved.bucket!==saved.originalBucket)add('setBucket',{gameDirectory:game.gameDirectory,bucket:saved.bucket});
+  if(!operations.length)return true;
+  editorSaveTasks.set(key,{phase:'running',label:'正在保存，可返回后继续处理'});editSaveInFlight=true;refreshCardOperationState();
+  try{
+    snapshot=preserveNewerEditorMedia(await invoke('saveEditor',{operations,refreshNativeArtwork:Boolean(saved.artworkDirty&&isNativeSteamGame(game))}));
+    if(document.hasFocus()&&!document.hidden&&!$('#library-view').classList.contains('hidden'))renderLibrary();else silentRenderPending=true;
+    const refreshed=mergedGames().find(item=>normalizedUiPath(item.primaryExecutable)===normalizedUiPath(game.primaryExecutable));
+    if(refreshed)rebaseSavedEditor(submitted,saved,refreshed,submittedFields);
+    return true;
+  }catch(error){showError(error,libraryNotice);return false;}
+  finally{editorSaveTasks.delete(key);editSaveInFlight=editorSaveTasks.size>0;refreshCardOperationState();}
 }
 function setBucketOptions(value) { const select = $('#edit-bucket-select'); if (select) { select.value = value || 'auto'; refreshWorkspaceDropdown(select); } }
 function closeEdit() {
+  ++editPresentationEpoch;nativeArtworkRefreshOwner=null;editorArtworkRenderPending=false;
   stopSharedWallpaperPreview();
   document.querySelectorAll('#edit-modal [data-controller-input]').forEach(finishControllerTextInput);
   cancelEditorBackgroundTasks();
@@ -2799,8 +3239,8 @@ $('#back-entry-button').addEventListener('click', () => { closeEdit(); invoke('c
 $('#refresh-artwork-button').addEventListener('click', startNonBlockingRefresh);
 $('#page-select-all').addEventListener('click', () => setPageSelection('all'));
 $('#page-invert-selection').addEventListener('click', () => setPageSelection('invert'));
-$('#directory-settings-toggle').addEventListener('click', () => { const panel = $('#directory-settings-panel'); if (!panel) return; const open = panel.classList.toggle('hidden') === false; if (open) closeLibraryMenuPanels('directory-settings-panel'); $('#directory-settings-toggle').setAttribute('aria-expanded', String(open)); });
-$('#manual-game-settings-toggle').addEventListener('click', () => { const panel = $('#manual-game-panel'); if (!panel) return; const open = panel.classList.toggle('hidden') === false; if (open) closeLibraryMenuPanels('manual-game-panel'); $('#manual-game-settings-toggle').setAttribute('aria-expanded', String(open)); });
+$('#directory-settings-toggle').addEventListener('click', () => { if(librarySidebarState()){librarySidebarPage('sources');return;}const panel = $('#directory-settings-panel'); if (!panel) return; const open = panel.classList.toggle('hidden') === false; if (open) closeLibraryMenuPanels('directory-settings-panel'); $('#directory-settings-toggle').setAttribute('aria-expanded', String(open)); });
+$('#manual-game-settings-toggle').addEventListener('click', () => { if(librarySidebarState()){librarySidebarPage('manual');return;}const panel = $('#manual-game-panel'); if (!panel) return; const open = panel.classList.toggle('hidden') === false; if (open) closeLibraryMenuPanels('manual-game-panel'); $('#manual-game-settings-toggle').setAttribute('aria-expanded', String(open)); });
 async function pickAndAddLibraryPath(command, addCommand, busyTitle, busyDetail, successMessage) { try { const result = await invoke(command); if (result?.cancelled || !result?.path) return; await runBusy(addCommand, busyTitle, result.path, { path: result.path }, successMessage); } catch (error) { showError(error, libraryNotice); } }
 const scanLibraryButton = document.createElement('button');
 scanLibraryButton.id = 'scan-library-button';
@@ -2870,11 +3310,23 @@ async function requestSteamCommit(directories = selectedCommitDirectories()) {
   finally { steamCommitRequestInFlight = false; }
 }
 $('#commit-button').addEventListener('click', () => requestSteamCommit());
-$('#edit-add-to-steam').addEventListener('click', () => {
-  const game = selectedActionGame;
-  if (!game || game.mediaOnly || isNativeSteamGame(game) || !game.primaryExecutable || !keyFor(game)) return;
-  return requestSteamCommit([keyFor(game)]);
-});
+async function joinEditedGameToSteam() {
+  const game=selectedActionGame;
+  if(!game||game.mediaOnly||isNativeSteamGame(game)||!game.primaryExecutable||!keyFor(game))return false;
+  const key=keyFor(game);if(['queued','running'].includes(steamCommitTasks.get(key)?.phase))return false;
+  const target=selectedTargetArguments([key]);
+  steamCommitTasks.set(key,{phase:'queued',label:'排队加入 Steam'});refreshCardOperationState();
+  try{
+    // The native FIFO performs admission again at execution time. A running
+    // Steam instance is reported on this card; it is never silently closed.
+    snapshot=await invoke('commit',target);
+    steamCommitTasks.set(key,{phase:'completed',label:'已加入 Steam'});
+    if(document.hasFocus()&&!document.hidden&&!$('#library-view').classList.contains('hidden'))renderLibrary();else silentRenderPending=true;
+    return true;
+  }catch(error){steamCommitTasks.set(key,{phase:'failed',label:'加入失败：'+(error?.message||String(error))});return false;}
+  finally{refreshCardOperationState();}
+}
+$('#edit-add-to-steam').addEventListener('click',joinEditedGameToSteam);
 $('#steam-runtime-state')?.addEventListener('click', async () => {
   if (steamRuntimeState.running === true) await closeSteamOnly();
   else if (steamRuntimeState.running === false) await refreshSteamRuntimeState(true);
@@ -2896,14 +3348,14 @@ $('#steam-commit-close').addEventListener('click', closeSteamCommit); $('#steam-
   } catch (error) { showError(error, libraryNotice); }
 });
 $('#delete-button').addEventListener('click', () => { const count = selectedSteamCount(); if (!count) return showNotice('当前页面没有已选中的 Steam 快捷方式。', true, libraryNotice); $('#delete-summary').textContent = `将从全部 Steam 大屏用户中删除 ${count} 个明确匹配的快捷方式。`; $('#steam-delete-modal').classList.remove('hidden'); });
-$('#steam-delete-close').addEventListener('click', () => $('#steam-delete-modal').classList.add('hidden')); $('#steam-delete-cancel').addEventListener('click', () => $('#steam-delete-modal').classList.add('hidden')); $('#steam-delete-confirm').addEventListener('click', async () => { $('#steam-delete-modal').classList.add('hidden'); await runBusy('deleteFromSteam', '正在事务删除 Steam 快捷方式', '逐账户备份、暂存、删除并校验 shortcuts.vdf。', { ...selectedTargetArguments(), selectionMode: 'all-steam-accounts', selectedGameDirectories: [...(selectedSteamDirectories === null ? new Set(defaultSelectedSteamDirectories()) : selectedSteamDirectories)] }); });
+$('#steam-delete-close').addEventListener('click', () => $('#steam-delete-modal').classList.add('hidden')); $('#steam-delete-cancel').addEventListener('click', () => $('#steam-delete-modal').classList.add('hidden')); $('#steam-delete-confirm').addEventListener('click', async () => { $('#steam-delete-modal').classList.add('hidden'); await runBusy('deleteFromSteam', '正在事务删除 Steam 快捷方式', '逐账户备份、暂存、删除并校验 shortcuts.vdf。', { ...selectedTargetArguments(), selectionMode: 'all-steam-accounts', selectedGameDirectories: selectedVisibleSteamDirectories() }); });
 document.querySelectorAll('.page-tab').forEach(tab => tab.addEventListener('click', () => { closeLibraryMenuPanels(); activeTab = tab.dataset.tab; renderLibrary(); }));
 $('#edit-back-button').addEventListener('click', closeEdit); $('#edit-folder').addEventListener('click', () => selectedActionGame && invoke('openFolder', { path: selectedActionGame.gameDirectory }).catch(error => showError(error, libraryNotice))); $('#artwork-cancel')?.addEventListener('click', cancelArtworkEditor); $('#artwork-save')?.addEventListener('click', confirmArtworkDraft); document.querySelectorAll('.artwork-pane[data-artwork-editable="true"]').forEach(pane => { const type = pane.dataset.artworkType; const preview = pane.querySelector('.artwork-dropzone'); preview?.addEventListener('click', () => openArtworkActionMenu(type)); preview?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); openArtworkActionMenu(type); } }); });
 $('#artwork-action-close').addEventListener('click', () => closeArtworkActionMenu(true)); $('#artwork-action-search').addEventListener('click', () => artworkActionForCurrentType('search')); $('#artwork-action-replace').addEventListener('click', () => artworkActionForCurrentType('replace')); $('#artwork-action-delete').addEventListener('click', () => artworkActionForCurrentType('delete'));
 $('#artwork-search-close').addEventListener('click', cancelArtworkTask); $('#artwork-search-cancel').addEventListener('click', cancelArtworkTask); $('#identity-search-cancel').addEventListener('click', cancelIdentitySearch);
 $('#edit-primary-select').addEventListener('change', event => { if (!selectedActionGame || !event.target.value) return; selectedActionGame.primaryExecutable = event.target.value; editDraft.primaryDirty = true; renderEditDraft(selectedActionGame); showNotice('主程序已暂存；点击“保存内容”才会写入配置。', false, libraryNotice); });
 $('#edit-bucket-select').addEventListener('change', event => { if (!selectedActionGame) return; editDraft.bucket = event.target.value; setBucketOptions(editDraft.bucket); renderEditDraft(selectedActionGame); showNotice('页面归类已暂存；点击“保存内容”才会写入配置。', false, libraryNotice); });
-$('#identity-form').addEventListener('submit', async event => { event.preventDefault(); syncIdentityDraft(); await searchGame(); }); $('#identity-name-candidates').addEventListener('change', event => { const selected = event.target.selectedIndex > 0 ? event.target._nameRows?.[event.target.selectedIndex - 1] : null; if (selected?.name) { $('#identity-name').value = selected.name; if (selected.steamAppId) $('#identity-steam-id').value = String(selected.steamAppId); syncIdentityDraft(); renderEditDraft(selectedActionGame); $('#identity-name').focus(); } event.target.value = ''; }); $('#identity-steam-id-clear').addEventListener('click', async () => { if (!selectedActionGame?.primaryExecutable) return; if (editDraft) { steamIdClearPending = true; $('#identity-steam-id').value = ''; syncIdentityDraft(); renderEditDraft(selectedActionGame); showNotice('Steam AppID 已清空并暂存；点击“保存内容”才会写入配置。', false, libraryNotice); return; } steamIdClearPending = true; $('#identity-steam-id').value = ''; try { snapshot = await invoke('clearManualSteamId', { executable: selectedActionGame.primaryExecutable }); const refreshed = mergedGames().find(item => normalizedUiPath(item.primaryExecutable) === normalizedUiPath(selectedActionGame.primaryExecutable)); if (refreshed) { selectedActionGame = refreshed; openEdit(refreshed); } else { renderEntry(); if (!$('#library-view').classList.contains('hidden')) renderLibrary(); } showNotice('Steam AppID 已清空；已锁定为不自动恢复，点击保存内容可继续保存其他修改。', false, libraryNotice); } catch (error) { steamIdClearPending = false; showError(error, libraryNotice); } }); $('#identity-name').addEventListener('input', () => { syncIdentityDraft(); renderEditDraft(selectedActionGame); }); $('#identity-steam-id').addEventListener('input', () => { syncIdentityDraft(); renderEditDraft(selectedActionGame); }); $('#edit-save-content').addEventListener('click', async () => { if (!selectedActionGame?.primaryExecutable) return; if (editDraft) { await persistEditDraft(); return; } });
+$('#identity-form').addEventListener('submit', async event => { event.preventDefault(); syncIdentityDraft(); await searchGame(); }); $('#identity-name-candidates').addEventListener('change', event => { const selected = event.target.selectedIndex > 0 ? event.target._nameRows?.[event.target.selectedIndex - 1] : null; if (selected?.name) { $('#identity-name').value = selected.name; if (selected.steamAppId) { $('#identity-steam-id').value = String(selected.steamAppId); ++editDraft.steamIdEdits; } syncIdentityDraft('name'); renderEditDraft(selectedActionGame); $('#identity-name').focus(); } event.target.value = ''; }); $('#identity-steam-id-clear').addEventListener('click', async () => { if (!selectedActionGame?.primaryExecutable) return; if (editDraft) { steamIdClearPending = true; $('#identity-steam-id').value = ''; syncIdentityDraft('steamId'); renderEditDraft(selectedActionGame); showNotice('Steam AppID 已清空并暂存；点击“保存内容”才会写入配置。', false, libraryNotice); return; } steamIdClearPending = true; $('#identity-steam-id').value = ''; try { snapshot = await invoke('clearManualSteamId', { executable: selectedActionGame.primaryExecutable }); const refreshed = mergedGames().find(item => normalizedUiPath(item.primaryExecutable) === normalizedUiPath(selectedActionGame.primaryExecutable)); if (refreshed) { selectedActionGame = refreshed; openEdit(refreshed); } else { renderEntry(); if (!$('#library-view').classList.contains('hidden')) renderLibrary(); } showNotice('Steam AppID 已清空；已锁定为不自动恢复，点击保存内容可继续保存其他修改。', false, libraryNotice); } catch (error) { steamIdClearPending = false; showError(error, libraryNotice); } }); $('#identity-name').addEventListener('input', () => { syncIdentityDraft('name'); renderEditDraft(selectedActionGame); }); $('#identity-steam-id').addEventListener('input', () => { syncIdentityDraft('steamId'); renderEditDraft(selectedActionGame); }); $('#edit-save-content').addEventListener('click', async () => { if (!selectedActionGame?.primaryExecutable) return; if (editDraft) { await persistEditDraft(); return; } });
 $('#confirm-cancel').addEventListener('click', () => closeConfirm(false)); $('#confirm-confirm').addEventListener('click', () => closeConfirm(true)); $('#confirm-close').addEventListener('click', () => closeConfirm(false));
 function routeWorkspaceKey(event) {
   // Native form controls must keep Enter/Space/arrows for text entry,
@@ -2937,10 +3389,11 @@ function routeWorkspaceKey(event) {
   if (semanticWorkspaceAction && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
     finishControllerTextInput(document.activeElement);
   }
+  if(isBack&&librarySidebarState()?.page!=='library'&&librarySidebarState()&&!activeWorkspaceModal()){event.preventDefault();controllerBackLastAt=0;if(controllerBackResetTimer)window.clearTimeout(controllerBackResetTimer);controllerBackResetTimer=0;librarySidebarPage();return;}
   if (isBack) {
     event.preventDefault();
     const isControllerBack = semanticWorkspaceAction;
-    if (isControllerBack) {
+    if (isControllerBack && !activeWorkspaceModal()) {
       const now = performance.now();
       const isDouble = controllerBackLastAt > 0 && now - controllerBackLastAt <= CONTROLLER_B_DOUBLE_MS;
       if (controllerBackResetTimer) window.clearTimeout(controllerBackResetTimer);
@@ -3020,19 +3473,95 @@ function routeWorkspaceAction(action) {
 window.addEventListener('workspace-action', event => routeWorkspaceAction(event.detail));
 window.addEventListener('keydown', routeWorkspaceKey);
 let refreshAfterScrapeTimer = 0;
-function scheduleSilentRefresh() {
-  if (refreshAfterScrapeTimer) return;
-  refreshAfterScrapeTimer = window.setTimeout(async () => {
-    refreshAfterScrapeTimer = 0;
-    try {
-      snapshot = await invoke('state');
-      renderEntry();
-      if (!$('#library-view').classList.contains('hidden')) renderLibrary();
-    } catch (error) {
-      showNotice(error?.message || String(error), true, libraryNotice);
-    }
-  }, 250);
+let silentRefreshPending = false;
+let silentRefreshAdvisory = false, silentRefreshPreserveWaiting = false;
+let silentRefreshInFlight = null;
+let silentRefreshClosed = false;
+let silentRefreshEpoch = 0;
+let silentRenderPending = false;
+let silentRefreshDeferredRender = false;
+function libraryRenderAllowed(){return !silentRefreshClosed&&!document.hidden&&document.hasFocus();}
+function syncLibraryAnimationActivity(){
+  const paused=!libraryRenderAllowed(),root=document.documentElement;
+  if(root.classList.contains('workspace-background')!==paused)root.classList.toggle('workspace-background',paused);
 }
+syncLibraryAnimationActivity();
+function renderSilentSnapshot(){
+  if(!libraryRenderAllowed()){silentRenderPending=true;return;}
+  silentRenderPending=false;
+  renderEntry();
+  if(!$('#library-view').classList.contains('hidden'))renderLibrary();
+}
+function scheduleSilentRefresh(options = {}) {
+  if(silentRefreshClosed)return;
+  if(options.advisory===true)silentRefreshAdvisory=true;
+  if(options.preserveWaiting===true)silentRefreshPreserveWaiting=true;
+  silentRefreshPending=true;
+  if(!libraryRenderAllowed()||refreshAfterScrapeTimer||silentRefreshInFlight)return;
+  refreshAfterScrapeTimer=window.setTimeout(()=>{
+    refreshAfterScrapeTimer=0;
+    if(!libraryRenderAllowed())return;
+    silentRefreshPending=false;
+    const epoch=silentRefreshEpoch;let succeeded=false;
+    const request=invoke('state',{},5000).then(next=>{
+      if(silentRefreshClosed||epoch!==silentRefreshEpoch)return;
+      succeeded=true;
+      if(silentRefreshAdvisory){
+        applyLibrarySnapshot(next,{normalized:true,deferRender:true,preserveWaiting:silentRefreshPreserveWaiting});
+        if(!silentRefreshPending){silentRefreshAdvisory=false;silentRefreshPreserveWaiting=false;}
+      }else snapshot=next;
+      silentRenderPending=true;
+      // A change during the read needs one follow-up. Do not render an
+      // intermediate tree that would be rebuilt again a moment later.
+      if(!silentRefreshPending||silentRefreshDeferredRender){silentRefreshDeferredRender=false;renderSilentSnapshot();}
+      else silentRefreshDeferredRender=true;
+    }).catch(error=>{
+      if(silentRefreshClosed||epoch!==silentRefreshEpoch)return;
+      silentRefreshPending=true;
+      if(libraryRenderAllowed())showNotice(error?.message||String(error),true,libraryNotice);
+    }).finally(()=>{
+      // A previous page lifecycle cannot clear a newer page's request owner.
+      if(silentRefreshInFlight!==request)return;
+      silentRefreshInFlight=null;
+      if(succeeded&&silentRefreshPending)scheduleSilentRefresh();
+    });
+    silentRefreshInFlight=request;
+  },250);
+}
+function resumeSilentRefresh(){
+  syncLibraryAnimationActivity();
+  syncEditorSearchActivity();
+  if(!libraryRenderAllowed())return;
+  if(cardOperationPending)scheduleCardOperationState();
+  if(silentRefreshPending)scheduleSilentRefresh();
+  else if(silentRenderPending)renderSilentSnapshot();
+}
+window.addEventListener('focus',resumeSilentRefresh);
+document.addEventListener('visibilitychange',()=>{if(document.hidden){suspendCardOperationState();cancelEditReturnFocus();}resumeSilentRefresh();});
+window.addEventListener('blur',()=>{
+  syncLibraryAnimationActivity();
+  syncEditorSearchActivity();
+  suspendCardOperationState();cancelEditReturnFocus();
+  if(refreshAfterScrapeTimer)clearTimeout(refreshAfterScrapeTimer);
+  refreshAfterScrapeTimer=0;
+});
+window.addEventListener('pagehide',()=>{
+  suspendCardOperationState();cancelEditReturnFocus();
+  silentRefreshClosed=true;++silentRefreshEpoch;silentRefreshPending=true;
+  syncLibraryAnimationActivity();
+  if(identitySearchOwner||identitySearchInFlight)retireIdentitySearch();
+  cancelArtworkPreviewWarmups();
+  if(artworkSearchPresentationOwner){retireArtworkSearchPresentation();$('#artwork-search-modal')?.classList.add('hidden');}
+  silentRenderPending=false;silentRefreshDeferredRender=false;silentRefreshInFlight=null;
+  if(refreshAfterScrapeTimer)clearTimeout(refreshAfterScrapeTimer);
+  refreshAfterScrapeTimer=0;
+  syncSharedWallpaperPreviewActivity();
+});
+window.addEventListener('pageshow',()=>{silentRefreshClosed=false;resumeSilentRefresh();});
+function workspaceRefreshRequested(message) {
+  return Boolean(message.snapshot) || (message.refreshRequested === true && message.refreshProtocol === 1);
+}
+
 window.chrome.webview.addEventListener('message', event => {
   const message = isWorkspaceRecord(event.data) ? event.data : {};
   if (message.kind === 'response') {
@@ -3055,28 +3584,34 @@ window.chrome.webview.addEventListener('message', event => {
   }
   if (message.scrape) {
     snapshot.scrape = message.scrape;
-    // Background progress must not rebuild the card DOM on every tick. The
-    // progress controls update below, while terminal events schedule one
-    // coalesced snapshot refresh; this preserves the active gamepad focus.
-    syncScrapeCardStates();
+    // Keep every data update, but paint card statuses once per visible frame.
+    // Background events retain only the latest data until focus returns.
+    scheduleCardOperationState();
   }
-  if(message.event==='media-download-progress'){snapshot.mediaDownloads=message.mediaDownloads;renderMediaDownloads();return;}
+  if(message.event==='steam-commit-progress'){
+    const labels={queued:message.position>1?'排队加入 Steam（第 '+message.position+' 位）':'排队加入 Steam',running:'正在加入 Steam',completed:'已加入 Steam',failed:'加入失败：'+(message.error||'请重试')};
+    for(const directory of Array.isArray(message.directories)?message.directories:[]){if(typeof directory!=='string')continue;const key=normalizedUiPath(directory);if(key)steamCommitTasks.set(key,{phase:message.phase,label:labels[message.phase]||'正在处理'});}
+    scheduleCardOperationState(true);return;
+  }
+  if(message.event==='media-download-progress'){renderMediaDownloads(message.mediaDownloads,{defer:true});return;}
   if(message.event==='game-media-changed'){scheduleSilentRefresh();}else if(message.event==='game-media-sync-error'){showNotice('静态壁纸已保存，共享缓存同步待重试：'+(message.error||'未知错误'),true,libraryNotice);}
   else if (message.event === 'library-first-run-started') {
     showNotice('正在自动扫描游戏库；仅首次打开时执行，页面保持可操作。', false, libraryNotice);
+  // Detached workers can publish a snapshot sampled before a completed user write.
+  // Coalesce their notifications into the current FIFO state read, never apply that old payload.
   } else if (message.event === 'library-first-run-scan-complete' || message.event === 'library-first-run-complete') {
-    if (message.snapshot) applyLibrarySnapshot(message.snapshot);
+    if (workspaceRefreshRequested(message)) scheduleSilentRefresh({advisory:true});
     showNotice(`首次目录扫描完成${Number.isFinite(Number(message.rootCount)) ? `，发现 ${Number(message.rootCount)} 个游戏库目录` : ''}；SteamID、封面和壁纸仍在后台识别。`, false, libraryNotice);
   } else if (message.event === 'library-first-run-error') {
     showNotice(message.error || '首次自动扫描未完成，可手动点击“扫描游戏库”重试。', true, libraryNotice);
   } else if (message.event === 'library-scan-complete') {
-    if (message.snapshot) applyLibrarySnapshot(message.snapshot);
+    if (workspaceRefreshRequested(message)) scheduleSilentRefresh({advisory:true});
     showNotice('目录扫描已完成；页面保持可操作。', false, libraryNotice);
   } else if (message.event === 'library-plan-refreshed') {
     // The local scan and Steam plan are intentionally separate phases.  A
     // slow/disconnected Steam install may delay this event, but must never
     // delay the library page or consume foreground input.
-    if (message.snapshot) applyLibrarySnapshot(message.snapshot, { preserveWaiting: true });
+    if (workspaceRefreshRequested(message)) scheduleSilentRefresh({advisory:true,preserveWaiting:true});
   } else if (message.event === 'scrape-queue-started') {
     clearNotice(libraryNotice);
     if (String(message.scrape?.mode || '') === 'manual-refresh') {
@@ -3196,32 +3731,8 @@ window.chrome.webview.addEventListener('message', event => {
     showNotice(message.cancelled ? '已暂停后台手动识别；名称与 ID 保留，可稍后再次搜索。' : '网络补齐暂未完成；名称与 ID 已保留，可稍后再次搜索。', false, libraryNotice);
   } else if (message.event === 'manual-identify-busy') {
     showNotice('后台识别任务正在合并，当前编辑仍可继续。', false, libraryNotice);
-  } else if (message.event === 'identity-search-started') {
-    if (!identityEventMatches(message)) return;
-    if (message.jobId) identitySearchJobId = message.jobId;
-    identitySearchInFlight = true;
-    showNotice('候选名称正在后台搜索；结果会自动填入下拉菜单。', false, libraryNotice);
-  } else if (message.event === 'identity-search-complete') {
-    if (!identityEventMatches(message)) return;
-    identitySearchInFlight = false;
-    identitySearchJobId = '';
-    stopIdentitySearchLoading();
-    if (selectedActionGame && normalizedUiPath(selectedActionGame.primaryExecutable) === normalizedUiPath(message.executable || '')) {
-      searchReturnToEdit = false;
-      renderSearchCandidates({ ...selectedActionGame, directoryName: message.query || gameDisplayName(selectedActionGame), _searchQuery: message.query || '' }, message.candidates || [], message.query || '');
-    }
-  } else if (message.event === 'identity-search-failed') {
-    if (!identityEventMatches(message)) return;
-    identitySearchInFlight = false;
-    identitySearchJobId = '';
-    stopIdentitySearchLoading();
-    if (message.cancelled) {
-      $('#identity-search-modal').classList.add('hidden');
-      if (selectedActionGame) openEdit(selectedActionGame);
-    } else {
-      $('#identity-search-list').innerHTML = '<div class="identity-search-empty">候选名称暂未返回，可再次点击自动识别。</div>';
-      showNotice('自动识别暂未完成，原页面保持不变，可稍后重试。', false, libraryNotice);
-    }
+  } else if (['identity-search-started','identity-search-complete','identity-search-failed'].includes(message.event)) {
+    consumeIdentitySearchEvent(message);
   } else if (message.event === 'scrape-error' || message.event === 'library-open-error') {
     if (message.event === 'scrape-error') setBusy(false);
     if (message.event === 'scrape-error' && String(message.scrape?.mode || '') === 'manual-refresh') {
@@ -3242,7 +3753,7 @@ window.chrome.webview.addEventListener('message', event => {
     scheduleSilentRefresh();
     showNotice(message.planPending ? '网络恢复已完成，计划正在后台刷新。' : '网络恢复任务已完成。', false, libraryNotice);
   } else if (message.event === 'network-plan-refreshed') {
-    if (message.snapshot) applyLibrarySnapshot(message.snapshot, { preserveWaiting: true });
+    if (workspaceRefreshRequested(message)) scheduleSilentRefresh({advisory:true,preserveWaiting:true});
   } else if (message.event === 'network-wake-cancelled') {
     scheduleSilentRefresh();
     showNotice('网络恢复已取消；当前缓存和页面状态保留，可稍后重试。', false, libraryNotice);
@@ -3270,10 +3781,8 @@ function syncUpdateSteamArtworkButton() {
   updateSteamArtworkButton.disabled = !visible || count === 0;
   updateSteamArtworkButton.innerHTML = `更新Steam图标 <span class="count-label">${formatSelectedCount(count)}</span>`;
 }
-const baseRenderLibrary = renderLibrary;
-renderLibrary = function () { baseRenderLibrary(); syncUpdateSteamArtworkButton(); };
 updateSteamArtworkButton.addEventListener('click', async () => {
-  const selected = [...(selectedSteamDirectories === null ? new Set(defaultSelectedSteamDirectories()) : selectedSteamDirectories)];
+  const selected = selectedVisibleSteamDirectories();
   if (!selected.length) return showNotice('请先选择已加入 Steam 的游戏。', true, libraryNotice);
   try {
     const preflight = await invoke('steamCommitPreflight');
@@ -3311,7 +3820,7 @@ window.addEventListener('focus', () => {
 // Startup is a fast local snapshot refresh, not a user-cancellable task. Keep
 // it invisible and non-blocking; only explicit refresh/add/search operations
 // use the busy overlay and B/Escape cancellation path.
-invoke('startup').then(async result => {
+invoke('startup', {advisoryRefreshProtocol:1}).then(async result => {
   snapshot = result;
   renderEntry();
   await openLibraryView();
@@ -3330,25 +3839,46 @@ let sharedWallpaperPreviewChoice=null;
 function sharedWallpaperMode(){
   if(sharedWallpaperPreviewChoice?.key===keyFor(selectedActionGame||{}))return sharedWallpaperPreviewChoice.mode;
   const entry=selectedActionGame?.gameMedia;
+  if(entry?.wallpaperMode==='static'||entry?.wallpaperMode==='dynamic')return entry.wallpaperMode;
   return entry?.dynamicPreviewUrl||(entry?.asset?.kind==='video'&&entry.previewUrl)?'dynamic':'static';
 }
 function confirmedMediaAppId(game){return isNativeSteamGame(game)?formalSteamAppId(game):(isSteamReady(game)?String(game?.steam?.steamStoreAppId||game?.steam?.storefrontAppId||game?.steam?.appId||''):'');}
 function sharedWallpaperTarget(game){return game?.gameMedia||{appId:Number(confirmedMediaAppId(game))||0,name:gameDisplayName(game),executable:game.primaryExecutable||'',verified:Boolean(confirmedMediaAppId(game))};}
 async function prepareSharedWallpaperPreview(game){
-  if(!game)return;const key=keyFor(game),executable=normalizedUiPath(game.primaryExecutable||''),originalKey=game.gameMedia?.key;
+  if(!game)return;const key=keyFor(game),executable=normalizedUiPath(game.primaryExecutable||''),originalKey=game.gameMedia?.key,epoch=editPresentationEpoch;
   try{
     const entry=await invoke('mediaCreate',{...sharedWallpaperTarget(game)});
-    if(!selectedActionGame||keyFor(selectedActionGame)!==key||normalizedUiPath(selectedActionGame.primaryExecutable||'')!==executable)return;
+    if(epoch!==editPresentationEpoch||!selectedActionGame||keyFor(selectedActionGame)!==key||normalizedUiPath(selectedActionGame.primaryExecutable||'')!==executable)return;
     const current=selectedActionGame.gameMedia;
     if(current?.key===entry.key&&Number(current.bindingRevision)>Number(entry.bindingRevision))return;
     if(current?.key&&current.key!==originalKey&&current.key!==entry.key)return;
     selectedActionGame.gameMedia={...(current||{}),...entry};renderSharedWallpaperPreview();
   }catch(error){showError(error,libraryNotice);}
 }
+function syncSharedWallpaperPreviewActivity(){
+  const video=document.querySelector('#artwork-wallpaper-preview video');if(!video)return;
+  if(!libraryRenderAllowed()||$('#edit-modal').classList.contains('hidden')){if(!video.paused)video.pause();}
+  else if(video.paused)void video.play().catch(()=>{});
+}
+window.addEventListener('blur',syncSharedWallpaperPreviewActivity);
+window.addEventListener('focus',resumeEditorArtworkPresentation);
+window.addEventListener('pageshow',resumeEditorArtworkPresentation);
+document.addEventListener('visibilitychange',resumeEditorArtworkPresentation);
 function stopSharedWallpaperPreview(){const video=document.querySelector('#artwork-wallpaper-preview video');if(video){video.pause();video.removeAttribute('src');video.load();}}
 const WALLPAPER_DEFAULT_PLAYBACK={start:8,end:38,fit:'cover'};
 const sharedWallpaperPendingPlayback=new Map();
 let sharedWallpaperActivePlayback=null;
+// Old hosts return a durable media receipt without mapped preview URLs.
+// Reuse a preview only when its exact immutable asset descriptor is unchanged.
+function retainSharedWallpaperPreviews(owner,receipt){
+  const previous=owner.entry;
+  if(!previous||!receipt||previous.key!==receipt.key||Number(previous.appId||0)!==Number(receipt.appId||0))return receipt;
+  const next={...receipt};
+  const inherit=(field,prior,asset)=>{if(!next[field]&&previous[field]&&prior?.id&&asset?.id===prior.id&&JSON.stringify(prior)===JSON.stringify(asset))next[field]=previous[field];};
+  for(const slot of ['dynamic','static'])inherit(slot+'PreviewUrl',previous.assets?.[slot],next.assets?.[slot]);
+  inherit('previewUrl',previous.asset,next.asset);
+  return next;
+}
 function captureSharedWallpaperWrite(game=selectedActionGame){
   if(!game)return null;
   return {key:keyFor(game),executable:normalizedUiPath(game.primaryExecutable||''),target:{...sharedWallpaperTarget(game)},entry:game.gameMedia?{...game.gameMedia}:null};
@@ -3368,33 +3898,48 @@ function wallpaperEffectiveRange(video,playback){
   const start=requested<duration-1?requested:0;return {start,end:length?Math.min(duration,start+length):duration};
 }
 function applyWallpaperPreviewRange(video){
+  if(!selectedActionGame||!video.isConnected||document.querySelector('#artwork-wallpaper-preview video')!==video)return;
+  if(!libraryRenderAllowed()){editorArtworkRenderPending=true;return;}
   const requested=pendingSharedWallpaperPlayback()||selectedActionGame?.gameMedia?.playback||WALLPAPER_DEFAULT_PLAYBACK;
   const range=wallpaperEffectiveRange(video,requested);if(video.readyState>=1&&(video.currentTime<range.start||range.end>range.start&&video.currentTime>=range.end))video.currentTime=range.start;
   const hint=document.getElementById('shared-wallpaper-duration-hint');if(hint&&Number.isFinite(video.duration)){const text='本片播放约 '+Math.max(1,Math.round(range.end-range.start))+' 秒';if(hint.textContent!==text)hint.textContent=text;const trigger=workspaceDropdownForSelect(document.getElementById('shared-wallpaper-length'))?.trigger;const title='播放时长 · '+text;if(trigger&&trigger.title!==title)trigger.title=title;}
 }
 function setWallpaperSelect(select,value,label){
-  if(!select)return;const text=String(value);if(![...select.options].some(option=>option.value===text)){const option=document.createElement('option');option.value=text;option.textContent=label;option.dataset.custom='true';select.appendChild(option);}
-  select.value=text;refreshWorkspaceDropdown(select);
+  if(!select)return;const text=String(value);let added=false;
+  if(![...select.options].some(option=>option.value===text)){const option=document.createElement('option');option.value=text;option.textContent=label;option.dataset.custom='true';select.appendChild(option);added=true;}
+  if(select.value!==text||added){select.value=text;refreshWorkspaceDropdown(select);}
 }
 function renderSharedWallpaperPreview(){
-  if(!selectedActionGame)return;const target=document.getElementById('artwork-wallpaper-preview');if(!target)return;
-  const entry=selectedActionGame.gameMedia||{},mode=sharedWallpaperMode();
-  const actualHeight=Number(entry.assets?.dynamic?.selectedHeight||0);
-  target.title=mode==='dynamic'&&actualHeight>0?'当前动态壁纸：'+actualHeight+'p':'';
-  for(const button of document.querySelectorAll('[data-shared-wallpaper-mode]'))button.setAttribute('aria-pressed',String(button.dataset.sharedWallpaperMode===mode));
-  document.getElementById('shared-wallpaper-playback')?.classList.toggle('hidden',mode!=='dynamic');
-  document.querySelector('.shared-wallpaper-dynamic')?.classList.toggle('is-selected',mode==='dynamic');
+  renderSharedWallpaperDownloadStatus();
+  if(!selectedActionGame)return;
+  if(!libraryRenderAllowed()){editorArtworkRenderPending=true;return;}
+  const target=document.getElementById('artwork-wallpaper-preview');if(!target)return;
+  const entry=selectedActionGame.gameMedia||{},mode=sharedWallpaperMode(),actualHeight=Number(entry.assets?.dynamic?.selectedHeight||0);
+  const title=mode==='dynamic'&&actualHeight>0?'当前动态壁纸：'+actualHeight+'p':'';if(target.title!==title)target.title=title;
+  for(const button of document.querySelectorAll('[data-shared-wallpaper-mode]')){const pressed=String(button.dataset.sharedWallpaperMode===mode);if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);}
+  const playback=document.getElementById('shared-wallpaper-playback'),dynamic=document.querySelector('.shared-wallpaper-dynamic');
+  if(playback&&playback.classList.contains('hidden')!==(mode!=='dynamic'))playback.classList.toggle('hidden',mode!=='dynamic');
+  if(dynamic&&dynamic.classList.contains('is-selected')!==(mode==='dynamic'))dynamic.classList.toggle('is-selected',mode==='dynamic');
   const requested=pendingSharedWallpaperPlayback()||entry.playback||WALLPAPER_DEFAULT_PLAYBACK;
   const start=Number(requested.start)||0,length=Number(requested.end)>start?Number(requested.end)-start:0;
   setWallpaperSelect(document.getElementById('shared-wallpaper-skip'),start,start+' 秒');
   setWallpaperSelect(document.getElementById('shared-wallpaper-length'),length,length?length+' 秒':'完整播放');
   if(mode==='dynamic'){
     const url=entry.dynamicPreviewUrl||(entry.asset?.kind==='video'?entry.previewUrl:'');
-    if(url){const old=target.querySelector('video');if(old?.getAttribute('src')===url){applyWallpaperPreviewRange(old);return;}target.replaceChildren();const video=document.createElement('video');video.src=url;video.muted=true;video.loop=true;video.playsInline=true;video.autoplay=true;video.preload='metadata';video.setAttribute('aria-label','动态壁纸预览');video.style.objectFit=entry.playback?.fit||'cover';video.addEventListener('loadedmetadata',()=>applyWallpaperPreviewRange(video));video.addEventListener('timeupdate',()=>applyWallpaperPreviewRange(video));target.appendChild(video);}
-    else target.innerHTML='<span class="artwork-empty">暂无动态壁纸，按 A 可替换或重新下载</span>';
-  }else if(entry.staticPreviewUrl&&(!artworkDraft.wallpaper?.asset||selectedActionGame.mediaOnly)){
-    target.replaceChildren();const image=document.createElement('img');image.src=entry.staticPreviewUrl;image.alt='静态壁纸预览';target.appendChild(image);
-  }
+    if(url){
+      const projection=editorArtworkProjection('video',url),old=target.querySelector('video');
+      if(target._editorArtworkProjection===projection&&old?.getAttribute('src')===url){const fit=entry.playback?.fit||'cover';if(old.style.objectFit!==fit)old.style.objectFit=fit;applyWallpaperPreviewRange(old);syncSharedWallpaperPreviewActivity();return;}
+      if(old){old.pause();old.removeAttribute('src');old.load();}
+      target._editorArtworkProjection=projection;target._deferredArtworkError=null;target._artworkFallbackToken=null;
+      const video=document.createElement('video');video.src=url;video.muted=true;video.loop=true;video.playsInline=true;video.autoplay=libraryRenderAllowed();video.preload='metadata';video.setAttribute('aria-label','动态壁纸预览');video.style.objectFit=entry.playback?.fit||'cover';video.addEventListener('loadedmetadata',()=>applyWallpaperPreviewRange(video));video.addEventListener('timeupdate',()=>applyWallpaperPreviewRange(video));target.replaceChildren(video);
+    }else replaceEditorArtworkMarkup(target,'dynamic-empty','<span class="artwork-empty">暂无动态壁纸，按 A 可替换或重新下载</span>');
+  }else if(artworkDraft.dirty.wallpaper&&!selectedActionGame.mediaOnly){
+    replaceEditorArtworkMarkup(target,'slot:wallpaper',artworkSlotMarkup(artworkDraft.wallpaper,'wallpaper'),'wallpaper');
+  }else if(entry.deletedSlots?.static){
+    replaceEditorArtworkMarkup(target,'shared-static-deleted',artworkSlotMarkup({state:'deleted'},'wallpaper'));
+  }else if(entry.staticPreviewUrl&&(!artworkDraft.wallpaper?.asset||selectedActionGame.mediaOnly||entry.manualSlots?.static)){
+    replaceEditorArtworkMarkup(target,'shared-image',`<img src="${escapeHtml(entry.staticPreviewUrl)}" alt="静态壁纸预览">`);
+  }else replaceEditorArtworkMarkup(target,'slot:wallpaper',artworkSlotMarkup(artworkDraft.wallpaper,'wallpaper'),'wallpaper');
 }
 function queueSharedWallpaperPlayback(){
   const owner=captureSharedWallpaperWrite();if(!owner)return;
@@ -3413,21 +3958,90 @@ async function updateSharedWallpaper(action,extra={},owner=captureSharedWallpape
   if(sharedWallpaperBusy||!owner)return false;sharedWallpaperBusy=true;
   try{
     const entry=owner.entry||await invoke('mediaCreate',owner.target);
-    const next=await invoke('mediaEdit',{...entry,...extra,action});const state=await invoke('mediaState');snapshot=state;
-    applySharedWallpaperWrite(owner,state.gameMedia?.entries?.[next.key||entry.key]||next);renderLibrary();return true;
+    const next=await invoke('mediaEdit',{...entry,...extra,action});
+    snapshot.gameMedia||={entries:{}};snapshot.gameMedia.entries||={};snapshot.gameMedia.entries[next.key||entry.key]=next;const state=snapshot;
+    applySharedWallpaperWrite(owner,state.gameMedia?.entries?.[next.key||entry.key]||next);if(libraryRenderAllowed())renderLibrary();else silentRenderPending=true;return true;
   }catch(error){showError(error,libraryNotice);return false;}
   finally{sharedWallpaperBusy=false;void flushSharedWallpaperPlayback();}
 }
+const sharedWallpaperDownloadRequests=new Map();
+function setSharedWallpaperDownloadRequest(owner,request){
+  sharedWallpaperDownloadRequests.delete(owner.key);
+  sharedWallpaperDownloadRequests.set(owner.key,{mediaKey:owner.entry?.key,...request});
+  while(sharedWallpaperDownloadRequests.size>64)sharedWallpaperDownloadRequests.delete(sharedWallpaperDownloadRequests.keys().next().value);
+  renderSharedWallpaperDownloadStatus();
+}
+function sharedWallpaperDownloadFeedback(entry={},state={},request){
+  if(entry.deleted||entry.deletedSlots?.dynamic)return null;
+  const key=entry.key,active=state.active?.[key]||(state.current?.key===key?state.current:null);
+  const rawItem=state.manualItems?.[key];
+  const item=rawItem&&(!request?.revision||Number(rawItem.requestBindingRevision||0)>=request.revision)?rawItem:null;
+  const pending=entry.refreshRequested&&entry.refreshSlot!=='static'||entry.selectedVideo&&entry.taskSlots?.includes('dynamic');
+  if(request?.mediaKey&&request.mediaKey!==entry.key)request=null;
+  if(request?.phase==='submitting')return {status:'pending',text:'正在提交下载请求…',indeterminate:true};
+  if(request?.phase==='error')return {status:'error',text:'下载请求未完成：'+request.error,canSearch:true};
+  const replaced=request?.assetId&&entry.assets?.dynamic?.id&&entry.assets.dynamic.id!==request.assetId;
+  if(replaced||item?.state==='done'&&!pending)return request||item?{status:'done',text:'动态壁纸已下载并应用',value:1}:null;
+  if(!request&&!pending&&!active&&!item)return null;
+  const pauses={'on-battery':'电池模式，等待接通电源后继续','power-unknown':'正在确认供电状态','startup-protection':'启动保护结束后继续','media-disk-space-low':'磁盘余量不足，腾出空间后继续','media-cache-budget-full':'壁纸缓存已满，清理后继续','media-storage-unavailable':'存储暂不可用，恢复后继续','low-battery':'低电量，等待充电后继续','battery-saver':'节电模式下暂停','cpu-busy':'后台负载较高，等待空闲后继续','game-running':'游戏运行中，等待后台下载恢复'};
+  const pause=state.resourcePauseReason||state.pauseReason;
+  if(pauses[pause])return {status:'waiting',text:pauses[pause]+'；当前壁纸保留'};
+  if(active){
+    if(active.phase==='retrying')return {status:'retrying',text:'网络波动，正在按弱网策略重试…',indeterminate:true};
+    if(active.phase==='publishing')return {status:'pending',text:'下载完成，正在应用动态壁纸…',indeterminate:true};
+    const total=Number(active.totalBytes||0),bytes=Math.max(0,Number(active.bytes||0));
+    if(total>0)return {status:'downloading',text:'正在下载动态壁纸 · '+Math.min(100,Math.floor(bytes*100/total))+'%',value:Math.min(1,bytes/total)};
+    const mb=bytes>0?' · 已下载 '+(bytes/1048576).toFixed(1)+' MB':'';
+    return {status:'downloading',text:(active.phase==='downloading'?'正在下载动态壁纸':'正在连接视频来源')+mb,indeterminate:true};
+  }
+  if(state.manualState==='cancelled'&&item)return {status:'waiting',text:'本轮下载已停止，所选视频已保留',canSearch:true};
+  const error=item?.lastError||(pending?entry.error:'');
+  const stopped=item?.autoStopped||item?.state==='unavailable';
+  if(error){
+    if(error==='media-video-selection-expired')return {status:'error',text:'官方视频候选已更新，请重新选择；当前壁纸保留',canSearch:true};
+    const network=/network|http-429|http-5|truncated|empty/.test(error),retryAt=Number(item?.retryAt||entry.retryAt||0);
+    if(!stopped&&(retryAt>0||state.manualUntil>Date.now()))return {status:'retrying',text:(network?'网络暂不稳定':'下载暂未完成')+'，已保留所选视频，等待重试；当前壁纸保留',canSearch:true};
+    const detail=network?'网络连接持续失败':error==='media-video-selection-expired'?'官方视频候选已更新，请重新选择':pauses[error]||String(error);
+    return {status:'error',text:'下载未完成：'+detail+'；当前壁纸保留',canSearch:true};
+  }
+  if(request?.phase==='queued'||pending||item)return {status:'pending',text:'已加入下载队列，等待处理；当前壁纸保留',indeterminate:true};
+  return null;
+}
+function renderSharedWallpaperDownloadStatus(){
+  const panel=document.getElementById('shared-wallpaper-download-status');if(!panel||!libraryRenderAllowed())return;
+  const game=selectedActionGame;if(!game||sharedWallpaperMode()!=='dynamic'){panel.classList.add('hidden');return;}
+  const bound=game.gameMedia||{},fresh=snapshot.gameMedia?.entries?.[bound.key];
+  const entry=fresh&&Number(fresh.bindingRevision||0)>=Number(bound.bindingRevision||0)?fresh:bound;
+  const feedback=sharedWallpaperDownloadFeedback(entry,snapshot.mediaDownloads||{},sharedWallpaperDownloadRequests.get(keyFor(game)));
+  panel.classList.toggle('hidden',!feedback);if(!feedback)return;
+  if(panel.dataset.status!==feedback.status)panel.dataset.status=feedback.status;
+  const text=panel.querySelector('[data-wallpaper-download-label]');if(text.textContent!==feedback.text)text.textContent=feedback.text;
+  const bar=panel.querySelector('progress');
+  if(feedback.indeterminate){if(bar.hasAttribute('value'))bar.removeAttribute('value');}
+  else if(!bar.hasAttribute('value')||bar.value!==Number(feedback.value||0))bar.value=Number(feedback.value||0);
+  panel.querySelector('button').classList.toggle('hidden',!feedback.canSearch);
+}
 async function searchSharedWallpaperVideos(owner){
   const qualitySelect=document.getElementById('artwork-video-quality');qualitySelect.value=String([480,720,1080].includes(owner.entry?.selectedVideo?.preferredHeight)?owner.entry.selectedVideo.preferredHeight:720);document.getElementById('artwork-video-quality-row').classList.remove('hidden');const qualityDropdown=workspaceDropdownForSelect(qualitySelect);refreshWorkspaceDropdown(qualitySelect);qualitySelect.onchange=()=>{for(const item of document.querySelectorAll('[data-video-candidate] .artwork-candidate-meta'))item.textContent=qualitySelect.value+'p 优先';};
-  const token=++artworkTaskToken;artworkTaskInFlight=true;artworkSearchSlot='wallpaper';artworkSearchType='dynamic';stopSharedWallpaperPreview();document.querySelector('#artwork-search-modal .eyebrow').textContent='视频候选';
+  const token=++artworkTaskToken,epoch=silentRefreshEpoch;artworkTaskInFlight=true;artworkSearchSlot='wallpaper';artworkSearchType='dynamic';stopSharedWallpaperPreview();document.querySelector('#artwork-search-modal .eyebrow').textContent='视频候选';
   const modal=document.getElementById('artwork-search-modal'),list=document.getElementById('artwork-search-list');
   document.getElementById('artwork-search-title').textContent='选择动态壁纸';document.getElementById('artwork-search-summary').textContent='正在读取 Steam 官方预告片…';
   list.replaceChildren();list.dataset.artworkType='wallpaper';document.getElementById('artwork-search-empty').classList.add('hidden');modal.classList.remove('hidden');
-  const current=()=>token===artworkTaskToken&&!modal.classList.contains('hidden')&&selectedActionGame&&keyFor(selectedActionGame)===owner.key;
-  const searchError=error=>{if(!current())return;document.getElementById('artwork-search-summary').textContent='动态壁纸搜索未完成：'+String(error?.message||error);document.getElementById('artwork-search-empty').classList.add('hidden');const retry=document.createElement('button');retry.type='button';retry.className='button';retry.textContent='重试搜索';retry.addEventListener('click',()=>searchSharedWallpaperVideos(owner));list.replaceChildren(retry);retry.focus();};
+  const ownerCurrent=()=>selectedActionGame&&keyFor(selectedActionGame)===owner.key&&normalizedUiPath(selectedActionGame.primaryExecutable||'')===owner.executable&&(!owner.entry?.key||selectedActionGame.gameMedia?.key===owner.entry.key&&Number(selectedActionGame.gameMedia.bindingRevision||0)===Number(owner.entry.bindingRevision||0));
+  const current=()=>modal.isConnected&&!silentRefreshClosed&&epoch===silentRefreshEpoch&&token===artworkTaskToken&&!modal.classList.contains('hidden')&&ownerCurrent();
+  const lease=beginArtworkSearchPresentation(current);
+  const searchError=error=>queueArtworkSearchPresentation(lease,()=>{if(!current())return;document.getElementById('artwork-search-summary').textContent='动态壁纸搜索未完成：'+String(error?.message||error);document.getElementById('artwork-search-empty').classList.add('hidden');const retry=document.createElement('button');retry.type='button';retry.className='button';retry.textContent='重试搜索';retry.addEventListener('click',()=>{if(current())void searchSharedWallpaperVideos(captureSharedWallpaperWrite());});list.replaceChildren(retry);requestArtworkSearchFocus(retry,lease);});
+  const selectionError=error=>queueArtworkSearchPresentation(lease,()=>{
+    if(!current())return;
+    document.getElementById('artwork-search-summary').textContent='动态壁纸选择或下载请求未完成：'+String(error?.message||error)+'；可重试候选或重新搜索，完成前保留当前壁纸。';
+    if(!list.querySelector('[data-video-search-retry]')){const retry=document.createElement('button');retry.type='button';retry.className='button';retry.dataset.videoSearchRetry='true';retry.textContent='重新搜索';retry.addEventListener('click',()=>{if(current()&&!sharedWallpaperBusy)void searchSharedWallpaperVideos(captureSharedWallpaperWrite());});list.appendChild(retry);}
+  });
+  lease.onError=searchError;
   try{
     const result=await invoke('mediaSearchVideos',owner.entry||owner.target);if(!current())return false;
+    const entryKey=owner.entry?.key||selectedActionGame.gameMedia?.key;
+    if(result?.entryKey&&entryKey&&result.entryKey!==entryKey)throw new Error('动态壁纸游戏绑定已变化，请重新搜索');
+    return queueArtworkSearchPresentation(lease,()=>{
     const candidates=Array.isArray(result?.candidates)?result.candidates:[];
     document.getElementById('artwork-search-summary').textContent=(result.query||'当前游戏')+' · '+candidates.length+' 个动态壁纸候选 · 选择后后台下载';
     document.getElementById('artwork-search-empty').textContent=candidates.length?'':'该游戏暂无可用的官方预告片，可返回后指定本地视频。';document.getElementById('artwork-search-empty').classList.toggle('hidden',candidates.length!==0);
@@ -3435,13 +4049,27 @@ async function searchSharedWallpaperVideos(owner){
       const preview=document.createElement('span');preview.className='artwork-candidate-preview';
       if(candidate.previewUrl){const img=document.createElement('img');img.src=candidate.previewUrl;img.alt=candidate.title||'动态壁纸';img.loading='lazy';img.addEventListener('error',()=>{preview.textContent='Steam 官方预告片';},{once:true});preview.appendChild(img);}else preview.textContent='Steam 官方预告片';
       const title=document.createElement('strong');title.className='artwork-candidate-title';title.textContent=candidate.title||'Steam 预告片';const meta=document.createElement('span');meta.className='artwork-candidate-meta';meta.textContent=qualitySelect.value+'p 优先';card.append(preview,title,meta);
-      card.addEventListener('click',async()=>{if(!current()||sharedWallpaperBusy)return;sharedWallpaperBusy=true;card.disabled=true;
-        try{const target=owner.entry||owner.target;const next=await invoke('mediaSelectVideo',{...target,bindingRevision:result.bindingRevision,searchToken:result.searchToken,candidateId:candidate.id,preferredHeight:Number(qualitySelect.value)||720});if(!current())return;
-          closeWorkspaceDropdown(false);modal.classList.add('hidden');snapshot=await invoke('mediaState');applySharedWallpaperWrite(owner,snapshot.gameMedia?.entries?.[next.key]||next);renderLibrary();showNotice('已选择“'+candidate.title+'”，已加入下载队列；完成前保留当前壁纸。',false,libraryNotice);
-        }catch(error){searchError(error);}finally{sharedWallpaperBusy=false;card.disabled=false;void flushSharedWallpaperPlayback();}
+      card.addEventListener('click',async()=>{if(!current()||sharedWallpaperBusy)return;sharedWallpaperBusy=true;card.disabled=true;setSharedWallpaperDownloadRequest(owner,{phase:'submitting',token,assetId:owner.entry?.assets?.dynamic?.id});meta.textContent='正在加入下载队列…';
+        try{const target=owner.entry||owner.target;const received=await invoke('mediaSelectVideo',{...target,bindingRevision:result.bindingRevision,searchToken:result.searchToken,candidateId:candidate.id,preferredHeight:Number(qualitySelect.value)||720});if(!current())return;const next=retainSharedWallpaperPreviews(owner,received);
+          if(!next?.key||entryKey&&next.key!==entryKey)throw new Error('选择或下载请求未返回有效的游戏回执，请重试');
+          // applySharedWallpaperWrite advances owner.entry to the accepted revision before the state refresh fence.
+          snapshot.gameMedia={...snapshot.gameMedia,entries:{...snapshot.gameMedia?.entries,[next.key]:next}};
+          setSharedWallpaperDownloadRequest(owner,{phase:'queued',token,revision:Number(next.bindingRevision||0),assetId:owner.entry?.assets?.dynamic?.id});
+          applySharedWallpaperWrite(owner,next);closeWorkspaceDropdown(false);modal.classList.add('hidden');renderLibrary();showNotice('已选择“'+candidate.title+'”，已加入下载队列；完成前保留当前壁纸。',false,libraryNotice);
+          try{
+            const downloadsBefore=snapshot.mediaDownloads;
+            const state=await invoke('mediaState',{key:next.key,entryOnly:true});if(token!==artworkTaskToken||!ownerCurrent())return;
+            const entry=state.gameMedia?.entries?.[next.key];
+            const refreshed=entry?.key===next.key&&Number(entry.bindingRevision||0)>=Number(next.bindingRevision||0)?retainSharedWallpaperPreviews(owner,entry):next;
+            snapshot.gameMedia={...snapshot.gameMedia,entries:{...snapshot.gameMedia?.entries,[next.key]:refreshed}};
+            if(state.mediaDownloads&&snapshot.mediaDownloads===downloadsBefore)renderMediaDownloads(state.mediaDownloads);
+            applySharedWallpaperWrite(owner,refreshed);renderLibrary();
+          }
+          catch(error){if(token===artworkTaskToken&&ownerCurrent())showNotice('动态壁纸选择请求已完成，下载状态刷新未完成：'+String(error?.message||error)+'；完成前保留当前壁纸。',true,libraryNotice);}
+        }catch(error){if(current())setSharedWallpaperDownloadRequest(owner,{phase:'error',token,error:String(error?.message||error)});selectionError(error);}finally{sharedWallpaperBusy=false;card.disabled=false;meta.textContent=qualitySelect.value+'p 优先';if(sharedWallpaperDownloadRequests.get(owner.key)?.phase==='submitting'&&sharedWallpaperDownloadRequests.get(owner.key)?.token===token)sharedWallpaperDownloadRequests.delete(owner.key);if(current()&&libraryRenderAllowed())card.focus();renderSharedWallpaperDownloadStatus();void flushSharedWallpaperPlayback();}
       });list.appendChild(card);
     }
-    requestAnimationFrame(()=>list.querySelector('button')?.focus());return true;
+    requestArtworkSearchFocus(list.querySelector('button'),lease);});
   }catch(error){searchError(error);return false;}
   finally{if(token===artworkTaskToken)artworkTaskInFlight=false;}
 }
@@ -3453,13 +4081,18 @@ async function actOnSharedWallpaper(action){
   try{
     const picked=await invoke(slot==='dynamic'?'pickVideo':'pickArtwork');if(picked?.cancelled||!picked?.path)return true;
     const entry=owner.entry||await invoke('mediaCreate',owner.target);
-    const imported=await invoke('mediaImport',{...entry,source:picked.path,slot});snapshot=await invoke('mediaState');
-    applySharedWallpaperWrite(owner,snapshot.gameMedia?.entries?.[imported?.key||entry.key]||imported);renderLibrary();return true;
+    const imported=await invoke('mediaImport',{...entry,source:picked.path,slot});
+    if(!imported?.key)throw new Error('素材导入没有返回有效的游戏回执，请刷新后确认。');
+    // The accepted receipt includes mapped previews and advances queued edits
+    // before any independent refresh. A full-library read is not part of this write.
+    snapshot.gameMedia||={entries:{}};snapshot.gameMedia.entries||={};snapshot.gameMedia.entries[imported.key]=imported;
+    applySharedWallpaperWrite(owner,imported);if(libraryRenderAllowed())renderLibrary();else silentRenderPending=true;return true;
   }catch(error){showError(error,libraryNotice);return false;}
   finally{sharedWallpaperBusy=false;void flushSharedWallpaperPlayback();}
 }
 (function installSharedWallpaperPreview(){
   const preview=document.getElementById('artwork-wallpaper-preview'),pane=preview?.closest('.artwork-pane');if(!preview||!pane)return;
+  const status=document.createElement('div');status.id='shared-wallpaper-download-status';status.className='shared-wallpaper-download-status hidden';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.innerHTML='<span data-wallpaper-download-label></span><progress max="1" value="0" aria-label="当前动态壁纸下载进度"></progress><button type="button" class="button hidden" data-edit-row="wallpaper-download-retry">重新选择视频</button>';status.querySelector('button').addEventListener('click',()=>{if(!sharedWallpaperBusy)void actOnSharedWallpaper('search');});preview.after(status);
   const aside=document.createElement('aside');aside.className='shared-wallpaper-settings';aside.setAttribute('aria-label','壁纸设置');
   const choice=document.createElement('div');choice.className='shared-wallpaper-modes';choice.setAttribute('aria-label','壁纸类型');
   const dynamicGroup=document.createElement('div');dynamicGroup.className='shared-wallpaper-dynamic';dynamicGroup.setAttribute('role','group');dynamicGroup.setAttribute('aria-label','动态壁纸与播放设置');choice.appendChild(dynamicGroup);
@@ -3471,3 +4104,120 @@ async function actOnSharedWallpaper(action){
   for(const value of [30,60,90,120,0]){const option=document.createElement('option');option.value=String(value);option.textContent=value?value+' 秒':'完整播放';lengths.appendChild(option);}
   skips.value='8';lengths.value='30';skips.addEventListener('change',queueSharedWallpaperPlayback);lengths.addEventListener('change',queueSharedWallpaperPlayback);dynamicGroup.appendChild(tools);const heading=document.querySelector('#edit-modal .edit-heading-status');heading.insertBefore(aside,heading.firstChild);for(const select of [skips,lengths]){const dropdown=upgradeWorkspaceSelect(select);const caption=document.createElement('span');caption.className='wallpaper-control-caption';caption.textContent=select.getAttribute('aria-label');caption.setAttribute('aria-hidden','true');dropdown.trigger.prepend(caption);if(select===lengths)dropdown.trigger.setAttribute('aria-describedby','shared-wallpaper-duration-hint');}
 })();
+
+// Left library presentation reuses the existing snapshot, native IPC and write owners.
+function librarySidebarState(){return document.getElementById('library-view')?._sidebarState||null;}
+function librarySidebarMatches(game){const query=librarySidebarState()?.query||'';return !query||String(gameDisplayName(game)||'').toLocaleLowerCase().includes(query);}
+function librarySidebarIcon(name){const icons=LIBRARY_SIDEBAR_ICONS;return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icons[name]||icons.grid}</svg>`;}
+function librarySidebarCurrentGame(){const key=activeLibraryCard()?.dataset.directory||librarySidebarState()?.lastCard||currentCardDirectory;return mergedGames().find(game=>keyFor(game)===key)||mergedGames().find(game=>category(game)===activeTab&&librarySidebarMatches(game));}
+function librarySidebarPage(page='library',restore=true){
+ const state=librarySidebarState();if(!state)return;
+ const previous=state.page;state.page=page;
+ const management=$('#library-management-page'),main=$('#library-main-page');
+ main.classList.toggle('hidden',page!=='library');management.classList.toggle('hidden',page==='library');
+ for(const [id,kind] of [['directory-settings-panel','sources'],['manual-game-panel','manual']])$('#'+id).classList.toggle('hidden',page!==kind);
+ $('#directory-settings-toggle').setAttribute('aria-expanded',String(page==='sources'));$('#manual-game-settings-toggle').setAttribute('aria-expanded',String(page==='manual'));
+ $('#library-management-title').textContent=page==='sources'?'游戏库来源':'单独添加游戏';
+ $('#library-management-description').textContent=page==='sources'?'管理需要扫描的游戏目录。移除来源不会删除游戏文件。':'选择一个游戏的主程序，沿用原有识别与加入流程。';
+ $('#library-view').dataset.libraryPage=page;
+ syncLibrarySidebarDock();
+ if(restore){const target=page==='library'?$('#'+(previous==='sources'?'directory-settings-toggle':'manual-game-settings-toggle')):page==='sources'?$('#pick-root-button'):$('#pick-game-button');focusWorkspaceElement(target);}
+}
+function syncLibrarySidebarDock(){
+ const state=librarySidebarState();if(!state)return;
+ const management=state.page!=='library';$('#library-dock-select').classList.toggle('hidden',management);$('#library-dock-edit').classList.toggle('hidden',management);
+ $('#library-dock-back').querySelector('span').textContent=management?'返回游戏库':'返回';
+ const game=librarySidebarCurrentGame();$('#library-dock-name').textContent=management?(state.page==='sources'?'游戏库来源':'单独添加游戏'):game?gameDisplayName(game):'当前分类没有游戏';
+ $('#library-dock-select').disabled=!game||!pageSelectable(game);$('#library-dock-edit').disabled=!game;
+}
+function fitLibrarySidebarCards(){
+ const state=librarySidebarState(),scroll=$('#library-sidebar-scroll');if(!state||!scroll||state.page!=='library'||!libraryRenderAllowed())return;
+ const width=library.clientWidth,height=scroll.clientHeight-20,gap=state.density==='compact'?12:innerWidth<=1400?13:16;
+ let columns=innerWidth<760?Math.max(2,Math.floor((width+gap)/125)):innerWidth<=1400?Math.max(3,Math.min(7,Math.floor((width+gap)/125))):8;
+ if(innerWidth>=760)while(columns<11&&2*((width-gap*(columns-1))/columns*1.5+44)+18>height&&(width-gap*columns)/(columns+1)>92)columns++;
+ if(state.density==='compact')columns=innerWidth<760?columns+1:Math.ceil(columns*1.4);
+ library.style.setProperty('--library-columns',String(columns));library.classList.toggle('small-library-cards',(width-gap*(columns-1))/columns<110);
+ const card=libraryCards()[0],rows=card?Math.max(1,Math.floor((height+18)/(card.getBoundingClientRect().height+18))):0;
+ $('#library-density-count').textContent=card?`${columns} 列 · 一屏 ${columns*rows} 张`:'';
+}
+function syncLibrarySidebar(){
+ const state=librarySidebarState();if(!state)return;
+ const title=CATEGORY_DEFINITIONS[activeTab]?.label||'游戏库';$('#library-main-title').textContent=title;
+ for(const tab of document.querySelectorAll('.page-tab')){
+  if(!tab.querySelector('.sidebar-tab-icon')){const icon=document.createElement('i');icon.className='sidebar-tab-icon';icon.innerHTML=librarySidebarIcon(tab.dataset.tab==='native-steam'?'steam':tab.dataset.tab==='in-steam'?'checkCircle':tab.dataset.tab==='unclassified'?'alert':tab.dataset.tab==='non-game'?'ban':'clock');tab.prepend(icon);}
+ }
+ for(const id of ['commit-button','edit-add-to-steam']){const button=$('#'+id);if(button&&!button.querySelector('.sidebar-steam-icon')){const icon=document.createElement('i');icon.className='sidebar-steam-icon';icon.innerHTML=librarySidebarIcon('steam');button.prepend(icon);}}
+ for(const card of libraryCards()){
+  const image=card.querySelector('.cover-placeholder');if(!image||card.querySelector('.sidebar-card-check'))continue;
+  const check=document.createElement('span');check.className='sidebar-card-check';check.setAttribute('aria-hidden','true');check.innerHTML=librarySidebarIcon('check');image.appendChild(check);
+  const hint=document.createElement('span');hint.className='sidebar-card-edit';hint.setAttribute('aria-hidden','true');hint.innerHTML='<span class="controller-key controller-key--small" data-controller-key="X">X</span><span>编辑</span>';image.appendChild(hint);
+ }
+ $('#library-result-count').textContent=`${libraryCards().length} 个游戏`;
+ syncLibrarySidebarDock();fitLibrarySidebarCards();
+}
+function librarySidebarMove(key){
+ const state=librarySidebarState();if(!state)return false;
+ const root=$('#library-view'),active=document.activeElement,all=visibleFocusables(root).filter(item=>!item.matches('.workspace-native-select')&&!item.closest('.workspace-dropdown-menu'));
+ const card=activeLibraryCard(),aside=$('#library-sidebar');
+ if(card&&state.page==='library'){
+  const cards=navigableLibraryCards(),index=cards.indexOf(card),columns=Number(library.style.getPropertyValue('--library-columns'))||1,column=index%columns;let next=null;
+  if(key==='ArrowLeft'){if(column)next=cards[index-1];else next=aside.querySelector('.page-tab.active');}
+  else if(key==='ArrowRight'){if(column<columns-1)next=cards[index+1];}
+  else if(key==='ArrowUp'){next=index>=columns?cards[index-columns]:$('#library-search');}
+  else if(key==='ArrowDown'){next=cards[index+columns]||$('#library-dock-edit');}
+  return focusWorkspaceElement(next)||true;
+ }
+ if(aside.contains(active)){
+  if(key==='ArrowRight'){const from=active.getBoundingClientRect(),sameRow=visibleFocusables(aside).find(item=>{const box=item.getBoundingClientRect();return box.left>from.left+8&&Math.abs(box.top-from.top)<8;});if(sameRow)return focusWorkspaceElement(sameRow)||true;const target=state.page==='library'?libraryCards().find(item=>item.dataset.directory===state.lastCard)||libraryCards()[0]||$('#library-search'):visibleFocusables($('#library-management-page'))[0];return focusWorkspaceElement(target)||true;}
+  return moveSpatialFocus(visibleFocusables(aside),key,active)||true;
+ }
+ if(active?.closest('#library-sidebar-dock')&&key==='ArrowUp'&&state.page==='library')return focusWorkspaceElement(libraryCards().find(item=>item.dataset.directory===state.lastCard)||libraryCards()[0]||$('#library-search'))||true;
+ if(!all.includes(active))return focusWorkspaceElement(state.page==='library'?libraryCards()[0]||aside.querySelector('.page-tab.active'):visibleFocusables($('#library-management-page'))[0])||true;
+ const next=spatialNavigationTarget(all.filter(item=>!aside.contains(item)),active,key);
+ return focusWorkspaceElement(next||(key==='ArrowLeft'?aside.querySelector('.page-tab.active'):null))||true;
+}
+function installLibrarySidebar(){
+ const root=$('#library-view');if(!root||root._sidebarState)return;
+ root._sidebarState={page:'library',density:'standard',query:'',lastCard:''};root.dataset.libraryDensity='standard';
+ document.body.classList.add('library-sidebar-shell');
+ const heading=root.querySelector('.library-heading'),tabs=root.querySelector('.page-tabs'),menu=root.querySelector('.library-menu-row'),bar=root.querySelector('.steam-bar');
+ const aside=document.createElement('aside');aside.id='library-sidebar';aside.setAttribute('aria-label','游戏库导航');aside.innerHTML='<div class="sidebar-library-brand">YeMan自定义游戏库</div><div class="sidebar-caption">游戏</div>';
+ root.prepend(aside);aside.appendChild(tabs);
+ const manage=document.createElement('div');manage.className='sidebar-management-actions';manage.innerHTML='<div class="sidebar-caption">管理</div>';
+ for(const id of ['directory-settings','manual-game-settings'])manage.appendChild($('#'+id));
+ const refresh=$('#refresh-artwork-button');manage.appendChild(refresh);aside.appendChild(manage);aside.appendChild(bar);
+ const media=$('#media-download-progress');aside.appendChild(media);
+ const workspace=document.createElement('div');workspace.className='library-sidebar-workspace';
+ const main=document.createElement('div');main.id='library-main-page';main.className='library-sidebar-page';
+ heading.querySelector('h1').id='library-main-title';heading.querySelector('.eyebrow').textContent='YeMan自定义游戏库';$('#back-entry-button').textContent='返回主程序';main.appendChild(heading);
+ const tools=document.createElement('div');tools.className='library-sidebar-tools';tools.innerHTML='<label class="library-sidebar-search"><span>'+librarySidebarIcon('search')+'</span><input id="library-search" type="search" placeholder="搜索游戏名称…" aria-label="搜索游戏名称" autocomplete="off"></label><div class="library-sidebar-density" role="group" aria-label="封面密度"><button type="button" data-library-density="standard" class="active" aria-pressed="true">标准</button><button type="button" data-library-density="compact" aria-pressed="false">紧凑</button></div>';
+ main.appendChild(tools);
+ const meta=document.createElement('div');meta.className='library-sidebar-meta';meta.innerHTML='<span id="library-result-count"></span><span id="library-density-count"></span>';main.appendChild(meta);
+ for(const id of ['in-steam-limitation','library-notice'])main.appendChild($('#'+id));
+ const scroll=document.createElement('div');scroll.id='library-sidebar-scroll';scroll.append(library,$('#empty'));main.appendChild(scroll);workspace.appendChild(main);
+ const management=document.createElement('section');management.id='library-management-page';management.className='library-sidebar-page hidden';management.innerHTML='<header class="library-management-heading"><button id="library-management-back" type="button" class="button ghost"><span class="controller-key sidebar-key key-b" data-controller-key="B">B</span>返回</button><div><div class="eyebrow">YeMan自定义游戏库 / 管理</div><h1 id="library-management-title">游戏库来源</h1></div></header><p id="library-management-description"></p><div id="library-management-content"></div>';
+ for(const id of ['directory-settings-panel','manual-game-panel']){const panel=$('#'+id);panel.classList.remove('menu-popover-panel');panel.classList.add('library-management-panel');management.querySelector('#library-management-content').appendChild(panel);}
+ workspace.appendChild(management);
+ const dock=document.createElement('footer');dock.id='library-sidebar-dock';dock.innerHTML='<div id="library-dock-name"></div><div class="library-dock-actions"><button type="button" id="library-dock-select" class="button ghost"><span class="controller-key sidebar-key key-a" data-controller-key="A">A</span>选择</button><button type="button" id="library-dock-edit" class="button ghost"><span class="controller-key sidebar-key key-x" data-controller-key="X">X</span>编辑 / 单独加入</button><button type="button" id="library-dock-back" class="button ghost"><span class="controller-key sidebar-key key-b" data-controller-key="B">B</span><span>返回</span></button></div>';workspace.appendChild(dock);
+ root.append(aside,workspace);menu.remove();
+ $('#directory-settings-toggle').setAttribute('aria-label','游戏库来源');$('#directory-settings-toggle').firstChild.textContent='游戏库来源 ';
+ $('#manual-game-settings-toggle').setAttribute('aria-label','单独添加游戏');$('#manual-game-settings-toggle').firstChild.textContent='单独添加游戏 ';
+ $('#pick-root-button').textContent='选择游戏库目录';$('#pick-game-button').textContent='选择游戏主程序';
+ $('#library-search').addEventListener('input',event=>{root._sidebarState.query=event.target.value.trim().toLocaleLowerCase();renderLibrary();});
+ $('#library-search').addEventListener('keydown',event=>{if(event.key==='ArrowDown'||event.key==='Enter'){event.preventDefault();event.stopPropagation();focusWorkspaceElement(libraryCards()[0]);}});
+ tools.querySelectorAll('[data-library-density]').forEach(button=>button.addEventListener('click',()=>{const density=button.dataset.libraryDensity;root._sidebarState.density=density;root.dataset.libraryDensity=density;tools.querySelectorAll('[data-library-density]').forEach(item=>{item.classList.toggle('active',item===button);item.setAttribute('aria-pressed',String(item===button));});fitLibrarySidebarCards();}));
+ $('#library-management-back').addEventListener('click',()=>librarySidebarPage());
+ $('#library-dock-select').addEventListener('click',()=>{const game=librarySidebarCurrentGame();if(game)toggleGameSelection(game,true);});
+ $('#library-dock-edit').addEventListener('click',()=>{const game=librarySidebarCurrentGame();if(game)openEdit(game);});
+ $('#library-dock-back').addEventListener('click',()=>{if(root._sidebarState.page!=='library')librarySidebarPage();else focusWorkspaceElement(aside.querySelector('.page-tab.active'));});
+ root.addEventListener('focusin',event=>{const card=event.target.closest('.game-card');if(card){root._sidebarState.lastCard=card.dataset.directory;syncLibrarySidebarDock();}});
+ tabs.addEventListener('click',event=>{if(event.target.closest('.page-tab')&&root._sidebarState.page!=='library')librarySidebarPage('library',false);});
+ const observer=new ResizeObserver(()=>fitLibrarySidebarCards());observer.observe(scroll);
+ window.addEventListener('pagehide',()=>observer.disconnect(),{once:true});
+ syncLibrarySidebar();
+}
+
+function selectedVisibleSteamDirectories(){const selected=selectedSteamDirectories===null?new Set(defaultSelectedSteamDirectories()):selectedSteamDirectories;return mergedGames().filter(game=>category(game)==='in-steam'&&selected.has(keyFor(game))&&librarySidebarMatches(game)).map(keyFor);}
+function decorateLibrarySteamButton(button){if(!librarySidebarState()||!button||button.querySelector('.sidebar-steam-icon'))return;const icon=document.createElement('i');icon.className='sidebar-steam-icon';icon.innerHTML=librarySidebarIcon('steam');button.prepend(icon);}
+const LIBRARY_SIDEBAR_ICONS={"grid": "<rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/>", "clock": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/>", "checkCircle": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"m7.5 12 3 3 6-6\"/>", "check": "<path d=\"m5 12 4 4L19 6\"/>", "alert": "<path d=\"M12 3 2 21h20L12 3Z\"/><path d=\"M12 9v5m0 3h.01\"/>", "ban": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"m6 6 12 12\"/>", "search": "<circle cx=\"10.5\" cy=\"10.5\" r=\"6.5\"/><path d=\"m16 16 5 5\"/>", "steam": "<path fill=\"currentColor\" stroke=\"none\" opacity=\"0.66\" fill-rule=\"evenodd\" d=\"M11.7857 0.378L11.4429 0.4271 10.8429 0.4321 10.6714 0.5083 10.0714 0.5212 9.9857 0.5787 9.3 0.7033 9.2143 0.764 9.0429 0.7755 8.6143 0.9385 8.4429 0.9503 8.1 1.1065 7.9286 1.123 7.8429 1.1917 7.5 1.2942 6.4714 1.8083 5.9571 2.1346 5.8714 2.1512 5.7 2.3044 5.6143 2.3242 5.1 2.7384 4.9286 2.833 4.5857 3.1659 4.4143 3.261 3.3438 4.3286 2.4951 5.4429 2.214 5.9571 2.0654 6.1286 1.9631 6.3857 1.7303 6.7286 1.5343 7.2429 1.3802 7.5 1.3456 7.6714 1.2116 7.9286 1.1894 8.1 1.1227 8.1857 1.1056 8.3571 1.0373 8.4429 1.0098 8.6143 0.9498 8.7 0.9341 8.9571 0.8659 9.0429 0.8522 9.2143 0.7755 9.3857 0.757 9.6429 0.6874 9.8143 0.6819 10.0714 0.6052 10.2429 0.5978 10.7571 0.5163 11.0143 0.5145 12.6429 0.5879 12.9 0.6015 13.4143 0.6819 13.6714 0.6929 14.0143 0.7548 14.1 0.7805 14.4429 0.8346 14.5286 0.8659 14.7857 0.9341 14.8714 0.9516 15.1286 1.019 15.2143 1.0373 15.3857 1.1056 15.4714 1.2081 15.9 1.2744 15.9857 1.3793 16.3286 1.5341 16.5857 1.7228 17.1 2.1346 17.7857 2.1512 17.8714 2.9188 18.9857 3.3857 19.5422 4.4602 20.6143 5.8714 21.6774 7.3286 22.4484 7.5 22.4659 7.9286 22.706 8.2714 22.8085 8.3571 22.877 8.8714 22.9815 8.9571 23.0487 9.2143 23.0612 9.3857 23.1385 9.5571 23.1544 9.6429 23.2202 9.9857 23.2373 10.0714 23.3056 10.5 23.3266 10.7571 23.3975 11.4429 23.4101 11.7 23.4835 12.3 23.485 12.6429 23.4033 13.2429 23.3975 13.5857 23.3163 13.9286 23.3074 14.1 23.2306 14.4429 23.2188 14.5286 23.1544 14.7857 23.1396 14.9571 23.0623 15.4714 22.9627 15.5571 22.8944 15.7286 22.8672 15.9857 22.7326 16.3286 22.6216 16.5857 22.4723 16.7571 22.4484 17.6143 22.0203 18.3 21.593 18.4714 21.4369 18.5571 21.4203 18.8143 21.2501 18.9857 21.0881 19.1571 20.994 19.7571 20.4295 19.8429 20.3939 20.3131 19.9286 20.9953 19.1571 21.0904 18.9857 21.3371 18.7286 21.5872 18.3857 21.9512 17.7 22.1889 17.3571 22.5289 16.6714 22.6369 16.3286 22.7058 16.2429 23.1382 14.9571 23.1483 14.7857 23.2251 14.6143 23.2389 14.3571 23.3115 14.1857 23.3173 14.0143 23.3945 13.8429 23.4007 13.4143 23.4847 13.1571 23.4875 12.6429 23.5662 12.2143 23.5707 11.8714 23.4923 11.3571 23.4832 10.7571 23.4066 10.5857 23.3945 9.9857 23.2338 9.4714 23.2242 9.2143 23.1472 9.0429 23.1374 8.8714 22.7056 7.5857 22.5557 7.3286 22.3629 6.8143 21.9512 6.1286 21.9346 6.0429 21.7826 5.8714 21.4915 5.3571 20.9945 4.6714 20.6629 4.3286 20.4833 4.0714 20.0568 3.6429 19.7571 3.4219 19.2429 2.9198 19.0714 2.825 18.5571 2.4119 18.0429 2.131 17.8714 1.9797 17.2714 1.6864 17.1 1.5623 16.9286 1.5211 16.1571 1.1479 15.0429 0.7761 14.4429 0.6691 14.3571 0.6091 14.1 0.5956 13.9286 0.5184 13.4143 0.5091 13.2429 0.4318ZM10.8429 2.233L10.6714 2.3099 10.4143 2.3305 10.2429 2.3967 9.9857 2.402 9.8143 2.4786 9.5571 2.4944 9.4714 2.5627 8.9571 2.6789 8.5286 2.8371 8.4429 2.9058 8.2714 2.9412 7.7571 3.1802 6.9857 3.6075 6.4714 3.9489 6.3 4.106 6.2143 4.1226 5.7 4.5438 4.9739 5.2714 4.3821 5.9571 3.7787 6.8143 3.0944 8.1 3.0695 8.2714 2.923 8.5286 2.9056 8.7 2.8373 8.7857 2.7478 9.0429 2.5627 9.9 2.4953 9.9857 2.483 10.4143 2.4121 10.5857 2.3951 11.1 2.3326 11.2714 2.4429 11.3917 2.6143 11.4747 2.9571 11.5843 3.3857 11.8198 3.5571 11.8373 3.9857 12.077 4.1571 12.0944 4.4143 12.2484 4.5857 12.2659 5.0143 12.5058 5.3571 12.6083 5.7857 12.8484 5.9571 12.8659 6.2143 13.0197 6.5571 13.124 6.8143 13.277 6.9857 13.277 7.1571 13.1226 7.6714 12.9346 7.7571 12.8659 8.1857 12.8549 8.6143 12.7357 11.1309 9.1286 11.1516 8.7 11.2128 8.6143 11.2332 8.3571 11.3897 8.0143 11.4087 7.8429 11.5797 7.5 12.0033 6.9 12.3857 6.5193 12.5571 6.4247 12.7286 6.2654 13.4143 5.923 13.5857 5.9036 13.6714 5.837 13.8429 5.8256 14.0143 5.7523 14.3571 5.7351 14.6143 5.6571 14.8714 5.6691 15.0429 5.7393 15.3 5.7451 15.4714 5.8155 15.7286 5.8462 16.3286 6.094 16.6714 6.3353 16.7571 6.3572 17.1857 6.7562 17.5631 7.1571 17.5797 7.2429 17.8203 7.5857 18.0085 8.1 18.077 8.1857 18.0964 8.4429 18.163 8.5286 18.1742 8.7857 18.2549 9.0429 18.2567 9.5571 18.1752 9.8143 18.1659 9.9857 18.0892 10.1571 18.0802 10.3286 17.7346 11.1 17.4827 11.4429 16.9286 12 16.5 12.331 15.9857 12.5913 15.8143 12.6052 15.4714 12.7544 14.8714 12.7943 14.3571 13.1187 14.1857 13.2797 13.7571 13.5489 12.9857 14.1374 12.6429 14.3327 12.2143 14.6499 12.1286 14.6725 11.3571 15.2491 11.2714 15.2698 11.1535 15.3857 11.1406 15.9 11.0638 16.0714 11.029 16.3286 10.7917 16.8429 10.6226 17.1 10.2429 17.4836 9.6429 17.888 9.4714 17.9228 9.3857 17.9917 9.1286 18.0819 8.9571 18.0893 8.7857 18.1627 8.2714 18.17 8.0143 18.0887 7.8429 18.0788 7.4143 17.9096 6.8143 17.5659 6.4356 17.1857 6.1045 16.6714 6.077 16.5 6.0087 16.4143 5.9198 16.1571 5.9024 15.9 5.7857 15.7214 5.0143 15.421 4.7571 15.2659 4.5857 15.2484 4.3286 15.0946 3.9857 14.9915 3.7286 14.8373 3.5571 14.8198 3.1286 14.5799 2.7 14.4244 2.6685 14.5286 2.7346 14.6143 2.7483 14.7857 2.8373 15.0429 2.9056 15.1286 2.923 15.3 3.0605 15.5571 3.0944 15.7286 3.3329 16.1571 3.3599 16.3286 3.4974 16.5 3.7009 16.9286 4.2709 17.7 4.2932 17.7857 4.717 18.3 5.6581 19.2429 6.4714 19.8797 7.4143 20.4774 8.2714 20.9036 8.4429 20.923 8.7 21.077 8.8714 21.0941 8.9571 21.1608 9.5571 21.3377 9.8143 21.3519 9.9857 21.4261 10.1571 21.4373 10.2429 21.5056 10.7571 21.5291 10.8429 21.5925 10.9286 21.5995 12.0429 21.6336 13.2429 21.5894 13.3286 21.5227 13.7571 21.5056 13.8429 21.4373 14.1 21.4229 14.2714 21.3495 14.5286 21.3341 14.6143 21.2659 14.8714 21.2386 15.1286 21.1027 15.3857 21.0622 16.6714 20.4774 16.8429 20.3226 17.1 20.2159 17.5286 19.894 17.6143 19.8774 17.8714 19.6369 17.9571 19.6203 18.4714 19.1882 19.1134 18.5571 19.6957 17.8714 19.7213 17.7857 20.1364 17.2714 20.8201 16.0714 21.1681 15.2143 21.2765 14.7857 21.3359 14.7 21.3516 14.5286 21.4198 14.4429 21.4326 14.1857 21.5957 13.6714 21.6066 13.2429 21.6832 13.0714 21.6842 10.8429 21.6156 10.6714 21.5957 10.1571 21.4335 9.6429 21.4211 9.3857 21.3582 9.3 21.2517 8.8714 20.9942 8.1857 20.8426 7.9286 20.8169 7.7571 20.5619 7.2429 19.9797 6.3857 19.9631 6.3 19.8083 6.1286 19.7571 6.0016 18.7714 4.9286 18.0429 4.2902 16.9286 3.5226 16.8429 3.506 16.6714 3.3567 15.9857 3.0774 15.7286 2.9228 15.3857 2.8176 15.3 2.7509 15.1286 2.7341 15.0429 2.6659 14.6143 2.563 14.5286 2.4951 14.1857 2.4788 14.1 2.4208 13.8429 2.3937 13.6714 2.3165 13.3286 2.312 13.1571 2.2349ZM14.4429 6.6097L14.3571 6.6763 14.0143 6.7047 13.5 6.8851 12.9857 7.2227 12.6915 7.5 12.3512 8.0143 12.1854 8.3571 12.1659 8.5286 12.0885 8.7 12.0887 9.8143 12.1659 9.9857 12.1814 10.1571 12.4338 10.6714 12.6869 11.0143 12.9857 11.3104 13.5 11.6486 13.8429 11.7512 13.9286 11.8198 14.2714 11.8357 14.4429 11.9123 14.9571 11.908 15.1286 11.8308 15.3857 11.8237 15.9857 11.5631 16.2844 11.3571 16.8765 10.7571 17.1341 10.2429 17.2358 9.8143 17.2973 9.7286 17.3056 8.8714 17.2382 8.7857 17.1341 8.2714 16.9631 7.9286 16.7571 7.6295 16.2429 7.1327 15.8143 6.8679 15.3 6.6944 15.0429 6.6788 14.8714 6.602ZM14.5286 7.4687L14.3571 7.5409 14.1 7.5516 13.7571 7.7226 13.3841 8.0143 13.0373 8.5286 13.0198 8.7 12.9516 8.7857 12.8839 9.3857 13.0373 9.9857 13.2771 10.3286 13.2969 10.4143 13.5 10.6247 14.1 10.9627 14.5286 11.0552 14.8714 11.0528 15.4714 10.8774 15.7705 10.6714 16.1814 10.2429 16.3516 9.9 16.3802 9.7286 16.4484 9.6429 16.4549 8.9571 16.3427 8.6143 16.1093 8.1857 15.7286 7.806 15.2143 7.5464 14.9571 7.5263 14.7857 7.4584ZM8.1857 13.7351L8.1857 13.7935 8.2714 13.8783 8.9105 14.1857 9.1654 14.4429 9.3195 14.7 9.4283 15.0429 9.4273 15.5571 9.3346 15.8143 9.2143 16.0269 8.7857 16.4488 8.3571 16.6185 7.8429 16.6163 7.3286 16.4286 7.1571 16.3103 7.0714 16.291 6.9663 16.3286 7.3286 16.7662 7.5857 16.9631 7.8477 17.1 8.2714 17.2268 8.7857 17.2198 8.8714 17.1516 9.1286 17.1221 9.6429 16.7948 10.0226 16.3286 10.1988 15.9 10.19 14.9571 9.9346 14.4429 9.4714 13.9797 9.1286 13.8044 8.9571 13.7916 8.8714 13.7237Z\"/>"};
+installLibrarySidebar();

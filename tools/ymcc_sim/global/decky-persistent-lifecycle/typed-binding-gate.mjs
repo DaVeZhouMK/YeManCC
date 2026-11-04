@@ -10,6 +10,9 @@ const slash = file => file.replaceAll('\\', '/');
 const relative = (root, file) => slash(path.relative(root, file));
 const hashFile = file => sha(fs.readFileSync(file));
 export const typedIds = Object.freeze({
+ offlineIdentity: 'native.typed-offline-current-ui-account-consumers',
+ loaderTempPath: 'native.typed-loader-temp-path-budget',
+ admissionPark: 'native.typed-admission-park-resume-without-budget-refill',
  healthy: 'native.typed-runtime-drains-live-watch-without-extra-reader-thread',
  inactive: 'native.typed-rejected-final-admission-releases-watch-before-off',
  stalled: 'native.typed-stalled-binding-stop-before-fixture-release',
@@ -57,6 +60,60 @@ export const historicalValidationId = 'native.historical-callback-negative-prese
 export function resourceZero(s) {
  return s?.fullyDestroyed === true && s.handles === 0 && s.pendingIo === 0 && s.activeCalls === 0 && s.jobActiveProcesses === 0 && s.childExited === true &&
   s.ownerHandles === 0 && s.ownerPendingIo === 0 && s.readerHandles === 0 && s.readerPendingIo === 0 && s.clientHandles === 0;
+}
+// A post-bootstrap resource recheck is a separate failure boundary, not proof
+// supplied by an earlier successful read. Keep it mandatory under the same IDs.
+export function verifyDeferredResourceRevalidation(raw){
+ assert([typedIds.historyResourceRecover,typedIds.historyResourceReady,typedIds.historyResourceOff,typedIds.historyResourceHash,typedIds.historyResourceCleanup,typedIds.historyResourceAdmission].includes(raw.id));
+ const d=raw.afterDeferredBootstrap,heals=[typedIds.historyResourceRecover,typedIds.historyResourceReady].includes(raw.id);
+ assert(d,'Missing post-deferred-bootstrap resource evidence');assert.equal(d.passed,true);assert.equal(d.variant,raw.id.slice('native.typed-history-resource-'.length));
+ assert.equal(d.stage,'resource-revalidation-after-deferred-bootstrap');assert.equal(d.plansAtRejectedPreflight,2);
+ assert(resourceZero(d.resourcesAtRejectedPreflight),'Rejected deferred preflight retained binding resources');
+ assert(resourceZero(d.atExit),'Deferred resource case did not release owned resources');
+ assert(Number.isSafeInteger(d.beforeHandles)&&d.beforeHandles===d.afterHandles);assert.equal(d.cefUnaffected,true);
+ assert.equal(d.originalStopDeadlineMs,3200);assert(Number.isSafeInteger(d.stopElapsedMs)&&d.stopElapsedMs>=0&&d.stopElapsedMs<=3200);
+ assert.equal(d.recovered,heals);assert.equal(d.bindingPlans,heals?3:2);
+ assert.equal(d.preflightReads,raw.id===typedIds.historyResourceRecover?4:heals?3:2);
+ if(heals){assert(d.loaderPid>0);assert.equal(d.phase,'loader-started');}
+ else assert.equal(d.loaderPid,0);
+ if(raw.id===typedIds.historyResourceRecover)assert(d.elapsedFromFailureMs>=2900,'Deferred resource retries refilled or bypassed original debt');
+ if(raw.id===typedIds.historyResourceOff)assert.equal(d.phase,'disabled');
+ if(raw.id===typedIds.historyResourceAdmission)assert.equal(d.phase,'waiting-manual-steam');
+ if(raw.id===typedIds.historyResourceHash)assert.equal(d.reason,'resource-hash-mismatch');
+ if(raw.id===typedIds.historyResourceCleanup)assert.equal(d.reason,'resource-worker-cleanup-incomplete');
+ return d;
+}
+export function verifyDeferredResourceExecution(value,expectedCases=6){
+ assert(value&&value.selected===true);assert.equal(value.childExecutions,1);
+ assert(Number.isSafeInteger(value.pid)&&value.pid>0);assert.equal(value.exitCode,0);
+ assert.equal(value.jobActiveProcesses,0);assert.equal(value.ownedParentHandlesAfterClose,0);assert.equal(value.parentReaderThreads,0);
+ assert.equal(value.originalSharedOuterBudgetMs,45000);assert.equal(value.cases,expectedCases);
+ for(const key of ['elapsedMs','parentObservationElapsedMs'])assert(Number.isSafeInteger(value[key])&&value[key]>=0&&value[key]<=45000);
+ assert(typeof value.image==='string'&&value.image.length>0);assert(typeof value.raw==='string'&&value.raw.length>0);
+ return value;
+}
+// A complete current producer must account for every nested case, not merely
+// retain a total PASS. Reused by the original owned/current/global paths.
+export function verifyDeferredResourceGroup(result){
+ const execution=verifyDeferredResourceExecution(result.deferredResourceExecution);
+ const ids=['recover','ready','off','hash','cleanup','admission'].map(v=>'native.typed-history-resource-'+v);
+ const rows=result.cases.filter(row=>ids.includes(row.id));
+ assert.deepEqual(rows.map(row=>row.id).sort(),ids.sort(),'Complete deferred resource membership required');
+ for(const row of rows){assert.equal(row.passed,true);verifyDeferredResourceRevalidation(row);}
+ return {execution,rows};
+}
+export function verifyDeferredResourceProof(result,producerDir){
+ const {execution,rows}=verifyDeferredResourceGroup(result),dir=path.resolve(producerDir);
+ const file=path.resolve(execution.raw),expected=path.join(dir,'runtime-fixtures/deferred-resource-branch/result.json');
+ const normalized=p=>path.resolve(p).replaceAll('\\','/').toLowerCase();
+ assert.equal(normalized(file),normalized(expected),'Deferred resource receipt is not the original producer output');
+ assert.equal(normalized(fs.realpathSync(file)),normalized(file),'Deferred resource receipt reparse rejected');
+ const child=read(file);assert.equal(child.pid,execution.pid);assert.equal(child.sourceImage,execution.image);
+ assert.equal(normalized(child.sourceImage),normalized(path.join(dir,'FixtureSteam/steam.exe')),'Deferred child is not the current compiled image');
+ assert.equal(child.elapsedMs,execution.elapsedMs);
+ assert.deepEqual(Object.keys(child.cases).sort(),['recover','ready','off','hash','cleanup','admission'].sort());
+ for(const row of rows)assert.deepEqual(row.afterDeferredBootstrap,child.cases[row.afterDeferredBootstrap.variant]);
+ return {execution,raw:{path:file,sha256:hashFile(file)}};
 }
 function blockAfter(text, anchor) {
  const start = text.indexOf(anchor); assert(start >= 0, 'Production binding source anchor missing: ' + anchor);
@@ -107,9 +164,10 @@ export function verifyProductionWiring({root, out, tools, execute}) {
  fs.writeFileSync(path.join(out, 'production-binding-wiring.json'), JSON.stringify(receipt, null, 2) + '\n');
  return {id: productionWiringId, name: productionWiringId, passed: true, measurements: receipt};
 }
-export function verifyTypedRuntime({root, out, execution}) {
+export function verifyTypedRuntime({root, out, execution, runtimeDirectory}) {
  assert.equal(execution.passed, true, 'Fresh typed Runtime build/run failed');
- const dir = path.join(out, 'typed-runtime'), file = path.join(dir, 'typed-runtime-result.json');
+ const dir = path.resolve(runtimeDirectory??path.join(out, 'typed-runtime')), file = path.join(dir, 'typed-runtime-result.json');
+ assert(dir.toLowerCase().startsWith((path.resolve(out)+path.sep).toLowerCase()),'Typed Runtime directory must stay inside this evidence root');
  const result = read(file), build = read(path.join(dir, 'BUILD.json')), run = read(path.join(dir, 'RESULT.json')), pins = read(path.join(dir, 'SOURCE-PINS.json'));
  assert.equal(build.exit, 0); assert.equal(run.status, 'pass'); assert.equal(run.compilerExit, 0); assert.equal(run.runExit, 0);
  // The alternate S0 function is compiled from current main.cpp, not a
@@ -117,10 +175,22 @@ export function verifyTypedRuntime({root, out, execution}) {
  // remain useful diagnostics, but can never authorize a release receipt.
  assert.equal(run.resumeConsumer?.intentOverride,undefined,'Negative Ready override is not production evidence');
  const readyMain=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
- const readyFunction=readyMain.match(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation\) \{[\s\S]*?\n\}/);
- assert(readyFunction,'Missing S0 Ready production consumer');
+ const readyFunctions=[...readyMain.matchAll(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation(?:,const char\* scope="sleep-intent-ready")?\) \{[\s\S]*?\n\}/g)],readyFunction=readyFunctions[0];
+ assert(readyFunction,'Missing S0 Ready production consumer');assert.equal(readyFunctions.length,1,'Ambiguous S0 Ready production consumer');
  assert.equal(run.resumeConsumer.alternateReady.sourceSha256,sha(Buffer.from(readyFunction[0])));
  assert.equal(hashFile(path.join(dir,'source/native/decky_wake_ready_consumer.inc')),sha(Buffer.from(readyFunction[0]+'\n')),'Compiled S0 Ready consumer drift');
+
+ const planBegin=readyMain.indexOf('static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan('),planEnd=readyMain.indexOf('static void deckySidebarOwnedBindingDiagnostic(',planBegin);
+ const diagnosticEnd=readyMain.indexOf('// Existing high-frequency lane only;',planEnd);
+ const admissionStart=readyMain.match(/    config[.]launchAdmission=\s*\[\]\(\) -> ymcc::deckysidebar::LaunchAdmission \{/),admissionEnd=readyMain.indexOf('\n        };',admissionStart?.index??-1)+'\n        };'.length;
+ assert(planBegin>=0&&planEnd>planBegin&&diagnosticEnd>planEnd&&admissionStart&&admissionEnd>admissionStart.index,'Missing exact offline consumer boundary');
+ const plan=readyMain.slice(planBegin,planEnd).trim(),diagnostic=readyMain.slice(planEnd,diagnosticEnd).trim();
+ const admission=readyMain.slice(admissionStart.index,admissionEnd).trim().replace(/^config.launchAdmission=/,'return ');
+ const compiled=plan+'\n'+diagnostic+'\ninline auto actualAdmission(){'+admission+'}\n';
+ assert.equal(run.resumeConsumer.offlineIdentity.planSha256,sha(Buffer.from(plan)));
+ assert.equal(run.resumeConsumer.offlineIdentity.diagnosticSha256,sha(Buffer.from(diagnostic)));
+ assert.equal(run.resumeConsumer.offlineIdentity.admissionSha256,sha(Buffer.from(admission)));
+ assert.equal(hashFile(path.join(dir,'source/native/decky_offline_consumers.inc')),sha(Buffer.from(compiled)),'Compiled current offline consumer drift');
  assert.deepEqual(run.changedOriginalInputs, []); assert.equal(run.exeSha256, hashFile(path.join(dir, 'FixtureSteam/steam.exe')));
  assert(!build.args.some(arg => /^\/DYMCC_DECKY_RUNTIME_LEGACY_FIXTURE(?:=|$)/i.test(arg)));
  assert(pins.files.length > 0);
@@ -129,7 +199,7 @@ export function verifyTypedRuntime({root, out, execution}) {
   assert.equal(hashFile(path.join(root, pin.path)), pin.sha256, 'Typed source drift: ' + pin.path);
   assert.equal(hashFile(path.join(dir, 'source', pin.path)), pin.sha256, 'Frozen typed source changed: ' + pin.path);
  }
- for (const required of ['native/decky_sidebar_runtime.h', 'native/decky_binding_client.h', 'native/decky_binding_process_owner.h', 'native/decky_binding_worker.h', 'tools/decky_binding_runtime_selftest.cpp'])
+ for (const required of ['native/decky_sidebar_runtime.h', 'native/decky_sidebar_temp.h', 'native/decky_binding_client.h', 'native/decky_binding_process_owner.h', 'native/decky_binding_worker.h', 'tools/decky_binding_runtime_selftest.cpp'])
   assert(pins.files.some(pin => pin.path === required), 'Typed production dependency not frozen: ' + required);
  assert.equal(result.passed, true); assert.equal(result.tests, Object.keys(typedIds).length); assert.equal(result.passedCount, result.tests);
  assert.equal(result.deadlineMs, 3200); assert.equal(result.productCallbackMode, 'typed-only; legacy macro absent');
@@ -138,13 +208,23 @@ export function verifyTypedRuntime({root, out, execution}) {
  const cold = result.sharedCryptoInitialization;
  assert(cold && cold.samples.length >= 10 && cold.samples.at(-1).elapsedMs >= 500, 'Shared CNG baseline stability not recorded');
  assert(cold.samples.every(sample => sample.handles === cold.afterHandles), 'Unstable shared CNG baseline');
+ const deferredProof=verifyDeferredResourceProof(result,dir),deferredExecution=deferredProof.execution,deferredRaw=deferredProof.raw.path;
  const rawProof = {path: relative(out, file), sha256: hashFile(file)};
  const rows = result.cases.map(raw => {
   assert.equal(raw.passed, true, 'Typed business case failed: ' + raw.id);
   assert(resourceZero(raw.atExit ?? raw.atDeadline ?? raw.afterOff), 'Typed owned resources not zero: ' + raw.id);
   const before = raw.beforeHandles ?? raw.parentHandlesBefore, after = raw.afterHandles ?? raw.parentHandlesAfter;
   assert(Number.isSafeInteger(before) && before === after, 'Raw parent handle count mismatch: ' + raw.id);
-  if (raw.id === typedIds.healthy) {
+  if(raw.id===typedIds.offlineIdentity){
+   for(const key of ['actualMainConsumers','offlineAdmission','typedNonzeroProof','missingProofRefused','sameAccountOnline','ownerRevocation','cefUnaffected'])assert.equal(raw[key],true);
+  } else if(raw.id===typedIds.loaderTempPath){
+   assert.equal(raw.officialLoaderExecuted,false);assert.equal(raw.originalJobGatePreserved,true);assert.equal(raw.cefUnaffected,true);
+   assert(raw.homeUnits>=148&&raw.ownedRunUnits<=190&&raw.officialPayloadUnits<260);
+   assert(raw.inertLoaderPid>0&&raw.stopMs<3200);assert.equal(raw.runtimeTempFacts,1);
+  } else if(raw.id===typedIds.admissionPark){
+   for(const key of ['timerResumed','recoveredWithoutExtraEvent','originalBudgetAndStopAssertions','cefUnaffected'])assert.equal(raw[key],true);
+   assert.equal(raw.bindingPlans,1);assert.equal(raw.refusalStormSignals,20000);
+  } else if (raw.id === typedIds.healthy) {
    assert.equal(raw.watchDrained, true); assert.equal(raw.diagnosticFrames, 192); assert.equal(raw.cefUnaffected, true);
    assert.equal(raw.activeThreads, raw.beforeThreads + 1, 'Extra parent binding reader thread');
   } else if(raw.id.startsWith('native.typed-final-admission-')) {
@@ -187,6 +267,7 @@ export function verifyTypedRuntime({root, out, execution}) {
    assert.equal(raw.bindingPlansBeforeValidResources,0);assert.equal(raw.bindingPlans,heals?1:0);
    if(raw.id===typedIds.historyResourceOff)assert.equal(raw.phase,'disabled');
    if(raw.id===typedIds.historyResourceAdmission)assert.equal(raw.phase,'waiting-manual-steam');
+   verifyDeferredResourceRevalidation(raw);
   } else if(raw.id===typedIds.healOff) {
    for(const name of ['lateResultAttempted','resumeAfterOffRejected','recoveryAfterOffRejected'])assert.equal(raw[name],true,raw.id+': '+name);
    assert.equal(raw.afterOff.enabled,false);assert.equal(raw.afterOff.phase,'disabled');assert.equal(raw.acceptedResults,1);assert.equal(raw.plansAfterQuiet,2);
@@ -203,12 +284,13 @@ export function verifyTypedRuntime({root, out, execution}) {
   }
   // Raw tables remain in the byte-pinned receipt; acceptance uses the measured
   // scalar and resource fields, without copying thousands of handle-table rows.
-  const measurements = Object.fromEntries(Object.entries(raw).filter(([key, value]) => !['id', 'passed'].includes(key) && (value === null || typeof value !== 'object' || ['atExit', 'atDeadline', 'beforeStop', 'beforeOff', 'afterOff', 'active'].includes(key))));
+  const measurements = Object.fromEntries(Object.entries(raw).filter(([key, value]) => !['id', 'passed'].includes(key) && (value === null || typeof value !== 'object' || ['atExit', 'atDeadline', 'beforeStop', 'beforeOff', 'afterOff', 'active', 'afterDeferredBootstrap'].includes(key))));
   return {id: raw.id, name: raw.id, passed: true, evidence: rawProof, measurements};
  });
  return {rows, receipt: {schema: result.schema, passed: true, raw: rawProof, build: {path: relative(out, path.join(dir, 'BUILD.json')), sha256: hashFile(path.join(dir, 'BUILD.json'))},
   execution: {path: relative(out, path.join(dir, 'RESULT.json')), sha256: hashFile(path.join(dir, 'RESULT.json'))},
   sourcePins: {path: relative(out, path.join(dir, 'SOURCE-PINS.json')), sha256: hashFile(path.join(dir, 'SOURCE-PINS.json')), verifiedCurrentFiles: pins.files.length},
+  deferredResourceExecution: {...deferredExecution, raw:{path:relative(out,deferredRaw),sha256:hashFile(deferredRaw)}},
   sharedCryptoInitialization: {scope: cold.scope, beforeHandles: cold.beforeHandles, afterHandles: cold.afterHandles, samples: cold.samples},
   currentEvidenceFor: 'destroyOnExit/destroyWhenStopStalls/explicitOffStaysOff/recoverAfterSleep; typed production path, legacy macro absent'}};
 }

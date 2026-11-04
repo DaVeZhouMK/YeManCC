@@ -4,6 +4,9 @@ Only type bindings/base-class scaffolding differ. HID Write/IsConnected are the
 terminal injection; no App, factory, UI, EC, serial, WMI or device Open is linked.
 """
 import argparse
+import sys
+
+sys.dont_write_bytecode = True
 import hashlib
 import json
 import pathlib
@@ -79,6 +82,8 @@ internal abstract class PinnedOneXProtocol
                         'minimal base class and capability/transport constructor scaffolding'],
             'generatedSha256': hashlib.sha256(generated.encode()).hexdigest(),
             'physicalDeviceVerified': False}
+    from x2_source import X2_SOURCE
+    lock['exactExtensions'] = {'onex-x2mini-hid-v1': X2_SOURCE}
     return generated, json.dumps(lock, indent=2) + '\n'
 
 

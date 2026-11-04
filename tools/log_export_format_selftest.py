@@ -70,10 +70,12 @@ int wmain(int argc,wchar_t** argv){
  const auto costName=[](char digit){return std::string("input-host-cost.log.archive.063928391234567890")+digit+".0123456789abcdef01234567.zip";};
  const std::vector<HostCostArchiveExportCandidate> costFiles={{costName('1'),3},{costName('3'),3},{costName('2'),3},{"unowned.zip",999}};
  const auto bounded=selectHostCostArchivesForExport(costFiles,6);
- check("cost-export-default-budget-8MiB",HostCostArchiveExportMaxBytes==8ULL*1024*1024);
+ check("cost-export-default-has-no-nested-volumes",HostCostArchiveExportMaxBytes==0);
  check("cost-export-newest-complete-volumes-fit-exact-budget",bounded["selectedSourceBytes"]==6&&bounded["selectedVolumes"]==2&&bounded["omittedVolumes"]==1&&bounded["archives"][0]["name"]==costName('3')&&bounded["archives"][1]["name"]==costName('2')&&bounded["archives"][2]["includedByBudget"]==false);
  check("cost-export-inventory-explicitly-retains-gap",bounded["allDiscoveredHistorySelected"]==false&&bounded["sourceHistoryModified"]==false&&bounded["archives"][2]["reason"]=="ordinary-export-cost-history-byte-budget");
  const auto zero=selectHostCostArchivesForExport(costFiles,0);
+ const auto zeroByteLegacy=selectHostCostArchivesForExport({{costName('3'),0}});
+ check("disabled-volume-export-also-excludes-empty-legacy-volume",zeroByteLegacy["selectedVolumes"]==0&&zeroByteLegacy["omittedVolumes"]==1);
  check("cost-export-zero-budget-retains-omission-inventory",zero["selectedVolumes"]==0&&zero["omittedVolumes"]==3);
  const auto oversize=selectHostCostArchivesForExport({{costName('3'),7},{costName('2'),1}},6);
  check("cost-export-never-truncates-oversized-newest-volume-or-fills-with-older-gap",oversize["selectedVolumes"]==0&&oversize["omittedVolumes"]==2);
@@ -86,7 +88,7 @@ int wmain(int argc,wchar_t** argv){
  const auto costDir=root/L"cost-source";fs::create_directories(costDir);
  {std::ofstream f(costDir/fs::path(costName('3')),std::ios::binary);f<<"newest";}
  {std::ofstream f(costDir/fs::path(costName('2')),std::ios::binary);f<<"older";}
- fs::resize_file(costDir/fs::path(costName('2')),HostCostArchiveExportMaxBytes);
+ fs::resize_file(costDir/fs::path(costName('2')),8ULL*1024*1024);
  {std::ofstream f(costDir/L"unowned.zip",std::ios::binary);f<<"ignored";}
  {std::ofstream f(costDir/fs::path(costName('1')+".tmp"),std::ios::binary);f<<"uncommitted";}
  // Execute the actual ordinary-export discovery/selection block on owned dummy files.
@@ -94,8 +96,8 @@ int wmain(int argc,wchar_t** argv){
  auto addFile=[&](const std::wstring& value){selectedPaths.push_back(value);};
  PRODUCTION_COST_EXPORT_BLOCK
  const auto& discovery=availability["costArchiveDiscovery"];
- check("actual-export-block-discovers-only-committed-owned-volumes",discovery["archivesFound"]==2&&selectedPaths.size()==1&&discovery["status"]=="complete-at-discovery");
- check("actual-export-block-uses-bounded-selection",discovery["exportSelection"]["budgetBytes"]==HostCostArchiveExportMaxBytes&&discovery["exportSelection"]["selectedSourceBytes"]==6&&discovery["exportSelection"]["omittedVolumes"]==1);
+ check("actual-export-block-discovers-only-committed-owned-volumes",discovery["archivesFound"]==2&&selectedPaths.empty()&&discovery["status"]=="complete-at-discovery");
+ check("actual-export-block-uses-bounded-selection",discovery["exportSelection"]["budgetBytes"]==HostCostArchiveExportMaxBytes&&discovery["exportSelection"]["selectedSourceBytes"]==0&&discovery["exportSelection"]["omittedVolumes"]==2);
  check("actual-export-block-preserves-originals-and-unrelated-files",fs::exists(costDir/fs::path(costName('3')))&&fs::exists(costDir/fs::path(costName('2')))&&fs::exists(costDir/L"unowned.zip")&&fs::exists(costDir/fs::path(costName('1')+".tmp")));
  const auto fieldInventory=root/L"field-cost-archive-candidates.json";
  if(fs::exists(fieldInventory)) {
@@ -164,6 +166,7 @@ def main():
  latest=(ROOT/'native/main.cpp').read_bytes();newtext=latest.decode('utf-8-sig').replace('\r\n','\n')
  checks={'ai-index-is-export-only':text.count('writeAiLogIndex(')==1 and 'snapshotReady && steamLogs' in text,
      'cost-volumes-and-pending-discovered':'hostCostArchiveEvidenceName(W2U(it->path().filename().wstring()))' in text and 'input-host-cost.log.pending' in text,
+     'ordinary-cost-export-single-active-no-rotation':'addFile(dataDir + L"\\\\input-host-cost.log");' in text and 'addRotated(dataDir + L"\\\\input-host-cost.log");' not in text and 'addFile(dataDir + L"\\\\input-host-cost.log.pending");' not in text,
      'ordinary-cost-history-bounded-before-staging':'selectHostCostArchivesForExport(std::move(archiveCandidates))' in cost_export_block and 'includedByBudget' in cost_export_block,
      'key-signal-and-fault-files-kept-outside-cost-budget':all(v in text for v in ('addRotated(dataDir + L"\\\\focus-trace.log");','addRotated(dataDir + L"\\\\input-host-signal.log");','addRotated(dataDir + L"\\\\input-host-fatal.log");')),
      'notification-control-body-identical-to-baseline':control_only(before)==control_only(function),

@@ -9,8 +9,8 @@ test('descriptor binds original protocol script/helper and guarded Python job',(
  for(const source of ['tools/tdp_protocol_selftest.py','PowerControl/pawnio/YeManTdpCtl.py','tools/ymcc_sim/global/host-process.ps1'])assert(a.evidenceInputs.includes(source));
  assert(a.artifactInputs.length>5&&a.artifactInputs.length<640);assert.deepEqual(a.resultFiles,['tdp-protocol/result.json']);
 });
-test('all five original groups and unoptimized isolated mode are required',()=>{
- assert.equal(verifyOriginal(raw(),spec).groups.length,5);
+test('all five original groups plus CPU voltage receipts and unoptimized isolated mode are required',()=>{
+ assert.equal(verifyOriginal(raw(),spec).groups.length,6);
  for(const field of ['isolated','noSite','noBytecodeWrite']){const value=raw();value[field]=false;assert.throws(()=>verifyOriginal(value,spec),/ASSERTION_OR_RUNTIME_MODE/);}
  const optimized=raw();optimized.assertOptimization=1;assert.throws(()=>verifyOriginal(optimized,spec),/ASSERTION_OR_RUNTIME_MODE/);
 });

@@ -32,10 +32,10 @@ int wmain(int argc,wchar_t** argv){
   check(wait("loader-crash-loop",25000),"production runtime stops repeated inert child exits");
   const auto count=launches.load();check(count==5,"exactly five owned launches before stop");
   runtime.requestTransportRecovery();runtime.observeSteam(1);runtime.requestBindingRefresh(1);runtime.requestLaunchAdmissionRefresh();
-  {std::unique_lock lock(mutex);changed.wait_for(lock,std::chrono::milliseconds(1100));}
+  {std::unique_lock lock(mutex);changed.wait_for(lock,std::chrono::milliseconds(1100),[&]{return launches.load()!=count;});}
   check(launches==count&&runtime.snapshot().reason=="loader-crash-loop","connection and mode wakes cannot bypass crash breaker");
   runtime.observeSteam(-1);runtime.observeSteam(1);
-  {std::unique_lock lock(mutex);changed.wait_for(lock,std::chrono::milliseconds(700));}
+  {std::unique_lock lock(mutex);changed.wait_for(lock,std::chrono::milliseconds(700),[&]{return launches.load()!=count;});}
   check(launches==count,"unknown observation cannot renew crash budget");
   runtime.observeSteam(1,true);
   {std::unique_lock lock(mutex);changed.wait_for(lock,std::chrono::milliseconds(700),[&]{return launches.load()>count;});}

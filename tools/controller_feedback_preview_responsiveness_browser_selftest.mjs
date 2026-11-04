@@ -67,8 +67,8 @@ let app;window.__tick=nextTick;window.__tdpRepeat=EDIT_REPEAT_BASE_MS;
 window.unmount=async()=>{app?.unmount();app=null;await nextTick()};
 window.mount=async(mode,persona='steamdeck',keepAlive=false)=>{await window.unmount();
 window.f={calls:[],vibrations:[],saved:[],caps:{ledAvailable:false,brightnessAvailable:false,ledEffects:[],vibrationAvailable:true,physicalPrimarySlot:0},settings:{gamepad:{feedback:{vibrationStrength:30,lighting:{enabled:false,off:false,mode:'solid',presetId:'',color:'#2ea6ff',color2:'#9d7cff',speed:55,brightness:65}}}}};
-const shown=ref(true),reference=ref(30),highlight=ref([]),oem=ref(OEM_EMPTY_SNAPSHOT);window.highlight=async v=>{highlight.value=v;await nextTick()};window.catalog=async v=>{oem.value=v;await nextTick()};window.show=async value=>{shown.value=value;await nextTick()};
-app=createApp({setup(){return()=>{const card=()=>h(Card);return mode==='card'?(keepAlive?h(KeepAlive,null,()=>shown.value?card():null):card()):mode==='preview'?h(Visualizer,{settings:{},persona,showTestMode:false,minimumPressFeedback:true,matchSteamDeckHeight:true,highlightButtons:highlight.value,oemKeys:oem.value}):h(Slider,{modelValue:reference.value,'onUpdate:modelValue':v=>reference.value=v,min:0,max:100,step:1,label:'TDP reference',accelerate:true,repeatIntervalMs:EDIT_REPEAT_BASE_MS})}}});
+const shown=ref(true),active=ref(true),reference=ref(30),highlight=ref([]),oem=ref(OEM_EMPTY_SNAPSHOT);window.highlight=async v=>{highlight.value=v;await nextTick()};window.catalog=async v=>{oem.value=v;await nextTick()};window.show=async value=>{shown.value=value;await nextTick()};window.present=async value=>{active.value=value;await nextTick()};
+app=createApp({setup(){return()=>{const card=()=>h(Card);return mode==='card'?(keepAlive?h(KeepAlive,null,()=>shown.value?card():null):card()):mode==='preview'?h(Visualizer,{settings:{},persona,presentationActive:active.value,showTestMode:false,minimumPressFeedback:true,matchSteamDeckHeight:true,highlightButtons:highlight.value,oemKeys:oem.value}):h(Slider,{modelValue:reference.value,'onUpdate:modelValue':v=>reference.value=v,min:0,max:100,step:1,label:'TDP reference',accelerate:true,repeatIntervalMs:EDIT_REPEAT_BASE_MS})}}});
 app.mount('#app');await nextTick();await nextTick()};
 window.mount('card');`;
 const plugin = { name: 'feedback-preview-fixture', setup(b) {
@@ -98,7 +98,7 @@ export const responsivenessAudit={command:(action:NativeUiAction)=>dispatchNativ
 let browser, server, failure;
 function check(value, name, detail) { checks.push({ name, pass: Boolean(value), detail }); }
 try {
-  const bundle = await build({ stdin: { contents: entry, resolveDir: repo, loader: 'ts' }, bundle: true, write: false, platform: 'browser', format: 'iife', loader: { '.png': 'dataurl' }, alias: { '@': path.join(repo, 'src') }, define: { 'process.env.NODE_ENV': '"production"' }, plugins: [plugin] });
+  const bundle = await build({ stdin: { contents: entry, resolveDir: repo, loader: 'ts' }, bundle: true, write: false, platform: 'browser', format: 'iife', loader: { '.png': 'dataurl', '.svg': 'dataurl' }, alias: { '@': path.join(repo, 'src') }, define: { 'process.env.NODE_ENV': '"production"' }, plugins: [plugin] });
   const tokenCss = source(path.join(repo, 'src/styles/tokens.css'));
   const html = '<!doctype html><meta charset="utf-8"><style>' + tokenCss + styles.join('\n') + 'body{background:#101823;color:#e8edf3;font:14px system-ui;margin:24px}#app{max-width:900px;margin:auto}.card{background:#172333;border:1px solid #435163;padding:20px;border-radius:12px}</style><main id="app"></main><script src="/fixture.js"></script>';
   fs.writeFileSync(path.join(out, 'fixture.js'), bundle.outputFiles[0].contents);
@@ -238,6 +238,42 @@ try {
       await page.evaluate(() => window.catalog({ supported: false, keys: [] }));
       check(await page.locator('[data-rear-control="L4"][data-available="false"]').count() > 0, persona + ' removing rear availability restores dimming');
     }
+    const paused = await page.evaluate(async () => {
+      const packet = axes => ({ connected: true, buttons: Array(18).fill(false), axes });
+      const svg = document.querySelector('.device-vector');
+      const coords = () => [...svg.querySelectorAll('[data-stick]')].map(n => n.getAttribute('transform'));
+      const subscriptions = window.__listenerCount();
+      await window.highlight([0]);
+      await window.present(false); await window.__tick();
+      const pausedAnimations = svg.getAnimations({subtree:true}).map(animation=>animation.playState);
+      const before = coords(); let mutations = 0;
+      const observer = new MutationObserver(entries => mutations += entries.length);
+      observer.observe(svg, { attributes: true, childList: true, subtree: true });
+      for (let i = 0; i < 32; i++) {
+        const frame = packet([Math.sin(i), Math.cos(i), -Math.sin(i), -Math.cos(i)]); frame.buttons[0] = true;
+        window.__emit('gamepad.state', frame); await window.__tick();
+      }
+      const latest = [.812345678, -.423456789, -.934567891, .645678912];
+      window.__emit('gamepad.state', packet(latest)); await window.__tick();
+      const frozen = coords(); observer.disconnect();
+      await window.present(true); await window.__tick();
+      const resumed = [...svg.querySelectorAll('[data-stick]')].map(n => {
+        const m = n.transform.baseVal.consolidate()?.matrix;
+        return { stick: +n.dataset.stick, x: m?.e, y: m?.f };
+      });
+      const resumedAnimations = svg.getAnimations({subtree:true}).map(animation=>animation.playState);
+      const live = [...svg.querySelectorAll('[data-fill-for~="a"]')].some(n => n.getAttribute('data-fill-live') === 'true');
+      return { before, frozen, mutations, latest, resumed, live, pausedAnimations, resumedAnimations, sameSvg: svg === document.querySelector('.device-vector'), subscriptions, resumedSubscriptions: window.__listenerCount() };
+    });
+    check(JSON.stringify(paused.before) === JSON.stringify(paused.frozen) && paused.mutations === 0, persona + ' covered presentation consumes input without repainting');
+    check(paused.sameSvg && paused.subscriptions === paused.resumedSubscriptions, persona + ' uncover reuses artwork and subscriptions');
+    check(paused.pausedAnimations.length > 0 && paused.pausedAnimations.every(state => state === 'paused') && paused.resumedAnimations.length === paused.pausedAnimations.length && paused.resumedAnimations.every(state => state === 'running'), persona + ' covered mapping blink pauses and uncover resumes', paused);
+    check(!paused.live, persona + ' uncover does not replay hidden press pulses');
+    for (const point of paused.resumed) {
+      const node = nodes.find(n => n.stick === point.stick);
+      check(Math.abs(point.x - paused.latest[point.stick * 2] * node.travel[0]) < 1e-6 && Math.abs(point.y + paused.latest[point.stick * 2 + 1] * node.travel[1]) < 1e-6, persona + ' uncover presents latest precise stick ' + point.stick);
+    }
+    result.coveredPresentation = paused;
     const cdp = await page.context().newCDPSession(page), trace = [];
     cdp.on('Tracing.dataCollected', event => trace.push(...event.value));
     await cdp.send('Tracing.start', { categories: 'devtools.timeline', transferMode: 'ReportEvents' });

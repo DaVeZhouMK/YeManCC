@@ -69,25 +69,86 @@ export function evaluateResult(result) {
   if (result.completionProof!==undefined && result.completionProof?.status!=='PASS') return 'FAIL';
   return 'PASS';
 }
+const BASELINE_ID='plugins.decky-update-recovery',PERSISTENT_PARENT_ID='plugins.decky-persistent-lifecycle';
+const BASELINE_ENTRY='tools/ymcc_sim/global/decky-update-recovery/run.mjs';
+const PERSISTENT_PARENT_ENTRY='tools/ymcc_sim/global/decky-persistent-lifecycle/current-parent-global.mjs';
+// This is an evidence reference, never a second execution or a cached PASS.
+function qualifiedBaselineReference(row){
+ const ref=row?.sharedReference;
+ return row?.status==='SHARED_REFERENCE'&&row.id===BASELINE_ID&&typeof row.source==='string'&&slash(row.source)===BASELINE_ENTRY&&
+  row.executedThisRun===false&&row.actualPassedThisRun===false&&row.verificationExecuted===true&&
+  row.requiredEvidenceMissing===false&&row.requiredEvidenceFailed===false&&Array.isArray(row.structuredEvidence)&&
+  Number.isInteger(row.referenceRequiredEvidenceCount)&&row.referenceRequiredEvidenceCount>0&&row.structuredEvidence.length===row.referenceRequiredEvidenceCount&&
+  ref?.status==='SHARED_REFERENCE'&&ref.canonicalTestId===BASELINE_ID&&ref.parentId===PERSISTENT_PARENT_ID&&
+  ref.originalProducerExecutionsWithinParent===1&&ref.originalProducerExecutionsByThisReference===0&&
+  ref.verificationExecuted===true&&ref.cached===false&&typeof ref.originalResult?.path==='string'&&
+  /^[a-f0-9]{64}$/.test(ref.originalResult?.sha256??'')&&typeof ref.parentResult?.path==='string'&&
+  /^[a-f0-9]{64}$/.test(ref.parentResult?.sha256??'');
+}
+
 export function verdictFor({ results, selectedCount, uncoveredCount = 0, requireAll = false }) {
   if (results.some(result => ['FAIL', 'TIMEOUT'].includes(result.status))) return { status: 'FAIL', exitCode: 2 };
-  if (selectedCount === 0 || results.length !== selectedCount || results.some(result => result.status !== 'PASS')) return { status: 'BLOCKED', exitCode: 10 };
+  if (selectedCount === 0 || results.length !== selectedCount || results.some(result => result.status !== 'PASS'&&!qualifiedBaselineReference(result))) return { status: 'BLOCKED', exitCode: 10 };
   if (requireAll && uncoveredCount > 0) return { status: 'INCOMPLETE_COVERAGE', exitCode: 10 };
   return { status: 'PASS_SELECTED_SCOPE', exitCode: 0 };
 }
 
-export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit = MAX_OUTPUT } = {}) {
+export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit = MAX_OUTPUT, baselineLaunch } = {}) {
   return new Promise(resolve => {
     const started = Date.now();
     let stdout = '', stderr = '', outputBytes = 0, truncated = false, timedOut = false, launchError = null;
+    // Only the exact original baseline caller supplies this recorder. Other calls retain no raw buffers.
+    const raw = baselineLaunch ? { stdout: [], stderr: [], observed: {stdout:0,stderr:0} } : null;
+    if (baselineLaunch) Object.assign(baselineLaunch, {
+      arguments: [...args], cwd, timeoutMs, startedAt: new Date(started).toISOString(),
+      startTimeMeaning: 'wall observation immediately before spawn; not OS process birth',
+      pid: null, spawnObservedAt: null, birthTimeUtc: null, birthTimeStatus: 'NOT_OBSERVED_BY_NODE_CHILD_PROCESS',
+      outputCaptureLimitBytes: outputLimit,
+    });
+    const finish = (outcome, terminalObservation, finished) => {
+      if (baselineLaunch) {
+        Object.assign(baselineLaunch, {
+          pid: outcome.pid ?? null, finishedAt: new Date(finished).toISOString(), elapsedMs: outcome.durationMs,
+          exitCode: outcome.exitCode, signal: outcome.signal ?? null, error: outcome.launchError ?? null,
+          launchError: outcome.launchError ?? null, timedOut: outcome.timedOut === true,
+          outputTruncated: outcome.outputTruncated === true, terminalObservation,
+          processStarted: baselineLaunch.spawnObservedAt !== null,
+        });
+        for (const kind of ['stdout','stderr']) {
+          try {
+            const bytes = Buffer.concat(raw[kind]);
+            const file = path.join(baselineLaunch.evidenceDir, 'original.plugins.decky-update-recovery.'+kind+'.bin');
+            fs.writeFileSync(file, bytes, {flag:'wx'});
+            baselineLaunch[kind] = {path:file,sha256:hash(bytes),bytes:bytes.length,
+              observedBytes:raw.observed[kind],complete:bytes.length === raw.observed[kind]};
+          } catch (error) {
+            baselineLaunch.recordingErrors.push({stage:kind,code:error.code ?? 'RAW_CAPTURE_WRITE_FAILED'});
+          }
+        }
+      }
+      resolve(outcome);
+    };
     let child;
     try { child = spawn(executable, args, { cwd, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
-    catch (error) { resolve({ exitCode: null, launchError: error.code ?? 'SPAWN_FAILED', durationMs: Date.now() - started, stdout, stderr }); return; }
+    catch (error) {
+      const finished = Date.now();
+      finish({exitCode:null,launchError:error.code ?? 'SPAWN_FAILED',durationMs:finished-started,stdout,stderr},'spawn-threw',finished);
+      return;
+    }
+    if (baselineLaunch) child.once('spawn', () => {
+      baselineLaunch.pid = child.pid ?? null;
+      baselineLaunch.spawnObservedAt = new Date().toISOString();
+    });
     const append = (kind, data) => {
       const remaining = Math.max(0, outputLimit - outputBytes);
       outputBytes += data.length;
       if (remaining < data.length) truncated = true;
-      const text = data.subarray(0, remaining).toString('utf8');
+      const retained = data.subarray(0, remaining);
+      if (raw) {
+        raw.observed[kind] += data.length;
+        if (retained.length) raw[kind].push(Buffer.from(retained));
+      }
+      const text = retained.toString('utf8');
       if (kind === 'stdout') stdout += text; else stderr += text;
     };
     child.stdout.on('data', data => append('stdout', data));
@@ -96,7 +157,9 @@ export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit 
     child.once('error', error => { launchError = error.code ?? 'SPAWN_FAILED'; });
     child.once('close', (exitCode, signal) => {
       clearTimeout(timer);
-      resolve({ pid: child.pid ?? null, exitCode, signal, timedOut, launchError, outputTruncated: truncated, durationMs: Date.now() - started, stdout, stderr });
+      const finished = Date.now();
+      finish({pid:child.pid ?? null,exitCode,signal,timedOut,launchError,outputTruncated:truncated,
+        durationMs:finished-started,stdout,stderr},'close-event',finished);
     });
   });
 }
@@ -152,7 +215,8 @@ export function checkStructuredEvidence(caseDir, adapter, repoRoot) {
   }
   return { paths, missing: problems.length > 0, missingPaths: problems, failed: paths.some(item => item.failed) };
 }
-export async function executeAdapter(adapter, { repoRoot, runDir, powershell = 'pwsh.exe', payloadRoot, env = process.env } = {}) {
+export async function executeAdapter(adapter, { repoRoot, runDir, powershell = 'pwsh.exe', payloadRoot, env = process.env, remainingMs } = {}) {
+  let baselineLaunch = null;
   const caseDir = path.join(runDir, 'cases', adapter.id);
   fs.mkdirSync(caseDir, { recursive: true });
   const result = {
@@ -229,7 +293,37 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
       args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', helper, '-ScriptPath', entry, '-ArgumentsPath', argumentsPath];
     }
     args = args.map(arg => arg.replaceAll('{outDir}', caseDir));
-    const processResult = await runProcess(executable, args, { cwd: repoRoot, env: cleanEnvironment(env, caseDir, payloadRoot), timeoutMs: adapter.timeoutMs });
+    const remaining=remainingMs?remainingMs():adapter.timeoutMs;
+    if(remaining<=0){result.status='NOT_RUN_BUDGET';result.reason='PARENT_WALL_BUDGET_EXHAUSTED';fs.writeFileSync(path.join(caseDir,'result.json'),JSON.stringify(result,null,2));return result;}
+    let timeoutMs=Math.min(adapter.timeoutMs,remaining);result.executionBudget={originalTimeoutMs:adapter.timeoutMs,effectiveTimeoutMs:timeoutMs};
+    const childEnv = cleanEnvironment(env, caseDir, payloadRoot);
+    if (adapter.id === 'plugins.decky-update-recovery' && adapter.kind === 'node' &&
+        slash(adapter.path) === 'tools/ymcc_sim/global/decky-update-recovery/run.mjs') {
+      const {baselineEnvironment} = await import('./decky-persistent-lifecycle/baseline-environment.mjs');
+      const tools = result.candidateArtifacts ?? [];
+      const program = tools.find(row => path.resolve(row.path).toLowerCase() === path.resolve(executable).toLowerCase())
+        ?? fingerprintArtifacts([executable])[0];
+      baselineLaunch = {
+        schemaVersion:1,kind:'ymcc-original-baseline-launch',id:'original.plugins.decky-update-recovery',adapterId:adapter.id,
+        evidenceDir:caseDir,program:{...program,path:path.resolve(executable)},originalBudgetMs:adapter.timeoutMs,
+        expectedOriginalBudgetMs:240000,originalBudgetMatchesContract:adapter.timeoutMs===240000,baselineEnvironment:baselineEnvironment(childEnv),
+        boundSourceInputs:inputs,sourceInputsAfter:null,toolArtifacts:tools,toolArtifactsAfter:null,
+        sourceIdentityScope:'registered adapter entry and evidenceInputs only',
+        toolIdentityScope:'registered adapter artifactInputs plus separately bound program; not parent tool scope',
+        environmentAlgorithm:'original baselineEnvironment; helper source not separately pinned by this recorder',
+        sharingAuthorized:false,sameInvocationQualified:false,parentToolScopeVerified:false,recordingErrors:[],
+      };
+      // Added selected-only preparation consumes the original shared remainder.
+      const launchRemaining = remainingMs ? remainingMs() : adapter.timeoutMs;
+      if (launchRemaining <= 0) {
+        result.status='NOT_RUN_BUDGET';result.reason='PARENT_WALL_BUDGET_EXHAUSTED';
+        fs.writeFileSync(path.join(caseDir,'result.json'),JSON.stringify(result,null,2));return result;
+      }
+      timeoutMs=Math.min(adapter.timeoutMs,launchRemaining);
+      result.executionBudget.effectiveTimeoutMs=timeoutMs;
+    }
+    const processResult = await runProcess(executable, args, {cwd:repoRoot,env:childEnv,timeoutMs,
+      ...(baselineLaunch ? {baselineLaunch} : {})});
     const { stdout, stderr, ...safeResult } = processResult;
     Object.assign(result, safeResult);
     fs.writeFileSync(path.join(caseDir, 'stdout.log'), stdout);
@@ -240,8 +334,13 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
     }
     const after = fingerprintInputs(repoRoot, inputs.map(item => item.path));
     result.sourceChanged = JSON.stringify(inputs) !== JSON.stringify(after);
+    if (baselineLaunch) baselineLaunch.sourceInputsAfter = after;
     if (result.dependencyInputs) result.sourceChanged ||= JSON.stringify(result.dependencyInputs) !== JSON.stringify(fingerprintInputs(repoRoot, result.dependencyInputs.map(item => item.path)));
-    if(result.candidateArtifacts)result.candidateArtifactChanged=JSON.stringify(result.candidateArtifacts)!==JSON.stringify(fingerprintArtifacts(result.candidateArtifacts.map(row=>row.path)));
+    if(result.candidateArtifacts) {
+      const toolsAfter=fingerprintArtifacts(result.candidateArtifacts.map(row=>row.path));
+      result.candidateArtifactChanged=JSON.stringify(result.candidateArtifacts)!==JSON.stringify(toolsAfter);
+      if(baselineLaunch)baselineLaunch.toolArtifactsAfter=toolsAfter;
+    } else if(baselineLaunch)baselineLaunch.toolArtifactsAfter=[];
     if(result.bundledToolAuthority)result.bundledToolProof=verifyBundledNodeReceipt(result,repoRoot,caseDir,{limit:MAX_ARTIFACT_INPUTS});
     if(adapter.completionContract!==undefined)result.completionProof=verifyExecutionCompletion({...result,stdout,stderr},adapter.completionContract);
     const evidence = checkStructuredEvidence(caseDir, adapter, repoRoot);
@@ -262,23 +361,102 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
       if(result.candidateArtifactChanged||result.sourceChanged)result.status='FAIL';
     } catch(error) { result.status='FAIL';result.candidateArtifactChanged=true;result.toolAuthorityError=String(error.message); }
   }
+  if (baselineLaunch) {
+    try {
+      baselineLaunch.programAfter=(baselineLaunch.toolArtifactsAfter ?? []).find(row =>
+        path.resolve(row.path).toLowerCase() === path.resolve(baselineLaunch.program.path).toLowerCase())
+        ?? fingerprintArtifacts([baselineLaunch.program.path])[0];
+      baselineLaunch.sourceUnchanged=typeof result.sourceChanged === 'boolean' ? !result.sourceChanged : null;
+      baselineLaunch.toolsUnchanged=baselineLaunch.toolArtifactsAfter === null ? null :
+        JSON.stringify(baselineLaunch.toolArtifacts) === JSON.stringify(baselineLaunch.toolArtifactsAfter) &&
+        baselineLaunch.program.status === 'OK' && baselineLaunch.programAfter.status === 'OK' &&
+        baselineLaunch.program.sha256 === baselineLaunch.programAfter.sha256;
+      const originalFile=path.join(caseDir,'decky-update-recovery/result.json');
+      const original=result.structuredEvidence?.find(row => row.path === originalFile);
+      baselineLaunch.originalResult=original ? {path:original.path,sha256:original.sha256} : null;
+      baselineLaunch.adapterStatus=result.status;
+      baselineLaunch.requiredEvidenceMissing=result.requiredEvidenceMissing ?? null;
+      baselineLaunch.requiredEvidenceFailed=result.requiredEvidenceFailed ?? null;
+      baselineLaunch.rawOutputComplete=baselineLaunch.stdout?.complete === true && baselineLaunch.stderr?.complete === true;
+      baselineLaunch.recordingComplete=baselineLaunch.recordingErrors.length === 0 &&
+        typeof baselineLaunch.finishedAt === 'string' && Boolean(baselineLaunch.stdout && baselineLaunch.stderr) &&
+        Array.isArray(baselineLaunch.sourceInputsAfter) && Array.isArray(baselineLaunch.toolArtifactsAfter);
+      baselineLaunch.status=baselineLaunch.recordingComplete ? 'RECORDED' : 'INCOMPLETE';
+      const file=path.join(caseDir,'original.plugins.decky-update-recovery.json');
+      const bytes=Buffer.from(JSON.stringify(baselineLaunch,null,2)+'\n');
+      fs.writeFileSync(file,bytes,{flag:'wx'});
+      result.baselineLaunchReceipt={path:file,sha256:hash(bytes),bytes:bytes.length,
+        recordingComplete:baselineLaunch.recordingComplete,sharingAuthorized:false};
+    } catch(error) {
+      result.baselineLaunchReceiptError={code:error.code ?? 'BASELINE_LAUNCH_RECEIPT_WRITE_FAILED'};
+    }
+  }
   result.finishedAt = new Date().toISOString();
   fs.writeFileSync(path.join(caseDir, 'result.json'), JSON.stringify(result, null, 2));
   return result;
 }
 
+function exactParentBaselinePair(adapters){
+ const baseline=adapters.find(row=>row.id===BASELINE_ID),parent=adapters.find(row=>row.id===PERSISTENT_PARENT_ID);
+ const exactArgs=(actual,wanted)=>JSON.stringify(actual)===JSON.stringify(wanted);
+ return !baseline?.blockedReason&&!parent?.blockedReason&&baseline?.kind==='node'&&slash(baseline.path)===BASELINE_ENTRY&&baseline.timeoutMs===240000&&
+  exactArgs(baseline.args,['--evidence-dir','{outDir}/decky-update-recovery'])&&
+  parent?.kind==='node'&&slash(parent.path)===PERSISTENT_PARENT_ENTRY&&parent.timeoutMs===480000&&
+  exactArgs(parent.args,['--mode','run','--evidence-dir','{outDir}/decky-persistent-lifecycle'])
+  ? {baseline,parent}:null;
+}
+async function referenceParentBaseline(adapter,parentExecution,options,runStartedAt){
+ const started=Date.now(),caseDir=path.join(options.runDir,'cases',adapter.id),file=path.join(caseDir,'result.json');
+ fs.mkdirSync(caseDir,{recursive:true});
+ if(fs.existsSync(file))throw Error('BASELINE_REFERENCE_FRESH_CASE_REQUIRED');
+ const result={id:adapter.id,domain:adapter.domain,title:adapter.title,scope:adapter.scope,source:adapter.path,
+  evidenceDir:caseDir,startedAt:new Date(started).toISOString(),status:'BLOCKED',executionKind:'SHARED_REFERENCE',
+  executedThisRun:false,actualPassedThisRun:false,verificationExecuted:false,originalProducerExecutionsByThisReference:0,
+  claims:{physicalHardwareValidated:false,operatingSystemSleepPerformed:false,installedApplicationExercised:false}};
+ if(parentExecution?.status!=='PASS'||parentExecution.exitCode!==0){
+  result.reason='BASELINE_NOT_RUN_PARENT_NOT_PASS';result.parentStatus=parentExecution?.status??'NOT_RUN';
+  if(parentExecution?.status==='NOT_RUN_BUDGET'){result.status='NOT_RUN_BUDGET';result.reason='PARENT_WALL_BUDGET_EXHAUSTED';}
+ }else if(options.remainingMs&&options.remainingMs()<=0){
+  result.status='NOT_RUN_BUDGET';result.reason='PARENT_WALL_BUDGET_EXHAUSTED';
+ }else{
+  try{
+   const {verifyCurrentRunParentBaselineReference}=await import('../optimization/release-baseline-reference.mjs');
+   const {baselineEnvironment}=await import('./decky-persistent-lifecycle/baseline-environment.mjs');
+   const {simulationCorePath}=await import('./release-host-environment.mjs');
+   result.sharedReference=verifyCurrentRunParentBaselineReference({repoRoot:options.repoRoot,coreRoot:simulationCorePath(),runDir:options.runDir,
+    runStartedAt,parentExecution,expectedEnvironment:baselineEnvironment(options.env??process.env)});
+   result.verificationExecuted=true;
+   // Preserve every original standalone structured receipt requirement at its real producer root.
+   const original=result.sharedReference.originalResult,producerCase=path.dirname(path.dirname(original.path));
+   const evidence=checkStructuredEvidence(producerCase,adapter,options.repoRoot);
+   result.structuredEvidence=evidence.paths;result.requiredEvidenceMissing=evidence.missing;result.requiredEvidenceFailed=evidence.failed;
+   result.referenceRequiredEvidenceCount=adapter.resultFiles?.length??0;
+   const primary=evidence.paths.find(row=>path.resolve(row.path).toLowerCase()===path.resolve(original.path).toLowerCase());
+   if(evidence.missing||evidence.failed||primary?.sha256!==original.sha256)throw Error('BASELINE_REFERENCE_ORIGINAL_STRUCTURED_EVIDENCE_REJECTED');
+   result.status='SHARED_REFERENCE';
+   if(!qualifiedBaselineReference(result))throw Error('BASELINE_REFERENCE_RESULT_CONTRACT_INVALID');
+   if(options.remainingMs&&options.remainingMs()<=0){result.status='TIMEOUT';result.reason='PARENT_WALL_BUDGET_EXHAUSTED_AFTER_REFERENCE';}
+  }catch(error){result.status='FAIL';result.reason='BASELINE_PARENT_REFERENCE_REJECTED:'+String(error.message??error);}
+ }
+ result.finishedAt=new Date().toISOString();result.durationMs=Date.now()-started;
+ fs.writeFileSync(file,JSON.stringify(result,null,2)+'\n',{flag:'wx'});return result;
+}
 export async function runAdapters(adapters, options = {}) {
-  validateAdapters(adapters, options.repoRoot);
-  const results = [];
-  // Sequential execution avoids shared ports and legacy fixture-output races.
-  for (const adapter of adapters) {
-    options.onProgress?.({ id: adapter.id, phase: 'start' });
-    const result = await executeAdapter(adapter, options);
-    results.push(result);
-    options.onProgress?.({ id: adapter.id, phase: 'complete', status: result.status, durationMs: result.durationMs ?? 0 });
-    fs.writeFileSync(path.join(options.runDir, 'progress.json'), JSON.stringify({ completed: results.length, total: adapters.length, results }, null, 2));
-  }
-  return results;
+ const runStartedAt=new Date().toISOString();validateAdapters(adapters, options.repoRoot);
+ if(adapters.length===0)return [];
+ fs.mkdirSync(options.runDir,{recursive:true});
+ const pair=exactParentBaselinePair(adapters),byId=new Map();
+ const checkpoint=()=>fs.writeFileSync(path.join(options.runDir,'progress.json'),JSON.stringify({completed:byId.size,total:adapters.length,
+  deferredToParent:pair&&!byId.has(BASELINE_ID)?[BASELINE_ID]:[],results:adapters.filter(a=>byId.has(a.id)).map(a=>byId.get(a.id))},null,2));
+ const complete=result=>{byId.set(result.id,result);options.onProgress?.({id:result.id,phase:'complete',status:result.status,durationMs:result.durationMs??0});checkpoint();};
+ // The original parent owns its baseline. Preserve other order and return original selection order.
+ for(const adapter of adapters){
+  if(pair&&adapter.id===BASELINE_ID){checkpoint();continue;}
+  options.onProgress?.({id:adapter.id,phase:'start'});
+  const result=await executeAdapter(adapter,options);complete(result);
+  if(pair&&adapter.id===PERSISTENT_PARENT_ID)complete(await referenceParentBaseline(pair.baseline,result,options,runStartedAt));
+ }
+ return adapters.map(adapter=>byId.get(adapter.id));
 }
 
 /** Compare equivalent tests only; different profile/source/scope is not a performance regression proof. */

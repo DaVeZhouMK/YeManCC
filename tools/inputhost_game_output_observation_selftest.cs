@@ -7,6 +7,8 @@ internal static partial class Program
     private static bool HasObservation(JsonElement r)=>r.TryGetProperty("gameOutputObservation",out _);
     private static JsonElement Observation(JsonElement r)
     { Check(HasObservation(r),"GAME_OUTPUT_OBSERVATION_MISSING"); return r.GetProperty("gameOutputObservation"); }
+    // Fixture controls only the actual Host cached flag; no product hooks/IO.
+    private static void SetFrameRawLoggingForFixture(HostSession session,bool enabled)=>typeof(HostSession).GetField("_costFlagEnabled",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.SetValue(session,enabled);
     private static int RunGameGroups(bool candidate, List<Dictionary<string,object>>? more=null)
     {
         var rows = new List<Dictionary<string,object>>();
@@ -168,6 +170,38 @@ internal static partial class Program
             var elapsed=Stopwatch.GetElapsedTime(start);var delta=GC.GetAllocatedBytesForCurrentThread()-allocated;
             Check(delta==0,"CALLBACK_ALLOCATION");
             Console.WriteLine(JsonSerializer.Serialize(new{kind="local-cost",iterations=100000,payloadBytes=64,elapsedUs=elapsed.TotalMicroseconds,allocatedBytes=delta,wholeProcessCpuPercent=(double?)null}));
+        }));
+        rows.Add(Group("ordinary frames omit raw while explicit stats preserve it",()=>{
+            var s=Ready();Accept(Send(s,"SUBMIT_NEUTRAL",3));s.ObservedController!.Emit(0,2,new byte[]{4,7,9},21);
+            var frame=Frame(s,4);Accept(frame);Check(!HasObservation(frame),"NORMAL_FRAME_SERIALIZED_RAW");
+            Check(Observation(Observe(s,5)).GetProperty("sdkSequence").GetUInt32()==21,"EXPLICIT_RAW_READ_LOST");
+        }));
+        rows.Add(Group("raw-only pending cannot activate a motor-only response",()=>{
+            var o=new HostGameOutputObservation();var c=new object();var b=o.Bind(c);o.Observe(b,c,0,2,new byte[]{1},1);
+            Check(o.HasPending&&!o.HasPendingFor(false,true),"RAW_PENDING_ACTIVATES_MOTOR_PATH");var response="{}";
+            long start=GC.GetAllocatedBytesForCurrentThread();for(int i=0;i<1000;i++)Check(ReferenceEquals(response,o.TryAppend(response,c,4096,includeMotors:true,includeRaw:false)));
+            Check(GC.GetAllocatedBytesForCurrentThread()-start==0,"RAW_ONLY_QUIET_FRAME_ALLOCATES");
+            using var r=JsonDocument.Parse(o.TryAppend(response,c,4096));Check(HasObservation(r.RootElement));
+        }));
+        rows.Add(Group("raw selection changes preserve message-budget pending evidence",()=>{
+            var o=new HostGameOutputObservation();var c=new object();var b=o.Bind(c);o.Observe(b,c,0,2,new byte[]{6},8);
+            Check(o.TryAppend("{}",c,2)=="{}","BUDGET_DROPPED_RAW");
+            Check(o.TryAppend("{}",c,4096,includeMotors:true,includeRaw:false)=="{}","EXCLUDED_RAW_EMITTED");
+            using var r=JsonDocument.Parse(o.TryAppend("{}",c,4096));Check(Observation(r.RootElement).GetProperty("sdkSequence").GetUInt32()==8);
+        }));
+        rows.Add(Group("raw exclusion preserves a pending motor stop after lighting",()=>{
+            var o=new HostGameOutputObservation();var c=new object();var b=o.Bind(c,"dualsense-edge");var stop=new byte[63];stop[0]=3;
+            o.Observe(b,c,0,2,stop,31);o.Observe(b,c,0,2,new byte[63],32);
+            using var m=JsonDocument.Parse(o.TryAppend("{}",c,4096,includeMotors:true,includeRaw:false));var r=m.RootElement;
+            Check(!HasObservation(r)&&r.GetProperty("gameFeedbackLeft").GetInt32()==0&&r.GetProperty("gameFeedbackRight").GetInt32()==0,"PENDING_STOP_LOST");
+            Check(r.GetProperty("gameFeedbackSdkSequence").GetUInt32()==31&&!o.HasPendingFor(false,true),"MOTOR_PENDING_OR_ORIGIN_LOST");
+            using var raw=JsonDocument.Parse(o.TryAppend("{}",c,4096));Check(Observation(raw.RootElement).GetProperty("sdkSequence").GetUInt32()==32);
+        }));
+        rows.Add(Group("actual Host logging state selects raw on frame without dropping later evidence",()=>{
+            var s=Ready();Accept(Send(s,"SUBMIT_NEUTRAL",3));SetFrameRawLoggingForFixture(s,true);s.ObservedController!.Emit(0,2,new byte[]{5},10);
+            Check(Observation(Frame(s,4)).GetProperty("sdkSequence").GetUInt32()==10,"ENABLED_FRAME_RAW_MISSING");
+            SetFrameRawLoggingForFixture(s,false);s.ObservedController.Emit(0,2,new byte[]{7},11);Check(!HasObservation(Frame(s,5)),"DISABLED_FRAME_RAW_PRESENT");
+            Check(Observation(Observe(s,6)).GetProperty("sdkSequence").GetUInt32()==11,"OFF_DROPPED_EXPLICIT_DIAGNOSTIC");
         }));
         return RunGameGroups(true,rows);
     }

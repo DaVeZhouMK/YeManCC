@@ -55,6 +55,185 @@ function Get-Sha256([string]$Path) {
   }
 }
 
+function Initialize-FanDeploymentRecordStore {
+  if ('YeManCC.FanDeploymentRecordV1.Store' -as [type]) { return }
+  # Small record IO only: strict JSON, exact archive, source snapshot, bounded lock.
+  Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Globalization;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+namespace YeManCC.FanDeploymentRecordV1 {
+  internal sealed class Value {
+    internal char Kind; internal string Raw; internal string Text;
+    internal Dictionary<string, Value> Fields;
+    internal Dictionary<string, string> Names;
+    internal List<string> Order;
+  }
+  internal sealed class StrictJson {
+    readonly string text; int at; internal bool FutureSeen;
+    internal StrictJson(string value) { text = value; }
+    static FormatException Bad() { return new FormatException("FAN_DEPLOYMENT_RECORD_INVALID"); }
+    void Space() { while (at < text.Length && (text[at]==' ' || text[at]=='\r' || text[at]=='\n' || text[at]=='\t')) at++; }
+    bool Take(char c) { if (at < text.Length && text[at]==c) { at++; return true; } return false; }
+    bool Literal(string value) { if(at+value.Length>text.Length||string.CompareOrdinal(text,at,value,0,value.Length)!=0)return false;at+=value.Length;return true; }
+    string String() {
+      if (!Take('"')) throw Bad(); var value = new StringBuilder();
+      while (at < text.Length) {
+        char c=text[at++]; if (c=='"') return value.ToString(); if (c<32) throw Bad();
+        if (c=='\\') {
+          if (at==text.Length) throw Bad(); c=text[at++];
+          switch(c) {
+            case '"': case '\\': case '/': break;
+            case 'b': c='\b'; break; case 'f': c='\f'; break; case 'n': c='\n'; break;
+            case 'r': c='\r'; break; case 't': c='\t'; break;
+            case 'u': c=Hex(); break; default: throw Bad();
+          }
+        }
+        if (char.IsHighSurrogate(c)) {
+          value.Append(c); if (at>=text.Length) throw Bad(); char low=text[at++];
+          if (low=='\\') { if (!Take('u')) throw Bad(); low=Hex(); }
+          if (!char.IsLowSurrogate(low)) throw Bad(); value.Append(low);
+        } else { if (char.IsLowSurrogate(c)) throw Bad(); value.Append(c); }
+      } throw Bad();
+    }
+    char Hex() {
+      if (at+4>text.Length) throw Bad(); int n=0;
+      for(int i=0;i<4;i++) { char c=text[at++]; int v=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1; if(v<0)throw Bad(); n=n*16+v; }
+      return (char)n;
+    }
+    Value Parse(int depth) {
+      Space(); int start=at; if(at==text.Length)throw Bad(); char c=text[at]; var value=new Value();
+      if(c=='{' || c=='[') {
+        if(depth>=16)throw Bad(); at++; value.Kind=c;
+        if(c=='{') {
+          value.Fields=new Dictionary<string,Value>(StringComparer.Ordinal);value.Names=new Dictionary<string,string>(StringComparer.Ordinal);value.Order=new List<string>();
+          Space(); if(!Take('}')) { while(true) {
+            Space(); int nameAt=at; string name=String(),rawName=text.Substring(nameAt,at-nameAt); Space(); if(!Take(':'))throw Bad(); Value child=Parse(depth+1);
+            if(depth==0 && (name=="schemaVersion" || name=="validationRulesVersion") && Store.Integer(child)>1)FutureSeen=true;
+            if(value.Fields.ContainsKey(name))throw Bad(); value.Fields.Add(name,child);value.Names.Add(name,rawName);value.Order.Add(name);
+            Space(); if(Take('}'))break; if(!Take(','))throw Bad();
+          } }
+        } else { Space(); if(!Take(']')) { while(true) { Parse(depth+1);Space();if(Take(']'))break;if(!Take(','))throw Bad(); } } }
+      } else if(c=='"') { value.Kind='s';value.Text=String(); }
+      else {
+        if(Literal("true")){value.Kind='b';} else if(Literal("false")){value.Kind='b';} else if(Literal("null")){value.Kind='0';}
+        else {
+          value.Kind='n';Take('-'); if(!Take('0')){if(at>=text.Length||text[at]<'1'||text[at]>'9')throw Bad();while(at<text.Length&&text[at]>='0'&&text[at]<='9')at++;}
+          if(Take('.')){int first=at;while(at<text.Length&&text[at]>='0'&&text[at]<='9')at++;if(first==at)throw Bad();}
+          if(Take('e')||Take('E')){if(!Take('+'))Take('-');int first=at;while(at<text.Length&&text[at]>='0'&&text[at]<='9')at++;if(first==at)throw Bad();}
+          double number;if(!double.TryParse(text.Substring(start,at-start),NumberStyles.Float,CultureInfo.InvariantCulture,out number)||double.IsInfinity(number)||double.IsNaN(number))throw Bad();
+        }
+      }
+      value.Raw=text.Substring(start,at-start);return value;
+    }
+    internal Value Read() { Value value=Parse(0);Space();if(at!=text.Length)throw Bad();return value; }
+  }
+  public sealed class Snapshot { internal string Path; internal byte[] Bytes; internal Value Document; internal bool Corrupt; }
+  public static class Store {
+    const int Limit=65536;
+    static readonly UTF8Encoding Utf8=new UTF8Encoding(false,true);
+    static readonly string[] Managed={"schemaVersion","validationRulesVersion","payloadRoot","runtimeRoot","payloadManifestSha256","runtimeManifestSha256","runtimeId","result","payloadFileCount","runtimeFileCount","deployedAtUtc"};
+    static Exception Fault(string code){return new IOException(code);}
+    internal static double Integer(Value value){double n;if(value==null||value.Kind!='n'||!double.TryParse(value.Raw,NumberStyles.Float,CultureInfo.InvariantCulture,out n)||n<0||n>9007199254740991d||Math.Truncate(n)!=n)return -1;return n;}
+    static Value Field(Value doc,string name){Value v;return doc!=null&&doc.Kind=='{'&&doc.Fields.TryGetValue(name,out v)?v:null;}
+    static string Text(Value doc,string name){Value v=Field(doc,name);return v!=null&&v.Kind=='s'?v.Text:null;}
+    static bool Digest(string s){return s!=null&&Regex.IsMatch(s,"\\A[0-9a-fA-F]{64}\\z");}
+    static bool DirectoryName(string s){return s!=null&&Regex.IsMatch(s,@"\A(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)")&&!Regex.IsMatch(s,@"[\x00-\x1f]")&&!Regex.IsMatch(s,@"(?:\A|[\\/])\.{1,2}(?:[\\/]|\z)");}
+    static bool Valid(Value doc) {
+      if(Integer(Field(doc,"schemaVersion"))!=1 || Integer(Field(doc,"validationRulesVersion"))<0 || Integer(Field(doc,"validationRulesVersion"))>1)return false;
+      string result=Text(doc,"result"),id=Text(doc,"runtimeId");
+      if(!DirectoryName(Text(doc,"payloadRoot"))||!DirectoryName(Text(doc,"runtimeRoot"))||!Digest(Text(doc,"payloadManifestSha256"))||!Digest(Text(doc,"runtimeManifestSha256"))||id==null||!Regex.IsMatch(id,"\\A[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}\\z")||(result!="ok"&&result!="failed"))return false;
+      foreach(string key in new[]{"payloadFileCount","runtimeFileCount"}) { Value v=Field(doc,key);if(v!=null&&(Integer(v)<=0||Integer(v)>100000))return false; }
+      Value stamp=Field(doc,"deployedAtUtc");if(stamp!=null){DateTime parsed;if(stamp.Kind!='s'||!Regex.IsMatch(stamp.Text,@"\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,7})?Z\z")||!DateTime.TryParse(stamp.Text,CultureInfo.InvariantCulture,DateTimeStyles.RoundtripKind,out parsed))return false;}
+      return true;
+    }
+    static void Plain(string path) {
+      FileAttributes attrs;try{attrs=File.GetAttributes(path);}catch(FileNotFoundException){return;}catch(DirectoryNotFoundException){return;}
+      if((attrs&FileAttributes.ReparsePoint)!=0)throw Fault("FAN_DEPLOYMENT_REPARSE_REFUSED");
+    }
+    static byte[] Observe(string path) {
+      Plain(path);
+      try {
+        using(var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)) {
+          if(file.Length>Limit)throw Fault("FAN_DEPLOYMENT_RECORD_LIMIT");
+          byte[] bytes=new byte[(int)file.Length];int offset=0,n;
+          while(offset<bytes.Length){n=file.Read(bytes,offset,bytes.Length-offset);if(n==0)throw Fault("FAN_DEPLOYMENT_READ_INCOMPLETE");offset+=n;}
+          if(file.ReadByte()!=-1)throw Fault("FAN_DEPLOYMENT_SOURCE_CHANGED");return bytes;
+        }
+      } catch(FileNotFoundException){return null;}catch(DirectoryNotFoundException){return null;}
+    }
+    static bool Same(byte[] a,byte[] b){if(a==null||b==null)return a==b;if(a.Length!=b.Length)return false;for(int i=0;i<a.Length;i++)if(a[i]!=b[i])return false;return true;}
+    static void RequireSame(string path,Snapshot expected){if(!Same(Observe(path),expected.Bytes))throw Fault("FAN_DEPLOYMENT_SOURCE_CHANGED");}
+    public static Snapshot Capture(string path) {
+      path=System.IO.Path.GetFullPath(path);byte[] bytes=Observe(path);var snapshot=new Snapshot{Path=path,Bytes=bytes,Corrupt=bytes!=null};if(bytes==null)return snapshot;
+      StrictJson reader=null;
+      try {
+        string text=Utf8.GetString(bytes);if(text.StartsWith("\uFEFF",StringComparison.Ordinal))text=text.Substring(1);
+        reader=new StrictJson(text);Value doc=reader.Read();if(reader.FutureSeen)throw Fault("FAN_DEPLOYMENT_FUTURE_RECORD");if(doc.Kind=='{')snapshot.Document=doc;snapshot.Corrupt=!Valid(doc);
+      } catch(FormatException) {if(reader!=null&&reader.FutureSeen)throw Fault("FAN_DEPLOYMENT_FUTURE_RECORD");}
+        catch(DecoderFallbackException) { /* Archive invalid UTF-8 bytes exactly, never decode with replacement. */ }
+      return snapshot;
+    }
+    static string Merge(Value prior,Value next) {
+      var text=new StringBuilder("{");bool first=true;var managed=new HashSet<string>(Managed,StringComparer.Ordinal);
+      foreach(string name in next.Order){if(!first)text.Append(',');first=false;text.Append(next.Names[name]).Append(':').Append(next.Fields[name].Raw);}
+      if(prior!=null)foreach(string name in prior.Order)if(!managed.Contains(name)&&!next.Fields.ContainsKey(name)){if(!first)text.Append(',');first=false;text.Append(prior.Names[name]).Append(':').Append(prior.Fields[name].Raw);}
+      return text.Append('}').ToString();
+    }
+    static void SaveNew(string path,byte[] bytes) {
+      using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough)){file.Write(bytes,0,bytes.Length);file.Flush(true);}
+    }
+    static void Archive(string path,byte[] original) {
+      string digest;using(var hash=SHA256.Create())digest=BitConverter.ToString(hash.ComputeHash(original)).Replace("-","").ToLowerInvariant();
+      string archive=path+".corrupt."+digest+".json";byte[] existing=Observe(archive);
+      if(existing==null)SaveNew(archive,original);
+      if(!Same(Observe(archive),original))throw Fault("FAN_DEPLOYMENT_ARCHIVE_UNCONFIRMED");
+    }
+    public static void Write(string path,string record,Snapshot expected) {
+      path=System.IO.Path.GetFullPath(path);if(expected==null||!string.Equals(path,expected.Path,StringComparison.OrdinalIgnoreCase))throw Fault("FAN_DEPLOYMENT_EXPECTED_SOURCE_REQUIRED");
+      var parser=new StrictJson(record);Value next=parser.Read();if(parser.FutureSeen||!Valid(next)||Integer(Field(next,"validationRulesVersion"))!=1||Text(next,"result")!="ok")throw Fault("FAN_DEPLOYMENT_NEW_RECORD_INVALID");
+      byte[] content=Utf8.GetBytes(Merge(expected.Document,next));if(content.Length>Limit)throw Fault("FAN_DEPLOYMENT_RECORD_LIMIT");
+      string directory=System.IO.Path.GetDirectoryName(path);Plain(directory);string lockPath=path+".lock";Plain(lockPath);
+      // Immediate refusal: no lock polling and no retries in this process.
+      using(var gate=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None)) {
+        RequireSame(path,expected);
+        if(expected.Bytes!=null&&expected.Corrupt)Archive(path,expected.Bytes);
+        string stagePath=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+        try {
+          SaveNew(stagePath,content);
+          RequireSame(path,expected);
+          if(expected.Bytes==null)File.Move(stagePath,path);else File.Replace(stagePath,path,null,true);
+          // Confirm the committed bytes before a producer can acknowledge success.
+          if(!Same(Observe(path),content))throw Fault("FAN_DEPLOYMENT_RECORD_WRITE_UNCONFIRMED");
+        } finally {if(File.Exists(stagePath))File.Delete(stagePath);}
+      }
+    }
+  }
+}
+'@
+}
+
+function Get-FanDeploymentRecordSnapshot([string]$Path) {
+  Initialize-FanDeploymentRecordStore
+  return [YeManCC.FanDeploymentRecordV1.Store]::Capture($Path)
+}
+
+function Write-FanDeploymentRecord([string]$Path, [string]$Record, $Expected) {
+  Initialize-FanDeploymentRecordStore
+  [YeManCC.FanDeploymentRecordV1.Store]::Write($Path, $Record, $Expected)
+}
+
+# Capture before full validation: a later file generation cannot be overwritten.
+$deploymentSnapshot = $null
+if ($SkipStateDirectory -eq $false) {
+  $deploymentRecordPath = Join-Path (Get-FullPath $StateDirectory) 'YeManFanHost.deployment.json'
+  $deploymentSnapshot = Get-FanDeploymentRecordSnapshot $deploymentRecordPath
+}
+
 $payloadFull = Get-FullPath $PayloadDirectory
 if (-not (Test-Path -LiteralPath $payloadFull -PathType Container)) {
   throw "Fan Host 目录不存在: $payloadFull"
@@ -203,7 +382,6 @@ if (-not $SkipStateDirectory) {
   $recordDirectory = Get-FullPath $StateDirectory
   New-Item -ItemType Directory -Force -Path $recordDirectory | Out-Null
   $recordPath = Join-Path $recordDirectory 'YeManFanHost.deployment.json'
-  $recordTemp = $recordPath + '.tmp'
   $record = [ordered]@{
     schemaVersion = 1
     validationRulesVersion = 1
@@ -217,10 +395,7 @@ if (-not $SkipStateDirectory) {
     result = 'ok'
     deployedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
   }
-  [IO.File]::WriteAllText($recordTemp, ($record | ConvertTo-Json -Depth 4),
-    (New-Object Text.UTF8Encoding($false)))
-  if (Test-Path -LiteralPath $recordPath) { Remove-Item -LiteralPath $recordPath -Force }
-  [IO.File]::Move($recordTemp, $recordPath)
+  Write-FanDeploymentRecord $recordPath ($record | ConvertTo-Json -Depth 4) $deploymentSnapshot
   # 注意：不得新增第二个 FAN_HOST_*_OK 成功常量——前门（build-workspace.ps1
   # Assert-PublishPreGate §3）要求 ps1 的每个 FAN_HOST_*_OK 都被 fanHost.ts 的
   # 成功判定正则接受；部署记录的"已写出"不是 launcher 的成功判据（它另行读取记录核对），

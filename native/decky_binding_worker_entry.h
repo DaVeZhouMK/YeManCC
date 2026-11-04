@@ -3,8 +3,10 @@
 #include "decky_binding_worker.h"
 #include "decky_binding_process_owner.h"
 #include "decky_resource_worker.h"
+#include "decky_context_cleanup_worker.h"
 namespace ymcc::deckybinding::entry {
-inline bool tryRunCommandLine(const wchar_t* commandLine,int& exitCode){
+using CleanupHook=std::function<bool(const nlohmann::json&,HANDLE,const std::function<bool(const nlohmann::json&)>&,int&)>;
+inline bool tryRunCommandLine(const wchar_t* commandLine,int& exitCode,const CleanupHook& cleanup={}){
     int argc=0;auto** argv=CommandLineToArgvW(commandLine,&argc);
     if(!argv){exitCode=ERROR_INVALID_PARAMETER;return true;}
     const auto mode=ChildChannel::classify(argc,argv);
@@ -22,6 +24,7 @@ inline bool tryRunCommandLine(const wchar_t* commandLine,int& exitCode){
         };
         const auto operation=nlohmann::json::parse(bytes);
         if(ymcc::deckyresources::worker::tryRun(operation,channel.cancelEvent(),emit,exitCode))return true;
+        if(cleanup&&cleanup(operation,channel.cancelEvent(),emit,exitCode))return true;
         exitCode=worker::run(bytes,channel.cancelEvent(),[&](const nlohmann::json& packet){
             const auto text=packet.dump();
             const std::vector<std::uint8_t> payload(text.begin(),text.end());

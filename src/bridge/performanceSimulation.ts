@@ -1,97 +1,61 @@
-/** Adapter for the isolated simulator. Only explicit Save reaches shared production APIs. */
-import { getContinuousPerformanceSnapshot, updateContinuousPerformanceControls } from './performanceSchedule';
-import { patchContinuousBank, toPowerCoreMode, type ContinuousPerformanceSnapshot, type ContinuousSidePatch } from './performanceControls';
-import { getPolicyGame } from './gamePolicyTarget';
-const coreIds = { bigFirst: 0, bigOnly: 1, littleFirst: 3, littleOnly: 2 } as const;
-const fromId = ['bigFirst', 'bigOnly', 'littleOnly', 'littleFirst'] as const;
-const fromKey = { big: 'bigFirst', 'only-big': 'bigOnly', small: 'littleFirst', 'only-small': 'littleOnly' } as const;
-export function simulationSourceSnapshot(source: ContinuousPerformanceSnapshot, revision: number): Record<string, any> {
-  const side = source.side;
-  if (!side || !source.bank) throw new Error('正在确认供电状态，请稍后进入模拟测试');
-  const game = getPolicyGame(), a = source.controls.ac, d = source.controls.dc;
-  const rule = (v: typeof a) => ({ splitWatts: v.auto.coreSplit, lowerMode: toPowerCoreMode(v.auto.coreLow), upperMode: toPowerCoreMode(v.auto.coreHigh) });
-  const manual = (v: typeof a) => ({ freq: v.manual.frequencyMHz / 1000, aggr: v.manual.aggressiveness, turbo: v.manual.turbo, unlimited: v.manual.unlimited, minOverride: null, core: coreIds[v.manual.coreMode] });
-  return { schema: 'ymcc-performance-prototype-v29', exampleOnly: true, fixture: 'unknown', mode: source.bank.mode, gameMode: source.bank.mode,
-    gameThreads: source.identity.exe ? { [source.identity.exe]: { hyperThreadMode: source.hyperThreadMode === 'off' ? 'off' : 'on' } } : {},
-    machine: { maxTdp: Math.min(150, Math.max(a.tdpCeiling, d.tdpCeiling)) }, simulationProfile: 'z2e',
-    auto: { side, floatSearchMode: 'baseline', coreRules: { ac: rule(a), dc: rule(d) }, bias: { ac: a.auto.bias, dc: d.auto.bias },
-      energySaving: { ac: a.auto.saving, dc: d.auto.saving }, tdp: { ac: a.tdp, dc: d.tdp } },
-    manual: { side, controls: { ac: manual(a), dc: manual(d) } }, frames: source.frameRates,
-    syncRevision: revision, power: { actualSide: side },
-    previewRuntime: { topGame: game ? { name: game.name, path: game.path || game.name, pid: game.pid, processCreated: String(game.processCreated) } : null,
-      coreTopologyScenario: source.hybrid ? 'hybrid2' : 'uniform' } };
-}
-export function simulationDraftPatch(base: Record<string, any>, draft: Record<string, any>, source: ContinuousPerformanceSnapshot): ContinuousSidePatch {
-  const side = source.side;
-  if (!side || draft?.schema !== 'ymcc-performance-prototype-v29' || draft.auto?.side !== side || draft.manual?.side !== side) throw new Error('供电侧或模拟参数已变化，请恢复当前设置');
-  const m = draft.manual.controls[side], a = draft.auto, rule = a.coreRules[side], frames = draft.frames[side];
-  const finite = (v: unknown) => { if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error('无效的模拟参数'); return v; };
-  const coreLow = fromKey[rule.lowerMode as keyof typeof fromKey], coreHigh = fromKey[rule.upperMode as keyof typeof fromKey];
-  if (!coreLow || !coreHigh || !Number.isInteger(m.core) || !fromId[m.core]) throw new Error('无效的核心方案');
-  if (typeof m.turbo !== 'boolean' || typeof m.unlimited !== 'boolean') throw new Error('无效的 CPU 开关');
-  const patch: ContinuousSidePatch = { mode: draft.mode, tdp: finite(a.tdp[side]),
-    auto: { bias: finite(a.bias[side]), saving: a.energySaving[side], coreSplit: finite(rule.splitWatts), coreLow, coreHigh },
-    manual: { frequencyMHz: finite(m.freq) * 1000, aggressiveness: finite(m.aggr), turbo: m.turbo, unlimited: m.unlimited, coreMode: fromId[m.core] },
-    frameRate: { fps: finite(frames.fps), ceiling: finite(frames.ceiling), lastFps: finite(frames.lastFps) } };
-  // A shared draft envelope must not change an untouched per-side remembered ceiling.
-  if (draft.machine.maxTdp !== base.machine.maxTdp) patch.tdpCeiling = finite(draft.machine.maxTdp);
-  const before = base.gameThreads?.[source.identity.exe]?.hyperThreadMode;
-  const after = draft.gameThreads?.[source.identity.exe]?.hyperThreadMode;
-  if (after !== before) {
-    if (!source.smtAvailable || !['on', 'off'].includes(after)) throw new Error('当前游戏不支持超线程策略');
-    patch.hyperThreadMode = after;
-  }
-  return patch;
-}
-/** Project the same cached draft back into the production editor's typed view. */
-export function simulationPanelSnapshot(base: Record<string, any>, draft: Record<string, any>, source: ContinuousPerformanceSnapshot): ContinuousPerformanceSnapshot {
-  const patch = simulationDraftPatch(base, draft, source), side = source.side!;
-  const value = structuredClone(source);
-  value.controls[side] = patchContinuousBank(value.controls[side], patch, side);
-  value.bank = value.controls[side];
-  value.actualSide = draft.power?.actualSide ?? source.actualSide;
-  value.frameRates = structuredClone(draft.frames);
-  value.hyperThreadMode = draft.gameThreads?.[source.identity.exe]?.hyperThreadMode ?? source.hyperThreadMode;
-  return value;
-}
-/** Translate typed production controls into the existing isolated draft command protocol. */
-export function simulationPanelCommands(patch: ContinuousSidePatch, current: ContinuousPerformanceSnapshot): {key: string; value: any}[] {
-  if (!current.side || !current.bank) throw new Error('模拟参数尚未就绪');
-  const bank = patchContinuousBank(current.bank, patch, current.side), out: {key:string;value:any}[] = [];
-  const add = (key: string, value: any) => out.push({key,value});
-  if (patch.tdpCeiling !== undefined) add('machineMax',bank.tdpCeiling);
-  if (patch.tdp !== undefined) add('simulationBudget',bank.tdp);
-  if (patch.frameRate) { add('ceiling',patch.frameRate.ceiling); add('target',patch.frameRate.fps); }
-  for (const [field,key] of [['bias','bias'],['saving','saving'],['coreSplit','autoCoreThreshold'],['coreLow','autoCoreLow'],['coreHigh','autoCoreHigh']] as const)
-    if (patch.auto?.[field] !== undefined) add(key,bank.auto[field]);
-  if (patch.manual?.frequencyMHz !== undefined || patch.manual?.unlimited !== undefined) add('manualMHz',bank.manual.unlimited?0:bank.manual.frequencyMHz);
-  if (patch.manual?.aggressiveness !== undefined) add('manualAggressiveness',bank.manual.aggressiveness);
-  if (patch.manual?.turbo !== undefined) add('manualTurbo',bank.manual.turbo);
-  if (patch.manual?.coreMode !== undefined) add('manualCoreMode',bank.manual.coreMode);
-  if (patch.hyperThreadMode !== undefined) add('manualSmt',patch.hyperThreadMode !== 'off');
-  if (patch.mode !== undefined) add('mode',bank.mode);
-  return out;
-}
-export function createPerformanceSimulationSession() {
-  let revision = 0;
-  const bases = new Map<number, ContinuousPerformanceSnapshot>();
-  async function read() {
-    const source = await getContinuousPerformanceSnapshot('effective');
-    bases.set(++revision, source);
-    if (bases.size > 64) bases.delete(bases.keys().next().value!);
-    return simulationSourceSnapshot(source, revision);
-  }
-  return { read, panel(base: Record<string, any>, draft: Record<string, any>) {
-    const source = bases.get(base?.syncRevision);
-    if (!source) throw new Error('正式参数已变化，请恢复当前设置');
-    return simulationPanelSnapshot(base,draft,source);
-  }, async save(base: Record<string, any>, draft: Record<string, any>) {
-    const source = bases.get(base?.syncRevision);
-    if (!source) return { ok: false, reason: 'conflict', snapshot: await read() };
-    try {
-      const patch = simulationDraftPatch(base, draft, source);
-      await updateContinuousPerformanceControls(source.identity, patch);
-      return { ok: true, snapshot: await read() };
-    } catch (error) { return { ok: false, reason: (error as Error).message, snapshot: await read() }; }
-  } };
+/** TS draft session. Reads current production settings; only confirmed Save uses the CAS writer. */
+import {getContinuousPerformanceSnapshot,updateContinuousPerformanceControls} from './performanceSchedule';
+import {patchContinuousBank,defaultContinuousBank,normalizeHyperThreadMode,type ContinuousPerformanceSnapshot,type ContinuousPerformanceIdentity,type ContinuousSidePatch,type ControlSide} from './performanceControls';
+import {frameRateSetting} from './frameRateModel';
+import {detectPerformanceTemplate} from './yeman';
+
+const copy=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
+const stableContext=(value:ContinuousPerformanceIdentity)=>{const {revision,generation,...rest}=value;return JSON.stringify(rest);};
+const ownedValue=(value:ContinuousPerformanceSnapshot)=>JSON.stringify({bank:value.bank,frame:value.side?value.frameRates[value.side]:null,smt:value.hyperThreadMode,scheme:value.powerScheme});
+export function createPerformanceSimulationSession(){
+ const documents=new Map<ControlSide,{base:ContinuousPerformanceSnapshot;draft:ContinuousPerformanceSnapshot;version:number}>();
+ const listeners=new Set<()=>void>();let side:ControlSide|null=null,alive=true,saving=false;
+ const publish=()=>{for(const listener of listeners)listener();};
+ function document(){const value=side?documents.get(side):null;if(!value)throw Error('正式参数尚未载入');return value;}
+ function snapshot(){const value=document(),result=copy(value.draft);result.identity={...result.identity,revision:value.base.identity.revision+'/ts-draft/'+value.version};return result;}
+ async function read(requested?:ControlSide){
+  if(!alive)throw Error('模拟窗口已关闭');
+  if(!side||requested&&!documents.has(requested)){
+   const source=await getContinuousPerformanceSnapshot('effective',requested);
+   if(!alive||!source.side||!source.bank)throw Error('正在确认供电状态，请稍后重试');
+   if(!documents.has(source.side))documents.set(source.side,{base:copy(source),draft:copy(source),version:0});
+   side=source.side;
+  }else if(requested)side=requested;
+  return snapshot();
+ }
+ return {
+  read,
+  subscribe(listener:()=>void){listeners.add(listener);return()=>listeners.delete(listener);},
+  current(){return side&&documents.has(side)?snapshot():null;},
+  dirty(){return side&&documents.has(side)?ownedValue(document().base)!==ownedValue(document().draft):false;},
+  async commit(identity:ContinuousPerformanceIdentity,patch:ContinuousSidePatch){
+   const current=snapshot();if(JSON.stringify(current.identity)!==JSON.stringify(identity))throw Error('编辑目标已变化，请重新调节');
+   if(patch.powerScheme!==undefined)throw Error('系统电源方案请在性能调度页面单独选择');
+   const value=document(),selected=side!;value.draft.controls[selected]=patchContinuousBank(value.draft.controls[selected],patch,selected,value.draft.powerScheme);value.draft.bank=copy(value.draft.controls[selected]);
+   if(patch.frameRate)value.draft.frameRates[selected]=frameRateSetting(patch.frameRate);
+   if(patch.hyperThreadMode!==undefined)value.draft.hyperThreadMode=normalizeHyperThreadMode(patch.hyperThreadMode);
+   value.version++;publish();return snapshot();
+  },
+  async restore(){
+   const source=await getContinuousPerformanceSnapshot('effective',side??undefined);if(!alive||!source.side||!source.bank)throw Error('无法读取当前正式参数');
+   side=source.side;documents.set(side,{base:copy(source),draft:copy(source),version:(documents.get(side)?.version??0)+1});publish();return snapshot();
+  },
+  async reset(){
+   const value=document(),selected=side!,template=await detectPerformanceTemplate();if(!alive)throw Error('模拟窗口已关闭');
+   const bank=defaultContinuousBank(selected,template);bank.tdpCeiling=Math.min(bank.tdpCeiling,value.draft.hardwareMaximum);bank.tdp=Math.max(value.draft.hardwareMinimum,Math.min(bank.tdp,bank.tdpCeiling));
+   value.draft.controls[selected]=bank;value.draft.bank=copy(bank);value.draft.hyperThreadMode='default';value.draft.frameRates[selected]=frameRateSetting(selected==='dc'?60:template==='desktop'?200:120);value.version++;publish();return snapshot();
+  },
+  async save(){
+   if(saving)throw Error('正在保存，请稍候');saving=true;
+   try{const value=document(),selected=side!,current=await getContinuousPerformanceSnapshot('effective',selected);
+   if(!alive)throw Error('模拟窗口已关闭');
+   if(stableContext(current.identity)!==stableContext(value.base.identity)||ownedValue(current)!==ownedValue(value.base))throw Error('正式供电、游戏或设置已变化，请恢复当前设置后重新调节');
+   const bank=value.draft.controls[selected],patch:ContinuousSidePatch={mode:bank.mode,tdp:bank.tdp,tdpCeiling:bank.tdpCeiling,frameRate:copy(value.draft.frameRates[selected])};
+   if(bank.mode!=='manual'||current.powerScheme==='yeman'){patch.auto=copy(bank.auto);patch.manual=copy(bank.manual);patch.hyperThreadMode=value.draft.hyperThreadMode;}
+   const saved=await updateContinuousPerformanceControls(current.identity,patch,()=>alive);
+   if(alive){documents.set(selected,{base:copy(saved),draft:copy(saved),version:value.version+1});publish();}
+   return saved;}finally{saving=false;}
+  },
+  dispose(){alive=false;listeners.clear();documents.clear();}
+ };
 }

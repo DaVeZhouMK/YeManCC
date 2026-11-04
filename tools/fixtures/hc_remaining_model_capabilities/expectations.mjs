@@ -21,7 +21,7 @@ const oneXApplicationPolicy = {
   legalKeys:['turbo','keyboard','home','l4','r4'],
   routes:{
     OneXPlayerX2:{turbo:'keyboard-vk',keyboard:'keyboard-vk',home:'onex-x2-vendor-click',l4:'onex-x2-vendor-held',r4:'onex-x2-vendor-held'},
-    OneXPlayer3:{turbo:'keyboard-vk',keyboard:'keyboard-vk',home:'onex-x2-vendor-click',l4:'onex-x2-vendor-held',r4:'onex-x2-vendor-held'},
+    OneXPlayer3:{turbo:'keyboard-vk',keyboard:'keyboard-vk',home:'onex-x2-vendor-held',l4:'onex-x2-vendor-held',r4:'onex-x2-vendor-held',gkey:'onex-x2-vendor-held'},
     OneXPlayerX2MiniPro:{turbo:'keyboard-vk',keyboard:'keyboard-vk',home:'onex-x2-vendor-click',l4:'keyboard-vk',r4:'keyboard-vk'},
   },
 };
@@ -126,6 +126,12 @@ export function generateExpectations(workspace, fixtures) {
   const manifestBytes = fs.readFileSync(path.join(upstream, 'source-manifest.json')), manifest = JSON.parse(manifestBytes);
   const inventoryBytes = fs.readFileSync(inventoryPath), inventory = JSON.parse(inventoryBytes);
   if (hash(manifestBytes) !== pins.manifestSha256 || hash(inventoryBytes) !== pins.inventorySha256) throw Error('Pinned manifest/inventory SHA256 mismatch');
+  const upgradePath=path.resolve(fixtures,'../../../capabilities/upstream/f2e58468/OneXPlayer3.cs'),upgradeBytes=fs.readFileSync(upgradePath);
+  const upgradeSha='e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc',upgradeBlob='9361977cce00c11be104316a782a0d5e9de8165b';
+  if(hash(upgradeBytes)!==upgradeSha||hash(Buffer.concat([Buffer.from(`blob ${upgradeBytes.length}\0`),upgradeBytes]),'sha1')!==upgradeBlob)throw Error('Independent OXP3 input upgrade source changed');
+  const upgrade=clean(upgradeBytes.toString('utf8'));
+  if(!upgrade.includes('new KeyboardChord("G-Key", null, null, false, ButtonFlags.OEM4)')||!upgrade.includes('button is ButtonFlags.OEM3 or ButtonFlags.OEM4')||!upgrade.includes('0x25 => ButtonFlags.OEM4'))throw Error('Independent OXP3 held-role contract changed');
+  const upgrades=[{commit:'f2e58468d9917189d4be7ccfc242385ce2c3035b',path:upgradePath,sha256:upgradeSha,gitBlob:upgradeBlob,scope:'OXP3 input only; retain all old JSON matrix/factory inputs'}];
   const sources = new Map(), inputs = [];
   for (const pin of pins.files) {
     const file = path.join(upstream, 'sources/hc', pin.path), bytes = fs.readFileSync(file);
@@ -197,19 +203,20 @@ export function generateExpectations(workspace, fixtures) {
       const symbolic = remap([1,2,3]).map(value => `${value<0?'neg-':''}${axes[Math.abs(value)-1].toLowerCase()}`).join('-');
       matrices.push({ sensor, matrix, recipe:symbolic, source:configurationFile, samples:samples.map(input=>({input,output:remap(input)})) });
     }
-    const profile = { AYANEO3:'Ayaneo3', AYANEOAIR2:'AyaneoCec', AYANEOAIRPro1S:'AyaneoCec', AYANEOAIRPlusNxx:'AyaneoCec', AYANEOFlip11:'AyaneoFlip1SKb', OneXPlayerX2:'OneXX1', OneXPlayer3:'OneXX1', OneXPlayerX2MiniPro:'OneXX2MiniPro', SteamMachine:'None', AYANEONEXT2:'AyaneoNext2' }[name];
+    const profile = { AYANEO3:'Ayaneo3', AYANEOAIR2:'AyaneoCec', AYANEOAIRPro1S:'AyaneoCec', AYANEOAIRPlusNxx:'AyaneoCec', AYANEOFlip11:'AyaneoFlip1SKb', OneXPlayerX2:'OneXX1', OneXPlayer3:'OneXX3', OneXPlayerX2MiniPro:'OneXX2MiniPro', SteamMachine:'None', AYANEONEXT2:'AyaneoNext2' }[name];
     const family = name === 'SteamMachine' ? 'ValveSteamMachine' : name.startsWith('OneX') ? 'OneXPlayer' : 'Ayanero';
     const catalog = [...new Map(keys.map(k=>[k.id,{id:k.id,label:k.label,backIndex:k.backIndex,form:'KeyboardVk',clickOnly:false,capture:true}])).values()];
     if (name.startsWith('OneX')) {
-      catalog.splice(2,0,{id:'home',label:'Home',backIndex:0,form:'HidButton',clickOnly:true,capture:true});
+      catalog.splice(2,0,{id:'home',label:'Home',backIndex:0,form:'HidButton',clickOnly:name!=='OneXPlayer3',capture:true});
       for (const [id,label,backIndex] of [['l4','M1',1],['r4','M2',2]]) {
         const found = catalog.find(k=>k.id===id);
         if (found) found.label=label;
         else catalog.push({id,label,backIndex,form:'HidButton',clickOnly:false,capture:true});
       }
+      if(name==='OneXPlayer3')catalog.push({id:'gkey',label:'G-Key',backIndex:0,form:'HidButton',clickOnly:false,capture:true});
       const routes = oneXApplicationPolicy.routes[name];
-      if (!routes || catalog.map(k=>k.id).join(',') !== oneXApplicationPolicy.legalKeys.join(','))
-        throw Error(`OneX application catalog differs from reviewed five-key policy: ${name}`);
+      if (!routes || catalog.map(k=>k.id).join(',') !== Object.keys(routes).join(','))
+        throw Error(`OneX application catalog differs from reviewed per-model policy: ${name}`);
       for (const key of catalog) {
         key.capture=true;
         key.captureRoute=routes[key.id];
@@ -242,6 +249,6 @@ export function generateExpectations(workspace, fixtures) {
   if (legacyIdentities.length!==181 || legacyIdentities.filter(r=>r.deviceClass==='SteamDeck').length!==2)
     throw Error('Expected 181 frozen legacy aliases, including Jupiter/Galileo SteamDeck');
   return {schema:'hc-remaining-model-oracle-v2',hcCommit:pins.commit,identities,models,legacyIdentities,vkCodes,oneXApplicationPolicy,steamDeckCapturePolicy,
-    integrity:{pinsSha256:hash(pinsBytes),inventory:{path:inventoryPath,sha256:hash(inventoryBytes)},manifestSha256:hash(manifestBytes),inputs},
+    integrity:{pinsSha256:hash(pinsBytes),inventory:{path:inventoryPath,sha256:hash(inventoryBytes)},manifestSha256:hash(manifestBytes),inputs,upgrades},
     oracleBoundary:'No production identity/profile/catalog/matrix/capture table contributes expected aliases, chords, canonical bits, remapped values or source routes. Source routes/software capture are reviewed YMCC application policy, not independent proof of runtime readiness or device I/O.'};
 }

@@ -75,6 +75,10 @@ static void nativeSubmitGameFeedbackFrame(const InputFrameSubmission&,bool);
 static void gamepadSerialRevokeGameFeedback() {}
 @@CONTEXT@@
 static void nativeSubmitGameFeedbackFrame(const InputFrameSubmission&,bool) {}
+// Visibility ownership is outside this selected frame-only consumer. Its
+// production guard is inactive here; unexpected entry remains an explicit fail.
+static thread_local const void* t_inputHostDeferredPhysicalHideWrite=nullptr;
+static bool inputHostDeferredPhysicalHideWriteCurrent(){throw std::logic_error("unmodeled-deferred-visibility-in-frame-fixture");}
 @@ADAPTERS@@
 namespace ymcc::screenpads {struct Snapshot{bool present=false;};static json snapshotJson(const Snapshot& s){return {{"present",s.present}};}}
 @@NORMALIZE_AXIS@@

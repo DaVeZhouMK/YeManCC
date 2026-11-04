@@ -72,6 +72,32 @@ public:
                 if(enabled.contains("error"))throw std::runtime_error("mirror-bootstrap-watch-enable-failed");
                 const auto binding=command("Runtime.addBinding",{{"name","__YMCC_DECKY_HEALTH_V1"}});
                 if(binding.contains("error"))throw std::runtime_error("mirror-bootstrap-health-binding-failed");
+                const auto stopForFatal=[&](const std::string& fatal) -> bool {
+                    if(fatal.empty())return false;
+                    requireOwner();
+                    // A bundled entry also handles optional features. An uncaught exception alone
+                    // is insufficient: stop only if the upstream constructor never produced a loader.
+                    if(fatal=="decky-frontend-incompatible"){
+                        const auto boot=command("Runtime.evaluate",{{"expression","!window.DeckyPluginLoader"},{"contextId",activeContext},{"returnByValue",true}});
+                        if(boot.value("result",Json::object()).value("result",Json::object()).value("value",Json())!=true)return false;
+                    }
+                    // An exception from a context already destroyed during navigation is stale.
+                    const auto current=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_MIRROR__?.runId === "+Json(runId).dump()+" && window.__YMCC_DECKY_MIRROR__?.revoked !== true"},{"contextId",activeContext},{"returnByValue",true}});
+                    if(current.value("result",Json::object()).value("result",Json::object()).value("value",Json())!=true)return false;
+                    // Upstream's Disable Decky button restarts Steam. Use lifecycle teardown only;
+                    // the YMCC owner thread then runs the normal off/settings/owned-Job path.
+                    // Recheck inside the mutation too: logout/new bootstrap can
+                    // land after the preceding CDP read. A proven refusal never
+                    // authorizes the parent's normal OFF notification.
+                    // Recheck the SAME fault inside this existing mutation: a recovered Loader
+                    // or boundary must survive a late verdict. No additional CDP round trip.
+                    const std::string teardownExpression="(() => { const fatal="+Json(fatal).dump()+"; try { if (window.__YMCC_DECKY_MIRROR__?.runId !== "+Json(runId).dump()+" || window.__YMCC_DECKY_MIRROR__?.revoked === true || !['decky-frontend-incompatible','decky-render-failed'].includes(fatal) || (fatal === 'decky-frontend-incompatible' && window.DeckyPluginLoader) || (fatal === 'decky-render-failed' && window.__YMCC_DECKY_HEALTH__?.read() !== 'decky-render-failed')) return false; } catch { return false; } window.dispatchEvent(new Event('ymcc-decky-health-stop')); const l=window.DeckyPluginLoader; for(const method of ['dismountAll','deinit']) { try { if(typeof l?.[method]==='function')l[method](); } catch {} } return true; })()";
+                    try{
+                        const auto stopped=command("Runtime.evaluate",{{"expression",teardownExpression},{"contextId",activeContext},{"returnByValue",true}});
+                        if(stopped.value("result",Json::object()).value("result",Json::object()).value("value",Json())==false)return false;
+                    }catch(...){};
+                    requireOwner();notify("terminal",fatal);return true;
+                };
                 notify("watching");readiness->set_value({});readyReported=true;
                 for(;;){
                     Json packet;
@@ -82,28 +108,28 @@ public:
                     const auto method=packet.value("method",std::string{});
                     if(method=="Runtime.executionContextsCleared"){activeContext=0;continue;}
                     if(method=="Runtime.executionContextDestroyed"){if(packet.value("params",Json::object()).value("executionContextId",0)==activeContext)activeContext=0;continue;}
+                    // Account change is a transport revocation, never a fatal
+                    // frontend verdict. Re-read the exact current document guard
+                    // before accepting the marker, just like the render boundary.
+                    if(activeContext&&method=="Runtime.bindingCalled"){
+                        const auto params=packet.value("params",Json::object());
+                        if(params.value("name",std::string{})=="__YMCC_DECKY_HEALTH_V1"&&params.value("executionContextId",0)==activeContext){
+                            const auto payload=params.value("payload",std::string{});
+                            const auto signal=payload.size()<=256?Json::parse(payload,nullptr,false):Json();
+                            if(signal.is_object()&&signal.size()==2&&signal.contains("runId")&&signal["runId"].is_string()&&signal["runId"]==runId&&signal.contains("code")&&signal["code"].is_string()&&signal["code"]=="decky-account-changed"){
+                                const auto verified=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_HEALTH__?.accountCurrent() === false"},{"contextId",activeContext},{"returnByValue",true}});
+                                if(verified.value("result",Json::object()).value("result",Json::object()).value("value",Json())==true)
+                                    throw std::runtime_error("mirror-bootstrap-account-changed");
+                            }
+                        }
+                    }
                     std::string fatal=ymcc::deckyhealth::exception(packet,activeContext);
                     if(ymcc::deckyhealth::boundarySignal(packet,activeContext,runId)){
                         // Do not trust a marker alone. Re-read the actual visible official error boundary.
                         const auto verified=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_HEALTH__?.read() || ''"},{"contextId",activeContext},{"returnByValue",true}});
                         if(verified.value("result",Json::object()).value("result",Json::object()).value("value",std::string{})=="decky-render-failed")fatal="decky-render-failed";
                     }
-                    if(!fatal.empty()){
-                        requireOwner();
-                        // A bundled entry also handles optional features. An uncaught exception alone
-                        // is insufficient: stop only if the upstream constructor never produced a loader.
-                        if(fatal=="decky-frontend-incompatible"){
-                            const auto boot=command("Runtime.evaluate",{{"expression","!window.DeckyPluginLoader"},{"contextId",activeContext},{"returnByValue",true}});
-                            if(boot.value("result",Json::object()).value("result",Json::object()).value("value",Json())!=true)continue;
-                        }
-                        // An exception from a context already destroyed during navigation is stale.
-                        const auto current=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_MIRROR__?.runId === "+Json(runId).dump()},{"contextId",activeContext},{"returnByValue",true}});
-                        if(current.value("result",Json::object()).value("result",Json::object()).value("value",Json())!=true)continue;
-                        // Upstream's Disable Decky button restarts Steam. Use lifecycle teardown only;
-                        // the YMCC owner thread then runs the normal off/settings/owned-Job path.
-                        try{command("Runtime.evaluate",{{"expression","(() => { window.dispatchEvent(new Event('ymcc-decky-health-stop')); const l=window.DeckyPluginLoader; for(const method of ['dismountAll','deinit']) { try { if(typeof l?.[method]==='function')l[method](); } catch {} } return true; })()"},{"contextId",activeContext},{"returnByValue",true}});}catch(...){}
-                        requireOwner();notify("terminal",fatal);break;
-                    }
+                    if(stopForFatal(fatal))break;
                     if(method!="Runtime.executionContextCreated")continue;
                     const auto value=packet.value("params",Json::object()).value("context",Json::object());
                     const auto auxiliary=value.value("auxData",Json::object());
@@ -119,8 +145,18 @@ public:
                     }
                     const auto readback=reply["result"].value("result",Json::object()).value("value",std::string{});
                     if(readback.empty())continue; // Non-top-level frame: expression's origin/top guard refuses injection.
+                    if(readback=="ymcc-decky-account-not-current"||readback=="ymcc-decky-account-watch-unavailable")throw std::runtime_error("mirror-bootstrap-account-changed");
                     if(readback=="ymcc-decky-retained-frontend-mismatch")throw std::runtime_error("mirror-retained-frontend-changed");
                     if(readback!=runId)throw std::runtime_error("mirror-bootstrap-readback-failed");
+                    // A retained same-run health observer reports a fatal page
+                    // only once. That marker can belong to the old CDP channel.
+                    // Read current state once per verified attachment; reuse the
+                    // same ownership/run checks and normal terminal stop below.
+                    const auto health=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_HEALTH__?.read() || ''"},{"contextId",activeContext},{"returnByValue",true}});
+                    if(health.contains("error")||!health.contains("result")||health["result"].contains("exceptionDetails")){
+                        notify("context-replaced","mirror-bootstrap-reload-pending");continue;
+                    }
+                    if(health["result"].value("result",Json::object()).value("value",std::string{})=="decky-render-failed"&&stopForFatal("decky-render-failed"))break;
                     requireOwner();notify("context-attached");
                 }
             }catch(const std::exception& error){

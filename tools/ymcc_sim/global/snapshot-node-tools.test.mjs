@@ -7,16 +7,19 @@ import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {bindSnapshotNodeTools,verifySnapshotNodeTools,captureSnapshotNodeToolGraph,DEFAULT_SEED_PACKAGES,NODE_TOOLS_BINDING_NAME,parseSnapshotNodeToolArguments} from './snapshot-node-tools.mjs';
-import {createSourceSnapshot,compareSourceSnapshot} from './source-snapshot.mjs';
+import {createSourceSnapshot,createCapturedSourceSnapshot,compareSourceSnapshot,SNAPSHOT_POLICY} from './source-snapshot.mjs';
+import {beginCurrentCompileBatch,requireCurrentCompileBatch,finishCurrentCompileBatch} from './controller-coordinator-pipe/r3-current-compile-batch.mjs';
+import {LEGACY_MANAGED_CONTRACT} from './controller-coordinator-pipe/r3-managed-input-contract.mjs';
+import {readVirtualControllerSource} from '../../virtual_controller_runtime_source.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const writeJson=(file,value)=>fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');
 const failResult=fn=>{try{const result=fn();assert.equal(result.status,'FAIL');return result;}catch(error){if(error.code==='ERR_ASSERTION')throw error;return {status:'FAIL',failure:{code:error.code??error.message}};}};
 const throwing='throw new Error("SYNTHETIC_TOOL_MUST_NEVER_BE_EXECUTED");\n';
-function fixture(t){
- const temp=path.resolve(os.tmpdir()),base=fs.mkdtempSync(path.join(temp,'ymcc-node-tools-test-'));
+function fixture(t,{coreOwner=false}={}){
+ const temp=path.resolve(process.env.YMCC_CORE_LAYOUT_TEST_TEMP??os.tmpdir()),base=fs.mkdtempSync(path.join(temp,'ymcc-node-tools-test-'));
  t.after(()=>{const resolved=path.resolve(base);assert.equal(path.dirname(resolved),temp);assert(path.basename(resolved).startsWith('ymcc-node-tools-test-'));assert(!fs.lstatSync(resolved).isSymbolicLink());assert.equal(fs.realpathSync(resolved).toLowerCase(),resolved.toLowerCase());fs.rmSync(resolved,{recursive:true,force:true});});
- const parent=path.join(base,'workspace','Mainline','YeManCC-source'),repo=path.join(parent,'Primary'),snapshot=path.join(parent,'Frozen'),nm=path.join(repo,'node_modules');fs.mkdirSync(nm,{recursive:true});
+ const parent=path.join(base,'workspace','Mainline','YeManCC-source'),repo=path.join(parent,coreOwner?'YeManCC':'Primary'),coreWorkspace=path.join(base,'workspace','Testing','YMCC','Workspace'),owner=path.join(coreWorkspace,'owner-a','nested-run'),snapshot=coreOwner?path.join(owner,'Mainline','YeManCC-source','YeManCC'):path.join(parent,'Frozen'),nm=path.join(repo,'node_modules');fs.mkdirSync(nm,{recursive:true});if(coreOwner)fs.mkdirSync(path.dirname(snapshot),{recursive:true});
  const write=(rel,bytes)=>{const file=path.join(repo,...rel.split('/'));fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);return file;};
  write('package.json',JSON.stringify({name:'synthetic-primary',private:true,type:'module'}));write('native/main.cpp','// SYNTHETIC, uncommitted\nint entireMain=1;\n');write('src/contract.txt','controlled');
  const roots={};
@@ -35,8 +38,8 @@ function fixture(t){
  for(const name of DEFAULT_SEED_PACKAGES)linkAt(nm,name,roots[name]);dep('vue','@vue/compiler-sfc');dep('@vue/compiler-sfc','codec');dep('esbuild','@esbuild/win32-x64');
  const resolver=`import {createRequire} from 'node:module';\nconst specs=['typescript','vue/compiler-sfc','esbuild'];\nconsole.log(JSON.stringify({urls:specs.map(name=>import.meta.resolve(name)),cjs:createRequire(import.meta.url).resolve('esbuild')}));\n`;
  write('tools/resolve-only.mjs',resolver);
- const capture=createSourceSnapshot({repoRoot:repo,outDir:snapshot});assert.equal(capture.status,'PASS',JSON.stringify(capture.failure));const manifest=capture.manifestFile,manifestBytes=fs.readFileSync(manifest),manifestSha=sha(manifestBytes),bindingFile=path.join(snapshot,'.ymcc-source-snapshot',NODE_TOOLS_BINDING_NAME);
- return {base,parent,repo,snapshot,nm,roots,write,pkg,dep,linkAt,manifest,manifestBytes,manifestSha,bindingFile,bind(options={}){return bindSnapshotNodeTools({manifestFile:manifest,expectedSnapshotManifestSha256:manifestSha,primaryRepo:repo,...options});},verify(){return verifySnapshotNodeTools({bindingManifestFile:bindingFile});},mutatePackage(name,fn){const file=path.join(roots[name],'package.json'),value=read(file);fn(value);writeJson(file,value);}};
+ const capture=(coreOwner?createCapturedSourceSnapshot:createSourceSnapshot)({repoRoot:repo,outDir:snapshot});assert.equal(capture.status,'PASS',JSON.stringify(capture.failure));const manifest=capture.manifestFile,manifestBytes=fs.readFileSync(manifest),manifestSha=sha(manifestBytes),bindingFile=path.join(snapshot,'.ymcc-source-snapshot',NODE_TOOLS_BINDING_NAME);
+ return {base,parent,repo,snapshot,nm,roots,write,pkg,dep,linkAt,manifest,manifestBytes,manifestSha,bindingFile,capture,coreWorkspace,owner,bind(options={}){return bindSnapshotNodeTools({manifestFile:manifest,expectedSnapshotManifestSha256:manifestSha,primaryRepo:repo,...options});},verify(){return verifySnapshotNodeTools({bindingManifestFile:bindingFile});},mutatePackage(name,fn){const file=path.join(roots[name],'package.json'),value=read(file);fn(value);writeJson(file,value);}};
 }
 function bound(f){const result=f.bind();assert.equal(result.status,'PASS',JSON.stringify(result.failure));return result;}
 function naturalNode(t,args){const r=spawnSync(process.execPath,args,{windowsHide:true,encoding:'utf8',timeout:20000});t.diagnostic(JSON.stringify({kind:'Node resolver/binding CLI over synthetic fixture only',exitCode:r.status,signal:r.signal,error:r.error?.code??null,stdout:r.stdout,stderr:r.stderr}));assert.equal(r.error,undefined);assert.equal(r.signal,null);return r;}
@@ -231,4 +234,66 @@ test('snapshot-only CLI flag is explicit, unique and forbidden on verify',()=>{
 });
 test('snapshot-only actual CLI refuses default FAIL then binds and verifies complete historical capture naturally',t=>{
  const f=historicalFixture(t),cli=path.join(path.dirname(fileURLToPath(import.meta.url)),'snapshot-node-tools.mjs'),args=[cli,'--bind',f.historicalManifest,'--expected-sha',f.pin,'--repo',f.repo];let r=naturalNode(t,args);assert.equal(r.status,3);assert.equal(JSON.parse(r.stderr).failure.code,'NODE_TOOLS_SUCCESSFUL_SNAPSHOT_REQUIRED');r=naturalNode(t,[...args,'--snapshot-only']);assert.equal(r.status,0);const value=JSON.parse(r.stdout);assert.equal(value.creationStatus,'FAIL');assert.equal(value.isCurrent,false);assert.equal(value.snapshotIntegrityVerified,true);assert.equal(value.sourceApprovalGranted,false);r=naturalNode(t,[cli,'--verify',f.historicalBindingFile]);assert.equal(r.status,0);assert.equal(JSON.parse(r.stdout).sourceApprovalGranted,false);assert.equal(read(f.historicalManifest).status,'FAIL');
+});
+
+// The parent supplies one G-core temp root for this bounded selection. No TEMP/TMP mutation.
+function requireCoreLayoutTemp(){
+ const requested=process.env.YMCC_CORE_LAYOUT_TEST_TEMP;
+ assert(requested&&path.isAbsolute(requested),'Set YMCC_CORE_LAYOUT_TEST_TEMP to an existing G-core task temp directory');
+ const temp=path.resolve(requested),core=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace'),rel=path.relative(core,temp);
+ assert(rel&&!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep),'Core-layout test temp must be a strict child of the G-core workspace');
+ assert(fs.lstatSync(temp).isDirectory()&&!fs.lstatSync(temp).isSymbolicLink());
+ assert.equal(fs.realpathSync(temp).toLowerCase(),temp.toLowerCase(),'Core-layout temp ancestors cannot redirect');
+ return temp;
+}
+
+function coreOwnerFixture(t){requireCoreLayoutTemp();return fixture(t,{coreOwner:true});}
+function verifyCoreCapture(f){
+ const proof=verifyCapturedSourceSnapshot({manifestFile:f.manifest,repoRoot:f.repo,expectedManifestSha256:f.manifestSha});
+ assert.equal(proof.status,'FROZEN_SOURCE_VERIFIED');assert.equal(proof.snapshotIntegrityVerified,true);assert.equal(proof.isCurrent,true);assert.equal(proof.sourceApprovalGranted,false);return proof;
+}
+test('core owner layout: node bind and verify retain real capture identity without executing packages',t=>{
+ const f=coreOwnerFixture(t),marker=path.join(f.base,'package-entry-executed.txt');
+ for(const root of Object.values(f.roots))fs.writeFileSync(path.join(root,'index.js'),'require("node:fs").writeFileSync('+JSON.stringify(marker)+',"EXECUTED");\n'+throwing);
+ assert.equal(f.capture.captureMode,'same-descriptor-capture');assert.equal(f.capture.snapshotWorkspaceRoot,f.owner);verifyCoreCapture(f);
+ const result=bound(f);assert.equal(result.packageCodeExecuted,false);assert.equal(result.sourceApprovalGranted,false);assert.equal(result.graph.packageCount,6);assert.equal(result.graphBeforeSha256,result.graphAfterSha256);assert(!fs.existsSync(marker));
+ for(const name of DEFAULT_SEED_PACKAGES){const alias=path.join(f.snapshot,'node_modules',name);assert(fs.lstatSync(alias).isSymbolicLink());assert.equal(fs.realpathSync(alias),f.roots[name]);}
+ const bytes=fs.readFileSync(f.bindingFile),verified=f.verify();assert.equal(verified.status,'PASS',JSON.stringify(verified.failure));assert.equal(verified.packageCodeExecuted,false);assert.equal(verified.sourceApprovalGranted,false);assert(!fs.existsSync(marker));assert(fs.readFileSync(f.bindingFile).equals(bytes));assert(fs.readFileSync(f.manifest).equals(f.manifestBytes));verifyCoreCapture(f);
+});
+for(const [name,target]of[
+ ['unrelated non-sibling',f=>path.join(f.base,'unrelated','Mainline','YeManCC-source','YeManCC')],
+ ['core root used as owner',f=>path.join(f.coreWorkspace,'Mainline','YeManCC-source','YeManCC')],
+ ['escaped core owner',f=>path.resolve(f.coreWorkspace,'owner-a','..','..','escaped-owner','Mainline','YeManCC-source','YeManCC')],
+ ['noncanonical repository leaf',f=>path.join(f.owner,'Mainline','YeManCC-source','Unexpected')],
+])test('core owner layout: node binding rejects '+name+' with caller-pinned relocated metadata',t=>{
+ const f=coreOwnerFixture(t),out=target(f);fs.mkdirSync(path.dirname(out),{recursive:true});
+ // Both move endpoints are computed inside this fixture's unique G-core temp tree.
+ const relative=path.relative(f.base,out);assert(relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep));fs.renameSync(f.snapshot,out);
+ const manifest=path.join(out,'.ymcc-source-snapshot','manifest.json'),value=read(manifest);value.snapshotRoot=out;value.snapshotWorkspaceRoot=path.resolve(out,'../../..');writeJson(manifest,value);const bytes=fs.readFileSync(manifest);
+ assert.throws(()=>bindSnapshotNodeTools({manifestFile:manifest,expectedSnapshotManifestSha256:sha(bytes),primaryRepo:f.repo}),/SNAPSHOT_SIBLING_DESTINATION_REQUIRED/);assert(!fs.existsSync(path.join(out,'node_modules')));assert(!fs.existsSync(path.join(out,'.ymcc-source-snapshot',NODE_TOOLS_BINDING_NAME)));assert(fs.readFileSync(manifest).equals(bytes));
+});
+test('core owner layout: node bind and verify reject reparse owner aliases without rewriting receipts',t=>{
+ const f=coreOwnerFixture(t);bound(f);const binding=fs.readFileSync(f.bindingFile),real=path.join(f.coreWorkspace,'actual-owner');
+ assert.equal(path.dirname(f.owner),path.join(f.coreWorkspace,'owner-a'));fs.renameSync(f.owner,real);fs.symlinkSync(real,f.owner,'junction');
+ const actualBinding=path.join(real,'Mainline','YeManCC-source','YeManCC','.ymcc-source-snapshot',NODE_TOOLS_BINDING_NAME);
+ assert.throws(()=>f.bind(),/REPARSE/);assert.match(failResult(()=>f.verify()).failure.code,/REPARSE/);assert(fs.readFileSync(actualBinding).equals(binding));assert(fs.readFileSync(path.join(real,'Mainline','YeManCC-source','YeManCC','.ymcc-source-snapshot','manifest.json')).equals(f.manifestBytes));
+});
+test('core owner layout: node verify rejects a changed package graph and preserves its receipt',t=>{
+ const f=coreOwnerFixture(t);bound(f);const bytes=fs.readFileSync(f.bindingFile);fs.appendFileSync(path.join(f.roots.codec,'NOTICE.txt'),'changed after binding');
+ const result=f.verify();assert.equal(result.status,'FAIL');assert.equal(result.failure.code,'NODE_TOOLS_GRAPH_CHANGED');assert(fs.readFileSync(f.bindingFile).equals(bytes));assert(fs.readFileSync(f.manifest).equals(f.manifestBytes));
+});
+test('core owner layout: real capture and node binding enter only the current compile batch',t=>{
+ const f=coreOwnerFixture(t);verifyCoreCapture(f);const binding=bound(f),here=path.dirname(fileURLToPath(import.meta.url)),module=path.join(here,'controller-coordinator-pipe');
+ const verifierFile=path.join(here,'source-snapshot.mjs'),expectationsFile=path.join(module,'r3-current105-expectations.json'),toolchainFile=path.join(here,'inputhost-protocol','toolchain-inputs.json');
+ const expectations=read(expectationsFile);assert.equal(expectations.managedSources.length,21,'Use the original reviewed legacy21 declaration for compile-only admission');const dotnet=read(toolchainFile).pinned.find(row=>path.basename(row.path).toLowerCase()==='dotnet.exe');assert(dotnet,'Original declared dotnet.exe pin is required; never substitute a fake tool');assert.equal(sha(fs.readFileSync(dotnet.path)),dotnet.sha256);
+ const build=path.join(f.owner,'Build','Validation','CoreLayoutAdmission');fs.mkdirSync(build,{recursive:true});
+ const layout={schemaVersion:1,sourceAuthority:{mode:'EXPLICIT_CURRENT_CAPTURE_COMPILE_ONLY'},sourceRoot:f.snapshot,primaryRoot:f.repo,workspaceRoot:f.owner,authorizedBuildRoot:build,productMainSha256:f.capture.main.snapshot.sha256,manifestSha256:f.manifestSha,nodeBindingSha256:sha(fs.readFileSync(f.bindingFile)),expandedSourceSha256:sha(readVirtualControllerSource(path.join(f.snapshot,'native/main.cpp')).source),verifierCodeSha256:sha(fs.readFileSync(verifierFile)),expectationsSha256:sha(fs.readFileSync(expectationsFile)),managedInputContract:LEGACY_MANAGED_CONTRACT,expectedManagedSources:expectations.managedSources,dotnet};
+ const actualToolFiles=[fileURLToPath(import.meta.url),verifierFile,path.join(here,'snapshot-node-tools.mjs'),path.join(module,'r3-current-compile-batch.mjs'),path.join(module,'r3-managed-input-contract.mjs'),path.resolve(here,'../../virtual_controller_runtime_source.mjs'),expectationsFile,toolchainFile];
+ assert.equal(f.capture.policy.version,SNAPSHOT_POLICY.version);assert.notEqual(f.capture.policy.version,7,'The real current capture must exercise the former hardcoded7 rejection');assert.equal(binding.status,'PASS');assert.equal(binding.packageCodeExecuted,false);
+ const unowned=path.join(f.owner,'Build','Validation','AnotherOwner','authority');assert.throws(()=>beginCurrentCompileBatch({layout,actualToolFiles,receiptDirectory:unowned}),/OWNED_OUTPUT_REQUIRED/);assert(!fs.existsSync(unowned));
+ const wrong=read(f.manifest);wrong.policy.version=SNAPSHOT_POLICY.version+1;writeJson(f.manifest,wrong);const wrongReceipts=path.join(build,'wrong-policy-authority');
+ try{assert.throws(()=>beginCurrentCompileBatch({layout:{...layout,manifestSha256:sha(fs.readFileSync(f.manifest))},actualToolFiles,receiptDirectory:wrongReceipts}),/FULL_CREATION_PASS_V7_REQUIRED/);assert(!fs.existsSync(wrongReceipts));}finally{fs.writeFileSync(f.manifest,f.manifestBytes);}
+ const receiptDirectory=path.join(build,'authority'),token=beginCurrentCompileBatch({layout,actualToolFiles,receiptDirectory});assert.equal(token.kind,'CURRENT_CAPTURE_COMPILE_ONLY_IN_PROCESS_CAPABILITY');assert.equal(requireCurrentCompileBatch(token,{sourceRoot:f.snapshot,output:path.join(build,'not-built')}).managedInputContract,LEGACY_MANAGED_CONTRACT);
+ const result=finishCurrentCompileBatch(token);assert.equal(result.status,'AUTHORITY_STABLE');assert.equal(result.fullSourceVerificationCalls,2);assert.equal(result.sourceApprovalGranted,false);assert.equal(result.currentConsumerAccepted,false);assert.equal(result.memberAdmissions,0);assert.equal(result.nodeTools.packageCodeExecuted,false);assert.equal(result.source.snapshotIntegrityVerified,true);assert.equal(result.source.creationStatus,'PASS');assert.equal(result.nodeTools.graphSha256,binding.graphAfterSha256);assert.throws(()=>requireCurrentCompileBatch(token),/LIVE_BRANDED_BATCH/);
+ assert(!fs.existsSync(path.join(build,'not-built')));assert(fs.readFileSync(f.manifest).equals(f.manifestBytes));assert.equal(read(path.join(receiptDirectory,'authority-before.json')).sourceApprovalGranted,false);assert.equal(read(path.join(receiptDirectory,'authority-after.json')).currentConsumerAccepted,false);
 });

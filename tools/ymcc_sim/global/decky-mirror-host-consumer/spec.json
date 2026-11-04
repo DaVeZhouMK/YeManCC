@@ -31,15 +31,106 @@
           "line": 16
         },
         {
-          "name": "global performance owner is exposed when no game is confirmed",
+          "name": "wake held by native power stays connected read-only then recovers after committed resume",
           "line": 17
         },
         {
+          "name": "global performance owner is exposed when no game is confirmed",
+          "line": 23
+        },
+        {
           "name": "stop removes observers and late requests cannot save",
-          "line": 18
+          "line": 24
+        },
+        {
+          "name": "command+ accepts one delivered unchanged control receipt during a monitor refresh",
+          "line": 30
+        },
+        {
+          "name": "slider receipt cannot cross changed ",
+          "line": 44
+        },
+        {
+          "name": "sidebar entry asks shared game owner once and repeated snapshots stay passive",
+          "line": 51
+        },
+        {
+          "name": "sidebar entry recovers an empty cached game through the shared owner and rejects old-game controls",
+          "line": 55
+        },
+        {
+          "name": "an unavailable game refresh does not break the connected read-only sidebar",
+          "line": 60
+        },
+        {
+          "name": "same PID and birth with a new native lease rejects an old sidebar receipt without a source notification",
+          "line": 65
+        },
+        {
+          "name": "pending shared recognition rejects game-dependent controls while pure monitor and audio remain usable",
+          "line": 70
+        },
+        {
+          "name": "unknown versus confirmed empty target cannot authorize a global input write from an old receipt",
+          "line": 80
+        },
+        {
+          "name": "native target becomes pending during an awaited power read and cancels before the performance write",
+          "line": 84
+        },
+        {
+          "name": "readiness-only failure and same-target recovery repaint once per edge without repeated reads or writes",
+          "line": 91
+        },
+        {
+          "name": "in-flight snapshot storm preserves ",
+          "line": 112
+        },
+        {
+          "name": "renderer reattach respects ",
+          "line": 146
+        },
+        {
+          "name": "late native attach cannot replace ",
+          "line": 188
+        },
+        {
+          "name": "late bridge owner confirmation establishes current native health without adopting the old peer",
+          "line": 223
         }
       ],
-      "report": "stdout.log"
+      "report": "stdout.log",
+      "expansions": {
+        "command+ accepts one delivered unchanged control receipt during a monitor refresh": [
+          "performance.setControls accepts one delivered unchanged control receipt during a monitor refresh",
+          "frame.setField accepts one delivered unchanged control receipt during a monitor refresh"
+        ],
+        "slider receipt cannot cross changed ": [
+          "slider receipt cannot cross changed performance bank during the same refresh race",
+          "slider receipt cannot cross changed power source during the same refresh race",
+          "slider receipt cannot cross changed power generation during the same refresh race",
+          "slider receipt cannot cross changed process birth during the same refresh race"
+        ],
+        "in-flight snapshot storm preserves ": [
+          "in-flight snapshot storm preserves ordinary freshness",
+          "in-flight snapshot storm preserves source-change freshness",
+          "in-flight snapshot storm preserves manual-probe freshness",
+          "in-flight snapshot storm preserves reopen freshness"
+        ],
+        "renderer reattach respects ": [
+          "renderer reattach respects explicit-pause sidebar demand",
+          "renderer reattach respects pause-during-attach sidebar demand",
+          "renderer reattach respects visible sidebar demand",
+          "renderer reattach respects unknown sidebar demand",
+          "renderer reattach respects invalid-pause sidebar demand",
+          "renderer reattach respects new-peer sidebar demand"
+        ],
+        "late native attach cannot replace ": [
+          "late native attach cannot replace new-peer-event",
+          "late native attach cannot replace disconnect-event",
+          "late native attach cannot replace newer-attach"
+        ]
+      }
     },
     {
       "name": "readonly",
@@ -77,203 +168,305 @@
       "script": "tools/decky_sidebar_client_selftest.mjs",
       "cases": [
         {
-          "name": "missing bootstrap starts no discovery/network/timer",
-          "line": 39
-        },
-        {
-          "name": "non-loopback bootstrap rejected",
-          "line": 40
-        },
-        {
-          "name": "one visible socket requests one snapshot, no idle polling",
-          "line": 41
-        },
-        {
-          "name": "hidden/unloaded releases socket and timers",
-          "line": 42
-        },
-        {
-          "name": "old view packets ignored after hide",
-          "line": 43
-        },
-        {
-          "name": "older revisions do not overwrite fresh state",
-          "line": 44
-        },
-        {
-          "name": "malformed snapshot rejects instead of crashing React",
-          "line": 45
-        },
-        {
-          "name": "restart run ID disconnects and no mutation replay",
-          "line": 46
-        },
-        {
-          "name": "request freezes identity/generation/revision and args",
-          "line": 47
-        },
-        {
-          "name": "second mutation cannot overlap first",
-          "line": 48
-        },
-        {
-          "name": "timeout never resends a possibly applied action",
-          "line": 49
-        },
-        {
-          "name": "close rejects inflight mutation and reconnect does not replay it",
-          "line": 50
-        },
-        {
-          "name": "silent first connection has finite deadline and reconnect",
-          "line": 51
-        },
-        {
-          "name": "visible sidebar recovers beyond three failures with capped outage backoff",
-          "line": 52
-        },
-        {
-          "name": "hide cancels queued reconnect",
-          "line": 53
-        },
-        {
-          "name": "power not ready rejects changes without send",
-          "line": 54
-        },
-        {
-          "name": "fan requests do not include game identity",
-          "line": 55
-        },
-        {
-          "name": "late native bootstrap starts cold plugin by event, no polling",
-          "line": 56
-        },
-        {
-          "name": "same native binding event cannot duplicate live connection",
-          "line": 57
-        },
-        {
-          "name": "new native run cancels old mutation, never replays into new host",
-          "line": 58
-        },
-        {
-          "name": "hidden bootstrap event starts zero sockets",
-          "line": 59
-        },
-        {
-          "name": "late message from closed socket cannot restore connected state",
-          "line": 60
-        },
-        {
-          "name": "connection owns immutable bootstrap identity, not mutable global object",
-          "line": 61
-        },
-        {
-          "name": "port zero and out-of-range bootstrap are rejected",
-          "line": 62
-        },
-        {
-          "name": "Steam runtime ID getter runs once per demand, not per render or timer",
-          "line": 63
-        },
-        {
-          "name": "Steam runtime getter failure cannot prevent Fan snapshot connection",
-          "line": 64
-        },
-        {
-          "name": "slider accepts only the exact rendered snapshot",
-          "line": 65
-        },
-        {
-          "name": "slider rendered revision change rejects before sending any mutation",
-          "line": 66
-        },
-        {
-          "name": "slider game identity cannot migrate to a different foreground game",
-          "line": 67
-        },
-        {
-          "name": "failed action notice survives confirmed unchanged-state snapshot without retrying",
-          "line": 68
-        },
-        {
-          "name": "failed action notice cannot leak into another game or hidden/reopened session",
-          "line": 69
-        },
-        {
-          "name": "monitor accepts one boolean intent without requiring a game or fan permission",
-          "line": 70
-        },
-        {
-          "name": "monitor never sends without state/permission or with invented parameters",
-          "line": 71
-        },
-        {
-          "name": "malformed monitor state/permission terminates the session safely",
-          "line": 72
-        },
-        {
-          "name": "monitor timeout requests fresh state and never replays the intent",
-          "line": 73
-        },
-        {
-          "name": "connection test needs its own fresh native reply and never emits a mutation",
-          "line": 74
-        },
-        {
-          "name": "connection test cannot mistake unconfirmed or not-ready replies for success",
-          "line": 75
-        },
-        {
-          "name": "connection test timeout does not replay or block business controls",
-          "line": 76
-        },
-        {
-          "name": "hiding disposes the connection test and consumes late responses",
-          "line": 77
-        },
-        {
-          "name": "connection test reconnects existing binding without replaying writes",
-          "line": 78
-        },
-        {
-          "name": "trainer open requires a confirmed ready entry, not a missing or pending snapshot",
-          "line": 79
-        },
-        {
-          "name": "trainer request sends only open intent and exact current-game admission identity",
-          "line": 82
-        },
-        {
-          "name": "trainer-only pending state keeps existing game controls available and refuses a second launch",
-          "line": 85
-        },
-        {
-          "name": "malformed trainer states and private paths are rejected before UI sees them",
-          "line": 88
-        },
-        {
-          "name": "available trainer without a current game is an invalid snapshot",
+          "name": "missing bootstrap uses one capped local retry and recovers after a missed native event",
           "line": 91
         },
         {
+          "name": "non-loopback bootstrap rejected",
+          "line": 135
+        },
+        {
+          "name": "one visible socket requests one snapshot, no idle polling",
+          "line": 136
+        },
+        {
+          "name": "hidden/unloaded releases socket and timers",
+          "line": 137
+        },
+        {
+          "name": "old view packets ignored after hide",
+          "line": 138
+        },
+        {
+          "name": "older revisions do not overwrite fresh state",
+          "line": 139
+        },
+        {
+          "name": "malformed snapshot rejects instead of crashing React",
+          "line": 140
+        },
+        {
+          "name": "restart run ID disconnects and no mutation replay",
+          "line": 141
+        },
+        {
+          "name": "request freezes identity/generation/revision and args",
+          "line": 142
+        },
+        {
+          "name": "second mutation cannot overlap first",
+          "line": 143
+        },
+        {
+          "name": "timeout never resends a possibly applied action",
+          "line": 144
+        },
+        {
+          "name": "close rejects inflight mutation and reconnect does not replay it",
+          "line": 145
+        },
+        {
+          "name": "silent first connection has finite deadline and reconnect",
+          "line": 146
+        },
+        {
+          "name": "visible sidebar recovers beyond three failures with capped outage backoff",
+          "line": 147
+        },
+        {
+          "name": "hide cancels queued reconnect",
+          "line": 148
+        },
+        {
+          "name": "power not ready rejects changes without send",
+          "line": 149
+        },
+        {
+          "name": "fan requests do not include game identity",
+          "line": 150
+        },
+        {
+          "name": "late native bootstrap event replaces the cold retry immediately without duplicate work",
+          "line": 151
+        },
+        {
+          "name": "same native binding event cannot duplicate live connection",
+          "line": 152
+        },
+        {
+          "name": "new native run cancels old mutation, never replays into new host",
+          "line": 153
+        },
+        {
+          "name": "hidden bootstrap event starts zero sockets",
+          "line": 154
+        },
+        {
+          "name": "late message from closed socket cannot restore connected state",
+          "line": 155
+        },
+        {
+          "name": "connection owns immutable bootstrap identity, not mutable global object",
+          "line": 156
+        },
+        {
+          "name": "port zero and out-of-range bootstrap are rejected",
+          "line": 157
+        },
+        {
+          "name": "Steam runtime ID getter runs once per demand, not per render or timer",
+          "line": 158
+        },
+        {
+          "name": "Steam runtime getter failure cannot prevent Fan snapshot connection",
+          "line": 159
+        },
+        {
+          "name": "slider accepts only the exact rendered snapshot",
+          "line": 160
+        },
+        {
+          "name": "slider rendered revision change rejects before sending any mutation",
+          "line": 161
+        },
+        {
+          "name": "slider game identity cannot migrate to a different foreground game",
+          "line": 162
+        },
+        {
+          "name": "failed action notice survives confirmed unchanged-state snapshot without retrying",
+          "line": 163
+        },
+        {
+          "name": "failed action notice cannot leak into another game or hidden/reopened session",
+          "line": 164
+        },
+        {
+          "name": "monitor accepts one boolean intent without requiring a game or fan permission",
+          "line": 165
+        },
+        {
+          "name": "monitor never sends without state/permission or with invented parameters",
+          "line": 166
+        },
+        {
+          "name": "malformed monitor state/permission terminates the session safely",
+          "line": 167
+        },
+        {
+          "name": "monitor timeout requests fresh state and never replays the intent",
+          "line": 168
+        },
+        {
+          "name": "connection test needs its own fresh native reply and never emits a mutation",
+          "line": 169
+        },
+        {
+          "name": "connection test cannot mistake unconfirmed or not-ready replies for success",
+          "line": 170
+        },
+        {
+          "name": "connection test timeout does not replay or block business controls",
+          "line": 171
+        },
+        {
+          "name": "hiding disposes the connection test and consumes late responses",
+          "line": 172
+        },
+        {
+          "name": "connection test reconnects existing binding without replaying writes",
+          "line": 173
+        },
+        {
+          "name": "trainer open requires a confirmed ready entry, not a missing or pending snapshot",
+          "line": 174
+        },
+        {
+          "name": "trainer request sends only open intent and exact current-game admission identity",
+          "line": 177
+        },
+        {
+          "name": "trainer-only pending state keeps existing game controls available and refuses a second launch",
+          "line": 180
+        },
+        {
+          "name": "malformed trainer states and private paths are rejected before UI sees them",
+          "line": 183
+        },
+        {
+          "name": "available trainer without a current game is an invalid snapshot",
+          "line": 186
+        },
+        {
           "name": "trainer open rejects alternate actions and supplied file paths without sending",
-          "line": 92
+          "line": 187
         },
         {
           "name": "trainer intent timeout refreshes state and never repeats the launch",
-          "line": 93
+          "line": 188
         },
         {
           "name": "wallpaper passive demand does not own HUD traffic or business snapshots",
-          "line": 94
+          "line": 189
         },
         {
           "name": "HUD and wallpaper independently release one shared connection",
-          "line": 95
+          "line": 190
+        },
+        {
+          "name": "a busy observer rebind cannot forward an old write into the replacement broker",
+          "line": 193
+        },
+        {
+          "name": "an old send throwing after rebind cannot close the new healthy broker",
+          "line": 196
+        },
+        {
+          "name": "a timeout observer rebind cannot send the old run snapshot request through a new broker",
+          "line": 199
+        },
+        {
+          "name": "a timeout observer hiding the last page cannot restart paused passive snapshot demand",
+          "line": 202
+        },
+        {
+          "name": "hiding during busy admission cancels an unsent write without relabeling it as send failure",
+          "line": 205
+        },
+        {
+          "name": "failed hidden pause recovers ",
+          "line": 211
+        },
+        {
+          "name": "hidden restored snapshot pause failure creates one recovery despite repeated stale packets",
+          "line": 229
+        },
+        {
+          "name": "OPEN wallpaper context without response times out and recovers without replay",
+          "line": 244
+        },
+        {
+          "name": "correlated ",
+          "line": 247
+        },
+        {
+          "name": "context deadline is armed before synchronous socket response",
+          "line": 250
+        },
+        {
+          "name": "HUD snapshot uncorrelated ready wrong seq app and malformed status cannot cancel context deadline",
+          "line": 253
+        },
+        {
+          "name": "newest context owns reply while repeated demand never postpones unanswered deadline",
+          "line": 256
+        },
+        {
+          "name": "already queued expired context callback cannot revoke a later acknowledged generation",
+          "line": 259
+        },
+        {
+          "name": "context deadline cleanup at ",
+          "line": 262
+        },
+        {
+          "name": "a stale hidden context cannot cancel a newer visible context deadline",
+          "line": 273
+        },
+        {
+          "name": "local context serialization failure does not arm a transport deadline",
+          "line": 276
+        },
+        {
+          "name": "context send exception clears its deadline and keeps only original recovery",
+          "line": 279
+        },
+        {
+          "name": "wallpaper timeout never replays an uncertain business write",
+          "line": 282
+        },
+        {
+          "name": "YMCC restart while both views are hidden reacquires current state without an old write",
+          "line": 288
+        },
+        {
+          "name": "background outage survives capped failures and missed native restart notification",
+          "line": 321
+        },
+        {
+          "name": "24 mixed restart cycles fence silent connections old replies deadlines and duplicate edges",
+          "line": 340
         }
       ],
-      "report": "artifacts/validation/MIRROR-CLIENT-SELFTEST.json"
+      "report": "artifacts/validation/MIRROR-CLIENT-SELFTEST.json",
+      "expansions": {
+        "failed hidden pause recovers ": [
+          "failed hidden pause recovers hud transport without replaying an uncertain action",
+          "failed hidden pause recovers wallpaper transport without replaying an uncertain action",
+          "failed hidden pause recovers updater transport without replaying an uncertain action"
+        ],
+        "correlated ": [
+          "correlated wallpaper response settles context transport even when disabled or empty",
+          "correlated wallpaper-ready response settles context transport even when disabled or empty"
+        ],
+        "context deadline cleanup at ": [
+          "context deadline cleanup at hide ignores a late callback",
+          "context deadline cleanup at wallpaper-off ignores a late callback",
+          "context deadline cleanup at close ignores a late callback",
+          "context deadline cleanup at bootstrap ignores a late callback",
+          "context deadline cleanup at dispose ignores a late callback"
+        ]
+      }
     },
     {
       "name": "connection_probe",
@@ -318,6 +511,7 @@
   ],
   "productSources": [
     "PowerControl/GameTitlePolicy.json",
+    "decky-plugin/src/index.tsx",
     "decky-plugin/src/mirrorClient.ts",
     "decky-plugin/src/performanceModel.ts",
     "decky-plugin/src/steamRunningContext.ts",
@@ -341,9 +535,12 @@
     "src/bridge/deckyTouchpadActions.ts",
     "src/bridge/deckyTrainerActions.ts",
     "src/bridge/frameRateModel.ts",
+    "src/bridge/fxSound.ts",
+    "src/bridge/gameInputOverride.ts",
     "src/bridge/gamePolicyHysteresis.ts",
     "src/bridge/gamedetect.ts",
     "src/bridge/gyroPresetModel.ts",
+    "src/bridge/losslessScaling.ts",
     "src/bridge/monitorCoreTiles.ts",
     "src/bridge/monitorFrameTime.ts",
     "src/bridge/monitorHudFpsVisibility.ts",
@@ -354,9 +551,12 @@
     "src/bridge/performanceControls.ts",
     "src/bridge/performanceSchedule.ts",
     "src/bridge/quickActionLock.ts",
+    "src/bridge/screenTouchpadDefaults.ts",
     "src/bridge/screenTouchpads.ts",
     "src/bridge/settingsRepository.ts",
     "src/bridge/settingsSnapshot.ts",
+    "src/bridge/virtualOutputStatus.ts",
+    "src/bridge/virtualStartProtectionView.ts",
     "src/bridge/virtualTargetPolicy.ts",
     "src/bridge/yeman.ts"
   ],
@@ -384,10 +584,10 @@
       "suite": "host",
       "source": "src/bridge/deckyMirrorHost.ts",
       "function": "startDeckyMirrorHost.return.stop",
-      "from": "stop() { ended = true; updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); relay.dispose(); }",
-      "to": "stop() { ended = true; updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); }",
+      "from": "stop() { ended = true; updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); losslessProgramObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); relay.dispose(); }",
+      "to": "stop() { ended = true; updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); losslessProgramObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); }",
       "expectedName": "stop removes observers and late requests cannot save",
-      "expectedLine": 18
+      "expectedLine": 24
     }
   ]
 }

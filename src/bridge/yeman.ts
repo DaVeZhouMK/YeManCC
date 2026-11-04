@@ -1,4 +1,7 @@
 import { FRAME_RATE_CEILINGS } from './frameRateModel';
+import { onUiVisibilityChange } from './uiLifecycle';
+import { registerScheduledTask } from '../scheduler';
+import { TdpRequestSupersededError } from '../robust/repairModel';
 // yeman.ts — 语义化后端桥层（强强壳 shell.run / fs 封装）
 //
 // 所有 powercfg GUID、任务计划名、bat/vbs/ps1 路径、厂商识别逻辑都收在这里，
@@ -6,11 +9,11 @@ import { FRAME_RATE_CEILINGS } from './frameRateModel';
 //
 // 程序控制配置由本桥统一记录，TDP/FPS 的用户值不再依赖 PowerControl 下的 txt。
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
-import { fs, shell, registry, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
-import { invoke } from './ipc';
+import { fs, shell, registry, proc, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type RtssReloadResult, type HibernateState, type PowerLifecycleState } from './api';
+import { invoke, on } from './ipc';
 import { rtssIniValue, setRtssIniValue } from './rtssOverlay';
-import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
-import { runTdpHardwareWrite } from './tdpCircuitBreaker';
+import { getSettingsGeneration, assertSettingsGeneration, getSettingsRecoveryState, readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
+import { runTdpHardwareWrite, reconcileTdpPowerReady, reconcileTdpCapabilityReady, getTdpCapabilityState, resetTdpCapabilityState } from './tdpCircuitBreaker';
 import { tdpRuntimeStore } from './tdpRuntimeState';
 import { beginTdpObservation, tdpErrorText, type TdpObservationContext, type TdpRequestSource } from './tdpStaticDiagnostics';
 import { OEM_EMPTY_SNAPSHOT, normalizeOemKeysSnapshot, type OemKeysSnapshot } from './controllerShortcutRules';
@@ -20,7 +23,15 @@ import { readGamingHomeState, setGamingHomeStartup, type GamingHomeState, type G
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
 
 export function setPowerControlDir(dir: string): void {
+  stopTdpRecovery();
+  resetTdpCapabilityState(); // A new runtime/settings root never inherits a rejection latch.
+  tdpExecutionCapabilityError = null;
   tdpRuntimeStore.invalidate();
+  tdpDaemonUp = false;
+  tdpDaemonStart = null;
+  ++tdpDaemonEpoch;
+  tdpLifecycleEpoch++; tdpLifecycleSnapshot = null; tdpLifecycleRead = null; tdpBlockedPhase = null;
+  tdpDaemonNeedsResume = false; tdpPowerGeneration = 0; tdpCommittedGeneration = 0;
   tdpExecutionCapability = null;
   ++tdpExecutionCapabilityEpoch;
   tdpExecutionCapabilityPending = null;
@@ -439,7 +450,23 @@ async function gamingBackupPath(extension: string): Promise<string> {
     throw new Error('无法创建全屏启动备份目录，停止修改。');
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return join(directory, stamp + '-' + (++gamingBackupSequence) + extension);
+  for (let attempt = 0; attempt < 16; ++attempt) {
+    const candidate = join(directory, stamp + '-' + (++gamingBackupSequence) + extension);
+    // A prior backup, including an unreadable/future record, is never replaced.
+    if (!await fs.exists(candidate)) return candidate;
+  }
+  throw new Error('无法分配新的全屏启动备份路径，停止修改。');
+}
+async function saveGamingBackup(extension: string, content: string): Promise<void> {
+  const limit = extension === '.json' ? 64 << 10 : 1 << 20;
+  if (typeof content !== 'string' || !content.trim() || new TextEncoder().encode(content).byteLength > limit) {
+    throw new Error('全屏启动备份内容无效或超限，停止修改。');
+  }
+  const backupPath = await gamingBackupPath(extension);
+  // Request the existing create-only source check as well as an independent receipt.
+  await fs.writeTextFileAtomic(backupPath, content, undefined, { expectedContent: null });
+  const saved = await fs.readTextFile(backupPath, limit, { bounded: true });
+  if (saved !== content) throw new Error('全屏启动备份回读不一致，原配置未获修改授权。');
 }
 const gamingHomeRegistry: GamingHomeRegistryPort = {
   read: (root, key, name) => registry.read(root, key, name),
@@ -447,9 +474,19 @@ const gamingHomeRegistry: GamingHomeRegistryPort = {
   // Delete only the selected VALUE when rolling back an originally absent value.
   remove: (root, key, name) => invoke<boolean>('registry.delete', { root, path: key, name }),
   saveBackup: async (state) => {
-    await fs.writeTextFileAtomic(await gamingBackupPath('.json'), JSON.stringify({
+    const before = { ...state };
+    for (const value of [before.deviceForm, before.startupValue]) {
+      if (value !== null && (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 0xffffffff)) {
+        throw new Error('备份原始 DWORD 未确认，停止修改。');
+      }
+    }
+    if ((before.homeApp !== null && typeof before.homeApp !== 'string') ||
+        before.startupEnabled !== (before.startupValue === 1)) {
+      throw new Error('备份原始用户配置未确认，停止修改。');
+    }
+    await saveGamingBackup('.json', JSON.stringify({
       schema: 1, accountScope: 'HKCU of the Windows account running YMCC',
-      createdAt: new Date().toISOString(), before: state,
+      createdAt: new Date().toISOString(), before,
     }, null, 2));
   },
 };
@@ -460,13 +497,23 @@ export async function readGamingHomeStartup(): Promise<boolean> {
   return (await readGamingHomeConfiguration()).startupEnabled;
 }
 async function retireLegacyGamingTask(): Promise<void> {
+  const originals = new Map<string, string>();
   for (const task of taskPathCandidates('Xbox大屏游戏模式')) {
     if (!await taskDefinedAtPath(task)) continue;
     const backup = await shell.run('schtasks', ['/Query', '/TN', task, '/XML']);
     if (backup.exitCode !== 0 || !backup.stdout.trim()) {
       throw new Error('新配置已保存，但旧 physpanel 任务备份失败，未删除该任务。');
     }
-    await fs.writeTextFileAtomic(await gamingBackupPath('.task.xml'), backup.stdout);
+    await saveGamingBackup('.task.xml', backup.stdout);
+    originals.set(task, backup.stdout);
+  }
+  // A replacement or newly appearing task has no confirmed original backup.
+  for (const task of taskPathCandidates('Xbox大屏游戏模式')) {
+    if (!await taskDefinedAtPath(task)) continue;
+    const current = await shell.run('schtasks', ['/Query', '/TN', task, '/XML']);
+    if (current.exitCode !== 0 || !originals.has(task) || current.stdout !== originals.get(task)) {
+      throw new Error('旧任务在备份后发生变化，已保留备份且未授权删除。');
+    }
   }
   if (!await deleteTask('Xbox大屏游戏模式')) {
     throw new Error('新配置已保存，但旧 physpanel 任务清理失败，请检查管理员权限。');
@@ -558,6 +605,7 @@ export async function summonSet(settings: Partial<GamepadSettings>): Promise<Gam
 export interface ShortcutRecordingState {
   active: boolean;
   reason: string;
+  suppression?: { requested?: boolean; pending?: boolean; applied?: boolean; failed?: boolean; keyboardCaptureAvailable?: boolean; catalogMask?: string };
 }
 
 /**
@@ -567,6 +615,10 @@ export interface ShortcutRecordingState {
  */
 export function setShortcutRecording(active: boolean): Promise<ShortcutRecordingState> {
   return invoke<ShortcutRecordingState>('shortcut.recording.set', { active }, { timeoutMs: 1500 });
+}
+/** Read only while the editor is recording; suppression is best-effort. */
+export function getShortcutRecordingState(): Promise<ShortcutRecordingState> {
+  return invoke<ShortcutRecordingState>('shortcut.recording.get', {}, { timeoutMs: 1500 });
 }
 
 // ── 掌机专用键机型库（背部/专用按键清单）──
@@ -686,6 +738,7 @@ export async function msiControllerShieldSet(enabled: boolean): Promise<MsiContr
 export interface UpdateAccelState {
   exists: boolean;
   running: boolean;
+  known?: boolean;
 }
 export async function updateAccelGet(): Promise<UpdateAccelState> {
   try {
@@ -693,9 +746,10 @@ export async function updateAccelGet(): Promise<UpdateAccelState> {
     return {
       exists: !!r.exists,
       running: !!r.running,
+      known: r.known !== false && typeof r.running === 'boolean',
     };
   } catch {
-    return { exists: false, running: false };
+    return { exists: false, running: false, known: false };
   }
 }
 export async function updateAccelToggle(): Promise<UpdateAccelState & { ok: boolean }> {
@@ -703,6 +757,7 @@ export async function updateAccelToggle(): Promise<UpdateAccelState & { ok: bool
   return {
     exists: !!r.exists,
     running: !!r.running,
+    known: r.known !== false && typeof r.running === 'boolean',
     ok: !!r.ok,
   };
 }
@@ -893,11 +948,12 @@ export function detectPerformanceTemplate(): Promise<'portable' | 'desktop'> {
     return info.hasBattery ? 'portable' : 'desktop';
   });
 }
-// proc.running：Toolhelp32 进程枚举（支持 "RTSS*" 前缀通配），失败返回 null
+// proc.running：原生唯一进程列表（支持 "RTSS*" 前缀通配），失败或缺字段返回 null
 async function nativeProcRunning(names: string[]): Promise<Record<string, boolean> | null> {
   try {
     const r = await invoke<Record<string, boolean>>('proc.running', { names });
-    return r && typeof r === 'object' ? r : null;
+    if (!r || typeof r !== 'object' || Array.isArray(r) || names.some(name => typeof r[name] !== 'boolean')) return null;
+    return r;
   } catch {
     return null;
   }
@@ -917,8 +973,15 @@ type PowerModeProbe = { mode: 'ac' | 'dc'; reliable: boolean };
 const POWER_FALLBACK_BACKOFF_MS = 30_000;
 let powerProbeInFlight: Promise<PowerModeProbe> | null = null;
 let powerFallbackBlockedUntil = 0;
+let powerProbeAttemptRevision = -1;
+let powerProbeLastOutcome: PowerModeProbe = { mode: 'ac', reliable: false };
 
 async function probePowerModeOnce(): Promise<PowerModeProbe> {
+  try {
+    const state = await invoke<{ known: boolean; acLine: number }>('power.sourceSnapshot', {}, { timeoutMs: 2000 });
+    if (state?.known && (state.acLine === 0 || state.acLine === 1)) return { mode: state.acLine === 1 ? 'ac' : 'dc', reliable: true };
+    if (state && typeof state.known === 'boolean') return { mode: 'ac', reliable: false };
+  } catch { /* Older native compatibility at startup/explicit boundary only. */ }
   const si = await nativeSysInfo();
   if (si?.acLine === 0) return { mode: 'dc', reliable: true };
   if (si?.acLine === 1) return { mode: 'ac', reliable: true };
@@ -949,9 +1012,24 @@ async function probePowerModeOnce(): Promise<PowerModeProbe> {
   }
 }
 
-async function detectPowerModeProbe(): Promise<PowerModeProbe> {
+async function detectPowerModeProbe(fresh = false): Promise<PowerModeProbe> {
+  // Native source events already update this shared observed side. Every TDP
+  // caller reads memory; only startup/unknown or an explicit boundary probes.
+  const known = tdpRuntimeStore.get().mode;
+  if (!fresh && known !== null) return { mode: known, reliable: true };
   if (powerProbeInFlight) return powerProbeInFlight;
-  const probe = probePowerModeOnce().finally(() => { powerProbeInFlight = null; });
+  const sourceRevision = tdpRuntimeStore.powerRevision();
+  if (!fresh && powerProbeAttemptRevision === sourceRevision) return powerProbeLastOutcome;
+  powerProbeAttemptRevision = sourceRevision;
+  const probe = probePowerModeOnce().then(result => {
+    if (sourceRevision !== tdpRuntimeStore.powerRevision()) {
+      const current = tdpRuntimeStore.get().mode;
+      return { mode: current ?? 'ac', reliable: current !== null } as PowerModeProbe;
+    }
+    if (result.reliable) tdpRuntimeStore.powerMode(result.mode);
+    powerProbeLastOutcome = result;
+    return result;
+  }).finally(() => { if (powerProbeInFlight === probe) powerProbeInFlight = null; });
   powerProbeInFlight = probe;
   return probe;
 }
@@ -960,9 +1038,9 @@ export async function detectPowerMode(): Promise<'ac' | 'dc'> {
   return (await detectPowerModeProbe()).mode;
 }
 
-export async function detectPowerModeReliable(): Promise<'ac' | 'dc' | null> {
+export async function detectPowerModeReliable(fresh = false): Promise<'ac' | 'dc' | null> {
   try {
-    const probe = await detectPowerModeProbe();
+    const probe = await detectPowerModeProbe(fresh);
     return probe.reliable ? probe.mode : null;
   } catch {
     return null;
@@ -971,10 +1049,12 @@ export async function detectPowerModeReliable(): Promise<'ac' | 'dc' | null> {
 
 // 唤醒后连续两轮可靠且一致才视为稳定；检测持续失败时仍按 AC 兜底，不引入 unknown。
 export async function detectPowerModeStable(): Promise<'ac' | 'dc'> {
+  const known = tdpRuntimeStore.get().mode;
+  if (known !== null) return known;
   let lastReliable: 'ac' | 'dc' | null = null;
   let stableCount = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const probe = await detectPowerModeProbe();
+    const probe = await detectPowerModeProbe(true);
     if (probe.reliable) {
       if (probe.mode === lastReliable) stableCount += 1;
       else {
@@ -1041,8 +1121,12 @@ export async function detectCoreArchitecture(): Promise<CoreArchitectureInfo | n
 // daemon 仅在浮动 TDP 接管期间常驻。前端调用专用 native IPC；native 固定可信 EXE 路径，
 // 再通过双向消息型命名管道与管理员 daemon 通信。每个请求等待真实硬件 rc，失败立即回退一次性 CLI。
 export interface SetTdpOpts {
+  /** Optional cached controller envelope, checked against the resolved command. */
+  minWatts?: number;
+  maxWatts?: number;
   source?: TdpRequestSource; // diagnostic provenance only; never a control selector
   retryMsi?: boolean; // explicit manual retry after a terminal OEM partial/unknown result
+  isCurrent?: () => boolean; // existing controller lease, memory only; never an AC/DC probe
   onAccepted?: (watts: number) => void; // operation-local accepted setting; never physical CPU power
   apply?: boolean;   // 是否实时下发硬件（调 YeManTdpCtl）
   vendor?: Vendor;
@@ -1051,6 +1135,7 @@ export interface SetTdpOpts {
 // CPU-first descriptor; OEM transport selection is independent of CPU/brand recognition.
 export interface TdpExecutionCapability {
   provider: 'default' | 'msi-g3e-wmi';
+  capabilityCatalog?: { libraryId: string; version: string; policySha256: string; modelId: string; modelRegistered: boolean; sourceLimitsApplied: false; hardwareAcceptance: false };
   cpuFamily?: 'intel-arc-g3-extreme' | 'other-or-unverified';
   selected: boolean;
   ready: boolean;
@@ -1065,7 +1150,23 @@ export interface TdpExecutionCapability {
 let tdpExecutionCapability: TdpExecutionCapability | null = null;
 let tdpExecutionCapabilityPending: Promise<TdpExecutionCapability> | null = null;
 let tdpExecutionCapabilityEpoch = 0;
+let tdpExecutionCapabilityError: Error | null = null;
+let tdpRecoveryStop: (() => void) | null = null;
+function stopTdpRecovery(): void {
+  const stop = tdpRecoveryStop; tdpRecoveryStop = null; stop?.();
+}
+function queueTdpRecovery(): void {
+  if (tdpRecoveryStop) return;
+  const session = tdpDaemonEpoch;
+  // Reuse the one shared scheduler. Healthy sessions have no recovery task;
+  // failures get one 30s read/reconcile, never a floating-path power probe.
+  tdpRecoveryStop = registerScheduledTask('tdp-session-recovery', 30000, async () => {
+    if (session !== tdpDaemonEpoch) { stopTdpRecovery(); return; }
+    await reconcileTdpPowerSession().catch(() => false);
+  }, { pauseWhenHidden: false });
+}
 export async function getTdpExecutionCapability(refresh = false): Promise<TdpExecutionCapability> {
+  if (!refresh && tdpExecutionCapabilityError) throw tdpExecutionCapabilityError;
   if (!refresh && tdpExecutionCapability) return tdpExecutionCapability;
   if (!refresh && tdpExecutionCapabilityPending) return tdpExecutionCapabilityPending;
   const epoch = ++tdpExecutionCapabilityEpoch;
@@ -1084,10 +1185,19 @@ export async function getTdpExecutionCapability(refresh = false): Promise<TdpExe
     assertSettingsGeneration(generation);
     if (epoch !== tdpExecutionCapabilityEpoch) throw new Error("TDP 能力请求已过期，请重试");
     tdpExecutionCapability = value;
+    tdpExecutionCapabilityError = null;
+    if (!value.ready) queueTdpRecovery();
     return value;
   })();
   tdpExecutionCapabilityPending = pending;
   try { return await pending; }
+  catch (error) {
+    if (epoch === tdpExecutionCapabilityEpoch) {
+      tdpExecutionCapabilityError = error instanceof Error ? error : new Error(String(error));
+      queueTdpRecovery();
+    }
+    throw error;
+  }
   finally { if (tdpExecutionCapabilityPending === pending) tdpExecutionCapabilityPending = null; }
 }
 export function getTdpHardwareMinimum(): number {
@@ -1132,19 +1242,11 @@ export function formatTdpTarget(watts: number, capability: TdpExecutionCapabilit
 }
 
 const TDPCTL_EXE = (): string => join(PC_DIR, 'pawnio', 'YeManTdpCtl.exe');
-let tdpDaemonUp = false;      // 仅浮动接管期间使用 daemon
-let tdpDaemonStart: Promise<boolean> | null = null; // 并发调用共享同一个启动结果，禁止 daemon/直连抢硬件
-const TDP_FLOAT_ACTIVE = (): string => join(PC_DIR, 'float-active');
-
-async function floatTdpActive(): Promise<boolean> {
-  try {
-    const st = await fs.stat(TDP_FLOAT_ACTIVE());
-    const modifiedMs = Number(st.modified) * 1000;
-    return Number.isFinite(modifiedMs) && Date.now() - modifiedMs < 30000;
-  } catch {
-    return false;
-  }
-}
+// Lazy session ownership: a blocked named-pipe server consumes no polling CPU.
+// Do not probe files or ping again before every already-owned write.
+let tdpDaemonUp = false;
+let tdpDaemonStart: Promise<boolean> | null = null;
+let tdpDaemonEpoch = 0;
 
 async function tdpDaemonAlive(): Promise<boolean> {
   try {
@@ -1163,32 +1265,37 @@ export async function ensureTdpDaemon(observation?: TdpObservationContext): Prom
     if (!capability.ready) throw new Error(capability.error || 'MSI TDP 身份/CPU 验证失败');
     return true; // Native OEM path: do not start/install a PawnIO daemon.
   }
-  if (tdpDaemonUp) {
-    if (await tdpDaemonAlive()) return true;
-    tdpDaemonUp = false;
-  }
+  if (tdpDaemonUp && tdpDaemonNeedsResume) throw new Error('TDP 会话等待当前电源代次恢复');
+  if (tdpDaemonUp) return true;
   if (tdpDaemonStart) return tdpDaemonStart;
-  tdpDaemonStart = (async () => {
+  const epoch = tdpDaemonEpoch;
+  const start = (async () => {
     if (await tdpDaemonAlive()) {
+      if (epoch !== tdpDaemonEpoch) return false;
       tdpDaemonUp = true;
       return true;
     }
+    if (epoch !== tdpDaemonEpoch) return false;
     try {
-      await tdpDaemon.start(observation);
-    } catch { /* 拉起失败 → 下方等待超时 → fallback */ }
+      const result = await tdpDaemon.start(observation);
+      if (!result?.ok) return false;
+    } catch { return false; /* No set was sent; one CLI fallback is permitted. */ }
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 100));
+      if (epoch !== tdpDaemonEpoch) return false;
       if (await tdpDaemonAlive()) {
+        if (epoch !== tdpDaemonEpoch) return false;
         tdpDaemonUp = true;
         return true;
       }
     }
     return false;
   })();
+  tdpDaemonStart = start;
   try {
-    return await tdpDaemonStart;
+    return await start;
   } finally {
-    tdpDaemonStart = null;
+    if (tdpDaemonStart === start) tdpDaemonStart = null;
   }
 }
 
@@ -1197,8 +1304,102 @@ async function tdpDaemonSet(watts: number, observation?: TdpObservationContext):
   if (!r.ok || r.rc !== 0) throw new Error(r.error || `TDP daemon rc=${r.rc}`);
 }
 
+let tdpLifecycleSnapshot: PowerLifecycleState | null = null;
+let tdpLifecycleRead: Promise<PowerLifecycleState | null> | null = null;
+let tdpLifecycleEpoch = 0;
+let tdpBlockedPhase: string | null = null;
+let tdpDaemonNeedsResume = false;
+let tdpResumePending: { epoch: number; session: number; required: boolean; task: Promise<boolean> } | null = null;
+let tdpPowerGeneration = 0, tdpCommittedGeneration = 0;
+
+// Startup and power edges own validation. The steady-state floating path only
+// reads this immutable snapshot; native still enforces its current write lease.
+export function invalidateTdpPowerSession(phase: 'suspending' | 'resuming' | 'ready', generation?: number): void {
+  if (Number.isSafeInteger(generation) && generation! > 0) {
+    if (generation! < tdpPowerGeneration || phase !== 'ready' && generation! <= tdpCommittedGeneration) return;
+    if (phase === 'ready' && tdpLifecycleSnapshot?.generation === generation && tdpLifecycleSnapshot.phase === 'ready') return;
+    tdpPowerGeneration = generation!;
+  }
+  ++tdpLifecycleEpoch; tdpLifecycleSnapshot = null; tdpLifecycleRead = null;
+  tdpBlockedPhase = phase === 'ready' ? null : phase;
+  if (tdpDaemonUp) tdpDaemonNeedsResume = true;
+  if (phase !== 'ready') queueTdpRecovery();
+}
+async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | null> {
+  if (!refresh && tdpLifecycleSnapshot) return tdpLifecycleSnapshot;
+  if (tdpLifecycleRead) return tdpLifecycleRead;
+  const epoch = tdpLifecycleEpoch;
+  const task = powerLifecycle.get().catch(() => null).then(state => {
+    if (epoch !== tdpLifecycleEpoch || state && state.generation < tdpPowerGeneration) return null;
+    if (state && Number.isSafeInteger(state.generation) && state.generation > 0) {
+      if (tdpPowerGeneration > 0 && state.generation > tdpPowerGeneration) {
+        // Recover a boundary whose entire broadcast was missed. Old pending
+        // completions cannot populate the new session; no hardware probe/write.
+        ++tdpLifecycleEpoch;
+        tdpRuntimeStore.invalidatePower();
+        if (tdpDaemonUp) tdpDaemonNeedsResume = true;
+      }
+      tdpLifecycleSnapshot = state; tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation);
+      if (state.phase === 'ready' && state.hardwareWritesAllowed) tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
+      tdpBlockedPhase = state.phase === 'ready' && state.hardwareWritesAllowed ? null : state.phase;
+    }
+    return state;
+  });
+  tdpLifecycleRead = task;
+  try { return await task; } finally { if (tdpLifecycleRead === task) tdpLifecycleRead = null; }
+}
+// Startup/show/focus reconciliation can observe a Ready whose broadcast was
+// lost while the WebView was hidden/recreated. Adopt only the native snapshot;
+// this read never replays a hardware write or runs in the floating adjustment.
+export async function reconcileTdpPowerSession(retryUnsupported = false): Promise<boolean> {
+  const session = tdpDaemonEpoch;
+  const state = await readTdpLifecycle(true);
+  if (session !== tdpDaemonEpoch || !state || state !== tdpLifecycleSnapshot || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  const epoch = tdpLifecycleEpoch;
+  const unsupported = getTdpCapabilityState() === 'unsupported';
+  if (tdpExecutionCapabilityError || tdpExecutionCapability?.ready === false || retryUnsupported && unsupported) {
+    const capability = await getTdpExecutionCapability(true);
+    if (!capability.ready || epoch !== tdpLifecycleEpoch || session !== tdpDaemonEpoch) return false;
+    if (retryUnsupported && unsupported) reconcileTdpCapabilityReady();
+  }
+  // A real unsupported backend waits for a new session/explicit reopen, rather
+  // than automatically issuing another hardware command every heartbeat.
+  if (unsupported && !retryUnsupported) { stopTdpRecovery(); return false; }
+  // Resume only an already-owned helper; never reapply the last watts here.
+  if (tdpDaemonUp && tdpDaemonNeedsResume && !await resumeTdpDaemonAfterWake(false, { epoch, state })) return false;
+  if (epoch !== tdpLifecycleEpoch || session !== tdpDaemonEpoch || state !== tdpLifecycleSnapshot) return false;
+  reconcileTdpPowerReady();
+  stopTdpRecovery();
+  return true;
+}
+export async function primeTdpSession(initial?: Promise<PowerLifecycleState | null>): Promise<boolean> {
+  const epoch = tdpLifecycleEpoch;
+  const state = initial ? await initial : await readTdpLifecycle();
+  if (epoch !== tdpLifecycleEpoch || !state || state.generation < tdpPowerGeneration || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  tdpLifecycleSnapshot = state; tdpBlockedPhase = null;
+  tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation); tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
+  const capability = await getTdpExecutionCapability();
+  return capability.ready && (capability.selected || await ensureTdpDaemon());
+}
+if (typeof window !== 'undefined') {
+  const recoverIfNeeded = () => {
+    if (tdpRecoveryStop || tdpBlockedPhase || !tdpLifecycleSnapshot || tdpExecutionCapabilityError ||
+        tdpExecutionCapability?.ready === false || tdpDaemonNeedsResume || getTdpCapabilityState() === 'unsupported')
+      void reconcileTdpPowerSession(true).catch(() => { queueTdpRecovery(); });
+  };
+  onUiVisibilityChange(state => {
+    if (state.visible && state.powerGeneration > tdpPowerGeneration)
+      void reconcileTdpPowerSession(true).catch(() => { queueTdpRecovery(); });
+    else if (state.visible) recoverIfNeeded();
+  });
+  on('window.focus', recoverIfNeeded);
+  on<{ generation?: number }>('power.suspending', data => invalidateTdpPowerSession('suspending', data.generation));
+  on<{ generation?: number }>('power.resuming', data => invalidateTdpPowerSession('resuming', data.generation));
+  on<{ generation?: number }>('power.resumed', data => { invalidateTdpPowerSession('ready', data.generation); if (tdpRecoveryStop || !tdpLifecycleSnapshot) void reconcileTdpPowerSession().catch(() => { queueTdpRecovery(); }); });
+}
 async function assertHardwareWriteAllowed(trace?: ReturnType<typeof beginTdpObservation>) {
-  const state = await powerLifecycle.get().catch(() => null);
+  if (tdpBlockedPhase) throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${tdpBlockedPhase}）`);
+  const state = await readTdpLifecycle();
   trace?.emit('tdp.lifecycle', state ? { phase: state.phase, generation: state.generation, hardwareWritesAllowed: state.hardwareWritesAllowed } : { phase: 'not-observed' });
   if (state && (!state.hardwareWritesAllowed || state.phase !== 'ready')) {
     throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${state.phase}）`);
@@ -1206,39 +1407,54 @@ async function assertHardwareWriteAllowed(trace?: ReturnType<typeof beginTdpObse
   return state;
 }
 
-export async function resumeTdpDaemonAfterWake(required = false): Promise<boolean> {
+export async function resumeTdpDaemonAfterWake(required = false, observed?: { epoch: number; state: PowerLifecycleState }): Promise<boolean> {
   const trace = beginTdpObservation({ source: 'resume', requestedW: null, clampedW: null,
     requestedMode: null, observedMode: tdpRuntimeStore.get().mode, apply: true, save: false });
   try {
-    const result = await resumeTdpDaemonObservedCore(required, trace);
+    // Only observers of this power epoch may share its recovery. A newer wake
+    // starts immediately; an older pending completion cannot hold it back.
+    let pending = tdpResumePending;
+    if (!pending || pending.epoch !== tdpLifecycleEpoch || pending.session !== tdpDaemonEpoch || required && !pending.required) {
+      pending = { epoch: tdpLifecycleEpoch, session: tdpDaemonEpoch, required, task: resumeTdpDaemonObservedCore(required, trace, observed) };
+      tdpResumePending = pending;
+    }
+    let result: boolean;
+    try { result = await pending.task; } finally { if (tdpResumePending === pending) tdpResumePending = null; }
     if (!trace.state.skipped) trace.emit(result ? 'tdp.completed' : 'tdp.failed', { reason: result ? 'existing-resume-command-returned' : 'existing-resume-command-failed', verificationScope: 'handle-reinitialization-not-TDP-setting' });
     return result;
   } catch (error) { trace.emit('tdp.failed', { error: tdpErrorText(error) }); throw error; }
 }
-async function resumeTdpDaemonObservedCore(required: boolean, trace: ReturnType<typeof beginTdpObservation>): Promise<boolean> {
-  if ((await getTdpExecutionCapability()).selected) { trace.emit('tdp.skipped', { skipped: true, reason: 'existing-MSI-native-route-no-daemon-handles' }); return true; }
-  // MSI has no daemon handles and must not prime an OEM ceiling on wake.
+async function resumeTdpDaemonObservedCore(required: boolean, trace: ReturnType<typeof beginTdpObservation>, observed?: { epoch: number; state: PowerLifecycleState }): Promise<boolean> {
+  const session = tdpDaemonEpoch;
+  if ((await getTdpExecutionCapability()).selected) { trace.emit('tdp.skipped', { skipped: true, reason: 'existing-MSI-native-route-no-daemon-handles' }); return session === tdpDaemonEpoch; }
+  const epoch = observed?.epoch ?? tdpLifecycleEpoch;
+  const current = () => epoch === tdpLifecycleEpoch && session === tdpDaemonEpoch;
+  // A reconciliation just read native state. Share that exact same-epoch
+  // snapshot instead of making a second IPC query on the recovery edge.
+  const state = observed && current() && observed.state === tdpLifecycleSnapshot
+    ? observed.state : await readTdpLifecycle(true);
+  if (!current() || !state || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  const generation = state.generation;
   const alive = await tdpDaemonAlive();
+  if (!current()) return false;
   if (!alive) {
-    // If this WebView had already taken ownership of the daemon, or persisted
-    // automatic scheduling requires it after a WebView recreation, a daemon
-    // killed during sleep must be restarted before the resume transaction can
-    // commit.  Manual mode keeps the historical zero-resident behavior.
     const shouldRestart = required || tdpDaemonUp;
-    tdpDaemonUp = false;
+    tdpDaemonUp = false; tdpDaemonNeedsResume = false;
     if (!shouldRestart) { trace.emit('tdp.skipped', { skipped: true, reason: 'existing-manual-no-daemon-owner' }); return true; }
-    if (!(await ensureTdpDaemon(trace.context).catch(() => false))) return false;
+    if (!(await ensureTdpDaemon(trace.context).catch(() => false)) || !current()) return false;
   }
+  const accepted = (r: Awaited<ReturnType<typeof tdpDaemon.request>> | null) =>
+    !!r?.ok && r.rc === 0 && r.result?.reinitialized === true && r.result?.resumeGeneration === generation;
   try {
-    const r = await tdpDaemon.request('resume', {}, 5000, trace.context);
-    if (r.ok && r.rc === 0) return true;
-  } catch {
-    // 句柄重建失败时走下面的完整 daemon 重启。
-  }
-  await stopTdpDaemon().catch(() => {});
-  if (!(await ensureTdpDaemon(trace.context).catch(() => false))) return false;
-  const retry = await tdpDaemon.request('resume', {}, 5000, trace.context).catch(() => null);
-  return !!retry && retry.ok && retry.rc === 0;
+    const r = await tdpDaemon.request('resume', { generation }, 5000, trace.context);
+    if (current() && accepted(r)) { tdpDaemonNeedsResume = false; return true; }
+  } catch { /* An observer timeout is not a failed operation or permission to restart. */ }
+  if (!current()) return false;
+  // A slow resume may have completed after its observer expired. Query the
+  // generation-bound completion receipt instead of rebuilding handles again.
+  const status = await tdpDaemon.request('ping', {}, 5000).catch(() => null);
+  if (current() && accepted(status)) { tdpDaemonNeedsResume = false; return true; }
+  return false;
 }
 
 export async function setTdp(mode: 'ac' | 'dc', watts: number, opts: SetTdpOpts = {}): Promise<boolean> {
@@ -1247,12 +1463,17 @@ export async function setTdp(mode: 'ac' | 'dc', watts: number, opts: SetTdpOpts 
     apply: opts.apply === true, save: opts.save !== false, vendor: opts.vendor });
   try {
     const result = await setTdpObservedCore(mode, watts, opts, trace);
-    trace.emit(result ? 'tdp.completed' : 'tdp.unverified', { verificationScope: trace.state.verificationScope ?? (opts.apply ? 'existing-write-receipt-only-not-OEM-or-physical-power-proof' : 'configuration-only') });
+    if (!trace.state.skipped) trace.emit(result ? 'tdp.completed' : 'tdp.unverified', { verificationScope: trace.state.verificationScope ?? (opts.apply ? 'existing-write-receipt-only-not-OEM-or-physical-power-proof' : 'configuration-only') });
     return result;
   } catch (error) {
     trace.emit('tdp.failed', { error: tdpErrorText(error), readbackMatched: 'not-observed' });
     throw error;
   }
+}
+
+function assertTdpCommandWatts(watts: number): void {
+  if (!Number.isFinite(watts) || watts < TDP_MIN || watts > TDP_MAX)
+    throw new Error('TDP 指令超出 2–200W 请求域，已拒绝发送；不会将错误指令钳成最低瓦数');
 }
 
 async function setTdpObservedCore(
@@ -1264,10 +1485,20 @@ async function setTdpObservedCore(
   // 两个独立动作：save=记录程序配置；apply=实时下发硬件。
   // 顶部「快速切换」/手柄用 { apply:true, save:true }；
   // 自动浮动临时值用 { apply:true, save:false }，不覆盖用户设定的 TDP 最大值。
+  const session = tdpDaemonEpoch;
+  if (opts.apply) assertTdpCommandWatts(watts);
+  const minWatts = opts.minWatts === undefined ? TDP_MIN : opts.minWatts;
+  const maxWatts = opts.maxWatts === undefined ? TDP_MAX : opts.maxWatts;
+  if (opts.apply && (!Number.isFinite(minWatts) || !Number.isFinite(maxWatts) || minWatts < TDP_MIN || maxWatts > TDP_MAX || minWatts > maxWatts))
+    throw new Error('TDP 调度上下限无效，已拒绝发送');
+  const admitted = () => session === tdpDaemonEpoch && (!opts.isCurrent || opts.isCurrent());
+  if (!admitted()) { trace.emit('tdp.skipped', { reason: 'superseded-before-validation' }); return false; }
   const capability = await getTdpExecutionCapability();
+  if (!admitted()) { trace.emit('tdp.skipped', { reason: 'superseded-before-save' }); return false; }
   if (!capability.ready) throw new Error(capability.error || 'TDP 执行能力尚未就绪，已拒绝保存和写入');
   const target = resolveTdpTarget(watts, capability);
   const w = target.effectiveW;
+  if (opts.apply && (w < minWatts || w > maxWatts)) throw new Error('TDP 最终指令超出当前调度区间，已拒绝发送');
   trace.context.clampedW = w;
   trace.context.policy = target.rangeLimited ? 'device-range-effective-target-saved-intent-preserved' : 'existing-target-in-device-range';
   trace.emit('tdp.target-resolved', { intentW: target.intentW, effectiveW: w, rangeLimited: target.rangeLimited,
@@ -1279,9 +1510,13 @@ async function setTdpObservedCore(
   if (!opts.apply) return true;
 
   const receipt = tdpRuntimeStore.begin(mode, w);
+  const assertCurrent = () => {
+    if (!admitted() || !tdpRuntimeStore.isCurrent(receipt)) throw new TdpRequestSupersededError();
+  };
   let acceptedW = w, acknowledged = true;
   try {
     const result = await runTdpHardwareWrite(async () => {
+      assertCurrent(); // A queued old side/owner must never reach the hardware.
       const lifecycle = await assertHardwareWriteAllowed(trace);
       if (capability.selected) {
         if (!lifecycle || !Number.isSafeInteger(lifecycle.generation)) {
@@ -1294,6 +1529,7 @@ async function setTdpObservedCore(
         }
         trace.context.vendor = 'intel';
         trace.emit('tdp.route-selected', { route: capability.provider });
+        assertCurrent();
         const response = await invoke<{ ok: boolean; rc: number; error?: string; note?: string; readbackMatched: boolean;
           outcome?: 'applied' | 'oem-adjusted' | 'unverified' | 'oem-rejected'; acceptedVerified?: boolean; acceptedPL1W?: number }>(
           'tdpMsi.set', { watts: w, generation: lifecycle.generation, deadlineTick: freshCapability.deadlineTick,
@@ -1316,35 +1552,32 @@ async function setTdpObservedCore(
         }
         return; // Exclusive path: no CLI replay on partial failure or timeout.
       }
-      const vendor = capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' :
-        opts.vendor && opts.vendor !== 'unknown' ? opts.vendor : await detectVendor();
-      // vendor 检测失败（AMD.txt/intel.txt 缺失且注册表读不到）时不能静默跳过：
-      // 用户以为 TDP 已下发实际没动，且 YeManTdpCtl 也需要 vendor 才能选对 SMU 通道。
-      if (vendor === 'unknown') {
-        throw new Error('无法识别 CPU 厂商（AMD.txt/intel.txt 与注册表均不可用），TDP 下发已跳过');
-      }
-      // 只有浮动优化真正接管时才写 daemon 命令；普通低功耗调用始终按需直连，
-      // 不拉起常驻进程，也不增加额外 AC/DC 检测。
-      const floating = await floatTdpActive();
-      trace.context.vendor = vendor;
-      trace.emit('tdp.route-selected', { route: floating ? 'daemon-with-existing-direct-fallback' : 'cli' });
-      if (floating) {
-        if (await ensureTdpDaemon(trace.context).catch(() => false)) {
-          try {
-            await tdpDaemonSet(w, trace.context);
-          } catch (error) {
-            trace.emit('tdp.route-selected', { route: 'cli', fallbackReason: tdpErrorText(error) });
-            // 写命令失败时不能静默吞掉，否则硬件值会停在旧档位；立即退回单次直连。
-            tdpDaemonUp = false;
-            const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor], 30000, trace.context);
-            if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
-          }
-        } else {
-          trace.emit('tdp.route-selected', { route: 'cli', fallbackReason: 'daemon-unavailable-after-existing-start-budget' });
-          const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor], 30000, trace.context);
-          if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
+      // All frequent callers reuse the same lazy session: UI, shortcuts, Decky
+      // and schedules. No float marker stat, repeated ping or per-write Python boot.
+      if (await ensureTdpDaemon(trace.context)) {
+        trace.emit('tdp.route-selected', { route: 'daemon' });
+        assertCurrent();
+        try {
+          await tdpDaemonSet(w, trace.context);
+        } catch (error) {
+          // A response timeout may follow a real write. Never replay it through
+          // CLI or turn an unknown outcome into a second hardware operation.
+          if (/hardware_resume_not_ready|stale_resume_generation|resume_hardware_failed/.test(tdpErrorText(error)))
+            tdpDaemonNeedsResume = true; // A real negative receipt proves this helper is alive.
+          else tdpDaemonUp = false;
+          throw error;
         }
       } else {
+        const vendor = capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' :
+          opts.vendor && opts.vendor !== 'unknown' ? opts.vendor : await detectVendor();
+        // vendor 检测失败（AMD.txt/intel.txt 缺失且注册表读不到）时不能静默跳过：
+        // 用户以为 TDP 已下发实际没动，且 YeManTdpCtl 也需要 vendor 才能选对 SMU 通道。
+        if (vendor === 'unknown') {
+          throw new Error('无法识别 CPU 厂商（AMD.txt/intel.txt 与注册表均不可用），TDP 下发已跳过');
+        }
+        trace.context.vendor = vendor;
+        trace.emit('tdp.route-selected', { route: 'cli', fallbackReason: 'daemon-unavailable-before-write' });
+        assertCurrent();
         const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor], 30000, trace.context);
         if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
       }
@@ -1352,34 +1585,45 @@ async function setTdpObservedCore(
     // Keep the diagnostic visible to optional schedule callers. Their wrapper
     // converts this into a warning and continues the CPU axis; direct UI calls
     // still receive a real failure instead of displaying a false success.
+    if (result.superseded) {
+      trace.emit('tdp.skipped', { reason: 'superseded-before-hardware-dispatch' });
+      tdpRuntimeStore.finish(receipt, false);
+      return false; // Cancellation is neither applied nor a backend failure latch.
+    }
     if (!result.applied) throw new Error(result.error || 'TDP hardware write skipped');
     trace.emit('tdp.lifecycle', { powerEpoch: receipt.powerEpoch, stale: !tdpRuntimeStore.isCurrent(receipt), ignored: !tdpRuntimeStore.isCurrent(receipt) });
+    if (!admitted() || !tdpRuntimeStore.isCurrent(receipt)) {
+      tdpRuntimeStore.finishUnknown(receipt);
+      trace.emit('tdp.skipped', { reason: 'superseded-after-hardware-completion', stale: true, ignored: true });
+      return false; // A completed old write cannot acknowledge the current owner.
+    }
     if (!acknowledged) { tdpRuntimeStore.finishUnknown(receipt); return false; }
     tdpRuntimeStore.finish(receipt, true, acceptedW);
     try { opts.onAccepted?.(acceptedW); } catch { /* consumer cannot turn a backend receipt into a failed write */ }
     return true;
   } catch (error) {
     tdpRuntimeStore.finish(receipt, false);
+    queueTdpRecovery();
     throw error;
   }
 }
 
 export async function stopTdpDaemon(): Promise<void> {
-  if ((await getTdpExecutionCapability()).selected) {
-    tdpDaemonUp = false;
-    tdpDaemonStart = null;
-    return; // No restore, UEFI write or helper lifecycle on the OEM path.
-  }
-  if (await tdpDaemonAlive().catch(() => false)) {
-    await tdpDaemon.request('quit', {}, 2000).catch(() => {});
-  }
-  tdpDaemonUp = false;
-  tdpDaemonStart = null;
+  const owned = tdpDaemonUp;
+  ++tdpDaemonEpoch;
+  stopTdpRecovery();
+  tdpDaemonUp = false; tdpDaemonStart = null; tdpDaemonNeedsResume = false;
+  try {
+    const capability = await getTdpExecutionCapability().catch(() => null);
+    if (capability?.selected || !capability && !owned) return;
+    if (await tdpDaemonAlive().catch(() => false))
+      await tdpDaemon.request('quit', {}, 2000).catch(() => {});
+  } finally { stopTdpRecovery(); } // Explicit OFF cannot leave a recovery task armed.
 }
 
 // 手柄快捷：按当前 AC/DC 电源模式，将 TDP 增减 delta 并立即应用
 export async function adjustTdp(delta: number): Promise<number | null> {
-  const mode = await detectPowerMode().catch(() => null as 'ac' | 'dc' | null);
+  const mode = await detectPowerModeReliable();
   if (!mode) return null;
   const cur = await readTdp(mode);
   if (cur === null) return null;
@@ -1394,7 +1638,9 @@ export async function adjustTdp(delta: number): Promise<number | null> {
 
 // 手柄快捷：按当前 AC/DC 电源模式，将 TDP 目标值设为指定值并立即应用
 export async function setTdpCurrentMode(watts: number): Promise<number | null> {
-  const mode = await detectPowerMode().catch(() => null as 'ac' | 'dc' | null);
+  // Validate the original command before target resolution can clamp it.
+  assertTdpCommandWatts(watts);
+  const mode = await detectPowerModeReliable();
   if (!mode) return null;
   const next = resolveTdpTarget(watts, await getTdpExecutionCapability()).effectiveW;
   let accepted = next;
@@ -1491,25 +1737,32 @@ export function windowsValueToSliderAggr(value: number): number {
   return 100 - actual;
 }
 
-// 已激活方案的缓存：setActiveScheme 同 GUID 重复调用时跳过 powercfg /setactive，
-// 避免浮动调节期每 ~2 秒触发系统电源策略变更通知（配合 --in-process-gpu 会引发 GPU
-// 驱动重初始化、浏览器进程瞬时卡顿 → WebView2 表面 IDC_APPSTARTING 转圈；该转圈与窗口
-// 是否前台无关，故「后台/隐藏也转」）。方案真被切换到不同 GUID 时仍会正常下发（自愈）。
-//
-// 切换/激活电源方案：每次都 /setactive，确保刚写入 YEMAN 方案的 CPU 调度（最大主频/积极性/
-// 最小CPU三联动等）被 OS 真正应用。setXvalueindex 仅写注册表，很多处理器性能设置需
-// /setactive 触发策略重应用才生效；跳过会导致「写入成功但频率不变化」（CPU 主频调不动的假象）。
-// 转圈根因是 YeManTdpCtl.exe 子进程（已 daemon 常驻化解决），与 /setactive 无关——确诊实验
-// 已排除 setactive 是 IDC_APPSTARTING 根因，故此处不 skip，对齐 CPUZQ 可用实现。
-export async function setActiveScheme(guid: string = PW.YEMAN): Promise<void> {
-  const r = await shell.run('powercfg', ['/setactive', guid], 5000);
-  if (r.exitCode !== 0) {
-    throw new Error(`powercfg /setactive ${guid} 失败：${(r.stderr || r.stdout).trim() || 'exit ' + r.exitCode}`);
+// Reapply every submitted CPU policy, including the same GUID. Use the native
+// Power API so frequent changes never create powercfg processes. Older shells
+// retain the CLI path only for an explicit unknown-command response.
+export async function setActiveScheme(guid: string = PW.YEMAN, isCurrent?: () => Promise<boolean>): Promise<void> {
+  await assertPowerSchemeSelectionCurrent(isCurrent);
+  try {
+    const result=await invoke<{ ok: boolean; code: number }>('power.setActiveScheme', { scheme: guid }, { timeoutMs: 5000 });
+    if (!result || typeof result.ok !== 'boolean' || !Number.isInteger(result.code)) throw new Error('电源方案激活回执无效');
+    if (!result.ok || result.code !== 0) throw new Error(`电源方案激活失败：${result.code}`);
+    return;
+  } catch (error) {
+    const message=error instanceof Error ? error.message : String(error);
+    if (!/^unknown(?::| command:)\s*power\.setActiveScheme$/i.test(message.trim())) throw error;
   }
+  await assertPowerSchemeSelectionCurrent(isCurrent);
+  const result = await shell.run('powercfg', ['/setactive', guid], 5000);
+  if (result.exitCode !== 0) throw new Error(`powercfg /setactive ${guid} 失败：${(result.stderr || result.stdout).trim() || 'exit ' + result.exitCode}`);
 }
 // 重新激活"当前活动方案"（电源按钮等修改跟随当前方案生效，不强制切回 YEMAN）
 export async function reactivateCurrentScheme(): Promise<void> {
-  await shell.run('powercfg', ['/setactive', 'SCHEME_CURRENT']);
+  // SCHEME_CURRENT is resolved by Windows at execution time: never restore a
+  // captured GUID over a power-plan change made while the request was pending.
+  const result = await shell.run('powercfg', ['/setactive', 'SCHEME_CURRENT'], 5000);
+  if (result.exitCode !== 0) {
+    throw new Error(`电源方案刷新失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
+  }
 }
 export async function importScheme(file: string): Promise<void> {
   const r = await shell.run('powercfg', ['/import', file, PW.YEMAN]);
@@ -1522,12 +1775,32 @@ export async function importScheme(file: string): Promise<void> {
   }
 }
 export async function schemeExists(guid: string): Promise<boolean> {
-  // 直接以 GUID 问系统“该电源方案是否存在”。
-  // ⚠️ 不再解析 `powercfg /list` 全量文本：其输出含 GBK 中文，`oemToUtf8` 解码后
-  // 在某些环境下会干扰正则提取 GUID（实测运行时偶发漏判，导致“检测不到野蛮系统电源
-  // 且无法恢复”）。`/query <guid>` 用退出码判定零歧义：存在 exit 0 / 不存在 exit 1。
-  const r = await shell.run('powercfg', ['/query', guid]);
-  return r.exitCode === 0;
+  // Always query the native API afresh: a confirmed absence may authorize recovery.
+  // Only an explicit old-shell unknown command permits the legacy CLI path.
+  let result: unknown;
+  try {
+    result = await invoke<unknown>('power.schemeExists', { scheme: guid }, { timeoutMs: 5000 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/^unknown(?::| command:)\s*power\.schemeExists$/i.test(message)) throw error;
+    const r = await shell.run('powercfg', ['/query', guid]);
+    return r.exitCode === 0;
+  }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error('电源方案存在性回执无效');
+  }
+  const receipt = result as { ok?: unknown; exists?: unknown; code?: unknown };
+  if (typeof receipt.ok !== 'boolean' || typeof receipt.exists !== 'boolean' ||
+      typeof receipt.code !== 'number' || !Number.isInteger(receipt.code) ||
+      receipt.code < 0 || receipt.code > 0xffffffff) {
+    throw new Error('电源方案存在性回执无效');
+  }
+  if (receipt.ok) {
+    if (receipt.code !== 0) throw new Error('电源方案存在性回执矛盾');
+    return receipt.exists;
+  }
+  if (receipt.exists || receipt.code === 0) throw new Error('电源方案存在性回执矛盾');
+  throw new Error(`读取电源方案失败：${receipt.code}`);
 }
 function logYemanSchemePersonality(details: Record<string, unknown>): void {
   try {
@@ -1540,16 +1813,18 @@ function logYemanSchemePersonality(details: Record<string, unknown>): void {
   } catch { /* 日志不可用也不影响电源检查流程。 */ }
 }
 
-async function ensureYemanSchemePersonality(): Promise<void> {
+async function ensureYemanSchemePersonality(isCurrent?: () => Promise<boolean>): Promise<void> {
   // SUB_NONE 的设置直接位于方案根下；每侧仅检查一次，写入结果只记录退出码。
   const path = `SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes\\${PW.YEMAN}\\${PW.G_PERSONALITY}`;
   await Promise.all((['AC', 'DC'] as const).map(async (side) => {
-    let stage: 'read' | 'write' = 'read';
+    let stage: 'read' | 'check' | 'write' = 'read';
     try {
       const current = await invoke<unknown>('registry.read', {
         root: 'HKLM', path, name: side === 'AC' ? 'ACSettingIndex' : 'DCSettingIndex',
       }, { timeoutMs: 1500 });
       if (current === 1) return;
+      stage = 'check';
+      await assertPowerSchemeSelectionCurrent(isCurrent);
       stage = 'write';
       const result = await shell.run('powercfg', [
         side === 'AC' ? '/setacvalueindex' : '/setdcvalueindex',
@@ -1560,6 +1835,7 @@ async function ensureYemanSchemePersonality(): Promise<void> {
         detail: (result.stderr || result.stdout).trim().slice(0, 512),
       });
     } catch (error) {
+      if (stage === 'check') throw error;
       logYemanSchemePersonality({
         side, stage, commandSucceeded: false,
         detail: (error instanceof Error ? error.message : String(error)).slice(0, 512),
@@ -1569,16 +1845,19 @@ async function ensureYemanSchemePersonality(): Promise<void> {
 }
 
 // 方案缺失时先恢复；确认存在后尽力修正 AC/DC 电源计划类型，失败仅记日志。
-export async function ensureYemanScheme(): Promise<void> {
+export async function ensureYemanScheme(isCurrent?: () => Promise<boolean>): Promise<void> {
+  await assertPowerSchemeSelectionCurrent(isCurrent);
   if (!(await schemeExists(PW.YEMAN))) {
     const pow = join(PC_DIR, 'YM.pow');
     if (!(await fs.exists(pow))) throw new Error('YM.pow 电源方案文件不存在，无法恢复野蛮系统电源');
+    await assertPowerSchemeSelectionCurrent(isCurrent);
     await importScheme(pow);
     if (!(await schemeExists(PW.YEMAN))) {
       throw new Error('野蛮系统电源方案恢复失败：导入后仍未在系统电源列表中找到该方案');
     }
   }
-  await ensureYemanSchemePersonality();
+  await ensureYemanSchemePersonality(isCurrent);
+  await assertPowerSchemeSelectionCurrent(isCurrent);
 }
 export async function setOverlay(guid: string): Promise<void> {
   const r = await shell.run('powercfg', ['/overlaysetactive', guid]);
@@ -1634,50 +1913,91 @@ export async function getActiveScheme(): Promise<string> {
   return m ? m[1].toLowerCase() : '';
 }
 
-// 切换电源方案：yeman=直接setactive；besteff/bestperf=先setactive平衡再叠加overlay
-export async function switchScheme(key: SchemeKey): Promise<void> {
+// A selected scheme and its remembered owner commit on the same queue as broadcasts.
+// Queue callbacks call only the unsafe implementation, never another queued entry.
+async function assertPowerSchemeSelectionCurrent(isCurrent?: () => Promise<boolean>): Promise<void> {
+  if (isCurrent && !(await isCurrent())) throw new Error('电源方案请求已失效');
+}
+
+function selectedPowerSchemeBase(key: SchemeKey): string {
+  if (!SCHEMES.some((scheme) => scheme.key === key)) throw new Error('未知电源方案：' + String(key));
+  return key === 'yeman' ? PW.YEMAN : PW.WIN_BAL;
+}
+
+async function switchSchemeUnsafe(key: SchemeKey, isCurrent?: () => Promise<boolean>): Promise<void> {
+  await assertPowerSchemeSelectionCurrent(isCurrent);
+  const base = selectedPowerSchemeBase(key);
   if (key === 'yeman') {
-    // 切换到野蛮系统电源前先确保方案存在，被删则从 C:\SOFT\YeMan\PowerControl\YM.pow 重新导入
-    await ensureYemanScheme();
-    await setActiveScheme(PW.YEMAN);
-    if (await getActiveScheme() !== PW.YEMAN) throw new Error('切换野蛮系统电源后仍未生效');
-    await rememberYemanScheme('yeman');
-    // 偏好文件写入失败不影响已切换的电源（仅记录选择，绝不回滚/删除方案）
-    try { await savePower('scheme', 'YeMan'); } catch { /* ignore */ }
-    return;
+    await ensureYemanScheme(isCurrent);
+  } else if (!(await schemeExists(base))) {
+    throw new Error('标准平衡电源方案不存在，无法切换所选电源方案');
   }
-  if (key === 'bal') {
-    await rememberManualScheme(key, PW.WIN_BAL);
-    await setActiveScheme(PW.WIN_BAL);
-    await setOverlay(PW.OV_NONE);
-    await savePower('scheme', 'Balanced');
-    return;
+  await assertPowerSchemeSelectionCurrent(isCurrent);
+  await setActiveScheme(base, isCurrent);
+  if (await getActiveScheme() !== base) throw new Error('切换电源方案后基方案未生效');
+  if (key !== 'yeman') {
+    if (key !== 'bal') await new Promise((resolve) => setTimeout(resolve, 400));
+    await assertPowerSchemeSelectionCurrent(isCurrent);
+    await setOverlay(key === 'besteff' ? PW.OV_EFF : key === 'bestperf' ? PW.OV_PERF : PW.OV_NONE);
+    if (await getActiveScheme() !== base) throw new Error('切换电源方案后基方案未生效');
   }
-  const ov = key === 'besteff' ? PW.OV_EFF : PW.OV_PERF;
-  const tag = key === 'besteff' ? 'BestEfficiency' : 'BestPerformance';
-  await rememberManualScheme(key, PW.WIN_BAL);
-  await setActiveScheme(PW.WIN_BAL);
-  await new Promise((r) => setTimeout(r, 400));
-  await setOverlay(ov);
-  await savePower('scheme', tag);
+  await assertPowerSchemeSelectionCurrent(isCurrent);
+  if (key === 'yeman') await rememberYemanScheme('yeman');
+  else await rememberManualScheme(key, base);
+  // The compatibility hook performs no writes; structured memory is committed above.
+  const tag = key === 'yeman' ? 'YeMan' : key === 'besteff' ? 'BestEfficiency' : key === 'bestperf' ? 'BestPerformance' : 'Balanced';
+  try { await savePower('scheme', tag); } catch { /* scheme and structured memory are already committed */ }
+}
+
+// Explicit selection preserves the existing switchScheme(key) call contract.
+export function switchScheme(key: SchemeKey): Promise<void> {
+  const run = powerSchemeEnsureQueue.then(() => switchSchemeUnsafe(key));
+  powerSchemeEnsureQueue = run.catch(() => {});
+  return run;
+}
+
+// AC/DC and per-game callers supply their projected choice and a generation guard.
+// Matching memory + active base avoids replaying activation/overlay. It is not an
+// overlay readback: Windows currently exposes no such receipt through this bridge.
+export function ensureSelectedPowerScheme(key: SchemeKey = 'yeman', isCurrent?: () => Promise<boolean>): Promise<void> {
+  const run = powerSchemeEnsureQueue.then(async () => {
+    await assertPowerSchemeSelectionCurrent(isCurrent);
+    const base = selectedPowerSchemeBase(key);
+    const remembered = await readRememberedPowerScheme();
+    const recovery = getSettingsRecoveryState();
+    if (recovery.status !== 'ready') throw new Error('无法确认已记忆电源方案：' + (recovery.message || '配置读取未就绪'));
+    const active = await getActiveScheme();
+    if (!isGuid(active)) throw new Error('无法确认当前活动电源方案');
+    await assertPowerSchemeSelectionCurrent(isCurrent);
+    const sameSelection = key === 'yeman'
+      ? remembered?.guid === base && (remembered.mode === 'yeman' || remembered.mode === 'auto')
+      : remembered?.mode === 'manual' && remembered.selectedKey === key &&
+        remembered.guid === base && (remembered.selectedGuid ?? remembered.guid) === base;
+    if (sameSelection && active === base) {
+      if (remembered?.mode === 'auto') {
+        await assertPowerSchemeSelectionCurrent(isCurrent);
+        await rememberYemanScheme('yeman');
+      }
+      return;
+    }
+    await switchSchemeUnsafe(key, isCurrent);
+  });
+  powerSchemeEnsureQueue = run.catch(() => {});
+  return run;
 }
 
 // 一组 CPU 电源参数通过 native Power API 逐项下发；native 会先解除处理器
 // 子组的隐藏属性，失败项再尝试写入正确的 scheme/setting 注册表路径。
-// Windows/OEM 对不同核心类别的支持可能不同，因此单项失败必须静默忽略，
-// 不能阻止其他参数或后续 /setactive。
+// Windows/OEM 对不同核心类别的支持可能不同，native 返回的单项失败仍按
+// 原兼容策略继续；整批 IPC/电源租约拒绝则必须上抛，不能将未执行记为成功。
 async function applyPowerValueBatch(ac: boolean, entries: Array<[string, number]>): Promise<void> {
   if (entries.length === 0) return;
-  try {
-    await registry.writePowerBatch(
-      PW.YEMAN,
-      PW.SUB,
-      ac ? 'ACSettingIndex' : 'DCSettingIndex',
-      entries.map(([setting, value]) => ({ setting, value: Math.trunc(value) })),
-    );
-  } catch {
-    // CPU、电源写入类参数遵循强制逐条执行规则：IPC 或单项失败不冒泡。
-  }
+  await registry.writePowerBatch(
+    PW.YEMAN,
+    PW.SUB,
+    ac ? 'ACSettingIndex' : 'DCSettingIndex',
+    entries.map(([setting, value]) => ({ setting, value: Math.trunc(value) })),
+  );
 }
 
 // 自动性能组合应用用户保存的 CPU 挡位时必须是严格事务：主类 CPU 参数失败、
@@ -1867,7 +2187,10 @@ export async function applyPowerParams(p: PowerParams): Promise<boolean> {
 //   0–5000：线性 freq/100（100→1, 1000→10, 3000→30, 4900→49），下限 1
 // Manual CPU controls and CPU floating share the native batch path. It performs
 // the same per-setting writes while also unlocking hidden processor settings.
-export async function applyManualPowerParams(p: PowerParams): Promise<boolean> {
+export function applyManualPowerParams(p: PowerParams): Promise<boolean> {
+  return applyCpuPowerParams(p, false);
+}
+async function applyCpuPowerParams(p: PowerParams, strict: boolean): Promise<boolean> {
   const applyAc = !p.sides || p.sides.includes('ac');
   const applyDc = !p.sides || p.sides.includes('dc');
   const acThrot = p.acThrottle ?? throttleForFrequency(p.acFreq);
@@ -1882,7 +2205,8 @@ export async function applyManualPowerParams(p: PowerParams): Promise<boolean> {
   const schedulers = [PW.G_SCHED1, PW.G_SCHED2, PW.G_SCHED3];
 
   async function writeSide(ac: boolean, entries: Array<[string, number]>): Promise<void> {
-    await applyPowerValueBatch(ac, entries);
+    if (strict) await applyPowerValueBatchStrict(ac, entries);
+    else await applyPowerValueBatch(ac, entries);
   }
 
   if (applyAc) {
@@ -1912,11 +2236,11 @@ export async function applyManualPowerParams(p: PowerParams): Promise<boolean> {
   return applyAc || applyDc;
 }
 
-// CPU 浮动沿用已经验证过的逐条 powercfg 写入链路。
-// 浮动调用方显式传入固定最小处理器状态；此别名仅区分调用语义，
-// 不改变手动路径的 AC/DC、三类参数和单条失败后继续写入行为。
-export async function applyFloatPowerParams(p: PowerParams): Promise<boolean> {
-  return applyManualPowerParams(p);
+// Floating uses the same full per-setting packet. A required write/lease failure
+// must reach its existing backoff instead of marking a failed CPU trial applied.
+// Unsupported secondary classes and throttle keep their original optional status.
+export function applyFloatPowerParams(p: PowerParams): Promise<boolean> {
+  return applyCpuPowerParams(p, true);
 }
 
 export function freqToMinState(freqMhz: number): number {
@@ -2146,22 +2470,52 @@ export async function runResetProfile(path: string): Promise<void> {
 // Missing RTSS is optional at YMCC startup; installation failures are not.
 class RtssNotInstalledError extends Error {}
 let rtssDirCache: string | null = null;
+type RtssProcessIdentity = { pid: number; name: string; path: string; processCreated: string };
+function rtssValidatedProcessIdentities(reply: unknown, names: readonly string[]): RtssProcessIdentity[] | null {
+  if (!reply || typeof reply !== 'object' || Array.isArray(reply)) return null;
+  const payload = reply as { known?: unknown; processes?: unknown; reason?: unknown; error?: unknown };
+  if (payload.known !== true || !Array.isArray(payload.processes) || payload.processes.length > 256 ||
+      (payload.reason !== undefined && typeof payload.reason !== 'string') ||
+      (payload.error !== undefined && (typeof payload.error !== 'number' || !Number.isInteger(payload.error) || payload.error !== 0))) return null;
+  const allowed = names.map(name => name.toLowerCase());
+  const seen = new Set<number>();
+  for (const row of payload.processes) {
+    if (!row || typeof row !== 'object' || Array.isArray(row) ||
+        !Number.isSafeInteger(row.pid) || row.pid <= 0 || row.pid > 0xffffffff || seen.has(row.pid) ||
+        typeof row.name !== 'string' || typeof row.path !== 'string' ||
+        typeof row.processCreated !== 'string' || !/^[0-9]+$/.test(row.processCreated) ||
+        !/[1-9]/.test(row.processCreated) || row.processCreated.length > 64 ||
+        row.processCreated.replace(/^0+/, '').length > 20 ||
+        (row.processCreated.replace(/^0+/, '').length === 20 && row.processCreated.replace(/^0+/, '') > '18446744073709551615') ||
+        row.path.length > 32767 || /[\x00-\x1f]/.test(row.path)) return null;
+    const normalizedPath = row.path.split(String.fromCharCode(92)).join('/');
+    if (!/^[A-Za-z]:\//.test(normalizedPath) && !/^\/\/[^/]+\/[^/]+\//.test(normalizedPath)) return null;
+    const name = row.name.replace(/\.exe$/i, '').toLowerCase();
+    const leaf = normalizedPath.split('/').pop()?.toLowerCase();
+    if (!allowed.includes(name) || leaf !== name + '.exe') return null;
+    seen.add(row.pid);
+  }
+  return payload.processes as RtssProcessIdentity[];
+}
 async function resolveRtssDir(): Promise<string> {
   if (rtssDirCache && await fs.exists(`${rtssDirCache}\\RTSS.exe`).catch(() => false)) return rtssDirCache;
+  let running: RtssProcessIdentity[] | null = null;
+  try { running = rtssValidatedProcessIdentities(await proc.identities(['RTSS']), ['RTSS']); }
+  catch { /* Native identity unknown; file/registry discovery remains available. */ }
+  const nativePaths = (running || []).map(identity => "'" + identity.path.replace(/'/g, "''") + "'").join(',');
   const script = [
-    "$c=@()",
-    "$p=Get-Process RTSS -ErrorAction SilentlyContinue | Select-Object -First 1",
-    "if($p -and $p.Path){$c+=$p.Path}",
+    "$c=@(" + nativePaths + ")",
     "$c+=@(\"$env:ProgramFiles\\RivaTuner Statistics Server\\RTSS.exe\",\"${env:ProgramFiles(x86)}\\RivaTuner Statistics Server\\RTSS.exe\",\"$env:LOCALAPPDATA\\RivaTuner Statistics Server\\RTSS.exe\")",
     "$k=@('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*')",
     "foreach($x in $k){Get-ItemProperty $x -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName -match 'RivaTuner Statistics Server|RTSS'} | ForEach-Object {if($_.InstallLocation){$c+=(Join-Path $_.InstallLocation 'RTSS.exe')}elseif($_.DisplayIcon){$c+=($_.DisplayIcon -replace ',.*$','').Trim('\\\"')}}}",
-    "foreach($x in ($c|Where-Object {$_}|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Leaf){$d=Split-Path -Parent $x;if((Test-Path (Join-Path $d 'RTSSHooks64.dll'))){Write-Output $d;break}}}"
+    "foreach($x in ($c|Where-Object {$_}|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Leaf){$d=Split-Path -Parent $x;if((Test-Path -LiteralPath (Join-Path $d 'RTSS.exe') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $d 'RTSSHooks64.dll') -PathType Leaf)){Write-Output $d;break}}}"
   ].join(';');
   try {
     const r = await shell.run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
     const d = (r.stdout || '').split(/\r?\n/).map((v) => v.trim()).find((v) => v && /^[A-Za-z]:\\/.test(v));
     if (d) { rtssDirCache = d; return d; }
   } catch { /* handled below */ }
+  if (running === null) throw new Error('RTSS 运行路径状态待确认，请稍后重试');
   throw new RtssNotInstalledError('未找到 RTSS.exe，请先安装 RivaTuner Statistics Server');
 }
 
@@ -2196,31 +2550,16 @@ export const FPS_MIN = 15;
 export const FPS_MAX_DEFAULT = 300;
 
 export async function rtssRunning(): Promise<boolean> {
-  // 优先 native Toolhelp32 枚举（毫秒级）；兜底 Get-Process 子进程（旧 exe 兼容）。
   const p = await nativeProcRunning(['RTSS']);
-  if (p) return !!p['RTSS'];
-  const r = await shell.run('powershell', [
-    '-NoProfile',
-    '-Command',
-    '(Get-Process RTSS -EA 0).Count -gt 0',
-  ]);
-  return (r.stdout || '').trim().toLowerCase() === 'true';
+  if (!p) throw new Error('RTSS 运行状态待确认，请稍后重试');
+  return p['RTSS'];
 }
 // HWiNFO 进程是否在运行：用于区分「有 HW 但共享内存未起来」(需重启修复)
 // 与「无 HW 进程」(未装/未启动) 两套补救逻辑。
 export async function hwiNfoRunning(): Promise<boolean> {
   const p = await nativeProcRunning(['HWiNFO64']);
-  if (p) return !!p['HWiNFO64'];
-  try {
-    const r = await shell.run('powershell', [
-      '-NoProfile',
-      '-Command',
-      '(Get-Process HWiNFO64 -EA 0).Count -gt 0',
-    ]);
-    return (r.stdout || '').trim().toLowerCase() === 'true';
-  } catch {
-    return false;
-  }
+  if (!p) throw new Error('HWiNFO 运行状态待确认，请稍后重试');
+  return p['HWiNFO64'];
 }
 export async function readRtssLimit(): Promise<number> {
   const dir = await resolveRtssDir();
@@ -2268,6 +2607,7 @@ export function setRtssLimit(fps: number, isCurrent: () => boolean = () => true)
   }
   if (!isCurrent()) return;
     await fs.writeTextFileAtomic(global, outLines.join('\r\n'));
+    if (!isCurrent()) return;
   // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
   // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
   // ⚠ 不能用 rundll32：RTSS SDK 的 LoadProfile 是 void(LPCSTR)，与 rundll32
@@ -2305,59 +2645,33 @@ export async function readRtssZoom(): Promise<number> {
   const dir = await resolveRtssDir();
   const global = `${dir}\\Profiles\\Global`;
   if (!(await fs.exists(global))) return 5;
-  const txt = await fs.readTextFile(global);
-  let inOsd = false;
-  for (const line of txt.split(/\r?\n/)) {
-    if (line.startsWith('[')) inOsd = line.trim().toLowerCase() === '[osd]';
-    else if (inOsd) {
-      const m = line.match(/^ZoomRatio=(\d+)/i);
-      if (m) return parseInt(m[1], 10);
-    }
+  const text = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
+  const raw = rtssIniValue(text, 'OSD', 'ZoomRatio');
+  return raw !== null && /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 5;
+}
+async function writeRtssZoom(dir: string, ratio: number, skipMatching = false): Promise<void> {
+  const global = `${dir}\\Profiles\\Global`;
+  const raw = Number(ratio);
+  const zoom = Number.isFinite(raw) ? Math.max(RTSS_ZOOM_MIN, Math.min(RTSS_ZOOM_MAX, Math.round(raw))) : 5;
+  if (!(await fs.exists(global))) throw new Error('RTSS Global 配置不存在');
+  const original = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
+  if (!skipMatching || rtssIniValue(original, 'OSD', 'ZoomRatio') !== String(zoom)) {
+    const updated = setRtssIniValue(original, 'OSD', 'ZoomRatio', String(zoom));
+    await fs.writeTextFileAtomic(global, updated, undefined, { expectedContent: original });
   }
-  return 5; // 文件存在但缺键 → 默认 100%
+  // A matching file may follow an earlier failed reload. Confirm the SDK
+  // on every explicit apply, even when no durable write was needed.
+  // Reload only after durable write succeeds. Never use SaveProfile here:
+  // it would overwrite the selected disk values with stale in-memory state.
+  await reloadRtssProfiles(dir);
+  const persisted = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
+  // The public display reader defaults to 100% for a missing key. A write
+  // confirmation must instead witness the exact stored target explicitly.
+  if (rtssIniValue(persisted, 'OSD', 'ZoomRatio') !== String(zoom))
+    throw new Error('RTSS 大小读回未确认；请检查配置是否被其他程序修改。');
 }
 export function setRtssZoom(ratio: number): Promise<void> {
-  const run = rtssConfigWriteQueue.then(async () => {
-  const dir = await resolveRtssDir();
-  const global = `${dir}\\Profiles\\Global`;
-    const raw = Number(ratio);
-  const z = Number.isFinite(raw)
-    ? Math.max(RTSS_ZOOM_MIN, Math.min(RTSS_ZOOM_MAX, Math.round(raw)))
-    : 5;
-  if (!(await fs.exists(global))) throw new Error('RTSS Global 配置不存在');
-  const lines = (await fs.readTextFile(global)).split(/\r?\n/);
-  let inOsd = false;
-  let done = false;
-  let osdIndex = -1; // 找到的 [OSD] 节起始行（用于节内首个键前插入）
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith('[')) {
-      if (inOsd && !done) {
-        // 无 ZoomRatio 键：插到 [OSD] 节首行之后（保持键在节内，RTSS 才解析）
-        lines.splice(i, 0, `ZoomRatio=${z}`);
-        done = true;
-        break;
-      }
-      inOsd = line.trim().toLowerCase() === '[osd]';
-      if (inOsd) osdIndex = i;
-    } else if (inOsd && /^ZoomRatio=\d+/i.test(line)) {
-      lines[i] = `ZoomRatio=${z}`;
-      done = true;
-    }
-  }
-  if (!done) {
-    if (osdIndex >= 0) {
-      // 存在 [OSD] 节但节内没键：插在节行之后；避免追加到文件末尾被 RTSS 忽略
-      lines.splice(osdIndex + 1, 0, `ZoomRatio=${z}`);
-    } else {
-      // 连 [OSD] 节都没有：补一节，保证写入一定生效（2026-08-05 修复追加末尾被忽略）
-      lines.push('[OSD]', `ZoomRatio=${z}`);
-    }
-  }
-  await fs.writeTextFileAtomic(global, lines.join('\r\n'));
-  // 强制 RTSS 重载配置：LoadProfile(重新载入磁盘) + UpdateProfiles(套用)。同样不要 SaveProfile（会把内存旧状态写回磁盘）。
-  await reloadRtssProfiles(dir);
-  });
+  const run = rtssConfigWriteQueue.then(async () => writeRtssZoom(await resolveRtssDir(), ratio));
   rtssConfigWriteQueue = run.catch(() => {});
   return run;
 }
@@ -2389,13 +2703,21 @@ const OVL_L = 'YeManOBS-L-1.ovl';
 const OVL_J = 'YeManOBS-JJ-1.ovl';
 const OVL_EMPTY = 'Empty.ovl';
 export interface OverlaySwitchResult { mode: 'live' | 'saved' }
+function rtssFailureDetail(result: RtssReloadResult | undefined, fallback: string): string {
+  let detail = result?.error || fallback;
+  // Keep the native distinction between preparation, persistence/readback and
+  // bridge rejection. These fields already belong to this one request; no new
+  // IO or recurring logging is needed to show a diagnosable failure.
+  if (result?.errorCode) detail += ` [${result.errorCode}]`;
+  if (result?.bridgeCode !== undefined && Number.isSafeInteger(result.bridgeCode)) detail += `（桥接 ${result.bridgeCode}）`;
+  if (result?.win32Error) detail += `（Win32 ${result.win32Error}）`;
+  if (result?.path) detail += `；文件：${result.path}`;
+  return detail;
+}
 async function prepareRtssOverlay(dir: string): Promise<void> {
   const result = await rtss.prepareOverlay(dir, PC_DIR);
   if (!result?.ok) {
-    const detail = result?.error || 'RTSS 模板桥准备失败';
-    const code = result?.win32Error ? `（Win32 ${result.win32Error}）` : '';
-    const path = result?.path ? `；文件：${result.path}` : '';
-    throw new Error(detail + code + path);
+    throw new Error(rtssFailureDetail(result, 'RTSS 模板桥准备失败'));
   }
 }
 // Called once by the main renderer after PowerControl has been resolved.
@@ -2421,17 +2743,18 @@ export async function readOverlayLayout(): Promise<string> {
   const dir = await resolveRtssDir();
   const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
   if (!(await fs.exists(cfg))) return '';
-  return rtssIniValue(await fs.readTextFile(cfg), 'Settings', 'Layout') ?? '';
+  return rtssIniValue(await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }), 'Settings', 'Layout') ?? '';
 }
-export function setOverlayLayout(layout: OverlayLayout): Promise<OverlaySwitchResult> {
+export function setOverlayLayout(layout: OverlayLayout, zoom?: number): Promise<OverlaySwitchResult> {
   const run = rtssConfigWriteQueue.then(async (): Promise<OverlaySwitchResult> => {
     const dir = await resolveRtssDir();
     await prepareRtssOverlay(dir);
     const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : layout === 'J' ? OVL_J : OVL_EMPTY;
     const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
     if (!(await rtssRunning())) {
-      const text = await fs.exists(cfg) ? await fs.readTextFile(cfg) : '';
-      await fs.writeTextFileAtomic(cfg, setRtssIniValue(text, 'Settings', 'Layout', target));
+      const original = await fs.exists(cfg) ? await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }) : null;
+      await fs.writeTextFileAtomic(cfg, setRtssIniValue(original ?? '', 'Settings', 'Layout', target), undefined, { expectedContent: original });
+      if (await readOverlayLayout() !== target) throw new Error('RTSS 模板保存读回未确认；未将请求当作保存成功。');
       return { mode: 'saved' };
     }
     // The RTSS-owned plugin invokes the official Load message and only ACKs
@@ -2439,7 +2762,10 @@ export function setOverlayLayout(layout: OverlayLayout): Promise<OverlaySwitchRe
     // full hypertext/embedded objects and reset its timer. No synthetic keys,
     // no partial shared-memory rewrites and no in-process hook DLL in YMCC.
     const result = await rtss.loadOverlay(dir, target);
-    if (!result?.ok) throw new Error(result?.error || 'RTSS 未确认模板完整加载');
+    if (!result?.ok) throw new Error(rtssFailureDetail(result, 'RTSS 未确认模板完整加载'));
+    // Apply the saved display size in this same configuration queue. OFF
+    // leaves zoom intact; a matching explicit OSD key needs no disk write.
+    if (layout !== 'off' && zoom !== undefined) await writeRtssZoom(dir, zoom, true);
     // The plugin persists Layout only after completion, so failure does not
     // turn a merely requested template into a falsely successful UI state.
     return { mode: 'live' };
@@ -2451,16 +2777,9 @@ export function setOverlayLayout(layout: OverlayLayout): Promise<OverlaySwitchRe
 // RTSS 进程家族是否还有残留（主程序 RTSS.exe + 钩子加载器 RTSSHooksLoader* + 编码服务 EncoderServer*）。
 // 仅查 RTSS.exe 会漏掉 RTSSHooksLoader64.exe —— 它常独立于主程序存活，造成"看似关了实则旧钩子/旧插件还在"的渲染 bug。
 async function rtssFamilyAlive(): Promise<boolean> {
-  // 优先 native Toolhelp32 枚举（* 结尾=前缀匹配，覆盖 RTSSHooksLoader64/32、EncoderServer64 等）。
   const p = await nativeProcRunning(['RTSS', 'RTSSHooksLoader*', 'EncoderServer*']);
-  if (p) return Object.values(p).some(Boolean);
-  // 兜底 Get-Process 子进程（旧 exe 兼容）
-  const r = await shell.run('powershell', [
-    '-NoProfile',
-    '-Command',
-    '(Get-Process -EA 0 | Where-Object { $_.Name -match "^(RTSS|RTSSHooksLoader|EncoderServer)" }).Count -gt 0',
-  ]);
-  return (r.stdout || '').trim().toLowerCase() === 'true';
+  if (!p) throw new Error('RTSS 进程家族状态待确认，请稍后重试');
+  return ['RTSS', 'RTSSHooksLoader*', 'EncoderServer*'].some(name => p[name]);
 }
 
 // 直接重启 RTSS：结束并重新拉起**整个进程家族**，不杀 HWiNFO（保留共享内存数据源）。
@@ -2492,11 +2811,16 @@ async function restartRtss(): Promise<void> {
     await new Promise<void>((r) => setTimeout(r, 100));
   }
   // 4. 设 CPU 亲和性 0xA0（核心 5/7），与 BAT 一致，稳定 overlay 渲染
-  await shell.run('powershell', [
-    '-NoProfile',
-    '-Command',
-    'Get-Process RTSS -EA 0 | ForEach-Object { $_.ProcessorAffinity = 0xA0 }; Get-Process EncoderServer64 -EA 0 | ForEach-Object { $_.ProcessorAffinity = 0xA0 }; Get-Process RTSSHooksLoader64 -EA 0 | ForEach-Object { $_.ProcessorAffinity = 0xA0 }',
-  ]);
+  try {
+    const names = ['RTSS', 'EncoderServer64', 'RTSSHooksLoader64'];
+    const identities = rtssValidatedProcessIdentities(await proc.identities(names), names);
+    if (identities) {
+      for (const identity of identities) {
+        try { await rtss.setAffinityExact(identity.pid, identity.processCreated, identity.path); }
+        catch { /* Optional affinity failure must not restart an already launched RTSS. */ }
+      }
+    }
+  } catch { /* Unknown identities do not authorize affinity writes or a shell fallback. */ }
 }
 export async function monitorOn(): Promise<boolean> {
   const l = await readOverlayLayout();
@@ -2515,8 +2839,9 @@ export interface SleepGuardStatus {
   mode: SleepGuardMode;         // 总开关模式：关闭 / 自选
   suspended: number;            // 当前被冻结任务数
   pauseGameOnSleep: boolean;    // 睡眠事务中暂停游戏，按唤醒分类后恢复
-  retryOnEntryFailure: boolean; // 明确 S0/S3 入睡失败时同模式重试一次
-  retryOnNonUserWake: boolean;  // 有来源证据的异常唤醒时同模式重试一次
+  retryOnEntryFailure: boolean; // 明确入睡失败时启动原有重试事务，保留原重试上限，唤醒优先
+  retryOnSleepTimeout: boolean; // 电源键 Sleep 意图满240秒仍在运行时启动原有重试事务，默认开启
+  retryOnNonUserWake: boolean;  // 有来源证据的异常唤醒时启动原有重试事务，唤醒优先
   wakePasswordEnabled?: boolean; // Remembered UI choice only, default off; never auto-applied.
   joyXoffAutoClose: true;       // 固定开启，不提供用户开关
 }
@@ -2532,6 +2857,7 @@ export async function sleepGuardGet(): Promise<SleepGuardStatus> {
     suspended: Number(r.suspended) || 0,
     pauseGameOnSleep: r.pauseGameOnSleep ?? r.pauseResume !== false,
     retryOnEntryFailure: r.retryOnEntryFailure !== false,
+    retryOnSleepTimeout: r.retryOnSleepTimeout !== false,
     retryOnNonUserWake: r.retryOnNonUserWake ?? r.resleepEnabled ?? false,
     wakePasswordEnabled: r.wakePasswordEnabled === true,
     joyXoffAutoClose: true,
@@ -2749,6 +3075,7 @@ export async function readSleepTimeouts(): Promise<SleepTimeoutSettings> {
 /** 写入固定野蛮电源方案中的单个 Windows 11 超时（单位：分钟）。 */
 export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, minutes: number): Promise<void> {
   const spec = SLEEP_TIMEOUT_FIELDS[field];
+  if (!spec || !Number.isFinite(Number(minutes))) throw new Error('电源超时参数无效');
   const safeMinutes = Math.max(0, Math.min(10080, Math.round(Number(minutes))));
   const seconds = safeMinutes * 60;
   const verb = ac ? '/setacvalueindex' : '/setdcvalueindex';
@@ -2763,6 +3090,17 @@ export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, min
   const after = await readPlanPowerIndex(PW.YEMAN, spec.subGroup, spec.setting, ac);
   if (after !== seconds) {
     throw new Error(`电源超时回读不一致：期望 ${seconds} 秒，实际 ${after === null ? '无法读取' : `${after} 秒`}`);
+  }
+  // A saved plan index is not the live Windows timeout until the active plan
+  // is refreshed. All six AC/DC fields share this user-action-only commit.
+  try {
+    const active = await getActiveScheme();
+    if (!active) throw new Error('无法确认当前活动电源方案');
+    if (active.toLowerCase() === PW.YEMAN.toLowerCase()) await reactivateCurrentScheme();
+    // Inactive YeMan settings are saved for its next activation. Never switch
+    // plans, or overwrite the timeout of another similarly named scheme.
+  } catch (error) {
+    throw new Error(`电源超时已保存，但生效刷新未完成：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -3058,17 +3396,21 @@ export async function fxSet(on: boolean): Promise<void> {
 
 const GPU_SCHED_KEY = 'SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers';
 const GPU_SCHED_VALUE = 'HwSchMode';
+// Read the selected ON/OFF setting. Without an override, read Windows' actual
+// GPU state once; merely showing the page must never create a registry value.
 export async function readHardwareGpuSchedule(): Promise<boolean> {
-  try {
-    const v = await registry.read('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE);
-    return Number(v) === 2;
-  } catch {
-    return false;
-  }
+  const v = await registry.read('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE);
+  if (Number(v) === 2) return true;
+  if (Number(v) === 1) return false;
+  const state = await invoke<{ ok?: boolean; enabled?: boolean }>('gpuSchedule.getState', {});
+  if (state?.ok === true && typeof state.enabled === 'boolean') return state.enabled;
+  throw new Error('无法确认系统硬件加速GPU计划状态');
 }
 export async function writeHardwareGpuSchedule(on: boolean): Promise<boolean> {
-  const ok = await registry.write('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE, on ? 2 : 1);
-  return ok === true;
+  const requested = on ? 2 : 1;
+  const ok = await registry.write('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE, requested);
+  if (ok !== true) return false;
+  return Number(await registry.read('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE)) === requested;
 }
 
 // 控制中心与 RTSS 开机启动分别管理，各自读取和切换对应的任务计划。
@@ -3251,14 +3593,9 @@ export async function steamMasterSet(on: boolean, repairCommand = false): Promis
   }
 }
 export async function steamRunning(): Promise<boolean> {
-  // 优先 native Toolhelp32 枚举；兜底 Get-Process（旧 exe 兼容）
   const p = await nativeProcRunning(['steam']);
-  if (p && typeof p['steam'] === 'boolean') return p['steam'];
-  const r = await shell.run('powershell', ['-NoProfile', '-Command', "$ErrorActionPreference='Stop'; @((Get-Process -ErrorAction Stop) | Where-Object { $_.ProcessName -ieq 'steam' }).Count -gt 0"], 5000);
-  const text = (r.stdout || '').trim().toLowerCase();
-  // Missing/failed process reads are unknown, not permission to run the BAT.
-  if (r.exitCode !== 0 || !['true', 'false'].includes(text)) throw new Error('Steam 运行状态验证失败，请稍后重试');
-  return text === 'true';
+  if (!p) throw new Error('Steam 运行状态验证失败，请稍后重试');
+  return p['steam'];
 }
 export async function steamStop(): Promise<void> {
   await shell.run('taskkill', ['/F', '/IM', 'Steam.exe']);

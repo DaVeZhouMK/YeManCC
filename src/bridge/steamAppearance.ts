@@ -26,7 +26,7 @@ export interface AppearanceSnapshot {
   steamRunning: boolean; configuredMatchesBackend: boolean; note: string; themes: AppearanceThemeState[];
 }
 export interface AppearanceResult { renderConfirmed?: boolean; reloaded?: boolean; previousRevision?: string; editorProtected?: boolean; ok: boolean; saved?: boolean; message?: string; snapshot?: AppearanceSnapshot; }
-interface IdlePolicy { supported: boolean; version: number; pid: number; birth: string; manualObservationProtocol?: number; }
+interface IdlePolicy { processQuery?: string; supported: boolean; version: number; pid: number; birth: string; manualObservationProtocol?: number; }
 interface UseRelease { ok: boolean; minimumHoldPending?: boolean; editorProtected?: boolean; editorStateUnknown?: boolean; error?: number; }
 interface UseTicket { ok: boolean; token: string; pid: number; birth: string; backendPath: string; }
 interface Dependencies {
@@ -114,6 +114,11 @@ export function createSteamAppearance(deps: Dependencies) {
   async function request(action: 'Status' | 'Apply' | 'Refresh' | 'Reload' | 'Prepare' | 'Reset' | 'Restore' | 'Idle' | 'Reconcile', payload?: object, timeoutMs?: number): Promise<AppearanceResult> {
     const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', await scriptPath(), '-Action', action];
     if (useTicket) args.push('-BackendPath', useTicket.backendPath);
+    const policy = await deps.idlePolicy?.();
+    if (policy?.supported && policy.processQuery && /^Local\\YMCC\.CssInventory\.[a-f0-9]{32}$/.test(policy.processQuery)) {
+      args.push('-ProcessQuery', policy.processQuery, '-SessionPid', String(policy.pid), '-SessionBirth', policy.birth);
+    }
+
     if (payload) {
       const encoded = btoa(Array.from(new TextEncoder().encode(JSON.stringify(payload)), byte => String.fromCharCode(byte)).join(''));
       args.push('-Payload', encoded);

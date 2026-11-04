@@ -75,14 +75,15 @@
     // Approved bounded repair: a retained document with a dead old backend must
     // not trap the product behind the no-repeat launch gate. Only an explicit repair
     // click can rebuild UI; automatic callers fail closed before any side effect.
-    if (request.operation === 'decky.repairConnection' || request.operation === 'decky.recoverConnection') {
+    if (request.operation === 'decky.repairConnection' || request.operation === 'decky.recoverConnection' || request.operation === 'decky.cleanupConnection') {
       stage = 'decky-manual-repair';
       const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
       const automatic = request.operation === 'decky.recoverConnection';
+      const cleanup = request.operation === 'decky.cleanupConnection';
       // RestartJSContext recreates the Big Picture window and may steal foreground.
       // Fail before any mode read, timer, marker or UI mutation, including stale native callers.
       if (automatic) fail('steam-ui-refresh-requires-user');
-      if (Object.keys(request).length !== 5 || (automatic ? request.automatic !== true : request.userInitiated !== true) ||
+      if (Object.keys(request).length !== (cleanup ? 7 : 5) || (cleanup ? request.cleanupAuthorized !== true : automatic ? request.automatic !== true : request.userInitiated !== true) ||
           !(hex(request.expectedFrontendBuild) || request.expectedFrontendBuild === null) || !hex(request.installedFrontendBuild) ||
           !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(request.loaderVersion || '')) fail('invalid-decky-repair-request');
       const loader = window.DeckyPluginLoader, frontend = window.__YMCC_DECKY_FRONTEND__;
@@ -93,7 +94,13 @@
         /^[a-f0-9]{32}$/.test(window.__YMCC_DECKY_MIRROR__?.runId || '') &&
         /^[a-f0-9]{64}$/.test(window.__YMCC_DECKY_MIRROR__?.token || '') &&
         new RegExp('^ws://127[.]0[.]0[.]1:[1-9][0-9]{0,4}/mirror$').test(window.__YMCC_DECKY_MIRROR__?.endpoint || '');
-      const current = () => window === window.top && location.origin === 'https://steamloopback.host' &&
+      const cleanupCurrent = () => !cleanup || (typeof request.expectedModeEpoch === 'string' &&
+        request.expectedModeEpoch.length <= 96 && Number.isInteger(request.expectedAccount) &&
+        request.expectedAccount > 0 && request.expectedAccount <= 0xffffffff &&
+        window.__YMCC_DECKY_ACCOUNT_WATCH__?.read?.(request.expectedAccount) === true &&
+        window.__ymccSteamUiModeWatch?.mode === 'bigpicture' &&
+        window.__ymccSteamUiModeWatch.id + ':' + window.__ymccSteamUiModeWatch.entries === request.expectedModeEpoch);
+      const current = () => cleanupCurrent() && window === window.top && location.origin === 'https://steamloopback.host' &&
         window.DeckyPluginLoader === loader && window.__YMCC_DECKY_FRONTEND__ === frontend &&
         (missing ? ownEmpty() : frontend?.active === true && frontend.buildId === request.expectedFrontendBuild &&
           Array.isArray(loader?.plugins) && loader.plugins.some(item => item.name === 'ymcc-sidebar')) &&
@@ -103,10 +110,26 @@
       const mode = await bounded(SteamClient.UI.GetUIMode());
       if ((mode !== 1 && mode !== 4) || !current()) fail('decky-repair-context-changed');
       if (window.__ymccDeckyManualRepair) fail('decky-repair-already-requested');
-      window.__ymccDeckyManualRepair = true;
+      const repairReservation = {}; let restartEntered = false;
+      window.__ymccDeckyManualRepair = repairReservation;
       // A scheduled/uncertain dispatch is not a successful handshake. The native
       // owner and actual snapshot remain the only completion evidence.
-      setTimeout(() => { if (current()) SteamClient.Browser.RestartJSContext(); }, 0);
+      setTimeout(() => {
+        if (restartEntered || window.__ymccDeckyManualRepair !== repairReservation) return;
+        let stillCurrent = false;
+        try { stillCurrent = current(); } catch {} // The restart API has not been entered.
+        if (!stillCurrent) {
+          // A positively cancelled callback may release ONLY its own JS gate,
+          // so a fresh explicit repair can proceed. This never refunds native
+          // cleanup history or grants ordinary automatic UI-refresh authority.
+          if (window.__ymccDeckyManualRepair === repairReservation) delete window.__ymccDeckyManualRepair;
+          return;
+        }
+        // Keep the gate spent even when the call throws: a restart may already
+        // have reached Steam. A late/duplicate callback cannot invoke it twice.
+        restartEntered = true;
+        SteamClient.Browser.RestartJSContext();
+      }, 0);
       mutated = true;
       return { ok: true, requestDispatched: true, mutated: true, stage, phase: 'requested' };
     }
@@ -149,14 +172,77 @@
       let deckyUpdateResidue, deckyEmptyFrontend;
       try {
         const prior=window.__YMCC_DECKY_FRONTEND__,bridge=window.__YMCC_DECKY_MIRROR__;
-        if(window===window.top&&location.origin==='https://steamloopback.host'&&window.DeckyPluginLoader&&prior?.active===true&&/^[a-f0-9]{64}$/.test(prior.buildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&/^[a-f0-9]{64}$/.test(bridge?.token||'')&&/^ws:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mirror$/.test(bridge?.endpoint||''))
+        // Revoked bridge keeps only build/run provenance, never credentials.
+        if(window===window.top&&location.origin==='https://steamloopback.host'&&window.DeckyPluginLoader&&prior?.active===true&&/^[a-f0-9]{64}$/.test(prior.buildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&((bridge?.revoked===true&&Object.keys(bridge).length===3&&bridge.frontendBuildId===prior.buildId)||(/^[a-f0-9]{64}$/.test(bridge?.token||'')&&/^ws:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mirror$/.test(bridge?.endpoint||''))))
           deckyUpdateResidue={protocol:1,active:true,bridgePresent:true,frontendBuildId:prior.buildId};
         const emptyLoader=window.DeckyPluginLoader, emptyVersion=emptyLoader?.deckyState?.publicState?.()?.versionInfo?.current;
         if(window===window.top&&location.origin==='https://steamloopback.host'&&prior==null&&Array.isArray(emptyLoader?.plugins)&&emptyLoader.plugins.length===0&&/^[a-f0-9]{64}$/.test(bridge?.frontendBuildId||'')&&/^[a-f0-9]{32}$/.test(bridge?.runId||'')&&/^[a-f0-9]{64}$/.test(bridge?.token||'')&&new RegExp('^ws://127[.]0[.]0[.]1:[1-9][0-9]{0,4}/mirror$').test(bridge?.endpoint||'')&&/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(emptyVersion||''))
           deckyEmptyFrontend={protocol:1,frontendBuildId:bridge.frontendBuildId,loaderVersion:emptyVersion};
         if(deckyUpdateResidue){try{const loaded=window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current;if(typeof loaded==='string'&&/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(loaded)&&loaded.length<=32)deckyUpdateResidue.loaderVersion=loaded;}catch{}}
       } catch {} // Recovery evidence is optional; a read failure never grants launch.
-      return { ok: true, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
+      // Reuse sleep.session.inspect's current UI identity read. Account discovery
+      // stays read-only and account-independent for mode/CSS; Decky alone may
+      // consume this proof when ActiveUser is zero in a logged-in offline session.
+      let observedAccount;
+      try {
+        const id=window.settingsStore?.m_CMInterface?.steamid;
+        if(typeof id?.GetAccountID==='function'){
+          const account=id.GetAccountID();
+          if(Number.isInteger(account)&&account>0&&account<=0xffffffff&&
+             window.settingsStore?.m_CMInterface?.steamid===id&&id.GetAccountID()===account)observedAccount=account;
+        }
+      } catch {} // Missing/racing identity never prevents a process-wide mode read.
+      // One native CurrentUser callback per document, shared by all rebinds.
+      // The public callback carries the actual SteamID even in offline mode.
+      // Its payload is only an identity witness, never an operation request.
+      let accountWatch=window.__YMCC_DECKY_ACCOUNT_WATCH__;
+      if(!accountWatch&&typeof globalThis.SteamClient?.User?.RegisterForCurrentUserChanges==='function'&&typeof SteamClient.User.RegisterForLoginStateChange==='function'){
+        const listeners=new Set();let current=0,registered=false;
+        const read=expected=>{
+          if(!registered||!Number.isInteger(expected)||expected<=0||expected>0xffffffff||current!==expected)return false;
+          try {const id=window.settingsStore?.m_CMInterface?.steamid;
+            return typeof id?.GetAccountID==='function'&&id.GetAccountID()===expected&&
+              window.settingsStore?.m_CMInterface?.steamid===id&&id.GetAccountID()===expected;
+          }catch{return false;}
+        };
+        accountWatch={version:1,read,subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn);}};
+        // Publish the registration attempt once. If either Steam hook fails,
+        // later mode reads must not accumulate another native subscription.
+        Object.defineProperty(window,'__YMCC_DECKY_ACCOUNT_WATCH__',{value:accountWatch,configurable:true});
+        try{
+          SteamClient.User.RegisterForCurrentUserChanges(user=>{
+            let next=0;
+            try {const id=user?.strSteamID;
+              if(typeof id==='string'&&/^[1-9][0-9]{0,19}$/.test(id)){
+                const full=BigInt(id);if(full<=0xffffffffffffffffn&&((full>>52n)&15n)===1n)next=Number(full&0xffffffffn);
+              }
+            }catch{}
+            current=next;
+            // At most the current binding owns a listener. No timers, HTTP,
+            // filenames, account history, UI changes or business writes.
+            for(const fn of Array.from(listeners).slice(0,4)){try{fn();}catch{}}
+          });
+          // Login cancellation/logout can precede the CurrentUser clear. An
+          // empty login name is revocation, never proof of a replacement account.
+          SteamClient.User.RegisterForLoginStateChange(name=>{if(typeof name!=='string'||!name){current=0;for(const fn of Array.from(listeners).slice(0,4)){try{fn();}catch{}}}});
+          registered=true;
+        }catch{current=0;}
+      }
+      const deckyAccountWatchAvailable=accountWatch?.version===1&&!!observedAccount&&accountWatch.read(observedAccount);
+      // Reviewed official v3.3.1 fields. Unknown versions remain UNKNOWN;
+      // installed hooks are only a structural check, never visual acceptance.
+      let deckyBackendConnected,deckyHooksInstalled;
+      try {
+        if(window===window.top&&window.location.origin==='https://steamloopback.host'&&
+           window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current==='v3.3.1'){
+          const ws=window.DeckyBackend?.ws;
+          if(ws&&Number.isInteger(ws.readyState))deckyBackendConnected=ws.readyState===1;
+          const hooks=window.__TABS_HOOK_INSTANCE;
+          deckyHooksInstalled=!!(hooks&&hooks===window.DeckyPluginLoader.tabsHook&&hooks.qamBrowserViewPatch&&
+            Array.isArray(hooks.tabs)&&hooks.tabs.some(tab=>tab?.id===999));
+        }
+      }catch{} // Never emit credentials, router URL, source objects or exception text.
+      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
     }
     // Steam sleep captures bind the account only through this fixed read.
     // Native code pins the verified Steam PID/birth/root and never uses this to

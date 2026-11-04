@@ -15,6 +15,7 @@
 #include <vector>
 #include "deps/json/json.hpp"
 #include "native/shortcut_frontend_button.h"
+#include "native/keyboard_shortcut_sequence.h"
 using json=nlohmann::json;
 #include "current-native-types.inc"
 static json logs=json::array();
@@ -33,7 +34,7 @@ static bool nativeYmccShortcutSubmit(std::function<void()> callback,SerialJobKin
  if(kind!=SerialJobKind::YmccOwn){++forbiddenInput;throw std::runtime_error("EXTERNAL_INJECTION_FORBIDDEN");}
  if(dispatchAccepted)callback();return dispatchAccepted;
 }
-static void nativeKeyboardShortcutSend(WORD,bool,bool){++forbiddenInput;throw std::runtime_error("KEYBOARD_INPUT_FORBIDDEN");}
+static bool nativeKeyboardSequenceDispatch(const NativeKeyboardShortcutRule&,uint64_t,uint64_t,uint64_t,bool,OemProducerTokens){++forbiddenInput;throw std::runtime_error("KEYBOARD_INPUT_FORBIDDEN");}
 #include "current-native-dispatch.inc"
 #include "current-native-mapping.inc"
 namespace ymcc {using InputShortcutJson=json;

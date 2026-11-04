@@ -73,3 +73,10 @@ controller.mouse-native执行正式summonLoad和summon.set，覆盖旧ON/AUTO/OF
 完整UI仍执行720/800正式组件与engine，controller/standard-mouse必须只出现两个后端且不查询Steam灵敏度；旧配置回执不能挂载普通Steam滑块；controller/steam-mouse改为仅SteamDeck受管状态和100%滑块，A/方向调节保留；旧可控制Steam回执不能使游戏菜单开放鼠标控制。超时B关闭及普通后端切换仍须通过。所有测试只替代硬件/系统边界，不操作安装版、真实Steam/游戏/手柄。
 
 证据：D:/Codex/2026-10-21/new-chat-12/work/retire-standard-steam-mouse-20261022。安装版尚未替换，实机验收另记。
+
+
+## 自动鼠标范围与共享分类（2026-11-03）
+
+本节取代旧“仅Windows外壳”范围。普通非游戏前台默认开；YMCC、当前游戏、模拟器和游戏平台前台关闭。复用顶部游戏阀门及其规则代次，后台游戏不否决普通前台；游戏黑名单中的办公／浏览器不整体转成鼠标黑名单。7系列模拟器资料与31条游戏平台规则共享给游戏库／识别／鼠标；规则和别名来自既有源码，不另建一套EXE名单。不可变游戏发布快照及同代次规则缓存避免短暂owner锁竞争误停。手动挡、SD受管、未知前台保护及回执代次保持。无新增进程扫描／磁盘轮询／线程。
+
+说明与范围：docs/mouse-auto-application-scope-20261103.md。精确原ID controller.mouse-auto执行正式main快照消费者与Runtime，Checked／Optimized各181断言和5个既有／新增指定反例。证据在G核心Testing/YMCC/Evidence/MouseAutoScope-20261103-stable/2026-11-03T16-26-47-048Z-8af7c1c1；旧失败及先前源码轮次保留。不自动运行全局或完整UI套件，不写作安装版和实机通过。

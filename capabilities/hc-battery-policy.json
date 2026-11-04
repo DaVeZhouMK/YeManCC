@@ -12,6 +12,7 @@
     "ayaneo-ceii-bypass",
     "oxp-x1-amd-ec",
     "oxp-x1-intel-ec",
+    "oxp3-wmi-ec",
     "valve-deck-firmware",
     "gpd-win-mini-2025"
   ],
@@ -21,7 +22,8 @@
     "AYANEOAIRPro1S",
     "AYANEOFlip11",
     "AYANEONEXT2",
-    "AYANEOAIRPlusNxx"
+    "AYANEOAIRPlusNxx",
+    "OneXPlayer3"
   ],
   "disabledSourceModels": [
     {

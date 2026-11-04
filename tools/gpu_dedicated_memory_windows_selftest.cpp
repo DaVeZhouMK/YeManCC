@@ -15,6 +15,8 @@
 #include <mutex>
 #include <sstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <stdexcept>
 #include "../native/gpu_dedicated_memory_contract.h"
 namespace transport {
@@ -54,18 +56,21 @@ struct State {
     bool childMissing=false,valueMissing=false,denyWrite=false,ignoreWrite=false,versionRead=true;
     std::wstring version=L"32.0.offline";
     unsigned writes=0,registryHandles=0,kmtHandles=0,deviceSets=0,modules=0,comObjects=0;
-    unsigned integratedQueries=0,d3dCreates=0,probeCalls=0,changeOnProbe=0,fileOpens=0,denyFileOpenAt=0;
+    unsigned integratedQueries=0,d3dCreates=0,probeCalls=0,changeOnProbe=0,fileOpens=0,denyFileOpenAt=0,tempFileOpens=0,denyTempOpenAt=0;
+    bool denyJournalTemp=false,denyJournalRead=false,failRead=false,shortRead=false,failWrite=false,shortWrite=false,failFlush=false,failArchive=false,failPublish=false,corruptPublished=false;
+    std::string changeSourceOnFlush;
     enum class Change {none,config,driver,capacity,readFailure};Change change=Change::none;
     bool asusOpen=true,asusIo=true,asusIgnore=false,asusShort=false;
     DWORD asusReply=1,asusRaw=4,asusError=ERROR_NOT_SUPPORTED;
     unsigned asusHandles=0,asusReads=0,asusWrites=0,asusOpens=0,asusDenyOpenAt=0;
 } state;
 std::filesystem::path root;
+std::map<HANDLE,std::filesystem::path> journalFiles;
 std::vector<std::string> cases;
 Json responses=Json::object();
 unsigned topologyPermutations=0,uncertainCombinations=0;
 void check(bool ok,const char* label){if(!ok)throw std::runtime_error(label);cases.emplace_back(label);}
-void balanced(){if(state.registryHandles||state.kmtHandles||state.deviceSets||state.modules||state.comObjects||state.asusHandles)throw std::runtime_error("leaked transport handles");}
+void balanced(){if(!journalFiles.empty())throw std::runtime_error("leaked owned journal handles");if(state.registryHandles||state.kmtHandles||state.deviceSets||state.modules||state.comObjects||state.asusHandles)throw std::runtime_error("leaked transport handles");}
 void reset(){balanced();state=State{};ref=defaultRef;pnp=defaultPnp;std::filesystem::remove(root/L"gpu-dedicated-memory.json");}
 // Minimal IUnknown call surfaces replace only SDK interface names after SDK headers.
 // COM ownership and every production method call still run through the real reader.
@@ -188,12 +193,34 @@ HANDLE WINAPI file(LPCWSTR name,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES s
         if(++state.asusOpens==state.asusDenyOpenAt||!state.asusOpen){SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
         if(access!=(GENERIC_READ|GENERIC_WRITE)||share!=(FILE_SHARE_READ|FILE_SHARE_WRITE)||creation!=OPEN_EXISTING)throw std::runtime_error("wrong ASUS open");
         ++state.asusHandles;return reinterpret_cast<HANDLE>(std::uintptr_t(0x4001));}
-    const auto target=std::filesystem::path(name).lexically_normal();if(target!=root/L"gpu-dedicated-memory.json.tmp")throw std::runtime_error("unexpected file/device open");
-    if(++state.fileOpens==state.denyFileOpenAt){SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
-    return ::CreateFileW(name,access,share,security,creation,flags,templ);}
+    const auto target=std::filesystem::path(name).lexically_normal();const auto leaf=target.filename().wstring();
+    if(target.parent_path()!=root || (leaf!=L"gpu-dedicated-memory.json" && leaf!=L"gpu-dedicated-memory.json.tmp" && !leaf.starts_with(L"gpu-dedicated-memory.json.tmp-") && !leaf.starts_with(L"gpu-dedicated-memory.json.invalid-")))throw std::runtime_error("unexpected file/device open");
+    const bool tempDenied=access==GENERIC_WRITE && leaf.starts_with(L"gpu-dedicated-memory.json.tmp-") && (++state.tempFileOpens==state.denyTempOpenAt || state.denyJournalTemp);
+    if(++state.fileOpens==state.denyFileOpenAt || tempDenied || (state.denyJournalRead && leaf==L"gpu-dedicated-memory.json" && access==GENERIC_READ)){SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
+    const auto result=::CreateFileW(name,access,share,security,creation,flags,templ);if(result!=INVALID_HANDLE_VALUE)journalFiles[result]=target;return result;}
 BOOL WINAPI closeFile(HANDLE handle){
     if(handle==reinterpret_cast<HANDLE>(std::uintptr_t(0x4001))){--state.asusHandles;return TRUE;}
-    return ::CloseHandle(handle);}
+    journalFiles.erase(handle);return ::CloseHandle(handle);}
+BOOL WINAPI readFile(HANDLE handle,LPVOID out,DWORD count,LPDWORD read,LPOVERLAPPED overlapped){
+    if(!journalFiles.contains(handle))throw std::runtime_error("unexpected file read handle");
+    if(state.failRead){SetLastError(ERROR_READ_FAULT);return FALSE;}
+    return ::ReadFile(handle,out,state.shortRead&&count?count-1:count,read,overlapped);}
+BOOL WINAPI writeFile(HANDLE handle,LPCVOID data,DWORD count,LPDWORD written,LPOVERLAPPED overlapped){
+    if(!journalFiles.contains(handle))throw std::runtime_error("unexpected file write handle");
+    if(state.failWrite){SetLastError(ERROR_WRITE_FAULT);return FALSE;}
+    return ::WriteFile(handle,data,state.shortWrite&&count?count-1:count,written,overlapped);}
+BOOL WINAPI flushFile(HANDLE handle){
+    if(!journalFiles.contains(handle))throw std::runtime_error("unexpected file flush handle");
+    if(!state.changeSourceOnFlush.empty()){std::ofstream out(root/L"gpu-dedicated-memory.json",std::ios::binary|std::ios::trunc);out<<state.changeSourceOnFlush;state.changeSourceOnFlush.clear();}
+    if(state.failFlush){SetLastError(ERROR_WRITE_FAULT);return FALSE;}return ::FlushFileBuffers(handle);}
+BOOL WINAPI moveFile(LPCWSTR from,LPCWSTR to,DWORD flags){
+    const auto source=std::filesystem::path(from).lexically_normal(),target=std::filesystem::path(to).lexically_normal();
+    if(source.parent_path()!=root||target.parent_path()!=root||!source.filename().wstring().starts_with(L"gpu-dedicated-memory.json")||!target.filename().wstring().starts_with(L"gpu-dedicated-memory.json"))throw std::runtime_error("unexpected move path");
+    const bool archive=target.filename().wstring().starts_with(L"gpu-dedicated-memory.json.invalid-");
+    if((archive&&state.failArchive)||(!archive&&state.failPublish)){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+    const auto result=::MoveFileExW(from,to,flags);
+    if(result&&!archive&&state.corruptPublished){std::ofstream out(target,std::ios::binary|std::ios::trunc);out<<"{external-corruption";}
+    return result;}
 BOOL WINAPI control(HANDLE handle,DWORD code,LPVOID input,DWORD inputBytes,LPVOID output,DWORD outputBytes,LPDWORD returned,LPOVERLAPPED){
     if(handle!=reinterpret_cast<HANDLE>(std::uintptr_t(0x4001))||code!=0x0022240c||inputBytes<16)throw std::runtime_error("unexpected hardware IOCTL");
     const auto words=static_cast<const std::uint32_t*>(input);
@@ -238,15 +265,74 @@ BOOL WINAPI control(HANDLE handle,DWORD code,LPVOID input,DWORD inputBytes,LPVOI
 #define CreateFileW transport::file
 #define DeviceIoControl transport::control
 #define CloseHandle transport::closeFile
+#define ReadFile transport::readFile
+#define WriteFile transport::writeFile
+#define FlushFileBuffers transport::flushFile
+#define MoveFileExW transport::moveFile
 #include "../native/gpu_dedicated_memory_runtime.h"
 using namespace ymcc::dedicatedmemory;
 int main(int argc,char** argv){try{
     using namespace transport;
-    if(argc!=3)throw std::runtime_error("pass an isolated output directory and captured topology fixture");
+    if(argc!=3&&argc!=4)throw std::runtime_error("pass an isolated output directory and captured topology fixture, optional --journal-storm");
     Json captured;{std::ifstream input{std::filesystem::path(wide(argv[2]))};input>>captured;}
     if(captured.at("schema")!=1||captured.at("deviceClass")!=deviceClass||captured.at("adapters").size()!=2)throw std::runtime_error("invalid captured G3E fixture");
     root=std::filesystem::absolute(wide(argv[1])).lexically_normal()/L"journal";
     std::filesystem::create_directories(root);
+    if(argc==4&&std::string(argv[3])=="--journal-storm"){
+        WindowsOps ops(root.wstring(),deviceClass);const auto file=root/L"gpu-dedicated-memory.json";
+        const Json valid={{"schema",1},{"pnpId","PCI\\FIXTURE"},{"driverVersion","fixture-version"},{"provider","intel-gmm"},{"bootId","windows-loader-v1|{00000001-0000-0000-0000-000000000000}|1"},{"stage","prepared"},{"originalRaw",4096},{"beforeBytes",4096*mib},{"target",{{"id","mib:8192"},{"raw",8192},{"capacityMiB",8192},{"removeOverride",false}}}};
+        const auto put=[&](const std::string& bytes){std::ofstream output(file,std::ios::binary|std::ios::trunc);output<<bytes;if(!output)throw std::runtime_error("GPU fixture setup failed");};
+        const auto bytes=[&](){std::ifstream input(file,std::ios::binary);return std::string(std::istreambuf_iterator<char>(input),{});};
+        const auto archiveSet=[&](){std::set<std::filesystem::path> values;for(const auto& f:std::filesystem::directory_iterator(root))if(f.path().filename().wstring().starts_with(L"gpu-dedicated-memory.json.invalid-"))values.insert(f.path());return values;};
+        const auto exactArchive=[&](const std::set<std::filesystem::path>& before,const std::string& raw){auto after=archiveSet();std::vector<std::filesystem::path> added;for(const auto& f:after)if(!before.contains(f))added.push_back(f);check(added.size()==1,"expected one owned original archive");std::ifstream input(added.front(),std::ios::binary);check(std::string(std::istreambuf_iterator<char>(input),{})==raw,"damaged original bytes not preserved exactly");};
+        const auto noTemporary=[&](){for(const auto& f:std::filesystem::directory_iterator(root))check(!f.path().filename().wstring().starts_with(L"gpu-dedicated-memory.json.tmp-"),"owned failed temporary leaked");};
+
+        Json result=Json::array();const auto test=[&](const std::string& name,const std::function<void()>& run){try{run();result.push_back({{"name",name},{"ok",true}});}catch(const std::exception& error){result.push_back({{"name",name},{"ok",false},{"error",error.what()}});}};
+        test("healthy journal roundtrip and unknown annotations survive",[&]{auto document=valid;document["futureNotes"]={{"keep",true}};document["target"]["extension"]="keep";put(document.dump());auto current=ops.journal();check(current.ok&&current.value.has_value(),"valid journal read rejected");current.value->stage="saved";check(ops.save(*current.value),"valid journal save rejected");const auto written=Json::parse(bytes());check(written.contains("futureNotes")&&written.at("futureNotes").value("keep",false)&&written.at("target").contains("extension")&&written.at("target").at("extension")=="keep","GPU save erased unknown annotations");});
+        for(const auto& wrong:std::vector<Json>{true,1.0,"1",2,nullptr})test("invalid schema "+wrong.dump(),[&]{auto document=valid;document["schema"]=wrong;put(document.dump());const auto current=ops.journal();check(!current.ok&&!current.value,"wrong schema acquired an owned journal");});
+        for(const auto* field:{"originalRaw","beforeBytes"})for(const auto& wrong:std::vector<Json>{-1,-1.0,4096.5,"4096",true,18446744073709551615ULL}){
+          if(std::string(field)=="beforeBytes"&&wrong.is_number_unsigned())continue;
+          test(std::string("invalid ")+field+"="+wrong.dump(),[&]{auto document=valid;document[field]=wrong;put(document.dump());auto current=ops.journal();check(!current.ok&&!current.value,"invalid raw/size acquired ownership");});
+        }
+        for(const auto* field:{"raw","capacityMiB"})for(const auto& wrong:std::vector<Json>{-1,8192.5,true,"8192",18446744073709551615ULL})test(std::string("invalid target ")+field+"="+wrong.dump(),[&]{auto document=valid;document["target"][field]=wrong;put(document.dump());auto current=ops.journal();check(!current.ok&&!current.value,"invalid target numeric accepted");});
+        test("duplicate decoded owner key is not accepted",[&]{auto document=valid.dump();document.insert(1,"\"pnpId\":\"other\",");put(document);check(!ops.journal().ok,"duplicate ownership field accepted");});
+        test("deep unknown branch is bounded and inactive",[&]{std::string nested="0";for(int n=0;n<2000;++n)nested="{\"next\":"+nested+"}";auto document=valid.dump();document.pop_back();document+=",\"unknown\":"+nested+"}";put(document);check(!ops.journal().ok,"deep branch consumed as a valid journal");});
+        test("corrupt original not overwritten by prepared save",[&]{put(valid.dump());const auto trusted=ops.journal().value;put("{broken");const auto original=bytes();check(!ops.save(*trusted)&&bytes()==original,"GPU save overwrites unknown debt");});
+        test("future original not overwritten by old in-memory journal",[&]{put(valid.dump());const auto trusted=ops.journal().value;auto future=valid;future["schema"]=99;put(future.dump());const auto original=bytes();check(!ops.save(*trusted)&&bytes()==original,"GPU save downgrades future journal");});
+        test("explicit reload heals a transient corrupt read",[&]{put("{broken");check(!ops.journal().ok,"corrupt root reported healthy");put(valid.dump());check(ops.journal().ok,"healthy replacement cannot be read after corrupt state");});
+        test("oversized journal is bounded and original preserved",[&]{put(std::string(65537,'x'));const auto original=bytes();check(!ops.journal().ok&&bytes()==original,"oversized journal consumed or changed");});
+
+        unsigned rawCase=0;
+        for(const auto& raw:std::vector<std::string>{"", "null", "[]", "true", "{broken", std::string("\xff\xfe\0\0",4), std::string(65537,'x'), "{\"schema\":1,\"pnpId\":\"x\",\"\\u0070npId\":\"y\"}"})test("bounded damaged fallback "+std::to_string(++rawCase),[&]{
+            reset();put(raw);const auto archives=archiveSet();const auto current=read(ops);
+            check(current.ok&&!current.journal&&current.journalRecovered&&!current.journalRecoveryRequired,"damaged record did not recover to absent trustworthy journal");
+            check(current.snapshot.dedicatedBytes==4096*mib&&verification(current.snapshot,current.journal)=="none"&&state.writes==0&&state.asusWrites==0,"metadata fallback fabricated capacity or mutated hardware");
+            check(!std::filesystem::exists(file),"corrupt active journal not retired");exactArchive(archives,raw);check(read(ops).ok,"ordinary read after recovery failed");balanced();
+        });
+        for(const auto& key:std::vector<std::string>{"schema","pnpId","driverVersion","provider","bootId","stage","originalRaw","beforeBytes","target"})test("missing field "+key+" cannot own history",[&]{reset();auto damaged=valid;damaged.erase(key);put(damaged.dump());check(!ops.journal().ok,"missing required field accepted");});
+        for(const auto& key:std::vector<std::string>{"pnpId","driverVersion","provider","bootId","stage"})for(const auto& wrong:std::vector<Json>{nullptr,false,Json::array(),""})test("invalid identity "+key+"="+wrong.dump(),[&]{reset();auto damaged=valid;damaged[key]=wrong;put(damaged.dump());check(!ops.journal().ok,"invalid journal identity accepted");});
+        for(const auto& change:std::vector<std::pair<std::string,Json>>{{"id","mib:4096"},{"id","auto"},{"removeOverride",true},{"removeOverride",1},{"capacityMiB",0},{"raw",0}})test("target semantic mismatch "+change.first+"="+change.second.dump(),[&]{reset();auto damaged=valid;damaged["target"][change.first]=change.second;put(damaged.dump());check(!ops.journal().ok,"inconsistent option accepted");});
+        test("known future marker before deep branch remains protected",[&]{reset();std::string branch="0";for(int n=0;n<2000;++n)branch="{\"next\":"+branch+"}";const auto raw="{\"schema\":99,\"unknown\":"+branch+"}";put(raw);const auto archives=archiveSet();const auto current=read(ops);check(!current.ok&&!current.journal&&!current.journalRecovered&&bytes()==raw&&archiveSet()==archives,"deep future metadata downgraded or archived");balanced();});
+        test("known future marker before oversized branch remains protected",[&]{reset();const auto raw=std::string("{\"schema\":99,\"unknown\":\"")+std::string(70000,'x')+"\"}";put(raw);const auto archives=archiveSet();check(!read(ops).ok&&bytes()==raw&&archiveSet()==archives,"oversized future metadata downgraded");balanced();});
+        test("future schema keeps original and refuses application",[&]{reset();auto future=valid;future["schema"]=99;put(future.dump());const auto raw=bytes();const auto before=read(ops);auto applied=apply(ops,fence(before.snapshot),"mib:8192",true);check(!before.ok&&!applied.ok&&bytes()==raw&&state.writes==0,"future record modified or consumed");balanced();});
+        test("archive failure keeps corrupt original and next read retries",[&]{reset();put("{broken");const auto archives=archiveSet();state.failArchive=true;auto before=read(ops);check(!before.ok&&before.journalRecoveryRequired&&bytes()=="{broken"&&archiveSet()==archives&&state.writes==0,"archive failure discarded original or exposed controls");state.failArchive=false;auto after=read(ops);check(after.ok&&after.journalRecovered,"released archive failure cannot heal");exactArchive(archives,"{broken");balanced();});
+        for(const auto fault:std::vector<std::string>{"denied","failed","short"})test("read "+fault+" is protected and retryable",[&]{reset();put(valid.dump());const auto raw=bytes();const auto archives=archiveSet();state.denyJournalRead=fault=="denied";state.failRead=fault=="failed";state.shortRead=fault=="short";auto before=read(ops);check(!before.ok&&bytes()==raw&&archiveSet()==archives&&state.writes==0,"IO failure masqueraded as damaged or missing record");state.denyJournalRead=state.failRead=state.shortRead=false;check(read(ops).ok,"released IO failure cannot reload");balanced();});
+        for(const auto fault:std::vector<std::string>{"open","write","short","flush","publish"})test("save "+fault+" preserves source and allows explicit retry",[&]{reset();put(valid.dump());auto current=ops.journal();check(current.ok&&current.value.has_value(),"setup journal invalid");const auto raw=bytes();auto next=*current.value;next.stage="saved";
+            state.denyFileOpenAt=fault=="open"?state.fileOpens+2:0;state.failWrite=fault=="write";state.shortWrite=fault=="short";state.failFlush=fault=="flush";state.failPublish=fault=="publish";
+            check(!ops.save(next)&&bytes()==raw&&state.writes==0,"failed publication changed source or acknowledged saved");noTemporary();balanced();
+            state.denyFileOpenAt=0;state.failWrite=state.shortWrite=state.failFlush=state.failPublish=false;check(ops.save(next)&&Json::parse(bytes()).at("stage")=="saved","save failure not retryable");noTemporary();balanced();
+        });
+        test("source changed between read and save remains untouched",[&]{reset();put(valid.dump());auto original=ops.journal();auto changed=valid;changed["otherWriter"]="retained";put(changed.dump());const auto raw=bytes();check(!ops.save(*original.value)&&bytes()==raw,"stale source overwrote another writer");auto fresh=ops.journal();check(ops.save(*fresh.value)&&Json::parse(bytes()).at("otherWriter")=="retained","fresh source cannot preserve unknown sibling");balanced();});
+        test("source changed during temporary preparation refuses commit",[&]{reset();put(valid.dump());auto current=ops.journal();auto changed=valid;changed["otherWriter"]="retained";state.changeSourceOnFlush=changed.dump();check(!ops.save(*current.value)&&Json::parse(bytes()).at("otherWriter")=="retained","last source check missed concurrent writer");noTemporary();auto fresh=ops.journal();check(ops.save(*fresh.value),"explicit retry after concurrent writer failed");balanced();});
+        test("independent post-publication corruption is not success",[&]{reset();put(valid.dump());auto current=ops.journal();state.corruptPublished=true;check(!ops.save(*current.value),"unverified publication reported saved");check(bytes()=="{external-corruption","external postpublication original unexpectedly replaced");state.corruptPublished=false;const auto archives=archiveSet();auto after=read(ops);check(after.ok&&after.journalRecovered&&!after.journal,"corrupt published record cannot recover safely");exactArchive(archives,"{external-corruption");noTemporary();balanced();});
+        test("two independent WindowsOps readers reject stale second writer",[&]{reset();put(valid.dump());WindowsOps second(root.wstring(),deviceClass);auto first=ops.journal();auto stale=second.journal();auto next=*first.value;next.stage="saved";check(ops.save(next),"first writer failed");check(!second.save(*stale.value)&&Json::parse(bytes()).at("stage")=="saved","second stale writer reverted stage");check(second.journal().ok&&second.save(next),"second writer cannot reload and retry");balanced();});
+        test("ROG public damaged read defaults to actual capacity without a write",[&]{reset();pnp=LR"(PCI\VEN_1002&DEV_OFFLINE\ROG)";state.adapters[0].vendor=0x1002;state.adapters[0].bytes=2048*mib;put("{broken");const auto archives=archiveSet();const auto before=runtimeRead(root.wstring(),"HandheldCompanion.Devices.ROGAllyX");check(before.at("ok")&&before.at("available")&&before.at("journalRecovered")&&before.at("verification")=="none"&&before.at("dedicatedBytes")==2048*mib&&state.asusWrites==0&&state.writes==0,"public recovery invented capacity or mutated firmware");exactArchive(archives,"{broken");const auto pending=runtimeApply(root.wstring(),"HandheldCompanion.Devices.ROGAllyX",Json{{"fence",before.at("fence")},{"option","mib:4096"},{"confirmed",true}});check(pending.at("ok")&&pending.at("verification")=="pending_restart"&&pending.at("dedicatedBytes")==2048*mib&&state.asusWrites==1&&state.writes==0,"public recovery cannot use original confirmed write and readback path");balanced();});
+        test("ROG same current target after recovery stays a no-op",[&]{reset();pnp=LR"(PCI\VEN_1002&DEV_OFFLINE\ROG)";state.adapters[0].vendor=0x1002;state.adapters[0].bytes=2048*mib;put("{broken");const auto before=runtimeRead(root.wstring(),"HandheldCompanion.Devices.ROGAllyX");const auto after=runtimeApply(root.wstring(),"HandheldCompanion.Devices.ROGAllyX",Json{{"fence",before.at("fence")},{"option",before.at("selected")},{"confirmed",true}});check(after.at("ok")&&after.at("verification")=="none"&&state.asusWrites==0&&!std::filesystem::exists(file),"recovery retriggered current target or invented pending proof");balanced();});
+        test("public Intel support gate survives metadata recovery",[&]{reset();put("{broken");const auto before=runtimeRead(root.wstring(),deviceClass);check(before.at("ok")&&!before.at("available").get<bool>()&&before.at("settingRoute")=="read-only"&&before.at("journalRecovered"),"recovery bypassed public Intel support policy");const auto after=runtimeApply(root.wstring(),deviceClass,Json{{"fence",before.at("fence")},{"option","mib:8192"},{"confirmed",true}});check(!after.at("ok").get<bool>()&&state.writes==0&&state.asusWrites==0,"unsupported Intel setter became writable");balanced();});
+        unsigned failed=0;for(const auto& item:result)if(!item.at("ok").get<bool>())++failed;
+        const Json report={{"status",failed?"FAIL":"PASS"},{"caseCount",result.size()},{"failed",failed},{"cases",result},{"hardwareIo",false},{"actualJournalReadAndSave",true}};
+        std::ofstream(root.parent_path()/L"journal-storm.json")<<report.dump(2);std::cout<<report.dump()<<'\n';return failed?1:0;
+    }
     // Legacy Intel transport is exercised below the public support policy. These
     // diagnostic candidate responses are deliberately inadmissible in the real UI.
     const auto readNow=[](){Json diagnostics;WindowsOps ops(root.wstring(),deviceClass,&diagnostics);auto j=resultJson(read(ops));j["readDiagnostics"]=std::move(diagnostics);balanced();return j;};
@@ -286,7 +372,7 @@ int main(int argc,char** argv){try{
     check(mismatchVerified.at("verification")=="verified"&&mismatchVerified.at("dedicatedBytes")==8192*mib,"preexisting target verifies only after exact dedicated capacity on a new boot");responses["configured8-actual128-verified"]=mismatchVerified;
     const auto mismatchEffectiveNoop=applyNow(mismatchVerified,"mib:8192");
     check(mismatchEffectiveNoop.at("ok")&&state.writes==1,"already effective same target retains idempotent production behavior");
-    reset();state.raw=8192;state.adapters[0].bytes=128*mib;auto mismatchBeforeFailure=readNow();state.denyFileOpenAt=1;
+    reset();state.raw=8192;state.adapters[0].bytes=128*mib;auto mismatchBeforeFailure=readNow();state.denyJournalTemp=true;
     check(!applyNow(mismatchBeforeFailure,"mib:8192").at("ok").get<bool>()&&state.writes==0,"preexisting same-target reapply cannot bypass original-record failure");
     reset();state.raw=8192;state.adapters[0].bytes=128*mib;mismatchBeforeFailure=readNow();state.denyWrite=true;
     check(!applyNow(mismatchBeforeFailure,"mib:8192").at("ok").get<bool>()&&state.writes==0,"matching existing registry value cannot turn denied reapply into success");
@@ -487,9 +573,9 @@ int main(int argc,char** argv){try{
     check(lostRead.at("writeDiagnostics").at("acknowledged")==true&&lostRead.at("writeDiagnostics").at("configurationReadback")==false&&
         lostRead.at("writeDiagnostics").at("capacityRead")==false&&lostRead.at("writeDiagnostics").at("dedicatedBytes").is_null(),
         "post-write read failure returns no invented zero capacity");
-    reset();before=readNow();state.denyFileOpenAt=1;const auto noJournal=applyNow(before,"mib:8192");
+    reset();before=readNow();state.denyTempOpenAt=1;const auto noJournal=applyNow(before,"mib:8192");
     check(!noJournal.at("ok").get<bool>()&&state.writes==0&&noJournal.at("selected")=="mib:4096","prepared journal failure prevents any registry mutation");responses["journal-before-failed"]=noJournal;
-    reset();before=readNow();state.denyFileOpenAt=2;const auto saveJournalFailed=applyNow(before,"mib:8192");
+    reset();before=readNow();state.denyTempOpenAt=2;const auto saveJournalFailed=applyNow(before,"mib:8192");
     check(!saveJournalFailed.at("ok").get<bool>()&&state.writes==1&&saveJournalFailed.at("verification")=="unconfirmed","final journal failure never reports configuration verified");responses["journal-after-failed"]=saveJournalFailed;
     state.boot=2;state.adapters[0].bytes=8192*mib;check(readNow().at("verification")=="unconfirmed","prepared journal remains unconfirmed even with exact new boot capacity");
     reset();before=readNow();auto pending=applyNow(before,"mib:8192");check(pending.at("ok")&&state.writes==1&&pending.at("selected")=="mib:8192"&&pending.at("verification")=="pending_restart"&&pending.at("dedicatedBytes")==4096*mib,"saved target stays pending with actual 4 GiB capacity");responses["pending"]=pending;
@@ -504,7 +590,8 @@ int main(int argc,char** argv){try{
     reset();before=readNow();auto autoPending=applyNow(before,"auto");check(autoPending.at("ok")&&state.valueMissing&&autoPending.at("verification")=="pending_restart"&&autoPending.at("selected")=="auto","Auto deletes only bound DedicatedSegmentSize and waits for boot");responses["auto-pending"]=autoPending;
     state.boot=2;state.adapters[0].bytes=512*mib;auto defaultRead=readNow();check(defaultRead.at("verification")=="default_read"&&defaultRead.at("dedicatedBytes")==512*mib,"Auto after reboot reports actual default capacity");responses["auto-default"]=defaultRead;
     {std::ofstream bad(root/L"gpu-dedicated-memory.json");bad<<"corrupt";}
-    hidden("显存设置记录无法读取","corrupt journal cannot expose controls");
+    state.failArchive=true;hidden("显存设置记录无法读取","unpreserved corrupt journal cannot expose controls");
+    state.failArchive=false;const auto recovered=readNow();check(recovered.at("ok")&&recovered.at("available")&&recovered.at("journalRecovered")&&recovered.at("verification")=="none"&&recovered.at("dedicatedBytes")==512*mib,"preserved corrupt journal recovers to live default without inventing proof");
     balanced();std::filesystem::remove(root/L"gpu-dedicated-memory.json");
 
     const auto prepareRog=[](){reset();pnp=LR"(PCI\VEN_1002&DEV_OFFLINE\ROG)";state.adapters[0].vendor=0x1002;state.adapters[0].name=L"AMD Radeon (offline ASUS transport)";state.adapters[0].bytes=2048*mib;};

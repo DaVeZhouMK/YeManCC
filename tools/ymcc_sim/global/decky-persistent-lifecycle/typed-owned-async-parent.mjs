@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import {reconstructTypedAsyncOriginalContract,verifyTypedAsyncReadyExtraction} from './typed-async-parent.mjs';
+import {reconstructTypedAsyncOriginalContract,verifyTypedAsyncReadyExtraction,validateTypedLegacySharedReference} from './typed-async-parent.mjs';
 import {inspectOwnedAsyncNative} from './typed-owned-async-native.mjs';
 
 const MODULE = 'tools/ymcc_sim/global/decky-persistent-lifecycle';
@@ -45,9 +45,12 @@ export function validateOwnedAsyncParentEnvelope(value) {
   assert.deepEqual(Object.keys(value.budgets).sort(), [...Object.keys(BUDGETS), 'reference'].sort());
   for (const [name, ms] of Object.entries(BUDGETS)) assert.equal(value.budgets[name], ms, fail('BUDGET:') + name);
   integer(value.elapsedMs, fail('OUTER_ELAPSED')); assert(value.elapsedMs <= 135000, fail('OUTER_DEADLINE'));
-  assert.deepEqual(value.executions.map(row => row.id), ['legacy-compile','legacy-native','typed-compile','typed-native']);
+  const shared = value.legacyRegression.status === 'SHARED_REFERENCE';
+  assert.deepEqual(value.executions.map(row => row.id), shared ? ['typed-compile','typed-native'] :
+    ['legacy-compile','legacy-native','typed-compile','typed-native'], fail('EXECUTION_MEMBERSHIP'));
   let total = 0;
-  value.executions.forEach((row, i) => {
+  value.executions.forEach((row, index) => {
+    const i = shared ? index + 2 : index;
     const cap = i % 2 === 0 ? 60000 : 20000;
     assert.equal(row.originalBudgetMs, cap, fail('PROCESS_BUDGET'));
     assert(row.timeoutMs > 0 && row.timeoutMs <= cap, fail('PROCESS_TIMEOUT'));
@@ -59,7 +62,22 @@ export function validateOwnedAsyncParentEnvelope(value) {
   assert(total <= value.elapsedMs, fail('SHARED_OUTER_BUDGET'));
   assert.equal(value.legacyRegression.source, LEGACY);
   assert.equal(value.legacyRegression.historicalResultsReclassified, false);
-  assert(['PASS','FAIL'].includes(value.legacyRegression.status), fail('LEGACY_NOT_EXECUTED'));
+  if (shared) {
+    assert.equal(value.legacyRegression.producerStatus, 'PASS', fail('LEGACY_SHARED_PRODUCER_STATUS'));
+    assert.equal(value.legacyRegression.executionKind, 'SHARED_REFERENCE', fail('LEGACY_SHARED_EXECUTION_KIND'));
+    assert.equal(value.legacyRegression.executedThisRun, false, fail('LEGACY_SHARED_NOT_EXECUTED'));
+    assert.equal(value.legacyRegression.actualPassedThisRun, false, fail('LEGACY_SHARED_NOT_ACTUAL_PASS'));
+    assert.equal(value.legacyRegression.naturalExit, 0, fail('LEGACY_SHARED_NATURAL_EXIT'));
+    for (const name of ['reference','context']) assert(value.legacyRegression[name] &&
+      typeof value.legacyRegression[name] === 'object' && !Array.isArray(value.legacyRegression[name]), fail('LEGACY_SHARED_STRUCTURE:')+name);
+  } else {
+    assert(['PASS','FAIL'].includes(value.legacyRegression.status), fail('LEGACY_NOT_EXECUTED'));
+    assert(!Object.hasOwn(value.legacyRegression, 'reference') && !Object.hasOwn(value.legacyRegression, 'context'), fail('LEGACY_MIXED_REFERENCE'));
+    const actual = {producerStatus:value.legacyRegression.status,executionKind:'ACTUAL_EXECUTION',
+      executedThisRun:true,actualPassedThisRun:value.legacyRegression.status === 'PASS'};
+    for (const [name, expected] of Object.entries(actual)) if (Object.hasOwn(value.legacyRegression, name))
+      assert.equal(value.legacyRegression[name], expected, fail('LEGACY_MIXED_EXECUTION:')+name);
+  }
   assert.equal(value.nodeToolProof.sourceApprovalGranted, false);
   assert(/^[a-f0-9]{64}$/.test(value.nodeToolProof.graphSha256), fail('NODE_GRAPH_PIN'));
   return value;
@@ -69,17 +87,27 @@ export function validateOwnedAsyncParentEnvelope(value) {
  * trusted result pin. Never derive new approval hashes from the child receipt.
  * sourcePins: Map<repo-relative path, sha256>; toolPins: Map<canonical path, pin>.
  * workRoot/evidenceRoot are the exact original child's roots, not umbrella roots.
+ * legacyReference binds a shared V1 legacy result to the caller's current parent
+ * invocation; envelope labels alone never authorize sharing.
  * Frozen mode additionally requires currentRepo and a separate frozen repo view;
  * its envelope always has allowAcceptance=false, including for a historical PASS.
  */
 export function validateOwnedAsyncRequestParentReceipt(value, {
   repo, evidenceRoot, workRoot, sourcePins, toolPins, receiptPin,
-  sourceMode = 'current', currentRepo = repo,
+  sourceMode = 'current', currentRepo = repo, legacyReference = null,
 }) {
   validateOwnedAsyncParentEnvelope(value);
   assert(sourcePins instanceof Map && sourcePins.size > 0, fail('SOURCE_PREBINDING_REQUIRED'));
   assert(toolPins instanceof Map && toolPins.size > 0, fail('TOOL_PREBINDING_REQUIRED'));
   assert(['current','frozen'].includes(sourceMode), fail('SOURCE_MODE'));
+  const shared = value.legacyRegression.status === 'SHARED_REFERENCE';
+  if (shared) {
+    assert.equal(sourceMode, 'current', fail('LEGACY_SHARED_CURRENT_ONLY'));
+    assert(legacyReference && typeof legacyReference === 'object' && !Array.isArray(legacyReference), fail('LEGACY_REFERENCE_REQUIRED'));
+    assert.deepEqual(Object.keys(legacyReference).sort(), ['context','reference'], fail('LEGACY_REFERENCE_OPTIONS'));
+    assert.deepEqual(value.legacyRegression.reference, legacyReference.reference, fail('LEGACY_REFERENCE_BINDING'));
+    assert.deepEqual(value.legacyRegression.context, legacyReference.context, fail('LEGACY_CONTEXT_BINDING'));
+  } else assert.equal(legacyReference, null, fail('STANDALONE_LEGACY_REFERENCE_FORBIDDEN'));
   if (sourceMode === 'frozen') assert(key(currentRepo) !== key(repo), fail('SEPARATE_FROZEN_VIEW_REQUIRED'));
   else samePath(currentRepo, repo, fail('CURRENT_REPO_FORWARDING'));
   const verify = (row, root) => {
@@ -135,11 +163,18 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   assert.deepEqual(value.originalContract, originalContract, fail('ORIGINAL_CONTRACT'));
   assert.deepEqual(read(path.join(evidenceRoot,'ORIGINAL-CONTRACT.json')), originalContract, fail('ORIGINAL_CONTRACT_FILE'));
   const runtime = fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8');
+  // Current producers declare the closed shared prefix explicitly. Historical
+  // frozen views may predate that marker; their original main boundary remains
+  // valid provenance only and still cannot authorize current acceptance.
+  const markedHelpersEnd=runtime.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END');
+  const sharedHelpersEnd=markedHelpersEnd>=0?markedHelpersEnd:sourceMode==='frozen'?runtime.indexOf('\nint main(int argc,char** argv){'):-1;
+  assert(sharedHelpersEnd>0,fail('SHARED_HELPER_BOUNDARY_REQUIRED'));
+
   const peer = fs.readFileSync(path.join(repo,'tools/decky_sidebar_bootstrap_selftest.cpp'),'utf8');
   const legacy = fs.readFileSync(path.join(repo,LEGACY),'utf8');
   const ioBegin = legacy.indexOf('                AsyncRequest request(');
   const extractions = [
-    {name:'helpers',origin:'tools/decky_binding_runtime_selftest.cpp',source:runtime,begin:0,end:runtime.indexOf('\nint main(int argc,char** argv){')},
+    {name:'helpers',origin:'tools/decky_binding_runtime_selftest.cpp',source:runtime,begin:0,end:sharedHelpersEnd},
     {name:'local-peer',origin:'tools/decky_sidebar_bootstrap_selftest.cpp',source:peer,begin:0,end:peer.indexOf('\nint main()')},
     {name:'original-io',origin:LEGACY,source:legacy,begin:ioBegin,end:legacy.indexOf('\n            }catch',ioBegin)},
   ];
@@ -178,7 +213,8 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
     [...flags,'/Bv','/W4','/WX','/UYMCC_DECKY_RUNTIME_LEGACY_FIXTURE',path.join(workRoot,'s',DRIVER+'.cpp'),'/sourceDependencies',path.join(workRoot,'d.json'),'/Fo'+path.join(workRoot,'p.obj'),'/Fe'+exe,'/link',...typedLinkFlags,...libraries],
     [path.join(workRoot,'binding-fixtures')],
   ];
-  value.executions.forEach((row, i) => {
+  value.executions.forEach((row, index) => {
+    const i = shared ? index + 2 : index;
     assert.deepEqual(row.args, expectedArgs[i], fail('COMMAND_CHANGED:')+row.id);
     samePath(row.cwd, i < 2 ? old : workRoot, fail('PROCESS_CWD'));
     samePath(row.program.path, i % 2 === 0 ? native.compiler : i === 1 ? path.join(old,'legacy.exe') : exe, fail('PROCESS_PROGRAM'));
@@ -191,7 +227,10 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
     assert.deepEqual(read(path.join(evidenceRoot,row.id+'.process.json')),row,fail('PROCESS_ORIGINAL'));
   });
   const graphCounts = [];
-  for (const [i, graphPin] of [value.legacyRegression.compilerGraph, value.compilerGraph].entries()) {
+  // Shared legacy provenance is checked by the helper below, outside V2's tree.
+  // Counts here describe only graphs independently consumed from this V2 run.
+  const compilerGraphs = shared ? [[1, value.compilerGraph]] : [[0, value.legacyRegression.compilerGraph], [1, value.compilerGraph]];
+  for (const [i, graphPin] of compilerGraphs) {
     samePath(graphPin.path,path.join(i === 0 ? old : workRoot,'d.json'),fail('GRAPH_PATH')); verify(graphPin,workRoot);
     const graph = read(graphPin.path); assert.equal(graph.Version,'1.2');
     const files = [graph.Data.Source,...graph.Data.Includes];
@@ -213,7 +252,8 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   const artifactPaths = [exe,path.join(workRoot,'bin/cef/fixture/steamwebhelper.exe'),path.join(workRoot,'p.obj')];
   value.nativeArtifacts.forEach((row,i)=>{samePath(row.path,artifactPaths[i],fail('NATIVE_ARTIFACT_MEMBERSHIP'));verify(row,workRoot);});
   assert.equal(value.nativeArtifacts[0].sha256,value.nativeArtifacts[1].sha256,fail('CEF_SELF_IMAGE'));
-  assert.deepEqual(value.nativeArtifacts[0],value.executions[3].program,fail('EXECUTED_NATIVE_IDENTITY'));
+  const typedNative = value.executions.find(row => row.id === 'typed-native');
+  assert.deepEqual(value.nativeArtifacts[0],typedNative.program,fail('EXECUTED_NATIVE_IDENTITY'));
   const nativeImage=fs.readFileSync(exe),nativePe=nativeImage.readUInt32LE(0x3c);
   assert(nativePe>=0x40&&nativePe+94<=nativeImage.length&&nativeImage.readUInt32LE(nativePe)===0x4550,fail('NATIVE_PE_HEADER'));
   assert.equal(nativeImage.readUInt16LE(nativePe+4),0x8664,fail('NATIVE_X64'));
@@ -225,7 +265,7 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   const raw = read(value.raw.path);
   const workRaw = path.join(workRoot,'native-result-v2.json'); assert.equal(digest(workRaw),value.raw.sha256,fail('NATIVE_RAW_COPY'));
   const stdoutValue = row => JSON.parse(fs.readFileSync(row.stdout.path,'utf8').trim().split(/\r?\n/).at(-1));
-  assert.deepEqual(stdoutValue(value.executions[3]),raw,fail('NATIVE_STDOUT'));
+  assert.deepEqual(stdoutValue(typedNative),raw,fail('NATIVE_STDOUT'));
   const observations=new Map();assert(Array.isArray(value.controls)&&value.controls.length===10,fail('CONTROL_RAW_COUNT'));
   for(const row of value.controls){assert(/^[a-f0-9]{32}$/.test(row.nonce??''));assert(!observations.has(row.nonce),fail('CONTROL_RAW_NONCE_REUSE'));samePath(row.raw.path,path.join(evidenceRoot,'controls','control-'+row.nonce+'.json'),fail('CONTROL_RAW_PATH'));verify(row.raw,evidenceRoot);const original=path.join(workRoot,'control-'+row.nonce+'.json');assert.equal(digest(original),row.raw.sha256,fail('CONTROL_NATIVE_RAW_COPY'));const value=read(row.raw.path);assert.equal(value.id,row.nonce);assert.deepEqual(value.identity,row.childIdentity);observations.set(row.nonce,value);}
   const reconstructed=inspectOwnedAsyncNative(raw,{executablePath:exe,observations});reconstructed.missingPredicates=[];
@@ -240,10 +280,20 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   const originalLegacy = read(path.join(evidenceRoot,'LEGACY-RESULT.json'));
   assert.deepEqual(value.legacyRegression,originalLegacy,fail('INDEPENDENT_LEGACY_RESULT'));
   const oldRun = originalLegacy;
-  assert.deepEqual(oldRun.compile,value.executions[0],fail('LEGACY_COMPILE_RECEIPT'));
-  samePath(oldRun.raw.path,path.join(old,'binding-cancel-results.json'),fail('LEGACY_RAW_PATH')); verify(oldRun.raw,workRoot);
+  if (shared) {
+    const qualifiedLegacy = validateTypedLegacySharedReference(legacyReference.reference, {
+      repo, sourcePins, toolPins, expectedContext:legacyReference.context,
+      consumerStartedAt:value.startedAt, consumerWorkRoot:workRoot,
+    });
+    assert.deepEqual(qualifiedLegacy, value.legacyRegression, fail('LEGACY_SHARED_RESULT'));
+    assert.deepEqual(qualifiedLegacy, oldRun, fail('LEGACY_SHARED_RESULT_FILE'));
+    verify(oldRun.raw);
+  } else {
+    assert.deepEqual(oldRun.compile,value.executions[0],fail('LEGACY_COMPILE_RECEIPT'));
+    samePath(oldRun.raw.path,path.join(old,'binding-cancel-results.json'),fail('LEGACY_RAW_PATH')); verify(oldRun.raw,workRoot);
+  }
   const legacyRaw = read(oldRun.raw.path); assert.deepEqual(oldRun.rawValue,legacyRaw,fail('LEGACY_RAW'));
-  assert.deepEqual(stdoutValue(value.executions[1]),legacyRaw,fail('LEGACY_STDOUT'));
+  if (!shared) assert.deepEqual(stdoutValue(value.executions[1]),legacyRaw,fail('LEGACY_STDOUT'));
   assert.deepEqual(legacyRaw.cases.map(r=>r.kind),KINDS,fail('LEGACY_CASES'));
   const legacyOkay = legacyRaw.cases.map(row => {
     assert.equal(row.deadlineMs,1500); integer(row.shutdownMs,fail('LEGACY_SHUTDOWN_MS'));
@@ -251,7 +301,8 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
       row.ownedChildExitObserved === true && row.requestCallbackOwnersReleased === true && row.offSurvivedLateRequests === true;
     assert.equal(row.ok,okay,fail('LEGACY_CONDITIONS')); return okay;
   }).every(Boolean);
-  assert.equal(legacyRaw.ok,legacyOkay); assert.equal(oldRun.status,legacyOkay?'PASS':'FAIL');
+  const legacyStatus = shared ? oldRun.producerStatus : oldRun.status;
+  assert.equal(legacyRaw.ok,legacyOkay); assert.equal(legacyStatus,legacyOkay?'PASS':'FAIL');
   assert.equal(oldRun.naturalExit,legacyOkay?0:1);
   assert.equal(legacyRaw.realSteamActions,0); assert.equal(legacyRaw.officialLoaderExecuted,false);
   assert.equal(value.passed,reconstructed.passed && legacyOkay,fail('RESULT_VERDICT'));
@@ -278,8 +329,12 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
     acceptanceScope:'typed-worker-owned-subtree-v2',sameProcessLibraryNaturalZeroClaim:'NOT_ASSERTED_BY_TYPED_ISOLATION_SCOPE',status:value.passed?'CURRENT_TYPED_OWNED_ASYNC_REQUEST_SATISFIED':'CURRENT_TYPED_OWNED_ASYNC_REQUEST_FAIL',
     currentSourceStatus:staleSources.length?'STALE':'CURRENT',sourceMode,staleSources,
     fullPersistentAcceptance:false,summary:reconstructed.summary,missingPredicates,ordered:reconstructed.ordered,
-    result:receiptPin,raw:value.raw,mapping:value.mapping,legacy:{status:oldRun.status,raw:oldRun.raw,independentlyExecuted:true},
-    checked:{sources:sourceSeen.size,tools:toolSeen.size,compilerGraphs:graphCounts,generated:value.generated.length,originalPredicates:72,ownedDirectControls:10},
+    result:receiptPin,raw:value.raw,mapping:value.mapping,legacy:{status:legacyStatus,raw:oldRun.raw,independentlyExecuted:!shared,
+      executionKind:shared?'SHARED_REFERENCE':'ACTUAL_EXECUTION',executedThisRun:!shared,actualPassedThisRun:!shared&&legacyStatus==='PASS'},
+    checked:{sources:sourceSeen.size,tools:toolSeen.size,compilerGraphs:graphCounts,
+      ...(shared?{legacyCompilerGraphReference:{reference:oldRun.reference,compilerGraph:oldRun.compilerGraph,
+        executionKind:'SHARED_REFERENCE',executedThisRun:false,verifiedBy:'validateTypedLegacySharedReference'}}:{}),
+      generated:value.generated.length,originalPredicates:72,ownedDirectControls:10},
     boundary:'Completed original files only; frozen historical evidence cannot authorize current-source acceptance. No installed Steam/Loader, real browser/physical sleep, complete parent lifecycle or power claim.'};
 }
 

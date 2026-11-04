@@ -54,6 +54,7 @@ inline InputShortcutJson inputShortcutGyroParams(const InputShortcutJson& motion
         if (preset == "fps") {
             params["outputStick"] = "right"; params["outputAxis"] = "xy";
             params["motionInput"] = "local-space"; params["aimingSightsTrigger"] = "LT";
+            params["gyroWeight"] = 1.3;
         } else if (preset == "racing") {
             params["outputStick"] = "left"; params["outputAxis"] = "x";
             params["motionInput"] = "joystick-steering";
@@ -63,8 +64,26 @@ inline InputShortcutJson inputShortcutGyroParams(const InputShortcutJson& motion
     const auto trigger = inputShortcutString(params, "motionTrigger");
     params.erase("gyroMode");
     params["motionMode"] = mode == "suppress" ? "on" : mode;
-    params["motionTrigger"] = mode == "on" || trigger.empty() ? InputShortcutJson(nullptr) : InputShortcutJson(trigger);
+    params["motionTrigger"] = mode == "on" ? InputShortcutJson(nullptr) : InputShortcutJson(trigger.empty() ? "LT" : trigger);
     return params;
+}
+// Explicit linked opening shares the gyro page's selected-preset transaction.
+// A valid legacy top-level trigger is preserved when no preset bank exists.
+inline InputShortcutJson inputShortcutLinkedGyroMotion(InputShortcutJson motion) {
+    auto preset = inputShortcutString(motion, "activePreset");
+    if (!inputShortcutGyroPreset(preset)) preset = inputShortcutString(motion, "preset");
+    if (!inputShortcutGyroPreset(preset)) preset = "fps";
+    const auto presets = inputShortcutObject(motion, "presets");
+    const auto stored = presets.find(preset);
+    const auto mode = inputShortcutString(motion, "motionMode");
+    const auto trigger = inputShortcutString(motion, "motionTrigger");
+    const bool configured = mode == "on" || ((mode == "off" || mode == "toggle") &&
+        trigger.find_first_not_of(" \t\r\n") != std::string::npos);
+    if ((stored != presets.end() && stored->is_object()) || !configured)
+        motion.update(inputShortcutGyroParams(motion, preset));
+    motion["preset"] = preset; motion["activePreset"] = preset;
+    motion["enabled"] = true; motion["outputMode"] = "virtual-stick";
+    return motion;
 }
 struct InputShortcutToggleResult {
     bool ok = false;
@@ -124,7 +143,7 @@ public:
             // Opening respects the user's existing virtualPadLink preference.
             if (!enable || inputShortcutBool(motion, "virtualPadLink", true)) {
                 target["gyroEnabled"] = enable; motion["enabled"] = enable;
-                if (enable) motion["outputMode"] = "virtual-stick";
+                if (enable) motion = inputShortcutLinkedGyroMotion(std::move(motion));
             }
         }
         context_ = context; target_ = std::move(target); motion_ = std::move(motion);

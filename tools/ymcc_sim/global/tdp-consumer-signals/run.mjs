@@ -31,7 +31,7 @@ function walk(root){const files=[];function visit(dir){for(const entry of fs.rea
 export async function runTdpConsumer(root,{repoRoot=REPO}={}){
  need(path.isAbsolute(root)&&!inside(repoRoot,root)&&!fs.existsSync(root),'TDP_FRESH_EXTERNAL_EVIDENCE_REQUIRED');
  const spec=read(path.join(repoRoot,MODULE,'spec.json')),tool=resolveTdpToolchain(repoRoot,read(path.join(repoRoot,MODULE,'toolchain-inputs.json')));
- need(spec.schemaVersion===1&&spec.expectedNames.length===20&&tool.schemaVersion===1&&tool.files.length===5,'TDP_PROFILE_INVALID');
+ need(spec.schemaVersion===1&&spec.expectedNames.length===87&&tool.schemaVersion===1&&tool.files.length===5,'TDP_PROFILE_INVALID');
  need(fs.realpathSync(process.execPath)===fs.realpathSync(tool.nodeExecutable),'TDP_NODE_IDENTITY');
  for(const file of tool.files)need(hash(file.path)===file.sha256,'TDP_TOOLCHAIN_IDENTITY');
  const scope=beginTdpScope(repoRoot,spec.sourceInputs,tool);

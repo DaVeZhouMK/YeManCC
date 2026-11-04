@@ -6,6 +6,9 @@ scratch-only compiled fixture pin. The shipping setter is separately checked to
 reject that fixture and may only execute unsupported (pre-open) capability tests.
 """
 import argparse
+import sys
+
+sys.dont_write_bytecode = True
 import hashlib
 import json
 import os
@@ -22,8 +25,35 @@ BLOCKED = {'HandheldCompanion', 'Shared', 'PresentationCore', 'PresentationFrame
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--scratch', required=True)
+    parser.add_argument('--case', action='append', choices=('x2mini', 'x2mini-wire', 'x2mini-admission', 'x2mini-terminal', 'x2mini-negative-controls'))
+    parser.add_argument('--resume-from', type=pathlib.Path, action='append')
+    parser.add_argument('--resume-sha256', action='append')
     args = parser.parse_args()
+    for name in ('resume_from', 'resume_sha256'):
+        values = getattr(args, name)
+        if values is not None and len(values) != 1:
+            parser.error('resume arguments must not be repeated')
+        setattr(args, name, values[0] if values else None)
+    if args.resume_sha256 is not None and args.resume_from is None:
+        parser.error('--resume-sha256 requires --resume-from')
+    if args.resume_from is not None and args.resume_sha256 is None:
+        import re
+        pin = re.fullmatch(r'RESUME-ADMISSION\.([a-f0-9]{64})\.json', args.resume_from.name)
+        if not pin:
+            parser.error('resume requires an explicit --resume-sha256 or hash-named RESUME-ADMISSION receipt')
+        args.resume_sha256 = pin.group(1)
+    if args.resume_sha256 is not None:
+        import re
+        if not re.fullmatch(r'[a-f0-9]{64}', args.resume_sha256):
+            parser.error('resume receipt SHA must be exactly 64 lowercase hexadecimal characters')
+    if args.resume_from is not None and args.case != ['x2mini']:
+        parser.error('resume is only valid for the exact x2mini selection')
+    if args.case is not None and len(args.case) != 1:
+        parser.error('--case must select exactly one known scope')
     scratch = pathlib.Path(args.scratch).resolve()
+    if args.case is not None:
+        from x2_replay import run_directed
+        return run_directed(scratch, args.case[0], args.resume_from, args.resume_sha256)
     build = scratch / 'build'
     core = build / 'replay-core/bin/ReplayCore/release/YeManLightDeviceCore.dll'
     consumer = build / 'replay-consumer/bin/ReplayConsumer/release_win-x64/LightSetterDeviceCoreConsumerReplay.dll'

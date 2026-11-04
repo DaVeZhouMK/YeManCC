@@ -84,3 +84,6 @@ pawnio/__pycache__/
 !/light-setter/YeManLightSetter.json
 !/light-setter/YeManLightSetter.runtimeconfig.json
 !/ymcc-shared-runtime/manifest.json
+
+# Source-owned TDP payload identity is required by clean Git release builds.
+!/pawnio/tdp-runtime-manifest.json

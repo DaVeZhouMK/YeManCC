@@ -22,6 +22,11 @@ function readScreenTouchpadMemory(persona:string){
 // Explicit, per-document legacy inputs. Ordinary navigation scenes keep their original data.
 const shortcutSeed=new URLSearchParams(location.search).get('shortcutSeed');
 const shortcutSettingsPath='G:\\YMCC-H5-Memory\\yeman-settings.json';
+function shortcutRuntimeFromMemory(){
+ const input=JSON.parse(files.get(shortcutSettingsPath)||'null')?.input;
+ const target=input?.outputTarget??{persona:'steamdeck',buttonMappingEnabled:true,gyroEnabled:true};
+ return {active:false,persona:target.persona??'disabled',virtualEnabled:target.persona!=='disabled'&&(target.buttonMappingEnabled===true||target.gyroEnabled===true),gyroEnabled:target.gyroEnabled===true&&(input?.gyroMotion?.enabled??true)};
+}
 const steamMouseSeed=new URLSearchParams(location.search).get('steamMouseSeed');
 if(steamMouseSeed==='standard'||steamMouseSeed==='legacy-steam')files.set(shortcutSettingsPath,JSON.stringify({input:{outputTarget:{persona:'disabled',buttonMappingEnabled:false,gyroEnabled:false},gyroMotion:{enabled:false}},rtss:{monitorOutput:{enabled:true,output:'ymcc'}}}));
 const shortcutNativeState:Record<string,boolean>={enabled:true,bDoubleMinimize:true,tdpShortcut:true,fpsShortcut:true,killGame:true,openKeyboard:true,returnDesktop:true,mouseToggle:true,startDoubleF7:shortcutSeed!=='empty'};
@@ -154,6 +159,11 @@ export async function invoke(cmd:string,args:any={}){
 
   if(cmd==='fs.exists'&&(args.path===losslessExe||String(args.path).startsWith('Q:\\LsMemory')))return args.path===losslessExe||files.has(args.path);
   if(cmd==='fs.readTextFile'&&String(args.path).startsWith('Q:\\LsMemory'))return files.get(args.path)||'';
+  if(cmd==='fs.readTextRange'&&String(args.path).startsWith('Q:\\LsMemory')){
+   const content=files.get(args.path);if(content===undefined)throw Error('LOSSLESS_MEMORY_FILE_NOT_FOUND');
+   if(args.offset!==0||!Number.isSafeInteger(args.maxBytes)||args.maxBytes<=0)throw Error('LOSSLESS_MEMORY_INVALID_RANGE');
+   const bytes=new TextEncoder().encode(content);return {content:new TextDecoder().decode(bytes.subarray(0,args.maxBytes)),offset:0,size:bytes.byteLength};
+  }
   if(cmd==='fs.writeTextFileAtomic'&&String(args.path).startsWith('Q:\\LsMemory')){
    if(args.path===losslessFile&&losslessMemory.running)throw Error('LS_CONFIG_REPLACED_WHILE_RUNNING');
    losslessMemory.writes.push(args.path);files.set(args.path,args.content);return true;
@@ -193,6 +203,12 @@ export async function invoke(cmd:string,args:any={}){
   return {...updateCacheFixture.next};
  }
  (window as any).__previewCalls??=[];(window as any).__previewCalls.push({cmd,args});
+ if(cmd==='shell.returnDesktop'){
+  const f=fixture();f.desktopRequests=(f.desktopRequests??0)+1;
+  if(f.desktopHold)await new Promise<void>(resolve=>f.releaseDesktop=resolve);
+  if(f.desktopThrow)throw new Error('IPC command timed out: shell.returnDesktop');
+  return f.desktopAccepted!==false;
+ }
  if(cmd==='screenTouchpads.get')return readScreenTouchpadMemory(args.persona);
  if(cmd==='screenTouchpads.set'){
   if(screenTouchpadMemory.holdNext){screenTouchpadMemory.holdNext=false;await new Promise<void>(resolve=>screenTouchpadMemory.release=resolve);}
@@ -271,7 +287,9 @@ export async function invoke(cmd:string,args:any={}){
    // current document, including any newer confirmed document.
    return virtualStartFixture.finishReply(reply,{ok:true,content:files.get(args.path)});
   }
-  files.set(args.path,args.content);stamp++;return {ok:true,content:args.content};
+  files.set(args.path,args.content);stamp++;
+  if(args.path===shortcutSettingsPath)emitNativeEvent('input.shortcutRuntime',shortcutRuntimeFromMemory());
+  return {ok:true,content:args.content};
  }
  if(cmd==='input.shortcutRuntime.clear'&&virtualStartFixture?.armed){
   const reply=virtualStartFixture.beginReply(cmd,args);
@@ -313,6 +331,14 @@ export async function invoke(cmd:string,args:any={}){
   const f=fixture();const sd=f?.mousePersona==='steamdeck';
   const base={ok:true,backend:'joyxoff',provider:sd?'steam':'ymcc',mode:'off',scene:'ymcc',on:false,controlAllowed:!sd,stateKnown:!sd,mappingVerified:false,verification:'backend-state',joyxoffOn:false,gamebarOn:false,joyxoffAvailable:true,gamebarAvailable:true,...f?.mouseModeState};
   if(sd)Object.assign(base,{provider:'steam',on:false,controlAllowed:false,stateKnown:false,verification:'unobserved'});
+  if(cmd==='mouseMode.rules.get')return {ok:true,...(f.mouseRules??{blacklist:[],whitelist:[]})};
+  if(cmd==='mouseMode.rules.set'){
+   if(f.mouseRulesFail)return {ok:false,error:'鼠标名单保存失败，原配置已保留'};
+   const kind='blacklist' in args?'blacklist':'whitelist',other=kind==='blacklist'?'whitelist':'blacklist';
+   const before=f.mouseRules??{blacklist:[],whitelist:[]};const values=[...new Set(args[kind])];
+   f.mouseRules={...before,[kind]:values,[other]:before[other].filter((v:string)=>!values.includes(v))};
+   return {ok:true,...f.mouseRules};
+  }
   if(cmd==='mouseMode.get')return base;
   if(cmd==='mouseMode.history')return [];
   if(cmd==='mouseMode.releaseJoyxoff')return {ok:true,closed:base.on,stateKnown:true};
@@ -334,7 +360,7 @@ export async function invoke(cmd:string,args:any={}){
  if((cmd==='steam.settings.get'||cmd==='steam.settings.set')&&(args.scope==='mouse'||'mousePercent' in args)){const f=fixture();if(cmd==='steam.settings.get'&&f?.steamMouseHoldRead){f.steamMouseReadAttempts=(f.steamMouseReadAttempts??0)+1;await new Promise<void>(resolve=>{f.steamMouseReleaseRead=resolve;});}if('mousePercent' in args&&f){f.steamMousePercent=args.mousePercent;f.mouseSensitivityWrites=(f.mouseSensitivityWrites??0)+1;}return {ok:true,available:true,percent:f?.steamMousePercent??100,pending:false,steamRunning:true,liveAvailable:true,appliedLive:true};}
  if(cmd==='steam.settings.get'||cmd==='steam.settings.set')return {ok:true,available:true,pending:false,position:1,detail:2,scale:100,saturation:100,opacity:80};
  if(cmd==='display.getModes')return {current:'1280x800',modes:[{width:1280,height:720,refreshRate:60},{width:1280,height:800,refreshRate:60}]};
- if(cmd==='input.shortcutRuntime.get')return virtualStartFixture?virtualStartShortcutRuntime:{active:false};
+ if(cmd==='input.shortcutRuntime.get')return virtualStartFixture?virtualStartShortcutRuntime:shortcutRuntimeFromMemory();
  if(cmd==='steam.startup.get')return {known:true,enabled:false,conflict:false};
  if(cmd==='steam.startup.set')return {ok:true,enabled:args.enabled===true};
  if(cmd==='deckySidebar.get')return fixture()?.deckyState||{enabled:false,pid:0,revision:1,phase:'disabled',steamKnown:true,steamRunning:true};
@@ -363,7 +389,7 @@ export async function invoke(cmd:string,args:any={}){
  if(cmd==='sys.info')return {totalMemoryGB:32,memoryGB:32,totalMemoryBytes:34359738368,batteryPresent:true,processor:'AMD Ryzen Z2 Extreme',cpu:'AMD Ryzen Z2 Extreme',systemManufacturer:'LENOVO',systemModel:'Legion Go 2',hasBattery:true};
  if(cmd==='power.activeScheme')return '1cb8b882-a900-4b9f-9bac-99d151e64441';
  if(cmd==='power.hibernateState')return {ok:true,enabled:true,supported:true,known:true,available:true,hibernateEnabled:true,enabledKnown:true,supportedKnown:true,source:'registry'};
- if(cmd==='sleepGuard.get')return {enabled:true,pauseGameOnSleep:true,retryOnEntryFailure:true,retryOnNonUserWake:true,autoWakeRecovery:true,wakePasswordEnabled:false};
+ if(cmd==='sleepGuard.get')return {enabled:true,pauseGameOnSleep:true,retryOnEntryFailure:true,retryOnSleepTimeout:false,retryOnNonUserWake:true,autoWakeRecovery:true,wakePasswordEnabled:false};
  if(cmd==='registry.read')return args.name==='DeviceForm'?46:0;
  if(cmd==='shell.run')return {exitCode:0,stdout:'',stderr:''};
  if(cmd==='gamepad.getCapabilities')return {vibration:true,lighting:true,gyro:true};

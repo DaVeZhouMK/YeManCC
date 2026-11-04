@@ -12,7 +12,7 @@ import {parseSnapshotArguments,SOURCE_SNAPSHOT_HELP} from './create-source-snaps
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 function fixture(t){
- const temp=path.resolve(os.tmpdir()),base=fs.mkdtempSync(path.join(temp,'ymcc-source-snapshot-test-'));
+ const temp=path.resolve(process.env.YMCC_CORE_LAYOUT_TEST_TEMP??os.tmpdir()),base=fs.mkdtempSync(path.join(temp,'ymcc-source-snapshot-test-'));
  t.after(()=>{const absolute=path.resolve(base);assert.equal(path.dirname(absolute),temp);assert(path.basename(absolute).startsWith('ymcc-source-snapshot-test-'));fs.rmSync(absolute,{recursive:true,force:true});});
  const parent=path.join(base,'workspace','Mainline','YeManCC-source'),repo=path.join(parent,'YeManCC'),out=path.join(parent,'Frozen');fs.mkdirSync(repo,{recursive:true});
  const write=(rel,bytes)=>{const file=path.join(repo,...rel.split('/'));fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);return file;};
@@ -41,7 +41,16 @@ for(const name of ['same','inside','contains','nonsibling'])test('destination re
 test('relative root arguments are rejected',t=>{const f=fixture(t);assert.throws(()=>createSourceSnapshot({repoRoot:'.',outDir:f.out}),/ABSOLUTE_PATH_REQUIRED/);assert.throws(()=>createSourceSnapshot({repoRoot:f.repo,outDir:'copy'}),/ABSOLUTE_PATH_REQUIRED/);});
 test('a source directory junction is refused without traversal and keeps FAIL evidence',t=>{const f=fixture(t),outside=path.join(f.base,'outside');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'secret.txt'),'not to be copied');fs.symlinkSync(outside,path.join(f.repo,'linked'),'junction');const value=f.create();assert.equal(value.status,'FAIL');assert.match(value.failure.code,/REPARSE/);assert(!fs.existsSync(path.join(f.out,'linked')));assert(!fs.existsSync(path.join(f.out,'secret.txt')));assert(fs.existsSync(value.manifestFile));});
 test('source-root and destination-root reparse aliases are refused before traversal',t=>{const f=fixture(t),alias=path.join(f.parent,'alias'),target=path.join(f.parent,'destination-target');fs.symlinkSync(f.repo,alias,'junction');assert.throws(()=>createSourceSnapshot({repoRoot:alias,outDir:f.out}),/REPARSE/);fs.mkdirSync(target);fs.symlinkSync(target,f.out,'junction');assert.throws(()=>f.create(),/REPARSE/);assert.equal(fs.readdirSync(target).length,0);});
-test('even an excluded root entry cannot be a reparse traversal',t=>{const f=fixture(t),outside=path.join(f.base,'packages');fs.mkdirSync(outside);fs.symlinkSync(outside,path.join(f.repo,'node_modules'),'junction');assert.equal(f.create().status,'FAIL');});
+test('even an excluded root entry cannot be a reparse traversal',t=>{
+ assert.deepEqual(SNAPSHOT_POLICY.opaqueExcludedRootLinks,['node_modules']);assert.equal(SNAPSHOT_POLICY.version,10);
+ for(const capture of [createSourceSnapshot,createCapturedSourceSnapshot]){
+  const f=fixture(t),outside=path.join(f.base,'packages'),alias=path.join(f.repo,'node_modules');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'secret.txt'),'EXCLUDED TOOL BYTES MUST NOT BE OPENED');fs.symlinkSync(outside,alias,'junction');
+  const r=withoutExcludedContent([outside,alias],()=>capture({repoRoot:f.repo,outDir:f.out}));assert.equal(r.status,'PASS',JSON.stringify(r.failure));
+  assert(r.excluded.some(row=>row.path==='node_modules'&&row.rule==='node-dependencies'));assert(!r.files.some(row=>row.path==='node_modules'||row.path.startsWith('node_modules/')));assert(!fs.existsSync(path.join(f.out,'node_modules')));
+  assert.equal(r.installationPayloadFrozen,false);assert.equal(r.snapshotPassApprovesChangedSource,false);
+  fs.writeFileSync(path.join(outside,'secret.txt'),'CHANGED EXCLUDED TOOL BYTES');assert.equal(withoutExcludedContent([outside,alias],()=>f.compare()).status,'CURRENT');
+ }
+});
 test('source metadata name collision is refused rather than hidden',t=>{const f=fixture(t);f.write(SNAPSHOT_METADATA+'/source.txt','source');const r=f.create();assert.equal(r.status,'FAIL');assert.equal(r.failure.code,'SNAPSHOT_SOURCE_METADATA_COLLISION');assert(!fs.existsSync(path.join(f.out,SNAPSHOT_METADATA,'source.txt')));});
 test('main is mandatory and absence leaves failure evidence',t=>{const f=fixture(t);fs.unlinkSync(path.join(f.repo,'native/main.cpp'));const r=f.create();assert.equal(r.status,'FAIL');assert.equal(r.failure.code,'SNAPSHOT_MAIN_CPP_REQUIRED');assert.equal(r.isCurrent,false);});
 for(const phase of ['source-before','before-copy-file'])test('source drift during '+phase+' fails without retrying or deleting partial output',t=>{const f=fixture(t);let changed=false;const r=f.create({onProgress:e=>{if(!changed&&e.phase===phase&&(phase!=='before-copy-file'||e.path==='native/main.cpp')){changed=true;f.write('native/main.cpp','new bytes while copying');}}});assert.equal(changed,true);assert.equal(r.status,'FAIL');assert.equal(r.isCurrent,false);assert.match(r.failure.code,/CHANGED_DURING_COPY|SOURCE_OR_COPY_DRIFT/);assert(fs.existsSync(r.manifestFile));assert.throws(()=>f.create(),/FRESH_DESTINATION_REQUIRED/);assert.equal(fs.readFileSync(path.join(f.repo,'native/main.cpp'),'utf8'),'new bytes while copying');});
@@ -85,7 +94,7 @@ test('manifest declares every operational root, its reason and the limited sourc
  const f=fixture(t),r=captured(f),expected=['_scratch','work','System.Management.Automation.Internal.Host.InternalHost'];
  assert.deepEqual(r.policy.rootRuntimeDirectoryExclusions.map(row=>row.name),expected);
  for(const row of r.policy.rootRuntimeDirectoryExclusions){assert(row.reason.length>20);assert(r.policy.rules.some(rule=>rule.id===row.id&&rule.reason===row.reason&&rule.match.includes('Root directory '+row.name+' only')));}
- assert.equal(r.policy.version,8);assert.deepEqual(r.policy.retainedStaticSourceData,SNAPSHOT_POLICY.retainedStaticSourceData);assert.equal(r.policy.installationPayloadFrozen,false);assert.equal(r.policy.excludedDirectoryContentsRead,false);assert.equal(r.installationPayloadFrozen,false);assert.equal(f.compare().installationPayloadFrozen,false);
+ assert.equal(r.policy.version,10);assert.deepEqual(r.policy.retainedStaticSourceData,SNAPSHOT_POLICY.retainedStaticSourceData);assert.equal(r.policy.installationPayloadFrozen,false);assert.equal(r.policy.excludedDirectoryContentsRead,false);assert.equal(r.installationPayloadFrozen,false);assert.equal(f.compare().installationPayloadFrozen,false);
 });
 for(const root of ['_scratch','work','System.Management.Automation.Internal.Host.InternalHost'])test('root '+root+' contents are never traversed, hashed or copied; excluded changes stay outside currentness',t=>{
  const f=fixture(t),rootPath=path.join(f.repo,root),outside=path.join(f.base,'fake-runtime-outside');
@@ -192,7 +201,7 @@ test('exact imported game-title source data is captured while similarly named ru
   for(const name of opaque){assert(result.excluded.some(item=>item.path===name&&item.rule==='powercontrol-nonsource'));assert(!fs.existsSync(path.join(f.out,name)));}
   assert.equal(f.compare().status,'CURRENT');
  });
- assert.equal(SNAPSHOT_POLICY.version,8);assert.deepEqual(SNAPSHOT_POLICY.retainedStaticSourceData.map(item=>[item.path,item.consumedBy]),[[sourceData,sourceImport],['PowerControl/settings-baseline.json','src/bridge/settingsBaseline.ts'],['PowerControl/settings-defaults-v1.json','tools/settings-baseline-contract.mjs']]);
+ assert.equal(SNAPSHOT_POLICY.version,10);assert.deepEqual(SNAPSHOT_POLICY.retainedStaticSourceData.map(item=>[item.path,item.consumedBy]),[[sourceData,sourceImport],['PowerControl/settings-baseline.json','src/bridge/settingsBaseline.ts'],['PowerControl/settings-defaults-v1.json','tools/settings-baseline-contract.mjs']]);
 });
 test('changing imported static JSON invalidates current source without reading excluded operational settings',t=>{
  const f=fixture(t),data='PowerControl/GameTitlePolicy.json',opaque='PowerControl/runtime/settings.json';
@@ -257,10 +266,21 @@ function releaseFixture(f){
  const save=()=>f.write(policy.manifest,JSON.stringify(manifest,null,2));save();return {policy,manifest,add,save};
 }
 for(const [mode,capture]of [['strict',createSourceSnapshot],['same-descriptor',createCapturedSourceSnapshot]])test('policy7: static release exact declared assets retain bytes/hash and complete identity ('+mode+')',t=>{
- const f=fixture(t),pack=releaseFixture(f),r=capture({repoRoot:f.repo,outDir:f.out});assert.equal(r.status,'PASS',JSON.stringify(r.failure));assert.equal(r.policy.version,8);assert.equal(r.policy.retainedStaticRelease.consumedBy,'PowerControl/steam-appearance/preset.ps1::Read-PresetManifest');
+ const f=fixture(t),pack=releaseFixture(f),r=capture({repoRoot:f.repo,outDir:f.out});assert.equal(r.status,'PASS',JSON.stringify(r.failure));assert.equal(r.policy.version,10);assert.equal(r.policy.retainedStaticRelease.consumedBy,'PowerControl/steam-appearance/preset.ps1::Read-PresetManifest');
  for(const entry of pack.manifest.files){const rel=pack.policy.assetRoot+'/'+entry.path,row=r.files.find(row=>row.path===rel);assert(row);assert.equal(row.size,entry.bytes);assert.equal(row.sha256,entry.sha256);assert(fs.readFileSync(path.join(f.repo,rel)).equals(fs.readFileSync(path.join(f.out,rel))));}
  const expected=[pack.policy.manifest,...pack.manifest.files.map(row=>pack.policy.assetRoot+'/'+row.path)].sort();assert.deepEqual(r.files.filter(row=>row.path.startsWith('PowerControl/steam-appearance/')).map(row=>row.path).sort(),expected);
  assert.equal(r.copyVerifiedFiles,r.files.length);assert.equal(f.compare().status,'CURRENT');const pin=hash(fs.readFileSync(r.manifestFile));assert.equal(verifyCapturedSourceSnapshot({manifestFile:r.manifestFile,repoRoot:f.repo,expectedManifestSha256:pin}).status,'FROZEN_SOURCE_VERIFIED');assert.equal(hash(fs.readFileSync(r.manifestFile)),pin);
+ // Bind the fixture catalog to the exact product declaration and bundled data;
+ // read these fixed source files only, never a user's installed theme root.
+ const productRoot=process.env.YMCC_SOURCE_SNAPSHOT_PRODUCT_ROOT??path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');assert(path.isAbsolute(productRoot));
+ const product=fs.readFileSync(path.join(productRoot,'PowerControl/steam-appearance.ps1'),'utf8'),declarations=[...product.matchAll(/^\$script:ThemeNames=@\(([^\r\n]*)\)\r?$/gm)];assert.equal(declarations.length,1);
+ const names=[...declarations[0][1].matchAll(/'([^']+)'/g)].map(match=>match[1]);assert.deepEqual(names,[...SNAPSHOT_POLICY.retainedStaticRelease.themeNames]);
+ const bundled=readJson(path.join(productRoot,SNAPSHOT_POLICY.retainedStaticRelease.manifest));assert.deepEqual(bundled.themes.map(row=>row.name),names);
+ assert(product.includes("$script:RetiredThemeNames=@('Game Cover Reflections')"));assert.equal(names.includes('Game Cover Reflections'),false);
+ // Keep the old Pretend Theme negative below; also reject reintroducing this
+ // explicitly retired name through a forged release declaration.
+ pack.manifest.themes[0].name='Game Cover Reflections';pack.save();const retired=capture({repoRoot:f.repo,outDir:f.out+'-retired'});
+ assert.equal(retired.status,'FAIL');assert.equal(retired.failure.code,'SNAPSHOT_STATIC_RELEASE_MANIFEST_INVALID');assert.equal(retired.isCurrent,false);
 });
 for(const [label,mutate,code]of [
  ['wrong release id',p=>p.manifest.id='other-release','SNAPSHOT_STATIC_RELEASE_MANIFEST_INVALID'],
@@ -313,7 +333,7 @@ test('policy8: exact configuration baseline/default bytes freeze without reading
  const mutable=['PowerControl/yeman-settings.json','PowerControl/yeman-settings.json.bak','PowerControl/settings-baseline.json.bak','PowerControl/settings-defaults-v9.json','PowerControl/ui-background/dynamic.json'];
  for(const rel of mutable)f.write(rel,'PRIVATE FIXTURE MUST NOT READ');
  withoutExcludedContent(mutable.map(rel=>path.join(f.repo,rel)),()=>{
-  const r=captured(f);assert.equal(r.policy.version,8);
+  const r=captured(f);assert.equal(r.policy.version,10);
   for(const rel of immutable){const row=r.files.find(row=>row.path===rel);assert(row);assert.equal(row.sha256,hash(fs.readFileSync(path.join(f.repo,rel))));assert(fs.readFileSync(path.join(f.out,rel)).equals(fs.readFileSync(path.join(f.repo,rel))));}
   for(const rel of mutable)assert(!r.files.some(row=>row.path===rel));
  });
@@ -321,4 +341,61 @@ test('policy8: exact configuration baseline/default bytes freeze without reading
 test('policy8: changing the configuration contract makes an old frozen build stale',t=>{
  const f=fixture(t),rel='PowerControl/settings-baseline.json';f.write(rel,'{"revision":1}');const r=captured(f),original=fs.readFileSync(r.manifestFile);f.write(rel,'{"revision":2}');
  const result=f.compare();assert.equal(result.status,'STALE');assert(result.sourceDiff.changed.some(row=>row.path===rel));assert(fs.readFileSync(r.manifestFile).equals(original));
+});
+
+// The parent supplies one G-core temp root for this bounded selection. No TEMP/TMP mutation.
+function requireCoreLayoutTemp(){
+ const requested=process.env.YMCC_CORE_LAYOUT_TEST_TEMP;
+ assert(requested&&path.isAbsolute(requested),'Set YMCC_CORE_LAYOUT_TEST_TEMP to an existing G-core task temp directory');
+ const temp=path.resolve(requested),core=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace'),rel=path.relative(core,temp);
+ assert(rel&&!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep),'Core-layout test temp must be a strict child of the G-core workspace');
+ assert(fs.lstatSync(temp).isDirectory()&&!fs.lstatSync(temp).isSymbolicLink());
+ assert.equal(fs.realpathSync(temp).toLowerCase(),temp.toLowerCase(),'Core-layout temp ancestors cannot redirect');
+ return temp;
+}
+
+function coreOwnerFixture(t){
+ requireCoreLayoutTemp();const f=fixture(t),workspace=path.resolve(f.repo,'../../..');
+ const coreWorkspace=path.join(workspace,'Testing','YMCC','Workspace'),owner=path.join(coreWorkspace,'owner-a','nested-run');
+ const coreOut=path.join(owner,'Mainline','YeManCC-source','YeManCC');fs.mkdirSync(path.dirname(coreOut),{recursive:true});
+ return {...f,coreWorkspace,owner,coreOut};
+}
+function coreCapture(f){
+ const value=createCapturedSourceSnapshot({repoRoot:f.repo,outDir:f.coreOut});
+ assert.equal(value.status,'PASS',JSON.stringify(value.failure));return value;
+}
+test('core owner layout: captured bytes and whole verification bind the exact nested owner',t=>{
+ const f=coreOwnerFixture(t);f.write('deps/raw.bin',Buffer.from([0,255,13,10,128]));const value=coreCapture(f),bytes=fs.readFileSync(value.manifestFile),pin=hash(bytes);
+ assert.equal(value.captureMode,'same-descriptor-capture');assert.equal(value.sourceWorkspaceRoot,path.resolve(f.repo,'../../..'));assert.equal(value.snapshotWorkspaceRoot,f.owner);assert.notEqual(value.sourceWorkspaceRoot,value.snapshotWorkspaceRoot);
+ assert.equal(value.copyVerifiedFiles,value.files.length);for(const row of value.files){const original=fs.readFileSync(path.join(f.repo,row.path)),copy=fs.readFileSync(path.join(f.coreOut,row.path));assert(original.equals(copy));assert.equal(copy.length,row.size);assert.equal(hash(copy),row.sha256);}
+ const proof=verifyCapturedSourceSnapshot({manifestFile:value.manifestFile,repoRoot:f.repo,expectedManifestSha256:pin});
+ assert.equal(proof.status,'FROZEN_SOURCE_VERIFIED');assert.equal(proof.snapshotIntegrityVerified,true);assert.equal(proof.isCurrent,true);assert.equal(proof.sourceApprovalGranted,false);assert.equal(proof.fileCount,value.files.length);assert.equal(proof.copyVerifiedFiles,value.files.length);
+ assert.equal(compareSourceSnapshot({manifestFile:value.manifestFile,repoRoot:f.repo}).status,'CURRENT');assert(fs.readFileSync(value.manifestFile).equals(bytes));assert.equal(value.executionPerformed,false);assert.equal(value.installationPayloadFrozen,false);
+});
+test('core owner layout: source drift remains stale without granting approval',t=>{
+ const f=coreOwnerFixture(t),value=coreCapture(f),bytes=fs.readFileSync(value.manifestFile);f.write('native/main.cpp','// changed synthetic source after capture\nint changed=2;\n');
+ const proof=verifyCapturedSourceSnapshot({manifestFile:value.manifestFile,repoRoot:f.repo,expectedManifestSha256:hash(bytes)});
+ assert.equal(proof.status,'FROZEN_SOURCE_VERIFIED');assert.equal(proof.snapshotIntegrityVerified,true);assert.equal(proof.isCurrent,false);assert.equal(proof.sourceDiff.equal,false);assert.equal(proof.sourceApprovalGranted,false);assert(fs.readFileSync(value.manifestFile).equals(bytes));
+});
+test('core owner layout: copy tampering fails whole verification and preserves creation evidence',t=>{
+ const f=coreOwnerFixture(t),value=coreCapture(f),bytes=fs.readFileSync(value.manifestFile);fs.appendFileSync(path.join(f.coreOut,'src/view.txt'),'tampered');
+ assert.throws(()=>verifyCapturedSourceSnapshot({manifestFile:value.manifestFile,repoRoot:f.repo,expectedManifestSha256:hash(bytes)}),/SNAPSHOT_CAPTURED_VERSION_CHANGED/);assert(fs.readFileSync(value.manifestFile).equals(bytes));assert.equal(readJson(value.manifestFile).status,'PASS');
+});
+for(const [name,target]of[
+ ['unrelated non-sibling',f=>path.join(f.base,'unrelated','Mainline','YeManCC-source','YeManCC')],
+ ['core root used as owner',f=>path.join(f.coreWorkspace,'Mainline','YeManCC-source','YeManCC')],
+ ['escaped core owner',f=>path.resolve(f.coreWorkspace,'owner-a','..','..','escaped-owner','Mainline','YeManCC-source','YeManCC')],
+ ['noncanonical repository leaf',f=>path.join(f.owner,'Mainline','YeManCC-source','Unexpected')],
+])test('core owner layout: capture rejects '+name,t=>{
+ const f=coreOwnerFixture(t),out=target(f);fs.mkdirSync(path.dirname(out),{recursive:true});
+ assert.throws(()=>createCapturedSourceSnapshot({repoRoot:f.repo,outDir:out}),/SNAPSHOT_SIBLING_DESTINATION_REQUIRED/);assert(!fs.existsSync(out));assert(!fs.existsSync(f.coreOut));
+});
+test('core owner layout: capture rejects reparse owner ancestors before writing',t=>{
+ const f=coreOwnerFixture(t),real=path.join(f.base,'owned-junction-target'),parent=path.join(real,'Mainline','YeManCC-source');fs.mkdirSync(parent,{recursive:true});const sentinel=path.join(real,'sentinel.txt');fs.writeFileSync(sentinel,'owned target must stay unchanged');
+ const alias=path.join(f.coreWorkspace,'linked-owner');fs.symlinkSync(real,alias,'junction');const out=path.join(alias,'Mainline','YeManCC-source','YeManCC');
+ assert.throws(()=>createCapturedSourceSnapshot({repoRoot:f.repo,outDir:out}),/REPARSE/);assert(!fs.existsSync(path.join(parent,'YeManCC')));assert.equal(fs.readFileSync(sentinel,'utf8'),'owned target must stay unchanged');
+});
+test('core owner layout: capture rejects reparse destination roots before writing',t=>{
+ const f=coreOwnerFixture(t),real=path.join(f.base,'owned-root-target');fs.mkdirSync(real);fs.symlinkSync(real,f.coreOut,'junction');
+ assert.throws(()=>createCapturedSourceSnapshot({repoRoot:f.repo,outDir:f.coreOut}),/REPARSE/);assert.deepEqual(fs.readdirSync(real),[]);
 });

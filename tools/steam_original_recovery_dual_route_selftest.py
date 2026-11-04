@@ -87,7 +87,7 @@ def main():
         helpers.insert(3, 'legacyWakeProof')
     parts['HELPERS'] = '\n'.join(take(name) for name in helpers)
     parts['RUN_ONE'] = take('runRoute') + '\n' + take('runOne')
-    event_entrypoints = ['steamOriginalRecoverySuspend', 'steamOriginalRecoveryWake', 'steamOriginalRecoveryPowerReady', 'steamOriginalRecoveryBindingReady', 'steamOriginalRecoveryRequestStop']
+    event_entrypoints = ['steamOriginalRecoverySuspend', 'steamOriginalRecoveryWake', 'steamOriginalRecoveryPowerReady', 'steamOriginalRecoveryTargetChanged', 'steamOriginalRecoveryBindingReady', 'steamOriginalRecoveryRequestStop']
     parts['EVENT_ENTRYPOINTS'] = '\n'.join(take(name) for name in event_entrypoints)
     auto_producers = ['sleepRecoveryAutoArm', 'sleepRecoveryAutoCaptureSuspend', 'sleepRecoveryAutoCloseSuspendEpisode']
     parts['AUTO_PRODUCERS'] = '\n'.join(take(name, source='native/sleep_recovery_auto.h') for name in auto_producers)

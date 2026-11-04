@@ -1,6 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import crypto from 'node:crypto';import {execFileSync} from 'node:child_process';import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const root=process.cwd(),out=path.resolve(process.argv[2]);fs.mkdirSync(out,{recursive:true});const hash=f=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-const header=fs.readFileSync('native/steam_ui_mode.h','utf8'),main=fs.readFileSync('native/main.cpp','utf8');const extract=name=>{const value=header.match(new RegExp('inline (?:Json|const wchar_t\\*) '+name+'\\([\\s\\S]*?\\n\\}'))?.[0];assert(value,'production '+name);return value};const registration=main.match(/    ipc_on\("steam\.ui\.showBigPicture",[\s\S]*?\n    \}\);/)?.[0];assert(registration);assert(main.includes('cmd == "steam.ui.showBigPicture"'));
+const actualHeaderPath=process.env.YMCC_STEAM_UI_MODE_HEADER_OVERRIDE||path.join(root,'native/steam_ui_mode.h');const header=fs.readFileSync(actualHeaderPath,'utf8'),main=fs.readFileSync('native/main.cpp','utf8');const extract=name=>{const value=header.match(new RegExp('inline (?:Json|bool|const wchar_t\\*) '+name+'\\([\\s\\S]*?\\n\\}'))?.[0];assert(value,'production '+name);return value};const registration=main.match(/    ipc_on\("steam\.ui\.showBigPicture",[\s\S]*?\n    \}\);/)?.[0];assert(registration);assert(main.includes('cmd == "steam.ui.showBigPicture"'));
 const cpp=`#define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -12,9 +12,9 @@ const cpp=`#define WIN32_LEAN_AND_MEAN
 #include <map>
 #include "${path.join(root,'deps/json/json.hpp').replaceAll('\\','/')}"
 using json=nlohmann::json;
-namespace fixture {int reads=0,shells=0,lookups=0,snapshots=0;bool live=true,birth=true,current=true,accepted=true;std::string mode="bigpicture";json state;void reset(){reads=shells=lookups=snapshots=0;live=birth=current=accepted=true;mode="bigpicture";state={{"known",true},{"running",true},{"mode","bigpicture"},{"pid",uint32_t(123)},{"birth","456"}};}}
+namespace fixture {int shown=-1;int reads=0,shells=0,lookups=0,snapshots=0;bool live=true,birth=true,current=true,accepted=true;std::string mode="bigpicture";json state;void reset(){shown=-1;reads=shells=lookups=snapshots=0;live=birth=current=accepted=true;mode="bigpicture";state={{"known",true},{"running",true},{"mode","bigpicture"},{"pid",uint32_t(123)},{"birth","456"}};}}
 namespace ymcc::steamsession {struct Session {std::wstring root=LR"(X:\\InertSteam)";DWORD pid=123;ULONGLONG created=456;bool operator==(const Session&)const=default;};struct Observer {Session sessionSnapshot(){++fixture::snapshots;Session s;if(!fixture::current)s.created=999;return s;}int steamPresence(){return 1;}};HANDLE verifiedProcess(DWORD,const std::wstring&,ULONGLONG* birth){++fixture::lookups;*birth=fixture::birth?456:999;return reinterpret_cast<HANDLE>(555);}}
-static BOOL fakeShell(SHELLEXECUTEINFOW* info){if(std::wstring(info->lpFile)!=LR"(X:\\InertSteam\\steam.exe)"||std::wstring(info->lpParameters)!=L"-url \\\"steam://open/bigpicture\\\"")throw std::runtime_error("fixed existing-client command");++fixture::shells;return fixture::accepted;}
+static BOOL fakeShell(SHELLEXECUTEINFOW* info){const auto command=std::wstring(info->lpParameters);if(std::wstring(info->lpFile)!=LR"(X:\\InertSteam\\steam.exe)"||(command!=LR"ARGS(-url "steam://open/bigpicture")ARGS"&&command!=LR"ARGS(-url "steam://close/bigpicture")ARGS"))throw std::runtime_error("fixed existing-client command");++fixture::shells;fixture::shown=info->nShow;return fixture::accepted;}
 static DWORD fakeWait(HANDLE,DWORD){return fixture::live?WAIT_TIMEOUT:WAIT_OBJECT_0;}static BOOL fakeClose(HANDLE){return TRUE;}
 #define ShellExecuteExW fakeShell
 #define WaitForSingleObject fakeWait
@@ -23,6 +23,7 @@ namespace ymcc::steamui {using Json=nlohmann::json;inline Json read(steamsession
 ${extract('uriFor')}
 ${extract('set')}
 ${extract('showBigPicture')}
+${extract('dispatchRecoveryMode')}
 }
 #undef ShellExecuteExW
 #undef WaitForSingleObject
@@ -39,10 +40,17 @@ for(const auto& patch:std::vector<json>{{{"known",false}},{{"running",false}},{{
 for(int failure=0;failure<4;++failure){fixture::reset();if(failure==0)fixture::live=false;if(failure==1)fixture::birth=false;if(failure==2)fixture::current=false;if(failure==3)fixture::accepted=false;auto result=handlers.at("steam.ui.showBigPicture")(valid);need(result["ok"]==false&&fixture::shells==(failure==3?1:0),"final identity and process check has no fallback");}
 fixture::reset();g_exitRequested=true;bool refused=false;try{handlers.at("steam.ui.showBigPicture")(valid);}catch(...){refused=true;}g_exitRequested=false;need(refused&&fixture::reads==0,"exit gate before native reads");
 fixture::reset();g_aiFanMockSession.isolated=true;refused=false;try{handlers.at("steam.ui.showBigPicture")(valid);}catch(...){refused=true;}need(refused&&fixture::reads==0,"isolated gate before native reads");
+
+fixture::reset();const ymcc::steamsession::Session recoverySession;
+need(ymcc::steamui::dispatchRecoveryMode(recoverySession,"bigpicture",[]{return fixture::current;}),"recovery command submission");
+need(fixture::shells==1&&fixture::shown==SW_SHOWNORMAL,"reopening Big Picture must request a displayed target, not SW_HIDE");
+fixture::reset();need(ymcc::steamui::dispatchRecoveryMode(recoverySession,"desktop",[]{return fixture::current;})&&fixture::shells==1&&fixture::shown==SW_HIDE,"desktop close keeps background dispatch");
+for(int failure=0;failure<4;++failure){fixture::reset();if(failure==0)fixture::live=false;if(failure==1)fixture::birth=false;if(failure==2)fixture::current=false;if(failure==3)fixture::accepted=false;need(!ymcc::steamui::dispatchRecoveryMode(recoverySession,"bigpicture",[]{return fixture::current;})&&fixture::shells==(failure==3?1:0),"recovery display intent cannot bypass identity, current or dispatch failure");}
+fixture::reset();bool invalidRecovery=false;try{ymcc::steamui::dispatchRecoveryMode(recoverySession,"shutdown",[]{return true;});}catch(const std::runtime_error&){invalidRecovery=true;}need(invalidRecovery&&fixture::shells==0&&fixture::lookups==0,"recovery fixed mode allowlist precedes process lookup");
 std::cout<<json{{"ok",true},{"checks",count},{"realSteamActions",0}}.dump();return 0;
 }catch(const std::exception& error){std::cout<<json{{"ok",false},{"checks",count},{"error",error.what()}}.dump();return 23;}}
 `;
 const preamble=calibrationToolchainPreamble('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat');
 function run(name,source){const dir=path.join(out,name);fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'consumer.cpp'),source);fs.writeFileSync(path.join(dir,'compile.cmd'),preamble+'cl /nologo /std:c++20 /utf-8 /EHsc /MT /O1 consumer.cpp /Foconsumer.obj /Feconsumer.exe\r\nexit /b %errorlevel%\r\n');const compiled=execFileSync('cmd.exe',['/d','/c','compile.cmd'],{cwd:dir,windowsHide:true,timeout:60000,encoding:'utf8'});fs.writeFileSync(path.join(dir,'compile.log'),compiled);try{return {code:0,result:JSON.parse(execFileSync(path.join(dir,'consumer.exe'),[],{cwd:dir,encoding:'utf8',windowsHide:true,timeout:10000}))};}catch(error){return {code:error.status,result:JSON.parse(error.stdout)}}}
-const positive=run('positive',cpp);assert.equal(positive.code,0,JSON.stringify(positive));const bad=cpp.replace('if (state.value("mode", std::string{}) != "bigpicture")','if (false)');assert.notEqual(bad,cpp);const negative=run('desktop-negative',bad);assert.equal(negative.code,23);assert.equal(negative.result.error,'other modes are never switched by status');assert(!/g_steamCss|g_decky|g_steamLinkAdmission|launchSteam|wscript/.test(registration));
-const report={ok:true,checks:positive.result.checks,negative:negative.result,sourceHashes:Object.fromEntries(['native/steam_ui_mode.h','native/main.cpp','tools/steam_bigpicture_show_native_selftest.mjs'].map(p=>[p,hash(p)])),actualProductionDefinitions:['uriFor','set','showBigPicture','IPC registrar'],realSteamActions:0};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+const positive=run('positive',cpp);fs.writeFileSync(path.join(out,'positive-result.json'),JSON.stringify(positive,null,2));assert.equal(positive.code,0,JSON.stringify(positive));const bad=cpp.replace('if (state.value("mode", std::string{}) != "bigpicture")','if (false)');assert.notEqual(bad,cpp);const negative=run('desktop-negative',bad);assert.equal(negative.code,23);assert.equal(negative.result.error,'other modes are never switched by status');assert(!/g_steamCss|g_decky|g_steamLinkAdmission|launchSteam|wscript/.test(registration));
+const report={ok:true,checks:positive.result.checks,negative:negative.result,sourceHashes:Object.fromEntries(['native/steam_ui_mode.h','native/main.cpp','tools/steam_bigpicture_show_native_selftest.mjs'].map(p=>[p,hash(p)])),actualHeader:{path:actualHeaderPath,sha256:hash(actualHeaderPath),override:!!process.env.YMCC_STEAM_UI_MODE_HEADER_OVERRIDE},actualProductionDefinitions:['uriFor','set','showBigPicture','dispatchRecoveryMode','IPC registrar'],realSteamActions:0};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

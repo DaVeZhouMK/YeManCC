@@ -60,7 +60,7 @@ static void note(const char* phase,const char* reason,const duty::Origin* origin
     }catch(...){}
 }
 static bool contextCurrent() {
-    if(inputHostExitFenceRaised())return false;
+    if(inputHostExitFenceRaised() || !inputHostDeferredPhysicalHideWriteCurrent())return false;
     const auto now=inputHostStartProtectionNow();
     if(g_inputHostSwitchRecoveryStartDeadline&&now>=g_inputHostSwitchRecoveryStartDeadline)return false;
     if(g_inputHostSwitchRecoveryStartRequestId&&

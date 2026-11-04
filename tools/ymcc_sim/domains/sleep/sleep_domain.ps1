@@ -65,10 +65,14 @@ param(
   [switch]$SimulateRun,
   [int]$WaitAppReadySec = 150,
   [int]$WaitAppExitSec = 60,
-  [switch]$Reverse
+  [switch]$Reverse,
+  [ValidateSet('all','software')][string]$TypingScope='all',
+  [string]$S3EvidencePath='',
+  [string]$S3EvidenceSha256=''
 )
 
 $ErrorActionPreference = 'Stop'
+if($Mode -ne 'sleeptypes' -and ($PSBoundParameters.ContainsKey('TypingScope') -or $PSBoundParameters.ContainsKey('S3EvidencePath') -or $PSBoundParameters.ContainsKey('S3EvidenceSha256'))){throw 'TYPING_INPUTS_REQUIRE_SLEEPTYPES_MODE'}
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -969,7 +973,7 @@ try {
     Invoke-SleepSelfCheck | Out-Null
   }
   elseif ($Mode -eq 'sleeptypes') {
-    Invoke-SleepTypes
+    Invoke-SleepTypes -TypingScope $TypingScope -S3EvidencePath $S3EvidencePath -S3EvidenceSha256 $S3EvidenceSha256
   }
   elseif ($Mode -eq 'live') {
     Invoke-SleepLive

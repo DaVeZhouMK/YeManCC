@@ -17,6 +17,9 @@ assert not re.search(r'\bSleep\s*\(', h) and 'wait_for' not in h
 assert source.index('sgPrepareWakeRecoveryForPauseUnlocked(rootPid)') < source.index('const std::vector<DWORD> targets{rootPid};')
 assert 'sgCancelWakeGameRecoveryUnlocked("application-exit")' in source
 assert h.count('nativeMonitorExcluded(') == 3 and h.count('sgNameExcludedBy(') == 3
+assert 'CreateToolhelp32Snapshot' not in h and 'Process32FirstW' not in h and 'Process32NextW' not in h
+assert 'ymcc::processInventory::read()' in h
+assert 'ymcc::processInventory::Status::Complete' in h
 cpp = r"""
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -25,6 +28,7 @@ cpp = r"""
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -70,6 +74,19 @@ struct Proc{ULONGLONG created=1234,ws=600ULL*1024*1024;int depth=1,calls=0,fail=
 std::map<DWORD,Proc> procs;
 std::vector<DWORD> enumeration;
 size_t enumIndex=0;DWORD error=0;
+unsigned inventoryReads=0,legacyEnumerationCalls=0;
+bool markerDirectoryUnknown=false;
+namespace ymcc::processInventory {
+enum class Status{Complete,Unavailable,Failed};
+struct Entry{DWORD pid;std::wstring name;};
+struct Snapshot{Status status=Status::Complete;std::vector<Entry> rows;};
+Status inventoryStatus=Status::Complete;
+std::shared_ptr<const Snapshot> read(){
+ ++inventoryReads;auto result=std::make_shared<Snapshot>();result->status=inventoryStatus;
+ for(DWORD pid:enumeration)result->rows.push_back({pid,procs.at(pid).name});
+ return result;
+}
+}
 std::vector<std::pair<std::string,json>> facts;int focusCalls=0,emitCalls=0;
 std::vector<std::wstring> blacklist;
 bool markerWritesAllowed=true;
@@ -85,7 +102,7 @@ DWORD fakeWait(HANDLE h,DWORD){return procs.at(pidOf(h)).exited?WAIT_OBJECT_0:WA
 DWORD fakeSelf(){return 999;}
 BOOL fakeSession(DWORD pid,DWORD* s){*s=pid==999||procs.at(pid).sameSession?1:2;return TRUE;}
 BOOL fakeDebug(HANDLE h,PBOOL v){*v=procs.at(pidOf(h)).debug;return TRUE;}
-HANDLE fakeSnapshot(DWORD,DWORD){enumIndex=0;return reinterpret_cast<HANDLE>(123456);}
+HANDLE fakeSnapshot(DWORD,DWORD){++legacyEnumerationCalls;enumIndex=0;return reinterpret_cast<HANDLE>(123456);}
 BOOL fakeFirst(HANDLE,PROCESSENTRY32W* p){if(enumeration.empty())return FALSE;p->th32ProcessID=enumeration[0];wcscpy_s(p->szExeFile,procs.at(enumeration[0]).name.c_str());return TRUE;}
 BOOL fakeNext(HANDLE,PROCESSENTRY32W* p){if(++enumIndex>=enumeration.size())return FALSE;p->th32ProcessID=enumeration[enumIndex];wcscpy_s(p->szExeFile,procs.at(enumeration[enumIndex]).name.c_str());return TRUE;}
 ULONGLONG nativeProcessCreatedFromHandle(HANDLE h){return procs.at(pidOf(h)).created;}
@@ -109,7 +126,7 @@ const std::string& sgManualPauseRunToken(){static const std::string token="runA"
 ULONGLONG sgMarkerCreated(const std::wstring& d,DWORD pid){auto t=sgReadFile(d+L"\\"+std::to_wstring(pid)+L".txt");auto p=t.find("|created=");if(p==std::string::npos)return 0;return std::stoull(t.substr(p+9));}
 unsigned long long sgMarkerGeneration(const std::wstring& d,DWORD pid){auto t=sgReadFile(d+L"\\"+std::to_wstring(pid)+L".txt");auto p=t.find("|generation=");if(p==std::string::npos)return 0;return std::stoull(t.substr(p+12));}
 bool sgMarkerIsSuspended(const std::wstring& d,DWORD pid){return sgReadFile(d+L"\\"+std::to_wstring(pid)+L".txt").find("|state=suspended")!=std::string::npos;}
-bool sgHasMarkerFiles(const std::wstring& d){for(auto& f:fspath::directory_iterator(d))if(f.is_regular_file())return true;return false;}
+bool sgHasMarkerFiles(const std::wstring& d){if(markerDirectoryUnknown)return true;for(auto& f:fspath::directory_iterator(d))if(f.is_regular_file())return true;return false;}
 bool sgReadSleepTarget(SgSleepTarget& t){t=owner;return owner.pid!=0;}
 void sgClearSleepTargetIfMatches(const SgSleepTarget& t){if(owner.pid==t.pid&&owner.processCreated==t.processCreated&&owner.powerGeneration==t.powerGeneration)owner={};}
 void sgRecordFact(const char* name,json data=json::object()){facts.push_back({name,data});}
@@ -138,13 +155,14 @@ void releaseMarker(HANDLE h){assert(CloseHandle(h));}
 #undef queryThreads
 #undef sameUser
 int passed=0;
-void pass(const char* n){++passed;std::cout<<"PASS "<<n<<"\n";}
+void pass(const char* n){assert(legacyEnumerationCalls==0);++passed;std::cout<<"PASS "<<n<<"\n";}
 const json& lastFact(const char* name){for(auto i=facts.rbegin();i!=facts.rend();++i)if(i->first==name)return i->second;assert(false);return facts.back().second;}
 void reset(){
  for(auto& dir:{SG_SLEEP_LEASE_DIR,SG_MANUAL_DIR})for(auto& f:fspath::directory_iterator(dir)){assert(f.is_regular_file());fspath::remove(f.path());}
  fspath::remove(SG_DIR+L"\\quickapp_suspended.json");
  procs.clear();enumeration.clear();blacklist.clear();facts.clear();focusCalls=emitCalls=0;
  markerWritesAllowed=true;onThreadQuery={};onIdentityQuery={};
+ inventoryReads=legacyEnumerationCalls=0;markerDirectoryUnknown=false;ymcc::processInventory::inventoryStatus=ymcc::processInventory::Status::Complete;
  generation=7;tick=0;error=0;retry=false;owner={};g_sgExplicitGameWakeGeneration=0;g_sgExplicitGameWakePauseFence=0;g_sgWakeRecovery={};g_sgLastGameWakeGeneration=0;
  g_sgWakeRecoveryPending=false;g_exitRequested=false;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_sgInSuspend=true;g_sgGameActuallySuspended=true;g_manualPausedPid=0;g_guardEnabled=true;g_sgPauseResume=true;
 }
@@ -225,6 +243,34 @@ int wmain(int argc,wchar_t** argv){assert(argc==2);SG_DIR=argv[1];assert(fspath:
 
  reset();marker(100,true);sgBeginWakeGameRecovery(7);assert(sgPrepareWakeRecoveryForPauseUnlocked(100));marker(100,true);at(0);window();assert(procs[100].calls==0&&procs[100].depth==1&&exists(100,true)&&!g_sgWakeRecoveryPending);pass("same-PID manual pause before the first immediate tick supersedes recovery without a thaw");
  reset();marker(100);inspected={SG_SLEEP_LEASE_DIR,100,procs[100].created,sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")};inspected.sleepOwnerGeneration=7;assert(sgBeginUserSleepGameRecoveryUnlocked(7,{inspected},"pause-during-confirmation"));onIdentityQuery=[](DWORD pid){marker(pid,true);procs[pid].depth=1;};at(0);assert(exists(100)&&exists(100,true)&&owner.markerOwned&&g_sgWakeRecoveryPending);window();assert(procs[100].calls==1&&procs[100].depth==1&&exists(100)&&exists(100,true));pass("manual pause during final identity proof prevents retirement and all later user-repair resumes");
+ // Exact recovery must not discover an unrelated eligible suspended process.
+ for(unsigned exact=0;exact<4;++exact){
+  reset();marker(100,exact==1);procs[200]={};enumeration={100,200};
+  if(exact==2){owner.powerGeneration=6;auto path=SG_SLEEP_LEASE_DIR+L"\\100.txt";auto text=sgReadFile(path);text.replace(text.find("generation=7"),12,"generation=6");assert(sgWriteFileAtomic(path,text));}
+  if(exact==3)procs[100].openError=ERROR_ACCESS_DENIED;
+  sgBeginWakeGameRecovery(7);assert(inventoryReads==0&&g_sgWakeRecovery.entries.size()==1&&!g_sgWakeRecovery.entries[0].fallback);
+  window();assert(inventoryReads==0&&procs[200].calls==0&&!exists(200));
+  if(exact==3)assert(procs[100].calls==0&&exists(100)&&owner.markerOwned);
+  else assert(procs[100].calls==1);
+ }pass("exact sleep/manual/old-generation/temporarily-denied target batches never discover other PIDs");
+ reset();marker(100);owner.powerGeneration=6;fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");procs[200]={};enumeration={100,200};
+ sgBeginWakeGameRecovery(7);assert(inventoryReads==0&&g_sgWakeRecovery.entries.size()==1&&g_sgWakeRecovery.entries[0].sleepOwnerGeneration==6);
+ window();assert(procs[100].calls==1&&procs[200].calls==0&&!owner.markerOwned);
+ pass("lost old-generation marker rebuilds only the fixed original PID and birth");
+ reset();marker(100);fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");procs[100].openError=ERROR_ACCESS_DENIED;procs[200]={};enumeration={100,200};
+ sgBeginWakeGameRecovery(7);assert(inventoryReads==0&&owner.markerOwned&&procs[100].calls==0&&procs[200].calls==0);
+ pass("known owner with unavailable identity remains retained without broad recovery");
+ reset();markerDirectoryUnknown=true;procs[100]={};enumeration={100};sgBeginWakeGameRecovery(7);
+ assert(inventoryReads==0&&!g_sgWakeRecoveryPending&&procs[100].calls==0&&!exists(100));
+ pass("unavailable marker evidence cannot authorize global discovery");
+ for(auto state:{ymcc::processInventory::Status::Unavailable,ymcc::processInventory::Status::Failed}){
+  reset();procs[100]={};enumeration={100};ymcc::processInventory::inventoryStatus=state;
+  sgBeginWakeGameRecovery(7);assert(inventoryReads==1&&!g_sgWakeRecoveryPending&&!exists(100)&&procs[100].calls==0);
+ }pass("unavailable/failed shared topology rejects even present rows without resuming");
+ reset();procs[100]={};enumeration={100};sgBeginWakeGameRecovery(7);
+ assert(inventoryReads==1&&g_sgWakeRecovery.entries.size()==1&&g_sgWakeRecovery.entries[0].fallback);
+ window();assert(inventoryReads==1&&legacyEnumerationCalls==0&&procs[100].calls==1);
+ pass("exception-only fallback borrows one shared complete topology and never rescans during attempts");
  std::cout<<"sleep wake recovery production-header selftest: "<<passed<<" groups PASS\n";
 }
 """

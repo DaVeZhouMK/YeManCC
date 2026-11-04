@@ -42,18 +42,50 @@ inline bool validRule(const std::string& rule) {
 inline Json emptyMembership() {
     return {{"schemaVersion", 1}, {"owner", "custom-steam-library"}, {"accounts", Json::object()}};
 }
+inline bool accountKey(const std::string& account) {
+    return !account.empty() && std::all_of(account.begin(), account.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+}
+inline bool revisionNumber(const Json& value) {
+    return value.is_number_unsigned() || (value.is_number_integer() && value.get<std::int64_t>() >= 0);
+}
+inline bool bindingPath(const std::string& raw, const std::string& account) {
+    if (!accountKey(account) || raw.empty() || raw.find_first_of("\"*?[]<>|\r\n\t") != std::string::npos) return false;
+    std::string path = raw;
+    for (auto& c : path) {
+        if (c == '\\') c = '/';
+        else if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        else if (static_cast<unsigned char>(c) < 32) return false;
+    }
+    const bool drive = path.size() > 3 && path[0] >= 'a' && path[0] <= 'z' && path[1] == ':' && path[2] == '/';
+    if (!drive && !path.starts_with("//")) return false;
+    if (path.find(':', drive ? 2 : 0) != std::string::npos || path.find("/../") != std::string::npos || path.find("/./") != std::string::npos) return false;
+    // This is a structural account/path binding only. The publisher still
+    // verifies the actual installation and current Steam bytes before use.
+    const auto suffix = "/userdata/" + account + "/config/shortcuts.vdf";
+    return path.size() > suffix.size() && path.ends_with(suffix);
+}
 inline void validateMembership(const Json& state) {
-    if (!state.is_object() || state.value("schemaVersion", 0) != 1 || text(state, "owner") != "custom-steam-library" ||
+    if (!state.is_object() || !state.contains("schemaVersion") || !state["schemaVersion"].is_number_integer() ||
+        state["schemaVersion"] != 1 || text(state, "owner") != "custom-steam-library" ||
         !state.contains("accounts") || !state["accounts"].is_object()) throw std::runtime_error("Invalid library-owned YMCC membership snapshot; preserved existing files");
     for (const auto& [account, row] : state["accounts"].items()) {
-        if (account.empty() || !row.is_object() || !row.contains("revision") || !row["revision"].is_number_unsigned() ||
+        if (!accountKey(account) || !row.is_object() || !row.contains("revision") || !revisionNumber(row["revision"]) ||
             !row.contains("entries") || !row["entries"].is_object()) throw std::runtime_error("Invalid account membership snapshot");
         for (const auto& [key, rule] : row["entries"].items())
-            if (executableKey(key) != key || !rule.is_string() || !validRule(rule.get<std::string>())) throw std::runtime_error("Invalid managed executable membership");
+            if (key.empty() || executableKey(key) != key || !rule.is_string() || !validRule(rule.get<std::string>())) throw std::runtime_error("Invalid managed executable membership");
+    }
+    // Missing bindings are retained as legacy unknown debt, never defaulted to
+    // empty ownership. Even unused binding rows must not hide malformed data.
+    if (state.contains("bindings")) {
+        if (!state["bindings"].is_object()) throw std::runtime_error("Invalid membership installation bindings");
+        for (const auto& [account, row] : state["bindings"].items())
+            if (!accountKey(account) || !row.is_object() || !row.contains("shortcutsVdf") || !row["shortcutsVdf"].is_string() ||
+                !bindingPath(row["shortcutsVdf"].get<std::string>(), account)) throw std::runtime_error("Invalid account installation binding; ownership remains unknown");
     }
 }
 inline std::uint64_t revision(const Json& state, const std::string& account) {
     validateMembership(state);
+    if (!accountKey(account)) throw std::runtime_error("Unknown membership account");
     const auto i = state["accounts"].find(account);
     return i == state["accounts"].end() ? 0 : (*i)["revision"].get<std::uint64_t>();
 }
@@ -63,6 +95,9 @@ inline bool authoritativeEvent(const Json& event) {
     const auto mode = text(event, "mode");
     return mode == "steam-library-add-plan" ||
         ((mode == "steam-library-add-commit" || mode == "steam-library-delete-commit") && flag(event, "committed"));
+}
+inline bool currentEventSchema(const Json& event) {
+    return event.is_object() && event.contains("schemaVersion") && event["schemaVersion"].is_number_integer() && event["schemaVersion"] == 1;
 }
 inline bool completeInventory(const Json& state, const Json& items) {
     if (!state.is_object() || !state.contains("games") || !state["games"].is_array() ||
@@ -83,7 +118,7 @@ inline bool completeInventory(const Json& state, const Json& items) {
 // Persist the consumed revision in result JSON so replaying historical last-*
 // payloads after a later deletion cannot resurrect their membership.
 inline void prepareLiveEvent(Json& event, const Json& state, bool completeAccount) {
-    if (!authoritativeEvent(event)) return;
+    if (!authoritativeEvent(event) || !currentEventSchema(event)) return;
     event["ymccMembershipAuthority"] = {{"baseRevision", revision(state, text(event, "accountId"))},
         {"completeAccount", completeAccount}, {"source", "live-steam-shortcuts"}};
 }
@@ -91,10 +126,11 @@ struct Update { Json membership; bool accepted = false; std::string reason; };
 template<class NormalizeRule>
 Update applyPrepared(const Json& state, const Json& event, NormalizeRule normalizeRule) {
     validateMembership(state);
-    if (!authoritativeEvent(event)) return {state, false, "not-a-live-membership-event"};
+    if (!authoritativeEvent(event) || !currentEventSchema(event)) return {state, false, "not-a-live-membership-event"};
     const auto authority = event.find("ymccMembershipAuthority");
     if (authority == event.end() || !authority->is_object() || text(*authority, "source") != "live-steam-shortcuts" ||
-        !authority->contains("baseRevision") || !(*authority)["baseRevision"].is_number_unsigned()) return {state, false, "missing-live-authority"};
+        !authority->contains("baseRevision") || !revisionNumber((*authority)["baseRevision"]) ||
+        !authority->contains("completeAccount") || !(*authority)["completeAccount"].is_boolean()) return {state, false, "missing-live-authority"};
     const auto account = text(event, "accountId");
     const auto previousRevision = revision(state, account);
     if ((*authority)["baseRevision"].get<std::uint64_t>() != previousRevision) return {state, false, "stale-account-revision"};
@@ -130,15 +166,21 @@ Update applyPrepared(const Json& state, const Json& event, NormalizeRule normali
     }
     if (entries != before || !next["accounts"].contains(account)) {
         if (previousRevision == (std::numeric_limits<std::uint64_t>::max)()) throw std::runtime_error("Membership revision overflow");
-        next["accounts"][account] = {{"revision", previousRevision + 1}, {"entries", std::move(entries)}};
+        auto& row = next["accounts"][account];
+        if (!row.is_object()) row = Json::object();
+        row["revision"] = previousRevision + 1;
+        row["entries"] = std::move(entries);
     }
     return {std::move(next), true, "authoritative-membership"};
 }
 inline std::set<std::string> unionRules(const Json& state) {
     validateMembership(state);
     std::set<std::string> rules;
-    for (const auto& [account, row] : state["accounts"].items())
+    for (const auto& [account, row] : state["accounts"].items()) {
+        if (!state.contains("bindings") || !state["bindings"].contains(account))
+            throw std::runtime_error("Unbound legacy membership remains unknown; refresh that account explicitly");
         for (const auto& [path, value] : row["entries"].items()) rules.insert(value.get<std::string>());
+    }
     return rules;
 }
 // Only exact complete marker pairs grant deletion authority. Text outside the

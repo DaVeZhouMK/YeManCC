@@ -14,10 +14,12 @@ let workspace=repo;
 while(!fs.existsSync(path.join(workspace,'Docs/Research/PcCapabilities-HC-CTW-20261014/upstream/source-manifest.json'))){const next=path.dirname(workspace);if(next===workspace)throw Error('Workspace marker missing');workspace=next;}
 const options={},args=process.argv.slice(2);
 for(let i=0;i<args.length;++i){if(['--out','--vcvars'].includes(args[i])&&args[i+1])options[args[i].slice(2)]=args[++i];else if(args[i]==='--no-mutations')options.noMutations=true;else throw Error(`Unknown/incomplete argument: ${args[i]}`);}
-const root=path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXApplication/Tests');
+let root=path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXApplication/Tests');
 const out=path.resolve(options.out||path.join(root,new Date().toISOString().replace(/[:.]/g,'-')));
 const inside=(base,target)=>{const rel=path.relative(base,target);return rel===''||(!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith(`..${path.sep}`));};
-if(!inside(root,out)||root===out)throw Error('Use a fresh child of OneXApplication/Tests');
+const coreEvidence=path.join(workspace,'Testing/YMCC/Evidence');
+if(inside(coreEvidence,out)&&out!==coreEvidence)root=coreEvidence;
+if(!inside(root,out)||root===out)throw Error('Use a fresh child of OneXApplication/Tests or Testing/YMCC/Evidence');
 fs.mkdirSync(root,{recursive:true});const realRoot=fs.realpathSync(root);if(path.resolve(root)!==realRoot)throw Error('Validation root redirected');
 let parent=out;while(!fs.existsSync(parent))parent=path.dirname(parent);if(!inside(realRoot,fs.realpathSync(parent)))throw Error('Output parent redirected');
 fs.mkdirSync(out,{recursive:true});if(fs.readdirSync(out).length)throw Error('Output directory must be empty');
@@ -32,7 +34,10 @@ try{
   const fixtureNames=['extract.mjs','handoff.mjs','boundary.h','harness.cpp','stubs.cpp.txt','README.md'];
   const mainPath=path.join(repo,'native/main.cpp'),beforePath=path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXApplication/main.before-application.cpp');
   const oldMock=path.join(repo,'tools/fixtures/hc_onex_x2_windows/mock_win32.h'),jsonPath=path.join(repo,'deps/json/json.hpp');
-  receipt.inputs=[runner,mainPath,beforePath,oldMock,jsonPath,...headers.map(x=>path.join(repo,'native',x)),...fixtureNames.map(x=>path.join(fixtures,x))].map(p=>({path:p,sha256:sha(fs.readFileSync(p))}));
+  const upgradePath=path.join(repo,'capabilities/upstream/f2e58468/OneXPlayer3.cs');
+  if(sha(fs.readFileSync(upgradePath))!=='e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc')throw Error('OXP3 held-input independent source identity changed');
+  receipt.inputUpgrade={commit:'f2e58468d9917189d4be7ccfc242385ce2c3035b',path:upgradePath,sha256:sha(fs.readFileSync(upgradePath)),meaning:'Independent C# basis for Home/G-Key held expectations; not compiled or executed'};
+  receipt.inputs=[runner,mainPath,beforePath,oldMock,jsonPath,upgradePath,...headers.map(x=>path.join(repo,'native',x)),...fixtureNames.map(x=>path.join(fixtures,x))].map(p=>({path:p,sha256:sha(fs.readFileSync(p))}));
   for(const name of headers)fs.copyFileSync(path.join(repo,'native',name),path.join(out,name));
   for(const name of fixtureNames)fs.copyFileSync(path.join(fixtures,name),path.join(out,name));
   const main=fs.readFileSync(mainPath,'utf8'),before=fs.readFileSync(beforePath,'utf8');
@@ -84,6 +89,8 @@ try{
   if(failures.length){receipt.failures=failures;throw Error(`${failures.length} compiled semantic case failures; see per-case logs (production headers untouched)`);}
   if(!options.noMutations){
     const controls=[
+      {name:'oxp3-held-routing-removed',from:'(machine == Model::OneXPlayer3 && (event->button == Button::Home || event->button == Button::GKey))',to:'false',scenario:'oxp3-held-keys',section:'oxp3-held'},
+      {name:'oxp3-gkey-follows-home',from:'| (event->rearBits & 8 ? kOemBitGKey : 0)',to:'| (event->rearBits & 4 ? kOemBitGKey : 0)',scenario:'oxp3-held-keys',section:'oxp3-held'},
       {name:'current-without-context',from:'&& oemProducerContextCurrent(source);',to:'&& true;',scenario:'context-fences',section:'context-fence'},
       {name:'vendor-keyboard-duplicated',from:'event->kind == EventKind::Click && event->button == Button::Home',to:'event->kind == EventKind::Click',scenario:'keyboard-owned',section:'keyboard-owner'},
       {name:'mini-vendor-rear-admitted',from:'&& machine != Model::X2MiniPro',to:'',scenario:'mini-keyboard',section:'mini-rear'},

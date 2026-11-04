@@ -52,6 +52,7 @@ struct VirtualOutputFacts {
     // MSI virtual-OFF mode-return debt only; unrelated recovery is not a return.
     bool returnPending = false;
     bool returnFailed = false;
+    bool operator==(const VirtualOutputFacts&) const = default;
 };
 struct VirtualOutputVerdict {
     const char* state;

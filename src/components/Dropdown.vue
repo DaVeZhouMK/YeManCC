@@ -67,8 +67,9 @@ function colorVar(): string {
 }
 
 function getGlobalUiScale(): number {
-  // A full-height performance editor has its own visual scale; keep its teleported menu in that scale.
-  const localScale = Number.parseFloat(triggerEl.value?.closest<HTMLElement>('[data-performance-editor-scale]')?.dataset.performanceEditorScale ?? '');
+  // Fullscreen editors own a local scale; their teleported menus must share it.
+  const localOwner = triggerEl.value?.closest<HTMLElement>('[data-performance-editor-scale], [data-controller-editor-scale]');
+  const localScale = Number.parseFloat(localOwner?.dataset.controllerEditorScale ?? localOwner?.dataset.performanceEditorScale ?? '');
   if (Number.isFinite(localScale) && localScale > 0) return Math.max(.1, Math.min(4, localScale));
   const rootValue = Number.parseFloat(
     getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'),
@@ -308,11 +309,17 @@ function onScroll(e: Event) {
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointer);
   window.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', closeMenu);
+  window.addEventListener('orientationchange', closeMenu);
+  window.addEventListener('ipc:window.resized', closeMenu);
   window.addEventListener('ipc:gamepad-back', onGpBack);
 });
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocPointer);
   window.removeEventListener('scroll', onScroll, true);
+  window.removeEventListener('resize', closeMenu);
+  window.removeEventListener('orientationchange', closeMenu);
+  window.removeEventListener('ipc:window.resized', closeMenu);
   window.removeEventListener('ipc:gamepad-back', onGpBack);
 });
 

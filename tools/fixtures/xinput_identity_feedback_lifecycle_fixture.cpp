@@ -109,7 +109,8 @@ static PhysicalFeedbackTarget g_feedbackPulseTarget;
 static bool g_feedbackPulseActive=false,g_feedbackPulseTouch=false;
 static unsigned long long g_rogVibratePulseGen=0;
 static std::map<std::wstring,int> motors;
-static json writes=json::array();
+static json writes=json::array(),attempts=json::array();
+static std::map<DWORD,std::wstring> slotOccupants; // Empty preserves every original slot0 fixture.
 static unsigned zeroFailures=0,nonzeroFailures=0;
 // A device/transport may report success while its output latch is stale.
 // The fault only changes final physical-output observation, never source admission.
@@ -117,11 +118,14 @@ static bool outputLatchNeedsZero=false;
 static std::function<void()> afterFeedbackWrite;
 static DWORD fakeSetState(DWORD slot,XINPUT_VIBRATION* v){
  const bool zero=!v->wLeftMotorSpeed&&!v->wRightMotorSpeed;
- if(zero&&zeroFailures){--zeroFailures;return 5;}
- if(!zero&&nonzeroFailures){--nonzeroFailures;return 5;}
+ const auto target=slotOccupants.count(slot)?slotOccupants.at(slot):occupant;
+ // Attempts precede the injected API failure. writes still means accepted writes.
+ attempts.push_back({{"slot",slot},{"occupant",W2U(target)},{"left",v->wLeftMotorSpeed},{"right",v->wRightMotorSpeed},{"error",0}});
+ if(zero&&zeroFailures){--zeroFailures;attempts.back()["error"]=5;return 5;}
+ if(!zero&&nonzeroFailures){--nonzeroFailures;attempts.back()["error"]=5;return 5;}
  if(zero)outputLatchNeedsZero=false;
- if(!outputLatchNeedsZero)motors[occupant]=v->wRightMotorSpeed;
- writes.push_back({{"slot",slot},{"occupant",W2U(occupant)},{"left",v->wLeftMotorSpeed},{"right",v->wRightMotorSpeed}});
+ if(!outputLatchNeedsZero)motors[target]=v->wRightMotorSpeed;
+ writes.push_back({{"slot",slot},{"occupant",W2U(target)},{"left",v->wLeftMotorSpeed},{"right",v->wRightMotorSpeed}});
  if(afterFeedbackWrite){auto callback=std::move(afterFeedbackWrite);afterFeedbackWrite={};callback();}
  return ERROR_SUCCESS;
 }
@@ -173,7 +177,7 @@ static void reset(){
  g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;g_xinputPrimarySlot=0;
  g_feedbackPulseActive=false;g_feedbackPulseTouch=false;g_rogVibratePulseGen=0;g_feedbackPulseTarget={};g_gamepadSerialFeedbackStop.reset();g_gamepadSerialStopping=false;
  openAvailable=pathReadable=connected=writeAllowed=true;occupant=L"HID#physical-A";inProbe={};pathQueries=availabilityQueries=0;motors.clear();writes=json::array();
- pendingLog=json::array();throwPendingLog=false;zeroFailures=nonzeroFailures=0;outputLatchNeedsZero=false;afterFeedbackWrite={};msiSource.reset();g_msiFeedbackSourceGeneration=0;g_msiFeedbackModeGeneration=1;g_msiFeedbackSamplePower=1;g_msiFeedbackSampleMode=1;g_msiFeedbackSampleTopology=1;g_msiDinputSourceValid=false;msiMotor=msiZeros=msiWrites=0;g_machineIdentity.deviceClass="ROG";
+ attempts=json::array();slotOccupants.clear();pendingLog=json::array();throwPendingLog=false;zeroFailures=nonzeroFailures=0;outputLatchNeedsZero=false;afterFeedbackWrite={};msiSource.reset();g_msiFeedbackSourceGeneration=0;g_msiFeedbackModeGeneration=1;g_msiFeedbackSamplePower=1;g_msiFeedbackSampleMode=1;g_msiFeedbackSampleTopology=1;g_msiDinputSourceValid=false;msiMotor=msiZeros=msiWrites=0;g_machineIdentity.deviceClass="ROG";
 }
 static ymcc::touchhaptic::Receipt start(){auto receipt=nativePhysicalFeedbackStart(26,18,false);if(!receipt.ok)throw std::runtime_error("Pulse setup unexpectedly failed");if(!gamepadSerialScheduleFeedbackStop(receipt.pulseGeneration,18))throw std::runtime_error("Schedule failed");return receipt;}
 static json cases=json::array(),checks=json::array();
@@ -520,6 +524,80 @@ int main(){
    physicalFeedbackFinish(pulse.pulseGeneration);expect("selected tier still stops",motors[occupant],0);
   }
   finish("touch-output-amplified-three-tiers-retain-stop");
+ }
+#endif
+
+#if FIXED_POLICY && defined(YMCC_UNIFIED_PHYSICAL_FEEDBACK)
+ for(const std::string direction:{"xinput-slot","xinput-to-msi"}){
+  reset();sample();const auto oldPulse=start();const auto oldOwner=g_feedbackPulseTarget;
+  const auto oldGeneration=g_rogVibratePulseGen;const bool newMsi=direction=="xinput-to-msi";
+  const auto oldPath=occupant;const std::wstring newPath=L"HID#physical-slot-B";
+  const std::string prefix="manual/"+direction+"/";
+  const auto check=[&](const char* name,const auto& actual,const auto& expected){expect((prefix+name).c_str(),actual,expected);};
+  check("starts with live manual A",oldPulse.ok&&g_feedbackPulseActive&&!oldOwner.game&&!g_feedbackPulseTouch&&physicalFeedbackSlotCurrent(oldOwner),true);
+  if(newMsi){
+   msiSource=std::make_shared<HidHideMsiMainSourceRecord>();fixturePublishMsiSource();
+   g_msiFeedbackSourceGeneration=7;g_msiDinputSourceValid=true;
+   check("B has the actual current MSI record",msiDinputFeedbackSourceCurrent(msiDinputFeedbackSourceSnapshot()),true);
+  }else{
+   slotOccupants[1]=newPath;g_xinputConnectedMask|=2;g_xinputKnownSlotMask|=2;g_xinputAdmittedMask|=2;
+   g_xinputPhysicalSourceMask|=2;g_xinputVirtualEndpointProbed|=2;
+   const auto epoch=g_xinputSlotIdentityEpoch.load();
+   xinputFeedbackIdentityProbe(1,true,newPath,XInputSlotIdentity::Physical,true,false,false,epoch,currentPowerGeneration());
+   g_xinputSlotIdentityResolvedEpoch[1]=epoch;g_xinputPrimarySlot=1;
+   check("B has its independent physical proof",g_xinputFeedbackIdentity[1].capture(epoch,currentPowerGeneration()).valid&&slotOccupants[1]!=oldPath,true);
+  }
+  check("A remains current when B is selected",physicalFeedbackSlotCurrent(oldOwner),true);
+  attempts=json::array();writes=json::array();zeroFailures=1;
+  const auto blocked=nativePhysicalFeedbackStart(41,18,false);
+  check("failed A zero refuses replacement receipt",blocked.ok,false);
+  check("failed A zero attempts no B pulse",blocked.attempted,false);
+  check("failed A zero reports stop unavailable",blocked.reason==ymcc::touchhaptic::Reason::StopUnavailable,true);
+  check("exactly one API attempt targets A zero",attempts.size()==1&&attempts[0]["slot"]==0&&attempts[0]["occupant"]==W2U(oldPath)&&attempts[0]["left"]==0&&attempts[0]["right"]==0&&attempts[0]["error"]==5,true);
+  unsigned bAttempts=0;for(const auto& a:attempts)if(a["slot"]==1&&(a["left"]!=0||a["right"]!=0))++bAttempts;
+  check("B XInput nonzero API attempts are zero",bAttempts,0u);
+  check("B MSI writer calls are zero",fixtureMsiWrites()==0&&fixtureMsiOpens==0&&fixtureMsiSdkCalls==0,true);
+  check("failed API has no accepted write",writes.empty(),true);
+  check("failure retains active A",g_feedbackPulseActive&&g_feedbackPulseTarget.slot==oldOwner.slot&&!g_feedbackPulseTarget.msi,true);
+  check("failure retains A generation",g_rogVibratePulseGen,oldGeneration);
+  check("failure retains A identity and capability",g_feedbackPulseTarget.sourceGeneration==oldOwner.sourceGeneration&&g_feedbackPulseTarget.identityEpoch==oldOwner.identityEpoch&&g_feedbackPulseTarget.xinputIdentity.episode==oldOwner.xinputIdentity.episode&&g_feedbackPulseTarget.unifiedBinding.token()==oldOwner.unifiedBinding.token(),true);
+  check("failure retains A power topology and flags",g_feedbackPulseTarget.powerGeneration==oldOwner.powerGeneration&&g_feedbackPulseTarget.sourceTopology==oldOwner.sourceTopology&&!g_feedbackPulseTarget.game&&!g_feedbackPulseTouch,true);
+  check("A remains physically nonzero in memory",motors[oldPath]>0,true);
+  check("failed replacement schedules immediate A stop",g_gamepadSerialFeedbackStop&&g_gamepadSerialFeedbackStop->generation==oldGeneration&&g_gamepadSerialFeedbackStop->due<=GetTickCount64(),true);
+  // Drain the actual scheduler -> finish -> zero before allowing another request.
+  zeroFailures=0;const bool stopped=pump();
+  check("actual scheduler drains the retained A stop",stopped&&!g_feedbackPulseActive&&motors[oldPath]==0,true);
+  check("A stop has a second accepted zero attempt",attempts.size()==2&&attempts[1]["slot"]==0&&attempts[1]["left"]==0&&attempts[1]["right"]==0&&attempts[1]["error"]==0&&writes.size()==1,true);
+  const auto recovered=nativePhysicalFeedbackStart(41,18,false);
+  check("B is admitted only after A settles",recovered.ok&&recovered.attempted,true);
+  check("only admitted B advances the generation",recovered.pulseGeneration,oldGeneration+1);
+  check("B owns the intended backend",g_feedbackPulseTarget.msi,newMsi);
+  check("B retains manual arbitration",g_feedbackPulseActive&&!g_feedbackPulseTarget.game&&!g_feedbackPulseTouch,true);
+  if(newMsi){check("B MSI gets exactly its selected pulse",fixtureMsiWrites()==1&&fixtureMsiMotor()==(41*255+50)/100,true);}
+  else{check("independent B actuator gets its pulse",attempts.size()==3&&attempts[2]["slot"]==1&&attempts[2]["occupant"]==W2U(newPath)&&attempts[2]["left"]>0&&motors[newPath]>0&&motors[oldPath]==0,true);}
+  gamepadSerialScheduleFeedbackStop(recovered.pulseGeneration,18);
+  const auto attemptsBeforeLate=attempts.size();const auto msiBeforeLate=fixtureMsiWrites();const auto due=g_gamepadSerialFeedbackStop->due;
+  physicalFeedbackFinish(oldPulse.pulseGeneration);
+  check("late A stop does not write to B",attempts.size()==attemptsBeforeLate&&fixtureMsiWrites()==msiBeforeLate,true);
+  check("late A stop preserves B owner and deadline",g_feedbackPulseActive&&g_rogVibratePulseGen==recovered.pulseGeneration&&g_gamepadSerialFeedbackStop&&g_gamepadSerialFeedbackStop->generation==recovered.pulseGeneration&&g_gamepadSerialFeedbackStop->due==due,true);
+  fakeTick+=18;const bool bStopped=pump();
+  check("B is returned by its own actual scheduler",bStopped&&!g_feedbackPulseActive&&(newMsi?fixtureMsiMotor()==0:motors[newPath]==0),true);
+  finish("manual-source-replacement-zero-failure-"+direction);
+ }
+ {
+  reset();sample();const auto oldPulse=start();zeroFailures=1;
+  const auto check=[](const char* name,const auto& actual,const auto& expected){expect((std::string("manual/control/")+name).c_str(),actual,expected);};
+  const auto replacement=nativePhysicalFeedbackStart(41,18,false);
+  check("same-source manual overwrite stays admitted",replacement.ok,true);
+  check("same-source manual overwrite advances once",replacement.pulseGeneration,oldPulse.pulseGeneration+1);
+  check("same-source overwrite adds no safety zero",zeroFailures,1u);
+  check("same-source overwrite only attempts pulses",attempts.size()==2&&attempts[0]["left"]>0&&attempts[1]["left"]>0,true);
+  const auto source=nativePhysicalFeedbackReady();const auto touch=nativePhysicalFeedbackStart(26,18,true,&source);
+  check("touch still defers to manual owner",!touch.attempted&&touch.reason==ymcc::touchhaptic::Reason::ManualPulseActive,true);
+  check("denied touch preserves manual generation",g_rogVibratePulseGen,replacement.pulseGeneration);
+  zeroFailures=0;physicalFeedbackFinish(replacement.pulseGeneration);
+  check("same-source overwrite keeps its normal stop",!g_feedbackPulseActive,true);
+  finish("manual-source-replacement-preserves-same-source-and-touch-arbitration");
  }
 #endif
  int failures=0,total=0,bad=0;for(const auto& c:cases){failures+=!c["passed"].get<bool>();for(const auto& e:c["checks"]){++total;bad+=!e["passed"].get<bool>();}}

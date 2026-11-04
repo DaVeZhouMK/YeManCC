@@ -503,6 +503,36 @@ void boundedMutationRejection() {
     CHECK(r::decodeRecord(json.dump()).state == r::DecodeState::Valid);
     CHECK(r::decodeRecord(json.dump()).record.hiddenPaths == sample().hiddenPaths); // retain old-generation debt
 }
+void nativeForegroundRecovery() {
+    auto reference=sample();reference.rootInstance=root1;reference.hiddenPaths.clear();reference.modeReturnPending=false;
+    const std::string game="HID\\VID_0DB0&PID_1901&IG_00\\8&1717EFAA&0&0000";
+    const std::string xusb="USB\\VID_0DB0&PID_1901&MI_00\\6&2B02AE9F&0&0000";
+    Json row={{"event","msi-native-foreground-isolation"},{"family","msi"},{"pid",17848u},
+        {"powerGeneration",4u},{"edge",41u},{"modeWrite",false},{"virtualTargetCreated",false},
+        {"sourceRoot",root1},{"locationPaths",reference.locationPaths},{"ownedPaths",{root1,game,xusb}},
+        {"configurationReturned",false},{"beforeConfigurationEvidence",{{"snapshotRead",true},
+        {"selectedPathsComplete",true},{"selectedHiddenCount",0},{"unownedSelectedHiddenCount",0}}}};
+    if(reference.locationPaths.empty())reference.locationPaths={"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(4)"};
+    row["locationPaths"]=reference.locationPaths;
+    r::Record recovered;CHECK(r::nativeForegroundLegacyClaim(row,reference,"134375313626906592",recovered));
+    CHECK(recovered.hiddenPaths.size()==3 && recovered.nativeLegacyImported && !recovered.modeReturnPending);
+    CHECK(r::decodeRecord(bytes(recovered)).record.nativeLegacyImported);
+    auto legacy=Json::parse(bytes(recovered));legacy.erase("nativeLegacyImported");
+    CHECK(!r::decodeRecord(legacy.dump()).record.nativeLegacyImported);
+    for(const auto& bad:{"USB\\VID_0DB0&PID_1901&MI_01\\X","HID\\VID_0DB0&PID_1901&IG_0G\\X",
+            "HID\\VID_0DB0&PID_1901&IG_00\\X\\extra","HID\\VID_0DB0&PID_1901&MI_02&COL01\\KEYBOARD"})CHECK(!r::validOwnedPath(bad));
+    auto changed=row;changed["configurationReturned"]=true;
+    CHECK(r::nativeForegroundLegacyClaim(changed,reference,"134375313626906592",recovered) && recovered.hiddenPaths.empty());
+    changed=row;changed["beforeConfigurationEvidence"]["selectedHiddenCount"]=1;
+    CHECK(!r::nativeForegroundLegacyClaim(changed,reference,"134375313626906592",recovered));
+    changed=row;changed["ownedPaths"]={thirdParty};
+    CHECK(!r::nativeForegroundLegacyClaim(changed,reference,"134375313626906592",recovered));
+    changed=row;changed["locationPaths"]={"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(9)"};
+    CHECK(!r::nativeForegroundLegacyClaim(changed,reference,"134375313626906592",recovered));
+    changed=row;changed["sourceRoot"]="USB\\VID_0DB0&PID_1901\\FOREIGN";changed["locationPaths"]={"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(9)"};
+    CHECK(!r::nativeForegroundLegacyClaim(changed,reference,"134375313626906592",recovered));
+    CHECK(!r::nativeForegroundLegacyClaim(row,reference,"",recovered));
+}
 } // namespace
 int main() {
     struct Test { const char* name; void (*run)(); };
@@ -516,7 +546,7 @@ int main() {
         {"mode2-pending-before-dispatch", mode2RequiresDurablePending}, {"kill-before-after-durable-mode1-consume", killAcrossModeConsume},
         {"one-attempt-per-owner-reload-new-owner-gated", perOwnerDurableOnce}, {"pending-failed-commit-grants-no-write", pendingAndFailedAreNotSuccess},
         {"post-commit-facts-rechecked", changedFactsConsumeWithoutDispatch}, {"partial-observed-discharge-durable-only", partialDischargeNeedsDurability},
-        {"bounded-corruptions-rejected", boundedMutationRejection}
+        {"bounded-corruptions-rejected", boundedMutationRejection}, {"native-foreground-owned-recovery",nativeForegroundRecovery}
     };
     unsigned passed = 0;
     for (const auto& test : tests) {

@@ -1,3 +1,4 @@
+#include <xmmintrin.h>
 #include "controller_motion_session.h"
 #include "main_madgwick_oracle.generated.h"
 
@@ -322,8 +323,27 @@ void testSubsequentTimeSemantics(){Fixture f;auto& s=f.effects;s.gravity={0,0,0}
     for(double now:times){auto result=processed(session,key(),{},now);delta(s,result,now-previous);previous=now;}
     session.revoke();s.clean();}
 } // namespace
+
+void testRejectedBeforeFpDelta() {
+    Fixture f; auto& effects=f.effects; Session session;
+    volatile double extreme=std::numeric_limits<double>::max();
+    require(session.select(key(),ops(),reads(),calibration(),-extreme),"extreme finite selection rejected");
+    volatile float rejected=std::numeric_limits<float>::quiet_NaN();
+    const RawSixAxes axes{rejected,0,0,0,0,0};
+    const auto effectsBefore=effects.events.size();
+    const unsigned saved=_mm_getcsr();
+    _mm_setcsr(saved & ~0x3fu);
+    auto result=session.process(key(),axes,extreme);
+    const unsigned flags=_mm_getcsr() & 0x3fu;
+    _mm_setcsr(saved);
+    require(!result,"invalid sample admitted before FP-order check");
+    require(effects.events.size()==effectsBefore,"rejected axes emitted callbacks");
+    require(flags==0,"invalid sample changed FP exception flags before rejection");
+    session.revoke(); effects.clean();
+}
+
 int main(int argc,char**argv){const std::vector<std::pair<std::string,std::function<void()>>> cases{
-    {"first-and-repeated-tick",testFirstAndTick},{"unchanged-selection",testIdempotence},{"reads-and-requested-spaces",testReadsAndSpaces},
+    {"invalid-rejection-before-fp-delta",testRejectedBeforeFpDelta},{"first-and-repeated-tick",testFirstAndTick},{"unchanged-selection",testIdempotence},{"reads-and-requested-spaces",testReadsAndSpaces},
     {"missing-optional-reads",testOptionalReads},{"missing-required-reads",testMissingRequiredReads},{"delta-unmodified",testDeltaUnmodified},
     {"invalid-sample-does-not-advance",testRejectedSamplesDoNotAdvance},{"key-replacement",testKeyReplacement},{"all-callback-replacements",testAllCallbackReplacement},
     {"create-failure",testCreateFailure},{"read-replacement-history",testReadReplacementHistory},{"stop-restart",testStopRestart},

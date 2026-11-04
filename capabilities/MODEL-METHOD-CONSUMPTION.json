@@ -3,7 +3,7 @@
   "scope": "Frozen Devices method declarations and their consumer/dependency review obligations",
   "sourceBaseline": "HC-BINARY-BATCH12-20260831",
   "sourceFilesIndexSha256": "9105b05655c280f99ffffdb214c165955ced5ef3463719d681e7abecf7e904d1",
-  "policySha256": "3c310ae189661648ae38ed2be3f1adecfd13fe0e3da87fe47a6a78163e0fb146",
+  "policySha256": "ab058e263c9a254eb0923eacb159ad8db84b76dd457bafd256a07bee6112f0a0",
   "evidenceLevel": "fresh-Roslyn-source-classification",
   "classCount": 92,
   "factoryClassCount": 80,
@@ -45,12 +45,13 @@
     "motion": 2
   },
   "kindCounts": {
-    "domain-action": 130,
+    "domain-action": 127,
     "model-metadata-reference": 28,
     "required-lifecycle-dependency": 74,
     "required-internal-dependency": 96,
     "mixed-settings-dependency-review": 26,
     "scope-review-required": 3,
+    "unconnected-model-capability": 3,
     "metadata-only-by-user": 35,
     "conditional-installation-dependency-review": 5
   },
@@ -665,7 +666,7 @@
     {
       "id": "model.secondary-display",
       "domain": "remaining-model-methods",
-      "kind": "domain-action",
+      "kind": "unconnected-model-capability",
       "names": [
         "CEcControl_SetSecDispBrightness",
         "CEcControl_GetSecDispBrightnessRaw",
@@ -693,7 +694,7 @@
           "role": "existing-domain-implementation"
         }
       ],
-      "note": "Exact Flip DS and explicitly source-inherited Flip 1S DS ACPI EC secondary-display consumers are connected in this source candidate. No OverlayQuickTools/keyboard/trackpad UI import; runtime readiness, one-use read fences and source-pinned two-model registration remain authoritative. Mainline promotion, global software acceptance, package and physical effects are separate.",
+      "note": "Not connected to the admitted product scope: ACTIVE-INTEGRATION-SCOPE.json retains these candidate sources without activation or D15R2 promotion. This is a model hardware capability gap, distinct from the excluded wake-password UI. Exact Flip DS and explicitly source-inherited Flip 1S DS ACPI EC secondary-display consumers are connected in this source candidate. No OverlayQuickTools/keyboard/trackpad UI import; runtime readiness, one-use read fences and source-pinned two-model registration remain authoritative. Mainline promotion, global software acceptance, package and physical effects are separate.",
       "sideEffects": [
         "ACPI EC byte-register latch0x4F=0 then brightness0x4E with readback; no SuperIO ports",
         "Persistent display preference only after verified explicit operation; no automatic startup/resume/release brightness write"
@@ -3937,7 +3938,7 @@
       },
       "group": "model.secondary-display",
       "domain": "remaining-model-methods",
-      "kind": "domain-action",
+      "kind": "unconnected-model-capability",
       "methodSpecificExecution": "not-inferred-from-domain-link",
       "runtimeAvailabilityAuthority": false,
       "physicalAcceptance": false
@@ -4013,7 +4014,7 @@
       },
       "group": "model.secondary-display",
       "domain": "remaining-model-methods",
-      "kind": "domain-action",
+      "kind": "unconnected-model-capability",
       "methodSpecificExecution": "not-inferred-from-domain-link",
       "runtimeAvailabilityAuthority": false,
       "physicalAcceptance": false
@@ -4032,7 +4033,7 @@
       },
       "group": "model.secondary-display",
       "domain": "remaining-model-methods",
-      "kind": "domain-action",
+      "kind": "unconnected-model-capability",
       "methodSpecificExecution": "not-inferred-from-domain-link",
       "runtimeAvailabilityAuthority": false,
       "physicalAcceptance": false
@@ -10390,5 +10391,5 @@
   "physicalAcceptance": false,
   "wholeProcessCpuReduction": null,
   "goalComplete": false,
-  "contentSha256": "c1024da8ad88043b35590393ab48c8dbfa287bc8f1002796f1af5a575c255f7a"
+  "contentSha256": "c91f91f78e0eb2662a00300fa73419281622d9126822c0060b50b854fa7d0ad0"
 }

@@ -111,6 +111,7 @@
     "mode": "custom",
     "pauseGameOnSleep": true,
     "retryOnEntryFailure": true,
+    "retryOnSleepTimeout": true,
     "retryOnNonUserWake": false,
     "factMonitorEnabled": false,
     "sleepPowerPlanOptimizationEnabled": true,
@@ -243,6 +244,7 @@
       "schemaVersion": 1,
       "mode": "ymcc-semantic",
       "frontendSummonVirtualControl": false,
+      "frontendIsolationEnabled": true,
       "externalControllerPriority": false
     },
     "diagnostics": {

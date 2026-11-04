@@ -2,13 +2,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+// This optional leaf remains part of controller.lossless-toggle-owner.
+const scriptDirectory=path.dirname(fileURLToPath(import.meta.url));
+const arguments_=process.argv.slice(2);
+function valueOf(flag){const i=arguments_.indexOf(flag);if(i<0)return undefined;assert.ok(arguments_[i+1]&&!arguments_[i+1].startsWith('--'),'Missing '+flag+' value');assert.equal(arguments_.lastIndexOf(flag),i,'Duplicate '+flag);return arguments_[i+1];}
+const root=path.resolve(valueOf('--source-root')||process.env.YMCC_LOSSLESS_SOURCE_ROOT||path.join(scriptDirectory,'..'));
+assert.ok(fs.existsSync(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')),'Supply YMCC_LOSSLESS_SOURCE_ROOT or --source-root when this copy lives in PrivateFixtures');
+const {calibrationToolchainPreamble}=await import(pathToFileURL(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')).href);
+if(arguments_.includes('--launch-session')){
+ await launchSessionOnly();
+}else if(arguments_.includes('--discovery')){
+ await discoveryOnly();
+}else{
 const out=path.resolve(process.argv[2]||path.join(root,'../../../Build/Validation/Lossless-Toggle-Xbox-20261022/owner'));
 fs.mkdirSync(out,{recursive:true});
-const inputs=['native/main.cpp','native/decky_sidebar_diagnostics.h','src/bridge/quickapp.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','tools/lossless_scaling_selftest.mjs','tools/lossless_toggle_owner_selftest.mjs','src/bridge/api.ts','src/bridge/ipc.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/lossless_runtime.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','tools/lossless_launch_selftest.cpp','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
+const inputs=['native/main.cpp','native/decky_sidebar_diagnostics.h','src/bridge/quickapp.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessProgramState.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','tools/lossless_scaling_selftest.mjs','tools/lossless_toggle_owner_selftest.mjs','src/bridge/api.ts','src/bridge/ipc.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/lossless_runtime.h','native/process_basic_candidates.h','native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','tools/lossless_launch_selftest.cpp','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 const hash=name=>createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
 const sourceHashes=Object.fromEntries(inputs.map(name=>[name,hash(name)]));
 const run=spawnSync(process.execPath,['tools/lossless_scaling_selftest.mjs'],{cwd:root,encoding:'utf8',windowsHide:true,timeout:30000,
@@ -128,3 +138,211 @@ int main(){
 }catch(error){result.error=String(error);}
 fs.writeFileSync(path.join(out,'lossless-owner-result.json'),JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify({pass:result.pass,cases:result.cases,error:result.error}));process.exitCode=result.pass?0:1;
+
+}
+
+async function discoveryOnly(){
+ const totalStart=performance.now(),startedUtc=new Date().toISOString();
+ const valuedFlags=new Set(['--source-root','--candidate-dir','--out']);
+ const positional=[];
+ for(let i=0;i<arguments_.length;i++){
+  const argument=arguments_[i];
+  if(argument==='--discovery'){assert.equal(arguments_.filter(v=>v===argument).length,1,'Duplicate --discovery');continue;}
+  if(valuedFlags.has(argument)){valueOf(argument);++i;continue;}
+  assert.ok(!argument.startsWith('--'),'Unsupported discovery option '+argument);positional.push(argument);
+ }
+ assert.ok(positional.length<=1,'Only the original output-directory positional argument is allowed');
+ assert.ok(!(positional.length&&valueOf('--out')),'Conflicting output paths');
+ const candidateArgument=valueOf('--candidate-dir');assert.ok(candidateArgument,'--discovery requires an explicit --candidate-dir');
+ const candidate=fs.realpathSync(path.resolve(candidateArgument));
+ const out=path.resolve(valueOf('--out')||positional[0]||path.join(scriptDirectory,'DiscoveryExecution'));
+ const native=path.join(out,'native');
+ assert.ok(!fs.existsSync(path.join(out,'lossless-discovery-result.json'))&&!fs.existsSync(path.join(native,'build.cmd')),'Use a fresh output directory; preserve previous FAIL/UNKNOWN receipts');
+ fs.mkdirSync(native,{recursive:true});
+ const candidateRuntime=path.join(candidate,'lossless_runtime.h'),candidateHelper=path.join(candidate,'process_basic_candidates.h');
+ const fixture=path.join(scriptDirectory,'lossless_discovery_fixture.h'),cpp=path.join(scriptDirectory,'lossless_launch_selftest.cpp');
+ const pin=p=>{const real=fs.realpathSync(p),bytes=fs.readFileSync(real);return {path:real,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};};
+ const normalize=p=>path.resolve(p).replaceAll('\\','/').toLowerCase();
+ const requiredInputs=[fileURLToPath(import.meta.url),cpp,fixture,candidateRuntime,candidateHelper,path.join(candidate,'process_inventory.h'),path.join(candidate,'game_process_inventory.h'),
+  path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'),path.join(root,'native/lossless_scale.h'),
+  path.join(root,'native/lossless_scale_contract.h'),path.join(root,'native/lossless_launch_contract.h'),path.join(root,'native/lossless_window_refresh.h'),process.execPath];
+ const inputStart=performance.now(),inputsBefore=requiredInputs.map(pin),identityMs=performance.now()-inputStart;
+ const result={pass:false,canonicalId:'controller.lossless-toggle-owner',selection:'discovery',startedUtc,
+  root,candidate,out,inputsBefore,actualOSInput:false,actualLsControl:false,actualYmccControl:false,
+  normalBusinessExecuted:false,fullFixtureValidation:'NOT_RUN',timings:{identityMs},processes:[],
+  scope:'Public candidate discoverRuntime; fake process/name/session/identity APIs only; original defaults not executed'};
+ const save=()=>fs.writeFileSync(path.join(out,'lossless-discovery-result.json'),JSON.stringify(result,null,2)+'\n');
+ const q=p=>{assert.ok(!/["%\r\n]/.test(p),'Unsupported build path');return '"'+p.replaceAll('/','\\')+'"';};
+ function execute(label,command,args,timeoutMs){
+  const start=performance.now(),utc=new Date().toISOString();
+  const run=spawnSync(command,args,{cwd:native,encoding:'utf8',windowsHide:true,timeout:timeoutMs,maxBuffer:32*1024*1024});
+  const receipt={label,command,args,cwd:native,startedUtc:utc,endedUtc:new Date().toISOString(),durationMs:performance.now()-start,
+   timeoutMs,pid:run.pid??null,status:run.status,signal:run.signal,error:run.error?String(run.error):null};
+  fs.writeFileSync(path.join(native,label+'.stdout.log'),run.stdout||'');fs.writeFileSync(path.join(native,label+'.stderr.log'),run.stderr||'');
+  fs.writeFileSync(path.join(native,label+'.process.json'),JSON.stringify(receipt,null,2)+'\n');result.processes.push(receipt);save();
+  return run;
+ }
+ try{
+  // No executable commands or alternative toolchains can be supplied by fixture arguments.
+  const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
+  result.vcvars=pin(vcvars);
+  const exe=path.join(native,'contract.exe');
+  const build=calibrationToolchainPreamble(vcvars)+'\r\nwhere cl > '+q(path.join(native,'compiler-paths.txt'))+'\r\nif errorlevel 1 exit /b 1\r\nwhere link >> '+q(path.join(native,'compiler-paths.txt'))+'\r\nif errorlevel 1 exit /b 1\r\n'+
+   'cl /nologo /std:c++20 /EHsc /utf-8 /O1 /W4 /showIncludes /DYMCC_LOSSLESS_DISCOVERY_ONLY=1 /I'+q(candidate)+' /I'+q(path.join(root,'native'))+' /I'+q(scriptDirectory)+' '+q(cpp)+
+   ' /Fe'+q(exe)+' /Fo'+q(path.join(native,'contract.obj'))+' /link user32.lib\r\nexit /b %errorlevel%\r\n';
+  fs.writeFileSync(path.join(native,'build.cmd'),build);result.buildCommand=pin(path.join(native,'build.cmd'));save();
+  const compiled=execute('compile','cmd.exe',['/d','/c',path.join(native,'build.cmd')],20000);
+  const includePaths=[];
+  for(const line of ((compiled.stdout||'')+'\n'+(compiled.stderr||'')).split(/\r?\n/)){
+   const match=line.match(/(?:[a-z]:[\\/]|\\\\)[^\r\n]*$/i);
+   if(match){const file=match[0].trim();if(fs.existsSync(file)&&fs.statSync(file).isFile())includePaths.push(fs.realpathSync(file));}
+  }
+  result.compilerInputs=[...new Map(includePaths.map(p=>[normalize(p),p])).values()].map(pin);
+  const compilerList=path.join(native,'compiler-paths.txt');
+  if(fs.existsSync(compilerList))result.compilerTools=fs.readFileSync(compilerList,'utf8').split(/\r?\n/).filter(p=>p&&fs.existsSync(p)).map(pin);
+  assert.equal(compiled.status,0,'Native discovery compile failed; raw logs retained');
+  const declared=new Set(inputsBefore.map(p=>normalize(p.path)));
+  result.undeclaredProjectInputs=result.compilerInputs.filter(p=>{const n=normalize(p.path);return (n.startsWith(normalize(root)+'/')||n.startsWith(normalize(candidate)+'/')||n.startsWith(normalize(scriptDirectory)+'/'))&&!declared.has(n);});
+  assert.deepEqual(result.undeclaredProjectInputs,[],'Compiler consumed undeclared project input');
+  const included=new Set(result.compilerInputs.map(p=>normalize(p.path)));
+  for(const required of [candidateRuntime,candidateHelper,path.join(candidate,'process_inventory.h'),fixture,path.join(root,'native/lossless_scale.h')])
+   assert.ok(included.has(normalize(fs.realpathSync(required))),'Compiler did not consume required actual input: '+required);
+  if(normalize(candidateRuntime)!==normalize(path.join(root,'native/lossless_runtime.h')))
+   assert.ok(!included.has(normalize(path.join(root,'native/lossless_runtime.h'))),'Shared runtime header shadowed candidate');
+  result.executable=pin(exe);save();
+  const inventoryOnly=process.env.YMCC_INVENTORY_TARGETED==='1';
+  result.subselection=inventoryOnly?'inventory-boundaries':'complete-discovery';
+  const normal=execute('discovery',exe,inventoryOnly?['--inventory-only']:[],5000);
+  assert.equal(normal.status,0,'Public discoverRuntime scenarios failed');
+  result.native=JSON.parse((normal.stdout||'').trim());
+  assert.equal(result.native.pass,true);assert.equal(result.native.publicDiscoverRuntimeExecuted,true);
+  assert.equal(result.native.canonicalId,result.canonicalId);assert.equal(result.native.normalBusinessExecuted,false);
+  assert.equal(result.native.comparisons,inventoryOnly?0:25);assert.equal(result.native.executions,inventoryOnly?4:70);assert.equal(result.native.rows.length,inventoryOnly?4:70);
+  for(const row of result.native.rows){assert.equal(row.metrics.forbidden,0);assert.equal(row.metrics.acquired,row.metrics.closed);}
+  // One same-binary targeted negative; no repeat of the normal groups or normal owner.
+  const negative=execute('legacy-no-toolhelp',exe,['--legacy-no-toolhelp'],5000);
+  assert.equal(negative.status,1,'Legacy no-Toolhelp negative must reject with actual exit1');
+  result.negative=JSON.parse((negative.stdout||'').trim());
+  assert.equal(result.negative.pass,false);assert.equal(result.negative.assertion,'NO_TOOLHELP_FAST_PATH');
+  assert.equal(result.negative.selection,'legacy-no-toolhelp');assert.equal(result.negative.executions,1);assert.equal(result.negative.comparisons,0);
+  assert.equal(result.negative.metrics.toolhelp,1);assert.equal(result.negative.metrics.forbidden,0);assert.equal(result.negative.outstandingFakeHandles,0);
+  assert.equal(result.negative.metrics.acquired,result.negative.metrics.closed);
+  result.inputsAfter=inputsBefore.map(p=>pin(p.path));
+  result.changedInputs=result.inputsAfter.filter((p,i)=>p.sha256!==inputsBefore[i].sha256);
+  result.compilerInputsAfter=result.compilerInputs.map(p=>pin(p.path));
+  result.changedCompilerInputs=result.compilerInputsAfter.filter((p,i)=>p.sha256!==result.compilerInputs[i].sha256);
+  assert.deepEqual(result.changedInputs,[]);assert.deepEqual(result.changedCompilerInputs,[]);
+  result.pass=true;
+ }catch(error){result.error=String(error);result.stack=error?.stack;}
+ finally{
+  // Failed compile/semantic runs retain source identity checks as well as raw failure.
+  try{
+   result.inputsAfter??=inputsBefore.map(p=>pin(p.path));
+   result.changedInputs??=result.inputsAfter.filter((p,i)=>p.sha256!==inputsBefore[i].sha256);
+   result.compilerInputsAfter??=(result.compilerInputs||[]).map(p=>pin(p.path));
+   result.changedCompilerInputs??=result.compilerInputsAfter.filter((p,i)=>p.sha256!==result.compilerInputs[i].sha256);
+   if(result.changedInputs.length||result.changedCompilerInputs.length){result.pass=false;result.error??='Actual input identity changed';}
+  }catch(error){result.pass=false;result.identityAfterError=String(error);}
+  result.endedUtc=new Date().toISOString();result.timings.totalMs=performance.now()-totalStart;
+  result.timings.compilationMs=result.processes.filter(p=>p.label==='compile').reduce((sum,p)=>sum+p.durationMs,0);
+  result.timings.nativeExecutionMs=result.processes.filter(p=>p.label!=='compile').reduce((sum,p)=>sum+p.durationMs,0);
+  save();
+ }
+ console.log(JSON.stringify({pass:result.pass,selection:result.selection,checks:result.native?.checks,executions:result.native?.executions,error:result.error,out}));
+ process.exitCode=result.pass?0:1;
+}
+
+
+async function launchSessionOnly(){
+ const totalStart=performance.now(),startedUtc=new Date().toISOString();
+ const positional=[],valuedFlags=new Set(['--source-root','--out']);
+ for(let i=0;i<arguments_.length;i++){
+  const argument=arguments_[i];
+  if(argument==='--launch-session'){assert.equal(arguments_.filter(v=>v===argument).length,1,'Duplicate --launch-session');continue;}
+  if(valuedFlags.has(argument)){valueOf(argument);++i;continue;}
+  assert.ok(!argument.startsWith('--'),'Unsupported launch-session option '+argument);positional.push(argument);
+ }
+ assert.ok(positional.length<=1,'Only one output-directory positional argument is allowed');
+ assert.ok(!(positional.length&&valueOf('--out')),'Conflicting output paths');
+ const out=path.resolve(valueOf('--out')||positional[0]||path.join(root,'../../../Testing/YMCC/Workspace/LosslessLaunchSession'));
+ const native=path.join(out,'native'),resultPath=path.join(out,'lossless-launch-session-result.json');
+ assert.ok(!fs.existsSync(resultPath)&&!fs.existsSync(path.join(native,'build.cmd')),'Use a fresh output directory; preserve previous FAIL/UNKNOWN receipts');
+ fs.mkdirSync(native,{recursive:true});
+ const pin=file=>{const actual=fs.realpathSync(file),bytes=fs.readFileSync(actual);return {path:actual,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};};
+ const normalize=p=>path.resolve(p).replaceAll('\\','/').toLowerCase();
+ const cpp=path.join(root,'tools/lossless_launch_selftest.cpp'),header=path.join(root,'native/lossless_launch.h');
+ const requiredInputs=[fileURLToPath(import.meta.url),cpp,header,path.join(root,'native/lossless_launch_contract.h'),path.join(root,'native/process_inventory.h'),path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'),process.execPath];
+ const result={pass:false,status:'INCOMPLETE',canonicalId:'controller.lossless-toggle-owner',selection:'launch-session',startedUtc,
+  root,out,argv:process.argv.slice(),cwd:process.cwd(),inputsBefore:[],processes:[],
+  defaultOwner:'NOT_RUN',discovery:'NOT_RUN',fullFixtureValidation:'NOT_RUN',actualOSInput:false,actualLsControl:false,actualYmccControl:false,
+  scope:'Original YMCC_LOSSLESS_LAUNCH_SESSION_ONLY branch; production NativePorts and Store with fake WinAPI; no product actions'};
+ const save=()=>fs.writeFileSync(resultPath,JSON.stringify(result,null,2)+'\n');
+ const q=p=>{assert.ok(!/["%\r\n]/.test(p),'Unsupported build path');return '"'+p.replaceAll('/','\\')+'"';};
+ function execute(label,command,args,timeoutMs){
+  const start=performance.now(),utc=new Date().toISOString();
+  const run=spawnSync(command,args,{cwd:native,encoding:'utf8',windowsHide:true,timeout:timeoutMs,maxBuffer:16*1024*1024});
+  const receipt={label,command,args,cwd:native,startedUtc:utc,endedUtc:new Date().toISOString(),durationMs:performance.now()-start,
+   timeoutMs,pid:run.pid??null,status:run.status,signal:run.signal,error:run.error?String(run.error):null};
+  fs.writeFileSync(path.join(native,label+'.stdout.log'),run.stdout||'');fs.writeFileSync(path.join(native,label+'.stderr.log'),run.stderr||'');
+  fs.writeFileSync(path.join(native,label+'.process.json'),JSON.stringify(receipt,null,2)+'\n');result.processes.push(receipt);save();return run;
+ }
+ save();
+ try{
+  result.inputsBefore=requiredInputs.map(pin);result.sourceSnapshots=[];
+  for(const input of result.inputsBefore){
+   if(normalize(input.path)===normalize(process.execPath))continue;
+   const relative=normalize(input.path)===normalize(fileURLToPath(import.meta.url))?path.join('entry',path.basename(input.path)):path.relative(root,input.path);
+   assert.ok(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),'Source snapshot escaped selected root');
+   const target=path.join(out,'sources',relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(input.path,target);
+   const snapshot=pin(target);assert.equal(snapshot.sha256,input.sha256,'Source changed while preserving original bytes');
+   result.sourceSnapshots.push({original:input.path,...snapshot});
+  }
+  save();
+  const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
+  result.vcvars=pin(vcvars);
+  const exe=path.join(native,'contract.exe');
+  const build=calibrationToolchainPreamble(vcvars)+'\r\nwhere cl > '+q(path.join(native,'compiler-paths.txt'))+'\r\nif errorlevel 1 exit /b 1\r\nwhere link >> '+q(path.join(native,'compiler-paths.txt'))+'\r\nif errorlevel 1 exit /b 1\r\n'+
+   'cl /nologo /std:c++20 /EHsc /utf-8 /MT /Od /showIncludes /DYMCC_LOSSLESS_LAUNCH_SESSION_ONLY=1 /I'+q(path.join(root,'native'))+' '+q(cpp)+
+   ' /Fe'+q(exe)+' /Fo'+q(path.join(native,'contract.obj'))+' /link kernel32.lib\r\nexit /b %errorlevel%\r\n';
+  fs.writeFileSync(path.join(native,'build.cmd'),build);result.buildCommand=pin(path.join(native,'build.cmd'));save();
+  const compiled=execute('compile','cmd.exe',['/d','/c',path.join(native,'build.cmd')],20000);
+  const includePaths=[];
+  for(const line of ((compiled.stdout||'')+'\n'+(compiled.stderr||'')).split(/\r?\n/)){
+   const match=line.match(/(?:[a-z]:[\\/]|\\\\)[^\r\n]*$/i);
+   if(match){const file=match[0].trim();if(fs.existsSync(file)&&fs.statSync(file).isFile())includePaths.push(fs.realpathSync(file));}
+  }
+  result.compilerInputs=[...new Map(includePaths.map(file=>[normalize(file),file])).values()].map(pin);
+  const compilerList=path.join(native,'compiler-paths.txt');
+  if(fs.existsSync(compilerList))result.compilerTools=fs.readFileSync(compilerList,'utf8').split(/\r?\n/).filter(file=>file&&fs.existsSync(file)).map(pin);
+  assert.equal(compiled.status,0,'Native launch-session compile failed; raw logs retained');
+  const included=new Set(result.compilerInputs.map(input=>normalize(input.path))),declared=new Set(result.inputsBefore.map(input=>normalize(input.path)));
+  for(const required of [header,path.join(root,'native/lossless_launch_contract.h'),path.join(root,'native/process_inventory.h')])
+   assert.ok(included.has(normalize(fs.realpathSync(required))),'Compiler did not consume required actual input: '+required);
+  result.undeclaredProjectInputs=result.compilerInputs.filter(input=>normalize(input.path).startsWith(normalize(root)+'/')&&!declared.has(normalize(input.path)));
+  assert.deepEqual(result.undeclaredProjectInputs,[],'Compiler consumed undeclared project input');
+  assert.ok(result.compilerTools?.some(tool=>path.basename(tool.path).toLowerCase()==='cl.exe'),'Actual compiler path missing');
+  assert.ok(result.compilerTools?.some(tool=>path.basename(tool.path).toLowerCase()==='link.exe'),'Actual linker path missing');
+  result.executable=pin(exe);save();
+  const selected=execute('launch-session',exe,[],5000);
+  result.native=JSON.parse((selected.stdout||'').trim());save();
+  assert.equal(selected.status,0,'Original launch-session scenarios failed');
+  assert.equal(result.native.checks,17);assert.equal(result.native.failures,0);
+  assert.deepEqual(result.native.failedAssertions,[]);assert.equal(result.native.realApplicationsStarted,0);
+  assert.deepEqual(result.native.cases.map(row=>row.name),['prefilter-session-reuse','same-session-control','held-session-denied']);
+  assert.deepEqual(result.native.cases.map(row=>row.checks),[6,5,6]);
+  assert.ok(result.native.cases.every(row=>row.failures===0&&row.heldSessionQueries>=1),'Incomplete launch-session boundary coverage');
+  result.inputsAfter=requiredInputs.map(pin);
+  result.changedInputs=result.inputsAfter.filter((input,index)=>input.sha256!==result.inputsBefore[index].sha256);
+  result.compilerInputsAfter=result.compilerInputs.map(input=>pin(input.path));
+  result.changedCompilerInputs=result.compilerInputsAfter.filter((input,index)=>input.sha256!==result.compilerInputs[index].sha256);
+  result.compilerToolsAfter=result.compilerTools.map(input=>pin(input.path));
+  result.changedCompilerTools=result.compilerToolsAfter.filter((input,index)=>input.sha256!==result.compilerTools[index].sha256);
+  assert.deepEqual(result.changedInputs,[],'Declared source/tool changed during launch-session test');
+  assert.deepEqual(result.changedCompilerInputs,[],'Actual compiler input changed during launch-session test');
+  assert.deepEqual(result.changedCompilerTools,[],'Actual compiler/linker changed during launch-session test');
+  result.pass=true;result.status='PASS';result.selectedCanonicalLeaves=1;result.cases=3;result.checks=result.native.checks;
+ }catch(error){result.status='FAIL';result.error=String(error instanceof Error?error.stack:error);}
+ finally{result.endedUtc=new Date().toISOString();result.totalMs=performance.now()-totalStart;save();}
+ console.log(JSON.stringify({pass:result.pass,status:result.status,canonicalId:result.canonicalId,selection:result.selection,cases:result.cases??0,checks:result.checks??0,error:result.error,out}));
+ if(!result.pass)process.exitCode=1;
+}

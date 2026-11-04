@@ -1,9 +1,17 @@
 #pragma once
 #include <windows.h>
 #include <tlhelp32.h>
+#include <winternl.h>
+#include <algorithm>
+#include <new>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <string_view>
 #include <string>
 #include <vector>
 #include <utility>
+#include "process_basic_candidates.h"
 
 // Direct executable control only. A live process is not evidence that its
 // controller bindings are enabled; callers expose that verification level.
@@ -42,43 +50,64 @@ inline bool samePath(HANDLE process, const std::wstring& executable) {
         CompareStringOrdinal(path, static_cast<int>(length), executable.c_str(),
             static_cast<int>(executable.size()), TRUE) == CSTR_EQUAL;
 }
-inline Snapshot inspect(const std::wstring& executable) {
+// Compatibility forwarding: callers retain the original mouse namespace/signatures.
+using BasicQuery = ymcc::processNames::BasicQuery;
+using BasicResult = ymcc::processNames::BasicResult;
+using SessionQuery = ymcc::processNames::SessionQuery;
+inline BasicQuery resolveBasicQuery() noexcept { return ymcc::processNames::resolveBasicQuery(); }
+inline bool parseBasicCandidates(const void* data, std::size_t bytes,
+    std::wstring_view name, std::vector<DWORD>& candidates) {
+    return ymcc::processNames::parseBasicCandidates(data, bytes, name, candidates);
+}
+inline BasicResult basicCandidates(std::wstring_view name, std::vector<DWORD>& candidates,
+    DWORD& error, BasicQuery query = resolveBasicQuery()) {
+    return ymcc::processNames::basicCandidates(name, candidates, error, query);
+}
+inline void inspectCandidate(Snapshot& result, DWORD pid, DWORD session,
+    const std::wstring& executable, SessionQuery querySession = &::ProcessIdToSessionId) {
+    DWORD candidateSession = 0;
+    if (!querySession(pid, &candidateSession)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_INVALID_PARAMETER) { result.known = false; result.error = error; }
+        return;
+    }
+    if (candidateSession != session) return;
+    Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid));
+    if (!process.value) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_INVALID_PARAMETER) { result.known = false; result.error = error; }
+    } else {
+        const DWORD wait = WaitForSingleObject(process.value, 0);
+        if (wait == WAIT_TIMEOUT) {
+            // The name/session hint predates OpenProcess and its PID can be
+            // recycled. Recheck the opened instance while its handle is held.
+            const DWORD heldPid = GetProcessId(process.value);
+            DWORD heldSession = 0;
+            if (!heldPid || !querySession(heldPid, &heldSession)) {
+                result.known = false; result.error = GetLastError(); return;
+            }
+            if (heldSession != session) return;
+            SetLastError(ERROR_SUCCESS);
+            if (samePath(process.value, executable)) result.processes.push_back(std::move(process));
+            else if (GetLastError() != ERROR_SUCCESS) {
+                result.known = false; result.error = GetLastError();
+            }
+        } else if (wait == WAIT_FAILED) { result.known = false; result.error = GetLastError(); }
+    }
+}
+inline Snapshot inspect(const std::wstring& executable, BasicQuery query = resolveBasicQuery()) {
     Snapshot result;
     DWORD session = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) {
         result.known = false; result.error = GetLastError(); return result;
     }
-    Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
-    if (snapshot.value == INVALID_HANDLE_VALUE) {
-        result.known = false; result.error = GetLastError(); return result;
-    }
     const auto name = executable.substr(executable.find_last_of(L"\\/") + 1);
-    PROCESSENTRY32W row{sizeof(row)};
-    BOOL found = Process32FirstW(snapshot.value, &row);
-    if (!found && GetLastError() != ERROR_NO_MORE_FILES) {
-        result.known = false; result.error = GetLastError(); return result;
-    }
-    while (found) {
-        if (_wcsicmp(row.szExeFile, name.c_str()) == 0) {
-            DWORD candidateSession = 0;
-            if (ProcessIdToSessionId(row.th32ProcessID, &candidateSession) && candidateSession == session) {
-                Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-                    FALSE, row.th32ProcessID));
-                if (!process.value) {
-                    const DWORD error = GetLastError();
-                    if (error != ERROR_INVALID_PARAMETER) { result.known = false; result.error = error; }
-                } else if (WaitForSingleObject(process.value, 0) == WAIT_TIMEOUT) {
-                    SetLastError(ERROR_SUCCESS);
-                    if (samePath(process.value, executable)) result.processes.push_back(std::move(process));
-                    else if (GetLastError() != ERROR_SUCCESS) {
-                        result.known = false; result.error = GetLastError();
-                    }
-                }
-            }
-        }
-        found = Process32NextW(snapshot.value, &row);
-    }
-    if (GetLastError() != ERROR_NO_MORE_FILES) { result.known = false; result.error = GetLastError(); }
+    std::vector<DWORD> candidates;
+    // This read becomes action/readback authority; cached absence cannot prove fresh OFF.
+    const auto status = ymcc::processNames::candidates(name, candidates, result.error, query,
+        ymcc::processNames::NameMatch::OrdinalIgnoreCase, 0);
+    if (status != BasicResult::Complete) { result.known = false; return result; }
+    for (const auto pid : candidates) inspectCandidate(result, pid, session, executable);
     return result;
 }
 inline Result observe(const std::wstring& executable) {
@@ -97,6 +126,7 @@ inline BOOL CALLBACK closeWindow(HWND window, LPARAM parameter) {
 using ProcessCreator = decltype(&::CreateProcessW);
 inline Result set(const std::wstring& executable, bool enabled,
                   ProcessCreator create = &::CreateProcessW) {
+    ymcc::processInventory::invalidate();
     auto before = inspect(executable);
     if (!before.known) return {false, !before.processes.empty(), false, before.error, "process-query-failed"};
     if (enabled && !before.processes.empty()) return {true, true, true, 0, "already-running"};
@@ -113,6 +143,7 @@ inline Result set(const std::wstring& executable, bool enabled,
         if (!create(executable.c_str(), buffer.data(), nullptr, nullptr, FALSE,
                     CREATE_NO_WINDOW, nullptr, directory.c_str(), &startup, &info))
             return {false, false, true, GetLastError(), "create-process-failed"};
+        ymcc::processInventory::invalidate();
         Handle process(info.hProcess), thread(info.hThread);
         const DWORD wait = WaitForSingleObject(process.value, 300);
         if (wait == WAIT_FAILED) return {false, false, false, GetLastError(), "startup-wait-failed"};
@@ -153,6 +184,7 @@ inline Result set(const std::wstring& executable, bool enabled,
             actual.reason = "stop-process-timeout"; return actual;
         }
     }
+    ymcc::processInventory::invalidate();
     auto actual = observe(executable);
     actual.ok = actual.known && !actual.running;
     actual.reason = actual.ok ? "process-stopped" : "stop-not-confirmed";

@@ -17,7 +17,7 @@ import { prepareHudUnderlayFile } from '@/bridge/monitorHudUnderlayImport';
 import { pickNativeHudUnderlayFile } from '@/bridge/monitorHudUnderlayPicker';
 import { isNativeRuntime } from '@/bridge/ipc';
 import { focusGamepadElement } from '@/gamepad/focus';
-import { HUD_DEFAULT_TEMPLATE_SCALES, HUD_TEMPLATES, switchMonitorHudTemplate, resetMonitorHudTemplate, type HudTemplateId, HUD_CROSSHAIRS, HUD_VISIBILITIES, HUD_UNDERLAY_PRESETS, type HudUnderlayPreset, HUD_DATA_PRESETS, hudDataPresetFields, type HudDataPresetId, hudMetricControlLabel, HUD_METRICS, HUD_LAYOUTS, HUD_FONTS, HUD_FPS_FONTS, isHorizontalHudLayout, isVerticalHudLayout, selectableMonitorOutput, monitorOutputChoice, RTSS_MONITOR_TEMPLATES, MONITOR_OUTPUTS, makeHudFixture, hudFromUniformSnapshot, normalizeMonitorOutput, type HudMetricId, type HudAppearance, type HudLayout, type HudData } from '@/bridge/monitorHudModel';
+import { HUD_DEFAULT_TEMPLATE_SCALES, HUD_TEXT_SCALE_MAX, HUD_TEMPLATES, switchMonitorHudTemplate, resetMonitorHudTemplate, type HudTemplateId, HUD_CROSSHAIRS, HUD_VISIBILITIES, HUD_UNDERLAY_PRESETS, type HudUnderlayPreset, HUD_DATA_PRESETS, hudDataPresetFields, type HudDataPresetId, hudMetricControlLabel, HUD_METRICS, HUD_LAYOUTS, HUD_FONTS, HUD_FPS_FONTS, isHorizontalHudLayout, isVerticalHudLayout, selectableMonitorOutput, monitorOutputChoice, RTSS_MONITOR_TEMPLATES, MONITOR_OUTPUTS, makeHudFixture, hudFromUniformSnapshot, normalizeMonitorOutput, type HudMetricId, type HudAppearance, type HudLayout, type HudData } from '@/bridge/monitorHudModel';
 import { readMonitorOutputPreferences, saveMonitorOutputPreferences, onMonitorOutputPreferencesChanged, readMonitorOutputRuntime, monitorOutputCoordinator, onMonitorHudAvailability } from '@/bridge/monitorOutput';
 import { setRtssZoom } from '@/bridge/yeman';
 import { subscribeMonitorSnapshot, subscribeMonitorTdpState, type MonitorSnapshotView, type TdpRuntimeSnapshot } from '@/bridge/monitorData';
@@ -30,18 +30,31 @@ const prefs = reactive(normalizeMonitorOutput());
 const loading = ref(true), busy = ref(false), status = ref('读取监控配置…'), failed = ref(false);
 const applied = ref<AppliedMonitorOutput>('unknown'), backend = ref(false), ymccAvailable = ref(false);
 const editorElement=ref<HTMLElement|null>(null),editorHeight=ref(0);
-let editorResize:ResizeObserver|null=null;
+let editorResize:ResizeObserver|null=null,editorFitFrame:number|null=null;
 function fitEditorViewport(){
+ if(!active)return;
  const root=editorElement.value,content=root?.closest<HTMLElement>('[data-monitor-editor-viewport],.app-content');if(!root||!content||!root.offsetWidth)return;
  const box=root.getBoundingClientRect(),viewport=content.getBoundingClientRect(),scale=box.width/root.offsetWidth;
  if(scale<=0||box.height===0)return;
  const padding=Number.parseFloat(getComputedStyle(content).paddingBottom)||0;
  editorHeight.value=Math.max(280,Math.floor((Math.min(innerHeight,viewport.bottom)-box.top)/scale-padding));
 }
+function scheduleEditorFit(){
+ if(!active||editorFitFrame!==null)return;
+ // Writing the observed parent's descendant height inside its delivery can
+ // immediately retrigger layout. Coalesce changes into one next-frame fit.
+ editorFitFrame=window.requestAnimationFrame(()=>{editorFitFrame=null;if(active)fitEditorViewport();});
+}
+function stopEditorViewport(){
+ editorResize?.disconnect();editorResize=null;
+ window.removeEventListener('resize',scheduleEditorFit);
+ if(editorFitFrame!==null){window.cancelAnimationFrame(editorFitFrame);editorFitFrame=null;}
+}
 function observeEditorViewport(){
+ stopEditorViewport();if(!active)return;
  const content=editorElement.value?.closest<HTMLElement>('[data-monitor-editor-viewport],.app-content');
- if(content){editorResize=new ResizeObserver(fitEditorViewport);editorResize.observe(content);}
- window.addEventListener('resize',fitEditorViewport);void nextTick(fitEditorViewport);
+ if(content){editorResize=new ResizeObserver(scheduleEditorFit);editorResize.observe(content);}
+ window.addEventListener('resize',scheduleEditorFit);void nextTick(scheduleEditorFit);
 }
 const sample = makeHudFixture();
 const cpuName = ref('');
@@ -98,13 +111,22 @@ async function refresh() {
   const epoch = ++readEpoch;
   try {
     await liveEdits.flush(); await saveQueue;
-    const [saved, runtime] = await Promise.all([readMonitorOutputPreferences(), readMonitorOutputRuntime()]);
+    const saved = await readMonitorOutputPreferences();
     if (!active || epoch !== readEpoch) return;
-    Object.assign(prefs, selectableMonitorOutput(saved)); prefs.rtssScale = runtime.rtssScale; if (runtime.rtssTemplate) prefs.rtssTemplate = runtime.rtssTemplate;
+    // Saved selection is user intent, not a live-output receipt. Keep it even
+    // if RTSS/native status fails; probing must never replace it with defaults
+    // or adopt a different running template after an unconfirmed switch.
+    Object.assign(prefs, selectableMonitorOutput(saved));
+    const runtime = await readMonitorOutputRuntime(saved);
+    if (!active || epoch !== readEpoch) return;
     applied.value = runtime.applied; backend.value = runtime.backend; ymccAvailable.value = runtime.ymccAvailable;
-    status.value = props.previewOnly ? '浏览器示例预览 · 不接硬件、不修改输出' : '自定义监控按所选条件显示；数据由 YMCC 统一数据层提供。';
-    failed.value = false;
-  } catch (error) { if (active && epoch === readEpoch) { status.value = '读取失败：' + String(error); failed.value = true; } }
+    const mismatch = prefs.enabled && prefs.output === 'rtss' &&
+      (runtime.applied !== 'rtss' || runtime.rtssTemplate !== prefs.rtssTemplate || runtime.rtssScale !== prefs.rtssScale);
+    failed.value = !props.previewOnly && mismatch;
+    status.value = props.previewOnly ? '浏览器示例预览 · 不接硬件、不修改输出' : mismatch ?
+      'RTSS 运行状态与已保存的模板或大小不一致；已保留设置，请重新应用监控。' :
+      '自定义监控按所选条件显示；数据由 YMCC 统一数据层提供。';
+  } catch (error) { if (active && epoch === readEpoch) { applied.value = 'unknown'; status.value = '读取失败：' + String(error); failed.value = true; } }
   finally { if (active && epoch === readEpoch) { loading.value = false; if(props.overviewOnly)emit('ready'); } }
 }
 function save(snapshot = normalizeMonitorOutput(prefs)) {
@@ -272,9 +294,9 @@ function templatePictureNavigation(event: Event) {
 }
 let offHudAvailability: (() => void) | null = null;
 onMounted(() => { window.addEventListener('gp:page-command',templatePictureNavigation); observeEditorViewport(); if(!props.previewOnly)void readMonitorCpuName().then(name=>{if(active){cpuName.value=name;projectSnapshot?.();}}); if (!props.previewOnly) offHudAvailability = onMonitorHudAvailability(value => { ymccAvailable.value = value; }); startSnapshotView(); void refresh(); });
-onActivated(() => { void nextTick(fitEditorViewport); if (!active) { active = true; startSnapshotView(); void refresh(); } });
-onDeactivated(() => { void liveEdits.flush(); active = false; ++readEpoch; stopSnapshotView(); });
-onUnmounted(() => { window.removeEventListener('gp:page-command',templatePictureNavigation);editorResize?.disconnect();window.removeEventListener('resize',fitEditorViewport);offPlacementPreferences(); offHudAvailability?.(); offHudAvailability = null; active = false; ++readEpoch; stopSnapshotView(); void liveEdits.dispose(); });
+onActivated(() => { if (!active) { active = true; observeEditorViewport(); startSnapshotView(); void refresh(); } else void nextTick(scheduleEditorFit); });
+onDeactivated(() => { void liveEdits.flush(); active = false; ++readEpoch; stopEditorViewport(); stopSnapshotView(); });
+onUnmounted(() => { window.removeEventListener('gp:page-command',templatePictureNavigation);stopEditorViewport();offPlacementPreferences(); offHudAvailability?.(); offHudAvailability = null; active = false; ++readEpoch; stopSnapshotView(); void liveEdits.dispose(); });
 async function flushEdits(){ await liveEdits.flush(); await saveQueue; if(failed.value)throw Error(status.value); }
 defineExpose({ flushEdits });
 </script>
@@ -305,7 +327,7 @@ defineExpose({ flushEdits });
 <div v-else ref="editorElement" class="monitor-output-settings sectioned-monitor monitor-header-layout monitor-template-workspace" :style="editorHeight?{height:editorHeight+'px'}:undefined"  :data-editor-variant="editorVariant" data-gp-scope="monitor" data-gp-spatial="nearest" :data-preview-only="previewOnly"><input ref="underlayInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="importUnderlay"/><SettingsSections :layout-variant="editorVariant" :sections="prefs.output === 'ymcc' ? [{id:'output',title:'基础设置',description:'监控显隐与提示',icon:'monitor'},{id:'appearance',title:(prefs.ymccTemplate??'A')+'模板 外观',description:'位置、字体与背景',icon:'layers'},{id:'fields',title:(prefs.ymccTemplate??'A')+'模板 显示数据',description:'选择需要关注的指标',icon:'grid'}] : [{id:'output',title:'输出设置',description:'选择监控输出方式',icon:'monitor'}]" label="监控"><template #top><header class="monitor-compact-heading">
  <div class="monitor-compact-title"><h1>自定义监控</h1><span aria-live="polite">{{loading?'正在读取':templateSwitching?'正在切换':'正在编辑'}}<strong>{{editingTemplate}}模板</strong></span></div>
  <div class="monitor-compact-templates" role="group" aria-label="选择监控模板"><button v-for="option in HUD_TEMPLATES" :key="option.value" type="button" class="monitor-template-choice" :class="{active:editingTemplate===option.value}" :data-monitor-template="option.value" :aria-label="option.label" :aria-pressed="editingTemplate===option.value" :disabled="templateControlsDisabled" @click="chooseTemplate(option.value)">{{option.label}}<InlineIcon v-if="editingTemplate===option.value" name="check" /></button></div>
- <button type="button" class="monitor-editor-close" aria-label="返回" @click="emit('close')"><span class="monitor-back-key">B</span>返回</button>
+ <button type="button" class="monitor-editor-close" aria-label="返回" @click="emit('close')"><span class="controller-key monitor-back-key" data-controller-key="B">B</span>返回</button>
 </header>
  </template><template v-if="prefs.output==='ymcc'" #preview>
   <section class="monitor-live-preview" aria-label="当前模板实时预览">
@@ -353,7 +375,7 @@ defineExpose({ flushEdits });
           </div>
           <div class="monitor-hardware-names"><Toggle :model-value="prefs.ymcc.showCpuName===true" label="CPU 显示设备名称" :disabled="loading || busy" :gp-row="7" :gp-col="0" @update:model-value="v=>toggleHardwareName('showCpuName',v)" /><Toggle :model-value="prefs.ymcc.showGpuName===true" label="GPU 显示设备名称" :disabled="loading || busy" :gp-row="7" :gp-col="1" @update:model-value="v=>toggleHardwareName('showGpuName',v)" /></div>
           <div class="monitor-slider-stack" v-if="prefs.output === 'ymcc'">
-            <Slider :model-value="Math.round((prefs.ymcc.textScale ?? 1.2)*100)" :min="50" :max="200" :step="5" :accelerate="false" label="监控文字倍率" unit="%" :gp-row="7.5" :disabled="loading || busy" @update:model-value="v=>appearance('textScale',v/100)" @commit="v=>appearance('textScale',v/100,true)" />
+            <Slider :model-value="Math.round((prefs.ymcc.textScale ?? 1.2)*100)" :min="50" :max="HUD_TEXT_SCALE_MAX * 100" :step="5" :accelerate="false" label="监控文字倍率" title="仅改变文字字号；完整可见会缩小预览，原始尺寸可查看实际字号。" unit="%" :gp-row="7.5" :disabled="loading || busy" @update:model-value="v=>appearance('textScale',v/100)" @commit="v=>appearance('textScale',v/100,true)" />
             <Slider :model-value="Math.round((1 - (prefs.ymcc.underlayOpacity ?? .28)) * 100)" :min="0" :max="100" :step="1" :accelerate="false" label="图片透明度" unit="%" :gp-row="8" :disabled="loading || busy" @update:model-value="v => appearance('underlayOpacity', 1 - v / 100)" @commit="v => appearance('underlayOpacity', 1 - v / 100, true)" />
             <Slider :model-value="Math.round(prefs.ymcc.scale * 100)" :min="20" :max="200" :step="5" :accelerate="false" label="监控整体大小" unit="%" :gp-row="9" :disabled="loading || busy" @update:model-value="v => appearance('scale', v / 100)" @commit="v => appearance('scale', v / 100, true)" />
             <Slider :model-value="Math.round(prefs.ymcc.saturation * 100)" :min="0" :max="100" :step="5" :accelerate="false" label="文字对比度/饱和度" unit="%" :gp-row="10" :disabled="loading || busy" @update:model-value="v => appearance('saturation', v / 100)" @commit="v => appearance('saturation', v / 100, true)" />

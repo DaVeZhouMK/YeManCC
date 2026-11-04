@@ -1,20 +1,35 @@
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {strict as assert} from 'node:assert';
-import {startSteamWallpaperHost,resolveWallpaperTarget} from '../src/bridge/steamWallpaperHost';
+import {startSteamWallpaperHost,resolveWallpaperTarget,steamWallpaperForegroundAllowed} from '../src/bridge/steamWallpaperHost';
 import type {GameMediaEntry} from '../src/bridge/sharedGameMedia';
+const stabilityRecoveryOnly=process.argv.includes('--stability-recovery');const stabilityRecoveryRows:Array<{name:string;ok:boolean;error?:string}>=[];
 let cases=0,checks=0;const same=(a:unknown,b:unknown,label:string)=>{checks++;assert.deepEqual(a,b,label);};
 const settle=()=>new Promise<void>(resolve=>setImmediate(resolve));
 const entry=(id=570,revision=1):GameMediaEntry=>({key:'steam-'+id,appId:id,bindingRevision:revision,status:'ready',ready:true,asset:{id:'asset-'+id,revision:String(revision),kind:'video',extension:'mp4',mime:'video/mp4',bytes:120},url:'http://fixture/'+id,playback:{start:8,end:38,fit:'cover'}});
-function fixture(options:{startReady?:boolean;lookup?:(target:any)=>Promise<GameMediaEntry>;ensure?:(target:any)=>Promise<GameMediaEntry>;shortcut?:any;shortcutRead?:()=>Promise<any>;nativePower?:boolean;reply?:(message:any,options:any)=>Promise<boolean>}={}){
+const nativeProof=(extra:any={})=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'focus-1',revision:1,reason:'verified',...extra});
+function fixture(options:{foreground?:unknown;foregroundRead?:()=>Promise<unknown>;startReady?:boolean;lookup?:(target:any)=>Promise<GameMediaEntry>;ensure?:(target:any)=>Promise<GameMediaEntry>;shortcut?:any;shortcutRead?:()=>Promise<any>;nativePower?:boolean;playbackFailed?:(value:any)=>Promise<GameMediaEntry>;reply?:(message:any,options:any)=>Promise<boolean>}={}){
+ let foregroundChanged:(value:unknown)=>void=()=>{};
  let extension:any,changed:(reason:string,key?:string)=>void=()=>{},resumed:(event:{generation?:number})=>void=()=>{},enabled=true;let opacity=.64;let current=entry();
  let timerId=0;const timers=new Map<number,{fn:()=>void;ms:number}>();const frames:any[]=[],calls:any[]=[],failures:any[]=[];const peer={connection:'1',runId:'a'.repeat(32)};
- const host=startSteamWallpaperHost({...({schedule:(fn:()=>void,ms:number)=>{timers.set(++timerId,{fn,ms});return timerId;},cancel:(id:number)=>timers.delete(id)} as any),...(!options.nativePower?{onResume:(handler:(event:{generation?:number})=>void)=>{resumed=handler;return()=>{resumed=()=>{};};}}:{}),enabled:()=>enabled,inventory:()=>{calls.push({command:'inventory'});},appearance:()=>({opacity,blur:0}),register:(value:any)=>{extension=value;return()=>extension=null;},invoke:(async(command:string,args:any,invokeOptions:any)=>{calls.push({command,args,options:invokeOptions});if(command==='deckySidebar.mirrorReply'){frames.push(args.message);return options.reply?options.reply(args.message,invokeOptions):true;}if(command==='gameMedia.shortcut')return options.shortcutRead?options.shortcutRead():options.shortcut||{executable:'G:/Games/local.exe',name:'Local Game',shortcutAppId:'4131894616',steamAccount:'17'};throw Error(command);}) as any,media:{selectSteamTarget:target=>{calls.push({command:'selectSteamTarget',target});},lookup:async target=>{calls.push({command:'lookup',target});return options.lookup?options.lookup(target):{...current};},ensure:async target=>{calls.push({command:'ensure',target});return options.ensure?options.ensure(target):{...current};},subscribe:fn=>{changed=fn;return()=>{changed=()=>{};};},playbackFailed:async value=>{failures.push(value);return {...current};}}});
+ const host=startSteamWallpaperHost({...({schedule:(fn:()=>void,ms:number)=>{timers.set(++timerId,{fn,ms});return timerId;},cancel:(id:number)=>timers.delete(id)} as any),...(!options.nativePower?{onResume:(handler:(event:{generation?:number})=>void)=>{resumed=handler;return()=>{resumed=()=>{};};}}:{}),readForeground:async()=>{calls.push({command:'foreground-read'});return options.foregroundRead?options.foregroundRead():options.foreground===undefined?nativeProof():options.foreground;},onForeground:handler=>{foregroundChanged=handler;return()=>{foregroundChanged=()=>{};};},enabled:()=>enabled,inventory:()=>{calls.push({command:'inventory'});},appearance:()=>({opacity,blur:0}),register:(value:any)=>{extension=value;return()=>extension=null;},invoke:(async(command:string,args:any,invokeOptions:any)=>{calls.push({command,args,options:invokeOptions});if(command==='deckySidebar.mirrorReply'){frames.push(args.message);return options.reply?options.reply(args.message,invokeOptions):true;}if(command==='gameMedia.shortcut')return options.shortcutRead?options.shortcutRead():options.shortcut||{executable:'G:/Games/local.exe',name:'Local Game',shortcutAppId:'4131894616',steamAccount:'17'};throw Error(command);}) as any,media:{selectSteamTarget:target=>{calls.push({command:'selectSteamTarget',target});},lookup:async (target,demand)=>{calls.push({command:'lookup',target,demand});return options.lookup?options.lookup(target):{...current};},ensure:async (target,_consumer,_priority,_complete,demand)=>{calls.push({command:'ensure',target,demand});return options.ensure?options.ensure(target):{...current};},subscribe:fn=>{changed=fn;return()=>{changed=()=>{};};},playbackFailed:async value=>{failures.push(value);return options.playbackFailed?options.playbackFailed(value):{...current};}}});
  const context=(id='570',seq=1,visible=true,other={})=>extension.request({...peer,...other,request:{command:'wallpaper.context',runId:peer.runId,contextSeq:seq,appId:id,name:'Fixture',visible,...(other as any).request}});
  if(options.startReady!==false)host.ready();extension.connected(peer);
- return {host,frames,calls,failures,context,peer,timers,fire:async()=>{const next=[...timers][0];assert.ok(next,'missing wallpaper delivery recovery timer');timers.delete(next[0]);next[1].fn();await settle();},resume:(generation:number)=>resumed({generation}),status:(args:any)=>extension.request({...peer,request:{command:'wallpaper.status',runId:peer.runId,...args}}),change:(reason='asset',key?:string)=>changed(reason,key),connect:(value=peer)=>extension.connected(value),enable:(value:boolean)=>{enabled=value;},appearance:(value:number)=>{opacity=value;},setEntry:(value:GameMediaEntry)=>{current=value;},output:()=>frames.filter(f=>f.type==='wallpaper'&&f.contextSeq>0)};
+ return {host,frames,calls,failures,context,peer,timers,foreground:(value:unknown)=>foregroundChanged(value),fire:async()=>{const next=[...timers][0];assert.ok(next,'missing wallpaper delivery recovery timer');timers.delete(next[0]);next[1].fn();await settle();},resume:(generation:number)=>resumed({generation}),status:(args:any)=>extension.request({...peer,request:{command:'wallpaper.status',runId:peer.runId,...args}}),change:(reason='asset',key?:string)=>changed(reason,key),connect:(value=peer)=>extension.connected(value),enable:(value:boolean)=>{enabled=value;},appearance:(value:number)=>{opacity=value;},setEntry:(value:GameMediaEntry)=>{current=value;},output:()=>frames.filter(f=>f.type==='wallpaper'&&f.contextSeq>0)};
 }
-async function run(name:string,fn:()=>Promise<void>){await fn();cases++;console.log('PASS '+name);}
+async function run(name:string,fn:()=>Promise<void>){if(stabilityRecoveryOnly&&!name.startsWith('R18 recovery:'))return;if(!stabilityRecoveryOnly){await fn();cases++;console.log('PASS '+name);return;}try{await fn();stabilityRecoveryRows.push({name,ok:true});console.log('PASS '+name);}catch(error){stabilityRecoveryRows.push({name,ok:false,error:String(error instanceof Error?error.message:error)});console.log('FAIL '+name);}cases++;}
+// These cases exercise native foreground admission, separately from the old
+// player DOM-focus checks. No native reader defaults to an affirmative proof.
+await run('native foreground unknown/minimized/overlay/desktop never starts media queries',async()=>{
+ for(const proof of [null,nativeProof({known:false}),nativeProof({foreground:false,reason:'minimized'}),nativeProof({foreground:false,reason:'overlay'}),nativeProof({mode:'desktop'}),nativeProof({current:false}),nativeProof({source:'process-exists'}),nativeProof({window:'0'}),nativeProof({birth:'0'}),nativeProof({ownerEpoch:''})]){const f=fixture({foreground:proof});try{f.context();await settle();await settle();same(f.calls.filter(c=>['lookup','ensure','inventory'].includes(c.command)).length,0,'unproved actual Big Picture foreground performs no media work');same(f.output().some(x=>x.entry),false,'unknown never returns a playable entry');}finally{f.host.stop();}}
+});
+await run('stable native foreground grants one query and repeating proof stays inert',async()=>{const f=fixture();try{f.context();await settle();await settle();same(f.calls.filter(c=>c.command==='lookup').length,1,'first current foreground owns one lookup');for(let n=0;n<100;n++)f.foreground(nativeProof());await settle();same(f.calls.filter(c=>c.command==='lookup').length,1,'same foreground proof cannot restart reads');const demand=f.calls.find(c=>c.command==='lookup').demand;same([demand.demandConsumer,demand.demandEpoch,demand.demandRevision],['steam','focus-1',1],'exact captured foreground ticket reaches native media');}finally{f.host.stop();}});
+await run('native blur revokes pending media and recovery reads current selection only once',async()=>{let release!:(v:GameMediaEntry)=>void;const f=fixture({lookup:()=>new Promise(r=>release=r)});try{f.context();await settle();f.foreground(nativeProof({foreground:false,ownerEpoch:'focus-2',revision:2}));release(entry());await settle();same(f.calls.filter(c=>c.command==='ensure').length,0,'blurred lookup cannot enter preparation');same(f.output().some(x=>x.entry),false,'late old lookup cannot deliver video');f.foreground(nativeProof());await settle();same(f.calls.filter(c=>c.command==='lookup').length,1,'retired native epoch cannot restart reads');f.setEntry(entry(570,2));f.foreground(nativeProof({ownerEpoch:'focus-3',revision:3}));await settle();same(f.calls.filter(c=>c.command==='lookup').length,2,'current focus restores once');release(entry(570,2));await settle();same(f.output().at(-1).entry.bindingRevision,2,'restored output uses current asset');}finally{f.host.stop();}});
+await run('hidden page and user OFF cannot be revived by native foreground',async()=>{const f=fixture();try{f.context('570',1,false);await settle();same(f.calls.filter(c=>['foreground-read','lookup','ensure'].includes(c.command)).length,0,'native foreground alone is no page demand');f.foreground(nativeProof());await settle();same(f.calls.filter(c=>c.command==='lookup').length,0,'native events cannot create page demand');f.context('570',2,true);await settle();await settle();f.enable(false);f.change('settings');const before=f.calls.filter(c=>c.command==='lookup').length;f.foreground(nativeProof({ownerEpoch:'focus-4',revision:4}));await settle();same(f.calls.filter(c=>c.command==='lookup').length,before,'OFF stays withdrawn');same(f.output().at(-1).enabled,false,'OFF remains authoritative');}finally{f.host.stop();}});
+await run('late initial foreground read cannot replace a newer native veto',async()=>{let release!:(value:unknown)=>void;const f=fixture({foregroundRead:()=>new Promise(r=>release=r)});try{f.context();await settle();f.foreground(nativeProof({foreground:false,ownerEpoch:'native-veto',revision:2}));release(nativeProof());await settle();same(f.calls.filter(c=>['lookup','ensure','inventory'].includes(c.command)).length,0,'old affirmative RPC receipt cannot bypass newer native blur');for(let n=0;n<100;n++)f.change('asset');await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'background asset storms remain metadata-idle');}finally{f.host.stop();}});
+await run('native epoch history cannot revive an old low-revision proof',async()=>{const f=fixture();try{f.context();await settle();const baseline=f.calls.filter(c=>c.command==='lookup').length;for(let n=2;n<25;n++)f.foreground(nativeProof({foreground:false,ownerEpoch:'retired-'+n,revision:n}));f.foreground(nativeProof());await settle();same(f.calls.filter(c=>c.command==='lookup').length,baseline,'history eviction cannot grant a stale low revision');f.foreground(nativeProof({ownerEpoch:'fresh-current',revision:25}));await settle();same(f.calls.filter(c=>c.command==='lookup').length,baseline+1,'fresh positive revision owns one recovery');}finally{f.host.stop();}});
+await run('unknown foreground transport failure stays deny without heartbeat',async()=>{const f=fixture({foregroundRead:async()=>{throw Error('native owner unavailable');}});try{f.context();await settle();await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'unavailable backend never grants a fallback permission');same(f.timers.size,1,'transport failure owns one finite repair, never a permanent proof poll');}finally{f.host.stop();}});
+await run('native media refusal withdraws proof instead of repeating preparation',async()=>{const f=fixture({lookup:async()=>({key:'steam-570',bindingRevision:1,status:'consumer-inactive',ready:false})});try{f.context();await settle();same(f.calls.filter(c=>c.command==='lookup').length,1,'one already-issued query may discover native revocation');same(f.calls.filter(c=>c.command==='ensure').length,0,'native refusal never causes another lookup/preparation');same(f.output().at(-1).foreground,false,'native refusal withdraws player permission');}finally{f.host.stop();}});
 // Execute the shipping App readiness statements around a deliberately held
 // unrelated startup tail. Host/media are production with inert IO; this is
 // source-extracted startup ordering, not a full Vue/native boot acceptance.
@@ -59,7 +74,7 @@ await run('OFF fences an in-flight download completion and remains idle',async()
 
 
 await run('committed wake waits for fresh visible context then republishes the cache',async()=>{
- const f=fixture();f.context('4131894616',1);await settle();const before=f.calls.filter(c=>c.command==='gameMedia.shortcut').length,beforeFrames=f.output().length;f.resume(2);await settle();same(f.output().length,beforeFrames+1,'wake clears old displayed selection');same(f.output().at(-1).entry,null,'wake cannot trust pre-sleep visibility');same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,before,'wake handshake alone does not read account data');f.context('4131894616',2,true);await settle();same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).resumeGeneration,2,'committed native wake signalled');same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,before+1,'active Steam account is revalidated after wake');same(f.output().at(-1).entry.assetId,'asset-570','cached current wallpaper returns');const count=f.calls.length;for(const generation of [2,1,0,NaN])f.resume(generation);await settle();same(f.calls.length,count,'duplicate old and invalid wake generations are inert');f.host.stop();f.resume(3);await settle();same(f.calls.length,count+1,'stop only relinquishes selected preparation; wake callback removed');
+ const f=fixture();f.context('4131894616',1);await settle();const before=f.calls.filter(c=>c.command==='gameMedia.shortcut').length,beforeFrames=f.output().length;f.resume(2);await settle();same(f.output().length,beforeFrames+1,'wake clears old displayed selection');same(f.output().at(-1).entry,null,'wake cannot trust pre-sleep visibility');same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,before,'wake handshake alone does not read account data');f.context('4131894616',2,true);await settle();same(f.frames.filter(c=>c.type==='wallpaper-ready'&&c.resumeGeneration!==undefined).at(-1).resumeGeneration,2,'committed native wake signalled');same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,before+1,'active Steam account is revalidated after wake');same(f.output().at(-1).entry.assetId,'asset-570','cached current wallpaper returns');const count=f.calls.length;for(const generation of [2,1,0,NaN])f.resume(generation);await settle();same(f.calls.length,count,'duplicate old and invalid wake generations are inert');f.host.stop();f.resume(3);await settle();same(f.calls.length,count+1,'stop only relinquishes selected preparation; wake callback removed');
 });
 await run('saved OFF survives committed wake without media or enable requests',async()=>{
  const f=fixture();f.context();await settle();f.enable(false);f.change('settings');await settle();const count=f.calls.length;f.resume(2);f.resume(3);await settle();same(f.calls.length,count,'OFF wake has no IPC or media work');same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,false,'OFF cannot be overridden by recovery');f.host.stop();
@@ -155,4 +170,162 @@ await run('persistent passive refusal backs off without rescan and OFF cancels i
 await run('late passive retry callback after teardown remains silent',async()=>{
  const f=fixture({reply:async()=>false});f.context();await settle();const late=[...f.timers.values()][0].fn;f.host.stop();const sent=f.frames.length;late();await settle();same(f.frames.length,sent,'late callback cannot send after owner stop');same(f.timers.size,0,'late callback cannot recreate recovery timer');
 });
-console.log(JSON.stringify({ok:true,cases,checks,scope:'production Steam wallpaper host; injected IPC/media ports, no installed Steam mutation'}));
+// Repeated same-shortcut account changes interleaved with committed wake,
+// rejected ready delivery, pending old-account reads and replaced peers.
+await run('12 account and peer replacements fence old reads wake retries and reconnect callbacks',async()=>{
+ const waiting:Array<{target:any;promise:Promise<unknown>;resolve:(value?:unknown)=>void;reject:(error:Error)=>void}>=[];
+ let account='17',refuseGeneration=0,refused=false;
+ const f=fixture({shortcutRead:async()=>({executable:'G:/Games/local.exe',steamAccount:account,shortcutAppId:'4131894616'}),
+  lookup:target=>{const wait={target,...deferred()};waiting.push(wait);return wait.promise as Promise<GameMediaEntry>;},
+  reply:async message=>{if(message.type==='wallpaper-ready'&&message.resumeGeneration===refuseGeneration&&!refused){refused=true;return false;}return true;}});
+ const context=(peer:any,seq:number)=>f.context('4131894616',seq,true,{connection:peer.connection,runId:peer.runId,request:{runId:peer.runId}});
+ let peer={...f.peer};
+ try{
+  await settle();
+  for(let cycle=0;cycle<12;cycle++){
+   context(peer,cycle*2+2);await settle();const pending=waiting.at(-1)!;
+   same(pending.target.steamAccount,account,'pending mapping belongs to the current account');
+   refuseGeneration=cycle+2;refused=false;f.resume(refuseGeneration);await settle();
+   same(f.timers.size,1,'one refused committed wake owns one bounded delivery retry');
+   const late=[...f.timers.values()].map(t=>t.fn),old={...peer};
+   account=String(18+cycle);peer={connection:String(cycle+2),runId:(cycle+2).toString(16).padStart(32,'0')};
+   f.connect(peer);await settle();const frames=f.frames.length,reads=waiting.length;
+   context(old,9999);f.resume(cycle+1);for(const callback of late)callback();
+   pending.resolve(entry(570,cycle+100));await settle();
+   same(f.frames.length,frames,'retired callback cannot publish into the replacement peer');
+   same(waiting.length,reads,'old peer and old wake cannot issue another account read');
+   same(f.timers.size,0,'peer replacement cancels the old delivery retry');
+   context(peer,1);await settle();const current=waiting.at(-1)!;
+   same(current.target.steamAccount,account,'same shortcut is resolved again for the new active account');
+   f.setEntry(entry(570,cycle+2));current.resolve(entry(570,cycle+2));await settle();
+   same(f.output().at(-1).entry.revision,String(cycle+2),'only current peer mapping reaches wallpaper');
+   same(f.timers.size,0,'healthy replacement leaves no retry or polling');
+  }
+ }finally{f.host.stop();}
+ same(f.timers.size,0,'all twelve lifecycles return their timers');
+});
+
+await run('failed playback report revalidates current cache before a bounded retry',async()=>{
+ let count=0;const f=fixture({playbackFailed:async()=>{if(++count===1)throw Error('inert media IPC unavailable');return entry(570,2);}});
+ try{f.context();await settle();const scans=f.calls.filter(c=>c.command==='inventory').length;f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();
+  same(f.timers.size,1,'lost failure report must own one recovery deadline');same([...f.timers.values()][0].ms,1000,'first report recheck is bounded and prompt');
+  const reads=f.calls.filter(c=>c.command==='lookup').length;await f.fire();same(f.calls.filter(c=>c.command==='lookup').length,reads+1,'retry must first read the current cache tuple');same(f.failures.length,2,'unchanged ready revision proves the old write did not commit and permits one retry');same(f.timers.size,0,'accepted retry is dormant');same(f.calls.filter(c=>c.command==='inventory').length,scans,'failure handoff never repeats library discovery');
+ }finally{f.host.stop();}
+});
+await run('lost committed failure receipt is read back without repeating mutation',async()=>{
+ const invalid={...entry(570,2),ready:false,dynamicReady:false,status:'error'};const f=fixture({playbackFailed:async()=>{f.setEntry(invalid);throw Error('inert ACK lost after commit');}});
+ try{f.context();await settle();f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();same(f.timers.size,1,'unconfirmed result schedules one status read');await f.fire();same(f.failures.length,1,'new native revision must never replay the old mutation');same(f.output().at(-1).entry,null,'readback publishes invalidated cache truth');same(f.timers.size,0,'readback success stops recovery');}finally{f.host.stop();}
+});
+await run('failure handoff backoff is finite and keeps failed ready asset quarantined',async()=>{
+ const f=fixture({playbackFailed:async()=>{throw Error('inert persistent media IPC failure');}});
+ try{f.context();await settle();f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();
+  for(const delay of [1000,5000,20000]){same(f.timers.size,1,'one recovery timer despite error storm');same([...f.timers.values()][0].ms,delay,'bounded handoff backoff');for(let i=0;i<100;i++)f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await f.fire();}
+  same(f.failures.length,4,'original write plus at most three revalidated attempts');same(f.timers.size,0,'exhaustion leaves no resident polling');for(let i=0;i<10;i++)f.change('asset','steam-570');await settle();same(f.timers.size,0,'unrelated asset signals cannot replenish failed report budget');same(f.output().at(-1).entry,null,'known failed tuple remains static while write handoff is unavailable');
+ }finally{f.host.stop();}
+});
+await run('cache drift and hidden OFF peer wake revoke pending failure handoff',async()=>{
+ for(const cause of ['new-cache','hidden','off','peer','wake','stop'] as const){const f=fixture({playbackFailed:async()=>{throw Error('inert report unavailable');}});
+  try{f.context();await settle();f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();const late=[...f.timers.values()][0]?.fn;assert.ok(late,'expected owned recovery timer');
+   if(cause==='new-cache'){f.setEntry(entry(570,3));f.change('asset','steam-570');}else if(cause==='hidden')f.context('570',2,false);else if(cause==='off'){f.enable(false);f.change('settings');}else if(cause==='peer')f.connect({connection:'2',runId:f.peer.runId});else if(cause==='wake')f.resume(2);else f.host.stop();
+   await settle();const before=f.calls.length;late();await settle();same(f.failures.length,1,'revoked '+cause+' cannot repeat old failure mutation');same(f.calls.length,before,'late '+cause+' recovery callback is silent');same(f.timers.size,0,'revoked '+cause+' cancels timer');
+  }finally{f.host.stop();}
+ }
+});
+
+await run('queued failure callback cannot bypass a rearmed recovery deadline',async()=>{
+ const f=fixture({playbackFailed:async()=>{throw Error('inert report refused');}});try{f.context();await settle();f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();const late=[...f.timers.values()][0].fn;await f.fire();same([...f.timers.values()][0].ms,5000,'second retry preserves backoff');const calls=f.calls.length;late();await settle();same(f.calls.length,calls,'same queued callback cannot reread or repeat mutation');same(f.failures.length,2,'old callback cannot consume another attempt');same(f.timers.size,1,'old callback cannot orphan the new timer');}finally{f.host.stop();}
+});
+await run('changed cache during pending failure verification wins before any write',async()=>{
+ let waiting=false,release!:(entry:GameMediaEntry)=>void;const f=fixture({lookup:async()=>waiting?new Promise(resolve=>release=resolve):entry(),playbackFailed:async()=>{throw Error('inert report refused');}});
+ try{f.context();await settle();f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();waiting=true;await f.fire();f.context('1091500',2,false);release(entry());await settle();same(f.failures.length,1,'late exact-looking old cache read cannot authorize a write for another context');same(f.timers.size,0,'late verification does not revive timers');}finally{f.host.stop();}
+});
+await run('unavailable cache rechecks never authorize failure writes',async()=>{
+ let unavailable=false;const f=fixture({lookup:async()=>{if(unavailable)throw Error('inert cache unavailable');return entry();},playbackFailed:async()=>{throw Error('inert original ACK lost');}});
+ try{f.context();await settle();f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'});await settle();unavailable=true;for(let i=0;i<3;i++)await f.fire();same(f.failures.length,1,'failed read is never proof the original write did not commit');same(f.timers.size,0,'unavailable status exhausts the same finite budget');}finally{f.host.stop();}
+});
+// Hold real Promises across normal event-loop turns. These tests never replay
+// a cancelled timer; f.fire() consumes only the currently owned one-shot timer.
+const pairedEntry=(id=570,revision=1):GameMediaEntry=>({...entry(id,revision),staticReady:true,dynamicReady:true});
+await run('32 cross-task same-key changes coalesce into one fresh trailing lookup',async()=>{
+ const head=deferred();let reads=0,pending=0,peakPending=0,latest=pairedEntry();
+ const f=fixture({lookup:async()=>{++reads;++pending;peakPending=Math.max(peakPending,pending);try{return await(reads===1?head.promise as Promise<GameMediaEntry>:Promise.resolve(latest));}finally{--pending;}}});
+ try{
+  f.context();await settle();same(reads,1,'initial selected lookup is pending');
+  for(let n=0;n<32;n++){latest=pairedEntry(570,n+2);f.change('asset','steam-570');await settle();}
+  same(reads,1,'32 notifications cannot submit 32 obsolete native reads');same(f.output().length,0,'dirty pending result is not a fresh cache');
+  head.resolve(pairedEntry());await settle();same(reads,2,'one trailing lookup reads the current cache');same(f.output().at(-1).entry.revision,'33','asset changes between initial and trailing reads survive');same(f.output().length,1,'only current cache is published');
+  same(peakPending,1,'same context never owns two pending lookups');same(pending,0,'both initial and trailing lookup actually settled');
+  console.log('WALLPAPER_STORM_METRICS '+JSON.stringify({notifications:32,lookupsDuringNotifications:1,totalLookups:reads,trailingLookups:reads-1,peakPendingLookups:peakPending,pendingLookupsAtEnd:pending,finalAssetRevision:f.output().at(-1).entry.revision}));
+  same(f.calls.filter(c=>c.command==='ensure').length,0,'complete fresh cache needs no preparation');same(f.calls.filter(c=>c.command==='inventory').length,1,'notifications do not rescan');same(f.timers.size,0,'coalescing has no timer');
+ }finally{f.host.stop();head.resolve(pairedEntry());await settle();}
+});
+await run('32 cross-task changes during ensure revalidate before any further preparation',async()=>{
+ const preparing=deferred();let cached=entry(),reads=0,prepares=0;
+ const f=fixture({lookup:async()=>{reads++;return cached;},ensure:async()=>{prepares++;return preparing.promise as Promise<GameMediaEntry>;}});
+ try{
+  f.context();await settle();same(reads,1,'initial cache read completed');same(prepares,1,'one original ensure is pending');
+  for(let n=0;n<32;n++){cached=pairedEntry(570,n+2);f.change('asset','steam-570');await settle();}
+  same(reads,1,'ensure owns the same publication chain');same(prepares,1,'notifications do not repeat an unconfirmed preparation');
+  preparing.resolve(entry());await settle();same(reads,2,'ensure settlement is followed by a real fresh lookup');same(prepares,1,'fresh complete cache prevents another ensure');same(f.output().at(-1).entry.revision,'33','stale ensure result cannot stand in for current cache');same(f.timers.size,0,'no polling or new deadline');
+ }finally{f.host.stop();preparing.resolve(entry());await settle();}
+});
+await run('a new context bypasses an old hung lookup and its dirty tail',async()=>{
+ const old=deferred();let reads=0;
+ const f=fixture({lookup:async target=>{reads++;return target.appId===570?old.promise as Promise<GameMediaEntry>:pairedEntry(target.appId,7);}});
+ try{
+  f.context();await settle();for(let n=0;n<8;n++){f.change('asset','steam-570');await settle();}
+  f.context('1091500',2);await settle();same(reads,2,'new selection reads without awaiting the old lookup');same(f.output().at(-1).appId,'1091500','new selected game is displayed while old read is hung');
+  const calls=f.calls.length;old.resolve(pairedEntry(570,99));await settle();same(f.calls.length,calls,'old settlement cannot run its dirty tail');same(f.output().at(-1).entry.revision,'7','old cache cannot overwrite new context');same(f.timers.size,0,'revoked tail is dormant');
+ }finally{f.host.stop();old.resolve(pairedEntry());await settle();}
+});
+await run('a rejected trailing lookup retains only the original slow recovery deadline',async()=>{
+ const head=deferred(),tail=deferred();let reads=0;
+ const f=fixture({lookup:async()=>++reads===1?head.promise as Promise<GameMediaEntry>:reads===2?tail.promise as Promise<GameMediaEntry>:pairedEntry(570,4)});
+ try{
+  f.context();await settle();f.change('asset','steam-570');await settle();head.resolve(pairedEntry());await settle();same(reads,2,'one trailing lookup has actually started');
+  tail.reject(Error('inert trailing cache receipt refused'));await settle();same(reads,2,'rejection does not spin another lookup');same(f.output().at(-1).entry,null,'unavailable current cache is not replaced with old pending cache');same(f.calls.filter(c=>c.command==='ensure').length,0,'read failure never authorizes preparation');same([...f.timers.values()].map(t=>t.ms),[20000],'original selected-cache retry remains bounded');
+  await f.fire();same(reads,3,'existing slow retry can read fresh cache');same(f.output().at(-1).entry.revision,'4','recovered current cache is published');same(f.timers.size,0,'successful recovery is idle');
+ }finally{f.host.stop();head.resolve(pairedEntry());tail.resolve(pairedEntry());await settle();}
+});
+await run('real notifications during a trailing read retain one further fresh tail',async()=>{
+ const head=deferred(),tail=deferred();let reads=0,latest=pairedEntry(570,2);
+ const f=fixture({lookup:async()=>++reads===1?head.promise as Promise<GameMediaEntry>:reads===2?tail.promise as Promise<GameMediaEntry>:latest});
+ try{
+  f.context();await settle();f.change('asset','steam-570');await settle();head.resolve(pairedEntry());await settle();same(reads,2,'first dirty event starts the trailing read');
+  for(let n=0;n<32;n++){latest=pairedEntry(570,n+3);f.change('asset','steam-570');await settle();}
+  same(reads,2,'trailing read also coalesces cross-task notifications');tail.resolve(pairedEntry(570,2));await settle();same(reads,3,'new real events own exactly one further fresh read');same(f.output().length,1,'both obsolete results remain fenced');same(f.output().at(-1).entry.revision,'34','newest changed asset wins');same(f.timers.size,0,'nothing repeats without another real event');await settle();same(reads,3,'idle completion does not invent another tail');
+ }finally{f.host.stop();head.resolve(pairedEntry());tail.resolve(pairedEntry());await settle();}
+});
+for(const cause of ['off','hidden','peer','resume','stop'] as const)await run('dirty publication cancellation synchronously revokes pending lookup and ensure: '+cause,async()=>{
+ for(const stage of ['lookup','ensure'] as const){
+  const pending=deferred();const f=fixture({lookup:async()=>stage==='lookup'?pending.promise as Promise<GameMediaEntry>:entry(),ensure:async()=>pending.promise as Promise<GameMediaEntry>});
+  try{
+   f.context();await settle();for(let n=0;n<8;n++){f.change('asset','steam-570');await settle();}
+   if(cause==='off'){f.enable(false);f.change('settings');}else if(cause==='hidden')f.context('570',2,false);else if(cause==='peer')f.connect({connection:'2',runId:'b'.repeat(32)});else if(cause==='resume')f.resume(2);else f.host.stop();
+   await settle();const io=()=>f.calls.filter(c=>c.command!=='selectSteamTarget').length,before=io(),frames=f.output().length;
+   for(let n=0;n<32;n++){f.change('asset','steam-570');f.change('settings');await settle();}
+   same(io(),before,'revoked '+stage+' notifications perform zero native/media IO');pending.resolve(pairedEntry(570,99));await settle();same(io(),before,'revoked '+stage+' settlement cannot start a tail');same(f.output().length,frames,'revoked '+stage+' settlement cannot publish');same(f.timers.size,0,'revoked '+stage+' has no timer');
+  }finally{f.host.stop();pending.resolve(pairedEntry());await settle();}
+ }
+});
+await run('OFF then ON in the same context bypasses either kind of old pending publication',async()=>{
+ for(const stage of ['lookup','ensure'] as const){
+  const pending=deferred();let old=true,reads=0,prepares=0;
+  const f=fixture({lookup:async()=>{reads++;return old&&stage==='lookup'?pending.promise as Promise<GameMediaEntry>:old?entry():pairedEntry(570,5);},ensure:async()=>{prepares++;return pending.promise as Promise<GameMediaEntry>;}});
+  try{
+   f.context();await settle();f.change('asset','steam-570');await settle();f.enable(false);f.change('settings');await settle();same(f.output().at(-1).enabled,false,'OFF is immediate while '+stage+' is hung');
+   old=false;f.enable(true);f.change('settings');await settle();same(reads,2,'new ON begins a fresh cache read without awaiting old '+stage);same(f.output().at(-1).entry.revision,'5','new ON displays current cache');same(prepares,stage==='ensure'?1:0,'new ON does not replay pending preparation');
+   const calls=f.calls.length;pending.resolve(pairedEntry(570,99));await settle();same(f.calls.length,calls,'old '+stage+' completion cannot create a new tail');same(f.output().at(-1).entry.revision,'5','new ON remains authoritative');same(f.timers.size,0,'new ON is idle');
+  }finally{f.host.stop();pending.resolve(pairedEntry());await settle();}
+ }
+});
+
+await run('R18 recovery: foreground transport failure retries same live demand without a native event',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('one native timeout');return nativeProof();}});try{f.context();await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'failed proof never grants media');same(f.timers.size,1,'one bounded proof repair belongs to visible demand');same([...f.timers.values()][0].ms,1000,'first repair is delayed');await f.fire();same(reads,2,'same peer retries actual reader without another WinEvent');same(f.output().at(-1).entry.assetId,'asset-570','current proof recovers current selection');same(f.timers.size,0,'successful foreground leaves no proof poll');}finally{f.host.stop();}});
+await run('R18 recovery: repeated transport failure exhausts a finite budget without an asset-event loop',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{reads++;throw Error('reader offline');}});try{f.context();await settle();for(const delay of [1000,5000,20000]){same(f.timers.size,1,'only one repair timer');same([...f.timers.values()][0].ms,delay,'bounded original recovery delays');for(let n=0;n<32;n++)f.change('asset');await settle();const before=reads;await f.fire();same(reads,before+1,'one actual read at one retry');}same(reads,4,'initial plus three repairs only');same(f.timers.size,0,'exhausted demand stops retry timers');for(let n=0;n<64;n++)f.change('asset');await settle();same(reads,4,'asset notifications cannot restart exhausted transport');same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'exhaustion never authorizes media');}finally{f.host.stop();}});
+await run('R18 recovery: authoritative false or unknown never schedules transport repair',async()=>{for(const proof of [null,nativeProof({foreground:false}),nativeProof({known:false,current:false})]){const f=fixture({foreground:proof});try{f.context();await settle();for(let n=0;n<32;n++)f.change('asset');await settle();same(f.timers.size,0,'actual native veto is not a transport fault');same(f.calls.filter(c=>c.command==='foreground-read').length,1,'no recurring native veto reads');same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'native veto stays denied');}finally{f.host.stop();}}});
+for(const cause of ['off','hidden','peer','power','stop'] as const)await run('R18 recovery: queued proof repair is cancelled by '+cause,async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('one failure');return nativeProof();}});try{f.context();await settle();const late=[...f.timers.values()][0]?.fn;assert.ok(late,'failed reader needs an owned repair');if(cause==='off'){f.enable(false);f.change('settings');}else if(cause==='hidden')f.context('570',2,false);else if(cause==='peer')f.connect({connection:'2',runId:'b'.repeat(32)});else if(cause==='power')f.resume(2);else f.host.stop();await settle();const count=f.calls.length;late();await settle();same(f.calls.length,count,'late repair cannot read a withdrawn owner');same(f.timers.size,0,'withdrawal cancels the repair');}finally{f.host.stop();}});
+await run('R18 recovery: a new context owns recovery and a queued old context stays inert',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first context fails');return nativeProof();}});try{f.context();await settle();const late=[...f.timers.values()][0]?.fn;assert.ok(late,'old context owns one timer');f.context('730',2,true);await settle();same(f.output().at(-1).appId,'730','new visible selection can recheck proof');const count=f.calls.length;late();await settle();same(f.calls.length,count,'old selection repair cannot replace current output');same(f.timers.size,0,'new success cancels old selection work');}finally{f.host.stop();}});
+await run('R18 recovery: late repaired proof cannot grant playback after native blur',async()=>{let reads=0,release!:(v:any)=>void;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first read failed');return new Promise(r=>release=r);}});try{f.context();await settle();await f.fire();f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur-new',revision:2}));release(nativeProof());await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'old positive transport receipt cannot override new native blur');same(f.timers.size,0,'native veto cancels repair work');}finally{f.host.stop();}});
+await run('R18 recovery: retry notifications route only current native-ticket Steam selection',async()=>{const f=fixture();try{f.context();await settle();const before=f.calls.filter(c=>c.command==='ensure').length;f.change('retry');await settle();same(f.calls.filter(c=>c.command==='ensure').length,before+1,'current owner receives one retry');const attempt=f.calls.filter(c=>c.command==='ensure').at(-1);same(attempt.target.appId,570,'retry uses selected game');same([attempt.demand.demandConsumer,attempt.demand.demandEpoch,attempt.demand.demandRevision],['steam','focus-1',1],'retry retains actual current native proof');f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur',revision:2}));const queries=()=>f.calls.filter(c=>['lookup','ensure','foreground-read'].includes(c.command)).length;const count=queries();f.change('retry');await settle();same(queries(),count,'blurred selection cannot retry');f.enable(false);f.change('settings');const off=queries();f.change('retry');await settle();same(queries(),off,'OFF cannot retry');}finally{f.host.stop();}});
+const stabilityOk=!stabilityRecoveryOnly||stabilityRecoveryRows.length>0&&stabilityRecoveryRows.every(x=>x.ok);if(!stabilityOk)process.exitCode=1;
+console.log(JSON.stringify({ok:stabilityOk,selection:stabilityRecoveryOnly?'stability-recovery':'default',stabilityRecoveryRows,cases,checks,scope:'production Steam wallpaper host; injected IPC/media ports, no installed Steam mutation'}));
