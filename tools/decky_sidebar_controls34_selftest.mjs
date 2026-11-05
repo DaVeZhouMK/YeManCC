@@ -9,7 +9,7 @@ const results=[];async function check(name,run){await run();results.push(name);}
 async function fixture(options={}){
  const start=deferred(),apply=deferred(),calls=[],fan={active:false,preset:'balanced'},timers=new Map();let counter=0,now=0,host;
  const runId='f'.repeat(32),peer={connection:'1',runId};
- const listeners=new Map(),socket={sent:[],addEventListener:(name,fn)=>listeners.set(name,fn),emit:(name,value)=>listeners.get(name)?.({data:typeof value==='string'?value:JSON.stringify(value)}),send:text=>{const request=JSON.parse(text);socket.sent.push(request);host.emit('deckySidebar.mirrorRequest',{...peer,request});},close:()=>listeners.get('close')?.()};
+ const listeners=new Map(),socket={sent:[],addEventListener:(name,fn)=>listeners.set(name,fn),emit:(name,value)=>listeners.get(name)?.({data:typeof value==='string'?value:JSON.stringify(value)}),send:text=>{const request=JSON.parse(text);socket.sent.push(request);host.emit('deckySidebar.mirrorRequest',{...peer,request});},close:()=>{listeners.get('close')?.();host?.emit('deckySidebar.mirrorPeer',{...peer,connected:false});}};
  const life={controlReady:false,state:'starting',hasControlIntent:false,recoveryActive:false,start:async()=>{calls.push('start');return start.promise;},apply:async()=>{calls.push('apply');life.hasControlIntent=true;await apply.promise;life.state='ready';life.controlReady=true;return {state:'Ready'};},applyPreset:async()=>{calls.push('preset');life.hasControlIntent=true;life.state='ready';life.controlReady=true;return {state:'Ready'};},disable:async()=>{calls.push('disable');await options.disableWait;life.hasControlIntent=false;life.controlReady=false;life.state='awaiting-control';return {state:'AwaitingControl'};}};
  const feature={FAN_IMPORT_ENABLED:true,FAN_FORCE_PREVIEW:false,fanFeatureEnabled:{value:true},fanControlActive:{get value(){return fan.active;}},getFanFeatureSettings:()=>({preset:fan.preset}),getFanPresetCurve:()=>[{tempC:0,dutyPercent:0},{tempC:100,dutyPercent:90}],saveFanCurve:async(_,preset)=>{fan.preset=preset;},setFanControlActive:value=>{fan.active=value;},setFanNavigationDuty:()=>{},recordFanHandshake:async()=>{}};
  host=await createMirrorHostFixture({initial:options.initial??{version:1,entries:{},rtss:{}},readHooks:options.readHooks??{},fanOwner:{lifecycle:life,featureBindings:feature,close:async()=>{}},invoke:async(command,args)=>{if(command==='deckySidebar.mirrorAttach')return {connected:false};if(command==='deckySidebar.mirrorReply'){socket.emit('message',args.message);return true;}if(command==='input.shortcutRuntime.clear'){host.counts.shortcutClears=(host.counts.shortcutClears||0)+1;return options.clearReply??true;}throw Error('Unmocked IO '+command);}});
@@ -147,14 +147,22 @@ await check('FxSound rejects malformed commands and does not claim failed applic
  }finally{f.stop();assert.equal(f.host.fxTimerCount(),0);}
 });
 await check('FxSound accepted action outlives sidebar close without starting observation again',async()=>{
- const f=await fixture(),pending=deferred();
- try{
-  f.host.state.fxSoundSetHook=async()=>pending.promise;
-  const operation=f.client.mutate('audioOptimization.setEnabled',{enabled:true}).catch(()=>null);await flush();assert.equal(f.host.counts.fxSoundWrites,1);
-  f.client.setVisible(false);f.host.emit('deckySidebar.mirrorPeer',{connection:'1',runId:'f'.repeat(32),connected:false});await flush();assert.equal(f.host.fxTimerCount(),0);
-  pending.resolve({ok:true,copied:false,reused:false,repaired:false,reason:'已开启',state:{...f.host.state.fxSound,running:true,enabled:true}});await operation;await flush();
-  assert.equal(f.host.fxTimerCount(),0);assert.equal(f.host.counts.fxSoundWrites,1);
- }finally{f.stop();}
+ for(const boundary of ['hidden','disconnected']){
+  const f=await fixture(),pending=deferred();
+  try{
+   f.host.state.fxSoundSetHook=async()=>pending.promise;
+   const operation=f.client.mutate('audioOptimization.setEnabled',{enabled:true}).catch(()=>null);await flush();assert.equal(f.host.counts.fxSoundWrites,1);
+   f.client.setVisible(false);
+   // Hiding retains the accepted command and its existing observation lease.
+   // A real lost socket must notify BOTH ends; host-only fake OFF formerly
+   // stranded the client promise outside its virtual timeout clock.
+   if(boundary==='disconnected'){f.socket.emit('close');f.host.emit('deckySidebar.mirrorPeer',{connection:'1',runId:'f'.repeat(32),connected:false});}
+   await flush();assert.equal(f.host.fxTimerCount(),boundary==='hidden'?1:0);
+   pending.resolve({ok:true,copied:false,reused:false,repaired:false,reason:'已开启',state:{...f.host.state.fxSound,running:true,enabled:true}});await operation;await flush();
+   assert.equal(f.host.fxTimerCount(),0);assert.equal(f.host.counts.fxSoundWrites,1);
+   assert.equal(f.socket.sent.filter(r=>r.command==='audioOptimization.setEnabled').length,1);
+  }finally{f.stop();}
+ }
 });
 
 for(const dedicated of [false,true])await check('the original input action lock remains owned until native completion settles '+dedicated,async()=>{
@@ -170,19 +178,19 @@ function renderFxToggle({enabled=false,known=true,connected=true,busy=false}={})
  const start=source.indexOf('const fieldLabels:'),end=source.indexOf('// Steam can reload its shared page before Loader calls onDismount.');
  assert(start>0&&end>start);
  const state={connected,busy,snapshot:{runId:'f'.repeat(32),generation:1,revision:1,ready:true,game:null,fan:{enabled:false,preset:'off',choices:[]},audioOptimization:{known,installed:true,running:enabled,enabled,selected:true,preset:'移动端通用音频优化',output:'fixture',reason:''},actions:{audioOptimization:true,fan:false,game:false}}};
- const sends=[],module={exports:{}},intents={performance:{snapshot:()=>null,cancel(){}},fan:{snapshot:()=>null,cancel(){}}};
+ const sends=[],module={exports:{}},intents={performance:{snapshot:()=>null,cancel(){}},fan:{snapshot:()=>null,hasWork:()=>false,cancel(){}}};
  const React={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useRef:value=>({current:value}),useState:value=>[value,()=>{}],useEffect(){}};
- const globals={module,exports:module.exports,React,SP_REACT:React,client:{snapshot:()=>state,mutate:async(command,args)=>{sends.push({command,args});return {};}},createContentIntents:()=>intents,useQuickAccessVisible:()=>true,PanelSection:'section',PanelSectionRow:'row',ToggleField:'toggle',ButtonItem:'button',SliderField:'slider',DropdownItem:'dropdown',AnchoredDropdown:'anchored',PerformanceControls:'performance',GameProfileControls:'profile',panelStyle:'grouped',FRAME_RATE_CEILINGS:[],FAN_CHOICES:[{data:'off',label:'关闭'}],DECKY_GYRO_CHOICES:[],losslessProgramLabel:()=>'',activeContentIntents:new Set()};
+ const globals={module,exports:module.exports,React,SP_REACT:React,client:{snapshot:()=>state,mutate:async(command,args)=>{sends.push({command,args});return {};}},createContentIntents:()=>intents,useQuickAccessVisible:()=>true,PanelSection:'section',PanelSectionRow:'row',ToggleField:'toggle',ButtonItem:'button',SliderField:'slider',DropdownItem:'dropdown',AnchoredDropdown:'anchored',PerformanceControls:'performance',GameProfileControls:'profile',panelStyle:'grouped',FRAME_RATE_CEILINGS:[],FAN_CHOICES:[{data:'off',label:'关闭'}],DECKY_GYRO_CHOICES:[],...load(fs.readFileSync(path.join(root,'src/bridge/losslessProgramState.ts'),'utf8')),activeContentIntents:new Set()};
  vm.runInNewContext(transformSync(source.slice(start,end)+'\nmodule.exports={Content};',{loader:'tsx',format:'cjs',jsxFactory:'React.createElement'}).code,globals);
  const tree=module.exports.Content(),nodes=[];function visit(node){if(!node||typeof node!=='object')return;nodes.push(node);for(const child of node.children??[])visit(child);}visit(tree);
  const label=node=>node.props?.label?.children?.join('')??'';
- const audio=nodes.find(node=>node.type==='toggle'&&label(node)==='音质优化 · FxSound');assert(audio,'production TSX must render FxSound ToggleField');
+ const audio=nodes.find(node=>node.type==='toggle'&&label(node)==='掌机专用低音强化');assert(audio,'production TSX must render FxSound ToggleField');
  return {audio,nodes,sends,label};
 }
 await check('actual Decky TSX places FxSound at software top and sends exactly the toggle boolean',async()=>{
  const f=renderFxToggle();assert.equal(f.audio.props.checked,false);assert.equal(f.audio.props.disabled,false);
- const heading=f.nodes.findIndex(n=>n.props.className==='ymcc-section-heading'&&n.children[0]==='软件'),audio=f.nodes.indexOf(f.audio);
- assert(heading>=0&&heading<audio);assert(!f.nodes.slice(heading,audio).some(n=>['toggle','button','slider','dropdown'].includes(n.type)));
+ const heading=f.nodes.findIndex(n=>n.props.className==='ymcc-section-heading'&&n.children[0]==='监控/软件'),audio=f.nodes.indexOf(f.audio);
+ assert(heading>=0&&heading<audio);const preceding=f.nodes.slice(heading,audio).filter(n=>['toggle','button','slider','dropdown'].includes(n.type));assert.equal(preceding.length,1,'Current requested software group keeps monitor directly above audio');assert.equal(f.label(preceding[0]),'监控总开关');
  f.audio.props.onChange(true);await flush();assert.equal(f.sends.length,1);assert.equal(f.sends[0].command,'audioOptimization.setEnabled');assert.equal(f.sends[0].args.enabled,true);
 });
 await check('actual FxSound TSX reflects ON and remains disabled for unknown or disconnected state',()=>{

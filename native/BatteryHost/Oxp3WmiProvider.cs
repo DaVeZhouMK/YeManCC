@@ -28,7 +28,7 @@ internal sealed class Oxp3WmiManagementMethod : IOxp3WmiMethod
             {
                 searcher.Options.Timeout=TimeSpan.FromSeconds(3);
                 using var instances=searcher.Get();
-                selected=SelectUniqueInstance(instances.Cast<ManagementObject>());
+                selected=SelectUniqueInstance(instances.Cast<ManagementObject>(),static (ManagementObject item)=>item.Dispose());
             }
             // Transfer ownership only after enumeration and query-resource cleanup succeed.
             instance=selected??throw new IOException("OXP3 WMI EC 接口不可用");
@@ -38,9 +38,11 @@ internal sealed class Oxp3WmiManagementMethod : IOxp3WmiMethod
     }
     // A reviewed model does not identify which of several EC endpoints is its owner.
     // This exact selector is shared with inert tests; it never invokes an EC method.
-    internal static T SelectUniqueInstance<T>(IEnumerable<T> candidates) where T:class,IDisposable
+    internal static T SelectUniqueInstance<T>(IEnumerable<T> candidates,Action<T>? cleanup=null) where T:class,IDisposable
     {
         ArgumentNullException.ThrowIfNull(candidates);
+        // ManagementObject hides Component.Dispose; production must bind its concrete cleanup.
+        cleanup??=static item=>item.Dispose();
         T? selected=null;
         try
         {
@@ -51,7 +53,7 @@ internal sealed class Oxp3WmiManagementMethod : IOxp3WmiMethod
                 {
                     // Even a duplicate object reference is ambiguous enumeration; dispose once.
                     try{throw new IOException("OXP3 WMI EC 存在多个实例，无法确认充电接口");}
-                    finally{if(!ReferenceEquals(candidate,selected))candidate.Dispose();}
+                    finally{if(!ReferenceEquals(candidate,selected))cleanup(candidate);}
                 }
                 selected=candidate;
             }
@@ -60,7 +62,7 @@ internal sealed class Oxp3WmiManagementMethod : IOxp3WmiMethod
             selected=null;
             return result;
         }
-        finally{selected?.Dispose();}
+        finally{if(selected is not null)cleanup(selected);}
     }
     public string? Invoke(string method,object[] arguments)
     {
@@ -96,7 +98,7 @@ internal sealed class Oxp3WmiEc : IOxp3WmiEc
         throw new IOException("OXP3 EC 响应字节未知："+value);
     }
 }
-internal sealed class Oxp3WmiProvider : IChargeProvider
+internal sealed class Oxp3WmiProvider : IChargeProvider,IChargeWriteAdmission
 {
     internal const ushort LimitRegister=0x04A3;
     internal const ushort BypassRegister=0x04A4;
@@ -109,11 +111,13 @@ internal sealed class Oxp3WmiProvider : IChargeProvider
         if(raw>100)throw new IOException("OXP3 充电阈值未知");
         return new(raw,raw);
     }
-    public void Write(int value,Reading before)
+    public void Write(int value,Reading before)=>Write(value,before,static ()=>{});
+    public void Write(int value,Reading before,Action requireAvailable)
     {
         if(value<0||value>100)throw new IOException("OXP3 充电档位超出源范围");
         if(before.Raw is null)throw new IOException("缺少 OXP3 充电原始状态");
         if(ec.ReadByte(LimitRegister)!=before.Raw)throw new IOException("充电状态已被其他软件改变，请重新读取");
+        requireAvailable(); // Recheck the owner after the final potentially blocking WMI pre-read.
         ec.WriteByte(LimitRegister,(byte)value);
     }
     internal static byte BypassValue(int mode)=>mode switch{1=>0x01,2=>0x0B,_=>0x00};

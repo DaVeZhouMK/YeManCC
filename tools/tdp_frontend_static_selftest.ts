@@ -32,6 +32,8 @@ let calls:Array<{cmd:string;args:any}>=[],rows:Array<{event:string;detail:any}>=
   if(args.op==='resume'){if(scenario==='daemon-pending-resume')return new Promise(resolve=>{holdResume=resolve;});if(scenario==='daemon-failed-resume')return {ok:false,rc:6,result:{reinitialized:false,resumeGeneration:powerGeneration}};resumedGeneration=Number(args.args.generation)||1;if(scenario==='daemon-stale-resume')invalidateTdpPowerSession('resuming');if(scenario==='daemon-late-resume')throw new Error('observer timeout after actual completion');return {ok:true,rc:0,result:{reinitialized:true,resumeGeneration:resumedGeneration}};}
   if(args.op==='ping')return {result:{reinitialized:resumedGeneration>0,resumeGeneration:resumedGeneration},ok:scenario.startsWith('daemon')&&scenario!=='daemon-unavailable',rc:scenario.startsWith('daemon')&&scenario!=='daemon-unavailable'?0:7,requestId:'fixture-existing-daemon-id'};
   if(args.op==='set'&&scenario==='daemon-held-set')return new Promise(resolve=>{holdSet=resolve;});
+  if(args.op==='set'&&scenario==='daemon-verified-amd')return {ok:true,rc:0,result:{amdObservation:{schemaVersion:1,hardwareCommandReturned:true,readbackMatched:true,verificationScope:'StrixHalo_PM_table_limit_fields_only'}}};
+  if(args.op==='set'&&scenario==='daemon-mismatch-amd')return {ok:false,rc:6,error:'amd_tdp_readback_mismatch: requested=31W observed=55W'};
   if(args.op==='set')return {ok:!['daemon-fail','daemon-native-power-block','daemon-unsupported','daemon-helper-notready'].includes(scenario),rc:['daemon-fail','daemon-native-power-block','daemon-unsupported','daemon-helper-notready'].includes(scenario)?7:0,requestId:'fixture-existing-daemon-id',error:scenario==='daemon-fail'?'fixture-original-daemon-error':scenario==='daemon-native-power-block'?'hardware writes are blocked during power transition':scenario==='daemon-unsupported'?'TDP unsupported on this transport':scenario==='daemon-helper-notready'?'hardware_resume_not_ready':undefined};
   return {ok:true,rc:0};
  }
@@ -157,6 +159,23 @@ async function main(){
  const revokedRelease=holdSet as unknown as ((value:any)=>void);if(!revokedRelease)throw Error('revoked write did not reach held daemon');currentOwner=false;scenario='daemon-recovered';revokedRelease({ok:true,rc:0});
  const revokedResult=await revokedAfterDispatch;await settle();
  check('revoked-after-dispatch-ack-cannot-publish-current-accepted-watts',!revokedResult&&revokedAccepted===0&&tdpRuntimeStore.get().status!=='applied');
- const report={checks,failures:checks.filter(c=>!c.pass).length,scope:'REAL_FRONTEND_UNIFIED_ENTRY_WITH_OFFLINE_IPC_NO_PRODUCT_OR_HARDWARE',realHardwareExecuted:false};writeFileSync(join(base,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));process.exitCode=report.failures?1:0;
+ const compatibilityBoundaries:string[]=[];
+ const compatibilityRealNow=Date.now;let compatibilityNow=compatibilityRealNow();Date.now=()=>compatibilityNow;
+ await reset('daemon-verified-amd');const verified=await setTdp('ac',31,{apply:true,save:false,source:'ui'});await settle();
+ if(!verified||!calls.some(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set'&&c.args.args.verifyTdp===true)||terminals()[0]?.detail.readbackMatched!==true)throw Error('Strix Halo static verification was not consumed');
+ compatibilityBoundaries.push('static-request-verification-and-returned-limits-consumed');
+ await reset('daemon-mismatch-amd');error='';try{await setTdp('ac',31,{apply:true,save:false,source:'ui'});}catch(e){error=String(e);}await settle();
+ if(!error.includes('amd_tdp_readback_mismatch')||terminals()[0]?.event!=='tdp.failed'||calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length!==1||calls.some(c=>c.cmd==='shell.run'))throw Error('Strix Halo mismatch was hidden or replayed');
+ compatibilityBoundaries.push('mismatch-is-explicit-and-no-write-replay');
+ const writesBeforeRetry=calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length;
+ let earlyRetry='';try{await setTdp('ac',31,{apply:true,save:false,source:'ui'});}catch(e){earlyRetry=String(e);}await settle();
+ if(!earlyRetry.includes('backoff')||calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length!==writesBeforeRetry)throw Error('Existing TDP failure backoff was bypassed');
+ compatibilityNow+=5001; // Existing 5000ms breaker, advanced only in this inert fixture.
+ scenario='daemon-verified-amd';const recovered=await setTdp('ac',31,{apply:true,save:false,source:'ui'});await settle();if(!recovered)throw Error('Strix Halo mismatch permanently latched the next request');
+ compatibilityBoundaries.push('new-explicit-request-recovers-without-permanent-latch');
+ await reset('daemon-float-compat');await setTdp('ac',30,{apply:true,save:false,source:'autofloat'});await settle();
+ if(!calls.some(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set'&&JSON.stringify(c.args.args)==='{"watts":30}')||calls.some(c=>c.cmd==='power.sourceSnapshot'||c.cmd==='registry.read'))throw Error('Strix Halo compatibility added high-frequency read work');
+ compatibilityBoundaries.push('float-stays-watts-only-no-extra-read-or-power-probe');Date.now=compatibilityRealNow;
+ const report={checks,compatibilityBoundaries,failures:checks.filter(c=>!c.pass).length,scope:'REAL_FRONTEND_UNIFIED_ENTRY_WITH_OFFLINE_IPC_NO_PRODUCT_OR_HARDWARE',realHardwareExecuted:false};writeFileSync(join(base,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));process.exitCode=report.failures?1:0;
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

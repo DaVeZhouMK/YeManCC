@@ -20,7 +20,15 @@ const label=computed(()=>outputFor(focused.value)?.label||focused.value);
 function focusCode(code:string){focused.value=code;void nextTick(()=>focusGamepadElement(root.value?.querySelector<HTMLElement>('[data-key-code="'+code+'"]:is(button)')||null))}
 function move(dx:number,dy:number){const from=KEYBOARD_KEY_LAYOUT.find(k=>k.code===focused.value);if(!from)return false;const x=from.x+from.w/2,y=from.y+from.h/2;const targets=KEYBOARD_KEY_LAYOUT.filter(k=>enabledCodes.value.includes(k.code)&&k.code!==from.code).map(k=>({k,dx:k.x+k.w/2-x,dy:k.y+k.h/2-y})).filter(v=>dx?v.dx*dx>1: v.dy*dy>1).sort((a,b)=>{const score=(v:typeof a)=>dx?Math.abs(v.dx)+Math.abs(v.dy)*5:Math.abs(v.dy)+Math.abs(v.dx)*2;return score(a)-score(b)});if(targets[0]){focusCode(targets[0].k.code);return true}return false}
 function navigate(dx:number,dy:number){if(move(dx,dy))return;if(dy>0&&comboMode.value)focusGamepadElement(root.value?.querySelector<HTMLElement>('.keyboard-combo-confirm:not(:disabled)')||null);else if(dy<0)focusGamepadElement(root.value?.querySelector<HTMLElement>('header button')||null)}
-function spatial(event:Event){const e=event as CustomEvent<{dx:number;dy:number}>;if(!(event.target as Element)?.closest('.keyboard-hit-layer'))return;event.preventDefault();navigate(e.detail.dx,e.detail.dy)}
+function spatial(event:Event){
+  const e=event as CustomEvent<{dx:number;dy:number}>;
+  // The shared engine dispatches on the inline-edit container; direct keyboard
+  // events originate from a key. Resolve both within this keyboard's own root.
+  const active=(root.value?.getRootNode() as Document|ShadowRoot|undefined)?.activeElement;
+  const source=(event.target as Element)?.closest?.('.keyboard-hit-layer')?event.target:active;
+  if(!(source instanceof Element)||!root.value?.contains(source)||!source.closest('.keyboard-hit-layer'))return;
+  event.preventDefault();navigate(e.detail.dx,e.detail.dy);
+}
 function keydown(event:KeyboardEvent){const direction:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(event.key==='Escape'){event.preventDefault();event.stopPropagation();emit('close')}else if(direction[event.key]&&(event.target as Element)?.closest('.keyboard-hit-layer')){event.preventDefault();navigate(...direction[event.key])}}
 function back(event:Event){if(!root.value?.getClientRects().length)return;event.preventDefault();event.stopImmediatePropagation();emit('close')}
 function select(code:string){const output=outputFor(code);if(!output)return;if(!comboMode.value){emit('select',output.actionId,output.code);return}const index=selectedKeys.value.findIndex(k=>k.code===code);if(index>=0)selectedKeys.value.splice(index,1);else if(selectedKeys.value.length<4)selectedKeys.value.push({actionId:output.actionId,code:output.code})}

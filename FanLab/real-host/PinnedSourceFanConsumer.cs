@@ -109,18 +109,20 @@ internal sealed partial class RealHcBackend
         activeCurveDuties=duties;activeFanProfile=curve;lastDispatchedTemperature=null;
         lastDispatchedFanProfile=null;lastTemperatureC=null;lastDutyPercent=null;
         lastControlWriteEvidence="source-curve-armed-awaiting-valid-temperature";
+        if(TrySubmitMaximumFanDuty(duties,admittedEpoch))return true;
         // One existing shared-memory sensor owner. The test seam creates only
         // its dormant object and stamps the real freshness field before callback.
         if(sourceConsumerForSelfTest)cpuTemperatureMonitor??=new HWiNFOTemperatureMonitor();
         else EnsureCpuTemperatureLoop();
         return true;
     }
-    private void WritePinnedSourceDuty(double duty)
+    private void WritePinnedSourceDuty(double duty,long? admittedEpoch=null)
     {
         var owner=sourceFanSession??throw new InvalidOperationException("SOURCE_FAN_OWNER_MISSING");
-        var operation=CaptureFanDispatchOwner();
+        var operation=CaptureFanDispatchOwner(admittedEpoch);
         var receipt=owner.ApplyPercent(duty,()=>SourcePermit(sourceFanAdmissionEpoch)&&
-            IsFanDispatchOwnerCurrent(operation)&&!AreTemperatureWritesBlocked());
+            IsFanDispatchOwnerCurrent(operation)&&!operationTimedOut&&
+            (admittedEpoch==sourceFanAdmissionEpoch||!AreTemperatureWritesBlocked()));
         lastControlWriteEvidence="source-transport-returned-physical-effect-not-observed";
         Diagnostic?.Invoke("source.fan-duty.returned",new { receipt.DeviceId,receipt.Generation,
             receipt.RegisterValue,receipt.SourceCommit,receipt.PhysicalEffectVerified });

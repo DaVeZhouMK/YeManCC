@@ -15,7 +15,7 @@ static unsigned fixturePsParentCalls=0,fixturePsIdCalls=0;
 static std::function<void()> fixturePsBeforeRead;
 static HDEVINFO fixturePsGetClassDevs(const GUID*,PCWSTR,HWND,DWORD){
  const bool returnRead=fixtureFullPipe&&g_psEndpointOwnership.retirementRequired();
- if(!fixturePsProbeActive&&!returnRead){++forbiddenIo;throw std::logic_error("unadmitted-PS-SetupAPI-boundary");}
+ if(!fixturePsProbeActive&&!returnRead){fixtureCountForbiddenIo("unadmitted-PS-SetupAPI-boundary");throw std::logic_error("unadmitted-PS-SetupAPI-boundary");}
  if(returnRead&&!fixturePsReturnManualTopology&&!fixturePsAutoReturnTopology()){SetLastError(ERROR_NOT_READY);return INVALID_HANDLE_VALUE;}
  ++fixturePsOpenCalls;
  if(fixturePsBeforeRead){auto invoke=std::move(fixturePsBeforeRead);fixturePsBeforeRead={};invoke();}
@@ -23,12 +23,12 @@ static HDEVINFO fixturePsGetClassDevs(const GUID*,PCWSTR,HWND,DWORD){
  return reinterpret_cast<HDEVINFO>(static_cast<uintptr_t>(0x5053));
 }
 static BOOL fixturePsEnum(HDEVINFO set,PSP_DEVINFO_DATA,const GUID*,DWORD index,PSP_DEVICE_INTERFACE_DATA data){
- if((!fixturePsProbeActive&&!(fixtureFullPipe&&g_psEndpointOwnership.retirementRequired()))||set!=reinterpret_cast<HDEVINFO>(static_cast<uintptr_t>(0x5053))){++forbiddenIo;throw std::logic_error("unknown-PS-enumeration-handle");}
+ if((!fixturePsProbeActive&&!(fixtureFullPipe&&g_psEndpointOwnership.retirementRequired()))||set!=reinterpret_cast<HDEVINFO>(static_cast<uintptr_t>(0x5053))){fixtureCountForbiddenIo("unknown-PS-enumeration-handle");throw std::logic_error("unknown-PS-enumeration-handle");}
  ++fixturePsEnumCalls;if(index>=fixturePsPaths.size()){fixturePsEndSeen=true;SetLastError(fixturePsEndError);return FALSE;}
  data->Reserved=index;return TRUE;
 }
 static BOOL fixturePsDetail(HDEVINFO,PSP_DEVICE_INTERFACE_DATA data,PSP_DEVICE_INTERFACE_DETAIL_DATA_W detail,DWORD bytes,PDWORD required,PSP_DEVINFO_DATA info){
- const auto index=static_cast<size_t>(data->Reserved);if(index>=fixturePsPaths.size()){++forbiddenIo;throw std::logic_error("PS-detail-index-out-of-range");}
+ const auto index=static_cast<size_t>(data->Reserved);if(index>=fixturePsPaths.size()){fixtureCountForbiddenIo("PS-detail-index-out-of-range");throw std::logic_error("PS-detail-index-out-of-range");}
  const auto& value=fixturePsPaths[index];const DWORD size=static_cast<DWORD>(offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W,DevicePath)+(value.size()+1)*sizeof(wchar_t));
  if(!detail){if(required)*required=static_cast<int>(index)==fixturePsSizeFailure?0:size;SetLastError(static_cast<int>(index)==fixturePsSizeFailure?ERROR_ACCESS_DENIED:ERROR_INSUFFICIENT_BUFFER);return FALSE;}
  if(static_cast<int>(index)==fixturePsDetailFailure){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
@@ -54,7 +54,7 @@ static CONFIGRET fixturePsDeviceId(DEVINST node,PWSTR value,ULONG chars,ULONG){
   if(fixturePsPaths[index].find(L"NEW-HID-SAME-ROOT")!=std::wstring::npos)id+=L"_REENUM";
  }else if(node>=0x50540000&&node<0x50540000+fixturePsPaths.size())id=fixturePsRootForPath(node-0x50540000);
  else if(fixturePsDepthLimit&&node>=0x50600000&&node<0x50610000)id=L"ROOT\\OFFLINE_DEPTH_"+std::to_wstring(node);
- else{++forbiddenIo;throw std::logic_error("unadmitted-PS-CM-instance");}
+ else{fixtureCountForbiddenIo("unadmitted-PS-CM-instance");throw std::logic_error("unadmitted-PS-CM-instance");}
  if(chars<=id.size())return CR_BUFFER_SMALL;memcpy(value,id.c_str(),(id.size()+1)*sizeof(wchar_t));return CR_SUCCESS;
 }
 static CONFIGRET fixturePsParent(PDEVINST parent,DEVINST node,ULONG){
@@ -65,7 +65,7 @@ static CONFIGRET fixturePsParent(PDEVINST parent,DEVINST node,ULONG){
  }
  if(fixturePsDepthLimit&&node>=0x50600000&&node<0x50610000){*parent=node+1;return CR_SUCCESS;}
  if(node>=0x50540000&&node<0x50540000+fixturePsPaths.size())return CR_NO_SUCH_DEVNODE;
- ++forbiddenIo;throw std::logic_error("unadmitted-PS-CM-parent");
+ fixtureCountForbiddenIo("unadmitted-PS-CM-parent");throw std::logic_error("unadmitted-PS-CM-parent");
 }
 
 struct FixturePsReadScope {bool prior=fixturePsProbeActive;FixturePsReadScope(){fixturePsProbeActive=true;}~FixturePsReadScope(){fixturePsProbeActive=prior;}};
@@ -120,7 +120,7 @@ static DWORD fixtureControlledXinputState(DWORD slot,XINPUT_STATE* state){
 }
 static std::wstring fixtureControlledXinputPath(DWORD slot){++inertXinputReads;if(!fixtureXinputSourceLive)return {};if(slot==0)return fixturePhysicalPath;if(slot==1&&fixtureElitePrepared())return fixtureElitePath;return {};}
 static BYTE fixtureControlledXinputIndex(const std::wstring& path){if(!fixtureXinputSourceLive)return 0xFF;return path==fixturePhysicalPath?0:path==fixtureElitePath&&fixtureElitePrepared()?1:0xFF;}
-static HDEVINFO fixtureXboxCreate(const GUID*,HWND){if(!fixtureElitePrepared()){++forbiddenIo;throw std::logic_error("unadmitted-Elite-identity-query");}return reinterpret_cast<HDEVINFO>(static_cast<uintptr_t>(0x454c4954));}
+static HDEVINFO fixtureXboxCreate(const GUID*,HWND){if(!fixtureElitePrepared()){fixtureCountForbiddenIo("unadmitted-Elite-identity-query");throw std::logic_error("unadmitted-Elite-identity-query");}return reinterpret_cast<HDEVINFO>(static_cast<uintptr_t>(0x454c4954));}
 static BOOL fixtureXboxOpen(HDEVINFO set,PCWSTR path,DWORD,PSP_DEVICE_INTERFACE_DATA iface){if(set!=reinterpret_cast<HDEVINFO>(static_cast<uintptr_t>(0x454c4954)))throw std::logic_error("foreign-Elite-identity-handle");if(!path||fixtureElitePath!=path)return FALSE;iface->Flags=SPINT_ACTIVE;return TRUE;}
 static BOOL fixtureXboxDetail(HDEVINFO,PSP_DEVICE_INTERFACE_DATA,PSP_DEVICE_INTERFACE_DETAIL_DATA_W detail,DWORD bytes,PDWORD needed,PSP_DEVINFO_DATA info){
  const DWORD size=static_cast<DWORD>(offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W,DevicePath)+(fixtureElitePath.size()+1)*sizeof(wchar_t));if(!detail){if(needed)*needed=size;SetLastError(ERROR_INSUFFICIENT_BUFFER);return FALSE;}if(bytes<size)return FALSE;memcpy(detail->DevicePath,fixtureElitePath.c_str(),(fixtureElitePath.size()+1)*sizeof(wchar_t));if(info)info->DevInst=0x454c4954;return TRUE;

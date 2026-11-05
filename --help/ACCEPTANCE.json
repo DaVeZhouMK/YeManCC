@@ -1,0 +1,18 @@
+{
+  "sourceHashes": {
+    "native/main.cpp": "8dcb01754ebb9e67bb12c1e59fa9eff1d27dc40a544bddd07161bc7a46b126a9",
+    "native/keyboard_shortcut_sequence.h": "834fa60f2fdd5a89c3546759d016a8e6c0411db7c96ab7beb8a6753cb7b6ac81",
+    "native/keyboard_shortcut_sequence_runtime.h": "9c5f0bf408dd3fdbb75a44ce99dae2798c038c8de89f6f0a9dc30d826cae9c40",
+    "tools/controller_shortcut_full_runtime_selftest.mjs": "2eb7edd54bb087b01342e9668f75ef4388ffa409e9801cf653ca20419696fed7"
+  },
+  "pass": true,
+  "exit": 0,
+  "result": "CHECKS 7701 FAILURES 0\r\n",
+  "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+  "sourceSha256": "8dcb01754ebb9e67bb12c1e59fa9eff1d27dc40a544bddd07161bc7a46b126a9",
+  "actualRuleParser": true,
+  "allVisibleOutputs": true,
+  "actualTriggerStateMachine": true,
+  "hardwareIo": false,
+  "installedSettingsWritten": false
+}

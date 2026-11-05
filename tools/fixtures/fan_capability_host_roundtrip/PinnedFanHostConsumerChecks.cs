@@ -259,6 +259,43 @@ internal static class PinnedFanHostConsumerChecks
         check(LocalFanHostServer.ParentRecoveryIsSafeToFinalizeForSelfTest(engine.Snapshot())&&terminals.Count==1&&!terminals[0].IsReady,
             "source-wire:actual-public-bridge-chain-terminal-"+source.DeviceId);
     }
+    private static void RunMaximum(Action<bool,string> check,string directory,PinnedFanDescriptor source)
+    {
+        var own=Path.Combine(directory,"maximum-"+source.DeviceId);Directory.CreateDirectory(own);
+        var auth=Path.Combine(own,"auth.txt");Allow(auth);var terminals=new List<Terminal>();
+        using var engine=Engine(auth,Path.Combine(own,"log"),source,terminals);
+        engine.Handshake();engine.Open();engine.OpenEvents();var lease=engine.AcquireControl();
+        JsonElement MaximumBody(FanLease held)=>JsonSerializer.SerializeToElement(new {
+            leaseId=held.LeaseId,nodes=new[]{new{tempC=0,dutyPercent=100},new{tempC=40,dutyPercent=100},new{tempC=70,dutyPercent=100},new{tempC=100,dutyPercent=100}}});
+        engine.Enable(MaximumBody(lease));var backend=engine.RealBackendForSelfTest!;
+        check(terminals.Count==1&&terminals[0].Writes.Count==2&&terminals[0].Writes.Last()==(source.DutyRegister,source.Maximum),
+            "source-maximum:enable-submits-exact-max-register-without-temperature-"+source.DeviceId);
+        check(engine.Snapshot().HardwareWritesEnabled&&!backend.TemperatureMonitorActive,
+            "source-maximum:no-false-temperature-dependency-"+source.DeviceId);
+        check(engine.Snapshot().MonitorFan is {Percent:100d,SampledAt:>0},
+            "source-maximum:monitor-target-receipt-is-100-without-HW-sample-"+source.DeviceId);
+        var serverOptions=HostOptions.Parse(Array.Empty<string>()) with {SessionToken=Token,ParentPid=null,ParentProcessName=null};
+        using var server=new LocalFanHostServer(engine,serverOptions,new HostDiagnosticLog(Path.Combine(own,"server-log")));
+        var worker=server.StartPowerWorkerForSelfTest();
+        try {
+            server.SuspendForSelfTest(2).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            check(engine.Snapshot().State=="Suspended"&&!terminals[0].IsReady,"source-maximum:actual-sleep-retires-max-owner-"+source.DeviceId);
+            server.ResumeForSelfTest().WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            var attempt=engine.Snapshot().PowerOperationAttempt;
+            engine.WaitForAutomaticResumeAsync(5000,ResumeWaitBinding.Pinned(attempt)).WaitAsync(TimeSpan.FromSeconds(6)).GetAwaiter().GetResult();
+            check(engine.Snapshot().HardwareWritesEnabled&&terminals.Count==2&&terminals[1].Writes.Last()==(source.DutyRegister,source.Maximum)&&!backend.TemperatureMonitorActive,
+                "source-maximum:actual-resume-replays-max-without-temperature-"+source.DeviceId);
+            var current=engine.AcquireControl();engine.Enable(EnableBody(current));
+            check(backend.TemperatureMonitorActive,"source-maximum:lower-curve-restores-original-temperature-owner-"+source.DeviceId);
+            var oldTemperature=backend.CapturePinnedSourceTemperatureForSelfTest();
+            engine.Enable(MaximumBody(current));var count=terminals[1].Writes.Count;oldTemperature(50);
+            check(!backend.TemperatureMonitorActive&&terminals[1].Writes.Count==count,
+                "source-maximum:late-lower-curve-sample-cannot-change-new-max-"+source.DeviceId);
+            engine.Close();var closed=engine.Snapshot();
+            check(closed.State=="Stopped"&&closed.SourceFanClosed&&!terminals[1].IsReady&&!closed.OemPhysicalOwnershipConfirmed,
+                "source-maximum:close-and-honest-physical-unknown-"+source.DeviceId);
+        }finally{server.CompletePowerQueueForSelfTest();worker.WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();}
+    }
     internal static void Run(Action<bool,string> check,string evidenceRoot)
     {
         var directory=Path.Combine(evidenceRoot,"source-host-consumer-memory-auth");Directory.CreateDirectory(directory);
@@ -300,6 +337,7 @@ internal static class PinnedFanHostConsumerChecks
         foreach(var engineSource in FanCapabilityCatalog.PinnedSourceDeclarations)
         {
             var ownDirectory=Path.Combine(directory,"outer-"+engineSource.DeviceId);Directory.CreateDirectory(ownDirectory);
+            RunMaximum(check,ownDirectory,engineSource);
             RunEngine(check,ownDirectory,engineSource);
             RunPowerAndRelease(check,ownDirectory,engineSource);
             RunBridgeReceiptChain(check,ownDirectory,engineSource);

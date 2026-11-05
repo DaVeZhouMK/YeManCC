@@ -381,3 +381,304 @@ test('fingerprint rechecks metadata before sharing a repeated role read', t => {
   assert.equal(value.manifest.inputs.find(row => row.role === 'resolved-input').sha256, hash(file));
   assert.notEqual(value.manifest.inputs.find(row => row.role === 'resolved-input').sha256, originalHash);
 });
+
+test('cached inspection shares byte reads only within one call and rejects changes between roles', t => {
+  const payload = Buffer.alloc(1024 * 1024 + 17, 0x61);
+  const prepare = () => {
+    const f = fixture(), file = path.join(f.repoRoot, 'dep.mjs');
+    t.after(() => {
+      assert.equal(path.dirname(fs.realpathSync(f.root)), fs.realpathSync(EVIDENCE));
+      fs.rmSync(f.root, { recursive: true });
+    });
+    fs.writeFileSync(file, payload);
+    const stamp = new Date(1_000_000);
+    fs.utimesSync(file, stamp, stamp);
+    const identity = f.fingerprint();
+    assert.equal(identity.cacheable, true, JSON.stringify(identity.reasons));
+    f.entry.identity = identity.identity;
+    f.raw.dependencyInputs[0].sha256 = hash(file);
+    f.save();
+    return { f, file, identity, times: fs.statSync(file), opens: 0, passes: new Set(), bytes: 0 };
+  };
+  const steady = prepare(), betweenRoles = prepare();
+  const probes = new Map([[steady.file, steady], [betweenRoles.file, betweenRoles]]);
+  const open = fs.openSync, read = fs.readSync, close = fs.closeSync, tracked = new Map();
+  let changedBetweenRoles = false;
+  t.mock.method(fs, 'openSync', (name, ...args) => {
+    const fd = open(name, ...args);
+    const probe = typeof name === 'string' && args[0] === 'r' ? probes.get(path.resolve(name)) : undefined;
+    if (probe) tracked.set(fd, { probe, pass: ++probe.opens });
+    return fd;
+  });
+  t.mock.method(fs, 'readSync', (fd, ...args) => {
+    const count = read(fd, ...args), target = tracked.get(fd);
+    if (target && count > 0) { target.probe.passes.add(target.pass); target.probe.bytes += count; }
+    return count;
+  });
+  t.mock.method(fs, 'closeSync', fd => {
+    const target = tracked.get(fd);
+    tracked.delete(fd);
+    const result = close(fd);
+    if (target?.probe === betweenRoles && !changedBetweenRoles) {
+      changedBetweenRoles = true;
+      fs.appendFileSync(betweenRoles.file, '\nchanged during cached identity inspection');
+    }
+    return result;
+  });
+  const inspect = probe => inspectCachedResult({ identity: probe.identity, cacheEntry: probe.f.entry });
+  const started = process.hrtime.bigint(), hit = inspect(steady);
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.equal(hit.status, 'CACHED_REFERENCE');
+  t.diagnostic(JSON.stringify({ payloadBytes: payload.length, actualBytesRead: steady.bytes,
+    actualByteReadPasses: steady.passes.size, elapsedMs }));
+  assert.equal(steady.bytes, payload.length);
+  assert.equal(steady.passes.size, 1);
+  assert.equal(steady.opens, 2, 'both declared dependency roles still open the file');
+
+  // Inspection must read again after a same-size replacement with the original mtime.
+  fs.writeFileSync(steady.file, Buffer.alloc(payload.length, 0x62));
+  fs.utimesSync(steady.file, steady.times.atime, steady.times.mtime);
+  const replaced = fs.statSync(steady.file);
+  assert.deepEqual([replaced.size, replaced.mtimeMs], [steady.times.size, steady.times.mtimeMs]);
+  const bytesBefore = steady.bytes, passesBefore = steady.passes.size;
+  const miss = inspect(steady);
+  assert.equal(miss.status, 'CACHE_MISS');
+  assert.equal(miss.reusable, false);
+  assert(codes(miss).includes('INPUT_SHA256_MISMATCH'));
+  assert.equal(steady.bytes - bytesBefore, payload.length);
+  assert.equal(steady.passes.size - passesBefore, 1);
+
+  // A separate private fixture changes after the first independently declared role closes.
+  const raced = inspect(betweenRoles);
+  assert.equal(changedBetweenRoles, true);
+  assert.equal(betweenRoles.opens, 2);
+  assert.equal(betweenRoles.passes.size, 2);
+  assert.equal(raced.status, 'CACHE_MISS');
+  assert.equal(raced.reusable, false);
+  assert(codes(raced).includes('INPUT_SHA256_MISMATCH'));
+});
+
+
+test('cache misses avoid input reads while matching references retain fresh validation', t => {
+  const f = fixture(), file = path.join(f.repoRoot, 'dep.mjs');
+  t.after(() => {
+    assert.equal(path.dirname(fs.realpathSync(f.root)), fs.realpathSync(EVIDENCE));
+    fs.rmSync(f.root, { recursive: true });
+  });
+  const payload = Buffer.alloc(1024 * 1024 + 17, 0x61);
+  fs.writeFileSync(file, payload);
+  const identity = f.fingerprint();
+  f.entry.identity = identity.identity;
+  f.raw.dependencyInputs[0].sha256 = hash(file);
+  f.save();
+  const open = fs.openSync, read = fs.readSync, close = fs.closeSync, opened = new Map();
+  let totalBytes = 0, sourceBytes = 0, runtimeBytes = 0;
+  t.mock.method(fs, 'openSync', (name, ...args) => {
+    const fd = open(name, ...args);
+    if (typeof name === 'string' && args[0] === 'r') opened.set(fd, path.resolve(name));
+    return fd;
+  });
+  t.mock.method(fs, 'readSync', (fd, ...args) => {
+    const count = read(fd, ...args);
+    if (count > 0) {
+      totalBytes += count;
+      if (opened.get(fd) === file) sourceBytes += count;
+      if (opened.get(fd) === process.execPath) runtimeBytes += count;
+    }
+    return count;
+  });
+  t.mock.method(fs, 'closeSync', fd => { opened.delete(fd); return close(fd); });
+  const begin = process.hrtime.bigint();
+  const missing = inspectCachedResult({ identity });
+  const elapsedMs = Number(process.hrtime.bigint() - begin) / 1e6;
+  assert.deepEqual([missing.reusable, missing.status, missing.actualPassedThisRun], [false, 'CACHE_MISS', false]);
+  assert.deepEqual(codes(missing), ['CACHE_ENTRY_MISSING']);
+  t.diagnostic(JSON.stringify({ missingEntry: true, payloadBytes: payload.length, totalBytes, sourceBytes, runtimeBytes, elapsedMs }));
+  assert.equal(totalBytes, 0, 'an absent entry cannot be reused and needs no source rehash');
+
+  const mismatch = inspectCachedResult({ identity, cacheEntry: { ...f.entry, identity: '0'.repeat(64) } });
+  assert.deepEqual([mismatch.reusable, mismatch.status], [false, 'CACHE_MISS']);
+  assert.deepEqual(codes(mismatch), ['IDENTITY_MISMATCH']);
+  assert.equal(totalBytes, 0, 'an unmatched key cannot enter reference validation');
+
+  // Eligible references still re-open/re-read current source and runtime bytes.
+  const hit = inspectCachedResult({ identity, cacheEntry: f.entry });
+  assert.deepEqual([hit.status, hit.executedThisRun, hit.actualPassedThisRun], ['CACHED_REFERENCE', false, false]);
+  assert.equal(sourceBytes, payload.length);
+  assert(runtimeBytes > 0);
+  fs.writeFileSync(file, Buffer.alloc(payload.length, 0x62));
+  const before = sourceBytes;
+  const stale = inspectCachedResult({ identity, cacheEntry: f.entry });
+  assert.equal(stale.reusable, false);
+  assert(codes(stale).includes('INPUT_SHA256_MISMATCH'));
+  assert.equal(sourceBytes - before, payload.length, 'matching references never share bytes across calls');
+});
+
+
+// Wire contract cache mechanics use the existing synthetic fixture. These records
+// exercise identity serialization; they do not certify the production tool closure.
+test('wire fixed cache effective build and environment records change the original identity', () => {
+  const f = fixture();
+  const reviewedRecord = {
+    compiler: f.tool, linker: f.tool, sdkVersion: 'synthetic-sdk-v1',
+    includePaths: [f.external], libraryPaths: [f.external],
+    environment: { PATH: f.external, INCLUDE: f.external, LIB: f.external, DOTNET_ROOT: f.external },
+    pathContext: { layout: 'synthetic-short-output-v1' }
+  };
+  const options = { ...f.options, wireFixedContract: reviewedRecord };
+  const identity = f.fingerprint({ options });
+  assert.equal(identity.cacheable, true);
+  f.entry.identity = identity.identity;
+  assert.equal(inspectCachedResult({ identity, cacheEntry: f.entry }).status, 'CACHED_REFERENCE');
+  const changes = [
+    ['compiler', record => { record.compiler += '.changed'; }],
+    ['linker', record => { record.linker += '.changed'; }],
+    ['sdk selection', record => { record.sdkVersion = 'synthetic-sdk-v2'; }],
+    ['include selection', record => { record.includePaths.push(path.join(f.external, 'other-include')); }],
+    ['library selection', record => { record.libraryPaths.push(path.join(f.external, 'other-lib')); }],
+    ['child environment', record => { record.environment.LIB = path.join(f.external, 'other-lib'); }],
+    ['output path class', record => { record.pathContext.layout = 'synthetic-other-output-v2'; }]
+  ];
+  for (const [label, mutate] of changes) {
+    const changed = structuredClone(reviewedRecord);
+    mutate(changed);
+    const current = f.fingerprint({ options: { ...f.options, wireFixedContract: changed } });
+    assert.notEqual(current.identity, identity.identity, label);
+    const reference = inspectCachedResult({ identity: current, cacheEntry: f.entry });
+    assert.equal(reference.reusable, false, label);
+    assert.equal(reference.actualPassedThisRun, false, label);
+  }
+});
+
+test('wire fixed cache actual path helper excludes per-run names and rejects unsafe context', async () => {
+  const { wirePathContext } = await import('../global/controller-lifecycle-pipe/wire-contract.mjs');
+  assert.equal(typeof wirePathContext, 'function');
+  const f = fixture();
+  const firstName = crypto.randomUUID(), secondName = crypto.randomUUID();
+  const first = path.join(f.root, 'runs', firstName), second = path.join(f.root, 'runs', secondName);
+  fs.mkdirSync(first, { recursive: true });
+  fs.mkdirSync(second, { recursive: true });
+  const firstContext = wirePathContext(first, f.root), secondContext = wirePathContext(second, f.root);
+  assert.ok(firstContext && typeof firstContext === 'object');
+  assert.deepEqual(firstContext, secondContext, 'same eligible layout must not key each fresh output name');
+  const serialized = JSON.stringify(firstContext);
+  assert.equal(serialized.includes(firstName), false);
+  assert.equal(serialized.includes(secondName), false);
+  assert.deepEqual(JSON.parse(serialized), firstContext, 'the helper returns stable JSON data');
+  const initial = f.fingerprint({ options: { ...f.options, wirePathContext: firstContext } });
+  const next = f.fingerprint({ options: { ...f.options, wirePathContext: secondContext } });
+  assert.equal(initial.identity, next.identity);
+  assert.throws(() => wirePathContext(path.join(path.dirname(f.root), 'outside-wire-root'), f.root));
+  assert.throws(() => wirePathContext(path.join(f.root, 'runs', 'x'.repeat(240)), f.root));
+});
+
+test('wire fixed cache declared source tool and artifact drift refuse existing references', () => {
+  for (const field of ['source', 'tool', 'artifact']) {
+    const f = fixture();
+    const identity = f.fingerprint({ options: { ...f.options, wireFixedContract: { revision: 'synthetic-v1' } } });
+    f.entry.identity = identity.identity;
+    assert.equal(inspectCachedResult({ identity, cacheEntry: f.entry }).status, 'CACHED_REFERENCE');
+    const file = field === 'source' ? path.join(f.repoRoot, 'source.ts') : f[field];
+    fs.appendFileSync(file, '\nwire fixed cache drift');
+    const stale = inspectCachedResult({ identity, cacheEntry: f.entry });
+    assert.equal(stale.reusable, false, field + ' must be re-read even with the old key');
+    assert.equal(stale.actualPassedThisRun, false, field);
+    const current = f.fingerprint({ options: { ...f.options, wireFixedContract: { revision: 'synthetic-v1' } } });
+    assert.notEqual(current.identity, identity.identity, field);
+    assert.equal(inspectCachedResult({ identity: current, cacheEntry: f.entry }).reusable, false, field);
+  }
+});
+
+test('wire fixed cache changed raw logs and structured evidence cannot be hidden by metadata', () => {
+  for (const field of ['resultPath', 'stdout', 'stderr', 'details']) {
+    const f = fixture();
+    assert.equal(f.inspect().status, 'CACHED_REFERENCE');
+    fs.appendFileSync(f[field], '\nchanged original evidence');
+    f.entry.status = 'PASS';
+    f.entry.resultStatus = 'PASS';
+    const result = f.inspect();
+    assert.equal(result.reusable, false, field);
+    assert.equal(result.executedThisRun, false, field);
+    assert.equal(result.actualPassedThisRun, false, field);
+  }
+});
+
+test('wire fixed cache references count zero actual passes and preserve original failure statuses', () => {
+  const f = fixture(), original = fs.readFileSync(f.resultPath);
+  const reference = f.inspect();
+  assert.deepEqual([reference.status, reference.executedThisRun, reference.actualPassedThisRun],
+    ['CACHED_REFERENCE', false, false]);
+  assert.equal([reference].filter(row => row.status === 'PASS' || row.actualPassedThisRun).length, 0);
+  assert.deepEqual(fs.readFileSync(f.resultPath), original, 'reference inspection does not rewrite raw');
+  for (const status of ['FAIL', 'UNKNOWN', 'TIMEOUT', 'INCOMPLETE']) {
+    f.raw.status = status;
+    f.raw.exitCode = 1;
+    f.save();
+    const failedBytes = fs.readFileSync(f.resultPath);
+    f.entry.status = 'PASS';
+    const retained = f.inspect();
+    assert.deepEqual([retained.hit, retained.reusable, retained.status, retained.previousStatus],
+      [false, true, 'UNCHANGED_FAILURE_REFERENCE', status]);
+    assert.deepEqual([retained.executedThisRun, retained.actualPassedThisRun], [false, false]);
+    assert.deepEqual(fs.readFileSync(f.resultPath), failedBytes);
+  }
+});
+
+test('wire fixed cache synthetic contract data never replaces explicit closure proof flags', () => {
+  const f = fixture();
+  for (const flag of ['closureComplete', 'toolClosureComplete']) {
+    const identity = f.fingerprint({ options: { ...f.options, wireFixedContract: { reviewed: true }, [flag]: false } });
+    assert.equal(identity.cacheable, false, flag);
+    assert.equal(identity.identity, null, flag);
+    const result = inspectCachedResult({ identity, cacheEntry: f.entry });
+    assert.equal(result.status, 'UNCACHEABLE', flag);
+    assert.equal(result.reusable, false, flag);
+    assert.equal(result.actualPassedThisRun, false, flag);
+  }
+});
+
+
+test('wire fixed cache actual resolver ignores installed higher SDK and inherited bootstrap choices', async () => {
+  const {resolveWireBuild,wireChildEnvironment} = await import('../global/controller-lifecycle-pipe/wire-contract.mjs');
+  const f=fixture(), msvc=path.join(f.external,'VC/Tools/MSVC/14.44.35207'),sdk=path.join(f.external,'Windows Kits/10');
+  const bin=path.join(msvc,'bin/Hostx64/x64');
+  for(const dir of [bin,path.join(msvc,'include'),path.join(msvc,'lib/x64'),...['ucrt','shared','um','winrt','cppwinrt'].map(n=>path.join(sdk,'Include/10.0.26100.0',n)),...['ucrt','um'].map(n=>path.join(sdk,'Lib/10.0.26100.0',n,'x64'))])fs.mkdirSync(dir,{recursive:true});
+  for(const name of ['cl.exe','link.exe'])fs.writeFileSync(path.join(bin,name),'synthetic fixed tool');
+  const nativeLedger=path.join(f.repoRoot,'tools/ymcc_sim/global/controller-lifecycle-pipe/native-tool-inputs.json');
+  const sharedLedger=path.join(f.repoRoot,'tools/ymcc_sim/global/controller-priority-ledger/tool-inputs.json');
+  fs.mkdirSync(path.dirname(nativeLedger),{recursive:true});fs.mkdirSync(path.dirname(sharedLedger),{recursive:true});
+  fs.writeFileSync(nativeLedger,JSON.stringify({files:[path.join(msvc,'include/synthetic.h'),path.join(sdk,'Include/10.0.26100.0/um/Windows.h')]}));
+  fs.writeFileSync(sharedLedger,JSON.stringify({files:['cl.exe','link.exe'].map(n=>path.join(bin,n))}));
+  const first=resolveWireBuild(f.repoRoot);
+  fs.mkdirSync(path.join(sdk,'Include/99.0.0.0'),{recursive:true});
+  fs.writeFileSync(path.join(msvc,'default-version.txt'),'99.0.0');
+  const second=resolveWireBuild(f.repoRoot);
+  assert.deepEqual(first,second,'installed enumeration and unbound default files cannot select this fixed compiler');
+  const saved={};for(const name of ['CL','_CL_','LINK','VCToolsVersion','WindowsSDKVersion','NODE_OPTIONS','DOTNET_ADDITIONAL_DEPS']){saved[name]=process.env[name];process.env[name]='synthetic-injected';}
+  let child;
+  try{child=wireChildEnvironment(first,f.caseDir);}finally{for(const [name,value] of Object.entries(saved)){if(value===undefined)delete process.env[name];else process.env[name]=value;}}
+  for(const name of Object.keys(saved))assert.equal(Object.hasOwn(child,name),false,name+' must not leak into wire child');
+  assert.equal(child.INCLUDE,first.includePaths.join(';'));
+  assert.equal(child.LIB,first.libraryPaths.join(';'));
+  assert.equal(child.COMSPEC,first.cmd);
+  fs.unlinkSync(path.join(bin,'cl.exe'));
+  assert.throws(()=>resolveWireBuild(f.repoRoot),/PINNED_PATH_MISSING/,'missing fixed compiler cannot silently select an installed replacement');
+});
+
+
+test('wire fixed cache nested original output pins cannot be omitted changed or redirected',()=>{
+ const f=fixture(),nested=path.join(f.caseDir,'original-negative-stdout.json');
+ fs.writeFileSync(nested,'{"status":"FAIL","expected":true}');
+ fs.writeFileSync(f.details,JSON.stringify({sourceHashes:[pin(nested),{path:'source.ts',sha256:hash(path.join(f.repoRoot,'source.ts'))}]}));
+ f.raw.structuredEvidence=[{...pin(f.details),failed:false}];f.outputFiles.push(nested);f.save();
+ const adapter={...f.adapter,cacheOutputManifest:'details.json'},identity=f.fingerprint({adapter});f.entry.identity=identity.identity;
+ assert.equal(inspectCachedResult({identity,cacheEntry:f.entry}).status,'CACHED_REFERENCE');
+ f.entry.evidencePins=f.entry.evidencePins.filter(row=>row.path!==nested);
+ assert.equal(inspectCachedResult({identity,cacheEntry:f.entry}).reusable,false,'nested native negative raw is mandatory');
+ f.entry.evidencePins.push(pin(nested));fs.appendFileSync(nested,'changed');
+ assert.equal(inspectCachedResult({identity,cacheEntry:f.entry}).reusable,false,'changed original raw cannot be hidden by parent PASS');
+ fs.writeFileSync(nested,'{"status":"FAIL","expected":true}');
+ fs.writeFileSync(f.details,JSON.stringify({sourceHashes:[{path:path.join(f.external,'unreviewed.json'),sha256:'a'.repeat(64)}]}));
+ f.raw.structuredEvidence=[{...pin(f.details),failed:false}];f.save();
+ assert.equal(inspectCachedResult({identity,cacheEntry:f.entry}).reusable,false,'external graph input must be declared');
+});

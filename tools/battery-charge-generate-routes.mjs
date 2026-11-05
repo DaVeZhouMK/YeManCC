@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import {validateSuperXChargeOverlay} from './lib/hc_battery_catalog.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const catalog=JSON.parse(fs.readFileSync(path.join(root,'docs/battery-charge-capabilities.json'),'utf8'));
 const excluded=new Set(['oxp-linux-platform','suiplay-cec-inheritance']);
@@ -31,7 +32,18 @@ assert.equal(oxp3.protocol.limitRegister,'0x04A3');assert.equal(oxp3.protocol.by
 assert.ok(!routes.some(r=>r.route===oxp3.route),'OXP3 overlay route must not duplicate research routes');
 routes.push({route:oxp3.route,family:oxp3.family,kind:oxp3.kind,identity:oxp3.identity,firmwareGate:oxp3.firmwareGate,min:oxp3.min});
 assert.equal(routes.filter(r=>r.route===oxp3.route).length,1,'OXP3 overlay must add exactly one identity group');
+// Super X is one separately reviewed, source-bound dual-transport charge route.
+// Preserve all old rows verbatim: no normalized alias or CPU predicate is added.
+for(const item of routes){
+ assert.ok(item.identity.manufacturerMatch===undefined||item.identity.manufacturerMatch==='normalized-exact','Unreviewed battery manufacturer predicate');
+ assert.ok(item.identity.valueMatch===undefined||item.identity.valueMatch==='normalized-exact','Unreviewed battery value predicate');
+ assert.notEqual(item.identity.deviceClass,'OneXPlayerSuperX','Super X must be a reviewed extension, never a research/frozen alias');
+}
+const superx=validateSuperXChargeOverlay({repo:root});
+assert.ok(!routes.some(r=>r.route===superx.route),'Super X overlay must not duplicate another route');
+routes.push({route:superx.route,family:superx.family,kind:superx.kind,identity:superx.identity,firmwareGate:superx.firmwareGate,min:superx.min});
+assert.equal(routes.filter(r=>r.route===superx.route).length,1,'Super X overlay must add exactly one source-bound identity group');
 const target=path.join(root,'native/BatteryHost/battery-routes.json');
 if(process.argv.includes('--check'))assert.deepEqual(JSON.parse(fs.readFileSync(target,'utf8')),routes,'Runtime allowlist differs from reviewed catalogue');
 else fs.writeFileSync(target,JSON.stringify(routes,null,2)+'\n');
-console.log(`${routes.length} exact identity groups, ${new Set(routes.map(r=>r.route)).size} Windows routes; Linux/SuiPlay candidates remain disabled.`);
+console.log(`${routes.length} reviewed identity groups, ${new Set(routes.map(r=>r.route)).size} Windows routes; Linux/SuiPlay candidates remain disabled.`);

@@ -20,7 +20,7 @@
 & G:\YeManCC-Work\Testing\YMCC\Run.ps1 -Optimized -Mode full -FullAcceptance
 ```
 
-`-Tier minimal` 为默认；`-Tier module` 选择这个模块原登记的全部用例，应先生成计划。`-Tests` 和模块最小集合可以共同选择，重复ID按原定义合并，定义冲突会拒绝。未知ID、模块、空profile交集或证据目录越出G核心层不能悄悄变成通过。
+`-Tier minimal` 为默认；`-Tier module` 选择这个模块原登记的全部用例，应先生成计划。`-Tests` 和模块最小集合可以共同选择，重复ID按原定义合并，定义冲突会拒绝。未知ID、模块、空profile交集或证据目录越出G核心层不能悄悄变成通过。 明确指定的`-Tests`中任一ID不受当前profile支持，也会在加载工厂前拒绝并列出原ID；不把混合列表静默裁成子集，不自动切到full或扩大执行范围。模块选择继续沿原profile交集规则。
 
 `modules.json` 登记18个模块的最小入口，每个通常一至两个原ID。它是快速定位的局部集合，不是该模块完整能力、native生命周期、真实睡眠或设备验收。完整验收保留原始要求，不能用最小集替代。
 
@@ -166,3 +166,26 @@ Decky Build原recovery required step由persistent父门保留完整原240秒入�
 <!-- FULL_RELEASE_RAW_LAUNCHER_SCOPE -->
 显式 FullAcceptance 的原阶段 wrapper 会把当前已安装 PowerShell 7 Application 的准确路径传给既有 RawProgram 消费者，使当前父首生产器及资源 cache/worker 的已实现并发路线能在正式入口生效；调用者已指定的路径不覆盖，阶段退出（含失败/超时）恢复原环境。声明/SHA、原 Job 回收和1800秒累计预算保持，普通导出/Fast不进入此阶段。该接线通过隔离控制，不能冒充完整父或发布验收成功。正式发布的指定灯光/Decky及原必要回归图，与全局全ID或HC/CPU专项图分开；不得把全局历史244计数误报为每次发布必跑244项。
 <!-- /FULL_RELEASE_RAW_LAUNCHER_SCOPE -->
+
+<!-- NATIVE-MEDIA-BATTERY-EXACT-SELECTION-20261105 -->
+## 原生媒体电源场景的精确维护入口
+
+原 `tools/shared_game_media_downloads_selftest.cpp` 编译出的同一测试程序支持 `--battery-pause-case <核心层全新证据目录> <原精确case名>`。先复用已验证匹配当前源码/依赖/工具的完整产物；确需重编时按原MSVC配方编译一次，不为每个case重复编译。`--battery-pause <全新证据目录>` 继续是原完整六场景组，未给选择时不会隐式切成局部。
+
+精确模式只运行匹配的原回调，原结果写 `selectedCase`、`completeRegression=false` 和其它五项 `notRun`；全局`checks`另含1项fresh-root断言，不可强制等于case内断言和。未知/空case或错误参数数量非零拒绝，且不创建测试目录、不落入默认组。局部通过不能交成完整原生组、实际worker/安装/功耗或完整发布PASS。
+
+当前可按原case名定向维护 `default-off-preserves-dc-and-unknown-preparation` 或 `unknown-power-is-not-ac-and-old-ymcc-work-stays-revoked`；这只是举例，唯一场景定义仍在原C++的run回调，禁止维护第二份永久case表。其余原场景按相同方式选择，不扩大module minimum、默认发布清单或预算。当前实跑/负例与默认未复跑边界见核心层 `Evidence/NativeMediaExactSelection-20261105/INTAKE.json`。
+<!-- /NATIVE-MEDIA-BATTERY-EXACT-SELECTION-20261105 -->
+
+
+<!-- VIRTUAL-TERMINAL-DIRECTED-20261105 -->
+## 原托管退出夹具的精确场景
+
+原工具`tools/input_host_managed_lifecycle_terminal_selftest.mjs`支持`--case`精确选择：健康场景`terminal-shutdown-healthy-fixed`、`terminal-read-loss-healthy-fixed`可单选或逗号组合；原永久输出阻塞场景`terminal-shutdown-output-fixed`只能单选。默认无选择仍为原全套，`--eligibility-only`保持原范围且不能与`--case`混用。未知、重复、空、缺值、永久场景混选及不支持的fault组合在输出前拒绝，编译后的原Main也会提前拒绝坏选择。
+
+日常原消费者调用参数为`--case "terminal-shutdown-healthy-fixed,terminal-read-loss-healthy-fixed"`；重复清理反例为`--case terminal-shutdown-healthy-fixed --fault terminal-repeat-shutdown`。沿既有owned Job和单份累计预算运行，证据目录必须新鲜；不绕过来源/SDK方法片段/工具身份门。定向结果必须有实际同名同序cases、selectedCase/selectedCases及actualMainTerminalBlockExecuted；不能先运行默认全套再追加所选项。原Release/Debug保留。
+
+本入口执行原TerminalPipeCase及原资源/终态/迟到回调断言，不复制业务模型；未新增globalID/minimum或发布前置。正常两场景两配置实际4项通过，重复清理两配置各1项预期失败，本轮原件见核心Evidence/VirtualTerminalExitFocused-20261105。全套、永久阻塞/强制终止、实机和物理归还分别保持未验收；只引用相同来源的已有原件，不把引用计作本轮实跑。
+永久阻塞定向参数为`--case terminal-shutdown-output-fixed`，错误回执反例为同选择加`--fault terminal-suppress-failure`；该场景只允许`none`或此反例，健康场景的fault约束不变。正例要求Main返回7、`ManagedReleaseComplete=false`、`owner-retained`，在fixture强制清理前保留未结束的输出线程和CTS并拒绝SDK/context析构；已有SHUTDOWN释放加一次直接重试，`ReleaseAttempts=2`、`DirectReleaseAttempts=1`。反例把失败码改为0时应被原断言检出。这里证明错误终态和保留责任，不授予永久阻塞资源已销毁、真实SDK或实机归还通过。
+
+<!-- /VIRTUAL-TERMINAL-DIRECTED-20261105 -->

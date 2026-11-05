@@ -30,15 +30,38 @@ export async function monitorEditorCases({f,height,command,press,actionCase,stat
   assert.equal(await overview.locator('[data-monitor-edit] button').count(),0);
   assert.equal(await overview.locator('[data-monitor-edit] .monitor-overview-template-switch').count(),0);
   await overview.evaluate(root=>{
-   const controls=[...root.querySelectorAll('.monitor-overview-editor-bar button')],lock=root.querySelector('.monitor-overview-lock'),visibility=root.querySelector('.monitor-overview-visibility .dd-trigger'),audit=window.__gamepadAudit;
+   const controls=[...root.querySelectorAll('.monitor-overview-editor-bar button')],lock=root.querySelector('.monitor-overview-lock'),visibility=root.querySelector('.monitor-overview-visibility .dd-trigger'),crosshair=root.querySelector('.monitor-overview-crosshair .dd-trigger'),audit=window.__gamepadAudit;
    if(controls.length!==3)throw Error('Expected independent edit/A/B controls');
    const rows=controls.map(el=>el.getBoundingClientRect());
    if(rows.some(row=>Math.abs((row.top+row.bottom)/2-(rows[0].top+rows[0].bottom)/2)>2))throw Error('Edit/A/B are not visually aligned');
    for(let i=0;i<controls.length;i++){
     for(const [direction,target] of [['nav-left',controls[Math.max(0,i-1)]],['nav-right',controls[Math.min(controls.length-1,i+1)]],['nav-down',lock]]){audit.focus(controls[i]);audit.command(direction);if(document.activeElement!==target)throw Error('Unexpected row neighbour '+i+' '+direction);}
-    audit.focus(controls[i]);audit.command('nav-up');if(document.activeElement!==visibility)throw Error('Editor/template Up skipped visibility row');
+    audit.focus(controls[i]);audit.command('nav-up');if(document.activeElement!==(i===0?visibility:crosshair))throw Error('Editor/template Up skipped nearest top-row control');
    }
   });
+ });
+ await actionCase('Monitor visibility and crosshair share equal-width aligned top controls with natural navigation',height,async()=>{
+  const row=overview.locator('.monitor-top-choices');assert.equal(await row.locator('label').count(),2);assert.equal(await overview.getByRole('button',{name:'屏幕准星',exact:true}).count(),1);
+  await row.evaluate(root=>{
+   const labels=[...root.querySelectorAll('label')],buttons=[...root.querySelectorAll('.dd-trigger')],rects=labels.map(el=>el.getBoundingClientRect()),triggers=buttons.map(el=>el.getBoundingClientRect());
+   if(Math.abs(rects[0].width-rects[1].width)>1||Math.abs(triggers[0].top-triggers[1].top)>1||Math.abs(triggers[0].width-triggers[1].width)>1)throw Error('Top controls do not share equal widths/baseline');
+   for(let i=0;i<2;i++){if(triggers[i].left<rects[i].left-1||triggers[i].right>rects[i].right+1)throw Error('Dropdown overflows equal column');}
+   const audit=window.__gamepadAudit;for(let i=0;i<2;i++){audit.focus(buttons[i]);audit.command('nav-left');if(document.activeElement!==buttons[0])throw Error('Left neighbour does not stay in top row');audit.focus(buttons[i]);audit.command('nav-right');if(document.activeElement!==buttons[1])throw Error('Right neighbour does not stay in top row');}
+  });
+ });
+ await actionCase('Monitor top crosshair settings persist independently for template A and B',height,async()=>{
+  const before=await f.evaluate(()=>structuredClone(window.__monitorPreview.preferences));
+  for(const [bank,kind,label] of [['A','dot','圆点'],['B','ring','圆环']]){
+   await press(f,overview.locator('[data-monitor-overview-template="'+bank+'"]'));await f.waitForFunction(bank=>window.__monitorPreview.preferences.ymccTemplate===bank,bank);
+   await press(f,overview.locator('.monitor-overview-crosshair .dd-trigger'));await f.locator('[role=listbox]').waitFor();await press(f,f.getByRole('option',{name:label,exact:true}));
+   await f.waitForFunction(({bank,kind})=>window.__monitorPreview.preferences.ymccTemplate===bank&&window.__monitorPreview.preferences.ymcc.crosshair===kind,{bank,kind});
+  }
+  for(const [bank,kind,label] of [['A','dot','圆点'],['B','ring','圆环'],['A','dot','圆点']]){
+   await press(f,overview.locator('[data-monitor-overview-template="'+bank+'"]'));await f.waitForFunction(({bank,kind})=>window.__monitorPreview.preferences.ymccTemplate===bank&&window.__monitorPreview.preferences.ymcc.crosshair===kind,{bank,kind});
+   assert.ok((await overview.locator('.monitor-overview-crosshair .dd-trigger').innerText()).includes(label));
+  }
+  const stored=await f.evaluate(()=>window.__monitorPreview.preferences);assert.equal(stored.ymccTemplates.A.crosshair,'dot');assert.equal(stored.ymccTemplates.B.crosshair,'ring');
+  await f.evaluate(p=>window.__monitorSetPreferences(p),before);
  });
  await actionCase('Monitor overview separate template buttons explicitly identify the current bank',height,async()=>{
   for(const bank of ['B','A']){
@@ -84,7 +107,7 @@ export async function monitorEditorCases({f,height,command,press,actionCase,stat
   });
   await press(f,modal.locator('[data-settings-section="appearance"]'));
   await state(f,bank==='A'?'monitor/appearance-expanded':'monitor/B/appearance',height,'.monitor-editor-window');
-  await actionCase('Monitor '+bank+' global text maximum is 200 percent',height,async()=>{const slider=modal.getByRole('slider',{name:'监控文字倍率',exact:true});assert.equal(await slider.getAttribute('max'),'200');await slider.evaluate(el=>{el.value='200';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});await f.waitForFunction(()=>window.__monitorPreview.preferences.ymcc.textScale===2);assert.equal(await modal.locator('.monitor-refinements summary').count(),0);assert.ok(await modal.getByRole('slider',{name:'圆角',exact:true}).isVisible());});
+  await actionCase('Monitor '+bank+' text range supports 400 percent and saves 200 percent',height,async()=>{const slider=modal.getByRole('slider',{name:'监控文字倍率',exact:true});assert.equal(await slider.getAttribute('max'),'400');await slider.evaluate(el=>{el.value='200';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});await f.waitForFunction(()=>window.__monitorPreview.preferences.ymcc.textScale===2);assert.equal(await modal.locator('.monitor-refinements summary').count(),0);assert.ok(await modal.getByRole('slider',{name:'圆角',exact:true}).isVisible());});
   await actionCase('Monitor '+bank+' header Down enters picture editor and Up returns to selected bank',height,async()=>{
    await press(f,modal.getByRole('button',{name:bank+'模板',exact:true}));
    await command(f,'nav-down');await f.waitForFunction(()=>document.activeElement?.matches('.monitor-image-underlay--top .dd-trigger'));

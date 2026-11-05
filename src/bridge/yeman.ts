@@ -15,6 +15,7 @@ import { rtssIniValue, setRtssIniValue } from './rtssOverlay';
 import { getSettingsGeneration, assertSettingsGeneration, getSettingsRecoveryState, readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
 import { runTdpHardwareWrite, reconcileTdpPowerReady, reconcileTdpCapabilityReady, getTdpCapabilityState, resetTdpCapabilityState } from './tdpCircuitBreaker';
 import { tdpRuntimeStore } from './tdpRuntimeState';
+import { readPowerSourceMode, powerSourceBatteryPresent, refreshPowerSourceSnapshot } from './powerSource';
 import { beginTdpObservation, tdpErrorText, type TdpObservationContext, type TdpRequestSource } from './tdpStaticDiagnostics';
 import { OEM_EMPTY_SNAPSHOT, normalizeOemKeysSnapshot, type OemKeysSnapshot } from './controllerShortcutRules';
 import { readGamingHomeState, setGamingHomeStartup, type GamingHomeState, type GamingHomeRegistryPort, type GamingHomeSelection } from './gamingHomePolicy';
@@ -927,8 +928,9 @@ interface NativeSysInfo {
   logicalProcs: number;
   totalMemoryBytes: number;
   acLine: number; // 0=DC 1=AC 255=未知
-  powerMode: 'ac' | 'dc';
+  powerMode: 'ac' | 'dc' | null;
   hasBattery?: boolean;
+  batteryKnown?: boolean;
   commonStartup: string;
   userProfile: string;
 }
@@ -941,12 +943,11 @@ async function nativeSysInfo(): Promise<NativeSysInfo | null> {
   }
 }
 // Hardware class only selects fresh defaults. Never overwrite a saved bank.
-let performanceTemplateRead: Promise<'portable' | 'desktop'> | null = null;
-export function detectPerformanceTemplate(): Promise<'portable' | 'desktop'> {
-  return performanceTemplateRead ??= nativeSysInfo().then(info => {
-    if (typeof info?.hasBattery !== 'boolean') { performanceTemplateRead = null; return 'portable'; }
-    return info.hasBattery ? 'portable' : 'desktop';
-  });
+export async function detectPerformanceTemplate(): Promise<'portable' | 'desktop'> {
+  if (powerSourceBatteryPresent.value === null) await refreshPowerSourceSnapshot();
+  // Unknown handheld telemetry stays portable. Only explicit absence chooses
+  // desktop defaults; no extra sys.info query or permanent unknown cache.
+  return powerSourceBatteryPresent.value === false ? 'desktop' : 'portable';
 }
 // proc.running：原生唯一进程列表（支持 "RTSS*" 前缀通配），失败或缺字段返回 null
 async function nativeProcRunning(names: string[]): Promise<Record<string, boolean> | null> {
@@ -959,113 +960,18 @@ async function nativeProcRunning(names: string[]): Promise<Record<string, boolea
   }
 }
 
-// ── 实时电源模式检测 ──
-// 优先 native GetSystemPowerStatus（ACLineStatus 0=DC）；兜底 WMI Win32_Battery
-// （BatteryStatus==1 放电中→DC；其余充电/满电/无电池→AC）。
-type PowerModeProbe = { mode: 'ac' | 'dc'; reliable: boolean };
-
-// A6（191 §2，2026-09-20）：sys.info 不可用时的 PowerShell 兜底必须**有界**——
-//   · single-flight：并发调用共用同一个在途探测，避免多处同时各起一个 PowerShell；
-//   · 失败退避：兜底失败（非 0 退出/异常）后 30s 内不再重试 PowerShell，期间直接
-//     返回 reliable:false（仍按 AC 兜底，但**不声称可靠**——调用方的
-//     detectPowerModeReliable/Stable 语义不变，绝不把未知当可靠 AC）。
-// 仅当 native 给不出 AC/DC 时才走兜底；native 正常时本机制完全不参与。
-const POWER_FALLBACK_BACKOFF_MS = 30_000;
-let powerProbeInFlight: Promise<PowerModeProbe> | null = null;
-let powerFallbackBlockedUntil = 0;
-let powerProbeAttemptRevision = -1;
-let powerProbeLastOutcome: PowerModeProbe = { mode: 'ac', reliable: false };
-
-async function probePowerModeOnce(): Promise<PowerModeProbe> {
-  try {
-    const state = await invoke<{ known: boolean; acLine: number }>('power.sourceSnapshot', {}, { timeoutMs: 2000 });
-    if (state?.known && (state.acLine === 0 || state.acLine === 1)) return { mode: state.acLine === 1 ? 'ac' : 'dc', reliable: true };
-    if (state && typeof state.known === 'boolean') return { mode: 'ac', reliable: false };
-  } catch { /* Older native compatibility at startup/explicit boundary only. */ }
-  const si = await nativeSysInfo();
-  if (si?.acLine === 0) return { mode: 'dc', reliable: true };
-  if (si?.acLine === 1) return { mode: 'ac', reliable: true };
-  if (performance.now() < powerFallbackBlockedUntil) return { mode: 'ac', reliable: false };
-  try {
-    const r = await shell.run('powershell', [
-      '-NoProfile',
-      '-Command',
-      '(Get-CimInstance Win32_Battery).BatteryStatus -join ","',
-    ]);
-    if (r.exitCode !== 0) {
-      powerFallbackBlockedUntil = performance.now() + POWER_FALLBACK_BACKOFF_MS;
-      return { mode: 'ac', reliable: false };
-    }
-    const out = (r.stdout || '').trim();
-    if (!out) {
-      // 无电池（台式机）→ AC：这是**成功**结论，不进退避。
-      return { mode: 'ac', reliable: true };
-    }
-    const discharging = out
-      .split(',')
-      .map((s) => s.trim())
-      .some((s) => s === '1');
-    return { mode: discharging ? 'dc' : 'ac', reliable: true };
-  } catch {
-    powerFallbackBlockedUntil = performance.now() + POWER_FALLBACK_BACKOFF_MS;
-    return { mode: 'ac', reliable: false };
-  }
-}
-
-async function detectPowerModeProbe(fresh = false): Promise<PowerModeProbe> {
-  // Native source events already update this shared observed side. Every TDP
-  // caller reads memory; only startup/unknown or an explicit boundary probes.
-  const known = tdpRuntimeStore.get().mode;
-  if (!fresh && known !== null) return { mode: known, reliable: true };
-  if (powerProbeInFlight) return powerProbeInFlight;
-  const sourceRevision = tdpRuntimeStore.powerRevision();
-  if (!fresh && powerProbeAttemptRevision === sourceRevision) return powerProbeLastOutcome;
-  powerProbeAttemptRevision = sourceRevision;
-  const probe = probePowerModeOnce().then(result => {
-    if (sourceRevision !== tdpRuntimeStore.powerRevision()) {
-      const current = tdpRuntimeStore.get().mode;
-      return { mode: current ?? 'ac', reliable: current !== null } as PowerModeProbe;
-    }
-    if (result.reliable) tdpRuntimeStore.powerMode(result.mode);
-    powerProbeLastOutcome = result;
-    return result;
-  }).finally(() => { if (powerProbeInFlight === probe) powerProbeInFlight = null; });
-  powerProbeInFlight = probe;
-  return probe;
-}
-
+// AC/DC is a passive read of the unique native/frontend owner. The fresh
+// argument is retained for callers, but never spawns a second query/WMI route.
 export async function detectPowerMode(): Promise<'ac' | 'dc'> {
-  return (await detectPowerModeProbe()).mode;
+  return await readPowerSourceMode() ?? 'ac';
 }
-
-export async function detectPowerModeReliable(fresh = false): Promise<'ac' | 'dc' | null> {
-  try {
-    const probe = await detectPowerModeProbe(fresh);
-    return probe.reliable ? probe.mode : null;
-  } catch {
-    return null;
-  }
+export async function detectPowerModeReliable(_fresh = false): Promise<'ac' | 'dc' | null> {
+  return readPowerSourceMode();
 }
-
-// 唤醒后连续两轮可靠且一致才视为稳定；检测持续失败时仍按 AC 兜底，不引入 unknown。
 export async function detectPowerModeStable(): Promise<'ac' | 'dc'> {
-  const known = tdpRuntimeStore.get().mode;
-  if (known !== null) return known;
-  let lastReliable: 'ac' | 'dc' | null = null;
-  let stableCount = 0;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const probe = await detectPowerModeProbe(true);
-    if (probe.reliable) {
-      if (probe.mode === lastReliable) stableCount += 1;
-      else {
-        lastReliable = probe.mode;
-        stableCount = 1;
-      }
-      if (stableCount >= 2) return probe.mode;
-    }
-    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return lastReliable ?? 'ac';
+  // Startup/wake reconciliation belongs to native. Do not run consumer-local
+  // repeated sleeps/probes; every caller receives the same committed receipt.
+  return await readPowerSourceMode() ?? 'ac';
 }
 
 // ── CPU 名称检测（native 注册表 ProcessorNameString；兜底 Win32_Processor.Name） ──
@@ -1299,9 +1205,12 @@ export async function ensureTdpDaemon(observation?: TdpObservationContext): Prom
   }
 }
 
-async function tdpDaemonSet(watts: number, observation?: TdpObservationContext): Promise<void> {
-  const r = await tdpDaemon.request('set', { watts: Math.round(watts) }, 5000, observation);
+async function tdpDaemonSet(watts: number, observation?: TdpObservationContext): Promise<Record<string, unknown> | null> {
+  const verify = !!observation && observation.source !== 'autofloat';
+  const r = await tdpDaemon.request('set', { watts: Math.round(watts), ...(verify ? { verifyTdp: true } : {}) }, 5000, observation);
   if (!r.ok || r.rc !== 0) throw new Error(r.error || `TDP daemon rc=${r.rc}`);
+  const receipt = r.result?.amdObservation;
+  return receipt && typeof receipt === 'object' && !Array.isArray(receipt) ? receipt as Record<string, unknown> : null;
 }
 
 let tdpLifecycleSnapshot: PowerLifecycleState | null = null;
@@ -1558,7 +1467,9 @@ async function setTdpObservedCore(
         trace.emit('tdp.route-selected', { route: 'daemon' });
         assertCurrent();
         try {
-          await tdpDaemonSet(w, trace.context);
+          const diagnostic = await tdpDaemonSet(w, trace.context);
+          if (diagnostic) trace.emit('tdp.lifecycle', { hardwareCommandReturned: diagnostic.hardwareCommandReturned,
+            readbackMatched: diagnostic.readbackMatched, verificationScope: diagnostic.verificationScope });
         } catch (error) {
           // A response timeout may follow a real write. Never replay it through
           // CLI or turn an unknown outcome into a second hardware operation.
@@ -1578,7 +1489,7 @@ async function setTdpObservedCore(
         trace.context.vendor = vendor;
         trace.emit('tdp.route-selected', { route: 'cli', fallbackReason: 'daemon-unavailable-before-write' });
         assertCurrent();
-        const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor], 30000, trace.context);
+        const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor, ...(vendor === 'amd' && trace.context.source !== 'autofloat' ? ['--verify-tdp'] : [])], 30000, trace.context);
         if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
       }
     });
@@ -1872,14 +1783,8 @@ export async function setDcValueIndex(subGroup: string, setting: string, value: 
   return await shell.run('powercfg', ['/setdcvalueindex', scheme ?? PW.YEMAN, subGroup, setting, value]);
 }
 async function hasBatteryDevice(): Promise<boolean> {
-  const si = await nativeSysInfo();
-  if (typeof si?.hasBattery === 'boolean') return si.hasBattery;
-  try {
-    const r = await shell.run('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_Battery).Count -gt 0']);
-    return r.exitCode === 0 && (r.stdout || '').trim().toLowerCase() === 'true';
-  } catch {
-    return false;
-  }
+  if (powerSourceBatteryPresent.value === null) await refreshPowerSourceSnapshot();
+  return powerSourceBatteryPresent.value === true;
 }
 async function setPowerValueIndex(ac: boolean, subGroup: string, setting: string, value: string): Promise<void> {
   const result = ac

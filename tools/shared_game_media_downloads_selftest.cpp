@@ -41,8 +41,19 @@ static BOOL WINAPI stormWrite(HANDLE h,LPCVOID data,DWORD count,LPDWORD written,
 }
 #define MoveFileExW stormReplace
 #define WriteFile stormWrite
+// Explicit Win32 power boundary for the selected battery consumer probe only.
+static std::atomic<int> batteryFixtureAc{-2};
+static std::atomic<unsigned> batteryPowerReads{0};
+static BOOL WINAPI batteryPowerStatus(LPSYSTEM_POWER_STATUS status){
+  const auto ac=batteryFixtureAc.load();if(ac==-2)return GetSystemPowerStatus(status);
+  ++batteryPowerReads;*status={};status->ACLineStatus=ac<0?255:BYTE(ac);return ac!=-3;
+}
+#define GetSystemPowerStatus batteryPowerStatus
 #include "../native/shared_game_media_download_supervisor.h"
 #include "../native/shared_game_media_download_worker.h"
+#include "../native/shared_game_media_server.h"
+#include "../native/steam_wallpaper_foreground.h"
+#undef GetSystemPowerStatus
 #undef WinHttpOpen
 #undef MoveFileExW
 #undef WriteFile
@@ -50,6 +61,12 @@ static BOOL WINAPI stormWrite(HANDLE h,LPCVOID data,DWORD count,LPDWORD written,
 #undef WaitForSingleObject
 #undef WaitForMultipleObjects
 #include <iostream>
+// The fixture drives the same shared producer receipt as native events. Consumers
+// must not gain a fallback direct power query to make a test pass.
+static void batteryFixtureSource(int ac){
+  batteryFixtureAc.store(ac);
+  ymcc::powerSource::owner().sample(batteryPowerStatus,GetTickCount64(),true);
+}
 using namespace ymcc::media;
 using namespace ymcc::media::downloads;
 static int checks = 0;
@@ -78,7 +95,9 @@ static int fakeChild(int argc, wchar_t **argv) {
   const auto root = custom_steam_library::configuredDataRoot();
   Queue queue(root);
   const auto token = utf8(argv[4]);
-  auto mode = read(root / L"fixture.json").value("mode", std::string{});
+  const auto fixture=read(root/L"fixture.json");
+  if(fixture.contains("powerAc"))batteryFixtureSource(fixture["powerAc"].get<int>());
+  auto mode = fixture.value("mode", std::string{});
   if (mode == "production") {
     return backgroundEntrypoint(root).value_or(99);
   }
@@ -88,7 +107,7 @@ static int fakeChild(int argc, wchar_t **argv) {
   });
   atomicWrite(root / L"started.json",
               {{"pid", GetCurrentProcessId()},
-               {"birth", processBirthToken(GetCurrentProcessId())}});
+               {"birth", processBirthToken(GetCurrentProcessId())},{"wallpaperPauseOnBattery",powerPolicy::enabled()},{"powerReads",batteryPowerReads.load()}});
   if (mode == "preclaim-crash")
     return 78;
   auto claimed = queue.claim(token);
@@ -403,8 +422,152 @@ static int queueStorm(const fs::path& base,const std::string& only={},int costPu
   Json report={{"ok",ok},{"cases",results},{"checks",checks},{"scope","original Queue load/consume/save/reread; isolated files; no processes or network"}};
   atomicWrite(base/L"results.json",report);return ok?0:1;
 }
+
+// Original Store/Queue/Authority/Server/Prewarmer and owned Supervisor process.
+// Only Windows' power sample and the existing child workload are fixture IO.
+static int batteryPauseProbe(const fs::path& base,const std::string& only={}){
+  check(!fs::exists(base),"battery evidence root must be fresh");
+  Json reports=Json::array(),notRun=Json::array();bool created=false;
+  const auto run=[&](const char* name,auto fn){
+    if(!only.empty()&&only!=name){notRun.push_back(name);return;}
+    if(!created){fs::create_directories(base);created=true;}
+    const auto before=checks;
+    batteryFixtureSource(1);powerPolicy::configure(false);steamDemand::setForegroundReader({});
+    try{fn(base/wide(name));reports.push_back({{"name",name},{"ok",true},{"checks",checks-before}});}
+    catch(const std::exception& error){reports.push_back({{"name",name},{"ok",false},{"checks",checks-before},{"error",error.what()}});}
+    powerPolicy::configure(false);
+  };
+  const auto video=[](const fs::path& root){fs::create_directories(root);const auto file=root/L"owned.mp4";std::ofstream out(file,std::ios::binary);const std::string bytes("\0\0\0\x18" "ftypisom",12);out.write(bytes.data(),bytes.size());out.close();return file;};
+  run("queue-write-failure-keeps-authoritative-local-gate",[&](const auto& root){
+    Queue queue(root);queue.enqueue(Json::array({target(711)}));const auto index=root/L"config"/L"game-media-downloads.json";const auto before=stormBytes(index);
+    batteryFixtureSource(0);stormReplaceFailure=true;bool rejected=false;
+    try{queue.configureWallpaperPower(true);}catch(const std::exception&){rejected=true;}stormReplaceFailure=false;
+    check(rejected&&powerPolicy::enabled()&&powerPolicy::reason()=="wallpaper-on-battery","write failure cannot roll back the authoritative local DC gate");
+    check(stormBytes(index)==before,"failed propagation retains original queue bytes");queue.snapshot();
+    check(powerPolicy::enabled()&&powerPolicy::blocked(),"old durable OFF cannot reopen the authoritative process");
+    queue.configureWallpaperPower(true);check(queue.document().value("wallpaperPauseOnBattery",false),"later explicit propagation repairs the durable preference");queue.configureWallpaperPower(false);
+  });
+  run("default-off-preserves-dc-and-unknown-preparation",[&](const auto& root){
+    batteryFixtureSource(0);batteryPowerReads=0;Store store(root);auto request=target(700);request["demandConsumer"]="ymcc";
+    check(store.begin(request).value("acquired",false),"OFF retains YMCC preparation on DC");check(batteryPowerReads==0,"OFF consumer does not sample DC power");batteryFixtureSource(-1);const auto readsAfterProducer=batteryPowerReads.load();
+    check(store.begin(target(701)).value("acquired",false),"OFF retains prior unknown-power behavior");
+    check(powerPolicy::reason().empty()&&batteryPowerReads==readsAfterProducer,"OFF does not sample power for the new policy");
+  });
+  run("real-dc-revokes-authority-claims-and-late-receipts",[&](const auto& root){
+    powerPolicy::configure(true);ymcc::steamwallpaperForeground::Authority authority("battery-owner");
+    ymcc::steamwallpaperForeground::Facts facts;facts.known=facts.physical=facts.enabled=facts.ready=true;
+    facts.pid=123;facts.birth=456;facts.window=789;facts.steamPid=123;facts.steamBirth=456;facts.modeEpoch="mode-A";facts.power=1;
+    steamDemand::setForegroundReader([&]{auto observed=facts;observed.enabled=powerPolicy::ticket().ac==1;return authority.observe(observed,authority.ticket());});
+    const auto proof=steamDemand::foreground();auto request=target(702);request["demandConsumer"]="steam";request["demandEpoch"]=proof["ownerEpoch"];request["demandRevision"]=proof["revision"];
+    Store store(root);auto lease=store.begin(request);check(lease.value("acquired",false),"AC and verified native proof grant a preparation lease");
+    auto disk=store.snapshot();disk["entries"]["steam-702"]["attempts"]=2;disk["entries"]["steam-702"]["retryAt"]=123;atomicWrite(root/L"config"/L"game-media.json",disk);
+    const auto source=video(root);batteryFixtureSource(0);const auto paused=steamDemand::foreground();
+    check(!paused.value("current",true)&&paused["revision"]!=proof["revision"],"real DC revokes the verified native ticket");
+    check(powerPolicy::reason()=="wallpaper-on-battery","DC reason matches UI contract");
+    check(!store.begin(request).value("acquired",false)&&!store.begin(target(703)).value("acquired",false),"DC rejects Steam and YMCC preparation");
+    const auto before=store.snapshot();store.fail(lease);store.finish(lease);
+    bool rejected=false;try{store.publish(lease,source,false);}catch(const std::exception&){rejected=true;}
+    check(rejected&&store.snapshot()==before,"DC blocks late commit/failure/completion without spending or resetting budgets");
+    const auto legacy=store.importLegacy(target(704),root/L"absent.mp4",[]{return true;});check(legacy.value("reason",std::string{})=="wallpaper-on-battery","DC denies legacy before reading source files");
+    store.cancel(lease);const auto cancelled=store.snapshot()["entries"]["steam-702"];
+    check(cancelled.value("leaseUntil",int64_t{1})==0&&cancelled.value("attempts",0)==2&&cancelled.value("retryAt",int64_t{0})==123,"exact cancellation releases lease and retains budgets");
+    batteryFixtureSource(1);const auto freshProof=steamDemand::foreground();
+    check(freshProof.value("current",false)&&freshProof["revision"]!=proof["revision"]&&!steamDemand::allowed(request),"AC reopens fresh authority while old Steam ticket remains denied");
+    auto fresh=request;fresh["demandEpoch"]=freshProof["ownerEpoch"];fresh["demandRevision"]=freshProof["revision"];
+    const auto next=store.begin(fresh);check(next.value("acquired",false)&&next["taskId"]!=lease["taskId"],"AC reacquires fresh work under unchanged ON preference");
+    auto late=lease;late["demandEpoch"]=freshProof["ownerEpoch"];late["demandRevision"]=freshProof["revision"];store.fail(late);store.finish(late);store.cancel(late);
+    const auto current=store.snapshot()["entries"]["steam-702"];check(current["taskId"]==next["taskId"]&&current.value("attempts",0)==2&&current.value("retryAt",int64_t{0})==123,"late old work cannot charge or release new AC lease");
+    steamDemand::setForegroundReader({});
+  });
+  run("unknown-power-is-not-ac-and-old-ymcc-work-stays-revoked",[&](const auto& root){
+    powerPolicy::configure(true);Store store(root);auto request=target(705);request["demandConsumer"]="ymcc";const auto lease=store.begin(request);
+    batteryFixtureSource(-1);check(powerPolicy::reason()=="wallpaper-power-unknown"&&!store.begin(target(706)).value("acquired",false),"255 waits for a real power sample");
+    batteryFixtureSource(-3);check(powerPolicy::reason()=="wallpaper-power-unknown","failed Win32 power read is also unknown");
+    batteryFixtureSource(1);const auto preAba=powerPolicy::ticket();batteryFixtureSource(0);batteryFixtureSource(1);check(!powerPolicy::current(preAba),"shared producer AC DC AC revokes old lease even without a consumer read on DC");const auto next=store.begin(request);check(next.value("acquired",false)&&next["taskId"]!=lease["taskId"],"fresh AC work replaces an invalidated YMCC lease");
+    check(!powerPolicy::allowed(lease),"old YMCC callback stays invalid on AC");
+    const auto before=store.snapshot();store.fail(lease);store.finish(lease);check(store.snapshot()==before,"old YMCC callback cannot alter the new owner");
+    // Exercise the actual Worker with a retained owner context, not another policy model.
+    Queue queued(root/L"worker-boundary");queued.enqueue(Json::array({target(712)}));queued.configure(true,"");queued.configureWallpaperPower(true);queued.resource("");
+    const auto session=queued.start();check(!session.empty(),"known AC admits the original queued session");
+    batteryFixtureSource(-1);check(!queued.allowed(session),"an existing queue rejects a readable unknown source");batteryFixtureSource(1);
+    const auto parent=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,GetCurrentProcessId());check(parent!=nullptr,"retain actual parent handle for the worker boundary");
+    struct ParentClose{HANDLE value;~ParentClose(){CloseHandle(value);}}parentClose{parent};
+    auto context=std::make_shared<WorkerContext>(queued.root());Worker retained(queued.root(),session,parent,context);
+    batteryFixtureSource(0);batteryFixtureSource(1); // No consumer observes the intermediate DC.
+    check(retained.run()==0,"old worker returns through original graceful power pause");
+    const auto paused=queued.document();atomicWrite(root/L"worker-fence-observation.json",{{"document",paused},{"sourceRevision",ymcc::powerSource::snapshot().revision}});
+    check(paused.value("phase",std::string{})=="paused"&&paused.value("enabled",false),"missed DC cannot resume an old worker on final AC");
+    const auto originalJob=paused["jobs"]["steam-712"];
+    check(originalJob.value("attempts",0)==0&&originalJob.value("state",std::string{})=="pending","stale worker must not consume or charge the queued task");
+    check(!queued.allowed(session)&&queued.claim(session).is_null(),"old session cannot regain admission or claim on final AC");
+    check(!queued.progress(session,"late-progress",1,1),"old session cannot republish progress after returning ownership");
+    queued.result(session,"steam-712",true);check(queued.document()["jobs"]["steam-712"]==originalJob,"late stale worker result cannot complete the task after AC");
+  });
+  run("cached-playback-and-prewarm-stop-without-cache-deletion",[&](const auto& root){
+    Store store(root);const auto source=video(root);auto lease=store.begin(target(707));const auto entry=store.publish(lease,source,true);const auto asset=store.assetPath(entry["asset"]);
+    Server server;const auto url=server.expose(store,entry);
+    const auto get=[&](const std::string& value){const auto split=value.find('/',7),colon=value.find(':',7);const auto port=std::stoi(value.substr(colon+1,split-colon-1));SOCKET socket=::socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);check(socket!=INVALID_SOCKET,"owned loopback socket");sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(static_cast<u_short>(port));address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);check(connect(socket,reinterpret_cast<sockaddr*>(&address),sizeof address)==0,"connect owned media server");const auto request="GET "+value.substr(split)+" HTTP/1.1\r\nHost: 127.0.0.1:"+std::to_string(port)+"\r\nConnection: close\r\n\r\n";send(socket,request.data(),int(request.size()),0);char response[2048]{};const auto size=recv(socket,response,sizeof response,0);closesocket(socket);return size>0?std::string(response,size):std::string{};};
+    check(get(url).starts_with("HTTP/1.1 200"),"cached video served on AC");powerPolicy::configure(true);batteryFixtureSource(0);
+    check(get(url).starts_with("HTTP/1.1 403"),"existing cached playback URL denied on DC");
+    CachePrewarmer denied;denied.replace({{"denied",asset}});const auto deniedStats=denied.stats();check(deniedStats.bytes==0&&deniedStats.queued==0&&!deniedStats.active,"DC prewarm creates no read work");
+    check(server.prewarm(store,Json::array({target(707)}))==0,"legacy server prewarm remains disabled");
+    check(fs::exists(asset)&&fs::file_size(asset)==12,"cached video retained");batteryFixtureSource(1);
+    check(get(url).starts_with("HTTP/1.1 403"),"AC does not reauthorize an old player URL");
+    check(get(server.expose(store,entry)).starts_with("HTTP/1.1 200"),"fresh exposure resumes cached playback on AC");
+    const auto streamed=root/L"stream-owned.mp4";{std::ofstream file(streamed,std::ios::binary);const std::string signature("\0\0\0\x18" "ftypisom",12);file.write(signature.data(),signature.size());file.seekp(32*1024*1024-1);file.put('x');}
+    const auto streamEntry=store.publish(store.begin(target(710)),streamed,true);const auto streamUrl=server.expose(store,streamEntry);
+    const auto pathAt=streamUrl.find('/',7),portAt=streamUrl.find(':',7);const auto port=std::stoi(streamUrl.substr(portAt+1,pathAt-portAt-1));
+    SOCKET stream=::socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);check(stream!=INVALID_SOCKET,"owned range socket");int small=4096;DWORD timeout=1000;setsockopt(stream,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<char*>(&small),sizeof small);setsockopt(stream,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<char*>(&timeout),sizeof timeout);sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(static_cast<u_short>(port));address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);check(connect(stream,reinterpret_cast<sockaddr*>(&address),sizeof address)==0,"connect active range stream");
+    const auto range="GET "+streamUrl.substr(pathAt)+" HTTP/1.1\r\nHost: 127.0.0.1:"+std::to_string(port)+"\r\nRange: bytes=0-33554431\r\nConnection: close\r\n\r\n";send(stream,range.data(),int(range.size()),0);char buffer[8192]{};auto received=recv(stream,buffer,sizeof buffer,0);check(received>0&&std::string(buffer,received).starts_with("HTTP/1.1 206"),"actual range stream entered the send path");
+    const auto cancelAt=GetTickCount64();batteryFixtureSource(0);powerPolicy::ticket();server.powerChanged();uint64_t receivedBytes=uint64_t(received);bool closed=false;
+    while((received=recv(stream,buffer,sizeof buffer,0))>0)receivedBytes+=received;closed=received==0||WSAGetLastError()==WSAECONNRESET;closesocket(stream);
+    check(closed&&GetTickCount64()-cancelAt<1000&&receivedBytes<1024*1024,"DC closes the actual active stream before reading/sending the full cached video");
+    check(fs::file_size(store.assetPath(streamEntry["asset"]))==32*1024*1024,"active-stream cancellation retains cached bytes");
+    atomicWrite(root/L"range-cancellation.json",{{"receivedBytes",receivedBytes},{"cachedBytes",32*1024*1024},{"cancelToCloseMs",GetTickCount64()-cancelAt},{"closed",closed}});batteryFixtureSource(1);powerPolicy::ticket();
+    const auto large=root/L"prewarm-owned.bin";{std::ofstream file(large,std::ios::binary);file.seekp(1024*1024-1);file.put('x');}
+    std::atomic<unsigned> reads{0};CachePrewarmer active([&]{if(++reads==2)batteryFixtureSource(0);return false;});active.replace({{"active",large}});
+    check(waitUntil([&]{return active.stats().cancelled>0;},1000),"active prewarm observes DC and cancels");
+    const auto stats=active.stats();check(!stats.active&&stats.completed==0&&stats.bytes<=65536,"active prewarm stops by next chunk and never records completion");
+  });
+  run("live-child-power",[&](const auto& root){
+    Queue queue(root);queue.enqueue(Json::array({target(708)}));queue.configure(true,"");queue.configureWallpaperPower(true);PolicyOwnedChild child(root);atomicWrite(root/L"fixture.json",{{"mode","stall"},{"powerAc",1}});
+    Supervisor owner(root,root/L"CustomSteamLibrary.exe",Limits{5000,10000,20000,50,0,50},ResourcePorts{[]{return 1;},[](uint64_t){return std::optional<double>{0};},[]{return false;}});owner.wake(true);
+    check(waitUntil([&]{return !queue.document().value("active",Json::object()).empty();},1500),"owned child claimed a live task");const auto started=read(root/L"started.json");check(started.value("wallpaperPauseOnBattery",false)&&started.value("powerReads",0u)>0,"separate child consumes durable ON and its own Windows power boundary");HANDLE exact=OpenProcess(SYNCHRONIZE,FALSE,started.value("pid",DWORD{0}));check(exact!=nullptr,"retain exact owned child handle");struct Close{HANDLE handle;~Close(){CloseHandle(handle);}}close{exact};
+    const auto token=queue.document().value("session",std::string{});queue.update(token,[](Json& state){state["jobs"]["steam-708"]["attempts"]=1;state["jobs"]["steam-708"]["retryAt"]=123;state["jobs"]["steam-708"]["automaticElapsedMs"]=4321;});
+    const auto part=root/L"cache"/L"jobs"/L"game-media"/L"12345678901234567890123456789012.part";stormFile(part,"owned resumable bytes");auto metadata=part;metadata.replace_extension(L".resume.json");atomicWrite(metadata,{{"resumeProtocol",1},{"validator","\"owned-etag\""}});queue.trackTemporary(token,utf8(part.filename().wstring()));
+    batteryFixtureSource(0);powerPolicy::ticket();notifyOwner(root);
+    check(waitUntil([&]{return WaitForSingleObject(exact,0)==WAIT_OBJECT_0;},2500),"DC actually terminates the owned active process");
+    check(waitUntil([&]{return queue.document().value("phase",std::string{})=="paused";},1000),"native owner records a policy pause");
+    const auto paused=queue.document();const auto job=paused["jobs"]["steam-708"];
+    check(paused.value("enabled",false)&&paused.value("active",Json::object()).empty()&&job.value("state",std::string{})=="pending","pause retains ON and retires live lanes");
+    check(job.value("attempts",0)==1&&job.value("retryAt",int64_t{0})==123&&job.value("automaticElapsedMs",int64_t{0})==4321,"DC kill neither spends nor refunds retry/time budget");
+    check(fs::exists(part)&&stormBytes(part)=="owned resumable bytes"&&fs::exists(metadata),"DC cancellation retains partial bytes and resume sidecar");
+    check(queue.claim(token).is_null(),"DC cannot claim another queued task");queue.result(token,"steam-708",false,"late-callback");
+    check(queue.document()["jobs"]["steam-708"]==job,"late DC worker result cannot change retained job");
+    batteryFixtureSource(1);powerPolicy::ticket();queue.result(token,"steam-708",false,"late-after-ac");check(queue.document()["jobs"]["steam-708"]==job,"terminal old callback remains denied after AC");
+    atomicWrite(root/L"fixture.json",{{"mode","complete"},{"powerAc",1}});notifyOwner(root);
+    check(waitUntil([&]{return queue.document()["jobs"]["steam-708"].value("state",std::string{})=="done";},5000),"AC resumes original ON with a fresh worker");
+    check(fs::exists(part)&&stormBytes(part)=="owned resumable bytes"&&fs::exists(metadata),"AC restart keeps the existing resumable partial");
+    atomicWrite(root/L"paused-state.json",paused);
+  });
+  if(!only.empty()&&reports.empty())throw std::runtime_error("requested battery case not found");
+  batteryFixtureSource(-2);powerPolicy::configure(false);steamDemand::setForegroundReader({});
+  const bool ok=std::all_of(reports.begin(),reports.end(),[](const Json& row){return row.value("ok",false);});
+  Json result={{"status",ok?"PASS":"FAIL"},{"checks",checks},{"cases",reports.size()},{"results",reports},{"scope","Actual native media consumers, explicit Win32 power IO, owned files/loopback and owned child process; installed apps and hardware untouched"}};
+  if(!only.empty()){result["selectedCase"]=only;result["completeRegression"]=false;result["notRun"]=notRun;}
+  atomicWrite(base/L"battery-pause-result.json",result);std::cout<<result.dump()<<std::endl;return ok?0:1;
+}
+
 int wmain(int argc, wchar_t **argv) {
   try {
+    if(argc>1&&std::wstring_view(argv[1])==L"--battery-pause"){
+      if(argc!=3)throw std::runtime_error("battery-pause requires exactly one evidence root");
+      return batteryPauseProbe(fs::absolute(argv[2]));
+    }
+    if(argc>1&&std::wstring_view(argv[1])==L"--battery-pause-case"){
+      if(argc!=4||!argv[3][0])throw std::runtime_error("battery-pause-case requires an evidence root and exact nonempty case");
+      return batteryPauseProbe(fs::absolute(argv[2]),utf8(argv[3]));
+    }
     if(argc==4&&std::wstring_view(argv[1])==L"--storm-case")return queueStorm(fs::absolute(argv[2]),utf8(argv[3]));
     if(argc==4&&std::wstring(argv[1])==L"--resource-cost")return queueStorm(fs::absolute(argv[2]),"resource-publication-fixed-inventory-cost",(std::clamp)(_wtoi(argv[3]),6,512)&~1);
     if(argc==3&&std::wstring_view(argv[1])==L"--storm")return queueStorm(fs::absolute(argv[2]));

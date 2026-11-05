@@ -4,7 +4,7 @@
 // （monitor.snapshot），旧 native 自动回退原 TopMonitor 四文件通路，字段语义不变。
 // 本桥只保留：共享 ref 所有权、6s 新鲜度门、展示需求登记（monitor.start/stop 合并）。
 import { shallowRef, watch } from 'vue';
-import { powerSourceMode } from './powerSource';
+import { powerSourceMode, powerSourceBatteryPresent } from './powerSource';
 import { acquireMonitorDemand, readMonitorSnapshot } from './monitorData';
 import { projectTopMonitorView } from './monitorTopProjection';
 import type { DisplayedFramerate } from './monitorControlFramerate';
@@ -34,7 +34,7 @@ export interface TopMonData {
   tdpW: number; // CPU Package Power W
   freqMhz: number; // CPU 当前主频 MHz
   tempC: number; // CPU (Tctl/Tdie) °C
-  ac: number; // 1=AC 0=DC
+  ac: number; // 1=AC 0=DC 255=unknown
   hasBattery: boolean; // true=电池设备；false=台式机
   batteryPercent: number; // 电池百分比；无电池/未知=-1
   chargeW: number; // Charge Rate W（正=充电 负=放电）
@@ -95,13 +95,22 @@ export interface TopMonData {
 export const topMonitorData = shallowRef<TopMonData | null>(null);
 
 export function setTopMonitorData(data: TopMonData | null): void {
+  if (!data) { topMonitorData.value = data; return; }
+  // Sensor snapshots cannot restore a source revoked by the native owner.
   const mode = powerSourceMode.value;
-  // Old HWiNFO/file snapshots may still carry pre-sleep AC/DC. Only that
-  // display field is projected from the foreground/native source snapshot.
-  topMonitorData.value = data && mode ? { ...data, ac: mode === 'ac' ? 1 : 0 } : data;
+  const ac = mode === 'ac' ? 1 : mode === 'dc' ? 0 : 255;
+  const hasBattery = powerSourceBatteryPresent.value ?? data.hasBattery;
+  const current = topMonitorData.value;
+  // Equal sensor data and projected facts need no replacement, even when a
+  // repeated raw snapshot carries the old AC/DC or battery capability.
+  if (current && current.ac === ac && current.hasBattery === hasBattery &&
+    (current === data || Object.is(current.ts, data.ts)) &&
+    Object.keys(current).length === Object.keys(data).length &&
+    Object.keys(data).every(key => key === 'ac' || key === 'hasBattery' || Object.is(current[key], data[key]))) return;
+  topMonitorData.value = data.ac === ac && data.hasBattery === hasBattery ? data : { ...data, ac, hasBattery };
 }
 
-watch(powerSourceMode, () => {
+watch([powerSourceMode, powerSourceBatteryPresent], () => {
   if (topMonitorData.value) setTopMonitorData(topMonitorData.value);
 }, { flush: 'sync' });
 

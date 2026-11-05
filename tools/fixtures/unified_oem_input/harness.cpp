@@ -73,7 +73,34 @@ static void checkFreshGatesAndReturn(){
   const auto original=oemCatalogForFamily(family,std::string(cls));check(actualOemKeysGet().at("keys").size()==static_cast<size_t>(original.count),"extension query fallback retained");
  }
 }
+// Field archive 20261105: DMI APEX, 0x22/0x23 press/release were already
+// published by the native vendor reader, but the catalog hid both source keys.
+static void checkOneXVendorCatalogConsumers(){
+ const char* canonicalClasses[]={"OneXPlayerX1","OneXPlayerX1AMD","OneXPlayerX1Intel","OneXPlayerX1Pro","OneXPlayerX1Mini","OneXPlayerApex","OneXPlayerX2","OneXPlayerX2MiniPro","OneXPlayer3"};
+ for(const auto* shortName:canonicalClasses){
+  setIdentity(YmccFamily::OneXPlayer,std::string("HandheldCompanion.Devices.")+shortName);
+  oemBackMappingRefreshGate(false,"disabled",false);
+  check(g_oemHooksWanted.load(),"OneX dedicated keyboard consumer remains available without a virtual target");
+  const auto query=actualOemKeysGet();unsigned rear=0;
+  for(const auto& key:query.at("keys")){const std::string id=key.at("keyId");if(id!="l4"&&id!="r4")continue;
+   ++rear;check(key.at("captureImplemented")==true,"OneX rear source capture remains implemented");
+   uint64_t bit=0;check(nativeKeyboardShortcutMaskBit(id,bit),"OneX key binds canonical action mask");
+   check(gamepadOemPressedKeys(bit)==json::array({id}),"observed OneX rear reaches actual pressed-key consumer");
+   check(gamepadOemPressedKeys(0).empty(),"OneX rear key-up clears actual pressed-key consumer");
+  }
+  check(rear==2,"every admitted OneX vendor rear model exposes two keys including Apex");
+ }
+ setIdentity(YmccFamily::OneXPlayer,"HandheldCompanion.Devices.OneXPlayer3");
+ const auto op3=actualOemKeysGet();for(const char* id:{"home","gkey"}){bool found=false;for(const auto& key:op3.at("keys"))if(key.at("keyId")==id){found=true;check(key.at("triggerCapability")=="full","latest OP3 Home and G-Key retain held and release capability");}check(found,"latest OP3 exposes Home and G-Key");}
+ for(const char* id:{"l4","r4","gkey","home"}){uint64_t bit=0;check(nativeKeyboardShortcutMaskBit(id,bit)&&gamepadOemPressedKeys(bit)==json::array({id}),"OP3 dedicated and rear bits reach actual consumer");}
+ setIdentity(YmccFamily::OneXPlayer,"HandheldCompanion.Devices.OneXPlayerApex");const auto apex=actualOemKeysGet();bool orange=false;for(const auto& key:apex.at("keys"))if(key.at("keyId")=="orange"){orange=true;check(key.at("physicalForm")=="hid-button","Apex Orange retains supported vendor form while keyboard fallback stays in profile");check(key.at("captureRoute")=="keyboard-vk-or-onex-vendor-held","Apex Orange documents both observed keyboard and supported vendor input");}check(orange,"Apex dedicated Orange retained");
+ std::vector<std::string>physical;for(const auto& key:apex.at("keys"))if(key.at("backIndex")==0){check(key.contains("physicalKeyIds"),"Apex operation carries total-library physical identity");for(const auto& id:key.at("physicalKeyIds"))physical.push_back(id.get<std::string>());}
+ std::sort(physical.begin(),physical.end());physical.erase(std::unique(physical.begin(),physical.end()),physical.end());
+ check(physical==std::vector<std::string>{"keyboard","orange","turbo"},"Apex six actions represent three physical special keys");
+ for(const char* cls:{"HandheldCompanion.Devices.OneXPlayerX1","HandheldCompanion.Devices.OneXPlayerX2","HandheldCompanion.Devices.OneXPlayer3","HandheldCompanion.Devices.OneXPlayerApexFuture"})check(ymcc::capabilities::oem::onex::physicalKeyIds(cls,"orangelp")[0].empty(),"Apex physical identity grouping does not alter other OneX models");
+
+}
 int main(){try{
- checkAliasConsumers();checkFreshGatesAndReturn();
+ checkAliasConsumers();checkFreshGatesAndReturn();checkOneXVendorCatalogConsumers();
  std::cout<<json{{"status","PASS"},{"checks",checks},{"selections",selections},{"pressReleaseCycles",pressCycles},{"completeProductionGate",true},{"productionQuery",true},{"productionHook",true},{"hardwareIo",false}}.dump()<<'\n';return 0;
 }catch(const std::exception& error){std::cout<<json{{"status","FAIL"},{"checks",checks},{"error",error.what()}}.dump()<<'\n';return 1;}}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "scope": "immutable-OneX-source-identity-only",
+  "legacyCatalog": "capabilities/hc-device-catalog.generated.h",
+  "registrations": [
+    {
+      "deviceId": "ymcc.device.OneXPlayerX2",
+      "canonicalClass": "HandheldCompanion.Devices.OneXPlayerX2",
+      "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2.cs",
+      "sourceSha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+    },
+    {
+      "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+      "canonicalClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+      "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2MiniPro.cs",
+      "sourceSha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+    },
+    {
+      "deviceId": "ymcc.device.OneXPlayer3",
+      "canonicalClass": "HandheldCompanion.Devices.OneXPlayer3",
+      "sourceFile": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+      "sourceSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+      "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+    }
+  ]
+}

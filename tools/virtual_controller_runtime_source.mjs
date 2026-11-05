@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 export const virtualControllerRuntimeHeaders = Object.freeze([
   'virtual_controller_capability_runtime.h',
   'virtual_controller_start_runtime.h',
+  'virtual_controller_onex_start_runtime.h',
   'virtual_controller_stop_runtime.h',
   'virtual_controller_ui_output_runtime.h',
   'virtual_target_return_runtime.h',

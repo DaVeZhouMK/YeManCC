@@ -89,12 +89,12 @@ await check('unrelated queued writes are preserved when the original store impor
  const initial=seed();delete initial.entries['game.exe'];const f=await fixture(initial);const current=f.memory.view(),next=structuredClone(current);next.entries['other.exe'].displayName='Concurrent edit';
  let release;f.memory.holdNext(new Promise(r=>release=r));const ahead=f.memory.store.saveGameCustomConfig(next);await flush();
  const controls=performanceControlsModule.normalizeContinuousControls({});
- const importing=f.memory.store.importGameCustomProfile({exe:'game.exe',pid:f.state.game.pid,processCreated:f.state.game.processCreated,generation:1},JSON.stringify([null,null]),{enabled:true,displayName:'Current game',ac:{...base},dc:{...base},controls},f.state.globalFrames);
+ const importing=f.memory.store.importGameCustomProfile({exe:'game.exe',pid:f.state.game.pid,processCreated:f.state.game.processCreated,path:f.state.game.path,identityGeneration:f.state.game.identityGeneration,generation:1},JSON.stringify([null,null]),{enabled:true,displayName:'Current game',ac:{...base},dc:{...base},controls},f.state.globalFrames);
  release();await ahead;await importing;assert.equal(f.memory.view().entries['other.exe'].displayName,'Concurrent edit');assert(f.memory.view().entries['game.exe']);f.stop();
 });
 await check('changing the target record rejects a captured deletion through the original owner CAS guard',async()=>{
  const f=await fixture(seed()),c=f.memory.view(),rev=JSON.stringify([c.entries['game.exe'],c.rtss['game.exe']]);c.entries['game.exe'].displayName='Edited after confirmation';await f.memory.store.saveGameCustomConfig(c);
- await assert.rejects(f.memory.store.removeGameCustomProfile({exe:'game.exe',pid:f.state.game.pid,processCreated:f.state.game.processCreated,generation:1},rev));assert(f.memory.view().entries['game.exe']);f.stop();
+ await assert.rejects(f.memory.store.removeGameCustomProfile({exe:'game.exe',pid:f.state.game.pid,processCreated:f.state.game.processCreated,path:f.state.game.path,identityGeneration:f.state.game.identityGeneration,generation:1},rev));assert(f.memory.view().entries['game.exe']);f.stop();
 });
 
 await check('a controller edit in recognized-game global scope saves input CAS without importing a dedicated profile',async()=>{
@@ -128,7 +128,9 @@ await check('external deletion without a renderer event refreshes profile value 
 await check('deletion during an asynchronous snapshot cannot publish an old dedicated value with a new receipt',async()=>{
  let owner,removed=false;
  const f=await fixture(seed(),{readHooks:{performance:async()=>{if(!removed){removed=true;const raw=owner.memory.raw();delete raw.entries['game.exe'];delete raw.rtss['game.exe'];owner.memory.documents.set(main,JSON.stringify(raw));}}}});owner=f;
- const s=await f.read();assert.equal(s.game.fields.profile.value,'global');assert.equal(f.replies.filter(r=>r.message.type==='snapshot').some(r=>r.message.snapshot.game?.fields.profile.value==='dedicated'),false);f.stop();
+ // A mixed-source read is deliberately rejected; the original single read-recovery timer observes the fresh profile.
+ let s=await f.read();if(!s.game){assert.equal(s.ready,false);assert.match(s.notice,/读取失败/);f.advanceController(250);for(let i=0;i<220;i++)await Promise.resolve();s=await f.read();}
+ assert.equal(s.game.fields.profile.value,'global');assert.equal(f.replies.filter(r=>r.message.type==='snapshot').some(r=>r.message.snapshot.game?.fields.profile.value==='dedicated'),false);assert.equal(f.memory.stats().fakeWrites,0);f.stop();
 });
 await check('an unseen external profile import blocks a captured global input edit before input CAS',async()=>{
  const f=await fixture(),s=await f.read();f.memory.documents.set(main,JSON.stringify(seed()));

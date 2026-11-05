@@ -10,6 +10,24 @@ int wmain(int argc,wchar_t** argv) {
     Json cases=Json::array();bool passed=true;
     auto check=[&](const char* name,bool ok){passed=passed&&ok;cases.push_back({{"name",name},{"ok",ok}});};
     ProfileBank bank;Config parsed;
+    for(int i=0;i<4;++i){
+        auto cfg=profileDefault(i);
+        check("all-four-personas-default-to-opposite-and-15s",cfg.summonPosition==SummonPosition::Opposite&&cfg.summonEnabled&&cfg.autoHideSeconds==15);
+        summonWindowOnLeft=false;check("right-YMCC-resolves-opposite-left",effectiveSummonPosition(cfg)==SummonPosition::Left);
+        summonWindowOnLeft=true;check("left-YMCC-resolves-opposite-right",effectiveSummonPosition(cfg)==SummonPosition::Right);
+        cfg.summonPosition=SummonPosition::Same;check("left-YMCC-resolves-same-left",effectiveSummonPosition(cfg)==SummonPosition::Left);
+        summonWindowOnLeft=false;check("right-YMCC-resolves-same-right",effectiveSummonPosition(cfg)==SummonPosition::Right);
+    }
+    for(const auto& legacyPosition:{"off","left","right"}){
+        Json profiles=Json::object();for(int i=0;i<4;++i)profiles[profileName(i)]={{"summonPosition",legacyPosition},{"summonEnabled",false},{"scale",135}};
+        const ProfileBank old(Json{{"profiles",profiles}});
+        for(int i=0;i<4;++i)check("old-absolute-or-disabled-summon-migrates-only-its-position",old.slots[i].summonPosition==SummonPosition::Opposite&&old.slots[i].summonEnabled&&old.slots[i].scale==135);
+        auto saved=old.json();for(int i=0;i<4;++i)saved["profiles"][profileName(i)]["summonPosition"]="same";
+        const ProfileBank edited(saved);for(int i=0;i<4;++i)check("saved-same-choice-survives-profile-reload",edited.slots[i].summonPosition==SummonPosition::Same);
+        for(int i=0;i<4;++i){saved["profiles"][profileName(i)]["summonPosition"]="off";saved["profiles"][profileName(i)]["summonEnabled"]=false;}
+        const ProfileBank disabled(saved);for(int i=0;i<4;++i)check("saved-new-off-choice-is-not-remigrated",disabled.slots[i].summonPosition==SummonPosition::Off&&!disabled.slots[i].summonEnabled);
+    }
+
     check("legacy-profiles-default-master-on",bank.slots[0].masterEnabled&&bank.slots[1].masterEnabled&&bank.slots[2].masterEnabled&&bank.slots[3].masterEnabled);
     const Json legacy={{"profiles",{{"steamdeck",{{"layout","dual"},{"leftMode","wasd"},{"rightMode","mouse"},{"specialMask",2},{"rearMask",5}}}}}};
     const ProfileBank migrated(legacy);

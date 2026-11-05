@@ -11,7 +11,7 @@ import {closeBrace} from '../hc_remaining_model_capabilities/expectations.mjs';
 import {calibrationToolchainPreamble} from '../hc_reviewed_calibration/toolchain.mjs';
 import {REPO as repo,WORKSPACE,FIXTURE,NATIVE_HEADERS,NATIVE_SOURCES,inside,caseRootAllowed,verifyManaged,write} from './contract.mjs';
 import {noRevisionGuard,NATIVE_REVISION_FAULT} from './faults.mjs';
-import {lifecycleContext} from './lifecycle-context.mjs';
+import {lifecycleContext,bindLifecycleOwnerContext} from './lifecycle-context.mjs';
 import {targetReturnContext} from './target-return-context.mjs';
 import {recordNativeCompile} from './native-stage-evidence.mjs';
 const options={};for(let i=2;i<process.argv.length;i++){const key=process.argv[i];assert(['--out','--case-root','--managed-dll','--managed-manifest','--source','--dotnet','--compile-only','--preflight-only','--expect-rejection','--revision-guard-fault'].includes(key)&&!Object.hasOwn(options,key),'invalid/duplicate option');options[key]=['--compile-only','--preflight-only','--revision-guard-fault'].includes(key)?true:process.argv[++i];}
@@ -36,67 +36,8 @@ const sources=[source,...NATIVE_SOURCES.filter(p=>p!=='native/main.cpp').map(p=>
 const main=fs.readFileSync(source,'utf8'),bindings=[];
 const lifecycle=lifecycleContext({sourceFile:source,resolveInput:r=>path.join(repo,r)});bindings.push(...lifecycle.bindings);
 const targetReturn=targetReturnContext({sourceFile:source,resolveInput:r=>path.join(repo,r)});bindings.push(...targetReturn.bindings);
-// The cold-return projection already owns this exact declaration. Relocate
-// that sole owner before PIPE consumers; never add a second state variable.
-const quarantine=lifecycle.unclosedDefinitions?.find(r=>r.symbol==='g_inputHostReleaseQuarantined');
-if(quarantine){
- const declarations=[...targetReturn.code.matchAll(/^static bool g_inputHostReleaseQuarantined = false;\r?$/gm)];
- assert.equal(declarations.length,1,'SOLE_QUARANTINE_OWNER_REQUIRED');
- assert.equal(declarations[0][0].replace(/\r$/,''),quarantine.code.replace(/\r$/,''),'EXACT_QUARANTINE_DECLARATION_REQUIRED');
- targetReturn.code=targetReturn.code.replace(declarations[0][0],'');
- lifecycle.code=quarantine.code+'\n'+lifecycle.code;
- const owner=lifecycle.bindings.find(r=>r.symbol==='g_inputHostReleaseQuarantined');
- assert(owner&&owner.emitted===false,'BOUND_QUARANTINE_DECLARATION_REQUIRED');owner.emitted=true;owner.relocatedFrom='targetReturn cold prefix';
- lifecycle.unclosedDefinitions=lifecycle.unclosedDefinitions.filter(r=>r!==quarantine);
- lifecycle.boundaries.quarantineOwnerRelocated=true;
- lifecycle.boundaries.staticDependencyClosureComplete=lifecycle.unclosedDefinitions.length===0;
-}
-
-// Bind the local ROG scope and retained OFF obligation without inventing a
-// cleanup/source receipt. The remaining execution predicate stays unclosed.
-const rogRuntimeFile=path.join(repo,'native/virtual_switch_verification_runtime.h');
-const rogRuntime=fs.readFileSync(rogRuntimeFile,'utf8'),rogBindings=[];
-const rogMember=(text,file,symbol,kind='function')=>{const row=extract(text,symbol,kind);rogBindings.push({...row,file,sourceSha256:sha(text),emitted:true,environmentLeaf:false});return row.code;};
-const rogDeclaration=(text,file,symbol,pattern)=>{
- const matches=[...text.matchAll(pattern)];assert.equal(matches.length,1,'ACTUAL_ROG_DECLARATION:'+symbol);
- const m=matches[0],code=m[0];rogBindings.push({symbol,kind:'declaration',file,sourceSha256:sha(text),sha256:sha(code),startLine:text.slice(0,m.index).split('\n').length,endLine:text.slice(0,m.index+code.length).split('\n').length,startUtf8Byte:Buffer.byteLength(text.slice(0,m.index)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,m.index+code.length)),code,emitted:true,environmentLeaf:false});return code;
-};
-const rogIdentity=[
- rogDeclaration(main,source,'YmccFamily',/^enum class YmccFamily : int \{[\s\S]*?^\};/gm),
- rogMember(main,source,'MachineIdentity','struct'),
- rogDeclaration(main,source,'g_machineIdentity',/^static MachineIdentity g_machineIdentity;\r?$/gm)
-].join('\n');
-const powerContext=[
- rogMember(main,source,'initialPowerGeneration'),
- rogDeclaration(main,source,'g_powerGeneration',/^static std::atomic<unsigned long long> g_powerGeneration\{initialPowerGeneration\(\)\};\r?$/gm),
- rogMember(main,source,'currentPowerGeneration')
-].join('\n');
-const protocolPowerContext=[
- rogDeclaration(main,source,'g_inputHostBoundPowerGeneration',/^static unsigned long long g_inputHostBoundPowerGeneration = 0;\r?$/gm),
- rogMember(main,source,'inputHostProtocolPowerGenerationLocked')
-].join('\n');
-const rogRetainedState=[
- rogMember(rogRuntime,rogRuntimeFile,'RogReturnBaseline','struct'),
- rogDeclaration(rogRuntime,rogRuntimeFile,'rogReturnBaseline',/^static RogReturnBaseline rogReturnBaseline;\r?$/gm),
- rogMember(rogRuntime,rogRuntimeFile,'RogOffSignal','struct'),
- rogDeclaration(rogRuntime,rogRuntimeFile,'rogOffSignal',/^static RogOffSignal rogOffSignal;[^\r\n]*/gm)
-].join('\n');
-const rogFunctions=['rogXboxSignalScope','rememberRogOffSignalLocked'].map(symbol=>{
- const pending=lifecycle.unclosedDefinitions.filter(row=>row.symbol===symbol);assert.equal(pending.length,1,'ORIGINAL_ROG_BOUNDARY:'+symbol);
- const original=extract(rogRuntime,symbol);assert.equal(original.code,pending[0].code,'EXACT_ROG_PENDING_BODY:'+symbol);
- const bound=lifecycle.bindings.filter(row=>row.symbol===symbol);assert.equal(bound.length,1,'SOLE_ROG_BINDING:'+symbol);assert.equal(bound[0].emitted,false,'ROG_ALREADY_EMITTED:'+symbol);bound[0].emitted=true;
- return original.code;
-}).join('\n');
-const forget=extract(rogRuntime,'inputHostSwitchVerificationForgetAcceptedLocked');
-assert.equal(lifecycle.code.split(forget.code).length,2,'SOLE_FORGET_ACCEPTED_CONSUMER');
-// Protection state/clock must precede remember; remember must precede forget.
-lifecycle.code=lifecycle.code.replace(forget.code,'')+'\nnamespace ymcc::inputHost::switchVerificationRuntime {\n'+rogRetainedState+'\n'+rogFunctions+'\n}\n'+forget.code+'\n';
-lifecycle.bindings.push(...rogBindings);bindings.push(...rogBindings);
-lifecycle.unclosedDefinitions=lifecycle.unclosedDefinitions.filter(row=>!['rogXboxSignalScope','rememberRogOffSignalLocked'].includes(row.symbol));
-lifecycle.boundaries.staticDependencyClosureComplete=lifecycle.unclosedDefinitions.length===0;
-lifecycle.boundaries.rogScopeAndRetainedSignalDefinitionsVerbatim=true;
-lifecycle.boundaries.rogPowerGenerationUsesActualAtomicOwner=true;
-lifecycle.boundaries.rogOffExecutionCompletionClosed=!lifecycle.unclosedDefinitions.some(row=>row.symbol==='inputHostRogOffExecutionDefersSuccess');
+const {rogIdentity,powerContext,protocolPowerContext,bindings:ownerBindings}=bindLifecycleOwnerContext({sourceFile:source,resolveInput:r=>path.join(repo,r),lifecycle,targetReturn});
+bindings.push(...ownerBindings);
 if(options['--preflight-only']){
  const unresolved=lifecycle.unclosedDefinitions.map(({code,...row})=>({...row,sha256:sha(code)}));
  const changed=sources.filter(row=>hash(row.path)!==row.sha256);assert.equal(changed.length,0,'STATIC_PREFLIGHT_SOURCE_DRIFT');

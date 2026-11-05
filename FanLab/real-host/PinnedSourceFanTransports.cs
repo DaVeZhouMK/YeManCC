@@ -134,11 +134,15 @@ internal sealed class ReflectionFanWmiMethod : IPinnedFanWmiMethod
 
 {
 
-    private object? instance,searcher,collection;
+    private object? instance,searcher,collection,enumerator;
+
+    private readonly Type? searcherTypeForSelfTest;
+
+    internal ReflectionFanWmiMethod(Type? searcherType=null)=>searcherTypeForSelfTest=searcherType;
 
     private MethodInfo? invoke;
 
-    private bool initialized,closed;
+    private bool initialized,closed,started;
 
     private readonly List<object> extras=new();
 
@@ -154,11 +158,11 @@ internal sealed class ReflectionFanWmiMethod : IPinnedFanWmiMethod
 
     {
 
-        if(closed||searcher is not null||instance is not null)throw new IOException("WMI initialization cannot be repeated");
+        if(started||closed)throw new IOException("WMI initialization cannot be repeated");
 
-        var system=Assembly.Load("System.Management");
+        started=true;
 
-        var searcherType=system.GetType("System.Management.ManagementObjectSearcher",true)!;
+        var searcherType=searcherTypeForSelfTest??Assembly.Load("System.Management").GetType("System.Management.ManagementObjectSearcher",true)!;
 
         searcher=Activator.CreateInstance(searcherType,new object[]{"root\\WMI","SELECT * FROM SuRwECRegInterface"})??throw new IOException("WMI searcher missing");
 
@@ -168,11 +172,15 @@ internal sealed class ReflectionFanWmiMethod : IPinnedFanWmiMethod
 
         collection=PinnedSourceFanTransports.Invoke(searcherType.GetMethod("Get",Type.EmptyTypes)!,searcher)??throw new IOException("WMI result missing");
 
-        foreach(var item in (IEnumerable)collection)
+        enumerator=((IEnumerable)collection).GetEnumerator();
+
+        while(((IEnumerator)enumerator).MoveNext())
 
         {
 
-            if(instance is not null){extras.Add(item);throw new IOException("Ambiguous SuRwECRegInterface instances");}
+            var item=((IEnumerator)enumerator).Current??throw new IOException("WMI null endpoint");
+
+            if(instance is not null){if(!ReferenceEquals(instance,item))extras.Add(item);throw new IOException("Ambiguous SuRwECRegInterface instances");}
 
             instance=item;
 
@@ -190,7 +198,7 @@ internal sealed class ReflectionFanWmiMethod : IPinnedFanWmiMethod
 
         if(string.IsNullOrWhiteSpace(DevicePath))throw new IOException("WMI endpoint path missing");
 
-        DisposeOne(ref collection);DisposeOne(ref searcher);initialized=true;
+        DisposeOne(ref enumerator);DisposeOne(ref collection);DisposeOne(ref searcher);initialized=true;
 
     }
 
@@ -200,9 +208,15 @@ internal sealed class ReflectionFanWmiMethod : IPinnedFanWmiMethod
 
         if(value is null)return;
 
-        if(value is not IDisposable disposable)throw new IOException("WMI disposal contract changed");
+        // ManagementObject hides Component.Dispose; the inherited IDisposable
+        // map bypasses its WMI release. Call the most-derived public method,
+        // retaining this exact resource when that actual cleanup throws.
+        if(value.GetType().GetMethod("Dispose",Type.EmptyTypes) is { } dispose)
+            PinnedSourceFanTransports.Invoke(dispose,value);
+        else if(value is IDisposable disposable)disposable.Dispose();
+        else throw new IOException("WMI disposal contract changed");
 
-        disposable.Dispose();value=null;
+        value=null;
 
     }
 
@@ -226,7 +240,7 @@ internal sealed class ReflectionFanWmiMethod : IPinnedFanWmiMethod
 
         while(extras.Count!=0){object? item=extras[^1];DisposeOne(ref item);extras.RemoveAt(extras.Count-1);}
 
-        DisposeOne(ref instance);DisposeOne(ref collection);DisposeOne(ref searcher);closed=true;
+        DisposeOne(ref instance);DisposeOne(ref enumerator);DisposeOne(ref collection);DisposeOne(ref searcher);closed=true;
 
     }
 

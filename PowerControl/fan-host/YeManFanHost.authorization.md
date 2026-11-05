@@ -1,8 +1,8 @@
 ﻿candidateOnly: true
 releaseApproved: false
 installed: false
-sourceBatch: candidate-onex-superx-uma-20261104
-sourceSnapshotManifestSha256: 296687d4f179cd228d73edd68ae6fb6e33a0331880c64c39f9ab1706777eb867
+sourceBatch: candidate-onex-fixed-speed-test-20261105
+sourceSnapshotManifestSha256: 24fed2ccf5ab7dd899e0d32e2532eb0f9094c052ba11a0fd238ef2698bc79816
 
 # YeManFanHost 正式授权记录
 
@@ -13,7 +13,7 @@ hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
 approvedHostExeSha256: F1163D7AAFACAA376E32D6AB14F10DD1B3C51380FF9BE7B392573F9AEBA77C0E
-approvedHostDllSha256: FCF9152B7C6A47B14150A130C31A8E7F1B2420306E9FC079E7435B9DB52C8651
+approvedHostDllSha256: 654A698338F63832F46AE3C7D73B6F0994BF7374F66BB4C68252A151F9A850D9
 approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
 baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline
@@ -68,3 +68,13 @@ fanColdWakePreparedCandidate: candidate-onex-receipt-20261104; fan-only initiali
 fanColdWakePreparedCandidate: candidate-onex-input-lighting-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
 
 fanColdWakePreparedCandidate: candidate-onex-superx-uma-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-wmi-cleanup-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-lighting-speed-20261104; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-op3-current-test-20261105; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-apex-lighting-test-20261105; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-fixed-speed-test-20261105; fan-only initialization and authenticated on-demand handshake; staged-not-promoted

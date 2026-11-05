@@ -7,7 +7,8 @@ import { createPressFeedback } from '@/bridge/controllerPressFeedback';
 import { createControllerPreviewTrace } from '@/robust/controllerPreviewTrace';
 import ControllerDeviceDiagram from '@/components/ControllerDeviceDiagram.vue';
 import { CONTROLLER_DIAGRAMS, controllerDiagramPersona } from '@/bridge/controllerDeviceDiagram';
-import { controllerOemDisplayCatalog } from '@/bridge/controllerOemPresentation';
+import { controllerOemDisplayCatalog, controllerOemPhysicalKeys, controllerOemPhysicalPressedKeys } from '@/bridge/controllerOemPresentation';
+import { oneXOemObservationKeys } from '@/bridge/controllerFeatureStatus';
 
 import Toggle from '@/components/Toggle.vue';
 import type { GamepadSettings } from '@/bridge/yeman';
@@ -72,13 +73,21 @@ const presenter = createGamepadPresenter((state) => {
   oemPressedKeys.value = state.oemPressedKeys;
   observePreview('presented');
 });
+// Short OneX keyboard edges can begin and end between gamepad.state frames.
+// Keep their display pulse separate so a neutral sampled frame cannot erase it.
+const oemEdgePulseKeys = shallowRef<readonly string[]>([]);
+const oemEdgeFeedback = createPressFeedback(keys => { oemEdgePulseKeys.value = keys; });
 const pulseKeys = shallowRef<readonly string[]>([]);
 const pressFeedback = createPressFeedback(keys => { pulseKeys.value = keys; });
 const diagramButtons = computed(() => props.minimumPressFeedback ? Array.from({length:Math.max(live.value.length,18)},(_,i)=>Boolean(live.value[i])||pulseKeys.value.includes('button:'+i)) : live.value);
-const diagramOemKeys = computed(() => props.minimumPressFeedback ? [...new Set([...oemPressedKeys.value,...pulseKeys.value.filter(key=>key.startsWith('oem:')).map(key=>key.slice(4))])] : oemPressedKeys.value);
+const diagramOemKeys = computed(() => controllerOemPhysicalPressedKeys(props.minimumPressFeedback
+  ? [...new Set([...oemPressedKeys.value,...oemEdgePulseKeys.value,...pulseKeys.value.filter(key=>key.startsWith('oem:')).map(key=>key.slice(4))])]
+  : oemPressedKeys.value, props.oemKeys));
+const diagramMappedOemKeys = computed(() => controllerOemPhysicalPressedKeys(props.highlightOemKeys, props.oemKeys));
 let viewActive = true;
 function presentationVisible(): boolean { return viewActive && props.presentationActive && isUiVisible(); }
 let stopState: (() => void) | null = null;
+let stopOemObserved: (() => void) | null = null;
 let stopVisibility: (() => void) | null = null;
 let testBTimer: number | null = null;
 let testBHeld = false;
@@ -127,7 +136,7 @@ function onBaseImageError(): void {
 
 function syncPresentationVisibility(): void {
   const visible = presentationVisible();
-  if (!visible) pressFeedback.reset();
+  if (!visible) { pressFeedback.reset(); oemEdgeFeedback.reset(); }
   presenter.setVisible(visible);
   syncPreviewTrace();
   if (!visible) {
@@ -163,6 +172,7 @@ function onTestModeEvent(e: Event) {
 onBeforeUpdate(() => observePreview('willPatch'));
 onUpdated(() => observePreview('didPatch'));
 watch(() => props.presentationActive, syncPresentationVisibility);
+watch(() => [props.oemKeys.familyId, props.oemKeys.deviceClass], () => oemEdgeFeedback.reset());
 watch(() => props.persona, () => {
   try { previewTrace?.personaChanged(); } catch { stopPreviewTrace(); }
 });
@@ -195,6 +205,13 @@ onMounted(() => {
     if(props.minimumPressFeedback&&presentationVisible()){const state=payload as {connected?:boolean;buttons?:boolean[];oemPressedKeys?:string[]};if(state.connected){pressFeedback.accept([...(state.buttons||[]).flatMap((down,i)=>down?['button:'+i]:[]),...(state.oemPressedKeys||[]).filter(key=>props.oemKeys.keys.some(k=>k.keyId===key&&k.captureImplemented!==false)).map(key=>'oem:'+key)])}else pressFeedback.reset()}
     presenter.accept(payload);
   });
+  stopOemObserved = onIpc('oem.keys.observed', payload => {
+    if (!props.minimumPressFeedback || !presentationVisible()) return;
+    const keys = oneXOemObservationKeys(payload, props.oemKeys);
+    if (!keys.length) return;
+    oemEdgeFeedback.accept(keys);
+    oemEdgeFeedback.accept([]); // Visual receipt only; never synthesize held input.
+  });
   stopResumeReady = onIpc('power.resume-ready', refreshBaseImage);
   stopResumed = onIpc('power.resumed', refreshBaseImage);
 });
@@ -203,6 +220,9 @@ onDeactivated(() => { viewActive = false; syncPresentationVisibility(); });
 onBeforeUnmount(() => {
   stopPreviewTrace();
   pressFeedback.reset();
+  oemEdgeFeedback.reset();
+  stopOemObserved?.();
+  stopOemObserved = null;
   presenter.dispose();
   stopVisibility?.();
   stopVisibility = null;
@@ -252,7 +272,8 @@ function isAdditionalBackKey(key: OemSpecialKey): boolean {
   return props.oemKeys.familyId === 'lenovo-legion-go' && key.backIndex === null &&
     (key.keyId === 'legionl' || key.keyId === 'legionm2');
 }
-const specialKeys = computed(() => catalogKeys.value.filter(key => key.backIndex === null && !isAdditionalBackKey(key)));
+const specialKeys = computed(() => controllerOemPhysicalKeys(displayOemKeys.value)
+  .filter(key => key.backIndex === null && !isAdditionalBackKey(key)));
 const diagramPersona = computed(() => controllerDiagramPersona(props.persona));
 // Keep every model at the existing Steam Deck height, with its own aspect ratio.
 const previewFrameStyle = computed(() => {
@@ -272,7 +293,7 @@ const backKeys = computed(() => catalogKeys.value
   .map(key => ({ ...key, ...backPositions[key.backIndex! - 1] })));
 function oemClass(key: OemSpecialKey): Record<string, boolean> {
   const available = key.captureImplemented !== false;
-  return { mapped: available && props.highlightOemKeys.includes(key.keyId), live: available && diagramOemKeys.value.includes(key.keyId) };
+  return { mapped: available && diagramMappedOemKeys.value.includes(key.keyId), live: available && diagramOemKeys.value.includes(key.keyId) };
 }
 function oemLabel(key: OemSpecialKey): string {
   const state = oemClass(key);
@@ -294,7 +315,7 @@ function oemLabel(key: OemSpecialKey): string {
         </div>
       </div>
       <div v-if="CONTROLLER_DIAGRAMS[diagramPersona].nodes" class="controller-preview-frame" :class="{ 'match-deck-height': matchSteamDeckHeight }" :style="previewFrameStyle">
-        <ControllerDeviceDiagram :persona="diagramPersona" :buttons="diagramButtons" :axes="axes" :mapped-buttons="props.highlightButtons" :pressed-oem-keys="diagramOemKeys" :mapped-oem-keys="props.highlightOemKeys" :oem-keys="displayOemKeys" :interactive="testMode" :revision="baseImageRevision" @image-error="onBaseImageError" />
+        <ControllerDeviceDiagram :persona="diagramPersona" :buttons="diagramButtons" :axes="axes" :mapped-buttons="props.highlightButtons" :pressed-oem-keys="diagramOemKeys" :mapped-oem-keys="diagramMappedOemKeys" :oem-keys="displayOemKeys" :interactive="testMode" :revision="baseImageRevision" @image-error="onBaseImageError" />
       </div>
       <svg v-else viewBox="0 48 420 282" class="pad" aria-label="手柄可视化">
         <defs>

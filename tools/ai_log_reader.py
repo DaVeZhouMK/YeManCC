@@ -21,7 +21,7 @@ MAX_TOTAL = 2 * 1024 * 1024 * 1024
 MAX_MEMBERS = 16384
 LINE_BYTES = 64 * 1024
 JSONL = {
-    'input-capture.jsonl', 'native-lifecycle.log', 'native-detail.log', 'monitor-detail.log',
+    'input-capture.jsonl', 'model-adaptation.log', 'virtual-adaptation.log', 'native-lifecycle.log', 'native-detail.log', 'monitor-detail.log',
     'tdp.log', 'tdp-detail.log', 'frontend-errors.log', 'frontend-trace.log', 'frontend-trace-detail.log',
     'webview-failures.log', 'fan-api.log', 'fan-lifecycle.log', 'gyro-motion.log', 'virtual-gamepad.log',
     'focus-trace.log', 'hardware-coordinator.log', 'input-host-fatal.log', 'input-host-rejects.log',

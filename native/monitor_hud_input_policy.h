@@ -25,6 +25,26 @@ inline LRESULT rejectTouchHitTest(LPARAM parameter) {
     const TOUCH_HIT_TESTING_PROXIMITY_EVALUATION rejected{TOUCH_HIT_TESTING_PROXIMITY_FARTHEST, input->point};
     return PackTouchHitTestingProximityEvaluation(input, &rejected);
 }
+// The crosshair renderer keeps screen coordinates, but its HWND must not
+// retain a full-screen native region. Only the HUD pixels and the small,
+// display-only crosshair glyph exist in the window region. Input remains on
+// the separate panel-sized input HWND; this disabled display never owns it.
+inline bool constrainDisplayRegion(HWND hwnd,const RECT& output,const RECT& panel,bool crosshair) {
+    if (!hwnd || output.right <= output.left || output.bottom <= output.top) return false;
+    if (!crosshair) return SetWindowRgn(hwnd, nullptr, FALSE) != 0;
+    HRGN region = CreateRectRgn(panel.left-output.left, panel.top-output.top,
+                               panel.right-output.left, panel.bottom-output.top);
+    if (!region) return false;
+    // The renderer is fixed to raw pixels / rasterization 1.0. Its 24px SVG
+    // and outline fit inside this 32px region, including odd screen sizes.
+    const LONG x=(output.right-output.left-32)/2,y=(output.bottom-output.top-32)/2;
+    HRGN glyph = CreateRectRgn(x, y, x+32, y+32);
+    const bool combined = glyph && CombineRgn(region, region, glyph, RGN_OR) != ERROR;
+    if (glyph) DeleteObject(glyph);
+    if (combined && SetWindowRgn(hwnd, region, FALSE)) return true; // Windows owns it.
+    DeleteObject(region);
+    return false;
+}
 inline bool inert(HWND hwnd) {
     return hwnd && IsWindow(hwnd) && !IsWindowEnabled(hwnd) &&
            (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & requiredExStyle) == requiredExStyle;

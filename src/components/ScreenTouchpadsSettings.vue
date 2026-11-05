@@ -5,9 +5,10 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, 
 import Toggle from '@/components/Toggle.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import Slider from '@/components/Slider.vue';
+import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
 import { on } from '@/bridge/ipc';
 import { LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES, SCREEN_TOUCHPAD_LAYOUTS,
-  SCREEN_SUMMON_POSITIONS, STANDALONE_SPECIAL_MODES, TOUCH_FEEDBACK_MODES, SCREEN_AUTO_HIDE_OPTIONS, screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile, screenTouchpadDefaults,
+  screenSummonPositions, STANDALONE_SPECIAL_MODES, TOUCH_FEEDBACK_MODES, SCREEN_AUTO_HIDE_OPTIONS, screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile, screenTouchpadDefaults,
   type ScreenTouchpadConfig, type ScreenTouchpadState } from '@/bridge/screenTouchpads';
 
 const props = withDefaults(defineProps<{ disabled?: boolean; persona?: string; steamDeckEnabled?: boolean; ps5Enabled?: boolean; presetConfig?: ScreenTouchpadConfig }>(),
@@ -15,6 +16,9 @@ const props = withDefaults(defineProps<{ disabled?: boolean; persona?: string; s
 const emit = defineEmits<{ (event:'preset-update', config:ScreenTouchpadConfig):void }>();
 // The parent keys this instance by persona; pending saves keep their original slot.
 const profile = screenTouchpadProfile(props.persona);
+const placement=ref(getUiSetting('windowPlacement'));
+const summonOptions=computed(()=>screenSummonPositions(placement.value));
+function syncPlacement(){placement.value=getUiSetting('windowPlacement');}
 const state = ref<ScreenTouchpadState>({ ...screenTouchpadDefaults(profile), persona: profile, ok: true, available: true, visible: false });
 const loading = ref(true), saving = ref(false);
 const error = ref('');
@@ -134,12 +138,17 @@ function changeLayout(layout: ScreenTouchpadConfig['layout']): void {
   change(patch);
 }
 watch(()=>props.presetConfig,()=>{if(props.presetConfig)void refresh();});
-onMounted(() => { void refresh(); if(props.presetConfig)return;unsubscribe = on<ScreenTouchpadState>('screenTouchpads.updated', next => {
+onMounted(() => {
+  window.addEventListener('ui-settings:loaded',syncPlacement);
+  window.addEventListener('ui-settings:changed',syncPlacement);
+  void loadUiSettings().then(syncPlacement).catch(()=>{}); void refresh(); if(props.presetConfig)return;unsubscribe = on<ScreenTouchpadState>('screenTouchpads.updated', next => {
   if (!disposed && next.persona === profile && !saving.value && !Object.keys(queued).length) { ++generation; state.value = next; loading.value = false; }
 }); });
-onActivated(() => { void refresh(); });
+onActivated(() => { syncPlacement();void refresh(); });
 onDeactivated(() => { void flush(); });
 onBeforeUnmount(() => {
+  window.removeEventListener('ui-settings:loaded',syncPlacement);
+  window.removeEventListener('ui-settings:changed',syncPlacement);
   // Drain the final debounced value behind an existing save, including on fast navigation.
   const finalPatch = queued; queued = {};
   if (Object.keys(finalPatch).length) {
@@ -159,9 +168,9 @@ onBeforeUnmount(() => {
       <Dropdown :model-value="state.layout" :options="SCREEN_TOUCHPAD_LAYOUTS" :disabled="locked"
         aria-label="屏幕触摸板布局" @update:model-value="changeLayout($event as ScreenTouchpadConfig['layout'])" />
     </div>
-    <div class="screen-touchpad-auto-hide screen-touchpad-field" title="触摸板和专用按键闲置后完全不可见，触摸原区域即可恢复；保持按住时不会隐藏。">
+    <div class="screen-touchpad-auto-hide screen-touchpad-field" title="触摸板、YMCC呼出键和专用按键闲置后完全不可见，触摸原区域即可恢复；保持按住时不会隐藏。">
       <label>自动隐藏</label>
-      <Dropdown :model-value="state.autoHideSeconds ?? 60" :options="SCREEN_AUTO_HIDE_OPTIONS" :disabled="locked"
+      <Dropdown :model-value="state.autoHideSeconds ?? 15" :options="SCREEN_AUTO_HIDE_OPTIONS" :disabled="locked"
         aria-label="触摸板和专用按键自动隐藏" @update:model-value="change({ autoHideSeconds: $event as ScreenTouchpadConfig['autoHideSeconds'] })" />
     </div>
     <template v-if="state.layout !== 'off'">
@@ -182,7 +191,7 @@ onBeforeUnmount(() => {
     </template>
     <div class="screen-control-selects" data-gp-group="screen-control-selects">
       <div class="screen-control-select screen-touchpad-field"><label>YMCC呼出</label>
-        <Dropdown :model-value="state.summonPosition" :options="SCREEN_SUMMON_POSITIONS" :disabled="locked"
+        <Dropdown :model-value="state.summonPosition" :options="summonOptions" :disabled="locked"
           aria-label="YMCC呼出位置" @update:model-value="change({ summonPosition: $event as ScreenTouchpadConfig['summonPosition'], summonEnabled: $event !== 'off' })" />
       </div>
       <div class="screen-control-select screen-touchpad-field"><label>{{presetConfig?'屏幕专用按键 · 触摸':'专用按键'}}</label>

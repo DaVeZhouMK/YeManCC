@@ -43,5 +43,15 @@ internal sealed class HostDomainRouter(Func<Controller> createBattery,
     public void Tick(){lock(gate){if(!stopped)battery?.Tick();}}
     public void Suspend(){suspended=true;lock(gate){display?.Suspend();battery?.Suspend();}}
     public void Resume(){lock(gate){if(stopped)return;suspended=false;display?.Resume();battery?.Resume();}}
-    public void Shutdown(){stopped=true;lock(gate){display?.Shutdown();battery?.Shutdown();}}
+    public void Shutdown()
+    {
+        stopped=true;
+        lock(gate)
+        {
+            Exception? first=null;
+            try{display?.Shutdown();}catch(Exception error){first=error;}
+            try{battery?.Shutdown();}catch(Exception error){first=first is null?error:new AggregateException(first,error);}
+            if(first is not null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw();
+        }
+    }
 }

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "scope": "Super X fan automatic/manual and duty only",
+  "implementation": "Original YMCC adapter from audited protocol facts; no upstream implementation copied",
+  "source": {
+    "repository": "the-reengineers/XmaX",
+    "commit": "6d728795511c2f9f683d1757e72481236de9b23a",
+    "readiness": "Upstream README WIP/not ready; no project-level licence identified; protocol facts only",
+    "files": [
+      {
+        "path": "backend/src/platform/platform_win32.cpp",
+        "bytes": 87825,
+        "sha256": "bd7bd2feaad1b4eb90ecf98c78a2a915d1b1235c6b0b30268b1bb66b2232a59c"
+      },
+      {
+        "path": "backend/src/fan.cpp",
+        "bytes": 4010,
+        "sha256": "7d2b3f8a636646c458d235cdc88fa902749c8fb3a7ccf359522934416026f01d"
+      }
+    ]
+  },
+  "identity": {
+    "repository": "torvalds/linux",
+    "commit": "0b6573e23acc7bca808e539e3edea49683f106de",
+    "file": "drivers/platform/x86/oxpec.c",
+    "sha256": "161fa21f5bd4e332914880dff780224a17a0ee4a0c94c467069b6555885974e3",
+    "boardNameExact": "ONEXPLAYER SUPER X",
+    "boardVendorContains": "ONE-NETBOOK",
+    "predicateCase": "Ordinal",
+    "systemProductAlias": false
+  },
+  "protocol": {
+    "namespace": "root\\WMI",
+    "class": "UMAInterface",
+    "instanceNameContains": "SETUMAWMI",
+    "readMethod": "GetEcValue",
+    "writeMethod": "SetEcValue",
+    "index": {
+      "name": "Index",
+      "callerVariant": "VT_I4",
+      "address": "raw EC16; no swapping",
+      "declaredCimType": "not established; require compatible non-array integer metadata"
+    },
+    "data": {
+      "name": "Data",
+      "writeCallerVariant": "VT_UI1",
+      "readTypes": [
+        "byte",
+        "Int32 0..255",
+        "UInt32 0..255"
+      ],
+      "rejectMissingNullOrOtherTypes": true
+    },
+    "control": {
+      "register": 1098,
+      "automatic": 0,
+      "manual": 1
+    },
+    "duty": {
+      "register": 1099,
+      "minimum": 0,
+      "maximum": 255
+    },
+    "writeProof": "COM method completion plus checked register readback; no documented firmware ReturnValue or physical-effect proof"
+  },
+  "ymccPolicy": {
+    "endpoint": "unique matching instance, retained exact nonempty __PATH",
+    "percentageRounding": "Existing session ToEven policy, not an imported hardware fact",
+    "thermalTripC": 95,
+    "thermalTripSource": "Existing YMCC Host policy; not a Super X hardware fact",
+    "temperature": "existing HWiNFO consumer, no guessed EC temperature",
+    "readRegisters": [
+      1098,
+      1099
+    ],
+    "writeRegisters": [
+      1098,
+      1099
+    ]
+  },
+  "excluded": [
+    "charging04A3",
+    "bypass04A4",
+    "RPM0476/0477",
+    "RGB",
+    "input",
+    "TDP",
+    "voltage",
+    "new services/workers",
+    "hardware acceptance"
+  ]
+}

@@ -44,8 +44,11 @@ static unsigned long long g_feedbackSlotGeneration[4]={};
 static bool g_xinputPhysicalSourceLocked=true;static DWORD g_xinputPhysicalSourceMask=1,g_xinputPrimarySlot=0;
 static constexpr ULONGLONG kXInputSlotReprobeBackoffMs=500;
 static bool tickCostEnabled(){return false;}
+static json manualStopLog=json::array();
+static std::function<void()> inManualCapabilities;
+static json nativeManualXInputCapabilitiesEvidence(DWORD){if(inManualCapabilities)inManualCapabilities();return {{"attempted",true},{"rc",0},{"physicalMotorEffectObserved",false}};}
 static json pendingLog=json::array();static bool throwPendingLog=false;
-static void appendNativeLifecycleLog(const char* event,const json& row){if(std::string(event)=="gamepad-feedback-stop-pending"){if(throwPendingLog)throw std::runtime_error("fixture logger");pendingLog.push_back(row);}}
+static void appendNativeLifecycleLog(const char* event,const json& row){if(std::string(event)=="onex-manual-feedback-stop")manualStopLog.push_back(row);if(std::string(event)=="gamepad-feedback-stop-pending"){if(throwPendingLog)throw std::runtime_error("fixture logger");pendingLog.push_back(row);}}
 static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end());}
 static bool openAvailable=true,pathReadable=true,connected=true,writeAllowed=true;
 static std::wstring occupant=L"HID#physical-A";
@@ -64,7 +67,8 @@ static auto msiDinputFeedbackSourceSnapshot(){return msiSource;}
 #endif
 static std::atomic<unsigned long long> g_msiFeedbackModeGeneration{1},g_msiFeedbackSourceGeneration{0},g_msiFeedbackSamplePower{1},g_msiFeedbackSampleMode{1},g_msiFeedbackSampleTopology{1};
 static std::atomic<bool> g_msiDinputSourceValid{false};
-static struct {std::string deviceClass="ROG";} g_machineIdentity;
+enum class YmccFamily { Unknown, OneXPlayer };
+static struct {std::string deviceClass="ROG";YmccFamily family=YmccFamily::Unknown;} g_machineIdentity;
 static bool hardwareWriteAllowed(){return writeAllowed;}
 static bool returnTapMsi=false;
 static bool msiClawKnownBoardAuthority(){
@@ -444,6 +448,20 @@ int main(){
  }
 #endif
 #if FIXED_POLICY
+ {
+  reset();fakePower=21000;sample();g_machineIdentity.family=YmccFamily::OneXPlayer;manualStopLog=json::array();
+  const auto pulse=nativePhysicalFeedbackStart(70,125,false);fakeTick+=125;physicalFeedbackFinish(pulse.pulseGeneration);
+  expect("OneX manual preserves the original pulse and zero writes",pulse.ok&&writes.size()==2&&writes[0]["left"]==45874&&writes[1]["left"]==0,true);
+  expect("OneX manual stop reports matching request and elapsed time",manualStopLog.size()==1&&manualStopLog[0]["pulseGeneration"]==pulse.pulseGeneration&&manualStopLog[0]["elapsedSinceWriteMs"]==125&&manualStopLog[0]["requestedDurationMs"]==125,true);
+  expect("OneX zero acceptance still is not hardware proof",manualStopLog[0]["zeroWriteAttempted"]==true&&manualStopLog[0]["zeroApiAccepted"]==true&&manualStopLog[0]["hardwareStopObserved"]==false,true);
+  writes=json::array();inManualCapabilities=[](){++fakePower;};
+  const auto cancelled=nativePhysicalFeedbackStart(70,125,false);inManualCapabilities={};
+  expect("OneX read-only capability delay cannot write after a power change",!cancelled.ok&&cancelled.reason==ymcc::touchhaptic::Reason::PowerTransition&&writes.empty(),true);
+  g_machineIdentity.family=YmccFamily::Unknown;manualStopLog=json::array();sample(true);
+  const auto common=nativePhysicalFeedbackStart(70,125,false);fakeTick+=125;physicalFeedbackFinish(common.pulseGeneration);
+  expect("other-family manual output has no OneX evidence",manualStopLog.empty(),true);
+  finish("onex-manual-output-observation-preserves-writes");
+ }
  // New source/power episode initialization is event driven. All of these calls
  // execute the extracted production physical writer, against the same bounded
  // in-memory final API used by the existing source/stop lifecycle tests.

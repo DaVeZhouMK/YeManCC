@@ -13,6 +13,8 @@ import BackgroundEffectPreview from '@/components/BackgroundEffectPreview.vue';
 import Slider from '@/components/Slider.vue';
 import { updatePredownloadState, setUpdatePredownloadEnabled } from '@/bridge/updatePredownload';
 import IntegratedPage from '@/components/IntegratedPage.vue';
+import {useRoute} from 'vue-router';
+const settingsRoute=useRoute();
 import { tdpDiagnosticDeliveryFailures } from '@/bridge/tdpStaticDiagnostics';
 import { frontendDiagnosticDeliveryFailures } from '@/robust/frontendDiagnostics';
 import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue';
@@ -860,7 +862,7 @@ onBeforeUnmount(() => {
 
 <template>
 <IntegratedPage title="设置" hide-heading><div class="page modern-settings-page settings-console-page settings-density-preview"><div v-if="errMsg" class="err-bar page-error" role="alert">{{errMsg}}</div>
-<SettingsSections :sections="settingsSections" label="设置" class="settings-layout settings-layout-b settings-console">
+<SettingsSections :sections="settingsSections" :initial-section="settingsRoute.query.section === 'device' ? 'device' : undefined" label="设置" class="settings-layout settings-layout-b settings-console">
 <template #appearance="{ active }"><div class="appearance-flow"><div class="setting-position">
 
  <section class="card window-position-settings"><h3 class="card-title"><InlineIcon name="target" />窗口位置</h3><div class="window-placement-options" role="group" aria-label="窗口位置"><button type="button" :class="{active:windowPlacement==='left'}" :aria-pressed="windowPlacement==='left'" @click="onWindowPlacementChange('left')">左侧</button><button type="button" :class="{active:windowPlacement==='right'}" :aria-pressed="windowPlacement==='right'" @click="onWindowPlacementChange('right')">右侧</button></div></section></div>
@@ -903,7 +905,7 @@ onBeforeUnmount(() => {
       <Toggle :model-value="msiControllerShield.enabled" label="微星前端屏蔽" color="accent" :disabled="msiShieldBusy" data-msi-controller-shield-toggle @update:model-value="onMsiControllerShieldToggle" />
       <p class="muted body" role="status">微星屏蔽 {{ msiControllerShield.enabled ? '开启' : '关闭' }} · {{ msiShieldExecutionStatus }}</p>
       <p class="muted body">专用键接管 {{ msiShieldShortcutStatus }} · 基础服务 {{ msiShieldServiceStatus }} · 重启 无需</p>
-      <p class="muted body">开启后关闭 MSI Center M 前端并删除 Server/Updater 启动任务；关闭屏蔽后从 XML 恢复任务，保留基础服务。<br />按键效果 待验证<span v-if="msiShieldExecutionStatus === '总体 OK（屏蔽已关闭）'"> · 前端未运行时可手动启动</span></p>
+      <p class="muted body">开启后关闭 MSI Center M 前端并删除 Server/Updater 启动任务；关闭屏蔽后从 XML 恢复任务，保留基础服务。运行期间保持手柄用途：打开 YMCC 时核对，LB＋RB 切换后延迟 3 秒核对并恢复；虚拟手柄启动前先恢复手柄策略，随后保留采集模式。<br />按键效果 待验证<span v-if="msiShieldExecutionStatus === '总体 OK（屏蔽已关闭）'"> · 前端未运行时可手动启动</span></p>
       <p v-if="msiShieldStatus" class="muted body" role="status">{{ msiShieldStatus }}</p>
     </section>
  <section v-if="active" class="card usbip-settings-card" aria-label="USB/IP 配套">

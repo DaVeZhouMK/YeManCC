@@ -173,6 +173,12 @@ static void msiLateHidePendingConsumerCases(){
             if(i->value("event","")==name)return (*i)["detail"];return json::object();};
         const auto current=[](){return inputHostDeferredPhysicalHideCurrent(g_inputHostEpoch,g_inputHostRunId,
             currentPowerGeneration(),inputHostConfiguredPersona(),inputHostStartProtectionNow());};
+        struct WakeRegressionEvent {
+            HANDLE handle=nullptr;
+            explicit WakeRegressionEvent(bool needed){if(needed)handle=CreateEventW(nullptr,TRUE,FALSE,nullptr);}
+            ~WakeRegressionEvent(){if(g_inputHostProcess==handle)g_inputHostProcess=nullptr;if(handle)CloseHandle(handle);}
+        } wakeHost{rog};
+        if(rog&&!wakeHost.handle)throw std::runtime_error("ROG212031-fixture-event");
         const auto prep=[&](bool arm,unsigned long long hostGen=7,bool refreshRequired=true){
             g_powerGeneration.store(savedPower,std::memory_order_release);prepare();
             fixtureLateHideDuringDecision={};fixtureLateHideAfterEmptyDecision={};
@@ -183,6 +189,10 @@ static void msiLateHidePendingConsumerCases(){
             {std::lock_guard<std::mutex> lock(g_msiMainSourceMx);g_msiMainSource=HidHideMsiMainSourceRecord{};}
             g_realStickTest.virtualTargetPersona="steamdeck";g_msiDinputRouteDinputArmed=row.armed;
             g_inputHostEpoch=hostGen;g_inputHostEpochMirror=hostGen;g_inputHostRunId="late-hide-offline-host-"+std::to_string(hostGen);
+            // Independent event Host for the actual stage owner's positive
+            // HELLO/prepared prerequisites; no process or target is created.
+            if(rog&&arm){g_inputHostProcess=wakeHost.handle;g_inputHostHello=true;g_inputHostPrepared=true;
+                g_inputHostBoundPowerGeneration=currentPowerGeneration();g_inputHostBoundPersona="steamdeck";}
             g_physicalReleaseWindowNeutral=false;
             fixtureRogDeferredJournalSeed=fixtureRogDeferredCycleEnabled=rog;
             g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;g_xinputConnectedMask=1;
@@ -222,7 +232,391 @@ static void msiLateHidePendingConsumerCases(){
         }
         inputHostRunQueuedLifecycleWork();check(hides()==0&&fixtureRogDeferredCycles.empty()&&drained(),"no-debt family source events dispatch no actual worker hide");
         observe("no-debt/both-confirmed-reasons");
+        // VC-ROG-SDWake-20261104-212031: parameterize the original family row.
+        // Real admission/owner/source/queue/worker bodies; only existing I/O leaves are inert.
+        const auto wakeCheck=[&](bool ok,const std::string& name){check(ok,("ROG212031 "+name).c_str());};
+        const auto orphanPrep=[&](const std::string& persona){
+            prep(false,0);g_inputHostRunId.clear();g_realStickTest.virtualTargetPersona=persona;
+            if(persona!="steamdeck"){
+                // Independent parameter setup, before the request under observation.
+                g_virtualStartProtection.~VirtualStartProtection();
+                new (&g_virtualStartProtection) ymcc::VirtualStartProtection();
+                g_virtualStartProtection.admit(persona,startProtectionClock);
+            }
+            g_wakeHoldPhysicalUnhide=true;g_inputHostLifecycleWorkRequested=false;
+            g_inputHostLifecycleWorkInFlight=false;g_shortcutRecordingActive=false;
+            g_inputHostStartBlocked=false;g_inputHostFaultHoldsStart=false;g_inputHostTransportFault=false;
+            return g_virtualStartProtection.view(startProtectionClock);
+        };
+        for(const std::string persona:{"steamdeck","dualsense-edge"}){
+            const auto request=orphanPrep(persona);
+            bool clean=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);clean=inputHostOwnedCleanupProvenLocked();}
+            wakeCheck(clean,"independent first-start setup has real settled ownership: "+persona);
+            wakeCheck(inputHostRetireUnownedRogWakeHoldForStart()==rog&&g_wakeHoldPhysicalUnhide.load()==!rog,
+                "only known ROG retires an unowned first-start hold: "+persona);
+            const auto after=g_virtualStartProtection.view(startProtectionClock);
+            wakeCheck(after.requestId==request.requestId&&after.persona==request.persona&&after.phase=="pending"&&
+                after.remainingMs==request.remainingMs&&after.fallbackAttempts==0&&!g_inputHostProcess&&
+                g_inputHostEpoch==0&&depth()==0&&drained()&&hides()==0&&fixtureRogDeferredCycles.empty()&&
+                fixtureRogInitialDiscoveryReads==0&&g_startEntrySeam.trace.empty(),
+                "hold admission preserves player deadline request fallback and creates no Host target scan or write: "+persona);
+        }
         if(!rog)return;
+        for(const std::string boundary:{"live-Host","epoch","journal-debt","expired","OFF","release",
+                "wakePending","requested","inflight","return","recovery","paused","sleep","MSI","GPD"}){
+            const auto request=orphanPrep("steamdeck");
+            if(boundary=="live-Host")g_inputHostProcess=wakeHost.handle;
+            else if(boundary=="epoch")g_inputHostEpoch=g_inputHostEpochMirror=1;
+            else if(boundary=="journal-debt")fixtureRogDeferredSeedJournal("ROG212031-owned-return");
+            else if(boundary=="expired")startProtectionClock+=request.remainingMs;
+            else if(boundary=="OFF")g_realStickTest.virtualTargetEnabled=false;
+            else if(boundary=="release")g_physicalReleaseWindowNeutral=true;
+            else if(boundary=="wakePending")g_wakeRescanRequested=true;
+            else if(boundary=="requested")g_inputHostLifecycleWorkRequested=true;
+            else if(boundary=="inflight")g_inputHostLifecycleWorkInFlight=true;
+            else if(boundary=="return")g_inputHostSwitchExecutionReturnPending=true;
+            else if(boundary=="recovery")g_inputHostSwitchRecoveryPending=true;
+            else if(boundary=="paused")g_externalPriorityVirtualSuspended=true;
+            else if(boundary=="sleep")g_powerLifecycle=PowerLifecycle::Suspended;
+            else if(boundary=="MSI"){g_machineIdentity.family=YmccFamily::MsiClaw;
+                g_machineIdentity.manufacturer="MICRO-STAR INTERNATIONAL CO., LTD.";g_machineIdentity.product="MS-1T91";}
+            else {g_machineIdentity.family=YmccFamily::Gpd;g_machineIdentity.manufacturer="GPD";g_machineIdentity.product="G1617-01";}
+            const auto remaining=g_virtualStartProtection.view(startProtectionClock).remainingMs;
+            const auto owned=g_hidHideVisibilityJournal.active;const auto host=g_inputHostProcess;
+            wakeCheck(!inputHostRetireUnownedRogWakeHoldForStart()&&g_wakeHoldPhysicalUnhide.load()&&
+                g_hidHideVisibilityJournal.active==owned&&g_inputHostProcess==host&&
+                g_virtualStartProtection.view(startProtectionClock).requestId==request.requestId&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs==remaining&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0&&
+                hides()==0&&fixtureRogDeferredCycles.empty()&&fixtureRogInitialDiscoveryReads==0,
+                "owned or inadmissible first-start hold stays protected without spending budget: "+boundary);
+            if(g_inputHostProcess==wakeHost.handle)g_inputHostProcess=nullptr;
+        }
+        // The sampler owns this mutex on another thread: try_lock must report
+        // busy even when the last published source mask would otherwise be live.
+        struct SourceWriter {
+            std::promise<void> acquired,release;std::thread thread;
+            void lock(){auto gate=release.get_future();thread=std::thread([this,gate=std::move(gate)]()mutable{
+                std::lock_guard<std::mutex> guard(g_gamepadReadMx);acquired.set_value();gate.wait();});
+                acquired.get_future().get();}
+            void unlock(){if(thread.joinable()){release.set_value();thread.join();}}
+            ~SourceWriter(){unlock();}
+        };
+        const auto resumePrep=[&](){const auto deadline=prep(true);
+            g_inputHostProcess=wakeHost.handle;g_inputHostHello=true;g_inputHostPrepared=true;
+            g_inputHostBoundPowerGeneration=currentPowerGeneration();g_inputHostBoundPersona="steamdeck";
+            g_shortcutRecordingActive=false;return deadline;};
+        for(const std::string source:{"mask0","unlocked","busy"}){
+            const auto deadline=resumePrep();const auto request=g_virtualStartProtection.view(startProtectionClock);
+            const auto topology=g_xinputTopologyEpoch.load();SourceWriter writer;bool reached=false;
+            inputHostQueueWakePhysicalHide("source-return-reconfirmed");const auto first=pending();
+            fixtureLateHideDuringDecision=[&](){reached=true;
+                if(source=="busy")writer.lock();
+                else {std::lock_guard<std::mutex> guard(g_gamepadReadMx);
+                    g_xinputPhysicalSourceLocked=source!="unlocked";g_xinputPhysicalSourceMask=0;g_xinputConnectedMask=source=="unlocked"?0:1;}};
+            inputHostRunQueuedLifecycleWork();
+            const std::string expected=source=="busy"?"physical-source-read-busy":
+                (source=="unlocked"?"physical-source-unlocked":"physical-source-mask-not-live");
+            wakeCheck(first.hasPending&&reached&&g_inputHostDeferredPhysicalHideSourcePending.load()&&
+                detail("late-hide-complete").value("deferredStartContextReason","")==expected&&
+                hides()==0&&fixtureRogDeferredCycles.empty()&&!inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&
+                !pending().hasPending&&depth()==0&&drained(),
+                "worker-entry source refusal retains only original debt with zero Apply/cycle: "+source);
+            const auto* reason=inputHostDeferredPhysicalHideSourceReason();
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);
+            wakeCheck(reason&&std::string(reason)==expected&&depth()==0&&drained()&&
+                g_inputHostDeferredPhysicalHideSourcePending.load()&&hides()==0&&fixtureRogDeferredCycles.empty(),
+                "real source helper and coordinator refuse unavailable or sampler-owned source: "+source);
+            writer.unlock();
+            {std::lock_guard<std::mutex> guard(g_gamepadReadMx);g_xinputPhysicalSourceLocked=true;
+                g_xinputPhysicalSourceMask=0;g_xinputConnectedMask=1;}
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);
+            wakeCheck(depth()==0&&drained()&&g_inputHostDeferredPhysicalHideSourcePending.load()&&
+                hides()==0&&fixtureRogDeferredCycles.empty()&&g_virtualStartProtection.view(startProtectionClock).phase=="pending",
+                "fresh connected sample without physical mask cannot enqueue or prove hidden: "+source);
+            {std::lock_guard<std::mutex> guard(g_gamepadReadMx);g_xinputPhysicalSourceMask=1;}
+            ++startProtectionClock;inputHostCoordinatorLateSourceVisibilityTick(true,true);const auto resumed=pending();
+            wakeCheck(resumed.hasPending&&resumed.token>first.token&&inputHostLateHideEpisodeEqual(resumed.episode,first.episode)&&
+                depth()==1&&!g_inputHostDeferredPhysicalHideSourcePending.load()&&g_xinputTopologyEpoch.load()==topology&&
+                g_virtualStartProtection.view(startProtectionClock).requestId==request.requestId&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs+startProtectionClock==deadline&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0&&hides()==0&&fixtureRogDeferredCycles.empty()&&
+                !inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&
+                detail("input-host-lifecycle-work-requested").value("trigger","")=="deferred-start-source-resumed",
+                "real coordinator resumes same episode once without topology edge deadline refund or early success: "+source);
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);
+            wakeCheck(depth()==1&&pending().token==resumed.token,"repeated BUS tick cannot duplicate resumed work: "+source);
+            inputHostRunQueuedLifecycleWork();inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            wakeCheck(hides()==1&&fixtureRogDeferredCycles.size()==1&&fixtureRogDeferredHideRecords.size()==1&&
+                inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&!current()&&depth()==0&&drained()&&
+                !g_inputHostDeferredPhysicalHideSourcePending.load()&&
+                fixtureRogDeferredCycles[0].value("executionDeadline",0ULL)==deadline&&
+                fixtureRogDeferredCycles[0].value("executionRequestId",0ULL)==request.requestId&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs+startProtectionClock==deadline&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "real worker performs one original hide and owned refresh; later BUS adds no work: "+source);
+            observe("ROG212031/source-resume/"+source);
+        }
+        for(const std::string boundary:{"expired","OFF","old-Host","old-run","old-power","sleep","release"}){
+            const auto deadline=resumePrep();inputHostQueueWakePhysicalHide("source-return-reconfirmed");const auto first=pending();
+            fixtureLateHideDuringDecision=[](){std::lock_guard<std::mutex> guard(g_gamepadReadMx);g_xinputPhysicalSourceMask=0;};
+            inputHostRunQueuedLifecycleWork();
+            wakeCheck(g_inputHostDeferredPhysicalHideSourcePending.load()&&hides()==0&&fixtureRogDeferredCycles.empty(),
+                "cancellation boundary starts with actual worker-entry source debt: "+boundary);
+            {std::lock_guard<std::mutex> guard(g_gamepadReadMx);g_xinputPhysicalSourceMask=1;}
+            if(boundary=="expired")startProtectionClock=deadline;
+            else if(boundary=="OFF")g_realStickTest.virtualTargetEnabled=false;
+            else if(boundary=="old-Host"){++g_inputHostEpoch;g_inputHostEpochMirror=g_inputHostEpoch;}
+            else if(boundary=="old-run")g_inputHostRunId+="-replacement";
+            else if(boundary=="old-power")g_powerGeneration.fetch_add(1,std::memory_order_acq_rel);
+            else if(boundary=="sleep")g_powerLifecycle=PowerLifecycle::Suspended;
+            else g_physicalReleaseWindowNeutral=true;
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            wakeCheck(depth()==0&&drained()&&hides()==0&&fixtureRogDeferredCycles.empty()&&
+                !inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "real coordinator refuses source continuation across retired or paused context: "+boundary);
+            if(boundary!="sleep"&&boundary!="release")wakeCheck(!g_inputHostDeferredPhysicalHideSourcePending.load(),
+                "retired source continuation flag is cancelled rather than revived: "+boundary);
+            observe("ROG212031/source-cancel/"+boundary);
+        }
+        resumePrep();inputHostQueueWakePhysicalHide("source-return-reconfirmed");const auto successful=pending();inputHostRunQueuedLifecycleWork();
+        inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+        wakeCheck(successful.hasPending&&inputHostLateHideEpisodeAlreadyCompleted(successful.episode)&&
+            hides()==1&&fixtureRogDeferredCycles.size()==1&&depth()==0&&drained()&&
+            !g_inputHostDeferredPhysicalHideSourcePending.load(),"original source success never acquires a new continuation");
+        cases.back()["startWakeFieldEvidence"]={{"name","VC-ROG-SDWake-20261104-212031"},
+            {"actualAdmissionCoordinatorAndWorker",true},{"hardwareValidated",false}};
+        // 003611 req3/7: configuration completed, then the real sampler owns
+        // the source mutex in the transaction/refresh path. Keep the original
+        // family rows and all 212031 assertions; only existing I/O leaves inject.
+        const auto transactionFirstAssertion=assertionTrace.size();
+        InputHostLateHideEpisodeKey transactionEpisode;
+        const auto transactionCheck=[&](bool ok,const std::string& label){check(ok,("ROG003611 "+label).c_str());};
+        const auto transactionObserve=[&](const std::string& variation){const auto p=pending();
+            const auto request=g_virtualStartProtection.view(startProtectionClock);
+            cases.back()["transactionSourceContinuation"].push_back({{"variation",variation},
+                {"debt",fixtureRogDeferredDebtState()},{"pending",p.hasPending},{"token",p.token},
+                {"queueDepth",depth()},{"drained",drained()},{"episodeCompleted",inputHostLateHideEpisodeAlreadyCompleted(transactionEpisode)},
+                {"hideCalls",hides()},{"hidePort",fixtureRogDeferredHideRecords},{"snapshots",fixtureRogDeferredSnapshots},
+                {"issueGuards",fixtureRogDeferredIssueGuards},{"cycles",fixtureRogDeferredCycles},
+                {"requestId",request.requestId},{"remainingMs",request.remainingMs},{"clock",startProtectionClock},
+                {"fallbackAttempts",request.fallbackAttempts},{"transportFault",g_inputHostTransportFault},
+                {"topology",g_xinputTopologyEpoch.load()},{"events",fixtureEvents},{"trace",g_startEntrySeam.trace}});
+        };
+        const auto restoreSource=[](){std::lock_guard<std::mutex> guard(g_gamepadReadMx);
+            g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=g_xinputConnectedMask=1;};
+        const auto beginTransaction=[&](){const auto deadline=resumePrep();
+            inputHostQueueWakePhysicalHide("source-return-reconfirmed");const auto queued=pending();transactionEpisode=queued.episode;
+            return std::make_pair(deadline,queued);};
+        for(const std::string stage:{"after-Apply","snapshot-return","after-configuration","before-issue"}){
+            const auto begun=beginTransaction();const auto deadline=begun.first;const auto first=begun.second;
+            const auto request=g_virtualStartProtection.view(startProtectionClock);
+            const auto topology=g_xinputTopologyEpoch.load();const auto run=g_inputHostRunId;const auto host=g_inputHostEpoch;
+            SourceWriter writer;bool reached=false,configurationWasReady=false;
+            const auto interrupt=[&](){reached=true;configurationWasReady=fixtureRogDeferredDebtState().value("configurationReady",false);writer.lock();};
+            if(stage=="after-Apply")fixtureRogDeferredAfterHide=interrupt;
+            else if(stage=="snapshot-return")fixtureRogPartialDuringSnapshot=[&](unsigned read){if(read==1)interrupt();};
+            else if(stage=="after-configuration")fixtureRogDeferredPortCallback=interrupt;
+            else fixtureRogDeferredBeforeCycleIssue=interrupt;
+            inputHostRunQueuedLifecycleWork();const auto held=fixtureRogDeferredDebtState();
+            transactionCheck(first.hasPending&&reached&&hides()==1&&fixtureRogDeferredHideRecords.size()==1&&
+                held.value("configurationApplied",false)&&!held.value("refreshAttempted",true)&&
+                held.value("sourcePending",false)&&fixtureRogDeferredCycles.empty()&&
+                !inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&!pending().hasPending&&depth()==0&&drained()&&
+                detail("late-hide-complete").value("configurationApplied",false)&&
+                !detail("late-hide-complete").value("rootRefreshMayHaveIssued",true)&&
+                !detail("late-hide-complete").value("ordinaryContinuationRetired",true)&&
+                detail("late-hide-complete").value("deferredContextPhase","")=="transaction-or-refresh"&&
+                detail("late-hide-complete").value("deferredStartContextReason","")=="physical-source-read-busy",
+                "transaction source busy retains Apply progress without completion or issue: "+stage);
+            if(stage=="after-configuration" || stage=="before-issue")transactionCheck(configurationWasReady&&
+                held.value("configurationReady",false)&&held.value("configurationTargetCount",0u)==2&&
+                held.value("configurationPhysicalIdentity","")==g_hidHideVisibilityJournal.physical.physicalIdentity&&
+                hidHideUpper(held.value("configurationRoot",""))==hidHideUpper(fixtureRogDeferredRoot()),
+                "completed snapshot retains exact physical identity root and two targets before source busy: "+stage);
+            if(stage=="before-issue")transactionCheck(fixtureRogDeferredIssueGuards.size()==1&&
+                !fixtureRogDeferredIssueGuards[0].value("admitted",true)&&
+                fixtureRogDeferredIssueGuards[0].value("issueActive",false)&&
+                fixtureRogDeferredIssueGuards[0].value("contextReason","")=="physical-source-read-busy"&&
+                !g_inputHostTransportFault,
+                "real final reserve guard refuses dispatch with unspent quota and no transport fault");
+            transactionObserve(stage+"/source-held");
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);
+            transactionCheck(depth()==0&&drained()&&g_inputHostDeferredPhysicalHideSourcePending.load()&&
+                hides()==1&&fixtureRogDeferredCycles.empty(),"BUS cannot resume while the actual sampler lock is held: "+stage);
+            writer.unlock();fixtureRogPartialDuringSnapshot={};restoreSource();++startProtectionClock;
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);const auto resumed=pending();
+            transactionCheck(resumed.hasPending&&resumed.token>first.token&&
+                inputHostLateHideEpisodeEqual(resumed.episode,first.episode)&&depth()==1&&
+                g_xinputTopologyEpoch.load()==topology&&g_inputHostEpoch==host&&g_inputHostRunId==run&&
+                g_inputHostProcess==wakeHost.handle&&g_virtualStartProtection.view(startProtectionClock).requestId==request.requestId&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs+startProtectionClock==deadline&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "source-ready BUS resumes same owner episode and original deadline without topology or fallback: "+stage);
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);
+            transactionCheck(depth()==1&&pending().token==resumed.token,"repeated ready BUS coalesces the same continuation: "+stage);
+            inputHostRunQueuedLifecycleWork();inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            transactionCheck(hides()==1&&fixtureRogDeferredHideRecords.size()==1&&fixtureRogDeferredCycles.size()==1&&
+                inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&!current()&&depth()==0&&drained()&&
+                !g_inputHostDeferredPhysicalHideSourcePending.load()&&fixtureRogDeferredSnapshots.size()>=1&&
+                fixtureRogDeferredCycles[0].value("root","")==fixtureRogDeferredRoot()&&
+                fixtureRogDeferredCycles[0].value("issueGuardAdmitted",false)&&
+                fixtureRogDeferredCycles[0].value("executionDeadline",0ULL)==deadline&&
+                fixtureRogDeferredCycles[0].value("executionRequestId",0ULL)==request.requestId&&
+                g_inputHostProcess==wakeHost.handle&&g_inputHostEpoch==host&&g_inputHostRunId==run&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs+startProtectionClock==deadline&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "real resumed worker only revalidates configuration and issues one owned root refresh without Apply: "+stage);
+            transactionObserve(stage+"/resumed");
+        }
+        // The same last issue guard must also reject an unlocked or absent source.
+        for(const std::string source:{"unlocked","mask0"}){
+            const auto begun=beginTransaction();bool reached=false;
+            fixtureRogDeferredBeforeCycleIssue=[&](){reached=true;std::lock_guard<std::mutex> guard(g_gamepadReadMx);
+                g_xinputPhysicalSourceLocked=source!="unlocked";g_xinputPhysicalSourceMask=0;};
+            inputHostRunQueuedLifecycleWork();const auto held=fixtureRogDeferredDebtState();
+            transactionCheck(reached&&hides()==1&&held.value("configurationApplied",false)&&held.value("configurationReady",false)&&
+                held.value("sourcePending",false)&&!held.value("refreshAttempted",true)&&fixtureRogDeferredCycles.empty()&&
+                fixtureRogDeferredIssueGuards.size()==1&&!fixtureRogDeferredIssueGuards[0].value("admitted",true)&&
+                !inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)&&!g_inputHostTransportFault,
+                "final issue source loss does not dispatch consume quota or fault transport: "+source);
+            transactionObserve("before-issue/"+source+"/refused");
+            restoreSource();inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            transactionCheck(hides()==1&&fixtureRogDeferredCycles.size()==1&&
+                inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)&&
+                fixtureRogDeferredCycles[0].value("executionDeadline",0ULL)==begun.first&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "same source recovers its first issue using retained configuration: "+source);
+            transactionObserve("before-issue/"+source+"/resumed");
+        }
+        // Apply acceptance is progress only. UNKNOWN or an incomplete list has
+        // no source-refusal receipt and cannot authorize an owned refresh.
+        for(const std::string shape:{"unknown","invalid","child-only","root-only","cloak-off","app-missing","inverse-unknown","inverse-on"}){
+            const auto begun=beginTransaction();fixtureRogPartialShape=shape;inputHostRunQueuedLifecycleWork();
+            const auto held=fixtureRogDeferredDebtState();
+            transactionCheck(hides()==1&&held.value("configurationApplied",false)&&!held.value("configurationReady",true)&&
+                !held.value("sourcePending",true)&&!held.value("refreshAttempted",true)&&
+                !fixtureRogDeferredSnapshots.empty()&&fixtureRogDeferredCycles.empty()&&fixtureRogDeferredIssueGuards.empty()&&
+                !inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)&&drained(),
+                "Apply success with partial or UNKNOWN readback cannot masquerade as configuration or source pending: "+shape);
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            transactionCheck(hides()==1&&fixtureRogDeferredCycles.empty()&&depth()==0&&drained()&&
+                !inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode),
+                "unchanged BUS does not turn unknown configuration into a source continuation: "+shape);
+            transactionObserve("configuration-unproven/"+shape);
+        }
+        // Even a previously complete configuration is re-read on resume. The
+        // remembered stage cannot skip a later missing or UNKNOWN driver list.
+        for(const std::string shape:{"unknown","child-only","root-only","cloak-off","app-missing","inverse-unknown"}){
+            const auto begun=beginTransaction();SourceWriter writer;bool reached=false;
+            fixtureRogDeferredPortCallback=[&](){reached=true;writer.lock();};inputHostRunQueuedLifecycleWork();
+            transactionCheck(reached&&fixtureRogDeferredDebtState().value("configurationReady",false)&&
+                g_inputHostDeferredPhysicalHideSourcePending.load()&&hides()==1&&fixtureRogDeferredCycles.empty(),
+                "later bad readback starts after a real complete configuration and source refusal: "+shape);
+            writer.unlock();restoreSource();fixtureRogPartialShape=shape;
+            const auto reads=fixtureRogDeferredSnapshots.size();inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            transactionCheck(hides()==1&&fixtureRogDeferredSnapshots.size()>reads&&fixtureRogDeferredCycles.empty()&&
+                fixtureRogDeferredIssueGuards.empty()&&!inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)&&
+                !g_inputHostDeferredPhysicalHideSourcePending.load()&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs+startProtectionClock==begun.first&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "resume re-reads driver state without re-Apply or refresh when configuration is now unproven: "+shape);
+            transactionObserve("configuration-revalidation/"+shape);
+        }
+        for(const std::string boundary:{"wrong-root","wrong-identity","wrong-journal","unowned-root","unowned-child",
+                "wrong-request","old-Host","old-run","old-power","OFF","expired"}){
+            const auto begun=beginTransaction();SourceWriter writer;bool reached=false;
+            fixtureRogDeferredPortCallback=[&](){reached=true;writer.lock();};inputHostRunQueuedLifecycleWork();
+            transactionCheck(reached&&hides()==1&&fixtureRogDeferredDebtState().value("configurationReady",false)&&
+                g_inputHostDeferredPhysicalHideSourcePending.load()&&fixtureRogDeferredCycles.empty(),
+                "owner boundary starts from real applied readback and unissued source wait: "+boundary);
+            writer.unlock();restoreSource();auto& journal=g_hidHideVisibilityJournal;
+            if(boundary=="wrong-root"){
+                journal.physical.baseContainerDeviceInstanceId+="_OTHER";journal.physicalSources={journal.physical};
+                journal.hiddenByUs={U2W(journal.physical.deviceInstanceId),U2W(journal.physical.baseContainerDeviceInstanceId)};
+            }else if(boundary=="wrong-identity"){
+                journal.physical.physicalIdentity+="_OTHER";journal.physicalSources={journal.physical};
+            }else if(boundary=="wrong-journal")journal.transactionId+="-other-owner";
+            else if(boundary=="unowned-root")journal.hiddenByUs={U2W(journal.physical.deviceInstanceId)};
+            else if(boundary=="unowned-child")journal.hiddenByUs={U2W(journal.physical.baseContainerDeviceInstanceId)};
+            else if(boundary=="wrong-request"){
+                const auto old=g_virtualStartProtection.view(startProtectionClock).requestId;
+                const bool cancelled=g_virtualStartProtection.cancel(startProtectionClock);
+                startProtectionClock+=ymcc::VirtualStartProtection::settleMs;
+                const auto next=g_virtualStartProtection.admit("steamdeck",startProtectionClock);
+                if(!cancelled || !next.accepted || next.requestId==old)throw std::logic_error("ROG003611-wrong-request-not-established");
+            }else if(boundary=="old-Host"){++g_inputHostEpoch;g_inputHostEpochMirror=g_inputHostEpoch;}
+            else if(boundary=="old-run")g_inputHostRunId+="-replacement";
+            else if(boundary=="old-power")g_powerGeneration.fetch_add(1,std::memory_order_acq_rel);
+            else if(boundary=="OFF")g_realStickTest.virtualTargetEnabled=false;
+            else startProtectionClock=begun.first;
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            transactionCheck(hides()==1&&fixtureRogDeferredCycles.empty()&&fixtureRogDeferredIssueGuards.empty()&&
+                !inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)&&
+                !g_inputHostDeferredPhysicalHideSourcePending.load()&&depth()==0&&drained()&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "remembered configuration cannot authorize refresh or new Apply across exact owner boundary: "+boundary);
+            transactionObserve("retired-configuration/"+boundary);
+        }
+        // Retire intent at the final leaf too, after all root/topology queries.
+        for(const std::string boundary:{"expired","OFF","old-power","cancelled-request","wrong-request"}){
+            const auto begun=beginTransaction();bool reached=false,mutationEstablished=false;
+            const auto originalRequest=g_virtualStartProtection.view(startProtectionClock).requestId;
+            fixtureRogDeferredBeforeCycleIssue=[&](){reached=true;
+                if(boundary=="expired"){startProtectionClock=begun.first;mutationEstablished=true;}
+                else if(boundary=="OFF"){g_realStickTest.virtualTargetEnabled=false;mutationEstablished=true;}
+                else if(boundary=="old-power"){g_powerGeneration.fetch_add(1,std::memory_order_acq_rel);mutationEstablished=true;}
+                else {
+                    const bool cancelled=g_virtualStartProtection.cancel(startProtectionClock);
+                    if(boundary=="cancelled-request"){
+                        const auto view=g_virtualStartProtection.view(startProtectionClock);
+                        mutationEstablished=cancelled&&view.requestId==originalRequest&&view.phase=="cancelled"&&view.locked;
+                    }else{
+                        startProtectionClock+=ymcc::VirtualStartProtection::settleMs;
+                        const auto next=g_virtualStartProtection.admit("steamdeck",startProtectionClock);
+                        mutationEstablished=cancelled&&next.accepted&&next.requestId!=originalRequest;
+                    }
+                }};
+            inputHostRunQueuedLifecycleWork();const auto held=fixtureRogDeferredDebtState();
+            transactionCheck(reached&&mutationEstablished&&hides()==1&&fixtureRogDeferredCycles.empty()&&fixtureRogDeferredIssueGuards.size()==1&&
+                !fixtureRogDeferredIssueGuards[0].value("admitted",true)&&!held.value("refreshAttempted",true)&&
+                !held.value("sourcePending",true)&&!inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)&&
+                !g_inputHostTransportFault&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "real final reserve rejects retired intent with no dispatch quota or false transport fault: "+boundary);
+            transactionObserve("before-issue/"+boundary);
+        }
+        // A failed/unknown ACK has already issued. Source loss caused by that
+        // issue cannot acquire a source continuation or replenish its quota.
+        for(const std::string result:{"failure","unknown","success"}){
+            const auto begun=beginTransaction();const auto topology=g_xinputTopologyEpoch.load();
+            fixtureRogDeferredCycleResult=result;bool sourceDropped=false;
+            fixtureRogDeferredCycleCallback=[&](){sourceDropped=true;std::lock_guard<std::mutex> guard(g_gamepadReadMx);
+                g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=g_xinputConnectedMask=0;};
+            inputHostRunQueuedLifecycleWork();const auto issued=fixtureRogDeferredDebtState();
+            transactionCheck(sourceDropped&&hides()==1&&fixtureRogDeferredCycles.size()==1&&fixtureRogDeferredIssueGuards.size()==1&&
+                fixtureRogDeferredIssueGuards[0].value("admitted",false)&&fixtureRogDeferredCycles[0].value("issueGuardAdmitted",false)&&
+                !g_inputHostDeferredPhysicalHideSourcePending.load()&&
+                inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)==(result=="success")&&
+                (result=="success" || issued.value("refreshAttempted",false)),
+                "actual issue followed by source loss is completed only by positive ACK and is never source-pending: "+result);
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();restoreSource();
+            inputHostCoordinatorLateSourceVisibilityTick(true,true);inputHostRunQueuedLifecycleWork();
+            if(result!="success"){inputHostQueueWakePhysicalHide("source-return-reconfirmed");inputHostRunQueuedLifecycleWork();}
+            transactionCheck(hides()==1&&fixtureRogDeferredCycles.size()==1&&fixtureRogDeferredIssueGuards.size()==1&&
+                !g_inputHostDeferredPhysicalHideSourcePending.load()&&g_xinputTopologyEpoch.load()==topology&&depth()==0&&drained()&&
+                inputHostLateHideEpisodeAlreadyCompleted(begun.second.episode)==(result=="success")&&
+                g_virtualStartProtection.view(startProtectionClock).remainingMs+startProtectionClock==begun.first&&
+                g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+                "offline then ready BUS and repeated notification cannot re-Apply or reissue an already dispatched refresh: "+result);
+            transactionObserve("issued-ACK/"+result);
+        }
+        json transactionAssertions=json::array();unsigned transactionFailures=0;
+        for(auto i=transactionFirstAssertion;i<assertionTrace.size();++i){transactionAssertions.push_back(assertionTrace[i]);
+            if(!assertionTrace[i].value("passed",false))++transactionFailures;}
+        cases.back()["transactionSourceCoverage"]={{"fieldEvidence","VC-ROG-SDLeak-20261105-003611"},
+            {"checks",transactionAssertions.size()},{"failed",transactionFailures},{"assertions",transactionAssertions},
+            {"actualWorkerSourceCoordinatorAndReserveHelper",true},{"snapshotAndDispatchIoInert",true},{"hardwareValidated",false}};
         for(const char* reason:{"source-return-reconfirmed","xinput-connect"}){
             const auto deadline=prep(true,std::strcmp(reason,"source-return-reconfirmed")==0?3ULL:4ULL);
             g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;g_xinputConnectedMask=0;
@@ -439,7 +833,9 @@ static void msiLateHidePendingConsumerCases(){
             inputHostQueueWakePhysicalHide("xinput-connect");inputHostRunQueuedLifecycleWork();
             refreshCheck(fixtureRogDeferredCycles.size()==1&&attempted()&&debtRetained()&&
                 !inputHostLateHideEpisodeAlreadyCompleted(first.episode)&&
-                detail("late-hide-complete").value("deferredRefreshOutcome","")=="refresh-unproven-no-reissue",
+                hides()==1&&fixtureRogDeferredIssueGuards.size()==1&&
+                detail("late-hide-complete").value("rootRefreshMayHaveIssued",false)&&
+                detail("late-hide-complete").value("deferredRefreshOutcome","")=="not-requested",
                 "failed or unknown cycle cannot reissue on second event",result);
             observe(std::string("cycle-result/")+result);
         }
@@ -487,10 +883,24 @@ static void msiLateHidePendingConsumerCases(){
             const auto nonTarget=dispatch();
             refreshCheck(fixtureRogDeferredCycles.empty()&&fixtureRogDeferredPortQueries.empty()&&
                 inputHostLateHideEpisodeAlreadyCompleted(nonTarget.episode)&&!debtRetained()&&
+                !detail("late-hide-complete").value("configurationApplied",true)&&
+                !detail("late-hide-complete").value("configurationReady",true)&&
                 detail("late-hide-complete").value("deferredRefreshOutcome","")=="not-rog-game-root",
-                "non-target game identity preserves no-cycle policy",shape);
+                "non-target game identity preserves original optional no-cycle completion policy",shape);
             observe(std::string("non-target/")+shape);
         }
+        // A missing specialization is not a global virtual-target admission gate.
+        // This valid source has no registered ROG SKU for root refresh.
+        prep(true);g_machineIdentity.product="ROG Ally X";
+        const auto unsupportedProfile=dispatch();
+        refreshCheck(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Unsupported&&
+            hides()==1&&fixtureRogDeferredCycles.empty()&&fixtureRogDeferredPortQueries.empty()&&
+            inputHostLateHideEpisodeAlreadyCompleted(unsupportedProfile.episode)&&!debtRetained()&&
+            !detail("late-hide-complete").value("configurationApplied",true)&&
+            !detail("late-hide-complete").value("configurationReady",true)&&
+            detail("late-hide-complete").value("deferredRefreshOutcome","")=="not-rog-game-root",
+            "unregistered ROG refresh profile preserves ordinary virtual hide without a root cycle","unregistered-profile");
+        observe("policy/unregistered-profile");
         for(const int portKind:{1,-1}){
             prep(true);fixtureRogDeferredPortKind=portKind;const auto external=dispatch();
             refreshCheck(fixtureRogDeferredPortQueries.size()==1&&fixtureRogDeferredCycles.empty()&&!attempted()&&
@@ -522,7 +932,7 @@ static void msiLateHidePendingConsumerCases(){
                     complete.value("deferredContextPhase","")=="transaction-or-refresh"&&
                     !complete.value("deferredStartContextReason","").empty()&&
                     complete.value("deferredRefreshOutcome","")==
-                        (std::strcmp(stage,"after-hide")==0?"context-retired":"context-retired-after-port-query"),
+                        (std::strcmp(stage,"after-hide")==0?"not-requested":"context-retired-after-port-query"),
                     "retired original intent at port boundary forbids cycle",std::string(stage)+"/"+boundary);
                 observe(std::string(stage)+"/"+boundary);
             }
@@ -550,7 +960,9 @@ static void msiLateHidePendingConsumerCases(){
             inputHostQueueWakePhysicalHide("xinput-connect");inputHostRunQueuedLifecycleWork();
             refreshCheck(fixtureRogDeferredCycles.size()==1&&attempted()&&debtRetained()&&
                 !inputHostLateHideEpisodeAlreadyCompleted(retired.episode)&&
-                detail("late-hide-complete").value("deferredRefreshOutcome","")=="refresh-unproven-no-reissue",
+                hides()==1&&fixtureRogDeferredIssueGuards.size()==1&&
+                detail("late-hide-complete").value("rootRefreshMayHaveIssued",false)&&
+                detail("late-hide-complete").value("deferredRefreshOutcome","")=="not-requested",
                 "retired cycle ACK consumes single attempt without reissue",boundary);
             observe(std::string("cycle-ACK-retired/")+boundary);
         }
@@ -696,7 +1108,9 @@ static void msiLateHidePendingConsumerCases(){
             cases.back()["partialRuns"].push_back({{"shape",shape},{"before",beforePartialState},{"after",state()},
                 {"hideCalls",hides()},{"snapshots",fixtureRogPartialSnapshotReads},{"forbiddenBefore",beforeForbidden},
                 {"forbiddenAfter",forbiddenIo},{"events",fixtureEvents},{"trace",g_startEntrySeam.trace}});
-            partialCheck(hides()==2&&fixtureRogPartialSnapshotReads==2&&fixtureRogDeferredCycles.size()==1&&
+            partialCheck(hides()==2&&fixtureRogPartialSnapshotReads==3&&fixtureRogDeferredSnapshots.size()==3&&
+                fixtureRogDeferredSnapshots[2]["debtBefore"].value("configurationApplied",false)&&
+                !fixtureRogDeferredSnapshots[2]["debtBefore"].value("configurationReady",true)&&fixtureRogDeferredCycles.size()==1&&
                 inputHostLateHideEpisodeAlreadyCompleted(queued.episode)&&!debtRetained(),
                 std::string("real worker completes one partial original hide before its sole refresh: ")+shape);
             partialCheck(g_virtualStartProtection.view(startProtectionClock).requestId==request&&g_inputHostRunId==run&&

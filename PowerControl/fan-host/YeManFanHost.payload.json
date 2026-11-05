@@ -13,11 +13,11 @@
     },
     {
       "path": "YeManFanBackend.dll",
-      "sha256": "f59113d094e1d5c8d15472ce7bef7b93c37a9bbd2b60db96b0520eaf94df3429"
+      "sha256": "7a4298630f7c93d1b6e96cf434b1e4b56637ced07786d43e846d68838e27e170"
     },
     {
       "path": "YeManFanHost.authorization.md",
-      "sha256": "ef8cd6599f28526af1c5b74d20b710d1fd55b52bd8cd2dbc0c239ce56bcec783"
+      "sha256": "19bb18951dbf7cf1b7e4ae56f292d2df57524c144d67f0e60800dcd746c2f706"
     },
     {
       "path": "YeManFanHost.deps.json",
@@ -25,7 +25,7 @@
     },
     {
       "path": "YeManFanHost.dll",
-      "sha256": "fcf9152b7c6a47b14150a130c31a8e7f1b2420306e9fc079e7435b9db52c8651"
+      "sha256": "654a698338f63832f46ae3c7d73b6f0994bf7374f66bb4c68252a151f9a850d9"
     },
     {
       "path": "YeManFanHost.exe",

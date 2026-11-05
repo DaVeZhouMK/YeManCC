@@ -116,7 +116,7 @@ export function validateTdpPolicy(p,catalog){
  need(amdSource.includes('var originalArguments = (uint[])args.Clone();')&&amdSource.includes('Array.Copy(originalArguments, args, originalArguments.Length);')&&amdSource.includes('if (status == Status.OK)')&&amdSource.includes('if (status != Status.UNKNOWN_CMD)')&&/FAILED\s*=\s*0xFF/.test(amdSource)&&/UNKNOWN_CMD\s*=\s*0xFE/.test(amdSource),'UPSTREAM_CPU_CO_STATUS_CONTRACT');
  const cs=p.voltageOffset.amd?.candidateSelection;
  need(cs?.recipeField==='co_commands'&&JSON.stringify(cs.primaryFields)==='["co_transport","coall"]'&&cs.order==='existing-primary-then-upstream'&&cs.retryOnly?.origin==='firmware_response'&&JSON.stringify(cs.retryOnly.mailboxStatuses)==='[254,255]'&&!Object.hasOwn(cs.retryOnly,'mailboxStatus')&&cs.stopOnSuccess===true&&cs.retryOnTransportFailure===false&&cs.retryOnUnknownResult===false&&cs.eachCandidateAtMostOnce===true&&cs.originalArgumentsPerAttempt===true&&cs.hardwareAcceptanceFromDeclaration===false,'CPU_CO_CANDIDATE_EXECUTION_CONTRACT');
- need(p.voltageOffset.amd?.unit==='co_step'&&p.voltageOffset.amd.minimum===-60&&p.voltageOffset.amd.maximum===60&&p.voltageOffset.amd.step===1&&p.voltageOffset.amd.scope==='all_core'&&p.voltageOffset.amd.readback===false&&p.voltageOffset.amd.encodingSource==='familyRecipes.co_enc','AMD_VOLTAGE_DECLARATION');
+ need(p.voltageOffset.amd?.unit==='co_step'&&p.voltageOffset.amd.minimum===-60&&p.voltageOffset.amd.maximum===0&&p.voltageOffset.amd.step===1&&p.voltageOffset.amd.scope==='all_core'&&p.voltageOffset.amd.readback===false&&p.voltageOffset.amd.encodingSource==='familyRecipes.co_enc','AMD_VOLTAGE_DECLARATION');
  need(p.voltageOffset.intel?.unit==='mv'&&p.voltageOffset.intel.minimum===-150&&p.voltageOffset.intel.maximum===0&&p.voltageOffset.intel.step===1&&p.voltageOffset.intel.scope==='fivr_plane'&&JSON.stringify(p.voltageOffset.intel.planes)==='["core","cache"]'&&p.voltageOffset.intel.readback===true&&p.voltageOffset.intel.encoding==='msr_0x150_offset_bits_31_21_signed11_scale1.024'&&p.voltageOffset.intel.command==='set_vf_direct','INTEL_VOLTAGE_DECLARATION');
  // Keep only the already-consumed core/cache direct SET source values here.
  // GET/readback/completion remains the existing YMCC protocol, not UXTU data.
@@ -140,19 +140,34 @@ export function validateTdpPolicy(p,catalog){
  validateCpuIdentities(p);
  return p;
 }
+function validateYmccStrixHalo(p){
+ const c=p.ymccCompatibility?.amdStrixHalo;
+ need(p.ymccCompatibility?.revision===1&&c?.id==='ymcc-strix-halo-pm-388-r1','YMCC_STRIX_COMPAT_ID');
+ need(c.cpu?.family===26&&JSON.stringify(c.cpu.models)==='[112]'&&c.familyRecipe==='FAM_APU_FT6_NEW'&&c.familyTag===p.familyRecipes[c.familyRecipe]?.tag&&c.writeRoute==='reuse-existing-395-StrixHalo-recipe','YMCC_STRIX_EXISTING_CPU_ROUTE');
+ const rb=c.readback;
+ need(JSON.stringify(rb?.tableVersions)==='[6553868,6554124]'&&rb.tableBytes===0xE50&&rb.unit==='w'&&JSON.stringify(rb.offsets)==='{"stapm":0,"fast":8,"slow":16}'&&rb.toleranceW===0.05&&rb.minimumLimitW===0&&rb.maximumPlausibleLimitW===1000&&rb.mode==='explicit-static-request-only'&&rb.unknownTable==='retain-write-receipt-and-unknown-readback'&&rb.mismatch==='report-not-reflected-without-write-replay'&&c.hardwareAcceptanceFromDeclaration===false,'YMCC_STRIX_PM_CONTRACT');
+ need(c.sources?.length===3,'YMCC_STRIX_SOURCE_COUNT');
+ const pinned={ 'ryzenadj-api.c':'0dafa84f39caa06309c713e0011a436dfbe187dc67d49866a954fb7fa0443860', 'ryzen_smu.c':'181d69adb7893a90d57836e817c72dac1dd97e08eb122f4504b70495993aee8e', 'RyzenSMU.p':'1aed03fe369afc49cf154a83bde104920a34bc37872c68190d686b99f34de7b5'};
+ for(const [name,digest] of Object.entries(pinned)){
+  const namePath='capabilities/upstream/ymcc-strix-halo-pm/'+name,decl=c.sources.find(v=>v.path===namePath);
+  need(decl&&decl.sha256===digest,'YMCC_STRIX_SOURCE_PIN:'+name);
+  const bytes=fs.readFileSync(new URL('../../'+namePath,import.meta.url));need(bytes.length===decl.bytes&&sha(bytes)===decl.sha256,'YMCC_STRIX_SOURCE_IDENTITY:'+name);
+ }
+ return c;
+}
 export function tdpDomain(catalog,policy){
- validateTdpPolicy(policy,catalog);
+ validateTdpPolicy(policy,catalog);validateYmccStrixHalo(policy);
  return {schemaVersion:1,libraryId:policy.libraryId,version:policy.version,policyFile:'capabilities/uxtu-tdp-policy.json',
   policySha256:sha(JSON.stringify(policy)),modelBinding:{source:'diagnostics-only; not capability, admission or watt limits',registeredModels:catalog.devices.length,unknownModel:'retain-unknown-model; existing CPU provider still resolves its own protocol'},
   consumers:{native:'native/main.cpp::tdpExecutionCapability',helper:'PowerControl/pawnio/YeManTdpCtl.py::_AMD_FAMILIES',frontend:'src/bridge/yeman.ts::getTdpExecutionCapability',manualCcd:'native/main.cpp::cpu.topology/cpu.setCcdMode',manualCpuOffset:'PowerControl/pawnio/YeManTdpCtl.py::amd_uv_set_with/intel_uv_set_pawn'},
   dispatch:'existing-engine-owners-generation-and-write-gates-retained',applyHcDeclaredLimits:false,
   machineMaximumKnown:false,activation:policy.activation,hardwareAcceptance:false,workingRoutesPreserved:true,newModulesActivated:false,deferredCapabilities:policy.deferredCapabilities,
-  ccdControl:policy.ccdControl,voltageOffset:policy.voltageOffset,manualControls:policy.manualControls};
+  ccdControl:policy.ccdControl,voltageOffset:policy.voltageOffset,manualControls:policy.manualControls,ymccCompatibility:policy.ymccCompatibility};
 }
 export function buildTdpArtifacts({catalog,policy,helper}){
  const metadata=tdpDomain(catalog,policy),digest=metadata.policySha256;
  const generated=['# BEGIN GENERATED UXTU CAPABILITY DATA',`# Source: capabilities/uxtu-tdp-policy.json; semantic SHA256 ${digest}`,`UXTU_CAPABILITY_LIBRARY_ID = ${quote(policy.libraryId)}`,`UXTU_CAPABILITY_LIBRARY_VERSION = ${quote(policy.version)}`,`UXTU_CAPABILITY_POLICY_SHA256 = ${quote(digest)}`,
-  'CCD_POLICY = '+python(policy.ccdControl),'UV_POLICY = '+python(policy.voltageOffset),'AMD_CPU_IDENTITIES = '+python(policy.amdCpuIdentification),'INTEL_CPU_POLICY = '+python(policy.intelCpuCapabilities),
+  'YMCC_TDP_COMPATIBILITY = '+python(policy.ymccCompatibility),'CCD_POLICY = '+python(policy.ccdControl),'UV_POLICY = '+python(policy.voltageOffset),'AMD_CPU_IDENTITIES = '+python(policy.amdCpuIdentification),'INTEL_CPU_POLICY = '+python(policy.intelCpuCapabilities),
   ...Object.entries(policy.familyRecipes).map(([name,value])=>name+' = '+python(value)),
   ...Object.entries(policy.familyAliases).map(([alias,name])=>alias+' = '+name),
   '_AMD_FAMILIES = ['+policy.familyOrder.join(', ')+']','# END GENERATED UXTU CAPABILITY DATA'].join('\n');

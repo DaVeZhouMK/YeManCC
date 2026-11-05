@@ -87,6 +87,20 @@ class Carrier {
  inline static thread_local std::vector<Carrier*> eventOwners;
  static bool alive(const State& s){if(s.global)return true;DWORD pid=0;return s.target&&s.target->process&&WaitForSingleObject(s.target->process,0)==WAIT_TIMEOUT&&
    IsWindow(s.target->window)&&GetWindowThreadProcessId(s.target->window,&pid)&&pid==s.target->pid;}
+ // Read the same main HWND used by touchpad/window.summon. Visibility does
+ // not release its reserved area, so opening YMCC cannot move the default HUD.
+ bool summonArea(RECT& r)const{
+   if(!config.anchor)return false;
+   if(!IsIconic(config.anchor))return GetWindowRect(config.anchor,&r)!=FALSE;
+   WINDOWPLACEMENT placement{};placement.length=sizeof(placement);
+   if(!GetWindowPlacement(config.anchor,&placement))return false;r=placement.rcNormalPosition;
+   if(!(GetWindowLongPtrW(config.anchor,GWL_EXSTYLE)&WS_EX_TOOLWINDOW)){
+     MONITORINFO info{sizeof(info)};
+     if(!GetMonitorInfoW(MonitorFromWindow(config.anchor,MONITOR_DEFAULTTONEAREST),&info))return false;
+     OffsetRect(&r,info.rcWork.left-info.rcMonitor.left,info.rcWork.top-info.rcMonitor.top);
+   }
+   return r.right>r.left&&r.bottom>r.top;
+ }
  static bool monitorArea(const State& s,RECT& r){
    MONITORINFO info{sizeof(info)};const auto monitor=s.monitor?s.monitor:MonitorFromWindow(nullptr,MONITOR_DEFAULTTOPRIMARY);
    if(!GetMonitorInfoW(monitor,&info)&&!GetMonitorInfoW(MonitorFromWindow(nullptr,MONITOR_DEFAULTTOPRIMARY),&info))return false;
@@ -197,11 +211,21 @@ class Carrier {
    const auto& p=s.drag.position;Json j={{"dragLocked",p.locked},{"dragRevision",p.revision}};
    if(p.placed){j["dragX"]=p.x;j["dragY"]=p.y;}return j;
  }
+ // Rendering may need an automatic offset on the full-screen crosshair canvas.
+ // Keep it transient: only placement(s), never this hint, is saved to settings.
+ Json renderPlacement(const State& s)const{
+   Json value=placement(s);const auto& a=s.placementArea;
+   if(s.crosshair&&!s.notice&&!s.drag.position.placed&&a.right>a.left&&a.bottom>a.top){
+     value["dragX"]=std::clamp((double)(s.panel.left-a.left)/(a.right-a.left),0.0,1.0);
+     value["dragY"]=std::clamp((double)(s.panel.top-a.top)/(a.bottom-a.top),0.0,1.0);
+   }
+   return value;
+ }
  void interaction(const std::shared_ptr<State>& s,bool toast=false,bool commit=false){
    if(commit)s->drag.position.revision=huddrag::nextRevision(s->drag.position.revision,wallNow());
-   Json value={{"id",s->id},{"nonce",s->nonce},{"seq",s->seq},{"dragging",s->drag.dragging()},{"toast",toast},{"placement",placement(*s)}};
+   Json value={{"id",s->id},{"nonce",s->nonce},{"seq",s->seq},{"dragging",s->drag.dragging()},{"toast",toast},{"placement",renderPlacement(*s)}};
    send(s,{{"event","desktopHud.interaction"},{"data",value}});
-   if(commit&&config.notify)config.notify("desktopHud.placement",value);
+   if(commit&&config.notify){value["placement"]=placement(*s);config.notify("desktopHud.placement",value);}
  }
  void stopInteraction(const std::shared_ptr<State>& s,bool destroy=false){
    if(s->inputSuspended)return;s->inputSuspended=true;
@@ -459,8 +483,12 @@ class Carrier {
    RECT monitor=r;if(s->global&&!monitorArea(*s,monitor))return;
    const auto area=[](const RECT& v){return hudplacement::Area{static_cast<int>(v.left),static_cast<int>(v.top),static_cast<int>(v.right),static_cast<int>(v.bottom)};};
    auto p=hudplacement::place(area(r),area(monitor),!s->global,s->width,s->height,s->position);
+   if(s->global&&!s->notice&&!s->drag.position.placed){
+     RECT reserved{};if(summonArea(reserved))p=hudplacement::avoidInitialOverlap(p,area(reserved),s->width,s->height);
+   }
    s->placementArea={p.area.left,p.area.top,p.area.right,p.area.bottom};
    if(s->drag.position.placed){p.x=p.area.left+(int)std::min(std::max(0,p.area.right-p.area.left-s->width),(int)std::lround(s->drag.position.x*(p.area.right-p.area.left)));p.y=p.area.top+(int)std::min(std::max(0,p.area.bottom-p.area.top-s->height),(int)std::lround(s->drag.position.y*(p.area.bottom-p.area.top)));}
+   const bool panelChanged=s->panel.left!=p.x||s->panel.top!=p.y||s->panel.right!=p.x+s->width||s->panel.bottom!=p.y+s->height;
    s->panel={p.x,p.y,p.x+s->width,p.y+s->height};
    int outputWidth=s->width,outputHeight=s->height;
    if(s->crosshair){
@@ -472,6 +500,7 @@ class Carrier {
    if(!p.fits){s->reason=s->global?"content-exceeds-global-viewport":"content-exceeds-game-window";hideOutput(s.get());emit(s,"desktopHud.unavailable");return;}
    RECT old{};GetWindowRect(s->hwnd,&old);
    const bool geometryChanged=old.left!=p.x||old.top!=p.y||old.right-old.left!=outputWidth||old.bottom-old.top!=outputHeight||!IsWindowVisible(s->hwnd);
+   if(s->crosshair&&!s->notice&&!s->drag.position.placed&&(panelChanged||geometryChanged))interaction(s);
    if(geometryChanged){
      SetWindowPos(s->hwnd,HWND_TOPMOST,p.x,p.y,outputWidth,outputHeight,SWP_NOACTIVATE|SWP_SHOWWINDOW);
      if(s->controller){s->controller->put_IsVisible(TRUE);s->controller->NotifyParentWindowPositionChanged();}if(s->device)s->device->Commit();
@@ -480,6 +509,15 @@ class Carrier {
      // event. Repair on that event or a confirmed overlap in the existing
      // data cadence; never raise an already-front HUD or steal game input.
      SetWindowPos(s->hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+   }
+   // SetWindowRgn also synchronously sends WM_WINDOWPOSCHANGED. Update the
+   // display HWND first so its unchanged mismatch guard observes committed
+   // geometry, rather than cancelling the drag against the previous frame.
+   if(!s->notice&&(panelChanged||geometryChanged)){
+     const RECT output{p.x,p.y,p.x+outputWidth,p.y+outputHeight};
+     if(!hudinput::constrainDisplayRegion(s->hwnd,output,s->panel,s->crosshair)){
+       s->reason="display-region-unavailable";hideOutput(s.get());emit(s,"desktopHud.unavailable");return;
+     }
    }
    // A rejected or altered display placement must not leave a live input
    // panel at coordinates where the rendered monitor no longer exists.

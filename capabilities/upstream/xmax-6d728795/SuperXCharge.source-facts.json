@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "scope": "Super X firmware charge limit only; raw 0x04A3 dual transport",
+  "implementation": "Original YMCC checked native ABI adaptation from audited protocol facts; no upstream implementation copied",
+  "source": {
+    "repository": "the-reengineers/XmaX",
+    "commit": "6d728795511c2f9f683d1757e72481236de9b23a",
+    "files": [
+      {
+        "path": "backend/src/platform/platform_win32.cpp",
+        "bytes": 87825,
+        "sha256": "bd7bd2feaad1b4eb90ecf98c78a2a915d1b1235c6b0b30268b1bb66b2232a59c",
+        "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\primary\\backend\\src\\platform\\platform_win32.cpp"
+      },
+      {
+        "path": "backend/src/power.h",
+        "bytes": 3187,
+        "sha256": "ecbfeb63b634fc1727a671b814fb415b49ca562fadab5fe1a5c0ef045adf6ece",
+        "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\primary\\backend\\src\\power.h"
+      },
+      {
+        "path": "backend/src/power.cpp",
+        "bytes": 2821,
+        "sha256": "06489cbb478542f2b0e7ec71584ac8b5f72f48c492c69ceaec3e094c1b4044d8",
+        "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\primary\\backend\\src\\power.cpp"
+      }
+    ]
+  },
+  "identity": {
+    "repository": "torvalds/linux",
+    "commit": "0b6573e23acc7bca808e539e3edea49683f106de",
+    "file": "drivers/platform/x86/oxpec.c",
+    "sha256": "161fa21f5bd4e332914880dff780224a17a0ee4a0c94c467069b6555885974e3",
+    "evidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-063-ONEX-INPUT-LIGHTING\\next-source-discovery\\linux-oxpec.c",
+      "bytes": 22607,
+      "sha256": "161fa21f5bd4e332914880dff780224a17a0ee4a0c94c467069b6555885974e3"
+    },
+    "boardVendorContains": "ONE-NETBOOK",
+    "boardNameExact": "ONEXPLAYER SUPER X",
+    "predicateCase": "Ordinal",
+    "systemProductAlias": false,
+    "processorPredicate": false,
+    "existingFanFacts": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+    "corroboration": {
+      "commit": "493f34eacd779e6551e5405440008ea5488c22b0",
+      "file": "drivers/platform/x86/oxpec.c",
+      "source": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\primary\\linux-new-identity\\oxpec.c",
+        "bytes": 23679,
+        "sha256": "659859901e00d712f054017ab58ce2e2d76c8bc8f52ab17d48bcd81757ddae41"
+      },
+      "capture": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\primary\\linux-new-identity\\CAPTURE-RECEIPT.json",
+        "bytes": 1268,
+        "sha256": "8631072beb958483df36a29ff36a932ce5d1adcd1943e93c5df47c9f9b698b64"
+      },
+      "scope": "Same DMI identity only; no Linux charging transport imported"
+    }
+  },
+  "protocol": {
+    "limitRegister": "0x04A3",
+    "read": {
+      "namespace": "root\\WMI",
+      "class": "UMAInterface",
+      "instanceNameContains": "SETUMAWMI",
+      "method": "GetEcValue",
+      "indexCallerVariant": "VT_I4",
+      "address": "raw EC16",
+      "actualData": [
+        "byte",
+        "Int32 0..255",
+        "UInt32 0..255",
+        "UInt16 0..255 only for CIM UInt16 managed projection"
+      ],
+      "endpoint": "Unique matching instance, retained exact nonempty __PATH rechecked before every invocation",
+      "queryTimeoutSeconds": 3,
+      "invokeOptionsTimeoutSeconds": 3,
+      "invokeDeadlineEnforced": false
+    },
+    "write": {
+      "transport": "checked-it87-superio-ec16",
+      "slot": 1,
+      "registerPort": "0x4E",
+      "dataPort": "0x4F",
+      "unlock": [
+        "0x87",
+        "0x01",
+        "0x55",
+        "0xAA"
+      ],
+      "indexedSelectors": [
+        "0x2E",
+        "0x2F"
+      ],
+      "addressHighIndex": "0x11",
+      "addressLowIndex": "0x10",
+      "dataIndex": "0x12",
+      "exitWrite": "none in pinned source",
+      "selectOperation": "ioctl_select_slot",
+      "writeOperation": "ioctl_pio_outb"
+    },
+    "range": {
+      "minimum": 75,
+      "maximum": 100,
+      "source": "backend/src/power.h CHARGE_LIMIT_MIN / CHARGE_LIMIT_MAX",
+      "productStep": 5,
+      "productChoices": [
+        75,
+        80,
+        85,
+        90,
+        95,
+        100
+      ]
+    }
+  },
+  "fixedModule": {
+    "library": "deps/ymcc-shared-runtime/bin/LibreHardwareMonitorLib.dll",
+    "librarySha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+    "resource": "LibreHardwareMonitor.Resources.PawnIo.LpcIO.bin",
+    "resourceBytes": 17172,
+    "resourceSha256": "3dcf8b2bc80ff642d97c4608511a818642b5bf315ff53df3df393d043e71d101",
+    "newDllOrModule": false
+  },
+  "ymccAdaptation": {
+    "ownership": "Dormant provider owns reader and writer before external work. Checked writer opens and retains its own exact PawnIO handle before loading the already fixed module.",
+    "loaderReason": "The internal LHM loader can lose a failed-load handle. Original YMCC checked ABI adaptation preserves that owner instead of reusing its unchecked loader or void LpcIo wrappers.",
+    "acknowledgement": "Check each DeviceIoControl success and exact zero returned bytes for fixed no-output load/select/write calls. Failure or unknown completion stops subsequent port writes and prevents replay.",
+    "serialization": "Existing global ISA bus serialization and original acquiring-thread lease ownership",
+    "independentReadback": "Fresh UMA before-state immediately before the checked SIO write, followed by a separate UMA readback through the existing Controller flow",
+    "stop": "No automatic firmware reset. Parent per-operation lease retains exact failed provider cleanup debt; repeated release/refresh/shutdown retries remaining objects before new opens.",
+    "synchronousWmiBoundary": "Pinned System.Management synchronous ExecMethod does not consume InvokeMethodOptions.Timeout. Three-second options are not an aggregate deadline. An admitted hung operation retains reader/provider/domain/native owner; shutdown reports pending and does not permit a replacement generation."
+  },
+  "consumers": {
+    "reader": "native/BatteryHost/SuperXUmaChargeReader.cs",
+    "writer": "native/BatteryHost/SuperXCheckedEcWriter.cs",
+    "provider": "native/BatteryHost/SuperXChargeProvider.cs",
+    "dispatcher": "capabilities/HcBatteryCapabilityCatalog.cs",
+    "policy": "native/BatteryHost/Policy.cs",
+    "controller": "native/BatteryHost/Controller.cs",
+    "inProcessOwner": "native/BatteryHost/InProcessEntry.cs",
+    "domainOwner": "native/BatteryHost/HostDomainRouter.cs"
+  },
+  "evidence": [
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\SUPERX-CHARGE-RANGE-ADDENDUM.json",
+      "bytes": 782,
+      "sha256": "aab46ae8317ea1ac8520752f68e17919a90ff8acefd6bab76df7a47f5e58a872"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\SUPERX-CHARGE-API-DECISION.json",
+      "bytes": 2813,
+      "sha256": "9780d26881c25cdf8afd2dfc4c1c43e75ead91727e77b7a9b231e1c50523d781"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\FIXED-LPC-API-RAW.json",
+      "bytes": 29576,
+      "sha256": "6d3854b77418687160f0a999adb1af099b7e274982f6f6fe533db904654895ae"
+    }
+  ],
+  "excluded": [
+    "0x04A4 bypass",
+    "UMA charging setter",
+    "Guessed Super I/O charging read",
+    "40 or 50 percent lower bounds from other models",
+    "CPU/system-product/marketing aliases",
+    "New DLL/module/driver/service",
+    "Hardware acceptance"
+  ],
+  "hardwareAcceptance": "UNKNOWN; source facts and authored inert tests do not establish physical battery behavior"
+}

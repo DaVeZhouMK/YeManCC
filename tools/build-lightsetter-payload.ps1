@@ -145,7 +145,7 @@ try{
  if($lightingTestExport){Assert-YmccLightingCompiledTestPayload -ProjectRoot $project -WorkspaceRoot $workspace -CandidateReceiptPath $candidateReceipt -PayloadRoot $destination|Out-Null}else{Assert-YmccLightingBuildCandidate -ProjectRoot $project -WorkspaceRoot $workspace -CandidateReceiptPath $candidateReceipt -PayloadRoot $destination|Out-Null}
  $marker=Resolve-YmccLightingChild $workspace 'Build/App/LightSetter/CANDIDATE-ACCEPTANCE.json';New-Item -ItemType Directory -Path (Split-Path -Parent $marker) -Force|Out-Null
  Replace $candidateReceipt $marker
- $report=[ordered]@{schemaVersion=1;status='PASS';candidateRoot=$candidate;candidateReceipt=$candidateReceipt;marker=$marker;helperSha256=$helperSha;coreSha256=$pin;sourceInputs=$inputs.Count;runtimeFiles=6;promotedFiles=$changes.Count;destination=$destination;changes=$changes;toolCalls=@($toolCalls);hardwareIo=$false;helperMainInvoked=$false;fullBuildExecuted=$false;fullPackageExecuted=$false}
+ $report=[ordered]@{schemaVersion=1;status='PASS';candidateRoot=$candidate;candidateReceipt=$candidateReceipt;marker=$marker;helperSha256=$helperSha;coreSha256=$pin;sourceInputs=$inputs.Count;runtimeFiles=$runtime.Count;promotedFiles=$changes.Count;destination=$destination;changes=$changes;toolCalls=@($toolCalls);hardwareIo=$false;helperMainInvoked=$false;fullBuildExecuted=$false;fullPackageExecuted=$false}
  Save (Join-Path $candidate 'BUILD-RESULT.json') $report
  Write-Output ('LIGHTING_BUILD_CANDIDATE_OK helper='+$helperSha+' receipt='+$marker)
 }catch{

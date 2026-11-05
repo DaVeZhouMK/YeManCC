@@ -31,7 +31,8 @@ inline nlohmann::json startupGyroPresetParams(const std::string& preset, const n
                   {"antiDeadzone", 20}, {"autoCalibrate", true}};
         if (preset == "fps") {
             params.update(json{{"outputStick", "right"}, {"outputAxis", "xy"},
-                               {"motionInput", "local-space"}, {"aimingSightsTrigger", "LT"}, {"gyroWeight", 1.3}});
+                               {"motionInput", "local-space"}, {"aimingSightsTrigger", ""}, {"gyroWeight", 1.3},
+                               {"motionMode", "off"}, {"motionTrigger", "LT"}});
         } else if (preset == "racing") {
             params.update(json{{"outputStick", "left"}, {"outputAxis", "x"}, {"motionInput", "joystick-steering"}});
         } else if (preset == "steam") {

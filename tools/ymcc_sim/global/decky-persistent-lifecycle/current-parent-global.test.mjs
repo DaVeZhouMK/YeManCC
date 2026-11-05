@@ -9,13 +9,127 @@ import {OWNED_SOURCES} from './owned-adapter.mjs';
 import {validateCurrentEnvelope,validateBaselineReceipt,aggregateSeven,coverageMap,allocateBudget,sourceMap,naturalExit,verifyCurrentDisk,parentDeclaration,legacyMigration,EXACT_25,REQUIREMENTS,JS_REGRESSIONS,NATIVE_REGRESSIONS,BUDGETS,currentChildToolPins} from './current-parent-global.mjs';
 import {verifyDeferredResourceRevalidation,verifyDeferredResourceExecution,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {validateOriginalResult as validateCurrentOriginal,ORIGINAL_CASES as originalCoreCases} from './owned-run.mjs';
-import {createRequiredStageGuard} from './current-parent-global.mjs';
+import {createRequiredStageGuard,raceInitialProducerFailure,collectInitialProducersAfterFailure} from './current-parent-global.mjs';
 // Explicit finite factory controls only; the original history-bound suite stays in else.
 const requiredStageFilterText=process.env.YMCC_PARENT_GLOBAL_CASE_FILTER;
 if(requiredStageFilterText!==undefined){
  const requested=JSON.parse(requiredStageFilterText);
  if(!Array.isArray(requested)||requested.length===0||requested.some(name=>typeof name!=='string')||new Set(requested).size!==requested.length)throw Error('YMCC_PARENT_GLOBAL_CASE_FILTER_INVALID');
+ // Synthetic disk receipts exercise the exported production admission, never a producer.
+ let budgetControlSequence=0;
+ function budgetControl({raw=true,parentRemainingMs=458684,allocatedMs=Math.min(240000,parentRemainingMs),editRequest=()=>{},editTerminal=()=>{},editResult=()=>{}}={}){
+  const repo=path.resolve(import.meta.dirname,'../../../..'),coreEvidence=path.resolve(repo,'../../../Testing/YMCC/Evidence');
+  assert(process.env.YMCC_PARENT_GLOBAL_CONTROL_RESULT,'DIRECTED_CONTROL_EVIDENCE_REQUIRED');
+  const outputRoot=path.dirname(path.resolve(process.env.YMCC_PARENT_GLOBAL_CONTROL_RESULT));assert(outputRoot.startsWith(coreEvidence+path.sep),'DIRECTED_CONTROL_CORE_EVIDENCE_REQUIRED');
+  const directory=path.join(outputRoot,'fixtures',String(++budgetControlSequence).padStart(3,'0'));fs.mkdirSync(directory,{recursive:true});
+  const write=(name,value)=>{const file=path.join(directory,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,typeof value==='string'?value:JSON.stringify(value)+'\n',{flag:'wx'});return file;};
+  const pin=file=>({path:file,bytes:fs.statSync(file).size,sha256:crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')});
+  const source=pin(write('control/source.h','SYNTHETIC metadata-only source')),program=pin(write('program.fixture','SYNTHETIC never executed')),helper=pin(write('helper.fixture','SYNTHETIC never executed')),launcher=pin(write('launcher.fixture','SYNTHETIC never executed'));
+  const sources=[{path:'control/source.h',sha256:source.sha256}],tools=[program,helper,launcher],before=new Map(sources.map(row=>[row.path,row.sha256]));
+  const result={fieldRegression:'decky-update-disconnect-20261020',nativeChecks:1,passed:true,inputsUnchanged:true,sourceInputs:sources,realSteamActions:0,userSettingsWrites:0,hardwareWrites:0};editResult(result);
+  const originalResult=pin(write('result.json',result)),args=[path.join(directory,'baseline.fixture'),'--evidence-dir',directory],argumentsPin=pin(write('arguments.json',args));
+  const parentStartedAtEpochMs=1700000000000,allocatedAtEpochMs=parentStartedAtEpochMs+BUDGETS.parent-parentRemainingMs,launchRequestedEpochMs=allocatedAtEpochMs+6,deadlineEpochMs=allocatedAtEpochMs+allocatedMs;
+  const budget={schemaVersion:1,parentStartedAtEpochMs,parentBudgetMs:BUDGETS.parent,allocatedAtEpochMs,requestCreatedEpochMs:allocatedAtEpochMs+3,originalBudgetMs:240000,allocatedBudgetMs:allocatedMs,parentRemainingBeforeMs:parentRemainingMs,deadlineEpochMs,cleanupReserveMs:5000};
+  const request={schemaVersion:1,kind:'ymcc-raw-program-v1',budget,cancelNonce:'a'.repeat(64),cwd:directory,arguments:argumentsPin,environment:{},sources:[source],tools,maxOutputBytes:16*1024*1024};editRequest(request);
+  const requestPin=pin(write('request.json',request)),logs=Object.fromEntries(['stdout','stderr'].map(name=>[name,pin(write(name+'.raw','SYNTHETIC metadata-only log'))]));
+  const declared=[...request.sources.map(row=>({role:'sources',...row})),...request.tools.map(row=>({role:'tools',...row}))];
+  const terminal={schemaVersion:1,kind:'ymcc-raw-program-terminal-v1',reason:'NATURAL',collectionComplete:true,cancelled:false,ownerLost:false,residualDescendants:false,timedOut:false,outputLimitExceeded:false,logsClosedAndFlushed:true,declaredPinsUnchanged:true,
+   request:{...requestPin,bytes:fs.statSync(requestPin.path).size},argumentsPin,launcher:{pid:222,program:launcher,helper},owner:{pid:111,expectedStartTicks:'638355968000000000',handleBound:true},
+   business:{pid:333,program,arguments:args,cwd:directory,atomicJobAdmission:true,originalDeadlineEpochMs:deadlineEpochMs,runCutoffEpochMs:deadlineEpochMs-5000,cleanupReserveMs:5000},businessExitCode:0,
+   job:{activeProcessesFinal:0,zeroObservedBeforeDispose:true,disposed:true,terminateRequested:false,cleanupError:null},logs,declaredInputsBefore:declared,declaredInputsAfter:declared.map(({path,bytes,sha256})=>({path,bytes,sha256})),startedEpochMs:launchRequestedEpochMs+1,finishedEpochMs:launchRequestedEpochMs+123,deadlineEpochMs,runCutoffEpochMs:deadlineEpochMs-5000,cleanupReserveMs:5000,helperExitCode:0};editTerminal(terminal);
+  const terminalPin=pin(write('terminal.json',terminal));
+  const receipt={id:'original.plugins.decky-update-recovery',pid:333,program,arguments:args,cwd:directory,finishedAt:new Date(terminal.finishedEpochMs).toISOString(),exitCode:0,error:null,signal:null,timedOut:false,outputTruncated:false,elapsedMs:124,timeoutMs:raw?deadlineEpochMs-launchRequestedEpochMs:240000,originalBudgetMs:240000,parentRemainingBeforeMs:parentRemainingMs,budgetClipped:allocatedMs<240000,boundSourceInputs:sources,toolArtifacts:tools,originalResult,stdout:logs.stdout,stderr:logs.stderr};
+  if(raw)receipt.rawExecution={budget:structuredClone(budget),launchRequestedEpochMs,terminal:terminalPin,request:requestPin,arguments:argumentsPin,helperSource:helper,launcher:terminal.launcher,helperPid:222,helperExitCode:0,helperSignal:null,actualBusiness:terminal.business,completion:{kind:'NATURAL',forcedToolFinalization:false,productResourcesWaived:false},job:terminal.job,logs:terminal.logs,sourceBefore:terminal.declaredInputsBefore,sourceAfter:terminal.declaredInputsAfter,collectionComplete:true,cancelled:false,ownerLost:false,residualDescendants:false};
+  return {result,process:receipt,before,required:['control/source.h']};
+ }
+ const admitBudget=c=>validateBaselineReceipt(c.result,c.process,c.before,c.required);
+ // Real parent race/guard/cleanup helpers with deferred proofs; no process is started.
+ const flushInitialProducers=()=>new Promise(resolve=>setImmediate(resolve));
+ const initialProof=(id,extra={})=>({id,exitCode:id==='current.native.entry'?2:0,elapsedMs:1,timeoutMs:100,error:null,signal:null,timedOut:false,outputTruncated:false,...extra});
+ function initialProducerControl({cancelNativeError=null,validateBaseline=()=>{}}={}){
+  const trace=[],proofs=[],cleanupErrors=[],cases=[],failures=[],stops=[];
+  const mock=id=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {resolve,reject,cancelCalls:0,wait:()=>promise,async cancel(){this.cancelCalls++;if(id==='current.native.entry'&&cancelNativeError)throw cancelNativeError;return await promise;}};};
+  const native=mock('current.native.entry'),baseline=mock('original.plugins.decky-update-recovery');
+  const persist=proof=>{if(!proofs.some(row=>row.id===proof.id))proofs.push(proof);};
+  const guard=createRequiredStageGuard({cases,recordFailure:(id,error)=>{failures.push({id,error});cases.push({id,passed:false});},recordStop:row=>stops.push(row)});
+  let observedCause=null;
+  const done=(async()=>{
+   try{
+    const early=await raceInitialProducerFailure(native,baseline);
+    if(early)await guard('original.plugins.decky-update-recovery',()=>{if(early.proof)persist(early.proof);throw early.cause;});
+    await guard('current.native.entry',async()=>{const proof=await native.wait();persist(proof);naturalExit(proof,2);trace.push('native');cases.push({id:proof.id,passed:true});});
+    await guard('original.plugins.decky-update-recovery',async()=>{const proof=await baseline.wait();persist(proof);naturalExit(proof,0);validateBaseline(proof);trace.push('baseline');cases.push({id:proof.id,passed:true});});
+    await guard('later',()=>{trace.push('later');cases.push({id:'later',passed:true});});
+   }catch(cause){observedCause=cause;await collectInitialProducersAfterFailure([native,baseline],persist,cleanup=>cleanupErrors.push(cleanup));}
+   return observedCause;
+  })();
+  return {native,baseline,done,trace,proofs,cleanupErrors,cases,failures,stops,get cause(){return observedCause;}};
+ }
  const directedControls=[
+  ['initial producer baseline nonzero cancels and awaits unresolved native once before stopping',async()=>{
+   const c=initialProducerControl(),failed=initialProof('original.plugins.decky-update-recovery',{exitCode:1}),cancelled=initialProof('current.native.entry',{exitCode:99,error:'RAW_PRODUCER_CANCELLED'});let finished=false;c.done.then(()=>{finished=true;});
+   c.baseline.resolve(failed);await flushInitialProducers();assert.equal(c.native.cancelCalls,1);assert.equal(finished,false);assert.deepEqual(c.trace,[]);assert.strictEqual(c.proofs[0],failed);assert.equal(c.stops[0].id,failed.id);
+   c.native.resolve(cancelled);const cause=await c.done;assert.strictEqual(cause,c.stops[0].error);assert.match(cause.message,/UNEXPECTED_CHILD_EXIT/);assert.equal(c.native.cancelCalls,1);assert.equal(c.baseline.cancelCalls,1);assert.deepEqual(c.proofs,[failed,cancelled]);assert.deepEqual(c.cleanupErrors,[]);assert.deepEqual(c.cases,[{id:failed.id,passed:false}]);assert.deepEqual(c.trace,[]);
+  }],
+  ['initial producer successful baseline first keeps native then baseline validation',async()=>{
+   const c=initialProducerControl(),baseline=initialProof('original.plugins.decky-update-recovery');c.baseline.resolve(baseline);await flushInitialProducers();assert.equal(c.native.cancelCalls,0);assert.deepEqual(c.trace,[]);assert.deepEqual(c.cases,[]);
+   c.native.resolve(initialProof('current.native.entry'));assert.equal(await c.done,null);assert.deepEqual(c.trace,['native','baseline','later']);assert.equal(c.native.cancelCalls,0);assert.equal(c.baseline.cancelCalls,0);assert.deepEqual(c.stops,[]);
+  }],
+  ['initial producer native succeeds first retains normal sequence',async()=>{
+   const c=initialProducerControl();c.native.resolve(initialProof('current.native.entry'));await flushInitialProducers();assert.deepEqual(c.trace,['native']);assert.equal(c.baseline.cancelCalls,0);
+   c.baseline.resolve(initialProof('original.plugins.decky-update-recovery'));assert.equal(await c.done,null);assert.deepEqual(c.trace,['native','baseline','later']);assert.equal(c.native.cancelCalls,0);assert.equal(c.baseline.cancelCalls,0);
+  }],
+  ['initial producer handled semantic negative root zero does not cancel',async()=>{
+   const baseline=initialProof('original.plugins.decky-update-recovery',{handledSemanticNegative:{observedExitCode:2,rejected:true}}),c=initialProducerControl({validateBaseline:proof=>assert.equal(proof.handledSemanticNegative.rejected,true)});
+   c.baseline.resolve(baseline);await flushInitialProducers();assert.equal(c.native.cancelCalls,0);assert.deepEqual(c.cases,[]);c.native.resolve(initialProof('current.native.entry'));assert.equal(await c.done,null);assert.deepEqual(c.trace,['native','baseline','later']);assert.deepEqual(c.failures,[]);assert.equal(c.native.cancelCalls,0);
+  }],
+  ['initial producer cancel rejection is retained without masking baseline cause',async()=>{
+   const cleanup=new Error('owned cancel rejected'),c=initialProducerControl({cancelNativeError:cleanup}),failed=initialProof('original.plugins.decky-update-recovery',{exitCode:1});c.baseline.resolve(failed);const cause=await c.done;
+   assert.match(cause.message,/UNEXPECTED_CHILD_EXIT/);assert.notStrictEqual(cause,cleanup);assert.strictEqual(cause,c.failures[0].error);assert.strictEqual(cause,c.stops[0].error);assert.deepEqual(c.cleanupErrors,[cleanup]);assert.deepEqual(c.proofs,[failed]);assert.equal(c.native.cancelCalls,1);assert.deepEqual(c.trace,[]);assert.deepEqual(c.cases,[{id:failed.id,passed:false}]);
+  }],
+  ['initial producer baseline root error stops before native validation',async()=>{
+   const c=initialProducerControl(),failed=initialProof('original.plugins.decky-update-recovery',{error:'ROOT_LAUNCH_ERROR'});c.baseline.resolve(failed);await flushInitialProducers();assert.equal(c.native.cancelCalls,1);c.native.resolve(initialProof('current.native.entry',{error:'CANCELLED'}));assert.match((await c.done).message,/CHILD_PROCESS_ERROR/);assert.equal(c.stops[0].id,failed.id);assert.deepEqual(c.trace,[]);assert.strictEqual(c.proofs[0],failed);
+  }],
+  ['initial producer baseline timeout stops before native validation',async()=>{
+   const c=initialProducerControl(),failed=initialProof('original.plugins.decky-update-recovery',{exitCode:null,timedOut:true,error:'TIMEOUT'});c.baseline.resolve(failed);await flushInitialProducers();assert.equal(c.native.cancelCalls,1);c.native.resolve(initialProof('current.native.entry',{error:'CANCELLED'}));assert.match((await c.done).message,/UNEXPECTED_CHILD_EXIT/);assert.equal(c.stops[0].id,failed.id);assert.strictEqual(c.proofs[0],failed);assert.deepEqual(c.trace,[]);
+  }],
+  ['initial producer native first failure still cancels and awaits baseline once',async()=>{
+   const c=initialProducerControl(),failed=initialProof('current.native.entry',{exitCode:1});c.native.resolve(failed);await flushInitialProducers();assert.equal(c.baseline.cancelCalls,1);assert.equal(c.stops[0].id,failed.id);c.baseline.resolve(initialProof('original.plugins.decky-update-recovery',{error:'CANCELLED'}));const cause=await c.done;assert.strictEqual(cause,c.failures[0].error);assert.equal(c.native.cancelCalls,1);assert.equal(c.baseline.cancelCalls,1);assert.equal(c.proofs.length,2);assert.deepEqual(c.trace,[]);
+  }],
+  ['initial producer baseline root zero still requires full baseline validation',async()=>{
+   const original=new Error('baseline full receipt rejected'),c=initialProducerControl({validateBaseline:()=>{throw original;}});c.baseline.resolve(initialProof('original.plugins.decky-update-recovery'));await flushInitialProducers();assert.equal(c.native.cancelCalls,0);assert.deepEqual(c.cases,[]);c.native.resolve(initialProof('current.native.entry'));assert.strictEqual(await c.done,original);assert.equal(c.stops[0].id,'original.plugins.decky-update-recovery');assert.deepEqual(c.trace,['native']);assert(!c.cases.some(row=>row.id==='later'));assert(!c.cases.some(row=>row.id==='original.plugins.decky-update-recovery'&&row.passed));
+  }],
+  ['initial producer baseline wait rejection retains original cause',async()=>{
+   const original=new Error('raw proof collection rejected'),c=initialProducerControl();c.baseline.reject(original);await flushInitialProducers();assert.equal(c.native.cancelCalls,1);c.native.resolve(initialProof('current.native.entry',{error:'CANCELLED'}));assert.strictEqual(await c.done,original);assert.strictEqual(c.stops[0].error,original);assert.deepEqual(c.cleanupErrors,[original]);assert.deepEqual(c.trace,[]);
+  }],
+  ['raw baseline admits exact allocation with six milliseconds of request setup',()=>{const c=budgetControl();assert.equal(c.process.timeoutMs,239994);assert.equal(c.process.rawExecution.budget.allocatedBudgetMs,240000);assert.equal(c.process.budgetClipped,false);assert.strictEqual(admitBudget(c),c.result);} ],
+  ['raw closing pins accept the actual roleless helper schema',()=>{const c=budgetControl();assert.strictEqual(admitBudget(c),c.result);} ],
+  ['raw closing pins reject missing input',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsAfter.pop()});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_AFTER_COUNT/);} ],
+  ['raw closing pins reject equal-count duplicated input',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsAfter[1]={...t.declaredInputsAfter[0]}});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_AFTER:/);} ],
+  ['raw closing pins reject changed hash',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsAfter[0].sha256='f'.repeat(64)});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_AFTER:/);} ],
+  ['raw closing pins reject changed bytes',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsAfter[0].bytes++});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_AFTER:/);} ],
+  ['raw closing pins reject reordered same members',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsAfter.reverse()});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_AFTER:/);} ],
+  ['raw closing pins reject extra unproduced role field',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsAfter[0].role='tools'});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_AFTER_SCHEMA:/);} ],
+  ['raw admission pins retain source versus tool roles',()=>{const c=budgetControl({editTerminal:t=>t.declaredInputsBefore[0].role='tools'});assert.throws(()=>admitBudget(c),/RAW_BUDGET_DECLARED_BEFORE:/);} ],
+  ['raw baseline rejects genuinely parent-clipped allocation',()=>{const c=budgetControl({parentRemainingMs:239000});assert.equal(c.process.budgetClipped,true);assert.throws(()=>admitBudget(c),/REUSE_REQUIRES_FULL_ORIGINAL_BUDGET/);} ],
+  ['raw baseline rejects expanded allocation',()=>{const c=budgetControl({allocatedMs:240001});assert.throws(()=>admitBudget(c),/RAW_ALLOCATION_CLIPPED_OR_EXPANDED/);} ],
+  ['raw baseline rejects request and result budget disagreement',()=>{const c=budgetControl();c.process.rawExecution.budget.deadlineEpochMs++;assert.throws(()=>admitBudget(c),/RAW_BUDGET_PROOF_MISMATCH/);} ],
+  ['raw baseline rejects terminal deadline mismatch',()=>{const c=budgetControl({editTerminal:t=>t.deadlineEpochMs++});assert.throws(()=>admitBudget(c),/RAW_TERMINAL_DEADLINE_MISMATCH/);} ],
+  ['raw baseline rejects business deadline mismatch',()=>{const c=budgetControl({editTerminal:t=>t.business.originalDeadlineEpochMs++});assert.throws(()=>admitBudget(c),/ERR_ASSERTION/);} ],
+  ['raw baseline rejects effective timeout mismatch',()=>{const c=budgetControl();c.process.timeoutMs--;assert.throws(()=>admitBudget(c),/RAW_EFFECTIVE_TIMEOUT_MISMATCH/);} ],
+  ['raw baseline rejects mismatched request pin',()=>{const c=budgetControl();c.process.rawExecution.request.sha256='f'.repeat(64);assert.throws(()=>admitBudget(c),/RAW_BUDGET_PIN_CHANGED/);} ],
+  ['raw baseline rejects mismatched terminal pin',()=>{const c=budgetControl();c.process.rawExecution.terminal.sha256='f'.repeat(64);assert.throws(()=>admitBudget(c),/RAW_BUDGET_PIN_CHANGED/);} ],
+  ['raw baseline rejects legacy request without precise allocation',()=>{const c=budgetControl({editRequest:q=>delete q.budget});assert.throws(()=>admitBudget(c),/RAW_PRECISE_BUDGET_REQUIRED/);} ],
+  ['raw baseline rejects marker without pinned provenance',()=>{const c=budgetControl({raw:false});c.process.rawExecution={};assert.throws(()=>admitBudget(c),/RAW_BUDGET_PIN_REQUIRED/);} ],
+  ['raw baseline rejects incorrect clipping classification',()=>{const c=budgetControl();c.process.budgetClipped=true;assert.throws(()=>admitBudget(c),/RAW_CLIPPED_SEMANTICS/);} ],
+  ['raw baseline rejects incomplete Job completion',()=>{const c=budgetControl({editTerminal:t=>t.job.activeProcessesFinal=1});assert.throws(()=>admitBudget(c),/RAW_COMPLETION_ACTIVE_PROCESSES/);} ],
+  ['raw baseline rejects changed bound source proof',()=>{const c=budgetControl();c.process.boundSourceInputs=[{path:'control/source.h',sha256:'f'.repeat(64)}];assert.throws(()=>admitBudget(c),/RAW_BUDGET_BOUND_SOURCES/);} ],
+  ['raw baseline rejects changed bound tool proof',()=>{const c=budgetControl();c.process.toolArtifacts=[];assert.throws(()=>admitBudget(c),/RAW_BUDGET_BOUND_TOOLS/);} ],
+  ['raw baseline rejects original result pin mismatch',()=>{const c=budgetControl();c.process.originalResult.sha256='f'.repeat(64);assert.throws(()=>admitBudget(c),/EVIDENCE_FILE_CHANGED/);} ],
+  ['raw baseline preserves original FAIL',()=>{const c=budgetControl({editResult:r=>r.passed=false});assert.throws(()=>admitBudget(c),/BASELINE_ORIGINAL_FAIL/);} ],
+  ['sequential baseline accepts only exact original timeout',()=>{const c=budgetControl({raw:false});assert.strictEqual(admitBudget(c),c.result);} ],
+  ['sequential baseline rejects shortened timeout',()=>{const c=budgetControl({raw:false});c.process.timeoutMs=239994;assert.throws(()=>admitBudget(c),/REUSE_REQUIRES_FULL_ORIGINAL_BUDGET/);} ],
+  ['sequential baseline rejects expanded timeout',()=>{const c=budgetControl({raw:false});c.process.timeoutMs=240001;assert.throws(()=>admitBudget(c),/REUSE_REQUIRES_FULL_ORIGINAL_BUDGET/);} ],
 
   ['original typed source freeze includes every declared input before parent consumption',()=>{
    const repo=path.resolve(import.meta.dirname,'../../../..'),entry=path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),text=fs.readFileSync(entry,'utf8');

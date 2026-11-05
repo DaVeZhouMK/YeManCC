@@ -33,6 +33,27 @@ inline constexpr Descriptor descriptorFor(std::string_view cls) {
         return {true, true, InitProfile::Apex, true};
     return {};
 }
+// Consumer-facing source description shares the exact reader descriptor.
+// This grants no device write or default-action suppression verification.
+inline constexpr const char* captureRoute(std::string_view cls, std::string_view key) {
+    const auto desc = descriptorFor(cls);
+    if (!desc.valid) return "unsupported";
+    if (key == "l4" || key == "r4" || key == "special") return "onex-vendor-held";
+    if (key == "keyboard" || (key == "orange" && desc.role21Orange))
+        return "keyboard-vk-or-onex-vendor-held";
+    return "keyboard-vk";
+}
+// APEX exposes three physical special keys plus three firmware gestures.
+// Preserve the existing action IDs while counting physical keys only once.
+// Exact descriptor admission prevents these gestures changing OP3/X2 catalogs.
+inline constexpr std::array<std::string_view, 2> physicalKeyIds(std::string_view cls, std::string_view key) {
+    if (descriptorFor(cls).initProfile != InitProfile::Apex) return {};
+    if (key == "turbo" || key == "keyboard" || key == "orange") return {key, {}};
+    if (key == "orangekb") return {"keyboard", "orange"};
+    if (key == "orangetb") return {"turbo", "orange"};
+    if (key == "orangelp") return {"orange", {}};
+    return {};
+}
 // Input and output lengths are observed separately. Neither implies the other's layout.
 inline constexpr bool reportBytesAllowed(std::size_t n) { return n == 64 || n == 65; }
 // HC ReadReportAsync exposes Data without its independent report ID. Keep the

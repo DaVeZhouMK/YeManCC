@@ -1,6 +1,7 @@
 import {buildLightingArtifacts} from './lib/hc_lighting_catalog.mjs';
 import {validateSuperJoyExtension} from './lib/hc_lighting_source_adapters.mjs';
 import fs from 'node:fs';
+import {isDeepStrictEqual} from 'node:util';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
@@ -27,11 +28,58 @@ if(lightingOnly){
  check(mini.brightness&&mini.declaredEffects.join(',')==='solid,rainbow,preset'&&!mini.presetAvailable&&!mini.statusAvailable&&mini.statusTransportDisabled,'X1Mini-existing-actions-and-transport-exclusions-preserved');
  check(JSON.stringify(actual.metadata.disabledActions)===JSON.stringify(catalog.domains.lighting.disabledActions),'existing-preset-status-policy-preserved');
  check(JSON.stringify(actual.metadata.secondColorExclusions)===JSON.stringify(policy.secondColorExclusions),'source-bound-exclusion-retained-in-same-library-metadata');
- check(actual.metadata.rows.filter(r=>r.name!=='OneXPlayerX1Mini').every(r=>JSON.stringify(r)===JSON.stringify(catalog.domains.lighting.rows.find(old=>old.name===r.name))),'all-other-frozen-lighting-rows-unchanged');
+ const apexId='hc.device.OneXPlayerApex',apexClass='HandheldCompanion.Devices.OneXPlayerApex';
+ const apex=actual.metadata.rows.find(r=>r.deviceId===apexId),frozenApex=catalog.devices.find(d=>d.deviceId===apexId);
+ const override=policy.reviewedConsumerOverrides[0];
+ const frozenX1=catalog.devices.find(d=>d.name==='OneXPlayerX1');
+ const methodHashes={SetLedColor:'ec78229ee1e5193756ba48e1b6d2eeb46a2083f5423d07b0cd98180a60a77f92',
+  SetLedBrightness:'4c11baf43f1b72b4237e612ad32a5ad650363da372826dd18b419502c26135d5',
+  SetLedStatus:'64ff6b0f634a08596bf01b04bedb5edcece8172b84b2ab082d7a33797b8ca306',
+  SetLEDPreset:'41c28ac07661ffcaf003a45f8b5e1101c3ed193c23abe986a9db830de8a94ca5'};
+ const frozenMethods=Object.fromEntries(Object.keys(methodHashes).map(name=>[name,{owner:'OneXPlayerX1',...frozenX1.methods.find(m=>m.name===name)}]));
+ const frozenConsumer={brightness:true,secondColor:true,declaredEffects:['solid','preset'],presetDeclared:true,presetAvailable:true,
+  statusAvailable:true,statusTransportDisabled:false,methodSources:frozenMethods};
+ check(frozenApex.sourcePath==='deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs'&&
+  frozenApex.sourceSha256==='c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60'&&
+  isDeepStrictEqual(frozenApex.inheritance,['IDevice','OneXAOKZOE','OneXPlayerX1','OneXPlayerX1AMD','OneXPlayerApex'])&&
+  isDeepStrictEqual(frozenApex.declared.Capabilities.minimum,['DynamicLighting','DynamicLightingBrightness','DynamicLightingSecondLEDColor'])&&
+  isDeepStrictEqual(frozenApex.declared.DynamicLightingCapabilities.minimum,['LEDPreset','SolidColor']),'APEX-frozen-identity-and-declared-facts-retained');
+ check(Object.entries(methodHashes).every(([name,hash])=>frozenMethods[name].sourceSha256===hash),'APEX-all-four-frozen-X1-method-pins-retained');
+ const factsFile=override.sourceDependencies.find(d=>d.role==='source-facts').path;
+ const expectedApex={deviceId:apexId,deviceClass:apexClass,name:'OneXPlayerApex',brightness:true,secondColor:false,
+  sourceDeclaredSecondColor:true,consumerSecondColor:false,declaredEffects:['solid','rainbow'],presetDeclared:false,presetAvailable:false,
+  statusAvailable:false,statusTransportDisabled:true,nativeAliasTargets:[],methodSources:frozenMethods,independent:null,
+  offAvailable:true,fixedSpeed:true,consumerFixedSpeed:true,origin:'reviewed-consumer-override',sourceAdapter:'onex-apex-hid-v2',
+  sourcePins:{huesync:'7176803ce147d8bffef126720c21e4f42e0f3612',hcWindows:'f2e58468d9917189d4be7ccfc242385ce2c3035b'},
+  sourceDependencies:override.sourceDependencies,consumerSources:override.consumerSources,semanticSourceFacts:read(factsFile),
+  frozenConsumer,requestLimits:override.requestLimits};
+ check(isDeepStrictEqual(apex,expectedApex),'APEX-entire-effective-row-matches-exact-reviewed-consumer-and-frozen-provenance');
+ check(isDeepStrictEqual(actual.metadata.reviewedConsumerOverrides,policy.reviewedConsumerOverrides)&&
+  policy.reviewedConsumerOverrides.length===1&&override.deviceId===apexId&&override.sourceAdapter==='onex-apex-hid-v2'&&
+  !actual.metadata.extensionRows.some(r=>r.name==='OneXPlayerApex'),'APEX-corrects-one-existing-row-without-extension-or-registration-growth');
+ check(actual.metadata.rows.filter(r=>r.name!=='OneXPlayerX1Mini'&&r.deviceId!==apexId).every(r=>{
+  const old=catalog.domains.lighting.rows.find(old=>old.name===r.name);
+  const expected=r.name==='OneXPlayerX1'?{...old,nativeAliasTargets:old.nativeAliasTargets.filter(id=>id!==apexId)}:old;
+  return isDeepStrictEqual(r,expected);
+ }),'all-other-frozen-lighting-rows-unchanged');
+ const x1=actual.metadata.rows.find(r=>r.name==='OneXPlayerX1');
+ const x1Children=['OneXPlayerX1AMD','OneXPlayerX1Intel','OneXPlayerX1Mini','OneXPlayerX1Pro'].map(name=>'hc.device.'+name);
+ check(isDeepStrictEqual(x1.nativeAliasTargets,x1Children)&&
+  actual.metadata.rows.every(r=>r.deviceId===apexId||!r.nativeAliasTargets.includes(apexId)),'APEX-no-other-execution-identity-alias-and-X1-other-children-preserved');
+ const managed=actual.artifacts['capabilities/HcLightingCapabilityCatalog.generated.cs'],header=actual.artifacts['native/oem_lighting_operations.h'];
+ const expectedManaged='        new("hc.device.OneXPlayerApex", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, true) { SourceAdapter = LightingSourceAdapter.ApexHidV2, FixedSpeed = true },';
+ check(managed.split(/\r?\n/).includes(expectedManaged),'APEX-effective-adapter-and-fixed-speed-carried-by-original-managed-row');
+ check(header.includes('    {true, true, false, false, NativeProvider::Helper, 5, true, false, SourceAdapter::ApexHidV2}, // OneXPlayerApex')&&
+  header.includes('device && device->deviceId == "hc.device.OneXPlayerApex"'),'APEX-effective-adapter-carried-by-original-native-row-and-override-selector');
+ const expectedNativeAlias='    if (e->deviceId == "hc.device.OneXPlayerX1") return '+x1Children.map(id=>'a->deviceId == '+JSON.stringify(id)).join(' || ')+';';
+ check(header.split(/\r?\n/).includes(expectedNativeAlias)&&!managed.includes('("hc.device.OneXPlayerX1", "hc.device.OneXPlayerApex")')&&
+  x1Children.every(id=>managed.includes('("hc.device.OneXPlayerX1", '+JSON.stringify(id)+')')),'native-and-managed-generated-identity-aliases-reject-expectedX1-actualAPEX-only');
+ check(header.includes('if (a->deviceId == e->deviceId) return true;'),'canonical-same-device-id-identity-remains-accepted');
  check(JSON.stringify(actual.metadata.extensionRows)===JSON.stringify(catalog.domains.lighting.extensionRows),'reviewed-extension-rows-match-published-catalog');
  check(actual.artifacts['capabilities/HcLightingCapabilityCatalog.generated.cs'].includes('new("hc.device.OneXPlayerX1Mini", true, false,'),'effective-exclusion-consumed-by-managed-descriptor');
  const native=actual.artifacts['native/main.cpp'].replace(/\r\n/g,'\n'),signature='static const std::vector<std::string>& ymccDeviceClassSecondColorSet()',start=native.indexOf(signature),end=native.indexOf('\n}',start),secondSet=native.slice(start,end+2);
  check(start>=0&&end>start&&!secondSet.includes('"HandheldCompanion.Devices.OneXPlayerX1Mini"'),'effective-exclusion-consumed-by-native-second-color-function');
+ check(!secondSet.includes(JSON.stringify(apexClass)),'APEX-secondary-consumption-excluded-from-original-native-set');
  check(['OneXPlayerX1AMD','OneXPlayerX1Pro','OneXPlayer3'].every(n=>secondSet.includes('"HandheldCompanion.Devices.'+n+'"')),'X1AMD-X1Pro-OXP3-native-secondary-consumers-retained');
  check(catalog.devices.length===92&&actual.metadata.rows.length===47,'frozen92-class-and47-lighting-roots-preserved');
  check(oxp.presets.length===10&&oxp.presets.some(p=>p.value===1000)&&oxp.declaredEffects.join(',')==='solid,breathing,preset','original-OXP3-presets-effects-and-classic-preserved');
@@ -46,6 +94,12 @@ if(lightingOnly){
  check(actual.artifacts['native/lighting_device_core_binding.h'].includes('HandheldCompanion.Devices.OneXPlayerX2MiniPro')&&actual.artifacts['native/lighting_device_core_binding.h'].includes('action == "off"'),'X2MiniPro-ordinary-native-independent-route-present');
  function reject(id,mutate,code){const candidate=structuredClone(policy);mutate(candidate);let reason;try{build(candidate);}catch(error){reason=error.message;}
   check(typeof reason==='string'&&reason.startsWith(code),id);checks.at(-1).rejection=reason;}
+ reject('missing-reviewed-APEX-consumer-override',p=>delete p.reviewedConsumerOverrides,'LIGHTING_APEX_OVERRIDE_REQUIRED');
+ reject('duplicate-reviewed-APEX-consumer-override',p=>p.reviewedConsumerOverrides.push(structuredClone(p.reviewedConsumerOverrides[0])),'LIGHTING_APEX_OVERRIDE_REQUIRED');
+ reject('APEX-override-cannot-target-X1',p=>p.reviewedConsumerOverrides[0].name='OneXPlayerX1','LIGHTING_APEX_OVERRIDE_SCOPE');
+ reject('APEX-override-source-pins-cannot-drift',p=>p.reviewedConsumerOverrides[0].sourcePins.huesync='0'.repeat(40),'LIGHTING_APEX_SOURCE_PINS');
+ for(const [name,value] of [['secondColor',true],['ledEffects',['SolidColor','LEDPreset']],['presetAvailable',true],['statusAvailable',true],['fixedSpeed',false],['offAvailable',false]])
+  reject('APEX-exact-consumer-fact-cannot-drift:'+name,p=>p.reviewedConsumerOverrides[0][name]=value,'LIGHTING_APEX_CONSUMER_CAPABILITIES');
  reject('missing-source-bound-second-color-exclusion',p=>delete p.secondColorExclusions,'LIGHTING_SECOND_COLOR_EXCLUSION_REQUIRED');
  reject('empty-source-bound-second-color-exclusion',p=>p.secondColorExclusions=[],'LIGHTING_SECOND_COLOR_EXCLUSION_REQUIRED');
  reject('duplicate-second-color-exclusion',p=>p.secondColorExclusions.push(structuredClone(p.secondColorExclusions[0])),'LIGHTING_SECOND_COLOR_EXCLUSION_REQUIRED');

@@ -1481,6 +1481,7 @@ internal static partial class Program
             _sdkDisposeFailure.Length != 0;
         // R39: host-local SDK object lifetime diagnostics; no OS or frame reads.
         private readonly TargetCreationLifetimeEvidence? _targetCreationLifetime = TargetCreationLifetimeEvidence.TryCreate();
+        private HostSdkFirstWitness? _sdkFirstWitness;
         private long _lastSubmitElapsedUs;
         // GP-926R17 §4：后端实际 submit 的最小聚合回执——只绑当前 tuple/会话（HELLO 与每次
         // PREPARE/RECREATE 重置）；native 在唤醒与借用结算各取一次。不改判定/幂等/后端架构。
@@ -2713,6 +2714,7 @@ internal static partial class Program
                 if (envelope.Persona == PsEndpointOwnership.Persona)
                     _psEndpointOwnership.Created(_controller);
                 _targetCreationLifetime?.Created(targetCreationAttempt, _controller);
+                try{(_sdkFirstWitness??=new HostSdkFirstWitness()).BindLifetime(_controller,_targetCreationLifetime?.Capture());}catch{}
                 CaptureMsiSdkDeclaredIdentityDiagnostic();
                 LogUsbipTransportLifecycleSafely("target-created");
                 _screenPadOwnsReport = false;
@@ -2960,13 +2962,15 @@ internal static partial class Program
         {
             try
             {
-                if (!_costFlagEnabled) return default;
                 var binding = cause ?? _tuple;
                 // Never substitute a trigger/prepare envelope for actual internal controls.
                 if (binding is null || canonical is null) return default;
+                var first=(_sdkFirstWitness??=new HostSdkFirstWitness()).Begin(_hostInstanceId,controller,binding,canonical,
+                    cause?.Sequence??_lastSequence,cause is not null,reason,encoderIndex,report,state);
+                if (!_costFlagEnabled) return new HostVirtualSignalEvidence.Attempt(){SdkFirstWitness=first};
                 var evidence = _virtualSignalEvidence ??= new HostVirtualSignalEvidence(CostStateDir);
                 return evidence.BeginSafely(_hostInstanceId, controller, binding, canonical,
-                    cause?.Sequence ?? _lastSequence, cause is not null, reason, encoderIndex, report, state);
+                    cause?.Sequence ?? _lastSequence, cause is not null, reason, encoderIndex, report, state) with {SdkFirstWitness=first};
             }
             catch { return default; }
         }
@@ -2975,6 +2979,7 @@ internal static partial class Program
         {
             try
             {
+                _sdkFirstWitness?.Complete(attempt.SdkFirstWitness,exception);
                 if (_costFlagEnabled) _virtualSignalEvidence?.CompleteSafely(attempt, exception);
             }
             catch { }
@@ -3665,7 +3670,7 @@ internal static partial class Program
             {
                 if (ok && envelope?.Command == "HELLO" && status == "host-hello")
                 {
-                    var capable = response[..^1] + ",\"msiReportChainDiagnosticVersion\":" + MsiReportChainProtocol1410.DiagnosticVersion + ",\"msiSteamDeckReleaseFenceVersion\":1,\"psEndpointOwnershipVersion\":1}";
+                    var capable = response[..^1] + ",\"msiReportChainDiagnosticVersion\":" + MsiReportChainProtocol1410.DiagnosticVersion + ",\"msiSteamDeckReleaseFenceVersion\":1,\"psEndpointOwnershipVersion\":1,\"sdkFirstWitnessVersion\":1,\"sdkFirstWitnessSampleLimit\":256}";
                     if (_msiNonSdReleaseDiagnosticRequested) capable = capable[..^1] + ",\"msiNonSdReleaseEvidenceVersion\":1}";
                     capable = HostRuntimeBinaryIdentity.AppendToHello(capable, _runtimeBinaryIdentity, MaxMessageBytes);
                     _reportChainCapabilityAdvertised1410 = true;
@@ -3680,7 +3685,8 @@ internal static partial class Program
                 }
             }
             catch { }
-            return AppendCompactFrameReplyBinding(AppendPsEndpointOwnership(response, envelope), envelope, ok, status);
+            var completeResponse=AppendCompactFrameReplyBinding(AppendPsEndpointOwnership(response, envelope), envelope, ok, status);
+            return _sdkFirstWitness?.TryAppend(completeResponse,MaxMessageBytes) ?? completeResponse;
         }
 
         private static bool TryVerifyLockedAsset(out string detail)

@@ -1,5 +1,37 @@
 # 虚拟手柄全机型消费覆盖表
 
+<!-- HC083-APEX-OEM-CURRENT:BEGIN -->
+## HC083：APEX OEM 当前派生片段
+
+捕获时间：`2026-11-05T02:21:46.037059+00:00`；仅更新 `models[71].oem` 的 APEX 事实。以下主体的 2026-10-25／10-31 日期、来源锚点和“当前”措辞保留为原历史快照；顶层 `capturedAt`、全部旧 `sourcePins` 及 `selectorAnchors` 原样保留，未整体重审，不能据本节把旧 SHA 或旧 PASS 转授当前源码。
+
+实际 `kOneXApexKeys` 为 **8 个操作条目**：**6 个专用操作对应 3 个实体专用键**（Turbo、Keyboard、Orange），另有 **L4/R4 两个背键**。Orange 的原生形态为 `HidButton`。组合与长按不增加实体键数量；`physicalKeyIds` 为现有合同投影，背键沿用调用方 `[keyId]` 回退。
+
+| 操作 ID | 原生 form | backIndex | 实体键投影 | 现有采集路线 |
+|---|---|---:|---|---|
+| turbo | KeyboardVk | 0 | turbo | keyboard-vk |
+| keyboard | KeyboardVk | 0 | keyboard | keyboard-vk-or-onex-vendor-held |
+| orange | HidButton | 0 | orange | keyboard-vk-or-onex-vendor-held |
+| orangekb | KeyboardVk | 0 | keyboard,orange | keyboard-vk |
+| orangetb | KeyboardVk | 0 | turbo,orange | keyboard-vk |
+| orangelp | KeyboardVk | 0 | orange | keyboard-vk |
+| l4 | HidButton | 1 | l4 | onex-vendor-held |
+| r4 | HidButton | 2 | r4 | onex-vendor-held |
+
+HC 原声明、`declarationSource` 与冻结身份未改；原 `OEMChords.Clear` 表示清除键盘 chord，不能据此删掉既有 vendor reader 继承的 L4/R4。JSON 的 `currentConsumerCapture` 单独保存本次事实、历史快照说明和捕获引用。本节是静态导航事实，不证明按键动作、游戏消费或硬件验收。
+
+下表 SHA 属于已保全的完整源码副本；只审查所列符号行段，`originalPath` 仅描述原始位置。原主线可继续并行变化，不能把这些捕获 SHA 声称为稍后实时主线 SHA。
+
+| originalPath（相对主线） | 已审符号与原行号 | 不可变捕获副本 | 副本完整 SHA256 |
+|---|---|---|---|
+| `native/main.cpp` | kOneXApexKeys:19431–19442, oemCatalogForFamily / OneXPlayer branch:19558–19567, oemUnifiedInputBindingFor:19605–19609, oem.keys.get:81050–81111, oem.keys.status:81115–81150 | [main.cpp](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION/agent-family/source-snapshots/20261105T022114186323Z/native/main.cpp) | `43ad64f61ebc683c126404603be1c00ff586f6af29ef7d5556390769675f6b00` |
+| `capabilities/HcOneXVendorInputContract.h` | descriptorFor:24–35, captureRoute:38–45, physicalKeyIds:49–56 | [HcOneXVendorInputContract.h](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION/agent-family/source-snapshots/20261105T022114186323Z/capabilities/HcOneXVendorInputContract.h) | `58da11d48a2c5fa9629c3e477a1b857114a630931a83ae3cac6b007d73c50f50` |
+| `capabilities/HcOemInputCapabilityBinding.h` | InputBindingCache::bind:69–96 | [HcOemInputCapabilityBinding.h](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION/agent-family/source-snapshots/20261105T022114186323Z/capabilities/HcOemInputCapabilityBinding.h) | `08954d8070d2fc1486a7788f4e24b08e92edade94be1ad927e019686fc981068` |
+| `src/bridge/controllerFeatureStatus.ts` | keyStatus / physicalIds:60–78 | [controllerFeatureStatus.ts](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION/agent-family/source-snapshots/20261105T022114186323Z/src/bridge/controllerFeatureStatus.ts) | `d8c731b7a6e6fb091e8dea8eee27df0a0bfe13efa2d6122c8b6f8871fd097882` |
+
+捕获清单：[CAPTURE-MANIFEST.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION/agent-family/source-snapshots/20261105T022114186323Z/CAPTURE-MANIFEST.json)，SHA256 `34fa19bd2ebbd85ed15c1303fcc9b77920ff65647a9e4f5f9fd6bb17dc6e40fc`。完整 preimage 及精确差异、CAS 和静态核对结果在本轮 `agent-family/D01-IMPLEMENTATION.json` 与报告中。本节未运行产品、夹具或硬件，不新增 runtime 接线。
+<!-- HC083-APEX-OEM-CURRENT:END -->
+
 本页已按 **2026-10-25 23:25 新导出**重新核对：102 行及18条共享OEM关系未改变，JSON中的来源快照与锚点已刷新；最新三机支持和FanHost／虚拟InputHost身份区分见[修复支持说明](CONTROLLER-REPAIR-SUPPORT.md)。
 
 2026-10-25 来源检查快照。机器可读：[CONTROLLER-MODEL-COVERAGE.json](CONTROLLER-MODEL-COVERAGE.json)；任务入口：[CONTROLLER-REPAIR-SUPPORT.md](CONTROLLER-REPAIR-SUPPORT.md)。按 JSON 的 `models[].name/deviceClass` 读取具体行；不必每次加载整个历史。2026-10-31 仅将 OneXPlayer3 行按 f2e58468 后的当前选择器修正为 `OneXX3 / kOneXX3Keys`（六键）；其余行仍为 2026-10-25 快照。

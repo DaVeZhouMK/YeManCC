@@ -1,11 +1,36 @@
-import {performanceModelModule} from './fixtures/decky_game_memory_store.mjs';
-import { task } from './fixtures/decky_task_paths.mjs';
 // Actual shipped client, browser IO/clock replaced with fakes.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+const originalMissingBootstrapCase='missing bootstrap uses one capped local retry and recovers after a missed native event';
+const selectionArgs=process.argv.slice(2);
+let exactCase=null,commandLifetimeOnly=false,legacyArtifactArgument=null;
+for(let i=0;i<selectionArgs.length;i++){
+ const argument=selectionArgs[i];
+ if(argument==='--command-lifetime'){
+  assert(!commandLifetimeOnly,'CLIENT_CASE_SELECTION_DUPLICATE');commandLifetimeOnly=true;continue;
+ }
+ if(argument==='--case'||argument.startsWith('--case=')){
+  assert(exactCase===null,'CLIENT_CASE_SELECTION_DUPLICATE');
+  const value=argument==='--case'?selectionArgs[++i]:argument.slice('--case='.length);
+  assert(typeof value==='string'&&value.length>0&&!value.startsWith('--'),'CLIENT_CASE_SELECTION_EMPTY');
+  assert([originalMissingBootstrapCase,'non-loopback bootstrap rejected','restart run ID disconnects and no mutation replay','port zero and out-of-range bootstrap are rejected'].includes(value),'CLIENT_CASE_SELECTION_UNKNOWN');
+  exactCase=value;continue;
+ }
+ // Original parent/release callers pass one absolute artifact directory as a
+ // redundant argument. Output ownership still comes from the original env.
+ assert(typeof argument==='string'&&argument.length>0&&!argument.startsWith('-')&&path.isAbsolute(argument)&&legacyArtifactArgument===null,'CLIENT_ARGUMENT_UNKNOWN:'+argument);
+ legacyArtifactArgument=argument;
+}
+assert(!(exactCase!==null&&commandLifetimeOnly),'CLIENT_CASE_SELECTION_CONFLICT');
+const skipped=[];
+// Admission precedes local fixture imports, output preparation and client VM.
+const {performanceModelModule}=await import('./fixtures/decky_game_memory_store.mjs');
+const {task}=await import('./fixtures/decky_task_paths.mjs');
+const rawPath=path.resolve(task,'validation/MIRROR-CLIENT-SELFTEST.json');
+if(fs.lstatSync(rawPath,{throwIfNoEntry:false}))throw new Error('Refusing to overwrite existing mirror client selftest raw: '+rawPath);
 const root = path.resolve(import.meta.dirname, '..');
 const require = createRequire(path.join(root,'package.json'));
 const { transformSync } = require('esbuild');
@@ -24,8 +49,30 @@ assert(clientDeclaration&&ts.isNewExpression(clientDeclaration.initializer)&&cli
 const provider=clientDeclaration.initializer.arguments[0].properties.find(node=>ts.isPropertyAssignment(node)&&node.name.getText(entryTree)==='bootstrap');
 assert(provider&&ts.isArrowFunction(provider.initializer),'Actual entry-point bootstrap provider missing');
 const readBootstrap=host=>vm.runInNewContext('('+provider.initializer.getText(entryTree)+')',{window:host});
+// Scoped execution reuses the original consumers; inherited full-suite failures
+// remain failures, and skipped names are never counted as executed.
+const lifetimeCases=new Set([
+ 'hidden/unloaded releases socket and timers','old view packets ignored after hide',
+ 'request freezes identity/generation/revision and args','second mutation cannot overlap first',
+ 'timeout never resends a possibly applied action','close rejects inflight mutation and reconnect does not replay it',
+ 'power not ready rejects changes without send','fan requests do not include game identity',
+ 'new native run cancels old mutation, never replays into new host',
+ 'slider accepts only the exact rendered snapshot','slider rendered revision change rejects before sending any mutation',
+ 'slider game identity cannot migrate to a different foreground game',
+ 'monitor accepts one boolean intent without requiring a game or fan permission',
+ 'hiding during busy admission preserves one accepted write until its reply',
+ 'a timeout observer hiding the last page cannot restart paused passive snapshot demand',
+ ...['hud','wallpaper','updater'].map(c=>'failed hidden pause recovers '+c+' transport without replaying an uncertain action')
+]);
 const cases=[];
-async function check(name,action) { try{await action();cases.push({name,status:'passed'});}catch(error){throw new Error(name+': '+error.message,{cause:error});} }
+function writeRaw(failure=null) {
+ const results=failure?[...cases,{name:failure.name,status:'failed',error:failure.error?.stack||String(failure.error)}]:cases;
+ const raw={project:'YMCC Decky 侧边栏',cases:results.length,selection:exactCase!==null?'exact-case':commandLifetimeOnly?'command-lifetime':'all',...(exactCase!==null?{selectedCases:[exactCase]}:{}),skipped,results,realSockets:false,hardware:false,productionClientSource:true};
+ if(failure)Object.assign(raw,{status:'failed',executed:results.length,passed:cases.length,failed:1,stoppedEarly:true,remaining:{status:'NOT_RUN',afterCase:failure.name,scope:'All subsequent check calls were not reached; their selection was not evaluated and they are excluded from passed and skipped.'}});
+ const fd=fs.openSync(rawPath,'wx');
+ try{fs.writeFileSync(fd,JSON.stringify(raw,null,2));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+}
+async function check(name,action) { if((exactCase!==null&&name!==exactCase)||(commandLifetimeOnly&&!lifetimeCases.has(name))){skipped.push(name);return;}try{await action();cases.push({name,status:'passed'});}catch(error){try{writeRaw({name,error});}catch(rawError){console.error('Failed to preserve mirror client selftest failure raw at '+rawPath+':',rawError);}throw new Error(name+': '+error.message,{cause:error});} }
 function fixture({boot=true,steam}={}) {
   const timers=new Map(); const sockets=[];let next=0;
   const bootstrap={endpoint:'ws://127.0.0.1:12345/mirror',token:'TEST-ONLY',runId:'run-1'};
@@ -79,7 +126,18 @@ await verify('last network owner hiding cannot revoke a separate feature binding
  const f=fixture({boot:false});try{let called=0;f.client.setVisible(true);const late=[...f.timers.values()][0].action;f.client.waitForBootstrap({},()=>called++);f.client.setVisible(false);assert.equal(f.timers.size,1);assert.equal([...f.timers.values()][0].delay,1000);late();assert.equal(f.timers.size,1);f.makeBootstrapAvailable();f.fireDelay(1000);await flush();assert.equal(called,1);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
 });
 for(const raw of [{runId:'native-revoked',revoked:true},{endpoint:'ws://example.com:12345/mirror',token:'fake',runId:'wrong',wallpaperProtocol:1},{endpoint:'ws://127.0.0.1:0/mirror',token:'fake',runId:'wrong',wallpaperProtocol:1},{endpoint:'ws://127.0.0.1:12345/mirror',runId:'missing-token',wallpaperProtocol:1}])await verify('available OFF or invalid binding ends observation without bypassing protocol/address identity '+raw.runId+String(raw.endpoint??''),async()=>{
- const f=fixture({boot:false});try{let called=0;f.client.waitForBootstrap({},()=>{called++;if(f.nativeWindow.__YMCC_DECKY_MIRROR__?.wallpaperProtocol===1)f.client.setPassiveDemand('wallpaper',true);});f.nativeWindow.__YMCC_DECKY_MIRROR__=raw;f.fireDelay(250);await flush();assert.equal(called,1);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+  const f=fixture({boot:false});try{
+   let called=0;f.client.waitForBootstrap({},()=>{called++;if(f.nativeWindow.__YMCC_DECKY_MIRROR__?.wallpaperProtocol===1)f.client.setPassiveDemand('wallpaper',true);});
+   f.nativeWindow.__YMCC_DECKY_MIRROR__=raw;f.fireDelay(250);await flush();assert.equal(called,1);assert.equal(f.sockets.length,0);
+   // The one-shot observation has ended. An explicit passive owner still owns
+   // the original capped retry while this malformed binding remains unusable.
+   const passiveRequested=raw.wallpaperProtocol===1;
+   assert.equal(f.timers.size,passiveRequested?1:0,'Only explicit passive demand may retain its original retry');
+   const late=[...f.timers.values()].map(timer=>timer.action);
+   if(passiveRequested)assert.equal([...f.timers.values()][0].delay,250,'The explicit owner uses the original first backoff');
+   f.client.setPassiveDemand('wallpaper',false);assert.equal(f.timers.size,0,'Released demand leaves no observation or transport timer');
+   for(const action of late)action();await flush();assert.equal(called,1);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0,'A cancelled retry cannot revive released demand');
+  }finally{f.client.dispose();}
 });
 await verify('one observer throwing cannot block another one-shot observer or retain timers',async()=>{
  const f=fixture({boot:false});try{let called=0;f.client.waitForBootstrap({},()=>{throw Error('inert observer failure')});f.client.waitForBootstrap({},()=>called++);f.makeBootstrapAvailable();f.fireDelay(250);await flush();assert.equal(called,1);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,0);}finally{f.client.dispose();}
@@ -161,13 +219,39 @@ await check('missing bootstrap uses one capped local retry and recovers after a 
  }
  await verifyBootstrapWaitOwnership();
 });
-await check('non-loopback bootstrap rejected',()=>{const f=fixture();f.bootstrap.endpoint='ws://example.com:12345/mirror';f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();});
+function verifyRejectedVisibleBinding(endpoint){
+ const f=fixture();try{
+  f.bootstrap.endpoint=endpoint;f.client.setVisible(true);
+  assert.equal(f.sockets.length,0,'A visible owner never bypasses the loopback endpoint restriction');
+  assert.equal(f.timers.size,1,'Visible demand retains only the original binding-validation retry');
+  assert.equal([...f.timers.values()][0].delay,250,'Malformed binding uses the original first backoff');
+  f.fireDelay(250);assert.equal(f.sockets.length,0,'Revalidation cannot create a socket for a rejected endpoint');
+  assert.equal(f.timers.size,1,'Revalidation retains one retry rather than adding a second owner');
+  assert.equal([...f.timers.values()][0].delay,1000,'Rejected binding spends the original backoff without resetting it');
+  const late=[...f.timers.values()].map(timer=>timer.action);
+  f.client.setVisible(false);assert.equal(f.timers.size,0,'Releasing visible demand cancels the binding-validation retry');
+  for(const action of late)action();assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0,'A stale retry cannot revive released demand');
+ }finally{f.client.dispose();}
+}
+await check('non-loopback bootstrap rejected',()=>verifyRejectedVisibleBinding('ws://example.com:12345/mirror'));
 await check('one visible socket requests one snapshot, no idle polling',()=>{const f=fixture();const s=f.connect();assert.equal(s.sent.length,1);assert.equal(s.sent[0].command,'snapshot');assert.equal(f.timers.size,0);f.client.setVisible(true);assert.equal(f.sockets.length,1);f.client.dispose();});
 await check('hidden/unloaded releases socket and timers',()=>{const f=fixture();f.connect();f.client.setVisible(false);assert.equal(f.timers.size,0);assert.equal(f.sockets[0].closed,true);assert.equal(f.client.snapshot().snapshot,null);});
 await check('old view packets ignored after hide',()=>{const f=fixture();const s=f.connect();f.client.setVisible(false);s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(100)});assert.equal(f.client.snapshot().connected,false);});
 await check('older revisions do not overwrite fresh state',()=>{const f=fixture();const s=f.connect();s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(10)});s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(5)});assert.equal(f.client.snapshot().snapshot.revision,10);f.client.dispose();});
 await check('malformed snapshot rejects instead of crashing React',()=>{const f=fixture();const s=f.connect();s.emit('message',{type:'snapshot',runId:'run-1',snapshot:{runId:'run-1',revision:2,generation:1}});assert.equal(f.client.snapshot().connected,false);assert.equal(s.closed,true);});
-await check('restart run ID disconnects and no mutation replay',()=>{const f=fixture();const s=f.connect();s.emit('message',{type:'snapshot',runId:'run-2',snapshot:f.snapshot()});assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,0);});
+await check('restart run ID disconnects and no mutation replay',()=>{
+ const f=fixture();try{
+  const socket=f.connect(),sentBefore=socket.sent.map(packet=>structuredClone(packet));
+  socket.emit('message',{type:'snapshot',runId:'run-2',snapshot:f.snapshot()});
+  assert.equal(f.client.snapshot().connected,false);assert.equal(f.client.snapshot().snapshot,null);assert.equal(socket.closed,true);
+  assert.deepEqual(socket.sent,sentBefore,'A different run cannot replay an earlier packet or user operation');
+  assert.equal(f.timers.size,1,'The still-visible owner retains one original reconnection retry');
+  assert.equal([...f.timers.values()][0].delay,250,'Session rejection uses the original first backoff');
+  const late=[...f.timers.values()].map(timer=>timer.action);
+  f.client.setVisible(false);assert.equal(f.timers.size,0,'Releasing the visible owner cancels recovery');
+  for(const action of late)action();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);assert.deepEqual(socket.sent,sentBefore);
+ }finally{f.client.dispose();}
+});
 await check('request freezes identity/generation/revision and args',async()=>{const f=fixture();const s=f.connect();const args={field:'acMode',value:'eco'};const p=f.client.mutate('game.setField',args);args.value='extreme';const req=s.sent.at(-1);assert.equal(req.args.value,'eco');assert.equal(req.identity,'app:480:pid101:birthA');assert.equal(req.generation,1);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true,result:{saved:true,applied:true}});await p;assert.equal(f.timers.size,0);f.client.dispose();});
 await check('second mutation cannot overlap first',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setPreset',{preset:'soft'});await assert.rejects(f.client.mutate('fan.setPreset',{preset:'aggressive'}),/当前不可操作/);const req=s.sent.at(-1);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true});await p;f.client.dispose();});
 await check('timeout never resends a possibly applied action',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setEnabled',{enabled:false});f.fireDelay(4000);await assert.rejects(p,/未确认/);assert.equal(s.sent.filter(m=>m.command==='fan.setEnabled').length,1);assert.equal(s.sent.at(-1).command,'snapshot');assert.equal(f.client.snapshot().snapshot,null);assert.equal(f.client.snapshot().busy,false);f.client.dispose();});
@@ -183,7 +267,7 @@ await check('new native run cancels old mutation, never replays into new host',a
 await check('hidden bootstrap event starts zero sockets',()=>{const f=fixture();f.client.bootstrapChanged();assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();});
 await check('late message from closed socket cannot restore connected state',()=>{const f=fixture();const old=f.connect();old.close();old.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(50)});assert.equal(f.client.snapshot().connected,false);assert.equal(f.client.snapshot().snapshot,null);f.client.dispose();});
 await check('connection owns immutable bootstrap identity, not mutable global object',()=>{const f=fixture();const old=f.connect();f.bootstrap.runId='changed-without-event';old.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(2)});assert.equal(f.client.snapshot().snapshot.runId,'run-1');f.client.dispose();});
-await check('port zero and out-of-range bootstrap are rejected',()=>{for(const port of [0,65536,99999]){const f=fixture();f.bootstrap.endpoint=`ws://127.0.0.1:${port}/mirror`;f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();}});
+await check('port zero and out-of-range bootstrap are rejected',()=>{for(const port of [0,65536,99999])verifyRejectedVisibleBinding(`ws://127.0.0.1:${port}/mirror`);});
 await check('Steam runtime ID getter runs once per demand, not per render or timer',()=>{let calls=0;const f=fixture({steam:()=>{calls++;return {availability:'observed',appId:'480',runningCount:1};}});const socket=f.connect();assert.equal(calls,1);assert.equal(socket.sent[0].steam.appId,'480');assert.equal(f.timers.size,0);f.client.setVisible(true);assert.equal(calls,1);f.client.dispose();});
 await check('Steam runtime getter failure cannot prevent Fan snapshot connection',()=>{const f=fixture({steam:()=>{throw new Error('Steam API changed');}});const socket=f.connect();assert.equal(socket.sent[0].steam.availability,'unavailable');assert.equal(f.client.snapshot().connected,true);f.client.dispose();});
 await check('slider accepts only the exact rendered snapshot',async()=>{const f=fixture(),s=f.connect(),expected=f.client.snapshot().snapshot;const p=f.client.mutate('fan.setPreset',{preset:'soft'},expected);const req=s.sent.at(-1);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true});await p;f.client.dispose();});
@@ -231,8 +315,8 @@ await check('a timeout observer rebind cannot send the old run snapshot request 
 await check('a timeout observer hiding the last page cannot restart paused passive snapshot demand',async()=>{
  const f=fixture();f.bootstrap.hudProtocol=1;f.client.setPassiveVisible(true);const socket=f.connect();let once=false;f.client.subscribe(state=>{if(!once&&state.notice.startsWith('结果未确认')){once=true;f.client.setVisible(false);}});const pending=f.client.mutate('fan.setPreset',{preset:'soft'}).then(()=>null,e=>e);f.fireDelay(4000);assert.equal(typeof (await pending)?.message,'string');assert.equal(socket.sent.at(-1).command,'snapshot');assert.equal(socket.sent.at(-1).subscribe,false);assert.equal(f.client.snapshot().connected,true);f.client.dispose();assert.equal(f.timers.size,0);
 });
-await check('hiding during busy admission cancels an unsent write without relabeling it as send failure',async()=>{
- const f=fixture(),socket=f.connect();let once=false;f.client.subscribe(state=>{if(state.busy&&!once){once=true;f.client.setVisible(false);}});const pending=f.client.mutate('fan.setPreset',{preset:'soft'}).then(()=>null,e=>e);assert.equal(typeof (await pending)?.message,'string');assert.equal(socket.sent.filter(m=>m.command!=='snapshot').length,0);assert.equal(f.client.snapshot().notice,'侧栏已隐藏');assert.equal(f.timers.size,0);f.client.dispose();
+await check('hiding during busy admission preserves one accepted write until its reply',async()=>{
+ const f=fixture(),socket=f.connect();let once=false;f.client.subscribe(state=>{if(state.busy&&!once){once=true;f.client.setVisible(false);}});const pending=f.client.mutate('fan.setPreset',{preset:'soft'});const writes=socket.sent.filter(m=>m.command!=='snapshot');assert.equal(writes.length,1);assert.equal(f.client.snapshot().busy,true);assert.equal(socket.closed,false);socket.emit('message',{type:'reply',runId:f.bootstrap.runId,id:writes[0].id,ok:true,result:{applied:true}});assert.equal((await pending).applied,true);assert.equal(socket.closed,true);assert.equal(f.timers.size,0);f.client.dispose();
 });
 
 // The hidden-sidebar pause is also a write to the shared transport. A send
@@ -244,7 +328,7 @@ for(const consumer of ['hud','wallpaper','updater'])await check('failed hidden p
   const pending=f.client.mutate('fan.setEnabled',{enabled:true}).then(()=>null,error=>error);
   assert.equal(socket.sent.filter(x=>x.command==='fan.setEnabled').length,1);
   socket.send=value=>{const message=JSON.parse(value);if(message.command==='snapshot'&&message.subscribe===false)throw Error('Inert hidden pause send failed');send(value);};
-  f.client.setVisible(false);assert.equal(typeof (await pending)?.message,'string');
+  f.client.setVisible(false);assert.equal(f.client.snapshot().busy,true);assert.equal(socket.closed,false);const write=socket.sent.find(x=>x.command==='fan.setEnabled');socket.emit('message',{type:'reply',runId:f.bootstrap.runId,id:write.id,ok:true,result:{applied:true}});assert.equal(await pending,null);
   assert.equal(f.client.snapshot().connected,false);assert.equal(socket.closed,true);
   assert.equal(f.timers.size,1);f.fireDelay(250);
   const next=f.sockets.at(-1);assert.notEqual(next,socket);next.emit('open');
@@ -405,4 +489,4 @@ await check('24 mixed restart cycles fence silent connections old replies deadli
  assert.equal(f.timers.size,0);assert.ok(f.sockets.every(s=>s.closed));
 });
 
-fs.writeFileSync(path.resolve(task,'validation/MIRROR-CLIENT-SELFTEST.json'),JSON.stringify({project:'YMCC Decky 侧边栏',cases:cases.length,results:cases,realSockets:false,hardware:false,productionClientSource:true},null,2));console.log(`Mirror client tests passed: ${cases.length}`);
+writeRaw();console.log(`Mirror client tests passed: ${cases.length}`);

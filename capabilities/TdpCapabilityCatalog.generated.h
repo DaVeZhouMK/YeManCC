@@ -3,7 +3,7 @@
 #include "hc-device-catalog.generated.h"
 #include <string_view>
 namespace ymcc::capabilities::tdp {
-inline constexpr std::string_view libraryId="ymcc.uxtu.tdp", version="26.3.1", policySha256="ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d";
+inline constexpr std::string_view libraryId="ymcc.uxtu.tdp", version="26.3.1", policySha256="4342190630c4bd570d4123feca7fc01c1edcccc41d471b77ec922b13fae207bf";
 inline constexpr std::string_view msiBoard="MS-1T91";
 inline constexpr int intelPl2Offset=1;
 struct RequestDomain {int minimumW,maximumW;};
@@ -15,5 +15,5 @@ inline constexpr bool ccdControlActive=true,voltageOffsetActive=true,ccdPhysical
 inline constexpr std::string_view ccdOperation="process_affinity",ccdEffectScope="global_process_affinity_by_l3_domain",ccdMechanism="SetProcessAffinityMask",ccdTopologySource="windows_relation_cache_l3";
 inline constexpr int ccdMinimumDomains=2;
 inline constexpr std::string_view amdVoltageUnit="co_step",intelVoltageUnit="mv";
-inline constexpr int amdVoltageMinimum=-60,amdVoltageMaximum=60,amdVoltageStep=1,intelVoltageMinimum=-150,intelVoltageMaximum=0,intelVoltageStep=1;
+inline constexpr int amdVoltageMinimum=-60,amdVoltageMaximum=0,amdVoltageStep=1,intelVoltageMinimum=-150,intelVoltageMaximum=0,intelVoltageStep=1;
 } // namespace ymcc::capabilities::tdp

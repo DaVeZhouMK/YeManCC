@@ -67,13 +67,13 @@ await check('stop cancels target permission and consumes late receipts without i
 
 // Original gameTrainer module: seed only its in-memory ready cache; every IO is inert.
 function ownerFixture(){
- const state={hash:'a'.repeat(64),gameExists:true,trainerExists:true,scriptExists:true,current:true,shellCalls:[],writes:[],reads:[],targetChecks:0,externalLaunches:0};
+ const state={hash:'a'.repeat(64),gameExists:true,trainerExists:true,scriptExists:true,current:true,shellCalls:[],writes:[],reads:[],targetChecks:0,externalLaunches:0,documents:new Map()};
  const api={app:{powerControlDir:async()=> 'C:\\Fixture\\PowerControl',dataDir:async()=> 'C:\\Fixture\\Data',exeDir:async()=> 'C:\\Fixture\\YMCC'},fs:{
   exists:async p=>p===game.path?state.gameExists:p===installed.path?state.trainerExists:p.endsWith('YeManTrainerLaunch.ps1')?state.scriptExists:true,
   sha256File:async p=>{assert.equal(p,installed.path);return state.hash;},mkdir:async()=>{},remove:async()=>{},
-  writeTextFileAtomic:async(p,text)=>state.writes.push({p,text}),readTextFile:async(p)=>{state.reads.push(p);const sent=state.shellCalls.at(-1);assert(sent);return JSON.stringify({requestId:sent.args[sent.args.indexOf('-RequestId')+1],pending:false,ok:state.trainerExists&&state.hash===installed.sha256,error:'fixture backend rejects changed/missing file',code:'trainer-changed'});}},
+  writeTextFileAtomic:async(p,text)=>{state.writes.push({p,text});state.documents.set(p,text);},readTextFile:async(p)=>{state.reads.push(p);assert(state.documents.has(p),'Original pending request must exist before launch');const pending=state.documents.get(p),sent=state.shellCalls.at(-1);if(!sent)return pending;assert.equal(sent.args[sent.args.indexOf('-ResultPath')+1],p);return JSON.stringify({...JSON.parse(pending),requestId:sent.args[sent.args.indexOf('-RequestId')+1],pending:false,ok:state.trainerExists&&state.hash===installed.sha256,error:'fixture backend rejects changed/missing file',code:'trainer-changed'});}},
   shell:{hidden:async(exe,args)=>{assert.equal(exe,'powershell.exe');assert(args[args.indexOf('-File')+1].endsWith('YeManTrainerLaunch.ps1'));assert.equal(args[args.indexOf('-Mode')+1],'Trainer');assert.equal(args[args.indexOf('-TrainerPath')+1],installed.path);state.shellCalls.push({exe,args});if(state.trainerExists&&state.hash===installed.sha256)state.externalLaunches++;return {ok:true};}}};
- const owner=load(read('src/bridge/gameTrainer.ts')+'\nexport function seedReadyForTest(name,path,state){states.set(trainerTaskKey(name,path),state);}',{'./api':api,'./gamedetect':{cleanGameTitle:name=>name.trim()},'./settingsRepository':{getSettingsGeneration:()=>1},'@/robust/frontendDiagnostics':{reportFrontendError:()=>{}}});
+ const owner=load(read('src/bridge/gameTrainer.ts')+'\nexport function seedReadyForTest(name,path,state){states.set(trainerTaskKey(name,path),state);}',{'./api':api,'./gamedetect':{cleanGameTitle:name=>name.trim()},'./settingsRepository':{getSettingsGeneration:()=>1},'@/robust/frontendDiagnostics':{reportFrontendError:()=>{}}},{TextEncoder,setTimeout:(fn,delay)=>{assert.equal(delay,5000,'Only current bounded config IO deadlines are allowed');return setTimeout(fn,delay);},clearTimeout});
  const ready={ok:true,state:'ready',gameName:game.title,trainerGameName:installed.gameName,trainerPath:installed.path,trainerFolder:installed.folder,sha256:installed.sha256,origin:installed.origin,identity:{method:'steam-manifest',steamAppId:'480',manifestPath:'C:/Fixture/steamapps/appmanifest_480.acf'}};
  owner.seedReadyForTest(game.title,game.path,ready);
  const options={isTargetCurrent:async()=>{state.targetChecks++;return state.current;}};
@@ -84,7 +84,7 @@ await check('original ready query is exact by title and EXE path, needs a verifi
  f.owner.seedReadyForTest(game.title,game.path,{...f.ready,sha256:undefined});assert.equal(f.owner.getReadyGameTrainer(game.title,game.path),null);
 });
 await check('the original ready-only owner validates files/hash/target and calls only its established launch script',async()=>{
- const f=ownerFixture(),result=await f.run();assert.equal(result.action,'opened');assert.equal(f.state.shellCalls.length,1);assert(f.state.targetChecks>=2);assert.equal(f.state.writes.length,1);assert.equal(f.state.reads.length,1);
+ const f=ownerFixture(),result=await f.run();assert.equal(result.action,'opened');assert.equal(f.state.shellCalls.length,1);assert(f.state.targetChecks>=2);assert.equal(f.state.writes.length,1);assert.equal(f.state.reads.length,2,'Pending request readback and one bound launch receipt');
 });
 await check('original owner deduplicates concurrent ready launches and shares the in-flight menu launch',async()=>{
  const f=ownerFixture(),done=defer();f.options.isTargetCurrent=()=>done.promise;const first=f.run(),second=f.run();assert.equal(first,second);assert.equal(f.owner.openOrSearchGameTrainer(game.title,undefined,game.path),first);done.resolve(true);await first;assert.equal(f.state.shellCalls.length,1);

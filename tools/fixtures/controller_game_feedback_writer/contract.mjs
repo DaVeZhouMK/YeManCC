@@ -113,7 +113,7 @@ export function verifyManaged(manifestPath,caseRoot){
  for(const name of ['normalHostMainExecuted','realSdkLoaded','hardwareIo','sourceFilesEdited'])need(value[name]===false,'MANAGED_BOUNDARY:'+name);
  const binding=value.inputBindings,expected=[...MANAGED_SOURCES,...(variant==='stale-revision'?[STALE_SOURCE]:[])];
  need(binding.variant===variant&&path.resolve(binding.caseRoot)===path.resolve(caseRoot),'MANAGED_BINDING_SCOPE');
- need(binding.sources.length===expected.length&&JSON.stringify(binding.sources.map(r=>r.relative))===JSON.stringify(expected),'MANAGED_EXACT24_OR25_MEMBERSHIP_REQUIRED');
+ need(binding.sources.length===expected.length&&JSON.stringify(binding.sources.map(r=>r.relative))===JSON.stringify(expected),'MANAGED_EXACT26_OR27_MEMBERSHIP_REQUIRED');
  need(new Set(expected).size===expected.length&&binding.generatedInputs.length<=40,'MANAGED_BINDING_BOUNDS');
  verifyRows(binding.sources,'MANAGED_SOURCE_STALE');
  for(const r of binding.sources){
@@ -131,9 +131,9 @@ export function verifyManaged(manifestPath,caseRoot){
  const actual=value.evaluatedCompilerInputs,declared=new Map(binding.toolchainAllowlist.map(r=>[path.resolve(r.path).toLowerCase(),r.sha256]));
  verifyRows(actual,'ACTUAL_COMPILER_INPUT_STALE');
  for(const r of actual){need(['Compile','Reference','Analyzer','Import'].includes(r.kind),'ACTUAL_COMPILER_KIND_INVALID');if(!inside(buildRoot,r.path))need(declared.get(path.resolve(r.path).toLowerCase())===r.sha256,'UNDECLARED_ACTUAL_COMPILER_INPUT:'+r.path);}
- const compiles=actual.filter(r=>r.kind==='Compile');need(compiles.length===19&&actual.some(r=>r.kind==='Reference'),'ACTUAL19_COMPILER_LEDGER_REQUIRED');
+ const compiles=actual.filter(r=>r.kind==='Compile');need(compiles.length===21&&actual.some(r=>r.kind==='Reference'),'ACTUAL21_COMPILER_LEDGER_REQUIRED');
  const observation=binding.sources.find(r=>r.relative===(variant==='stale-revision'?STALE_SOURCE:'InputHost/HostGameOutputObservation.cs'));
- for(const [name,source]of [['HostGameOutputObservation.cs',observation],['HcControllerGameFeedbackCapabilityCatalog.generated.cs',binding.sources.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs')],['PsEndpointOwnership.cs',binding.sources.find(r=>r.relative==='InputHost/PsEndpointOwnership.cs')],['HostRuntimeBinaryIdentity.cs',binding.sources.find(r=>r.relative==='InputHost/HostRuntimeBinaryIdentity.cs')]]){
+ for(const [name,source]of [['HostGameOutputObservation.cs',observation],['HostTerminalCleanup.cs',binding.sources.find(r=>r.relative==='InputHost/HostTerminalCleanup.cs')],['CompactFrameReplyBinding.cs',binding.sources.find(r=>r.relative==='InputHost/CompactFrameReplyBinding.cs')],['HcControllerGameFeedbackCapabilityCatalog.generated.cs',binding.sources.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs')],['PsEndpointOwnership.cs',binding.sources.find(r=>r.relative==='InputHost/PsEndpointOwnership.cs')],['HostRuntimeBinaryIdentity.cs',binding.sources.find(r=>r.relative==='InputHost/HostRuntimeBinaryIdentity.cs')]]){
   const matches=compiles.filter(r=>path.resolve(r.path)===path.resolve(buildRoot,name));need(matches.length===1&&matches[0].sha256===source.sha256,'ACTUAL_UNIQUE_COMPILE_MISSING:'+name);
  }
  const declarations=compiles.flatMap(r=>Array.from(fs.readFileSync(r.path,'utf8').matchAll(/\bclass\s+HcControllerGameFeedbackCapabilityCatalog\b/g),()=>path.basename(r.path)));

@@ -80,7 +80,9 @@ static void semiStaticOffCases(){
  known=true;cached.set(Mode::Off);injectReadback=true;const auto beforeInterleaved=applies.load();move(117);
  need(applies.load()==beforeInterleaved+1&&!backendLive.load()&&cached.state().value("backendReadbackFresh",false),"inflight-retained-off-must-not-overwrite-new-readback");
  need(cached.state().at("sequence").get<std::uint64_t>()>injectedSequence.load(),"new-physical-result-orders-after-interleaved-read");
- const auto oldGet=cached.acceptBackendReadback(receipt(false));const auto newOn=cached.set(Mode::On);
+ const auto oldGet=cached.acceptBackendReadback(receipt(false));
+ {std::lock_guard lock(guard);foreground.identityKnown=true;foreground.foregroundImage="c:/apps/browser.exe";}
+ const auto newOn=cached.set(Mode::On);
  need(oldGet.at("sequence").get<std::uint64_t>()<newOn.at("sequence").get<std::uint64_t>()&&newOn.value("on",false),"late-get-delivery-keeps-lower-sequence-than-new-set");
  const auto stableOnCalls=applies.load();for(unsigned i=0;i<5;++i)cached.acceptBackendReadback(receipt(true));std::this_thread::sleep_for(std::chrono::milliseconds(1100));
  need(applies.load()==stableOnCalls,"stable-on-does-not-become-a-periodic-provider-query");cached.set(Mode::Off);
@@ -111,7 +113,13 @@ static void applicationScopeCases(){
  };
  g_gameValveTarget={};g_gameValveTarget.rulesEpoch=g_gameRulesEpoch.load();
  auto browser=observe("c:\\apps\\chrome.exe");need(decide(Mode::Auto,browser).on,"ordinary-browser-with-no-game-enables");
- const auto skippedReads=applicationRuleReads,skippedIdentityReads=applicationForegroundReads;g_mousePolicyMode=0;observe("c:\\apps\\ordinary.exe");g_mousePolicyMode=2;observe("c:\\apps\\ordinary.exe");g_mousePolicyMode=1;need(applicationRuleReads==skippedReads,"manual-off-and-on-do-not-load-application-categories");need(applicationForegroundReads==skippedIdentityReads,"manual-off-and-on-do-not-query-foreground-identity");
+ const auto skippedReads=applicationRuleReads,skippedIdentityReads=applicationForegroundReads;
+ g_mousePolicyMode=0;observe("c:\\apps\\ordinary.exe");
+ need(applicationRuleReads==skippedReads&&applicationForegroundReads==skippedIdentityReads,"manual-off-does-not-query-foreground-or-load-categories");
+ g_mousePolicyMode=2;const auto manualBrowser=observe("c:\\apps\\ordinary.exe");
+ need(applicationForegroundReads==skippedIdentityReads+1&&decide(Mode::On,manualBrowser).on,"manual-on-observes-foreground-and-shares-cached-rules");
+ need(applicationRuleReads==skippedReads,"manual-on-reuses-current-shared-rule-cache");
+ g_mousePolicyMode=1;
  {
   std::promise<void> locked,release;auto ready=locked.get_future();auto done=release.get_future();
   std::thread owner([&]{std::lock_guard lock(g_gameRulesMx);locked.set_value();done.wait_for(std::chrono::milliseconds(500));});ready.wait();
@@ -128,7 +136,10 @@ static void applicationScopeCases(){
   const std::string name(rule.begin(),rule.end());const auto c=observe("c:\\apps\\"+name+".exe");
   need(c.gameLibrary&&!decide(Mode::Auto,c).on,"shared-library-blacklist-is-mouse-blacklist");
  }
- auto platform=observe("c:\\Steam\\steam.exe");need(decide(Mode::On,platform).on,"library-exclusion-is-auto-only");
+ auto platform=observe("c:\\Steam\\steam.exe");need(!decide(Mode::On,platform).on,"library-exclusion-shared-by-auto-and-on");
+ need(!decide(Mode::On,observe("c:\\Steam\\steam.exe")).on,"manual-on-inherits-platform-blacklist");
+ need(!decide(Mode::On,observe("c:\\emu\\rpcs3.exe")).on,"manual-on-inherits-emulator-blacklist");
+
  need(decide(Mode::Auto,observe("c:\\apps\\steam-game.exe")).on,"platform-rules-do-not-block-similar-game-or-app-names");
  g_gameValveTarget.game={20,200,L"c:\\games\\title.exe"};
  need(decide(Mode::Auto,observe("c:\\apps\\chrome.exe")).on,"background-game-does-not-disable-normal-app");
@@ -206,7 +217,7 @@ namespace requestRegression {
 #include "mouse_policy_set_consumer.inc"
  static void run(){
   auto receipt=[](bool on){return Json{{"ok",true},{"on",on},{"stateKnown",true},{"controlAllowed",true},{"provider","ymcc"}};};
-  g_mousePolicy.start({[]{return Context{};},[&](bool on,const auto&){return receipt(on);},[&]{return receipt(false);},{},{}},Mode::On);g_mousePolicy.set(Mode::On);
+  g_mousePolicy.start({[]{return Context{1,1,1,true,false,false};},[&](bool on,const auto&){return receipt(on);},[&]{return receipt(false);},{},{}},Mode::On);g_mousePolicy.set(Mode::On);
   savePaused=true;auto first=std::async(std::launch::async,[]{return mousePolicySet("off");});
   {std::unique_lock lock(gateMx);need(gateCv.wait_for(lock,std::chrono::seconds(2),[]{return saveEntered;}),"mode-save-gate-reached");}
   std::promise<void> started;auto ready=started.get_future();auto second=std::async(std::launch::async,[&]{started.set_value();return mousePolicySet("on");});ready.wait();
@@ -216,13 +227,13 @@ namespace requestRegression {
   need(persisted=="on"&&g_mousePolicyMode.load()==2&&g_mousePolicy.current()==Mode::On,"concurrent-save-and-runtime-have-same-final-authority");
   std::atomic<bool> blockOff{true};std::promise<void> entered,release;auto providerReady=entered.get_future(),providerRelease=release.get_future();
   g_mousePolicy.stop();Runtime blocked;
-  blocked.start({[]{return Context{};},[&](bool on,const auto&){if(!on&&blockOff.exchange(false)){entered.set_value();providerRelease.wait_for(std::chrono::seconds(2));}return receipt(on);},[&]{return receipt(false);},{},{}},Mode::On);
+  blocked.start({[]{return Context{1,1,1,true,false,false};},[&](bool on,const auto&){if(!on&&blockOff.exchange(false)){entered.set_value();providerRelease.wait_for(std::chrono::seconds(2));}return receipt(on);},[&]{return receipt(false);},{},{}},Mode::On);
   const auto offTicket=blocked.request(Mode::Off);need(providerReady.wait_for(std::chrono::seconds(2))==std::future_status::ready,"slow-provider-has-off-request");
   const auto onTicket=blocked.request(Mode::On);need(onTicket>offTicket&&blocked.current()==Mode::On,"new-mode-admitted-without-waiting-for-provider");release.set_value();
   const auto newer=blocked.wait(Mode::On,onTicket),older=blocked.wait(Mode::Off,offTicket);
   need(newer.value("on",false)&&older.value("mode",std::string{})=="on"&&older.value("superseded",false),"superseded-provider-wait-returns-current-mode");blocked.stop();
   // Start a fresh policy because Runtime owns its lifetime state.
-  Runtime cycling;cycling.start({[]{return Context{};},[&](bool on,const auto&){return receipt(on);},[&]{return receipt(false);},{},{}},Mode::Off);
+  Runtime cycling;cycling.start({[]{return Context{1,1,1,true,false,false};},[&](bool on,const auto&){return receipt(on);},[&]{return receipt(false);},{},{}},Mode::Off);
   const auto cycleTicket=cycling.request(Mode::Auto);cycling.refresh();need(cycling.current()==Mode::Auto,"backend-refresh-never-replays-captured-old-mode");cycling.wait(Mode::Auto,cycleTicket);cycling.stop();
  }
 }
@@ -236,21 +247,21 @@ int main(){try{
  need(!desktopSurface(L"c:\\games\\tmnt.exe",win,L"SDL_app"),"game-window-class-does-not-qualify-as-desktop");
  need(!desktopSurface(explorer,L"",L"Progman"),"missing-windows-root-never-qualifies");
  Context desktop{1,10,100,true,false,false},windowed{2,20,200,false,false,false},full{3,20,200,false,false,false},ymcc{4,30,300,false,true,false},unknown{};
- windowed.game=full.game=true;
+ windowed.game=full.game=true;windowed.identityKnown=full.identityKnown=true;windowed.foregroundImage=full.foregroundImage="c:/games/title.exe";
  need(decide(Mode::Auto,desktop).on,"confirmed-desktop-enable");need(!decide(Mode::Auto,windowed).on,"windowed-game-off");need(!decide(Mode::Auto,full).on,"fullscreen-game-off");need(!decide(Mode::Auto,ymcc).on,"ymcc-pauses-auto");need(!decide(Mode::Auto,unknown).on,"null-foreground-never-desktop");need(decide(Mode::On,full).on,"manual-on-ignores-game");need(!decide(Mode::Off,desktop).on,"manual-off-ignores-desktop");auto sd=desktop;sd.steam=true;need(!decide(Mode::On,sd).on,"sd-admission-before-manual-on");
  applicationScopeCases();
  auto custom=desktop;custom.customRule=-1;
  need(!decide(Mode::Auto,custom).on,"custom-blacklist-overrides-desktop");
- need(decide(Mode::On,custom).on,"manual-on-precedes-custom-blacklist");
+ need(!decide(Mode::On,custom).on,"manual-on-inherits-custom-blacklist");
  custom=full;custom.customRule=1;
  need(decide(Mode::Auto,custom).on,"custom-whitelist-overrides-focused-game");
  custom.emulator=true;custom.gameLibrary=true;
  need(decide(Mode::Auto,custom).on,"custom-whitelist-overrides-system-categories");
  need(!decide(Mode::Off,custom).on,"manual-off-precedes-custom-whitelist");
- custom.ymcc=true;need(!decide(Mode::Auto,custom).on,"ymcc-precedes-custom-whitelist");
+ custom.ymcc=true;need(!decide(Mode::Auto,custom).on,"ymcc-precedes-custom-whitelist");need(!decide(Mode::On,custom).on,"manual-on-ymcc-precedes-custom-whitelist");
  custom.ymcc=false;custom.steam=true;need(!decide(Mode::On,custom).on,"sd-precedes-custom-whitelist");
  custom.steam=false;custom.window=0;need(!decide(Mode::Auto,custom).on,"null-foreground-precedes-custom-whitelist");
- custom=desktop;custom.customRulesKnown=false;need(!decide(Mode::Auto,custom).on,"invalid-custom-rules-fail-closed");
+ custom=desktop;custom.customRulesKnown=false;need(!decide(Mode::Auto,custom).on,"invalid-custom-rules-fail-closed");need(!decide(Mode::On,custom).on,"manual-on-invalid-mouse-rules-fail-closed");
  AutoOverrides overrides;overrides.blacklist={L"explorer.exe"};overrides.whitelist={L"steam.exe"};
  custom=desktop;custom.identityKnown=true;
  need(applyAutoOverrides(custom,L"c:\\windows\\explorer.exe",overrides).customRule==-1,"custom-list-exact-basename");
@@ -271,12 +282,12 @@ int main(){try{
  auto tooMany=json::array();for(int i=0;i<65;++i)tooMany.push_back(std::to_string(i)+".exe");
  need(!mouseAutoRulesSet({{"blacklist",tooMany}}).value("ok",true),"custom-list-size-bound-enforced");
  g_mouseAutoRules.store(initialRules);
- std::mutex io;Context observed=desktop;bool backend=false,failStop=false,moveOnEnable=false,manualMove=false;unsigned starts=0,stops=0;std::vector<Json> events;
+ std::mutex io;Context observed=desktop;bool backend=false,failStop=false,moveOnEnable=false,manualMove=false,manualYmccMove=false;unsigned starts=0,stops=0;std::vector<Json> events;
  Runtime runtime;const auto observe=[&]{std::lock_guard lock(io);return observed;};
  auto release=[&]{std::lock_guard lock(io);++stops;if(!failStop)backend=false;return Json{{"ok",!failStop},{"on",backend},{"stateKnown",true},{"provider","ymcc"},{"controlAllowed",true},{"verification","backend-state"}};};
  runtime.start({observe,[&](bool on,const std::function<bool()>& valid){
    if(on&&valid&&!valid())return Json{{"ok",false},{"on",false},{"stateKnown",true}};
-   {std::lock_guard lock(io);if(on){++starts;backend=true;if(moveOnEnable||manualMove){observed=full;moveOnEnable=manualMove=false;}}else{++stops;if(!failStop)backend=false;}}
+   {std::lock_guard lock(io);if(on){++starts;backend=true;if(moveOnEnable||manualMove){observed=full;moveOnEnable=manualMove=false;}if(manualYmccMove){observed=ymcc;manualYmccMove=false;}}else{++stops;if(!failStop)backend=false;}}
    std::lock_guard lock(io);return Json{{"ok",on||!failStop},{"on",backend},{"stateKnown",true},{"provider","ymcc"},{"controlAllowed",true},{"mappingVerified",false},{"verification",on?"process-liveness":"backend-state"}};
  },release,[&](const Json& state){std::lock_guard lock(io);events.push_back(state);}},Mode::Off);
  auto move=[&](Context c){{std::lock_guard lock(io);observed=c;}runtime.wake();};
@@ -284,13 +295,22 @@ int main(){try{
  need(runtime.set(Mode::Auto).value("on",false),"auto-start-on-desktop");need(!runtime.state().value("mappingVerified",true),"liveness-not-mapping-proof");
  move(ymcc);need(until([&]{return runtime.state().value("scene",std::string{})=="ymcc"&&!on();}),"ymcc-foreground-disables");need(runtime.current()==Mode::Auto,"ymcc-keeps-automatic-choice");
  move(desktop);need(until(on),"minimize-to-desktop-restores");move(windowed);need(until([&]{return !on();}),"windowed-game-disables");move(ymcc);need(until([&]{return runtime.state().value("scene",std::string{})=="ymcc";}),"summon-from-game-pauses");move(full);need(until([&]{return runtime.state().value("scene",std::string{})=="game"&&!on();}),"minimize-to-fullscreen-stays-off");
- need(runtime.set(Mode::On).value("on",false),"manual-on-in-game");move(ymcc);need(until([&]{return runtime.state().value("scene",std::string{})=="manual"&&on();}),"manual-on-in-ymcc");
+ need(runtime.set(Mode::On).value("on",false),"manual-on-in-game");move(ymcc);need(until([&]{return runtime.state().value("scene",std::string{})=="ymcc"&&!on();}),"manual-on-pauses-in-ymcc");
+ need(runtime.current()==Mode::On,"ymcc-pause-keeps-on-selected");move(full);need(until(on),"manual-on-restores-in-game-after-ymcc-minimize");
+ auto blockedApp=full;blockedApp.customRule=-1;move(blockedApp);need(until([&]{return !on();}),"manual-on-stops-in-custom-blacklist");
+ move(full);need(until(on),"manual-on-game-restores-after-blacklist");
+ auto blockedEmulator=full;blockedEmulator.emulator=true;move(blockedEmulator);need(until([&]{return !on();}),"manual-on-stops-in-emulator");
+ move(full);need(until(on),"manual-on-restores-after-emulator");
+ auto blockedLibrary=full;blockedLibrary.gameLibrary=true;move(blockedLibrary);need(until([&]{return !on();}),"manual-on-stops-in-platform");
+ move(full);need(until(on),"manual-on-restores-after-platform");
  need(!runtime.set(Mode::Off).value("on",true),"manual-off-confirmed");move(desktop);std::this_thread::sleep_for(std::chrono::milliseconds(220));need(!on(),"off-kept-on-desktop");
  // Reproduce the late-enable race inside actual policy consumer IO.
  {std::lock_guard lock(io);moveOnEnable=true;observed=desktop;}
  runtime.set(Mode::Auto);need(until([&]{return runtime.state().value("scene",std::string{})=="game"&&!on();}),"late-desktop-enable-withdrawn-in-game");
  {std::lock_guard lock(io);observed=desktop;manualMove=true;}
- need(runtime.set(Mode::On).value("on",false),"manual-on-survives-foreground-race");
+ runtime.set(Mode::On);need(until(on),"manual-on-survives-game-foreground-race");
+ runtime.set(Mode::Off);{std::lock_guard lock(io);observed=desktop;manualYmccMove=true;}
+ runtime.set(Mode::On);need(until([&]{return !on()&&runtime.state().value("scene",std::string{})=="ymcc";}),"manual-late-enable-withdrawn-on-ymcc-focus");
  move(desktop);runtime.set(Mode::Auto);need(until(on),"desktop-before-null-transition");
  move(unknown);std::this_thread::sleep_for(std::chrono::milliseconds(40));need(on(),"short-null-foreground-keeps-admitted-mouse-state");
  move(desktop);need(until(on),"desktop-return-within-grace-keeps-mouse");

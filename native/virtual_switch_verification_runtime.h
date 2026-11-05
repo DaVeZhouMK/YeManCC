@@ -497,6 +497,101 @@ static bool inputHostRogOffExecutionDefersSuccess(std::uint64_t ticket,const cha
     return true;
 }
 
+// Same physical-source admission for deferred Hide and the configured-but-not-
+// refreshed stage. Cached ACKs never replace the selected physical identity.
+static bool inputHostSwitchLocalPhysicalSourceCurrentLocked(const HidHidePhysicalIdentity* expected) {
+    const auto source=inputHostRecoveryHealthLatestSourceLocked();
+    std::unique_lock<std::mutex> sample(g_gamepadReadMx,std::defer_lock),
+        physical(g_hidHidePhysicalIdentityMx,std::defer_lock);
+    if(std::try_lock(sample,physical)>=0)return false;
+    const auto slot=g_xinputPrimarySlot;
+    const DWORD selected=slot<4?(1u<<slot):0;
+    const auto identity=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
+    const bool selectedAdmitted=selected && g_xinputPhysicalSourceLocked &&
+        g_xinputPhysicalSourceMask==selected && (g_xinputAdmittedMask&selected) &&
+        (g_xinputConnectedMask&selected) && (g_xinputPreTargetSlots&selected) &&
+        !(g_xinputSlotUnknownMask&selected) && !(g_xinputVirtualEndpointMask&selected) &&
+        !(g_xinputSourceReconfirmMask.load(std::memory_order_acquire)&selected) &&
+        !(g_xinputSlotReprobeMask.load(std::memory_order_acquire)&selected) &&
+        g_xinputSlotIdentityResolvedEpoch[slot]==identity && g_hidHidePhysicalIdentity.resolved &&
+        !g_hidHidePhysicalIdentity.physicalIdentity.empty() && !g_hidHidePhysicalIdentity.deviceInstanceId.empty() &&
+        !g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId.empty() &&
+        !hidHideIsVirtualIdentity(g_hidHidePhysicalIdentity.deviceInstanceId,g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId);
+    // This admits only stopping/reopening our own target. It grants no new
+    // physical identity/write permission; Start must perform its original
+    // complete source admission and capability-policy checks again.
+
+    if(expected && (g_hidHidePhysicalIdentity.physicalIdentity!=expected->physicalIdentity ||
+        g_hidHidePhysicalIdentity.deviceInstanceId!=expected->deviceInstanceId ||
+        g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId!=expected->baseContainerDeviceInstanceId))return false;
+    return selectedAdmitted && source.route==ymcc::input::recoveryHealth::Route::XInput &&
+            source.incarnation==static_cast<std::uint64_t>(slot)+1 &&
+            source.live && source.stable && source.continuity &&
+            source.continuity!=std::numeric_limits<std::uint64_t>::max() &&
+            source.identity==g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) &&
+            ymcc::input::recoveryHealth::fresh(source,GetTickCount64(),currentPowerGeneration(),
+                g_xinputTopologyEpoch.load(std::memory_order_acquire));
+}
+
+// Read only the ordinary owner's exact completed-configuration stage. This
+// creates no refresh permission, retry clock, device scan or lifecycle work.
+static bool inputHostSwitchRootRefreshSnapshotLocked(std::uint64_t ticket,InputHostDeferredPhysicalHide& captured) {
+    using namespace ymcc::inputHost::switchVerificationRuntime;
+    if(!g_inputHostMx.ownedByCurrentThread())return false;
+    const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
+    if(!ticket || view.requestId!=ticket || !view.locked || !view.remainingMs ||
+        (view.phase!="pending" && view.phase!="verifying") || view.persona=="disabled" ||
+        inputHostConfiguredPersona()!=view.persona || pausedLocked() || kVirtualTestKeepPhysicalVisible ||
+        !g_machineIdentity.resolved || !ymccIsRogFamily() ||
+        !g_inputHostProcess || !g_inputHostHello || !g_inputHostPrepared || !g_inputHostNeutralized ||
+        !g_inputHostEpoch || g_inputHostRunId.empty() || !inputHostProcessAliveLocked() ||
+        g_inputHostBoundPowerGeneration!=currentPowerGeneration() || g_inputHostBoundPersona!=view.persona ||
+        !g_inputHostRequestedPersonaMatchesBound.load(std::memory_order_acquire) ||
+        g_inputHostTransportFault || g_inputHostPipeRetired || g_inputHostReleaseQuarantined ||
+        g_inputHostStartBlocked || g_inputHostFaultHoldsStart ||
+        g_inputHostRecoveryIntentReset || gamepadUiOutputIsolationEligible())return false;
+    {std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);captured=g_inputHostDeferredPhysicalHide;}
+    if(captured.requestId!=ticket || captured.hostGen!=g_inputHostEpoch || captured.runId!=g_inputHostRunId ||
+        captured.powerGen!=currentPowerGeneration() || captured.persona!=view.persona || now>=captured.deadline ||
+        !captured.configurationApplied || !captured.configurationReady || !captured.refreshRequired ||
+        captured.refreshAttempted || captured.continuationRetired)return false;
+    const auto& journal=g_hidHideVisibilityJournal;const auto& physical=journal.physical;
+    if(!journal.active || journal.transactionId!=captured.runId || !physical.resolved ||
+        journal.physicalSources.size()!=1 ||
+        journal.physicalSources.front().physicalIdentity!=physical.physicalIdentity ||
+        journal.physicalSources.front().deviceInstanceId!=physical.deviceInstanceId ||
+        journal.physicalSources.front().baseContainerDeviceInstanceId!=physical.baseContainerDeviceInstanceId ||
+        captured.configurationPhysicalIdentity.empty() ||
+        captured.configurationPhysicalIdentity!=hidHideUpper(physical.physicalIdentity) || captured.configurationRoot.empty() ||
+        captured.configurationRoot!=hidHideUpper(physical.baseContainerDeviceInstanceId) ||
+        captured.configurationTargets.size()!=2 || journal.hiddenByUs.size()!=2)return false;
+    if(std::find(captured.configurationTargets.begin(),captured.configurationTargets.end(),hidHideUpper(physical.deviceInstanceId))==captured.configurationTargets.end() ||
+        std::find(captured.configurationTargets.begin(),captured.configurationTargets.end(),captured.configurationRoot)==captured.configurationTargets.end())return false;
+    for(const auto& target:captured.configurationTargets)
+        if(target.empty() || hidHideIsVirtualIdentity(target,{}) || !hidHideContainsPath(journal.hiddenByUs,target))return false;
+    const auto& proof=g_inputHostOwnedVisibilityReadback;
+    if(!ownedVisibilityReadbackCurrentLocked() || proof.targetsMissing || !proof.cloakOn ||
+        proof.transactionId!=captured.runId || hidHideUpper(proof.physicalRoot)!=captured.configurationRoot ||
+        proof.deviceInstanceId!=physical.deviceInstanceId || proof.targets!=journal.hiddenByUs)return false;
+    return inputHostSwitchLocalPhysicalSourceCurrentLocked(&physical);
+}
+
+// Pin the offered stage even while normal execution is allowed to finish. A
+// replacement root/target set under the same request cannot borrow its offer.
+static bool inputHostSwitchRootRefreshOfferCurrentLocked(const InputHostSwitchRecoveryRequest& offered,
+        InputHostDeferredPhysicalHide* captured) {
+    InputHostDeferredPhysicalHide stage;
+    if(offered.localFault!=InputHostSwitchLocalFault::OwnedRootRefreshIncomplete ||
+        !inputHostSwitchRootRefreshSnapshotLocked(offered.requestId,stage) ||
+        offered.hostEpoch!=stage.hostGen || offered.stoppedRunId!=stage.runId || offered.power!=stage.powerGen ||
+        offered.persona!=stage.persona || offered.deadline>stage.deadline || offered.localStageDeadline!=stage.deadline ||
+        offered.localPhysicalIdentity!=stage.configurationPhysicalIdentity || offered.localRoot!=stage.configurationRoot ||
+        offered.localTargets!=stage.configurationTargets || offered.localConfigurationRevision!=g_inputHostConfigRevision ||
+        offered.localIntentRevision!=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire))return false;
+    if(captured)*captured=std::move(stage);
+    return true;
+}
+
 // Existing worker/Host mutex only. These predicates inspect cached owned
 // facts, never Steam enumeration, arbitrary XInput counts or a new device scan.
 static InputHostSwitchLocalFault inputHostSwitchLocalFaultCurrentLocked(std::uint64_t ticket) {
@@ -527,33 +622,11 @@ static InputHostSwitchLocalFault inputHostSwitchLocalFaultCurrentLocked(std::uin
             fault=InputHostSwitchLocalFault::OwnedHiddenTargetMissing;
     }
     else if(!g_hidHideVisibilityJournal.active && deferredHideOutstandingLocked(view)) {
-        const auto source=inputHostRecoveryHealthLatestSourceLocked();
-        std::unique_lock<std::mutex> sample(g_gamepadReadMx,std::defer_lock),
-            physical(g_hidHidePhysicalIdentityMx,std::defer_lock);
-        if(std::try_lock(sample,physical)>=0)return InputHostSwitchLocalFault::None;
-        const auto slot=g_xinputPrimarySlot;
-        const DWORD selected=slot<4?(1u<<slot):0;
-        const auto identity=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
-        const bool selectedAdmitted=selected && g_xinputPhysicalSourceLocked &&
-            g_xinputPhysicalSourceMask==selected && (g_xinputAdmittedMask&selected) &&
-            (g_xinputConnectedMask&selected) && (g_xinputPreTargetSlots&selected) &&
-            !(g_xinputSlotUnknownMask&selected) && !(g_xinputVirtualEndpointMask&selected) &&
-            !(g_xinputSourceReconfirmMask.load(std::memory_order_acquire)&selected) &&
-            !(g_xinputSlotReprobeMask.load(std::memory_order_acquire)&selected) &&
-            g_xinputSlotIdentityResolvedEpoch[slot]==identity && g_hidHidePhysicalIdentity.resolved &&
-            !g_hidHidePhysicalIdentity.physicalIdentity.empty() && !g_hidHidePhysicalIdentity.deviceInstanceId.empty() &&
-            !g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId.empty() &&
-            !hidHideIsVirtualIdentity(g_hidHidePhysicalIdentity.deviceInstanceId,g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId);
-        // This admits only stopping/reopening our own target. It grants no new
-        // physical identity/write permission; Start must perform its original
-        // complete source admission and capability-policy checks again.
-        if(selectedAdmitted && source.route==ymcc::input::recoveryHealth::Route::XInput &&
-            source.incarnation==static_cast<std::uint64_t>(slot)+1 &&
-            source.live && source.stable && source.continuity &&
-            source.continuity!=std::numeric_limits<std::uint64_t>::max() &&
-            source.identity==g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) &&
-            ymcc::input::recoveryHealth::fresh(source,GetTickCount64(),currentPowerGeneration(),
-                g_xinputTopologyEpoch.load(std::memory_order_acquire)))fault=InputHostSwitchLocalFault::DeferredPhysicalHide;
+        if(inputHostSwitchLocalPhysicalSourceCurrentLocked(nullptr))fault=InputHostSwitchLocalFault::DeferredPhysicalHide;
+    }
+    else if(g_hidHideVisibilityJournal.active && deferredHideOutstandingLocked(view)) {
+        InputHostDeferredPhysicalHide stage;
+        if(inputHostSwitchRootRefreshSnapshotLocked(ticket,stage))fault=InputHostSwitchLocalFault::OwnedRootRefreshIncomplete;
     }
     // Existing focus isolation is expected behavior, never a reason to rebuild.
     return fault!=InputHostSwitchLocalFault::None && gamepadUiOutputIsolationEligible()
@@ -568,7 +641,14 @@ static bool inputHostSwitchLocalFaultResolvedLocked(std::uint64_t ticket,InputHo
         g_inputHostBoundPersona!=view.persona || !g_hidHideVisibilityJournal.active)return false;
     if(fault==InputHostSwitchLocalFault::DeferredPhysicalHide)
         return !deferredHideOutstandingLocked(view);
-    return fault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing && ownedVisibilityReadbackCurrentLocked() &&
+    if(fault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete) {
+        const auto& offered=g_inputHostSwitchRecovery;
+        return offered.requestId==ticket && offered.hostEpoch==g_inputHostEpoch &&
+            offered.stoppedRunId==g_inputHostRunId && !deferredHideOutstandingLocked(view) &&
+            ownedVisibilityReadbackCurrentLocked() && !g_inputHostOwnedVisibilityReadback.targetsMissing &&
+            g_inputHostOwnedVisibilityReadback.cloakOn && currentOutputProvenLocked(view);
+    }
+    return fault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing && !deferredHideOutstandingLocked(view) && ownedVisibilityReadbackCurrentLocked() &&
         !g_inputHostOwnedVisibilityReadback.targetsMissing && g_inputHostOwnedVisibilityReadback.cloakOn;
 }
 static void inputHostRecordSwitchTimeout(const ymcc::VirtualStartProtection::View& view) noexcept {
@@ -643,7 +723,9 @@ static void inputHostSwitchVerificationMaintenanceLocked() {
     } else if (localFault!=InputHostSwitchLocalFault::None) {
         ++observation.knownFaultChecks;observedState="classified-owned-visibility-fault";
         observedEvidence=localFault==InputHostSwitchLocalFault::DeferredPhysicalHide?
-            "current-source-returned-hide-obligation-unfinished":"current-exact-owned-target-missing-from-readback";
+            "current-source-returned-hide-obligation-unfinished":
+            localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete?
+            "current-owned-configuration-complete-root-refresh-unfinished":"current-exact-owned-target-missing-from-readback";
         inputHostSwitchRecoveryOfferLocked(view.requestId,currentPowerGeneration(),ERROR_SUCCESS,false,localFault);
     } else if (inputHostTupleFaultCurrentLocked(view)) {
         ++observation.knownFaultChecks;observedState="classified-tuple-receipt-fault";
@@ -687,8 +769,8 @@ static void inputHostSwitchVerificationMaintenanceLocked() {
             if(localFault!=InputHostSwitchLocalFault::None) {
                 const auto& proof=g_inputHostOwnedVisibilityReadback;
                 detail["localVisibilityFault"]={
-                    {"policy","VC-COMMON-SELF-HEAL-20261103-R1"},
-                    {"kind",localFault==InputHostSwitchLocalFault::DeferredPhysicalHide?"deferred-physical-hide":"owned-hidden-target-missing"},
+                    {"policy",localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete?"VC-COMMON-SELF-HEAL-20261105-R2":"VC-COMMON-SELF-HEAL-20261103-R1"},
+                    {"kind",ymcc::inputHost::switchRecoveryRuntime::localFaultName(localFault)},
                     {"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"persona",view.persona},
                     {"deferredHideOutstanding",deferredHideOutstandingLocked(view)},
                     {"readbackProofApplicable",localFault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing},

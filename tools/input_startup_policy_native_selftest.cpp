@@ -63,12 +63,14 @@ int main() {
         expect(next["gyroMotion"]["presets"] == saved["gyroMotion"]["presets"]); expect(next["gyroMotion"]["calibrationId"] == "keep-calibration");
     });
     check("all new preset defaults match UI and game override", [&] {
-        auto fps = ymcc::startupGyroPresetParams("fps", nullptr); expect(fps["outputStick"] == "right" && fps["outputAxis"] == "xy" && fps["aimingSightsTrigger"] == "LT");
+        auto fps = ymcc::startupGyroPresetParams("fps", nullptr); expect(fps["outputStick"] == "right" && fps["outputAxis"] == "xy" && fps["aimingSightsTrigger"] == "" && fps["gyroWeight"] == 1.3);
         auto racing = ymcc::startupGyroPresetParams("racing", nullptr); expect(racing["outputStick"] == "left" && racing["outputAxis"] == "x" && racing["motionInput"] == "joystick-steering");
         auto steam = ymcc::startupGyroPresetParams("steam", nullptr); expect(steam["motionInput"] == "local-space");
         for (auto key : {"fps", "racing", "steam", "custom"}) {
             auto params = ymcc::startupGyroPresetParams(key, nullptr);
-            expect(params["innerDeadzone"] == 1 && params["antiDeadzone"] == 20 && params["autoCalibrate"] == true && params["motionMode"] == "on" && params["motionTrigger"].is_null());
+            expect(params["innerDeadzone"] == 1 && params["antiDeadzone"] == 20 && params["autoCalibrate"] == true);
+            if (std::string(key) == "fps") expect(params["motionMode"] == "off" && params["motionTrigger"] == "LT");
+            else expect(params["motionMode"] == "on" && params["motionTrigger"].is_null());
         }
     });
     check("on/trigger normalization and inactive preset memory", [&] {

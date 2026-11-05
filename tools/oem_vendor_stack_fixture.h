@@ -18,6 +18,9 @@ static constexpr uint64_t kOemBitCc=1ull<<22,kOemBitAc=1ull<<23,kOemBitLib=1ull<
 static struct {YmccFamily family=YmccFamily::AsusRogAlly;std::string deviceClass="HandheldCompanion.Devices.ROGAlly";} g_machineIdentity;
 static bool msiClawKnownBoardAuthority(){return g_machineIdentity.family==YmccFamily::MsiClaw;}
 static std::atomic<bool> g_exitRequested{false};
+static void msiForceGamepadShieldChanged(bool) {}
+static void msiForceGamepadRequest(const char*,unsigned) {}
+static void msiForceGamepadExitRestore() {}
 enum class PowerLifecycle { Ready, Suspending, Suspended, Resuming };
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static std::atomic<unsigned long long> g_powerGeneration{1};

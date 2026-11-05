@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { SCREEN_TOUCHPAD_DEFAULT, STANDALONE_SPECIAL_MODES, TOUCH_FEEDBACK_MODES, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, validateScreenTouchpadPatch, SCREEN_TOUCHPAD_LAYOUTS, SINGLE_TOUCHPAD_MODES, screenTouchpadDefaults, screenTouchpadProfile } from '../src/bridge/screenTouchpads';
+import { SCREEN_TOUCHPAD_DEFAULT, SCREEN_AUTO_HIDE_OPTIONS, screenSummonPositions, normalizeScreenTouchpadSummon, STANDALONE_SPECIAL_MODES, TOUCH_FEEDBACK_MODES, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, validateScreenTouchpadPatch, SCREEN_TOUCHPAD_LAYOUTS, SINGLE_TOUCHPAD_MODES, screenTouchpadDefaults, screenTouchpadProfile } from '../src/bridge/screenTouchpads';
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.enabled, false);
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.layout, 'off');
 for(const {value} of SCREEN_TOUCHPAD_LAYOUTS)assert.ok(validateScreenTouchpadPatch({layout:value}));
@@ -12,7 +12,7 @@ assert.equal(validateScreenTouchpadPatch({ touchFeedback: 'maximal' } as any), f
 assert.deepEqual(TOUCH_FEEDBACK_MODES.map(({ value, label }) => [value, label]), [
   ['off', '关闭'], ['minimal', '最小震动反馈'], ['medium', '中震动反馈'], ['strong', '强震动反馈'],
 ]);
-for(const field of ['summonEnabled','specialEnabled','rearEnabled'] as const){assert.equal(SCREEN_TOUCHPAD_DEFAULT[field],false);assert.ok(validateScreenTouchpadPatch({[field]:true}));assert.equal(validateScreenTouchpadPatch({[field]:1} as any),false);}
+for(const field of ['summonEnabled','specialEnabled','rearEnabled'] as const){assert.equal(SCREEN_TOUCHPAD_DEFAULT[field],field==='summonEnabled');assert.ok(validateScreenTouchpadPatch({[field]:true}));assert.equal(validateScreenTouchpadPatch({[field]:1} as any),false);}
 for (const mask of [0,1,2,3]) assert.ok(validateScreenTouchpadPatch({ specialMask: mask }));
 for (const mask of [0,5,10,15]) assert.ok(validateScreenTouchpadPatch({ rearMask: mask }));
 assert.equal(validateScreenTouchpadPatch({ specialMask: 4 }), false);
@@ -42,7 +42,7 @@ for (const profile of ['disabled','steamdeck','dualsense-edge','elite'] as const
   assert.equal(defaults.leftMode,profile==='steamdeck'?'steamdeck':profile==='dualsense-edge'?'dualsense':'wasd');
   assert.equal(defaults.specialEnabled,profile!=='disabled');
   assert.equal(defaults.specialMask,profile==='disabled'?0:profile==='elite'?1:3);
-  assert.equal(defaults.rearEnabled,false);assert.equal(defaults.summonEnabled,false);
+  assert.equal(defaults.rearEnabled,false);assert.equal(defaults.summonEnabled,true);assert.equal(defaults.summonPosition,'opposite');assert.equal(defaults.autoHideSeconds,15);
 }
 assert.equal(LEFT_TOUCHPAD_MODES[0].label,'SteamDeck 左触摸板 (Steam内设置)');
 assert.equal(RIGHT_TOUCHPAD_MODES[0].label,'SteamDeck 右触摸板 (Steam内设置)');
@@ -66,3 +66,19 @@ assert.equal(SCREEN_TOUCHPAD_DEFAULT.masterEnabled,true);
 assert.ok(validateScreenTouchpadPatch({masterEnabled:false}));
 assert.ok(validateScreenTouchpadPatch({masterEnabled:true}));
 assert.equal(validateScreenTouchpadPatch({masterEnabled:1} as any),false);
+
+assert.deepEqual(SCREEN_AUTO_HIDE_OPTIONS.map(option=>option.value),[0,1,3,5,10,15,30,45,60,120]);
+for(const {value} of SCREEN_AUTO_HIDE_OPTIONS)assert.ok(validateScreenTouchpadPatch({autoHideSeconds:value}));
+for(const autoHideSeconds of [-1,2,4,11,121,'1',true,null])assert.equal(validateScreenTouchpadPatch({autoHideSeconds} as any),false);
+assert.deepEqual(screenSummonPositions('right').map(option=>option.label),['关闭','同侧【右侧】呼出','对侧【左侧】呼出']);
+assert.deepEqual(screenSummonPositions('left').map(option=>option.label),['关闭','同侧【左侧】呼出','对侧【右侧】呼出']);
+for(const summonPosition of ['left','right','off',undefined]){
+ const old=normalizeScreenTouchpadSummon({summonPosition,summonEnabled:false,scale:135});
+ assert.equal(old.summonPosition,'opposite');assert.equal(old.summonEnabled,true);assert.equal(old.scale,135);
+}
+for(const summonPosition of ['off','same','opposite'] as const){
+ const edited=normalizeScreenTouchpadSummon({summonPosition,summonPlacementVersion:1});
+ assert.equal(edited.summonPosition,summonPosition);assert.equal(edited.summonEnabled,summonPosition!=='off');
+ assert.deepEqual(normalizeScreenTouchpadSummon(edited),edited);
+}
+console.log('TOUCHPAD_AUTOHIDE_RELATIVE_OK: 15s default, 10 durations, both window sides, one-time migration and player edits');

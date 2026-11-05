@@ -17,7 +17,7 @@ for(const match of project.matchAll(/<Compile\s+Include="([^"]+)"/g)){
  if(relative==='..'||relative.startsWith('../')||path.isAbsolute(relative))throw Error('Battery source link leaves the repository');
  if(!inputs.includes(relative))inputs.push(relative);
 }
-inputs.push('native/battery_managed_runtime.h','native/battery_charge_client.h','native/secondary_display_client.h','tools/battery-charge-contract.mjs');
+inputs.push('native/power_source_state.h','native/battery_managed_runtime.h','native/battery_charge_client.h','native/secondary_display_client.h','tools/battery-charge-contract.mjs');
 const hash=crypto.createHash('sha256');
 for(const name of inputs.sort())hash.update(name+'\0'+fs.readFileSync(path.join(root,name),'utf8').replaceAll('\r\n','\n')+'\0');
 const contract={schema:1,protocol:2,component:'YeManBatteryHost',implementation:'in-process-60s-msi-cg3em-ap-v1',sourceId:hash.digest('hex')};

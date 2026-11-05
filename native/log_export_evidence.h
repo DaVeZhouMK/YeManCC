@@ -34,7 +34,7 @@ inline std::string canonicalLogEvidenceName(std::string name) {
 }
 inline bool jsonLinesEvidenceName(std::string name) {
     name=canonicalLogEvidenceName(std::move(name));
-    for(const auto* exact:{"input-capture.jsonl","native-lifecycle.log","native-detail.log","monitor-detail.log","tdp.log","tdp-detail.log",
+    for(const auto* exact:{"input-capture.jsonl","native-lifecycle.log","model-adaptation.log","virtual-adaptation.log","native-detail.log","monitor-detail.log","tdp.log","tdp-detail.log",
         "frontend-errors.log","frontend-trace.log","frontend-trace-detail.log","webview-failures.log","fan-api.log",
         "fan-lifecycle.log","gyro-motion.log","virtual-gamepad.log","focus-trace.log","hardware-coordinator.log",
         "input-host-fatal.log","input-host-rejects.log","input-host-cost.log","input-host-signal.log","input-host-report-chain.log","input-host-xbox-sdk.log","physical-source-reader.log",

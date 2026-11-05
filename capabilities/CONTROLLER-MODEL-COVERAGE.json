@@ -5954,7 +5954,7 @@
             "keyId": "orange",
             "label": "Orange",
             "backIndex": 0,
-            "form": "KeyboardVk",
+            "form": "HidButton",
             "clickOnly": false
           },
           {
@@ -5977,10 +5977,211 @@
             "backIndex": 0,
             "form": "KeyboardVk",
             "clickOnly": false
+          },
+          {
+            "keyId": "l4",
+            "label": "L4",
+            "backIndex": 1,
+            "form": "HidButton",
+            "clickOnly": false
+          },
+          {
+            "keyId": "r4",
+            "label": "R4",
+            "backIndex": 2,
+            "form": "HidButton",
+            "clickOnly": false
           }
         ],
         "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
-        "profileNoneIsNotNoController": true
+        "profileNoneIsNotNoController": true,
+        "currentConsumerCapture": {
+          "captureId": "HC083-D01-APEX-OEM-20261105T022114186323Z",
+          "capturedAtUtc": "2026-11-05T02:21:46.037059+00:00",
+          "reviewedAtUtc": "2026-11-05T02:25:25.434654+00:00",
+          "scope": "OneXPlayerApex OEM current derived facts only; source declaration and live acceptance remain separate",
+          "historicalSourcePins": {
+            "disposition": "Top-level sourcePins, selectorAnchors and capturedAt are the preserved historical document snapshot; none is rehashed or promoted to current PASS by this bounded patch.",
+            "documentCapturedAt": "2026-10-25T23:34:49.635717+08:00",
+            "preimage": {
+              "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\CONTROLLER-MODEL-COVERAGE.json",
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION\\agent-family\\preimages\\20261105T022114186323Z\\capabilities\\CONTROLLER-MODEL-COVERAGE.json",
+              "sha256": "401baf1d67255d9e8c5609ff2213139427df5949e04c58ccfb5c39c15f02533a",
+              "bytes": 308921
+            },
+            "apexOemJsonPointer": "/models/71/oem"
+          },
+          "facts": {
+            "catalogOperationCount": 8,
+            "dedicatedOperationIds": [
+              "turbo",
+              "keyboard",
+              "orange",
+              "orangekb",
+              "orangetb",
+              "orangelp"
+            ],
+            "dedicatedOperationCount": 6,
+            "dedicatedPhysicalKeyIds": [
+              "turbo",
+              "keyboard",
+              "orange"
+            ],
+            "dedicatedPhysicalKeyCount": 3,
+            "rearKeyIds": [
+              "l4",
+              "r4"
+            ],
+            "rearKeyCount": 2,
+            "orangeForm": "HidButton",
+            "dedicatedOperationPhysicalKeyIds": {
+              "turbo": [
+                "turbo"
+              ],
+              "keyboard": [
+                "keyboard"
+              ],
+              "orange": [
+                "orange"
+              ],
+              "orangekb": [
+                "keyboard",
+                "orange"
+              ],
+              "orangetb": [
+                "turbo",
+                "orange"
+              ],
+              "orangelp": [
+                "orange"
+              ]
+            },
+            "captureRoutes": {
+              "turbo": "keyboard-vk",
+              "keyboard": "keyboard-vk-or-onex-vendor-held",
+              "orange": "keyboard-vk-or-onex-vendor-held",
+              "orangekb": "keyboard-vk",
+              "orangetb": "keyboard-vk",
+              "orangelp": "keyboard-vk",
+              "l4": "onex-vendor-held",
+              "r4": "onex-vendor-held"
+            }
+          },
+          "sourceMeaning": "OEMChords.Clear in the HC source clears keyboard chord declarations; it does not remove the inherited native vendor-reader L4/R4 entries. Existing action IDs, device declarationSource and frozen source identity are preserved.",
+          "physicalCountMeaning": "The six dedicated operations project to three physical dedicated keys; combination/long-press operations add no physical key. The two rear keys are separate. The existing UI uses physicalKeyIds or falls back to [keyId], so do not count eight operations as eight physical keys.",
+          "captureManifest": {
+            "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION\\agent-family\\source-snapshots\\20261105T022114186323Z\\CAPTURE-MANIFEST.json",
+            "sha256": "34fa19bd2ebbd85ed15c1303fcc9b77920ff65647a9e4f5f9fd6bb17dc6e40fc",
+            "bytes": 5177
+          },
+          "sourceReferences": [
+            {
+              "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION\\agent-family\\source-snapshots\\20261105T022114186323Z\\native\\main.cpp",
+              "sha256": "43ad64f61ebc683c126404603be1c00ff586f6af29ef7d5556390769675f6b00",
+              "bytes": 5656891,
+              "reviewedSymbols": [
+                {
+                  "symbol": "kOneXApexKeys",
+                  "line": 19431,
+                  "endLine": 19442,
+                  "sliceSha256": "732e43c98c09109560dfd13636d4e98c7567405aad912e0c7bb48d6fdba81824"
+                },
+                {
+                  "symbol": "oemCatalogForFamily / OneXPlayer branch",
+                  "line": 19558,
+                  "endLine": 19567,
+                  "sliceSha256": "727620dec37c1d323f30da9149cde529bb7c64a2114dc83df60f0d4e12709e27"
+                },
+                {
+                  "symbol": "oemUnifiedInputBindingFor",
+                  "line": 19605,
+                  "endLine": 19609,
+                  "sliceSha256": "cdc73cc6b7c2e4611965675377d1a691e6fb789d42a1f78864c59aa2c9b2d67f"
+                },
+                {
+                  "symbol": "oem.keys.get",
+                  "line": 81050,
+                  "endLine": 81111,
+                  "sliceSha256": "23148277bd9c61ccb8ee539f655490b16542955f00921459dbd4c6e7ea123b17"
+                },
+                {
+                  "symbol": "oem.keys.status",
+                  "line": 81115,
+                  "endLine": 81150,
+                  "sliceSha256": "68b030b776bae5101dc982f910ff7b226024c769b0dd96254efc20b0240bddf4"
+                }
+              ],
+              "reviewScope": "Only the named APEX OEM source slices are reviewed; full captured bytes are retained for stable identity."
+            },
+            {
+              "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcOneXVendorInputContract.h",
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION\\agent-family\\source-snapshots\\20261105T022114186323Z\\capabilities\\HcOneXVendorInputContract.h",
+              "sha256": "58da11d48a2c5fa9629c3e477a1b857114a630931a83ae3cac6b007d73c50f50",
+              "bytes": 7737,
+              "reviewedSymbols": [
+                {
+                  "symbol": "descriptorFor",
+                  "line": 24,
+                  "endLine": 35,
+                  "sliceSha256": "3335e7775f328033707a12cb215037b96ea0a32aed6c4136d7a0c0e21b75616f"
+                },
+                {
+                  "symbol": "captureRoute",
+                  "line": 38,
+                  "endLine": 45,
+                  "sliceSha256": "ae08415c1d1687555252d80de28a6fadc7f8c1e63350a8a34c206892e5f054ab"
+                },
+                {
+                  "symbol": "physicalKeyIds",
+                  "line": 49,
+                  "endLine": 56,
+                  "sliceSha256": "005d7fdc6d72e64891c6ea773c8d699d602b9c68f7f0a5d6a258a4ef3a4fcd2e"
+                }
+              ],
+              "reviewScope": "Only the named APEX OEM source slices are reviewed; full captured bytes are retained for stable identity."
+            },
+            {
+              "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcOemInputCapabilityBinding.h",
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION\\agent-family\\source-snapshots\\20261105T022114186323Z\\capabilities\\HcOemInputCapabilityBinding.h",
+              "sha256": "08954d8070d2fc1486a7788f4e24b08e92edade94be1ad927e019686fc981068",
+              "bytes": 5706,
+              "reviewedSymbols": [
+                {
+                  "symbol": "InputBindingCache::bind",
+                  "line": 69,
+                  "endLine": 96,
+                  "sliceSha256": "b5a174323c1640db78adc8d163b78be5824bcc9e2621ef4ac98757e3eeaceedf"
+                }
+              ],
+              "reviewScope": "Only the named APEX OEM source slices are reviewed; full captured bytes are retained for stable identity."
+            },
+            {
+              "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\controllerFeatureStatus.ts",
+              "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-083-ONEX-FRESH-FIELD-CAPABILITY-RECONCILIATION\\agent-family\\source-snapshots\\20261105T022114186323Z\\src\\bridge\\controllerFeatureStatus.ts",
+              "sha256": "d8c731b7a6e6fb091e8dea8eee27df0a0bfe13efa2d6122c8b6f8871fd097882",
+              "bytes": 9898,
+              "reviewedSymbols": [
+                {
+                  "symbol": "keyStatus / physicalIds",
+                  "line": 60,
+                  "endLine": 78,
+                  "sliceSha256": "cae848efda0a9dbc1ed1aea105b1a5d2c5fa74e629cc290a8da1f28f9e715e17"
+                }
+              ],
+              "reviewScope": "Only the named APEX OEM source slices are reviewed; full captured bytes are retained for stable identity."
+            }
+          ],
+          "verification": {
+            "kind": "JSON parse and static comparison against captured actual source slices",
+            "runtimeDispatcher": false,
+            "globalSourcePinsReaudited": false,
+            "fixturesRun": false,
+            "runtimeExecution": false,
+            "hardwareAcceptance": false,
+            "inputOrActionSuccessClaimed": false
+          }
+        }
       },
       "motion": {
         "recipeTableMembership": [

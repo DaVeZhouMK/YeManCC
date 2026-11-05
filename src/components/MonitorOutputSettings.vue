@@ -160,6 +160,11 @@ function chooseVisibility(value: string | number) {
   if (!mode) return;
   prefs.ymcc.visibility = mode; persist(false, true);
 }
+function chooseCrosshair(value: string | number) {
+  const kind = HUD_CROSSHAIRS.find(item => item.value === value)?.value;
+  if (!kind) return;
+  prefs.ymcc.crosshair = kind; persist(false, true);
+}
 function chooseHudLayout(value: string | number) {
   const layout = HUD_LAYOUTS.find(item => item.value === value)?.value;
   if (!layout) return;
@@ -306,7 +311,10 @@ defineExpose({ flushEdits });
   <h3 class="monitor-overview-heading"><InlineIcon name="monitor"/>监控输出</h3>
   <SegButton class="monitor-overview-output-modes" :model-value="monitorOutputChoice(prefs)" :options="MONITOR_OUTPUTS" color="accent" full :disabled="loading||busy" :gp-row="0" @update:model-value="v=>choose(String(v))" />
   <div class="monitor-overview-controls"><Toggle :model-value="prefs.enabled" label="显示监控" :disabled="loading||busy" :gp-row="1" :gp-col="0" @update:model-value="enabled"/><Toggle :model-value="prefs.popupEnabled" label="弹出提示" :disabled="loading||busy" :gp-row="1" :gp-col="1" @update:model-value="popupEnabled"/><Toggle :model-value="prefs.mouseStatusEnabled" label="鼠标状态" :disabled="loading||busy" :gp-row="1" :gp-col="2" @update:model-value="mouseStatusEnabled"/></div>
-  <label v-if="prefs.output==='ymcc'" class="monitor-overview-visibility"><span>监控出现</span><Dropdown :model-value="prefs.ymcc.visibility??'always'" :options="HUD_VISIBILITIES" aria-label="监控出现" color="accent" :disabled="loading||busy" :gp-row="2" :gp-col="0" @update:model-value="chooseVisibility"/></label>
+  <div v-if="prefs.output==='ymcc'" class="monitor-top-choices monitor-overview-choices">
+   <label class="monitor-overview-visibility"><span>监控出现</span><Dropdown :model-value="prefs.ymcc.visibility??'always'" :options="HUD_VISIBILITIES" aria-label="监控出现" color="accent" :disabled="loading||busy" :gp-row="2" :gp-col="0" @update:model-value="chooseVisibility"/></label>
+   <label class="monitor-overview-crosshair"><span class="monitor-crosshair-label">屏幕准星<span class="monitor-crosshair-swatch"><MonitorCrosshair :kind="prefs.ymcc.crosshair ?? 'none'" /></span></span><Dropdown :model-value="prefs.ymcc.crosshair ?? 'none'" :options="HUD_CROSSHAIRS" aria-label="屏幕准星" color="accent" :disabled="loading || busy" :gp-row="2" :gp-col="1" @update:model-value="chooseCrosshair" /></label>
+  </div>
   <section v-if="prefs.output==='rtss'" class="monitor-overview-rtss"><h3>RTSS 模板与大小</h3><SegButton :model-value="prefs.rtssTemplate" :options="RTSS_MONITOR_TEMPLATES" color="accent" full :disabled="loading||busy" @update:model-value="v=>{prefs.rtssTemplate=v as any;persist(true,true)}"/><Slider :model-value="prefs.rtssScale" :min="20" :max="240" :step="20" :accelerate="false" label="监控大小" unit="%" :disabled="loading||busy" @update:model-value="v=>rtssCommit(v,false)" @commit="rtssCommit"/></section>
   <p v-if="failed" class="monitor-overview-error" role="alert">{{status}}</p>
  </section>
@@ -355,7 +363,10 @@ defineExpose({ flushEdits });
       
 
 
-      <label v-if="prefs.output === 'ymcc'" class="monitor-visibility-choice"><span>监控出现</span><Dropdown :model-value="prefs.ymcc.visibility ?? 'always'" :options="HUD_VISIBILITIES" aria-label="监控出现" width="164px" color="accent" :disabled="loading || busy" :gp-row="1" :gp-col="0" @update:model-value="chooseVisibility" /></label>
+      <div v-if="prefs.output === 'ymcc'" class="monitor-top-choices">
+       <label class="monitor-visibility-choice"><span>监控出现</span><Dropdown :model-value="prefs.ymcc.visibility ?? 'always'" :options="HUD_VISIBILITIES" aria-label="监控出现" color="accent" :disabled="loading || busy" :gp-row="1" :gp-col="0" @update:model-value="chooseVisibility" /></label>
+       <label class="monitor-crosshair-choice"><span class="monitor-crosshair-label">屏幕准星<span class="monitor-crosshair-swatch"><MonitorCrosshair :kind="prefs.ymcc.crosshair ?? 'none'" /></span></span><Dropdown :model-value="prefs.ymcc.crosshair ?? 'none'" :options="HUD_CROSSHAIRS" aria-label="屏幕准星" color="accent" :disabled="loading || busy" :gp-row="1" :gp-col="1" @update:model-value="chooseCrosshair" /></label>
+      </div>
       <p v-if="failed" class="monitor-feedback monitor-feedback--failed" role="alert">{{ status }}</p>
     </section><div v-if="prefs.output==='rtss'"><section class="card rtss-output-card">
       <h3 class="card-title">RTSS 模板与大小</h3>
@@ -367,7 +378,6 @@ defineExpose({ flushEdits });
             <div class="monitor-image-underlay monitor-image-underlay--top"><span class="monitor-underlay-label">图片背景</span><div class="monitor-underlay-actions"><Dropdown :model-value="prefs.ymcc.underlayPreset ?? 'none'" :options="HUD_UNDERLAY_PRESETS" aria-label="图片背景" width="100%" color="accent" :disabled="loading || busy || underlayBusy" :gp-row="2" :gp-col="0" @update:model-value="chooseUnderlay" /><button v-if="prefs.ymcc.underlayPreset === 'custom'" type="button" class="action-btn" :disabled="loading || busy || underlayBusy" data-gp-row="2" data-gp-col="1" @click="openUnderlayPicker">{{ underlayPicking ? '选择中…' : underlayImporting ? '导入中…' : '选择图片' }}</button></div><span v-if="underlayError" class="monitor-underlay-error" role="alert">{{ underlayError }}</span></div>
             <label><span>监控样式</span><Dropdown :model-value="prefs.ymcc.layout" :options="HUD_LAYOUTS" aria-label="监控样式" width="100%" color="accent" :disabled="loading || busy" :gp-row="2" :gp-col="2" @update:model-value="chooseHudLayout" /></label>
           </div>
-          <label v-if="prefs.output === 'ymcc'" class="monitor-crosshair-choice"><span class="monitor-crosshair-label">屏幕准星<span class="monitor-crosshair-swatch"><MonitorCrosshair :kind="prefs.ymcc.crosshair ?? 'none'" /></span></span><Dropdown :model-value="prefs.ymcc.crosshair ?? 'none'" :options="HUD_CROSSHAIRS" aria-label="屏幕准星" width="160px" color="accent" :disabled="loading || busy" :gp-row="3" :gp-col="0" @update:model-value="v => { prefs.ymcc.crosshair = HUD_CROSSHAIRS.find(item => item.value === v)?.value ?? 'none'; persist(false, true); }" /></label>
           <div class="monitor-fps-emphasis" v-if="prefs.output === 'ymcc'"><Toggle :model-value="prefs.ymcc.fpsEmphasis !== false" label="FPS 突出显示" :disabled="loading || busy" :gp-row="4" :gp-col="0" @update:model-value="fpsEmphasis" /></div>
           <div v-if="prefs.output === 'ymcc'" class="monitor-font-grid">
             <label><span>正文字体</span><Dropdown :model-value="prefs.ymcc.font ?? 'system'" :options="HUD_FONTS" aria-label="正文字体" width="100%" :disabled="loading || busy" :gp-row="5" :gp-col="0" @update:model-value="v => chooseFont('font', v)" /></label>
@@ -841,5 +851,9 @@ defineExpose({ flushEdits });
 .monitor-overview-rtss h3{font-size:16px}
 .monitor-overview-rtss :deep(.slider){margin-top:14px}
 .monitor-overview-error{margin:8px 0 0;color:var(--danger);font-size:13px;overflow-wrap:anywhere}
+.monitor-top-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px;margin-top:6px}
+.monitor-overview .monitor-top-choices>label,.monitor-output-settings.sectioned-monitor .monitor-top-choices>label{display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:5px;margin:0;min-width:0;min-height:0;font-size:14px;white-space:normal}
+.monitor-top-choices>label>span{display:flex;align-items:center;min-height:24px;white-space:nowrap}
+.monitor-overview .monitor-top-choices :deep(.dd),.monitor-output-settings.sectioned-monitor .monitor-top-choices :deep(.dd){width:100%;max-width:none;min-width:0}
 </style>
 

@@ -50,6 +50,7 @@ export interface CcdLease {
   active: boolean;
 }
 export interface CcdProbe {
+  performanceSupported: boolean;
   supported: boolean;
   available: boolean;
   l3Domains: number;
@@ -68,7 +69,7 @@ export interface CcdProbe {
 
 function ccdUnavailable(reason: string): CcdProbe {
   return {
-    supported: false, available: false, l3Domains: 0, ccdMasks: [], domains: [],
+    performanceSupported: false, supported: false, available: false, l3Domains: 0, ccdMasks: [], domains: [],
     physicalCores: 0, logical: 0, operation: '', effectScope: '', mechanism: '',
     physicalCcdPowerOff: false, topologySource: '', lease: null, reason,
   };
@@ -149,7 +150,8 @@ export async function probeCcd(): Promise<CcdProbe> {
           .map((d: any) => ({ index: d.index, mask: d.mask, logical: d.logical }))
       : [];
     const domainsValid = domains.length === l3 &&
-      domains.every(d => masks.includes(d.mask));
+      domains.every((d, index) => d.index === index + 1 && d.mask === masks[index] &&
+        BigInt(/^0x/i.test(d.mask) ? d.mask : '0x' + d.mask).toString(2).replace(/0/g, '').length === d.logical);
     const lease = validCcdLease(r?.lease);
     const supported = l3 >= 2 && operation === 'process_affinity' &&
       !!effectScope && !!mechanism && !!topologySource &&
@@ -163,6 +165,8 @@ export async function probeCcd(): Promise<CcdProbe> {
       return ccdUnavailable(reason);
     }
     return {
+      performanceSupported: r?.performanceSupported === true && r?.multiCcdConfirmed === true &&
+        r?.coreArchitectureDetected === true && r?.heterogeneous === false,
       supported: true, available: true, l3Domains: l3, ccdMasks: masks, domains,
       physicalCores: count(r?.physicalCores), logical,
       operation, effectScope, mechanism, physicalCcdPowerOff: false, topologySource, lease,
@@ -295,7 +299,8 @@ function parseUvProbe(j: Record<string, any>): UvProbe {
   const vendor = validUvVendor(j.vendor);
   const unit: UvUnit = j.unit === 'co_step' ? 'co_step' : j.unit === 'mv' ? 'mv' : '';
   const offset = isRecord(j.offset) ? {
-    min: j.offset.min, max: j.offset.max, step: j.offset.step, signed: true,
+    min: j.offset.min, max: finiteInt(j.offset.max) ? Math.min(0, j.offset.max) : j.offset.max,
+    step: j.offset.step, signed: true,
   } : null;
   const offsetValid = offset !== null && finiteInt(offset.min) && finiteInt(offset.max) &&
     finiteInt(offset.step) && offset.step > 0 && offset.min <= offset.max;
@@ -536,6 +541,7 @@ export async function setUndervolt(v: number,
   });
   if (!CPU_VOLTAGE_OFFSET_ACTIVE) return rejected('CPU 电压偏移功能未激活');
   if (!Number.isSafeInteger(v)) return rejected('电压偏移必须是有限整数');
+  if (v > 0) return rejected('仅允许降压（负偏移）或以 0 恢复默认');
   const requestId = `cpu-uv:${Date.now()}:${++uvRequestSequence}`;
   try {
     const r = await shell.run(await tdpCtlExe(), ['uv', 'set', String(v), '--receipt'], 20000);

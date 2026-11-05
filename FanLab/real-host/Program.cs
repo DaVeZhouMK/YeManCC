@@ -2587,16 +2587,20 @@ internal sealed partial class RealHcBackend : IDisposable
     // the one-second health tick does not allocate a new record every time.
     internal sealed class MonitorTarget
     {
-        public MonitorTarget(FanDispatchOwner owner, double percent, long sampledAt)
+        public MonitorTarget(FanDispatchOwner owner, double percent, long sampledAt, bool temperatureIndependent = false)
         {
             Owner = owner;
             Percent = percent;
+            TemperatureIndependent = temperatureIndependent;
             sampledAt = Math.Max(0, sampledAt);
             Volatile.Write(ref SampledAtStorage, sampledAt);
         }
 
         public FanDispatchOwner Owner { get; }
         public double Percent { get; }
+        // A successfully submitted all-100% target has no sensor sample to age.
+        // This remains a target receipt, never temperature or physical RPM proof.
+        public bool TemperatureIndependent { get; }
         private long SampledAtStorage;
         public long SampledAt => Volatile.Read(ref SampledAtStorage);
         public void Refresh(long sampledAt) => Volatile.Write(ref SampledAtStorage, Math.Max(0, sampledAt));
@@ -3359,7 +3363,7 @@ internal sealed partial class RealHcBackend : IDisposable
     internal sealed record TemperatureStaleSignal(FanDispatchOwner Owner, long HealthRevision);
     public Action<TemperatureStaleSignal>? TemperatureMonitorStale { get; set; }
     internal bool IsTemperatureStaleCurrent(TemperatureStaleSignal signal) =>
-        IsFanDispatchOwnerCurrent(signal.Owner) &&
+        IsFanDispatchOwnerCurrent(signal.Owner) && !IsMaximumFanCurve(activeCurveDuties) &&
         signal.HealthRevision == Volatile.Read(ref temperatureHealthRevision);
     // Reports whether a bounded HC call that timed out eventually returned
     // normally or with an exception. A timeout is not itself a completion
@@ -5192,6 +5196,43 @@ internal sealed partial class RealHcBackend : IDisposable
     private static object? TryInvokeNoArg(Type type, object target, string name) =>
         FindNoArgMethod(type, name)?.Invoke(target, null);
 
+    // [LIFECYCLE:FAN:MAXIMUM] A full 100% curve is independent of HW
+    // temperature, including HC's Tjmax latch. Lower flat curves still need
+    // that safety override and must retain the normal HW freshness guard.
+    private static bool IsMaximumFanCurve(double[]? duties) =>
+        duties is { Length: 11 } && duties.All(duty => duty == 100d);
+
+    private bool TrySubmitMaximumFanDuty(double[]? duties, long admittedEpoch)
+    {
+        if (!IsMaximumFanCurve(duties)) return false;
+        if (!IsOpen || operationTimedOut || Volatile.Read(ref closeWriteBlocked) != 0 ||
+            Volatile.Read(ref suspendGateEpoch) != admittedEpoch)
+            throw new FanApiException(409, "FAN_WRITE_SUPERSEDED", "Maximum fan request no longer owns the current device session");
+        // Retire the previous sample owner before stopping its sensor worker.
+        // The existing writer still checks its exact transport/session at IO.
+        Interlocked.Increment(ref temperatureHealthRevision);
+        var profile = activeFanProfile;
+        DetachCpuTemperatureLoop();
+        activeFanProfile = profile; // Preserve HC's thermal latch across a later lower curve.
+        WriteFanProfileDuty(100d, admittedEpoch);
+        lastDutyPercent = 100d;
+        lastTemperatureC = null;
+        PublishMaximumFanTarget();
+        Diagnostic?.Invoke("fan.maximum-duty-submitted", new
+        {
+            dutyPercent = 100, temperatureRequired = false,
+            source = "current-authorized-maximum-curve", physicalEffectVerified = false,
+        });
+        return true;
+    }
+
+    private void PublishMaximumFanTarget()
+    {
+        if (IsMaximumFanCurve(activeCurveDuties) && lastDutyPercent == 100d)
+            Volatile.Write(ref monitorTarget, new MonitorTarget(CaptureFanDispatchOwner(), 100d,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), temperatureIndependent: true));
+    }
+
     private void EnsureCpuTemperatureLoop()
     {
         if (cpuTemperatureMonitor is not null) return;
@@ -5239,8 +5280,8 @@ internal sealed partial class RealHcBackend : IDisposable
             TemperatureStaleSignal? stale = null;
             lock (hardwareGate)
             {
-                if (activeFanProfile is not null && IsOpen && !AreTemperatureWritesBlocked() &&
-                    !temperatureStaleSignaled &&
+                if (activeFanProfile is not null && !IsMaximumFanCurve(activeCurveDuties) &&
+                    IsOpen && !AreTemperatureWritesBlocked() && !temperatureStaleSignaled &&
                     Environment.TickCount64 - lastTemperatureTick > TemperatureStaleTimeoutMs)
                 {
                     // Freeze before detaching. A new curve, sleep boundary or healthy
@@ -5582,9 +5623,9 @@ internal sealed partial class RealHcBackend : IDisposable
         return true;
     }
 
-    private void WriteFanProfileDuty(double duty)
+    private void WriteFanProfileDuty(double duty, long? admittedEpoch = null)
     {
-        if (SourceControlConnected) { WritePinnedSourceDuty(duty); return; }
+        if (SourceControlConnected) { WritePinnedSourceDuty(duty, admittedEpoch); return; }
         var currentDevice = device ?? throw new InvalidOperationException("HC device unavailable");
         if (oneXFanLifecycle is not null)
         {
@@ -6762,9 +6803,12 @@ internal sealed partial class RealHcBackend : IDisposable
         hcProfileTemplate = profile;
         // HC's device-specific setup must succeed before this Host accepts a
         // temperature callback that could dispatch the first fan duty write.
-        if (route.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget)
+        if (route.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget &&
+            !IsMaximumFanCurve(duties))
             EnsureCpuTemperatureLoop();
         activeCurveDuties = duties;
+        if (route.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget)
+            PublishMaximumFanTarget(); // Bind to the committed curve, not its predecessor.
         activeMsiCurveNodes = route.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease ? nodes.ToArray() : null;
         EnsurePowerProfileWatchdog();
         return true;
@@ -7874,6 +7918,10 @@ internal sealed partial class RealHcBackend : IDisposable
             }
             else
                 Invoke("PowerProfileManager_Applied", profile, source);
+            if (callbackPhase == "F3-controlled" &&
+                Route?.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget)
+                TrySubmitMaximumFanDuty(submittedFan is null ? null : GetMember(submittedFan, "fanSpeeds") as double[],
+                    msiAdmissionEpoch ?? Volatile.Read(ref suspendGateEpoch));
             UpdateExactDefaultHcRogLedger(callbackPhase);
             EmitDiagnostic("hc.fan-dispatch.callback-returned", () => new
             {
@@ -12878,12 +12926,12 @@ internal sealed partial class FanHostEngine : IDisposable
             && !snapshot.UnknownState && !snapshot.CloseCalled && !snapshot.HcCloseCleanupPending
             && snapshot.PowerState is not ("Suspended" or "Suspending" or "Resuming") && !snapshot.OemRestoreConfirmed;
         var target = enabled ? realBackend!.MonitorTargetForRead() : null;
-        // MonitorTarget.SampledAt is refreshed by the temperature producer. Capture
-        // it once so validation and the published receipt describe the same sample.
-        // Re-reading it can cross a freshness boundary and publish a timestamp
-        // that was never the value actually validated.
-        var sampledAt = enabled && target is not null ? target.SampledAt : 0;
+        // Dynamic targets keep the actual HW sample timestamp. A submitted
+        // maximum target is temperature-independent: this API response observes
+        // the current target owner, without fabricating a new sensor sample.
         var now = target is not null ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
+        var sampledAt = enabled && target is not null
+            ? target.TemperatureIndependent ? now : target.SampledAt : 0;
         var valid = enabled && target is not null && double.IsFinite(target.Percent) && target.Percent >= 0 && target.Percent <= 100 && sampledAt > 0 && sampledAt <= now && now - sampledAt < 6000;
         double? displayPercent = valid ? target!.Percent : null;
         var displaySampledAt = valid ? sampledAt : 0;

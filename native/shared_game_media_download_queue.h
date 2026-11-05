@@ -9,6 +9,9 @@ namespace ymcc::media::downloads {
 inline constexpr uint64_t stallMs = 90000, taskMs = 240000, sessionMs = 900000;
 inline constexpr int maxRecoveryAttempts = 2, automaticAttemptLimit = 3, maximumParallel = 10;
 inline constexpr int64_t retryMs = 20000, automaticAttemptMs = 180000, automaticGameMs = 360000;
+// Explicit video choice may use the existing six-minute game budget in one
+// serial transfer; automatic attempts retain their original three-minute cap.
+inline constexpr int64_t manualVideoAttemptMs = automaticGameMs;
 inline bool itemStopped(const Json& job){return job.value("autoStopped",false)||job.value("retiredPopular",false);}
 inline void resetAutomaticBudget(Json& job){job["autoStopped"]=false;job["automaticElapsedMs"]=0;job["attempts"]=0;job["retryAt"]=0;job.erase("stopReason");if(job.value("state",std::string{})=="unavailable")job["state"]="pending";}
 inline bool sharedFailure(const std::string& reason){return reason.find("media-disk-")==0||reason.find("media-cache-")==0||reason.find("media-staging-")==0||reason=="media-storage-unavailable"||reason.find("upgrade-required")!=std::string::npos||reason.find("power-paused")!=std::string::npos||reason.find("cancelled")!=std::string::npos;}
@@ -17,7 +20,7 @@ struct Limits {
   DWORD monitor = 5000;
   uint64_t startup = 30000;
   DWORD recheck = static_cast<DWORD>(retryMs);
-  uint64_t attempt = automaticAttemptMs;
+  uint64_t attempt = manualVideoAttemptMs; // Per-claim budget below still limits automatic work.
 };
 inline std::wstring eventName(const fs::path &root, const std::wstring &role) {
   return L"Local\\YMCC-MediaDownloads-" +
@@ -77,7 +80,7 @@ inline bool complete(const Json &e, int64_t time) {
 // A user request is a bounded run, independent from the automatic switch.
 // Only CPU/game soft gates may be bypassed; power/startup/storage stay intact.
 inline bool manualRun(const Json& j){const auto until=j.value("manualUntil",int64_t{0});return until>now()&&until<=now()+int64_t(sessionMs);}
-inline bool policyBlocked(const Json& j){const auto pause=stringField(j,"pauseReason");return !pause.empty()&&!(manualRun(j)&&pause=="game-running");}
+inline bool policyBlocked(const Json& j){if(powerPolicy::blocked())return true;const auto pause=stringField(j,"pauseReason");return !pause.empty()&&!(manualRun(j)&&pause=="game-running");}
 inline bool downloadsEnabled(const Json& j){return j.value("enabled",true)||manualRun(j);}
 inline bool runnable(const Json &job, int64_t time) {
   return !job.value("recoveryUnconfirmed",false) && !itemStopped(job) && job.value("state", std::string{"pending"}) != "done" &&
@@ -167,9 +170,9 @@ inline void write(const fs::path& path,const Json& j) {
 inline void fields(const Json& j,bool row=false) {
   if(!j.is_object())throw std::runtime_error("media-queue-fields-invalid");
   const auto require=[&](const char* name,const std::function<bool(const Json&)>& valid){auto it=j.find(name);if(it!=j.end()&&!valid(*it))throw std::runtime_error(std::string("media-queue-field-invalid:")+name);};
-  for(const auto* name:{"enabled","sessionClaimed","resourceChecked","catalogPending","identityPending","verified","retiredPopular","refreshRequested","recoveryRequired","recoveryUnconfirmed"})require(name,[](const Json& v){return v.is_boolean();});
+  for(const auto* name:{"enabled","wallpaperPauseOnBattery","sessionClaimed","resourceChecked","catalogPending","identityPending","verified","retiredPopular","refreshRequested","recoveryRequired","recoveryUnconfirmed"})require(name,[](const Json& v){return v.is_boolean();});
   if(row)require("autoStopped",[](const Json& v){return v.is_boolean();});
-  for(const auto* name:{"session","phase","reason","pauseReason","resourcePauseReason","workerBirth","ownerProtocolSession","launchTarget","inventoryReadyId","inventoryRequestId","manualRequestId","manualSession","manualSessionRequest","manualState","manualPriorityKey","catalogStatus","catalogError","queuePolicy","pendingReason","key","name","state","lastError","stopReason","catalogSource","localCatalogSource","executable","steamAccount","shortcutAppId","recoveryReason"})require(name,[](const Json& v){return v.is_string();});
+  for(const auto* name:{"wallpaperPowerCancelledSession","session","phase","reason","pauseReason","resourcePauseReason","workerBirth","ownerProtocolSession","launchTarget","inventoryReadyId","inventoryRequestId","manualRequestId","manualSession","manualSessionRequest","manualState","manualPriorityKey","catalogStatus","catalogError","queuePolicy","pendingReason","key","name","state","lastError","stopReason","catalogSource","localCatalogSource","executable","steamAccount","shortcutAppId","recoveryReason"})require(name,[](const Json& v){return v.is_string();});
   for(const auto* name:{"statusRevision","queueRevision","updatedAt","workerPid","ownerProtocol","maxParallel","parallelSlots","cpuThreshold","startupProtectionUntil","heartbeatAt","taskStartedAt","manualUntil","inventoryAwaitUntil","inventoryRequestedAt","cooldownUntil","catalogRetryAt","progressNotifiedAt","bytes","totalBytes","resumedBytes","sessionResumedBytes","activeCount","appId","addedAt","lastPlayed","attempts","automaticElapsedMs","retryAt","requestBindingRevision","provenanceRevision","admissionRevision","qualityUpgradeRevision","videoQualityPolicy","sourceTier","localSourceTier","chartRank","attemptBudgetMs","total","completed","remaining","failed","unavailable","manualTotal","manualCompleted","nextDueAt"})require(name,[&](const Json& v){return v.is_number_integer()&&(!v.is_number_unsigned()||v.get<uint64_t>()<=INT64_MAX)&&(v.get<int64_t>()>=0||(std::string_view(name)=="nextDueAt"&&v.get<int64_t>()==-1));});
   for(const auto* name:{"attempts","maxParallel","parallelSlots","cpuThreshold","ownerProtocol","videoQualityPolicy","sourceTier","localSourceTier","chartRank"})require(name,[](const Json& v){return v.get<int64_t>()<=INT_MAX;});
   require("workerPid",[](const Json& v){return v.get<uint64_t>()<=MAXDWORD;});
@@ -208,6 +211,7 @@ class Queue {
   fs::path root_;
   static Json normalizedDocument(Json j, bool *invalidatesStatus = nullptr) {
     if (invalidatesStatus) *invalidatesStatus = false;
+    if(j.contains("wallpaperPauseOnBattery")&&j["wallpaperPauseOnBattery"].is_boolean())powerPolicy::consume(j["wallpaperPauseOnBattery"].get<bool>());
     const auto changed = [&] { if (invalidatesStatus) *invalidatesStatus = true; };
     if (!j.contains("jobs")) { j["jobs"] = Json::object(); changed(); }
     if (!j.contains("enabled")) j["enabled"] = true;
@@ -487,8 +491,7 @@ public:
   bool progress(const std::string &token,const std::string &key,const std::string &phase,
                 uint64_t bytes,uint64_t total) {
     Lock lock(root_);auto j=liveStatus();
-    if (token.empty() || j.value("session",std::string{})!=token || !downloadsEnabled(j) ||
-        policyBlocked(j) || !j.value("resourcePauseReason",std::string{}).empty()) return false;
+    if (!policyAllowed(j,token) || !j.value("resourcePauseReason",std::string{}).empty()) return false;
     const auto priorPhase=j.value("phase",std::string{});
     const auto selected=key.empty()?j.value("current",Json::object()).value("key",std::string{}):key;
     if (!key.empty() && !j.value("active",Json::object()).contains(key)) return false;
@@ -521,6 +524,12 @@ public:
     const bool reclaimed=reclaimExited(j);
     if(!reclaimed&&j==stored&&statusMatches(readStatus(),j))return false;
     save(j);return true;
+  }
+  bool configureWallpaperPower(bool enabled){
+    const bool changed=powerPolicy::own(enabled);
+    Lock lock(root_,200);auto j=load();
+    if(j.value("wallpaperPauseOnBattery",false)==enabled)return changed;
+    j["wallpaperPauseOnBattery"]=enabled;save(j);return true;
   }
   void configure(bool enabled, const std::string &pause,
                  int cpuThreshold = 15) {
@@ -818,6 +827,7 @@ public:
     if(changed) storeTemporaryRecords(files);
   }
   std::string start() {
+    if(powerPolicy::blocked())return {};
     cleanupTemporary();
     Lock lock(root_);
     Json j;try{j=load();}catch(const checkpoint::UpgradeRequired&){return {};}
@@ -887,6 +897,7 @@ public:
   }
   static bool policyAllowed(const Json &j, const std::string &token) {
     return !token.empty() && j.value("session", std::string{}) == token &&
+           j.value("wallpaperPowerCancelledSession",std::string{}) != token &&
            downloadsEnabled(j) && !policyBlocked(j);
   }
   static bool allowed(const Json &j, const std::string &token) {
@@ -898,12 +909,12 @@ public:
   }
   Json claim(const std::string &token) {
     Lock lock(root_);auto j=load();
-    if (token.empty() || j.value("session",std::string{})!=token || !downloadsEnabled(j) ||
-        policyBlocked(j) || !j.value("resourcePauseReason",std::string{}).empty() ||
+    if (!policyAllowed(j,token) || !j.value("resourcePauseReason",std::string{}).empty() ||
         j["active"].size()>=size_t(j.value("maxParallel",maximumParallel))) return nullptr;
     const auto key=nextQueueKey(j,now(),&j["active"]);if (key.empty()) return nullptr;
     auto target=j["jobs"][key];target["key"]=key;target["session"]=token;target["state"]="running";target["taskStartedAt"]=now();
-    target["attemptBudgetMs"]=(std::max)(int64_t{1},(std::min)(automaticAttemptMs,automaticGameMs-target.value("automaticElapsedMs",int64_t{0})));
+    const auto attemptLimit=manualRun(j)&&manualTarget(j,key)&&!target.value("selectedVideo",Json::object()).empty()?manualVideoAttemptMs:automaticAttemptMs;
+    target["attemptBudgetMs"]=(std::max)(int64_t{1},(std::min)(attemptLimit,automaticGameMs-target.value("automaticElapsedMs",int64_t{0})));
     target["heartbeatAt"]=now();target["bytes"]=0;target["totalBytes"]=0;target["phase"]="resolving";
     j["jobs"][key]["state"]="running";j["active"][key]=target;
     j["current"]=target;j["sessionClaimed"]=true;j["phase"]="resolving";
@@ -912,6 +923,7 @@ public:
   void result(const std::string &token, const std::string &key, bool ok,
               const std::string &reason = {}, int64_t retryAt = 0) {
     update(token, [&](Json &j) {
+      if (powerPolicy::blocked()||j.value("wallpaperPowerCancelledSession",std::string{})==token)return;
       if (!j["jobs"].contains(key))
         return;
       auto &job = j["jobs"][key];
@@ -940,7 +952,8 @@ public:
         job["retryAt"]=now()+retryMs;
       }else{
         const auto attempt=(std::min)(automaticAttemptLimit,job.value("attempts",0)+1);
-        const auto elapsed=(std::clamp)(now()-current.value("taskStartedAt",now()),int64_t{0},automaticAttemptMs);
+        const auto chargedLimit=(std::clamp)(current.value("attemptBudgetMs",automaticAttemptMs),int64_t{1},manualVideoAttemptMs);
+        const auto elapsed=(std::clamp)(now()-current.value("taskStartedAt",now()),int64_t{0},chargedLimit);
         const auto spent=(std::min)(automaticGameMs,job.value("automaticElapsedMs",int64_t{0})+elapsed);
         job["attempts"]=attempt;job["automaticElapsedMs"]=spent;
         if(attempt>=automaticAttemptLimit||spent>=automaticGameMs){job["state"]="unavailable";job["autoStopped"]=true;job["stopReason"]=spent>=automaticGameMs?"automatic-time-budget-exhausted":"automatic-attempt-budget-exhausted";job["retryAt"]=0;}
@@ -980,8 +993,9 @@ public:
   void deferUnsupportedQuality(const std::string& token){update(token,[](Json& j){for(auto& job:j["jobs"])if(job.value("qualityUpgradeRevision",uint64_t{0})>0){job["retryAt"]=now()+3600000;job["lastError"]="download-quality-worker-upgrade-required";}});}
   void deferUnsupportedIdentities(const std::string& token){update(token,[](Json& j){for(auto& job:j["jobs"])if(job.value("identityPending",false)){job["retryAt"]=now()+3600000;job["lastError"]="download-identity-worker-upgrade-required";}});}
   void end(const std::string &token, const std::string &phase,
-           const std::string &reason = {}) {
+           const std::string &reason = {}, bool invalidatePowerSession = false) {
     update(token, [&](Json &j) {
+      if(phase=="paused"&&reason=="download-paused"&&(invalidatePowerSession||powerPolicy::blocked()))j["wallpaperPowerCancelledSession"]=token;
       for (auto &job:j["jobs"]) if (job.value("state",std::string{})=="running") job["state"]="pending";
       j["active"]=Json::object();j["activeCount"]=0;
       if(reason.find("media-disk-")==0||reason.find("media-cache-")==0||
@@ -1084,11 +1098,12 @@ public:
         CloseHandle(stop_);
       throw std::runtime_error("media-download-watch-failed");
     }
-    thread_ = std::thread([this, changed] {
+    thread_ = std::thread([this, root, changed] {
       HANDLE handles[] = {stop_, event_};
       while (WaitForMultipleObjects(2, handles, FALSE, INFINITE) ==
              WAIT_OBJECT_0 + 1) {
         try {
+          refreshMediaPowerPreference(root);
           changed();
         } catch (...) {
         }

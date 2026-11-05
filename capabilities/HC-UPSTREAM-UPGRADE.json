@@ -2015,5 +2015,57 @@
       "consumerImplementationOwners": "Existing Fan/Lenovo gyro/ONEX gyro/virtual-controller owners",
       "soleCanonicalPublisher": "Existing CPU1"
     }
-  ]
+  ],
+  "latestBatterySourceComparison": {
+    "dateHongKong": "2026-11-05",
+    "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
+    "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
+    "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+    "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
+    "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
+    "upstreamDeviceFiles": 104,
+    "sourceDeltaSinceF2e58468": 0,
+    "factoryClasses": 90,
+    "candidateChargeClasses": 41,
+    "registeredHcCandidateClasses": 40,
+    "runtimeIdentityRules": 42,
+    "runtimeProtocols": 12,
+    "registrationAuthorityChanged": false,
+    "hardwareProbed": false,
+    "runtimeBehaviorChangedByThisAudit": false,
+    "apexActualFieldFailureStillOpen": true,
+    "previousPinnedCommit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+    "frozenHcReplaced": false,
+    "sourceAdmissionChanged": false,
+    "verification": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\verification.json",
+      "sha256": "03fbb5f0468a1b45e83bdf2ff2e31dff8da288f22432d4d2e1102df96b81f566",
+      "selectedCasesPassed": 4,
+      "hardwareAcceptance": false
+    },
+    "latestFieldEvidence": {
+      "archive": "G:/YeManCC-Work/日志/其他/YeManCC-logs-20261105-023324-onexplayer3.zip",
+      "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\field-023324\\field-summary.json",
+      "evidenceSha256": "2ac99d75d827ed0bb71495c200c8a01a514be31b2fdf577878dbf64b3b5df693",
+      "sessionTimeHongKong": "2026-11-05T02:33:21.2518085+08:00",
+      "pid": 15104,
+      "build": "Nov 5 2026 02:09:14",
+      "bios": "0.12",
+      "ecMajor": 0,
+      "ecMinor": 12,
+      "knownFirmware": true,
+      "latestGetCount": 2,
+      "latestSetCount": 0,
+      "route": "oxp-x1-amd-ec",
+      "failedCondition": "ecMajor 0 < required majorMin 1; ecMinor 12 passes minorMin 3",
+      "providerOpened": false,
+      "runtimeBehaviorChanged": false,
+      "physicalAcceptance": false,
+      "status": "FIELD_FAILURE_CONFIRMED_NOT_REPAIRED"
+    },
+    "latestFieldVerification": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\field-023324\\verification.json",
+      "sha256": "09142f59a044c2d5ed87de4605c2daef1657fd17a6962097875fa5217bbdf9af"
+    }
+  }
 }

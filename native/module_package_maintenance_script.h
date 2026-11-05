@@ -179,12 +179,8 @@ function Test-YmccModuleInventoryEqual($Left,$Right){
   return $true
 }
 function Merge-YmccModuleManifestAnnotations($Manifest,$Previous){
+  # Incoming records are the baseline; legacy annotations may be discarded.
   $copy=$Manifest|ConvertTo-Json -Depth 64 -Compress|ConvertFrom-Json
-  if(!$Previous){return $copy}
-  foreach($property in $Previous.PSObject.Properties){if($property.Name -notin @('schemaVersion','owner','packageVersion','files','compatibility')){$copy|Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}}
-  $known=@{};foreach($file in $Previous.files){$known[$file.path]=$file}
-  foreach($file in $copy.files){if($known.ContainsKey($file.path)){foreach($property in $known[$file.path].PSObject.Properties){if($property.Name -notin @('path','bytes','sha256')){$file|Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}}}}
-  if($Previous.PSObject.Properties['compatibility'] -and $copy.PSObject.Properties['compatibility']){foreach($property in $Previous.compatibility.PSObject.Properties){if($property.Name -notin @('sourceKind','payloadHashScope','payloadSha256','scriptSha256','applyAfterYmccCommit')){$copy.compatibility|Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}}}
   Assert-YmccModuleManifest $copy;return $copy
 }
 function New-YmccModuleManifest([string]$Source, [string]$Version) {
@@ -202,50 +198,65 @@ function New-YmccModuleManifest([string]$Source, [string]$Version) {
   Assert-YmccModuleManifest $manifest $Version
   return $manifest
 }
-function Get-YmccModulePlan([string]$Source, [string]$Target, $Manifest, [string]$Version) {
+function Get-YmccModulePlan([string]$Source, [string]$Target, $Manifest, [string]$Version, [switch]$InstalledPayload) {
   Assert-YmccModuleManifest $Manifest $Version
   $sourceHome=Resolve-YmccDeckyPath $Source; $targetHome=Resolve-YmccDeckyPath $Target
-  if ($sourceHome -ieq $targetHome -or $sourceHome.StartsWith($targetHome+'\',[StringComparison]::OrdinalIgnoreCase) -or $targetHome.StartsWith($sourceHome+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'MODULE_SOURCE_TARGET_OVERLAP' }
+  if($InstalledPayload){
+    # Reconcile only an already verified, complete installed tuple. No archive
+    # or copy from an old receipt is needed to retire obsolete owned files.
+    if($sourceHome -ine $targetHome){throw 'MODULE_CURRENT_PAYLOAD_TARGET_INVALID'}
+  }elseif ($sourceHome -ieq $targetHome -or $sourceHome.StartsWith($targetHome+'\',[StringComparison]::OrdinalIgnoreCase) -or $targetHome.StartsWith($sourceHome+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'MODULE_SOURCE_TARGET_OVERLAP' }
+  # Validate the complete incoming tuple before any legacy metadata is retired.
+  foreach($file in @($Manifest.files)){
+    $sourceFile=Resolve-YmccDeckyPath $sourceHome $file.path
+    if(![IO.File]::Exists($sourceFile) -or ([IO.FileInfo]$sourceFile).Length -ne $file.bytes -or (Get-YmccDeckyHash $sourceFile) -cne $file.sha256){throw ('MODULE_PACKAGE_HASH_MISMATCH '+$file.path)}
+  }
   $entries=@(); $incoming=@{}
   foreach ($file in @($Manifest.files)) {
-    $src=Resolve-YmccDeckyPath $sourceHome $file.path; $dst=Resolve-YmccDeckyPath $targetHome $file.path
+    $src=Resolve-YmccDeckyPath $sourceHome $file.path; $dst=Resolve-YmccUpdateFileTarget $targetHome $file.path
     if (![IO.File]::Exists($src) -or ([IO.FileInfo]$src).Length -ne $file.bytes -or (Get-YmccDeckyHash $src) -cne $file.sha256) { throw ('MODULE_PACKAGE_HASH_MISMATCH '+$file.path) }
-    if ([IO.Directory]::Exists($dst)) { throw 'MODULE_TARGET_IS_DIRECTORY' }
     $before=$null; if ([IO.File]::Exists($dst)) { $before=Get-YmccDeckyHash $dst }
+    if($InstalledPayload -and $before -cne $file.sha256){throw 'MODULE_CURRENT_PAYLOAD_CHANGED'}
     $incoming[$file.path]=$true
     if ($before -cne $file.sha256) { $entries += [pscustomobject]@{path=$file.path;source=$src;before=$before;after=$file.sha256;remove=$false;bytes=$null} }
   }
-  # A separately installed newer SDK must not be silently downgraded. System
-  # BUS/driver versions are inspected by setup later, never inferred from files.
-  $core='feature-assets/virtual-gamepad/HIDMaestro.Core.dll'
-  $oldCore=Resolve-YmccDeckyPath $targetHome $core; $newCore=Resolve-YmccDeckyPath $sourceHome $core
-  if ([IO.File]::Exists($oldCore)) {
-    $oldVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($oldCore).FileVersion
-    $newVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($newCore).FileVersion
-    if ($oldVersion -and $newVersion -and [version]$oldVersion -gt [version]$newVersion) { throw 'MODULE_NEWER_SDK_PRESERVED: 已保留自主安装的较新 HIDM，请使用兼容的 YMCC 包。' }
-  }
-  $receipt=Resolve-YmccDeckyPath $targetHome '.ymcc-input-managed.json'
+  # The authenticated incoming package supplies a coherent SDK/consumer tuple.
+  # Installed BUS/driver state is still handled by its existing setup path.
+  $receipt=Resolve-YmccUpdateFileTarget $targetHome '.ymcc-input-managed.json'
   $previous=$null
   $receiptExists=Test-YmccModuleJournalExists $receipt
   if ($receiptExists) {
-    $previous=Read-YmccModuleJournalJson $receipt
-    Assert-YmccModuleManifest $previous
-    foreach ($file in $previous.files) {
+    try{$previous=Read-YmccModuleJournalJson $receipt;Assert-YmccModuleManifest $previous}
+    catch{Move-YmccLegacyUpdateMetadata $targetHome '.ymcc-input-managed.json';$previous=$null;$receiptExists=$false}
+    foreach ($file in @($previous.files | Where-Object { $null -ne $_ })) {
       if ($incoming.ContainsKey($file.path)) { continue }
-      $dst=Resolve-YmccDeckyPath $targetHome $file.path
+      $dst=Resolve-YmccUpdateFileTarget $targetHome $file.path
       if ([IO.File]::Exists($dst) -and (Get-YmccDeckyHash $dst) -ceq $file.sha256) { $entries += [pscustomobject]@{path=$file.path;source=$null;before=$file.sha256;after=$null;remove=$true;bytes=$null} }
+    }
+  }
+  # Clean stale code/data only inside the two YMCC-owned module roots.
+  # This also works when the old receipt was corrupt and could not be trusted.
+  $planned=@{};foreach($entry in $entries){$planned[$entry.path]=$true}
+  foreach($rootName in @('feature-assets/virtual-gamepad','feature-assets/gyro-motion')){
+    $folder=Resolve-YmccDeckyPath $targetHome $rootName
+    if(![IO.Directory]::Exists($folder)){continue}
+    foreach($old in @(Get-ChildItem -LiteralPath $folder -Recurse -File -Force -ErrorAction Stop)){
+      $relative=$old.FullName.Substring($targetHome.Length+1).Replace('\','/')
+      if($incoming.ContainsKey($relative) -or $planned.ContainsKey($relative) -or !(Test-YmccModuleFile $relative)){continue}
+      $safe=Resolve-YmccDeckyPath $targetHome $relative;$hash=Get-YmccDeckyHash $safe
+)YMCCMODULEPKG"
+R"YMCCMODULEPKG(      $entries += [pscustomobject]@{path=$relative;source=$null;before=$hash;after=$null;remove=$true;bytes=$null};$planned[$relative]=$true
     }
   }
   $receiptManifest=Merge-YmccModuleManifestAnnotations $Manifest $previous
   $receiptBytes=[Text.Encoding]::UTF8.GetBytes(($receiptManifest | ConvertTo-Json -Depth 64 -Compress))
   if($receiptBytes.Length -gt 4194304){throw 'MODULE_RECEIPT_TOO_LARGE'}
-)YMCCMODULEPKG"
-R"YMCCMODULEPKG(  $sha=[Security.Cryptography.SHA256]::Create()
+  $sha=[Security.Cryptography.SHA256]::Create()
   try { $receiptHash=([BitConverter]::ToString($sha.ComputeHash($receiptBytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
   $before=$null; if ($receiptExists) { $before=Get-YmccDeckyHash $receipt }
   if ($before -cne $receiptHash) { $entries += [pscustomobject]@{path='.ymcc-input-managed.json';source=$null;before=$before;after=$receiptHash;remove=$false;bytes=$receiptBytes} }
   foreach ($entry in $entries) { if ($entry.before) {
-    $stream=[IO.File]::Open((Resolve-YmccDeckyPath $targetHome $entry.path),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $stream.Dispose()
+    Assert-YmccUpdateTargetWritable (Resolve-YmccDeckyPath $targetHome $entry.path)
   } }
   return [pscustomobject]@{source=$sourceHome;target=$targetHome;entries=$entries;manifest=$Manifest}
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "power_source_state.h"
 #include <windows.h>
 #include <powrprof.h>
 #include <string>
@@ -27,7 +28,7 @@ inline Environment readEnvironment() noexcept {
         e.idleValid=e.idleMs<0x80000000u;
     }else e.lastInputError=GetLastError();
     SYSTEM_POWER_STATUS power{};
-    if(GetSystemPowerStatus(&power)){e.acLineStatus=power.ACLineStatus;e.sourceKnown=power.ACLineStatus==0||power.ACLineStatus==1;}
+    if(ymcc::powerSource::read(power)){e.acLineStatus=power.ACLineStatus;e.sourceKnown=power.ACLineStatus==0||power.ACLineStatus==1;}
     GUID* active=nullptr;e.activePlanStatus=PowerGetActiveScheme(nullptr,&active);
     if(e.activePlanStatus==ERROR_SUCCESS&&active){
         e.plan=*active;

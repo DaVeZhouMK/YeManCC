@@ -5,6 +5,7 @@ import Toggle from '@/components/Toggle.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import { focusGamepadElement } from '@/gamepad/focus';
 import { onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { useStickPresentation } from '@/bridge/stickPresentation';
 import { EDIT_REPEAT_BASE_MS } from '@/gamepad/sliderRepeat';
 import { CalibrationEditor, calibrationApplyAvailable, createControllerCalibrationPort, type CalibrationEditorState, type ControllerCalibrationPort } from '@/bridge/controllerCalibration';
 import { mapCalibrationStick, mapCalibrationTrigger, sameSource, type AxisCalibrationConfig, type StickOutputShape, type StickSide } from '@/bridge/controllerCalibrationContract';
@@ -67,6 +68,16 @@ const previewStick = computed(() => {
   if (!value) return null;
   return stickCorrectionActive.value ? mapCalibrationStick(value, stick.value) : { ...value };
 });
+const sampleReceivedAt = shallowRef(-Infinity);
+watch(() => {
+  const sample = state.value.snapshot?.sample;
+  return sample ? JSON.stringify([sample.source,sample.readSequence,sample.readStartedTick,sample.readCompletedTick]) : '';
+}, key => { sampleReceivedAt.value = key ? performance.now() : -Infinity; }, { immediate: true, flush: 'sync' });
+const displayIdentity = computed(() => JSON.stringify([stickSide.value,state.value.snapshot?.source]));
+const displayedRaw = useStickPresentation(() => rawStick.value, () => state.value.available,
+  () => displayIdentity.value, 100, () => sampleReceivedAt.value);
+const displayedPreview = useStickPresentation(() => previewStick.value, () => state.value.available,
+  () => displayIdentity.value, 100, () => sampleReceivedAt.value);
 const previewTrigger = computed(() => rawTrigger.value === null ? null : triggerCorrectionActive.value ? mapCalibrationTrigger(rawTrigger.value, trigger.value) : rawTrigger.value);
 const squareOutput = computed(() => stickCorrectionActive.value && stick.value.outputShape === 'circle-to-square');
 const outputCaption = computed(() => squareOutput.value ? '方形输出' : stickCorrectionActive.value && stick.value.outputShape === 'square-to-circle' ? '圆形输出' : '保持原始形状');
@@ -161,7 +172,7 @@ onMounted(() => mount('mounted')); onActivated(() => mount('activated')); onDeac
   <div class="calibration-workbench">
    <section class="axis-column calibration-stick" aria-label="摇杆修正">
     <div class="axis-heading"><Dropdown ref="stickSelect" :model-value="stickSide" :options="stickOptions" aria-label="选择摇杆" :gp-row="1" :gp-col="0" :disabled="childrenLocked" @update:model-value="selectStick" /><Toggle :model-value="state.draft.sticksEnabled" aria-label="启用摇杆修正" :gp-row="1" :gp-col="1" :disabled="childrenLocked" @update:model-value="v => updateGate(c => { c.sticksEnabled = v; })" /></div>
-    <div class="visual-well"><svg class="stick-visual" viewBox="0 0 220 178" role="img" aria-label="摇杆实时输入与修正预览">
+    <div class="visual-well"><svg class="stick-visual" :data-sample-x="rawStick?.x" :data-sample-y="rawStick?.y" :data-preview-x="previewStick?.x" :data-preview-y="previewStick?.y" viewBox="0 0 220 178" role="img" aria-label="摇杆实时输入与修正预览">
             <defs>
               <radialGradient id="stick-recess"><stop stop-color="#182638" /><stop offset=".76" stop-color="#111b29" /><stop offset="1" stop-color="#293a50" /></radialGradient>
               <linearGradient id="stick-cap" x2=".3" y2="1"><stop stop-color="#455970" /><stop offset="1" stop-color="#192738" /></linearGradient>
@@ -174,8 +185,8 @@ onMounted(() => mount('mounted')); onActivated(() => mount('activated')); onDeac
             <path d="M33 88H187M110 11V165" class="axis-guide" />
             <circle cx="110" cy="88" r="35" class="mid-ring" />
             <circle v-if="stickCorrectionActive" cx="110" cy="88" :r="70 * (1 - stick.outerDeadzonePct / 100)" class="full-ring" />
-            <path :d="`M110 88L${110 + (rawStick?.x ?? 0) * 36} ${88 - (rawStick?.y ?? 0) * 36}`" stroke="#172230" stroke-width="20" stroke-linecap="round" />
-            <g :transform="`translate(${110 + (rawStick?.x ?? 0) * 36} ${88 - (rawStick?.y ?? 0) * 36})`">
+            <path :d="`M110 88L${110 + displayedRaw.x * 36} ${88 - displayedRaw.y * 36}`" stroke="#172230" stroke-width="20" stroke-linecap="round" />
+            <g :transform="`translate(${110 + displayedRaw.x * 36} ${88 - displayedRaw.y * 36})`">
               <ellipse cy="5" rx="29" ry="27" fill="#050b13" opacity=".65" />
               <circle r="29" fill="url(#stick-cap)" stroke="#5a6c80" stroke-width="1" />
               <circle r="23" fill="url(#stick-face)" stroke="#152130" stroke-width="1.2" />
@@ -183,9 +194,9 @@ onMounted(() => mount('mounted')); onActivated(() => mount('activated')); onDeac
               <path d="M-7 0H7M0 -7V7" stroke="#93a3b4" stroke-width="1" opacity=".35" />
             </g>
             <circle v-if="stickCorrectionActive && stick.innerDeadzonePct > 0" :cx="110 + stick.centerX * 70" :cy="88 - stick.centerY * 70" :r="70 * stick.innerDeadzonePct / 100" class="deadzone-fill" />
-            <path :d="`M${110 + (rawStick?.x ?? 0) * 70} ${88 - (rawStick?.y ?? 0) * 70}L${110 + (previewStick?.x ?? 0) * 70} ${88 - (previewStick?.y ?? 0) * 70}`" stroke="var(--accent)" stroke-width="1.3" opacity=".8" />
-            <circle v-if="rawStick" :cx="110 + (rawStick?.x ?? 0) * 70" :cy="88 - (rawStick?.y ?? 0) * 70" r="5" fill="#0e1928" stroke="#d6e2ed" stroke-width="1.7" />
-            <circle v-if="previewStick" :cx="110 + (previewStick?.x ?? 0) * 70" :cy="88 - (previewStick?.y ?? 0) * 70" r="3.6" fill="var(--accent)" stroke="#07101e" stroke-width="1" />
+            <path :d="`M${110 + displayedRaw.x * 70} ${88 - displayedRaw.y * 70}L${110 + displayedPreview.x * 70} ${88 - displayedPreview.y * 70}`" stroke="var(--accent)" stroke-width="1.3" opacity=".8" />
+            <circle v-if="rawStick" :cx="110 + displayedRaw.x * 70" :cy="88 - displayedRaw.y * 70" r="5" fill="#0e1928" stroke="#d6e2ed" stroke-width="1.7" />
+            <circle v-if="previewStick" :cx="110 + displayedPreview.x * 70" :cy="88 - displayedPreview.y * 70" r="3.6" fill="var(--accent)" stroke="#07101e" stroke-width="1" />
             <text x="199" y="92" class="axis-letter">X</text><text x="106" y="9" class="axis-letter">Y</text>
             <text x="110" y="173" text-anchor="middle" class="drag-hint">{{ rawStick ? outputCaption : '等待手柄输入' }}</text>
           </svg></div>

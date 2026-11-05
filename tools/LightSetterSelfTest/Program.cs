@@ -45,8 +45,107 @@ internal static class LightSetterSelfTest
         view.WriteArray(Oxp3OwnerLease.PathOffset, pathBytes, 0, pathBytes.Length);
         view.Write(Oxp3OwnerLease.SequenceOffset, sequence + 2L);
     }
-    public static void Main()
+    private static void RunOneXSerialDiscovery()
     {
+        var cases = new List<string>();
+        void Selected(string name, object?[] rows, string expectedPort)
+        {
+            Check(OneXLightingSession.SelectSerialPort(rows, "CH340") == expectedPort, name);
+            cases.Add(name);
+        }
+        string Failed(string name, object?[] rows, int matchedPortsCount, string descriptor = "CH340", string? displayDescriptor = null)
+        {
+            try { OneXLightingSession.SelectSerialPort(rows, descriptor); }
+            catch (InvalidOperationException error)
+            {
+                var reason = matchedPortsCount == 0 ? "OneX lighting serial port not found" : "OneX lighting serial port ambiguous";
+                Check(error.Message.StartsWith(reason + "; ", StringComparison.Ordinal), name + " failure preserved");
+                Check(error.Message.Contains("expectedDescriptor=\"" + (displayDescriptor ?? descriptor) + "\";", StringComparison.Ordinal), name + " expected descriptor");
+                Check(error.Message.Contains("; rowCount=" + rows.Length + ";", StringComparison.Ordinal), name + " row count");
+                Check(error.Message.Contains("; matchedPortsCount=" + matchedPortsCount + ";", StringComparison.Ordinal), name + " unique matched ports");
+                Check(error.Message.EndsWith("; discovery=" + (rows.Length == 0 ? "empty-or-query-failed" : "rows-observed"), StringComparison.Ordinal), name + " query uncertainty");
+                cases.Add(name);
+                return error.Message;
+            }
+            throw new Exception(name + " was accepted");
+        }
+        void Bounded(string message)
+        {
+            const string key = "; observedNames=";
+            var start = message.IndexOf(key, StringComparison.Ordinal);
+            var end = message.IndexOf("; discovery=", StringComparison.Ordinal);
+            Check(start >= 0 && end > start + key.Length, "observed names context present");
+            var names = JsonSerializer.Deserialize<string[]>(message[(start + key.Length)..end])!;
+            Check(names.Length == 8, "observed names capped at eight");
+            Check(names.All(name => name.Length == 100), "observed names capped at 100 characters");
+            Check(names.Select((name, index) => name.StartsWith($"row-{index:D2}:", StringComparison.Ordinal)).All(value => value), "first eight observed rows retained");
+            Check(!message.Any(c => char.IsControl(c) || char.IsSurrogate(c) || c is '\u2028' or '\u2029' || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format), "diagnostic has no control or formatting characters");
+            Check(names.All(name => !name.Contains('"') && !name.Contains('\\')), "observed delimiters sanitized");
+            Check(message.Length < 1200, "exception context bounded");
+        }
+        Selected("single-port", [new { Name = "USB-SERIAL CH340 (COM3)" }], "COM3");
+        Selected("duplicate-same-com", [new { Name = "USB-SERIAL CH340 (COM3)" }, new { Name = "CH340 (COM3)" }, new { Name = "Generic (COM9)" }], "COM3");
+        Selected("descriptor-contains-retained", [new { Name = "prefixCH340suffix (COM24)" }], "COM24");
+        Selected("first-com-match-retained", [new { Name = "CH340 (COM6) (COM7)" }], "COM6");
+        Selected("null-name-with-valid-port", [null, new { Name = (string?)null }, new object(), new { Name = 42 }, new { Name = "CH340 (COM10)" }], "COM10");
+        var laterPortRows = Enumerable.Range(0, 8).Select(index => (object?)new { Name = "Generic row " + index }).Append(new { Name = "CH340 (COM42)" }).ToArray();
+        Selected("port-after-observation-cap", laterPortRows, "COM42");
+        Failed("zero-rows-empty-or-query-failed", [], 0);
+        Failed("descriptor-without-com", [new { Name = "USB-SERIAL CH340" }], 0);
+        Failed("missing-descriptor", [new { Name = "USB-SERIAL (COM3)" }], 0);
+        Failed("wrong-chip-rejected", [new { Name = "USB-SERIAL CH341 (COM3)" }, new { Name = "USB-SERIAL CH9102 (COM4)" }], 0);
+        Failed("generic-port-rejected", [new { Name = "USB Serial Device (COM3)" }, new { Name = "Communications Port (COM4)" }], 0);
+        Failed("descriptor-ordinal-case", [new { Name = "USB-SERIAL ch340 (COM3)" }], 0);
+        Failed("com-regex-case", [new { Name = "CH340 (com3)" }], 0);
+        foreach (var invalidPort in new[] { "COM0", "COM03", "COM", "XCOM3", "COM3X", "COM3_" })
+            Failed("com-regex-reject-" + invalidPort, [new { Name = "CH340 (" + invalidPort + ")" }], 0);
+        Failed("distinct-com-ambiguity", [new { Name = "CH340 (COM3)" }, new { Name = "CH340 (COM4)" }, new { Name = "CH340 duplicate (COM3)" }], 2);
+        var nullNames = Failed("null-name-rejected", [null, new { Name = (string?)null }], 0);
+        Check(nullNames.Contains("observedNames=[\"<null>\", \"<null>\"]", StringComparison.Ordinal), "null names have safe context");
+        var unsafeName = "name\r\n\t\0\u001b\u007f\u0085\"\\\u2028\u2029\u202e" + new string('n', 160);
+        var unmatchedRows = Enumerable.Range(0, 12).Select(index => (object?)new { Name = $"row-{index:D2}:" + unsafeName }).ToArray();
+        Bounded(Failed("bounded-not-found-context", unmatchedRows, 0));
+        var ambiguousRows = Enumerable.Range(0, 12).Select(index => (object?)new { Name = $"row-{index:D2}:CH340 (COM{index % 2 + 3}) " + unsafeName }).ToArray();
+        Bounded(Failed("bounded-ambiguous-context", ambiguousRows, 2));
+        const string unsafeDescriptorPrefix = "\r\n\t\0\u001b\u2028\u2029\u202e\"\\";
+        var displayDescriptor = new string('?', unsafeDescriptorPrefix.Length) + new string('D', 100 - unsafeDescriptorPrefix.Length);
+        var descriptorMessage = Failed("bounded-descriptor-context", [], 0, unsafeDescriptorPrefix + new string('D', 160), displayDescriptor);
+        Check(!descriptorMessage.Any(char.IsControl) && descriptorMessage.Length < 300, "expected descriptor sanitized and bounded");
+        // Current field failure: localized Name, underlying USB identity unknown.
+        // Even a plausible USB ID is observation only, not permission to write.
+        var genericHardware = new { Name = "USB 串行设备 (COM3)", DeviceId = @"USB\VID_1A86&PID_7523\FIELD", VID = "1A86", PID = "7523" };
+        var hardwareMessage = Failed("generic-name-hardware-observed-still-rejected", [genericHardware], 0);
+        JsonElement[] Hardware(string message) {
+            Check(message.Contains("; observedHardware=", StringComparison.Ordinal), "ordinary serial failure retains hardware identity evidence");
+            const string key = "; observedHardware=";
+            var start = message.IndexOf(key, StringComparison.Ordinal) + key.Length;
+            var end = message.IndexOf("; observedNames=", StringComparison.Ordinal);
+            return JsonSerializer.Deserialize<JsonElement[]>(message[start..end])!;
+        }
+        var hardware = Hardware(hardwareMessage);
+        Check(hardware.Length == 1 && hardware[0].GetProperty("row").GetInt32() == 1, "hardware evidence stays paired with enumerated row");
+        Check(hardware[0].GetProperty("deviceId").GetString() == genericHardware.DeviceId && hardware[0].GetProperty("vid").GetString() == "1A86" && hardware[0].GetProperty("pid").GetString() == "7523", "same-row USB identity survives normal error text");
+        Check(hardware[0].GetProperty("protocolAdmitted").GetBoolean() == false, "hardware inventory never claims protocol admission");
+        var largeHardwareRows = Enumerable.Range(0, 12).Select(index => (object?)new { Name = "generic " + index, DeviceId = "row" + index + unsafeName, VID = unsafeName, PID = unsafeName }).ToArray();
+        var boundedHardwareMessage = Failed("bounded-hardware-evidence", largeHardwareRows, 0);
+        var boundedHardware = Hardware(boundedHardwareMessage);
+        Check(boundedHardware.Length == 8, "hardware context shares the original eight-row observation ceiling");
+        Check(boundedHardware.Select((row, index) => row.GetProperty("row").GetInt32() == index + 1).All(x => x), "hardware diagnostics preserve row order");
+        Check(boundedHardware.All(row => new[]{"deviceId", "vid", "pid"}.All(key => row.GetProperty(key).GetString()!.Length <= 100)), "each hardware field shares the existing 100-character ceiling");
+        Check(!boundedHardwareMessage.Any(char.IsControl) && boundedHardwareMessage.Length < 5000, "hardware error context remains one bounded line");
+        Selected("matched-name-hardware-evidence-does-not-change-selection", [genericHardware, new { Name = "CH340 (COM8)", DeviceId = "unknown", VID = "", PID = "" }], "COM8");
+        Console.WriteLine(JsonSerializer.Serialize(new { ok = true, scope = "onex-serial-discovery", cases, checks, productionSelector = true, hardwareWrites = false, HCAssemblyLoaded = false, defaultSuiteRun = false }));
+    }
+    public static void Main(string[] args)
+    {
+        if (args.Length == 1 && args[0] == "--apex-hid-v2") { ApexLightingTests.Run(); return; }
+        if (args.Length != 0)
+        {
+            if (args.Length != 1 || args[0] != "--onex-serial-discovery")
+                throw new ArgumentException("Unsupported LightSetterSelfTest arguments");
+            RunOneXSerialDiscovery();
+            return;
+        }
         var device = new FakeDevice();
         Check(Action(device, "color", 50) == "ok", "successful color plus brightness");
         Check(device.Calls.SequenceEqual(new[] { "color", "brightness" }), "color action order");

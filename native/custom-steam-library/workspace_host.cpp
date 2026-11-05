@@ -60,6 +60,7 @@
 #include "custom_steam_library_opti_catalog.h"
 #include "../opti_catalog_startup.h"
 #include "../shared_game_media.h"
+#include "../power_source_channel.h"
 #include "../shared_game_media_download_worker.h"
 
 #pragma comment(lib, "ole32.lib")
@@ -8801,6 +8802,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         }
         return compatible ? 0 : 7;
     }
+
+    ymcc::powerSource::channel::Host powerSourceChannel;
+    powerSourceChannel.start(parentInputModeEnabled() ? g_launchOptions.parentPid : 0);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     wchar_t executablePath[32768]{};

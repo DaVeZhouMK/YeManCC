@@ -11,7 +11,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 assert(process.argv[2], 'Pass a fresh evidence directory');
 const out = path.resolve(process.argv[2]), baseline = process.argv.includes('--baseline');
 const sourceOverrides = new Map();
-for (const [option, relative] of [['--card-source', 'src/components/ControllerFeedbackCapabilitiesCard.vue'], ['--artwork-source', 'src/components/ControllerVectorArtwork.ts']]) {
+for (const [option, relative] of [['--card-source', 'src/components/ControllerFeedbackCapabilitiesCard.vue'], ['--artwork-source', 'src/components/ControllerVectorArtwork.ts'], ['--visualizer-source', 'src/components/GamepadVisualizer.vue']]) {
   const index = process.argv.indexOf(option);
   if (index >= 0) { assert(process.argv[index + 1], option + ' needs a path'); sourceOverrides.set(path.join(repo, relative), path.resolve(process.argv[index + 1])); }
 }
@@ -51,11 +51,13 @@ const mocks = {
   '@/bridge/settingsRepository': `export async function loadSettings(){return structuredClone(window.f.settings)};
 export async function saveSettingsSection(section,value){window.f.saved.push({section,value:JSON.parse(JSON.stringify(value))});window.f.settings[section]=JSON.parse(JSON.stringify(value))};`,
 };
+const nativeReportArg=process.argv.indexOf('--native-oem-report');
+const nativeCatalogs=nativeReportArg>=0?JSON.parse(source(path.resolve(process.argv[nativeReportArg+1]))).modelCatalogs:null;
 const entry = `import {createApp,h,ref,nextTick,KeepAlive} from 'vue';
 import Card from './src/components/ControllerFeedbackCapabilitiesCard.vue';
 import Visualizer from './src/components/GamepadVisualizer.vue';
 import Slider from './src/components/Slider.vue';
-import {OEM_EMPTY_SNAPSHOT} from './src/bridge/controllerShortcutRules';
+import {OEM_EMPTY_SNAPSHOT,normalizeOemKeysSnapshot} from './src/bridge/controllerShortcutRules';
 import {CONTROLLER_DIAGRAMS} from './src/bridge/controllerDeviceDiagram';
 import {EDIT_REPEAT_BASE_MS} from './src/gamepad/sliderRepeat';
 import {responsivenessAudit} from './src/gamepad/engine';window.__engine=responsivenessAudit;
@@ -67,7 +69,7 @@ let app;window.__tick=nextTick;window.__tdpRepeat=EDIT_REPEAT_BASE_MS;
 window.unmount=async()=>{app?.unmount();app=null;await nextTick()};
 window.mount=async(mode,persona='steamdeck',keepAlive=false)=>{await window.unmount();
 window.f={calls:[],vibrations:[],saved:[],caps:{ledAvailable:false,brightnessAvailable:false,ledEffects:[],vibrationAvailable:true,physicalPrimarySlot:0},settings:{gamepad:{feedback:{vibrationStrength:30,lighting:{enabled:false,off:false,mode:'solid',presetId:'',color:'#2ea6ff',color2:'#9d7cff',speed:55,brightness:65}}}}};
-const shown=ref(true),active=ref(true),reference=ref(30),highlight=ref([]),oem=ref(OEM_EMPTY_SNAPSHOT);window.highlight=async v=>{highlight.value=v;await nextTick()};window.catalog=async v=>{oem.value=v;await nextTick()};window.show=async value=>{shown.value=value;await nextTick()};window.present=async value=>{active.value=value;await nextTick()};
+const shown=ref(true),active=ref(true),reference=ref(30),highlight=ref([]),oem=ref(OEM_EMPTY_SNAPSHOT);window.highlight=async v=>{highlight.value=v;await nextTick()};window.catalog=async v=>{oem.value=normalizeOemKeysSnapshot(v);await nextTick()};window.show=async value=>{shown.value=value;await nextTick()};window.present=async value=>{active.value=value;await nextTick()};
 app=createApp({setup(){return()=>{const card=()=>h(Card);return mode==='card'?(keepAlive?h(KeepAlive,null,()=>shown.value?card():null):card()):mode==='preview'?h(Visualizer,{settings:{},persona,presentationActive:active.value,showTestMode:false,minimumPressFeedback:true,matchSteamDeckHeight:true,highlightButtons:highlight.value,oemKeys:oem.value}):h(Slider,{modelValue:reference.value,'onUpdate:modelValue':v=>reference.value=v,min:0,max:100,step:1,label:'TDP reference',accelerate:true,repeatIntervalMs:EDIT_REPEAT_BASE_MS})}}});
 app.mount('#app');await nextTick();await nextTick()};
 window.mount('card');`;
@@ -302,6 +304,68 @@ try {
     await page.screenshot({ path: path.join(out, persona + '-preview.png') });
     await page.evaluate(() => window.unmount());
     check(await page.evaluate(() => window.__listenerCount()) === 0, persona + ' releases IPC subscriptions on unmount');
+  }
+  // Real field sequence: all OneX key edges finish between neutral snapshots.
+  // The same Vue component must show three physical special keys plus two rears.
+  await mount('preview', 'steamdeck');
+  const oneXCatalog = nativeCatalogs?.['HandheldCompanion.Devices.OneXPlayerApex'] || {
+    supported: true, familyId: 'onexplayer', deviceClass: 'HandheldCompanion.Devices.OneXPlayerApex',
+    keys: [
+      ['turbo','Turbo',null,['turbo']],['keyboard','Keyboard',null,['keyboard']],['orange','Orange',null,['orange']],
+      ['orangekb','Keyboard + Orange',null,['keyboard','orange']],['orangetb','Turbo + Orange',null,['turbo','orange']],
+      ['orangelp','Orange, Long-press',null,['orange']],['l4','L4',1,undefined],['r4','R4',2,undefined],
+    ].map(([keyId,label,backIndex,physicalKeyIds])=>({keyId,label,backIndex,physicalKeyIds,captureImplemented:true,triggerCapability:'full'})),
+  };
+  await page.evaluate(catalog => window.catalog(catalog), oneXCatalog);
+  check(JSON.stringify(await page.locator('.oem-special-exterior [data-oem-key]').evaluateAll(nodes=>nodes.map(n=>n.dataset.oemKey)))===JSON.stringify(['turbo','keyboard','orange']), 'OneX gestures do not create extra physical special-key capsules');
+  check(await page.locator('[data-rear-control="L4"][data-available="true"]').count()>0&&await page.locator('[data-rear-control="R4"][data-available="true"]').count()>0,'OneX two rear keys remain separate from three special keys');
+  const receipt=keys=>({schemaVersion:1,familyId:oneXCatalog.familyId,deviceClass:oneXCatalog.deviceClass,observedKeys:keys});
+  const sendOneX=async value=>page.evaluate(async value=>{
+    window.__emit('gamepad.state',{connected:true,buttons:Array(18).fill(false),axes:[0,0,0,0],oemPressedKeys:[]});
+    window.__emit('oem.keys.observed',value);
+    window.__emit('gamepad.state',{connected:true,buttons:Array(18).fill(false),axes:[0,0,0,0],oemPressedKeys:[]});
+    await window.__tick();
+  },value);
+  for(const key of ['turbo','keyboard','orange']){
+    await sendOneX(receipt([key]));
+    check(await page.locator('[data-oem-key="'+key+'"].live').count()===1,'OneX '+key+' edge lights actual capsule despite neutral sampled frames');
+  }
+  await page.screenshot({path:path.join(out,'onex-three-physical-keys.png')});
+  await page.waitForTimeout(210);
+  check(await page.locator('.oem-capsule.live').count()===0,'OneX short-edge feedback expires without inventing held input');
+  for(const invalid of [{...receipt(['turbo']),deviceClass:'HandheldCompanion.Devices.OneXPlayer3'},{...receipt(['keyboard']),familyId:'asus-rog-ally'},{...receipt(['orange']),schemaVersion:2},receipt(['unknown'])]){
+    await sendOneX(invalid);check(await page.locator('.oem-capsule.live').count()===0,'OneX wrong identity/schema/key cannot light current physical keys '+JSON.stringify(invalid));
+  }
+  await sendOneX(receipt(['orangekb']));
+  check(await page.locator('[data-oem-key="orange"].live').count()===1&&await page.locator('[data-oem-key="keyboard"].live').count()===1&&await page.locator('[data-oem-key="turbo"].live').count()===0,'OneX compound operation lights its two real physical keys');
+  await page.evaluate(()=>window.present(false));
+  await sendOneX(receipt(['turbo']));await page.evaluate(()=>window.present(true));
+  check(await page.locator('.oem-capsule.live').count()===0,'OneX hidden receipt is not replayed on uncover');
+  await sendOneX(receipt(['orange']));
+  await page.evaluate(catalog=>window.catalog({...catalog,deviceClass:'HandheldCompanion.Devices.OneXPlayer3'}),oneXCatalog);
+  check(await page.locator('.oem-capsule.live').count()===0,'OneX changed catalog identity clears old receipt feedback');
+  check(await page.evaluate(()=>window.f.saved.length===0&&window.f.calls.length===0),'OneX display receipt performs no actions/settings/hardware writes');
+  await page.evaluate(()=>window.unmount());
+  check(await page.evaluate(()=>window.__listenerCount())===0,'OneX feedback releases all subscriptions and timers on unmount');
+  // Same observational consumer for existing family catalogs, not an APEX alias.
+  const fallbackOneXCases=[
+    ['OneXPlayerX1',['special','turbo','keyboard']],['OneXPlayerX1AMD',['special','turbo','keyboard']],
+    ['OneXPlayerX1Mini',['special','turbo','keyboard']],['OneXPlayerMini',['orange','keyboard','function']],
+    ['OneXPlayerMiniPro',['orange','keyboard','function']],['OneXPlayerOneXFly',['turbo','keyboard','home']],
+    ['OneXPlayer2',['turbo']],['OneXPlayerX2',['turbo','keyboard','home']],['OneXPlayer3',['turbo','keyboard','home','gkey']],
+  ];
+  const familyCases=nativeCatalogs?Object.entries(nativeCatalogs).filter(([,v])=>v.familyId==='onexplayer').map(([cls,v])=>[cls.replace('HandheldCompanion.Devices.',''),v.keys.filter(key=>!key.backIndex).map(key=>key.keyId)]):fallbackOneXCases;
+  for(const [model,keys] of familyCases){
+    await mount('preview','steamdeck');
+    const deviceClass='HandheldCompanion.Devices.'+model;
+    const catalog=nativeCatalogs?.[deviceClass]||{supported:true,familyId:'onexplayer',deviceClass,keys:keys.map(keyId=>({keyId,label:keyId,backIndex:null,captureImplemented:true,triggerCapability:'full'}))};
+    await page.evaluate(catalog=>window.catalog(catalog),catalog);
+    for(const key of keys.filter(id=>!catalog.keys.find(row=>row.keyId===id)?.physicalKeyIds||catalog.keys.find(row=>row.keyId===id).physicalKeyIds.includes(id))){
+      await sendOneX({schemaVersion:1,familyId:'onexplayer',deviceClass,observedKeys:[key]});
+      check(await page.locator('[data-oem-key="'+key+'"].live').count()===1,model+' family receipt lights '+key+' without APEX identity');
+    }
+    await page.evaluate(()=>window.unmount());
+    check(await page.evaluate(()=>window.__listenerCount())===0,model+' family receipt unsubscribes');
   }
   check(errors.length === 0, 'no browser errors', errors);
 } catch (error) { failure = error.stack || String(error); }

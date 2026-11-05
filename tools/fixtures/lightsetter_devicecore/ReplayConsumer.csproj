@@ -40,4 +40,9 @@
     <Compile Include="../../../FanLab/LightSetter/SuperJoyOwnerLease.cs" Link="SuperJoyOwnerLease.cs" />
     <Compile Include="../../../FanLab/LightSetter/SuperJoyWindowsHidTransport.cs" Link="SuperJoyWindowsHidTransport.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../FanLab/LightSetter/ApexLightingConsumer.cs" Link="ApexLightingConsumer.cs" />
+    <Compile Include="../../../FanLab/LightSetter/ApexWindowsHidTransport.cs" Link="ApexWindowsHidTransport.cs" />
+  </ItemGroup>
 </Project>

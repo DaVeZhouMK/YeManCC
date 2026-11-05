@@ -13,10 +13,12 @@ import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
 import { on, invoke } from '@/bridge/ipc';
 import { createNetworkAccelerationWakeRecovery } from '@/bridge/networkAccelerationWake';
 const networkAccelerationWake = createNetworkAccelerationWakeRecovery(generation => invoke('updateAccel.resume', { generation }, { timeoutMs: 8000 }));
+import { ensureUndervoltRuntime, stopUndervoltRuntime } from '@/bridge/undervoltRuntime';
 import { applyCpuAutostart } from '@/bridge/autostart';
 import { LEGACY_CCD_UNDERVOLT_ACTIVE } from '@/bridge/legacyCpuFeaturePolicy';
 import { applyTrayResident } from '@/bridge/trayResident';
 import { ensureDesktopModeStartupDefault } from '@/bridge/desktopModeStartup';
+import { ensureNetworkAccelerationStartupDefault } from '@/bridge/networkAccelerationStartup';
 import { restoreSelectedBootMode, migrateBootTrayPreference, cancelBootModeLaunches, cancelBootModeDeferredMouse, readBootModeFanIntent } from '@/bridge/bootModes';
 import { getFloatInfo, setAutofloatPowerControlDir, invalidateFloatPowerSource } from '@/bridge/autofloat';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
@@ -58,6 +60,10 @@ import {applyGameMediaRange} from '@/bridge/gameMediaPlayback';
 import {gameMediaRevisions as sharedMediaRevisions} from '@/bridge/gameMediaRevisionFence';
 import {sharedGameMedia,startSharedGameMedia} from '@/bridge/sharedGameMedia';
 import {startSteamWallpaperHost} from '@/bridge/steamWallpaperHost';
+import {wallpaperPowerBlocked,subscribeWallpaperPowerChanged} from '@/bridge/wallpaperPowerPolicy';
+let stopWallpaperPower:(()=>void)|null=null;
+const wallpaperPowerPaused=ref(wallpaperPowerBlocked());
+function dynamicBackgroundAllowed(){return getDynamicBackgroundConfig().enabled&&!wallpaperPowerPaused.value;}
 let stopSharedGameMedia:(()=>void)|null=null;
 let steamWallpaperHost:ReturnType<typeof startSteamWallpaperHost>|null=null;
 let updatePredownloadHost: ReturnType<typeof startUpdatePredownload> | null = null;
@@ -73,7 +79,7 @@ import { nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgro
 import { runPowerResumeTransaction } from '@/bridge/powerResume';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible, startUiPowerReconciliation } from '@/bridge/uiLifecycle';
-import { rememberPowerSourceMode, startForegroundPowerSourceRefresh } from '@/bridge/powerSource';
+import { rememberPowerSourceMode, onPowerSourceNotification, startForegroundPowerSourceRefresh } from '@/bridge/powerSource';
 import { tdpRuntimeStore } from '@/bridge/tdpRuntimeState';
 import {
   getFanFeatureSettings,
@@ -220,9 +226,9 @@ let sharedMediaDirty=false;
 let activeDynamicMediaAsset:{key:string;assetId:string;bindingRevision:number;kind?:string}|null=null;
 let sharedMediaRefreshQueued=false;
 function requestSharedBackgroundRefresh(){
-  if(!getDynamicBackgroundConfig().enabled)return;sharedMediaDirty=true;lastDynamicGameIdentity=null;
+  if(!dynamicBackgroundAllowed())return;sharedMediaDirty=true;lastDynamicGameIdentity=null;
   if(!isUiVisible()||sharedMediaRefreshQueued||!resumeLifecycleActive)return;sharedMediaRefreshQueued=true;
-  queueMicrotask(()=>{sharedMediaRefreshQueued=false;if(!resumeLifecycleActive||!isUiVisible()||!getDynamicBackgroundConfig().enabled)return;sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});});
+  queueMicrotask(()=>{sharedMediaRefreshQueued=false;if(!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed())return;sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});});
 }
 function onSharedMediaChanged(event:Event){
   const detail=(event as CustomEvent).detail;sharedMediaRevisions.observe(detail?.key,detail?.revision,detail?.canonicalKey);
@@ -253,7 +259,7 @@ let dynamicBackgroundNoGameTimer: number | null = null;
 let resumeVideoTimer: number | null = null;
 let hlsInstance: { destroy: () => void; on: (event: string, callback: (...args: any[]) => void) => void; loadSource: (url: string) => void; attachMedia: (video: HTMLVideoElement) => void } | null = null;
 function isVideoPlaybackBlockedByPower(): boolean {
-  return backgroundVideoAutoPause.value &&
+  return wallpaperPowerPaused.value || backgroundVideoAutoPause.value &&
     videoPowerState.value !== 'desktop' &&
     videoPowerState.value !== 'charging';
 }
@@ -287,7 +293,7 @@ function formatRetryRemaining(ms: number): string {
 }
 function scheduleBackgroundRetry(message: string): void {
   if (backgroundKind.value !== 'video' || !backgroundUrl.value ||
-      (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled)) return;
+      (backgroundSource.value === 'dynamic' && !dynamicBackgroundAllowed())) return;
   const now = Date.now();
   if (backgroundRetryUntil <= now) backgroundRetryUntil = now + BACKGROUND_RETRY_WINDOW_MS;
   const remaining = backgroundRetryUntil - now;
@@ -305,7 +311,7 @@ function scheduleBackgroundRetry(message: string): void {
     backgroundRetryTimer = null;
     if (Date.now() >= backgroundRetryUntil || backgroundKind.value !== 'video' || !backgroundUrl.value ||
         backgroundVideoSuspended.value || isVideoPlaybackBlockedByPower() ||
-        (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled)) {
+        (backgroundSource.value === 'dynamic' && !dynamicBackgroundAllowed())) {
       const finalMessage = Date.now() >= backgroundRetryUntil ? message : 'Steam 在线视频播放失败';
       clearBackgroundRetry();
       window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${finalMessage}` }));
@@ -449,7 +455,7 @@ async function reconcileBackgroundVideo(): Promise<void> {
     video &&
     backgroundKind.value === 'video' &&
     backgroundUrl.value &&
-    (backgroundSource.value === 'fixed' || getDynamicBackgroundConfig().enabled) &&
+    (backgroundSource.value === 'fixed' || dynamicBackgroundAllowed()) &&
     !backgroundVideoSuspended.value &&
     documentVisible.value &&
     nativeWindowVisible.value &&
@@ -484,7 +490,7 @@ async function reconcileBackgroundVideo(): Promise<void> {
   try {
     await video.play();
     if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
-        !getDynamicBackgroundConfig().enabled && backgroundSource.value === 'dynamic') {
+        !dynamicBackgroundAllowed() && backgroundSource.value === 'dynamic') {
       video.pause();
     }
   } catch {
@@ -510,7 +516,7 @@ function onBackgroundVideoPause(): void {
   const shouldResume = Boolean(
     backgroundKind.value === 'video' &&
     backgroundUrl.value &&
-    (backgroundSource.value === 'fixed' || getDynamicBackgroundConfig().enabled) &&
+    (backgroundSource.value === 'fixed' || dynamicBackgroundAllowed()) &&
     !backgroundVideoSuspended.value &&
     documentVisible.value &&
     nativeWindowVisible.value &&
@@ -564,9 +570,11 @@ function suspendBackgroundVideo(): void {
   if (backgroundKind.value !== 'video') return;
   clearBackgroundRetry();
   videoDesired.value = false;
-  backgroundVideo.value?.pause();
-  invalidateBackgroundMedia();
+  // Mark suspended and revoke HLS callbacks before aborting the media load.
   backgroundVideoSuspended.value = true;
+  invalidateBackgroundMedia();
+  const video = backgroundVideo.value;
+  if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
 }
 
 function pauseBackgroundVideoForWindow(): void {
@@ -688,13 +696,13 @@ function scheduleSharedBackgroundRetry(message: string): void {
         identity !== JSON.stringify(activeDynamicMediaAsset) || backgroundSource.value !== 'dynamic' ||
         backgroundKind.value !== 'video' || backgroundVideoSuspended.value ||
         !documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
-        isVideoPlaybackBlockedByPower() || !getDynamicBackgroundConfig().enabled) return;
+        isVideoPlaybackBlockedByPower() || !dynamicBackgroundAllowed()) return;
     backgroundVideoGeneration.value++;
     void nextTick(async () => {
       if (epoch !== backgroundMediaEpoch || source !== backgroundUrl.value ||
           identity !== JSON.stringify(activeDynamicMediaAsset) || backgroundVideoSuspended.value ||
           !documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
-          isVideoPlaybackBlockedByPower() || !getDynamicBackgroundConfig().enabled) return;
+          isVideoPlaybackBlockedByPower() || !dynamicBackgroundAllowed()) return;
       await setupBackgroundVideo();
       void reconcileBackgroundVideo();
     });
@@ -713,7 +721,7 @@ function onBackgroundVideoMediaError(event: Event): void {
 
 function onBackgroundVideoError(message = 'Steam 在线视频播放失败', failedVideo?: HTMLVideoElement): void {
   if (failedVideo && failedVideo !== backgroundVideo.value) return;
-  if (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled) return;
+  if (backgroundSource.value === 'dynamic' && !dynamicBackgroundAllowed()) return;
   if (backgroundVideoSuspended.value || !documentVisible.value || !nativeWindowVisible.value ||
       lowBatteryStatic.value || isVideoPlaybackBlockedByPower() || backgroundKind.value !== 'video') return;
   videoDesired.value = false;
@@ -1388,7 +1396,7 @@ function onDynamicBackgroundSettingChanged(): void {
     window.clearTimeout(dynamicBackgroundNoGameTimer);
     dynamicBackgroundNoGameTimer = null;
   }
-  if (!getDynamicBackgroundConfig().enabled) {
+  if (!dynamicBackgroundAllowed()) {
     stopDynamicBackgroundWatch();
     lastDynamicGameIdentity = null;
     dynamicBackgroundActive.value = false;
@@ -1396,13 +1404,13 @@ function onDynamicBackgroundSettingChanged(): void {
     // background.get below will install it as a separate, allowed source.
     applyBackgroundState(null, 'fixed');
     void backgroundGet().then((state) => {
-      if (generation === dynamicBackgroundGeneration && !getDynamicBackgroundConfig().enabled) {
+      if (generation === dynamicBackgroundGeneration && !dynamicBackgroundAllowed()) {
         const fixedState = state || lastFixedBackgroundState;
         lastFixedBackgroundState = fixedState;
         applyBackgroundState(fixedState, 'fixed');
       }
     }).catch(() => {
-      if (generation === dynamicBackgroundGeneration && !getDynamicBackgroundConfig().enabled) {
+      if (generation === dynamicBackgroundGeneration && !dynamicBackgroundAllowed()) {
         applyBackgroundState(lastFixedBackgroundState, 'fixed');
       }
     });
@@ -1411,14 +1419,14 @@ function onDynamicBackgroundSettingChanged(): void {
   if (!isUiVisible()) return;
   startDynamicBackgroundWatch();
   void detectGame(true).then(async (game) => {
-    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    if (generation !== dynamicBackgroundGeneration || !dynamicBackgroundAllowed()) return;
     if (!game) {
       window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: '未识别到当前游戏' }));
       return;
     }
     window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `正在访问 Steam：${cleanGameTitle(game.title || game.name)}` }));
     const result = await refreshDynamicBackground(game);
-    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled || !result) return;
+    if (generation !== dynamicBackgroundGeneration || !dynamicBackgroundAllowed() || !result) return;
     lastDynamicGameIdentity = `${game.pid}:${game.processCreated || ''}:${game.path || game.name}`;
     dynamicBackgroundActive.value = true;
     applyBackgroundState(result.state as BackgroundState, 'dynamic');
@@ -1428,7 +1436,7 @@ function onDynamicBackgroundSettingChanged(): void {
         : `已使用 Steam 背景图：${result.gameName}`,
     }));
   }).catch((error) => {
-    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    if (generation !== dynamicBackgroundGeneration || !dynamicBackgroundAllowed()) return;
     window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${(error as Error).message || 'Steam 连接失败'}` }));
   });
 }
@@ -1439,7 +1447,7 @@ function onGameRulesChanged(): void {
     dynamicBackgroundNoGameTimer = null;
   }
   lastDynamicGameIdentity = null;
-  if (!getDynamicBackgroundConfig().enabled) return;
+  if (!dynamicBackgroundAllowed()) return;
 
   // A rules update is authoritative: a game that was just blacklisted must
   // not keep its already-installed Steam media through the normal brief-null
@@ -1452,7 +1460,7 @@ function onGameRulesChanged(): void {
   // that snapshot opportunistically without allowing it to overwrite a newer
   // game/rules result.
   void backgroundGet().then((state) => {
-    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    if (generation !== dynamicBackgroundGeneration || !dynamicBackgroundAllowed()) return;
     lastFixedBackgroundState = state;
     applyBackgroundState(state, 'fixed');
   }).catch(() => {});
@@ -1467,7 +1475,7 @@ function scheduleDynamicBackgroundNoGameClear(): void {
         onDynamicGameStatus(current);
         return;
       }
-      if (!getDynamicBackgroundConfig().enabled) return;
+      if (!dynamicBackgroundAllowed()) return;
       dynamicBackgroundGeneration++;
       lastDynamicGameIdentity = null;
       dynamicBackgroundActive.value = false;
@@ -1482,14 +1490,14 @@ function scheduleDynamicBackgroundNoGameClear(): void {
 function onDynamicGameStatus(game: DetectedGame | null): void {
   const generation = ++dynamicBackgroundGeneration;
   void (async () => {
-    if (!getDynamicBackgroundConfig().enabled || !game) {
+    if (!dynamicBackgroundAllowed() || !game) {
       if (dynamicBackgroundNoGameTimer !== null) {
         window.clearTimeout(dynamicBackgroundNoGameTimer);
         dynamicBackgroundNoGameTimer = null;
       }
       // A short no-game interval is normal while a title starts or switches
       // renderers. It is not permission to retain the old title indefinitely.
-      if (getDynamicBackgroundConfig().enabled && dynamicBackgroundActive.value) {
+      if (dynamicBackgroundAllowed() && dynamicBackgroundActive.value) {
         scheduleDynamicBackgroundNoGameClear();
         return;
       }
@@ -1515,13 +1523,13 @@ function onDynamicGameStatus(game: DetectedGame | null): void {
     applyBackgroundState(lastFixedBackgroundState, 'fixed');
     try {
       const result = await refreshDynamicBackground(game);
-      if (result && generation === dynamicBackgroundGeneration && getDynamicBackgroundConfig().enabled) {
+      if (result && generation === dynamicBackgroundGeneration && dynamicBackgroundAllowed()) {
         lastDynamicGameIdentity = gameIdentity;
         dynamicBackgroundActive.value = true;
         applyBackgroundState(result.state as BackgroundState, 'dynamic');
       }
     } catch (error) {
-      if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+      if (generation !== dynamicBackgroundGeneration || !dynamicBackgroundAllowed()) return;
       const message = (error as Error).message || 'Steam 连接失败';
       window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${message}` }));
       console.warn('[dynamic background]', error);
@@ -1529,7 +1537,7 @@ function onDynamicGameStatus(game: DetectedGame | null): void {
   })();
 }
 function startDynamicBackgroundWatch(): void {
-  if (stopDynamicBackground || !getDynamicBackgroundConfig().enabled || !isUiVisible()) return;
+  if (stopDynamicBackground || !dynamicBackgroundAllowed() || !isUiVisible()) return;
   stopDynamicBackground = subscribeGameStatus(onDynamicGameStatus);
 }
 function stopDynamicBackgroundWatch(): void {
@@ -1538,7 +1546,7 @@ function stopDynamicBackgroundWatch(): void {
 }
 function onDynamicBackgroundLoaded(e: Event): void {
   const state = (e as CustomEvent<BackgroundState>).detail;
-  if (!state?.url || !getDynamicBackgroundConfig().enabled) return;
+  if (!state?.url || !dynamicBackgroundAllowed()) return;
   const generation = ++dynamicBackgroundGeneration;
   void detectGame(true).then((game) => {
     if (generation !== dynamicBackgroundGeneration || !game ||
@@ -1583,6 +1591,14 @@ onMounted(async () => {
   deckyMirrorHost = startDeckyMirrorHost();
   monitorHudHost = startMonitorHudHost();
   radialHost = startRadialTestingHost(router);
+  stopWallpaperPower=subscribeWallpaperPowerChanged(blocked=>{
+    wallpaperPowerPaused.value=blocked;
+    // Revoke all pre-unplug background/target callbacks before removing the decoder.
+    ++dynamicBackgroundGeneration;lastDynamicGameIdentity=null;
+    if(blocked){stopDynamicBackgroundWatch();clearBackgroundRetry();if(dynamicBackgroundNoGameTimer!==null){clearTimeout(dynamicBackgroundNoGameTimer);dynamicBackgroundNoGameTimer=null;}suspendBackgroundVideo();}
+    else {reconcileBackgroundLifecycle();if(getDynamicBackgroundConfig().enabled)onDynamicBackgroundSettingChanged();}
+  });
+  wallpaperPowerPaused.value=wallpaperPowerBlocked();
   stopSharedGameMedia = startSharedGameMedia();
   window.addEventListener('game-media:changed',onSharedMediaChanged);
   steamWallpaperHost = startSteamWallpaperHost();
@@ -1598,6 +1614,9 @@ onMounted(async () => {
   // One-time default schedules next logon only; never waits on a page or runs the desktop script.
   if (!aiFanMockActive && !aiCpuIsolated) void ensureDesktopModeStartupDefault().catch(error => {
     console.warn('全局桌面模式默认开机任务未完成：', error instanceof Error ? error.message : String(error));
+  });
+  if (!aiFanMockActive && !aiCpuIsolated) void ensureNetworkAccelerationStartupDefault().catch(error => {
+    console.warn('网络加速默认开机任务未完成：', error instanceof Error ? error.message : String(error));
   });
   resumeLifecycleActive = true;
   // Register the one-shot native wake events before the first awaited startup
@@ -1784,18 +1803,18 @@ onMounted(async () => {
   window.addEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
   window.addEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
   window.addEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
-  stopPowerSourceWatch = on<{ ac: boolean; generation?: number }>('power.sourceChanged', ({ ac }) => {
-    onVideoPowerSourceChanged(ac);
+  stopPowerSourceWatch = onPowerSourceNotification('immediate', (mode) => {
+    onVideoPowerSourceChanged(mode === 'ac');
     // sourceChanged is the immediate native notification; acChanged is a
     // later 5-second tail-debounced confirmation. Start the dedicated
     // profile restore here so a stable plug/unplug applies promptly, while
     // the debounced event below still provides the final settling pass.
-    schedulePowerChangePerformanceRestore(Boolean(ac) ? 'ac' : 'dc');
+    schedulePowerChangePerformanceRestore(mode);
   });
   // AC/DC 插拔：刷新数据；自动模式由性能调度重新应用当前电源侧组合。
-  stopAcWatch = on<{ ac: boolean; generation?: number }>('power.acChanged', async ({ ac }) => {
-    onAcPower.value = Boolean(ac);
-    onVideoPowerSourceChanged(Boolean(ac));
+  stopAcWatch = onPowerSourceNotification('settled', async (mode) => {
+    onAcPower.value = mode === 'ac';
+    onVideoPowerSourceChanged(mode === 'ac');
     globalRefreshKey.value++;
     scheduleSleepPowerPlanOptimization();
     // Resume commit will perform one authoritative re-apply after AC/DC is
@@ -1807,7 +1826,7 @@ onMounted(async () => {
     void fanHostLifecycle.reapplyActiveCurve('ac-changed');
     // 事件侧只负责发起一次有界、可取消的恢复；实际 AC/DC 侧确认和
     // 专属优先级由 schedulePowerChangePerformanceRestore 串行完成。
-    schedulePowerChangePerformanceRestore(Boolean(ac) ? 'ac' : 'dc');
+    schedulePowerChangePerformanceRestore(mode);
   });
   stopForegroundPowerSource = startForegroundPowerSourceRefresh((mode) => {
     const changed = onAcPower.value !== (mode === 'ac');
@@ -1928,6 +1947,7 @@ onMounted(async () => {
     sleepPlanOptimizationTimer = null;
     scheduleSleepPowerPlanOptimization();
   }, 30000);
+  if (!aiCpuIsolated) void ensureUndervoltRuntime();
   // No legacy CCD/undervolt startup timer is armed while the feature is inactive.
   if (!aiCpuIsolated && LEGACY_CCD_UNDERVOLT_ACTIVE) window.setTimeout(() => {
     applyCpuAutostart().catch(() => {});
@@ -1936,6 +1956,7 @@ onMounted(async () => {
   if (!aiFanMockActive && !aiCpuIsolated) { deckyMirrorHost?.ready(); monitorHudHost?.ready(); updatePredownloadHost = startUpdatePredownload(); }
 });
 onUnmounted(() => {
+  stopUndervoltRuntime();
   cancelBootModeLaunches();
   cancelBootModeDeferredMouse();
   uiPowerReconciliation?.stop();
@@ -1943,7 +1964,7 @@ onUnmounted(() => {
   updatePredownloadHost?.stop(); updatePredownloadHost = null;
   controllerShortcutRuntime?.stop(); controllerShortcutRuntime = null;
   window.removeEventListener('game-media:changed',onSharedMediaChanged);
-  steamWallpaperHost?.stop(); steamWallpaperHost=null;stopSharedGameMedia?.();stopSharedGameMedia=null;
+  stopWallpaperPower?.();stopWallpaperPower=null;steamWallpaperHost?.stop(); steamWallpaperHost=null;stopSharedGameMedia?.();stopSharedGameMedia=null;
   radialHost?.stop(); radialHost = null;
   monitorHudHost?.stop(); monitorHudHost = null;
   stopDeckySafetyNotifications?.();stopDeckySafetyNotifications=null;

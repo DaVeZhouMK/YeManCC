@@ -132,7 +132,9 @@ int wmain(int argc,wchar_t** argv) {
     const auto packed=createTarArchiveWithRetry((root/L"export.zip").wstring(),{(root/L"app.log").wstring()},root.wstring(),L"manifest.txt",&collection);
     check("running-steam-locked-file-does-not-discard-ymcc-export",live!=INVALID_HANDLE_VALUE && locked!=INVALID_HANDLE_VALUE && packed.ok && packed.steamCopied==6 && packed.steamSkipped==1 && packed.steamStatus=="snapshot-partial");
     if(live!=INVALID_HANDLE_VALUE)CloseHandle(live);if(locked!=INVALID_HANDLE_VALUE)CloseHandle(locked);
-    const auto packedAll=createTarArchiveWithRetry((root/L"export-all.zip").wstring(),{(root/L"app.log").wstring()},root.wstring(),L"manifest.txt",&collection);
+    put(root/L"model-adaptation.log",json({{"schema","ymcc.model-adaptation/1"},{"event","model-adaptation-unique"},{"firstSample",{{"mappingFound",false}}}}).dump()+"\n");
+    put(root/L"virtual-adaptation.log",json({{"event","virtual-adaptation-witness"},{"firstSample",{{"hostSdkDeliveryProven",false}}}}).dump()+"\n");
+    const auto packedAll=createTarArchiveWithRetry((root/L"export-all.zip").wstring(),{(root/L"app.log").wstring(),(root/L"model-adaptation.log").wstring(),(root/L"virtual-adaptation.log").wstring()},root.wstring(),L"manifest.txt",&collection);
     check("unlocked-steam-complete-snapshot",packedAll.ok && packedAll.steamCopied==7 && packedAll.steamSkipped==0);
     const auto optional=createTarArchiveWithRetry((root/L"not-installed.zip").wstring(),{(root/L"app.log").wstring()},root.wstring(),L"manifest.txt",&missing);
     check("steam-absent-still-exports-ymcc-with-explicit-receipt",optional.ok && optional.steamCopied==0 && optional.steamStatus=="logs-directory-missing");
@@ -304,6 +306,8 @@ def main() -> int:
         check('locked-file-explicit-receipt-not-in-zip',receipt['copied']==6 and receipt['skipped']==1 and 'steam/logs/locked.txt' not in z.namelist() and any(not f['copied'] and f['win32Error'] for f in receipt['files']))
         check('no-unrelated-install-or-outside-directory-content',not any('old.txt' in name or 'secret.txt' in name for name in z.namelist()))
     with zipfile.ZipFile(fixture/'export-all.zip') as z:
+        check('virtual-first-witness-exported-byte-identical',z.read('virtual-adaptation.log')==(fixture/'virtual-adaptation.log').read_bytes())
+        check('adaptation-first-witness-exported-byte-identical',z.read('model-adaptation.log')==(fixture/'model-adaptation.log').read_bytes())
         check('unlocked-originals-preserved-full-export',z.read('steam/logs/locked.txt')==b'locked-content\n')
         check('nested-steam-leading-dash-basename-retained',z.read('steam/logs/-leading-name.txt')==b'leading\n')
     with zipfile.ZipFile(fixture/'single-cost-active.zip') as z:

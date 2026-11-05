@@ -3,6 +3,7 @@
 #include <aclapi.h>
 #include <sddl.h>
 #include <functional>
+#include <string>
 // The non-admin journal-storage selection replaces privileged ACL lookup only.
 // Normal Win32 file reads, locks and all descriptor validation remain real.
 static bool fixtureJournalAclPort=false;
@@ -12,11 +13,27 @@ static DWORD WINAPI fixtureRecoveryGetSecurityInfo(HANDLE h,SE_OBJECT_TYPE type,
 }
 
 static bool fixtureCreateAclPort=false,fixtureShortWrite=false,fixtureFlushFailure=false,fixturePublishFailure=false,fixtureCorruptPublication=false,fixtureChangeBeforePublish=false;
-static HANDLE WINAPI fixtureRecoveryCreateFileW(LPCWSTR name,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES attributes,DWORD creation,DWORD flags,HANDLE templateFile){return ::CreateFileW(name,access,share,fixtureCreateAclPort&&attributes?nullptr:attributes,creation,flags,templateFile);}
+static HANDLE WINAPI fixtureRecoveryCreateFileW(LPCWSTR name,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES attributes,DWORD creation,DWORD flags,HANDLE templateFile){
+    auto h=::CreateFileW(name,access,share,fixtureCreateAclPort&&attributes?nullptr:attributes,creation,flags,templateFile);
+    // Fresh authorization uses protected CreateNew; legacy data is disposable.
+    // Keep the original source-change negative at that same preservation boundary.
+    if(h!=INVALID_HANDLE_VALUE&&fixtureChangeBeforePublish&&creation==CREATE_NEW){
+        std::wstring source=name;const auto marker=source.find(L".tmp-");
+        if(marker!=std::wstring::npos){source.resize(marker);fixtureChangeBeforePublish=false;
+            HANDLE original=::CreateFileW(source.c_str(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,TRUNCATE_EXISTING,0,nullptr);
+            if(original!=INVALID_HANDLE_VALUE){const char raw[]="{concurrent-change";DWORD written;::WriteFile(original,raw,sizeof(raw)-1,&written,nullptr);CloseHandle(original);}
+        }
+    }return h;
+}
 static BOOL WINAPI fixtureRecoveryWriteFile(HANDLE h,LPCVOID data,DWORD bytes,LPDWORD count,LPOVERLAPPED overlap){if(fixtureShortWrite&&bytes){fixtureShortWrite=false;return ::WriteFile(h,data,bytes-1,count,overlap);}return ::WriteFile(h,data,bytes,count,overlap);}
 static BOOL WINAPI fixtureRecoveryFlush(HANDLE h){if(fixtureFlushFailure){fixtureFlushFailure=false;SetLastError(ERROR_WRITE_FAULT);return FALSE;}return ::FlushFileBuffers(h);}
 static BOOL WINAPI fixtureRecoveryCopy(LPCWSTR from,LPCWSTR to,BOOL failExists){auto ok=::CopyFileW(from,to,failExists);if(ok&&fixtureChangeBeforePublish){fixtureChangeBeforePublish=false;HANDLE h=::CreateFileW(from,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,TRUNCATE_EXISTING,0,nullptr);if(h!=INVALID_HANDLE_VALUE){const char raw[]="{concurrent-change";DWORD n;::WriteFile(h,raw,sizeof(raw)-1,&n,nullptr);CloseHandle(h);}}return ok;}
-static BOOL WINAPI fixtureRecoveryMove(LPCWSTR from,LPCWSTR to,DWORD flags){if(fixturePublishFailure){fixturePublishFailure=false;SetLastError(ERROR_ACCESS_DENIED);return FALSE;}auto ok=::MoveFileExW(from,to,flags);if(ok&&fixtureCorruptPublication){fixtureCorruptPublication=false;HANDLE h=::CreateFileW(to,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,TRUNCATE_EXISTING,0,nullptr);if(h!=INVALID_HANDLE_VALUE){const char raw[]="{post-publish-corruption";DWORD n;::WriteFile(h,raw,sizeof(raw)-1,&n,nullptr);CloseHandle(h);}}return ok;}
+static BOOL WINAPI fixtureRecoveryMove(LPCWSTR from,LPCWSTR to,DWORD flags){if(fixturePublishFailure){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}auto ok=::MoveFileExW(from,to,flags);if(ok&&fixtureCorruptPublication){fixtureCorruptPublication=false;HANDLE h=::CreateFileW(to,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,TRUNCATE_EXISTING,0,nullptr);if(h!=INVALID_HANDLE_VALUE){const char raw[]="{post-publish-corruption";DWORD n;::WriteFile(h,raw,sizeof(raw)-1,&n,nullptr);CloseHandle(h);}}return ok;}
+static HANDLE WINAPI fixtureRecoveryCreateMutexW(LPSECURITY_ATTRIBUTES attributes,BOOL initial,LPCWSTR name){
+    if(!fixtureJournalAclPort)return ::CreateMutexW(attributes,initial,name);
+    const auto local=L"Local\\YMCC.RecoveryFixture."+std::to_wstring(GetCurrentProcessId());return ::CreateMutexW(nullptr,initial,local.c_str());
+}
+#define CreateMutexW fixtureRecoveryCreateMutexW
 #define CreateFileW fixtureRecoveryCreateFileW
 #define WriteFile fixtureRecoveryWriteFile
 #define FlushFileBuffers fixtureRecoveryFlush
@@ -24,6 +41,7 @@ static BOOL WINAPI fixtureRecoveryMove(LPCWSTR from,LPCWSTR to,DWORD flags){if(f
 #define MoveFileExW fixtureRecoveryMove
 #define GetSecurityInfo fixtureRecoveryGetSecurityInfo
 #include "update_install_recovery.h"
+#undef CreateMutexW
 #undef GetSecurityInfo
 #undef CreateFileW
 #undef WriteFile
@@ -68,8 +86,8 @@ static int journalStorageStorm(const std::filesystem::path& root){
     auto writerCase=[&](const std::string& name,const std::function<void(const std::filesystem::path&,const std::wstring&,const std::wstring&,const std::wstring&)>& body){test(name,[&](const auto& file){const auto dir=file.parent_path()/file.stem();std::filesystem::create_directories(dir);const auto targetExe=(dir/L"YeManCC.exe").wstring(),targetPc=(dir/L"PowerControl").wstring(),target=pathFor(dir.wstring(),targetExe);body(dir,targetExe,targetPc,target);});};
     auto writeGood=[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){auto j=good;j["exePath"]=utf8(targetExe);j["powerControl"]=utf8(targetPc);j["phase"]="committed";j["extra"]={{"preserve",42}};put(target,j.dump());return j;};
     writerCase("missing journal creates confirmed authority",[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){auto path=writeAt(dir.wstring(),targetExe,targetPc,"new-operation","0.0.99",std::string(64,'a'));check(path==target&&matches(readAt(dir.wstring(),path),targetExe,targetPc),"new writer failed");});
-    writerCase("valid old journal preserved before new authority",[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){auto old=writeGood(dir,targetExe,targetPc,target);const auto bytes=readRaw(target);writeAt(dir.wstring(),targetExe,targetPc,"next-operation","0.0.99",std::string(64,'b'));check(readAt(dir.wstring(),target).at("extra")==old.at("extra"),"unknown old fields lost");unsigned backups=0;for(const auto& file:std::filesystem::directory_iterator(dir))if(file.path().filename().wstring().find(L".ymcc-before-")!=std::wstring::npos){++backups;check(readRaw(file.path())==bytes,"preimage bytes changed");}check(backups==1,"preimage absent or duplicated");});
-    for(const auto& kind:{"damaged","future","directory","foreign"})writerCase(std::string("writer protects old ")+kind,[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){std::string raw;if(std::string(kind)=="directory")std::filesystem::create_directory(target);else{auto old=writeGood(dir,targetExe,targetPc,target);if(std::string(kind)=="damaged")raw="{broken";else{if(std::string(kind)=="future")old["schema"]=2;else old["operationId"]=42;raw=old.dump();}put(target,raw);}bool refused=false;try{writeAt(dir.wstring(),targetExe,targetPc,"new-operation","0.0.99",std::string(64,'a'));}catch(...){refused=true;}check(refused,"unconfirmed old journal overwritten");check(std::string(kind)=="directory"?std::filesystem::is_directory(target):readRaw(target)==raw,"protected old original changed");if(std::string(kind)!="directory"){writeGood(dir,targetExe,targetPc,target);writeAt(dir.wstring(),targetExe,targetPc,"repaired","0.0.99",std::string(64,'a'));check(readAt(dir.wstring(),target).at("operationId")=="repaired","trusted source repair did not unblock");}});
+    writerCase("valid old journal cannot constrain fresh authority",[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){writeGood(dir,targetExe,targetPc,target);writeAt(dir.wstring(),targetExe,targetPc,"next-operation","0.0.99",std::string(64,'b'));auto next=readAt(dir.wstring(),target);check(next.at("operationId")=="next-operation"&&!next.contains("extra"),"historical fields constrained fresh authorization");unsigned backups=0;for(const auto& file:std::filesystem::directory_iterator(dir))if(file.path().filename().wstring().find(L".ymcc-before-")!=std::wstring::npos)++backups;check(backups==0,"legacy preimage backup became mandatory again");});
+    for(const auto& kind:{"damaged","future","directory","foreign"})writerCase(std::string("writer replaces disposable legacy ")+kind,[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){if(std::string(kind)=="directory")std::filesystem::create_directory(target);else{auto old=writeGood(dir,targetExe,targetPc,target);if(std::string(kind)=="damaged")put(target,"{broken");else{if(std::string(kind)=="future")old["schema"]=2;else old["operationId"]=42;put(target,old.dump());}}writeAt(dir.wstring(),targetExe,targetPc,"fresh-authorized","0.0.99",std::string(64,'a'));auto next=readAt(dir.wstring(),target);check(matches(next,targetExe,targetPc)&&next.at("operationId")=="fresh-authorized","legacy data blocked new trusted installation");});
     for(const auto& kind:{"short-write","flush","publish","readback","source-change"})writerCase(std::string("writer fault ")+kind,[&](const auto& dir,const auto& targetExe,const auto& targetPc,const auto& target){writeGood(dir,targetExe,targetPc,target);const auto before=readRaw(target);auto k=std::string(kind);fixtureShortWrite=k=="short-write";fixtureFlushFailure=k=="flush";fixturePublishFailure=k=="publish";fixtureCorruptPublication=k=="readback";fixtureChangeBeforePublish=k=="source-change";bool refused=false;try{writeAt(dir.wstring(),targetExe,targetPc,"new-operation","0.0.99",std::string(64,'a'));}catch(...){refused=true;}fixtureShortWrite=fixtureFlushFailure=fixturePublishFailure=fixtureCorruptPublication=fixtureChangeBeforePublish=false;check(refused,"writer fault reported success");if(k!="readback"&&k!="source-change")check(readRaw(target)==before,"failed save changed known original");else check(readRaw(target).starts_with("{"),"failed save lost divergent bytes");writeGood(dir,targetExe,targetPc,target);writeAt(dir.wstring(),targetExe,targetPc,"retry","0.0.99",std::string(64,'a'));check(readAt(dir.wstring(),target).at("operationId")=="retry","retry after fault did not recover");});
     unsigned failed=0;for(const auto& row:rows)if(!row.at("ok").get<bool>())++failed;
     std::ofstream(root/L"journal-storage.json")<<Json{{"caseCount",rows.size()},{"failed",failed},{"cases",rows},{"scope","actual native readAt/matches/authorizes; owned Win32 files and locks real; privileged ACL lookup explicit inert port"}}.dump(2);

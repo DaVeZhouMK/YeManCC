@@ -110,27 +110,27 @@ inline bool resumeValid(const Json& p,const std::string& url,const std::string& 
     for(const auto* key:{"etag","lastModified"})if(p.contains(key)&&(!text(p[key],4096)||p[key].get_ref<const std::string&>().find_first_of("\r\n")!=std::string::npos))return false;
     return !p.contains("totalBytes")||integer(p["totalBytes"],(std::numeric_limits<std::uint64_t>::max)());
 }catch(...){return false;}}
-// Atomically preserve damaged files before an explicit repair. Valid preference
-// preimages are copied and verified; caller's existing writer owns durable commit.
+// Writable cache/preferences/diagnostics are disposable under the new-data-first
+// policy. Their old JSON/schema/annotations or a preimage copy cannot veto a
+// valid replacement; callers still provide the existing atomic writer.
 template<class Validator,class Writer>
 inline void save(const std::wstring& path,Json next,std::size_t maximum,Validator valid,Writer writer,bool preserveValid=false){
-    next.erase("configReadError");if(!valid(next))throw std::runtime_error("Invalid updater configuration");
-    const auto before=read(path,maximum);if(before.kind==Kind::unsupported||before.kind==Kind::unavailable)throw std::runtime_error("Updater configuration source is protected");
-    const bool damaged=before.kind==Kind::damaged||(before.kind==Kind::ready&&!valid(before.value));std::wstring archive;bool moved=false;
-    if(before.kind==Kind::ready&&!damaged){
-        const std::set<std::string> owned={"schema","schemaVersion","enabled","failureCount","nextCheckAt","cacheQuietUntil","lastNotifiedBoot","targetVersion","targetSha256","url","sha256","version","etag","lastModified","totalBytes","phase","stage","operationId","message","error","pauseReason","token","percent","downloadedBytes","resumedBytes","speedBps","etaSeconds","updatedAt","pid","repairAuthorized","installerActive","configReadError","snapshotPersistenceError","attempt","retryMax","retryInSeconds"};
-        for(auto it=before.value.begin();it!=before.value.end();++it)if(!owned.contains(it.key())&&!next.contains(it.key()))next[it.key()]=*it;
+    (void)preserveValid;next.erase("configReadError");
+    const auto text=next.dump();if(text.size()>maximum||!valid(next))throw std::runtime_error("Invalid updater replacement configuration");
+    if(!std::filesystem::path(path).is_absolute()||!ordinaryParents(std::filesystem::path(path)))throw std::runtime_error("Updater configuration path is unsafe");
+    const auto before=read(path,maximum);
+    if(before.kind==Kind::unavailable){
+        const auto attributes=GetFileAttributesW(path.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES)throw std::runtime_error("Updater configuration source is unavailable");
+        // A stale file/directory/link is isolated as a literal entry. No recursive
+        // deletion or access to a reparse target is authorized by this reset.
+        const auto retired=path+L".ymcc-retired-"+suffix();
+        if(!MoveFileExW(path.c_str(),retired.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Updater legacy configuration path is busy");
+    }else if(before.kind!=Kind::missing){
+        if(!sameImage(before,read(path,maximum)))throw std::runtime_error("Updater source changed before publication");
+        if(before.info.dwFileAttributes&FILE_ATTRIBUTE_READONLY)if(!SetFileAttributesW(path.c_str(),before.info.dwFileAttributes&~FILE_ATTRIBUTE_READONLY))throw std::runtime_error("Updater legacy configuration attributes unavailable");
     }
-    const auto text=next.dump();if(text.size()>maximum||!valid(next))throw std::runtime_error("Merged updater configuration invalid");
-    if(damaged||preserveValid&&before.kind==Kind::ready){archive=path+(damaged?L".ymcc-invalid-":L".ymcc-before-")+suffix();
-        if(!sameImage(before,read(path,maximum)))throw std::runtime_error("Updater source changed before preservation");
-        if(damaged){if(!MoveFileExW(path.c_str(),archive.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Cannot preserve damaged updater configuration");moved=true;
-            if(!sameImage(before,read(archive,maximum))||read(path,maximum).kind!=Kind::missing)throw std::runtime_error("Updater archive not confirmed");}
-        else{if(!CopyFileW(path.c_str(),archive.c_str(),TRUE))throw std::runtime_error("Cannot preserve updater preference preimage");const auto copy=read(archive,maximum);if(copy.kind!=before.kind||copy.raw!=before.raw)throw std::runtime_error("Updater preference backup differs");}
-    }
-    if((!moved&&!sameImage(before,read(path,maximum)))||(moved&&read(path,maximum).kind!=Kind::missing))throw std::runtime_error("Updater source changed before publication");
-    bool written=false;try{written=writer(path,text);}catch(...){if(moved&&read(path,maximum).kind==Kind::missing)MoveFileExW(archive.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH);throw;}
-    if(!written){if(moved&&read(path,maximum).kind==Kind::missing)MoveFileExW(archive.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH);throw std::runtime_error("Cannot persist updater configuration");}
+    if(!writer(path,text))throw std::runtime_error("Cannot persist updater configuration");
     const auto actual=read(path,maximum);if(actual.kind!=Kind::ready||actual.raw!=text||!valid(actual.value))throw std::runtime_error("Updater configuration readback failed");
 }
 } // namespace ymcc::updateconfig

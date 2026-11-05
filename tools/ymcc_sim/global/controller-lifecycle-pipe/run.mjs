@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {resolveWireBuild,wireChildEnvironment,wirePathContext} from './wire-contract.mjs';
+import {WIRE_FAULTS,mutateWireSource,wireSourceProjection} from './source-projection.mjs';
+import {collectWireEvidence} from './evidence-files.mjs';
 import {sourcePath,runProcess} from '../runner.mjs';
 import {CASE_ID,MODULE,REPO,WORKSPACE,sourceFiles,artifactFiles,managedContract,inside} from './adapter.mjs';
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const need=(v,m)=>{if(!v)throw Error(m);};
 const write=(p,v)=>fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
-function walk(root){return fs.readdirSync(root,{withFileTypes:true}).flatMap(e=>{need(!e.isSymbolicLink(),'OUTPUT_LINK');const p=path.join(root,e.name);return e.isDirectory()?walk(p):[p];});}
 function verifyManaged(contract){
  const {pin,manifest,value}=contract;
  need(hash(manifest)===pin.sha256,'MANAGED_CONTRACT_STALE_MANIFEST');
@@ -18,20 +20,32 @@ function verifyManaged(contract){
  for(const row of value.runtimeArtifacts)need(hash(row.path)===row.sha256,'MANAGED_CONTRACT_STALE_PAYLOAD:'+row.path);
  need(hash(value.generatedIdentity.path)===value.generatedIdentity.sha256,'MANAGED_CONTRACT_STALE_IDENTITY');
 }
+const ORIGINAL_PIPE_CASE_IDS=Object.freeze(['steamdeck','dualsense-edge','elite','recreate-loop','release-retry','pipe-break','stale-host-binding',...['steamdeck','dualsense-edge','elite'].flatMap(persona=>['parent-exit-','parent-kill-','parent-kill-retry-'].map(prefix=>prefix+persona))]);
+export function validatePipeReceiptMembership(configurations,{negative=false,name='receipt'}={}){
+ need(Array.isArray(configurations)&&configurations.length===2&&configurations.every(c=>c&&['Release','Checked'].includes(c.mode))&&new Set(configurations.map(c=>c.mode)).size===2,'INTEGRATION_CONFIGURATION_SET_INVALID:'+name);
+ if(!negative)for(const c of configurations){
+  const ids=c.result?.cases?.map(item=>item?.id);
+  need(Array.isArray(ids)&&ids.length===ORIGINAL_PIPE_CASE_IDS.length&&ids.every(id=>ORIGINAL_PIPE_CASE_IDS.includes(id))&&new Set(ids).size===ORIGINAL_PIPE_CASE_IDS.length,'INTEGRATION_CASE_SET_INVALID:'+name+':'+c.mode);
+ }
+ return true;
+}
 export async function execute(root){
- root=path.resolve(root);need((inside(path.join(WORKSPACE,'Build'),root)||inside(path.join(WORKSPACE,'Testing/YMCC/Evidence'),root))&&!fs.existsSync(root),'FRESH_OWNED_EVIDENCE_REQUIRED');fs.mkdirSync(root,{recursive:true});
+ root=path.resolve(root);const pathContext=wirePathContext(root,path.join(WORKSPACE,'Testing/YMCC'));need((inside(path.join(WORKSPACE,'Build'),root)||inside(path.join(WORKSPACE,'Testing/YMCC/Evidence'),root))&&!fs.existsSync(root),'FRESH_OWNED_EVIDENCE_REQUIRED');fs.mkdirSync(root,{recursive:true});
  const steps=[];
  try{
   const contract=managedContract();verifyManaged(contract);
   const sources=sourceFiles().map(p=>({path:p,sha256:hash(sourcePath(REPO,p))})),artifacts=artifactFiles().map(p=>({path:p,sha256:hash(p)}));need(artifacts.length<=640,'ARTIFACT_BOUND_EXCEEDED');
   write(path.join(root,'inputs-before.json'),{sources,artifacts,managedManifest:{path:contract.manifest,sha256:hash(contract.manifest)}});
-  const dotnet='C:/Program Files/dotnet/dotnet.exe';const env={...process.env,DOTNET_ROOT:path.dirname(dotnet),DOTNET_MULTILEVEL_LOOKUP:'0',YMCC_VCVARS64:'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat'};
+  const fixedBuild=resolveWireBuild(REPO),dotnet=fixedBuild.dotnet,env=wireChildEnvironment(fixedBuild,root);
+  write(path.join(root,'fixed-build-context.json'),{build:fixedBuild,pathContext,environment:env});
   for(const key of Object.keys(env))if(/^(?:CL|_CL_|LINK|_LINK_|NODE_OPTIONS|NODE_PATH)$/i.test(key))delete env[key];
   async function suite(name,source,expected){
-   const out=path.join(root,name),args=[sourcePath(REPO,'tools/input_lifecycle_pipe_integration.mjs'),'--out',out,'--source',source,'--managed-dll',contract.value.fixtureDll,'--dotnet',dotnet,...(expected?['--expect-rejection',expected]:[])];
+   const directory={positive:'p','negative-sequence-sync-omitted':'n0','negative-instance-fence-omitted':'n1'}[name];need(directory,'UNKNOWN_ORIGINAL_WIRE_SUITE:'+name);
+    const out=path.join(root,directory),args=[sourcePath(REPO,'tools/input_lifecycle_pipe_integration.mjs'),'--out',out,'--source',source,'--managed-dll',contract.value.fixtureDll,'--dotnet',dotnet,...(expected?['--expect-rejection',expected]:[])];
    const p=await runProcess(process.execPath,args,{cwd:REPO,env,timeoutMs:65000,outputLimit:2*1024*1024});fs.writeFileSync(path.join(root,name+'.stdout.log'),p.stdout);fs.writeFileSync(path.join(root,name+'.stderr.log'),p.stderr);const{stdout,stderr,...terminal}=p;steps.push({name,args,...terminal});write(path.join(root,'process-ledger.json'),{steps});
    need(p.exitCode===0&&!p.timedOut&&!p.launchError&&!p.signal&&!p.outputTruncated,'INTEGRATION_RUNNER_NOT_COMPLETED:'+name);
    const r=read(path.join(out,'RESULT.json'));need(r.status==='PASS'&&r.passed===true&&r.sourceUnchanged&&r.configurations.length===2,'INTEGRATION_FINAL_REPORT_INVALID:'+name);
+   validatePipeReceiptMembership(r.configurations,{negative:!!expected,name});
    need(r.managedDll.sha256===contract.value.runtimeArtifacts.find(row=>path.resolve(row.path)===path.resolve(contract.value.fixtureDll)).sha256,'WRONG_MANAGED_FIXTURE_USED');
    for(const row of r.sources){const relative=path.relative(REPO,row.path).replaceAll('\\','/');if(inside(root,row.path))continue;need(sources.some(s=>s.path===relative&&s.sha256===row.sha256),'UNBOUND_ORIGINAL_RUNNER_SOURCE:'+row.path);}
    for(const c of r.configurations){
@@ -63,14 +77,19 @@ export async function execute(root){
    }
    return {path:path.join(out,'RESULT.json'),sha256:hash(path.join(out,'RESULT.json')),profiles:r.configurations.map(c=>({mode:c.mode,status:c.status,exitCode:c.exitCode,checks:c.result.checks,cases:c.result.cases?.map(item=>({id:item.id,checks:item.checks,passed:item.passed}))??null,error:c.result.error??null})),expectedRejection:!!expected};
   }
-  const positive=await suite('positive',sourcePath(REPO,'native/main.cpp'));
-  const main=fs.readFileSync(sourcePath(REPO,'native/main.cpp'),'utf8'),faults=[
-   {id:'sequence-sync-omitted',before:'if (advanceSequence && hostConsumed) g_inputHostSequence = sequenceValue;',after:'(void)hostConsumed;',expected:'business-refusal-sequence-synced-without-transport-fault'},
-   {id:'instance-fence-omitted',before:'if (!tupleMatches || !identityOk) {',after:'(void)identityOk; if (!tupleMatches) {',expected:'stale-Host-instance-cannot-accept-ACK'}
-  ],negative=[];
-  for(const fault of faults){need(main.split(fault.before).length===2,'SOURCE_FAULT_ANCHOR_CHANGED:'+fault.id);const source=path.join(root,fault.id+'.cpp');fs.writeFileSync(source,main.replace(fault.before,fault.after));negative.push({id:fault.id,before:fault.before,after:fault.after,originalAssertionsUnchanged:true,proof:await suite('negative-'+fault.id,source,fault.expected)});}
+  const mainBytes=fs.readFileSync(sourcePath(REPO,'native/main.cpp'));
+  need(crypto.createHash('sha256').update(mainBytes).digest('hex')===sources.find(row=>row.path==='native/main.cpp').sha256,'MAIN_CHANGED_BEFORE_SNAPSHOT');
+  const snapshot=path.join(root,'source-main.cpp');fs.writeFileSync(snapshot,mainBytes,{flag:'wx'});
+  const main=mainBytes.toString('utf8'),faults=WIRE_FAULTS,negative=[];
+  const positive=await suite('positive',snapshot);
+  for(const fault of faults){const source=path.join(root,fault.id+'.cpp');fs.writeFileSync(source,mutateWireSource(main,fault.id));negative.push({id:fault.id,before:fault.before,after:fault.after,originalAssertionsUnchanged:true,proof:await suite('negative-'+fault.id,source,fault.expected)});}
   verifyManaged(contract);need(sources.every(row=>hash(sourcePath(REPO,row.path))===row.sha256),'SOURCE_CHANGED_DURING_RUN');need(artifacts.every(row=>hash(row.path)===row.sha256),'ARTIFACT_CHANGED_DURING_RUN');
-  const result={schemaVersion:1,id:CASE_ID,status:'PASS',passed:true,positive,negative,sourceHashes:[...sources,...walk(root).map(p=>({path:p,sha256:hash(p)}))],toolchainArtifacts:artifacts,sourceBoundManagedFixture:{manifest:contract.manifest,sha256:hash(contract.manifest),dll:contract.value.fixtureDll,actualLoadedAssemblyHashesVerified:true,compilerExecutedInThisAdapter:false},boundary:{completeNativeRequestExecuted:true,managedPipeAndSessionExecuted:true,heldSessionParentCasesPerProfile:9,parentNormalExitAndAbruptTermination:true,parentExitWithFirstStopFailure:true,realCrossProcessWindowsPipes:true,sdkIo:false,deviceIo:false,normalProductMainExecuted:false,fullCoordinatorLifecycleExecuted:false,physicalReturnAccepted:false,osSleepExecuted:false,cpuAcceptance:false,productionModified:false}};
+  const templatePath='tools/fixtures/input_lifecycle_integration/NativeEntry.cpp';
+  const proofFile=path.join(root,'source-projection.json');
+  write(proofFile,{schemaVersion:1,kind:'wire-native-main-proof-v1',source:{path:'native/main.cpp',sha256:hash(snapshot)},snapshot:{path:snapshot,sha256:hash(snapshot)},template:{path:templatePath,sha256:hash(sourcePath(REPO,templatePath))},generated:wireSourceProjection(main,fs.readFileSync(sourcePath(REPO,templatePath),'utf8'))});
+  const collected=collectWireEvidence(root),profileBoundary=path.join(root,'profile-output-boundary.json');
+  write(profileBoundary,{schemaVersion:1,excludedProfileDirectories:collected.excludedProfileDirectories,declaredEvidenceRootsUnchanged:true,profileStateNotClaimedAsEvidence:true});
+  const result={schemaVersion:1,id:CASE_ID,status:'PASS',passed:true,positive,negative,sourceProjection:{path:proofFile,sha256:hash(proofFile)},sourceHashes:[...sources,...[...collected.files,profileBoundary].map(p=>({path:p,sha256:hash(p)}))],toolchainArtifacts:artifacts,sourceBoundManagedFixture:{manifest:contract.manifest,sha256:hash(contract.manifest),dll:contract.value.fixtureDll,actualLoadedAssemblyHashesVerified:true,compilerExecutedInThisAdapter:false},fixedBuildContract:{build:fixedBuild,pathContext,environmentInheritance:'none'},boundary:{completeNativeRequestExecuted:true,managedPipeAndSessionExecuted:true,heldSessionParentCasesPerProfile:9,parentNormalExitAndAbruptTermination:true,parentExitWithFirstStopFailure:true,realCrossProcessWindowsPipes:true,sdkIo:false,deviceIo:false,normalProductMainExecuted:false,fullCoordinatorLifecycleExecuted:false,physicalReturnAccepted:false,osSleepExecuted:false,cpuAcceptance:false,productionModified:false}};
   write(path.join(root,'result.json'),result);return result;
  }catch(error){const blocked=error.message.startsWith('MANAGED_CONTRACT_STALE');write(path.join(root,'failure.json'),{status:blocked?'BLOCKED':'FAIL',error:error.message,steps,compilationFailureCountedAsNegative:false});if(blocked)error.exitCode=7;throw error;}
 }

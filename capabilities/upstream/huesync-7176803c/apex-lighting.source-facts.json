@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "mode": "source-bound-existing-apex-consumer-override",
+  "evidence": "HC-CODEX-071-APEX-LIGHTING-PROTOCOL-REVIEW",
+  "deviceId": "hc.device.OneXPlayerApex",
+  "deviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
+  "sourcePins": {
+    "huesync": "7176803ce147d8bffef126720c21e4f42e0f3612",
+    "hcWindows": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+  },
+  "sources": [
+    {
+      "role": "identity-mapping",
+      "path": "capabilities/upstream/huesync-7176803c/onexplayer_configs.py",
+      "sha256": "8a697b193db3a4f5c7801fb572eba4cadf0855e0ce50387b973c2a70a4e50d24"
+    },
+    {
+      "role": "endpoint-and-brightness",
+      "path": "capabilities/upstream/huesync-7176803c/onex_led_device_hid.py",
+      "sha256": "6ca7e1ab26165d548b8467905530cef3eca1a94243142ee2aadd267cb812ace3"
+    },
+    {
+      "role": "hid-v2-command",
+      "path": "capabilities/upstream/huesync-7176803c/oxp_hid_v2.py",
+      "sha256": "27c2f2b449271ac275e083daa39ae75fe7806f15bb42f0933f672c805d3feb08"
+    },
+    {
+      "role": "windows-wire",
+      "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+      "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+    },
+    {
+      "role": "windows-report",
+      "path": "capabilities/upstream/f2e58468/IDevice.cs",
+      "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+    },
+    {
+      "role": "frozen-device",
+      "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs",
+      "sha256": "c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60"
+    },
+    {
+      "role": "frozen-serial",
+      "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1.cs",
+      "sha256": "9948d5f99ec6b50f93a1c85ee557a309c3b0b6225a1ba50231c9c1e12ee49478"
+    }
+  ],
+  "identity": {
+    "product": "ONEXPLAYER APEX",
+    "configuration": "OXP_F1_CONF",
+    "protocol": "HID_V2",
+    "rgb": true,
+    "rgbSecondary": false
+  },
+  "endpoint": {
+    "vendorId": 6700,
+    "productId": 45057,
+    "usagePage": 65281,
+    "usage": 1
+  },
+  "wire": {
+    "linuxCommandBytes": 64,
+    "windowsReportId": 0,
+    "windowsReportBytes": 65,
+    "solidPrefix": [
+      0,
+      7,
+      255,
+      254
+    ],
+    "solidRgbRepetitions": 20,
+    "rainbowPrefix": [
+      0,
+      7,
+      255,
+      3
+    ],
+    "trailingByte": 0
+  },
+  "brightness": {
+    "rounding": "ties-to-even",
+    "divisor": 20,
+    "lowMaximum": 1,
+    "mediumMaximum": 3,
+    "levels": [
+      1,
+      3,
+      4
+    ],
+    "enabled": "percent > 0",
+    "offPercent": 0,
+    "offWindowsPrefix": [
+      0,
+      7,
+      255,
+      253,
+      0,
+      5,
+      1
+    ]
+  },
+  "consumer": {
+    "ledEffects": [
+      "SolidColor",
+      "Rainbow"
+    ],
+    "brightness": true,
+    "secondColor": false,
+    "presetDeclared": false,
+    "presetAvailable": false,
+    "statusAvailable": false,
+    "statusTransportDisabled": true,
+    "offAvailable": true,
+    "fixedSpeed": true
+  },
+  "contract": {
+    "provider": "onex-apex-hid-v2",
+    "sourceAdapter": "ApexHidV2",
+    "commandDelayMs": 300,
+    "owner": "shared-superjoy-leased-hid",
+    "runtimeDescriptorOutputBytes": 65,
+    "physicalEffectVerified": false
+  },
+  "differences": [
+    "HueSync exact product mapping supplies APEX HID_V2 identity; no new model or family alias is admitted.",
+    "HueSync gen_cmd emits a Linux 64-byte command. HC Windows V2 color helpers and IDevice.WithReportID establish report ID 0 plus a 64-byte command, totaling 65 bytes. Linux bytes alone do not establish a Windows descriptor.",
+    "Brightness thresholds and ties-even rounding come from HueSync set_led_color whole-update; gen_brightness supplies the explicit enabled field and levels 1/3/4.",
+    "The reviewed consumer sets enabled=(percent>0). HueSync whole-update currently forces enabled=True and Disabled mode to solid black; that workaround is not claimed equivalent or copied here.",
+    "HC SendV2Brightness always encodes enabled=1 and a clamped level 0..4. Its zero encoding is not used as an off command and is not equated with the HueSync discrete mapping.",
+    "Off requests percent=0 and explicitly sends enabled=0 with the HueSync low level 1; the encoded level byte is not zero. No cached color or serial status/preset is used.",
+    "Brightness/enable is completed before a300ms wait and color/mode; this follows HueSync whole-update processing timing, preserving cancellation and owner rechecks. Solid copies RGB directly twenty times; rainbow consumes mode03; second color and custom speed are unavailable.",
+    "The existing frozen APEX declaration and X1 serial method provenance remain intact. Only its effective lighting consumer is replaced.",
+    "Runtime native ownership and managed transport must both validate the exact current endpoint and 65-byte output descriptor. Software source admission does not assert a physical effect."
+  ]
+}

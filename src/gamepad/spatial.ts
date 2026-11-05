@@ -99,7 +99,7 @@ export function nearestSpatialTarget(
     // the row edge used to jump to unrelated settings above or below it.
     // Vertical movement leaves that row, including controls whose centres
     // differ slightly because switches, dropdowns and buttons have different heights.
-    }).filter(item => item.visible && item.forward > 1 && (horizontal ? item.beam === 0 && item.sameVisualRow : item.separated));
+    }).filter(item => item.visible && item.forward > 1 && (horizontal || item.separated));
   if (!horizontal && pane) {
     // Staggered rows in another scroll pane must not intercept Up/Down.
     // Header/footer controls outside all panes remain reachable at the edge.
@@ -108,6 +108,19 @@ export function nearestSpatialTarget(
     candidates.splice(0,candidates.length,...admitted);
   }
   if (horizontal) {
+    const row = candidates.filter(item => item.beam === 0 && item.sameVisualRow);
+    // Split editors may have blank rows in the other pane. At that boundary,
+    // admit its nearest enabled control instead of stranding the current row.
+    // Within a pane the strict same-row rule and edge stop remain unchanged.
+    if (!row.length && pane && scope?.hasAttribute('data-gp-pane-bridge')) {
+      const bridges = candidates.filter(item => {
+        const other = item.el.closest<HTMLElement>('[data-gp-pane]');
+        return other && other !== pane && other.dataset.gpPane !== paneId;
+      });
+      bridges.sort((a,b) => a.across - b.across || a.gap - b.gap || a.distance - b.distance);
+      return bridges[0]?.el ?? null;
+    }
+    candidates.splice(0, candidates.length, ...row);
     candidates.sort((a,b) => a.gap - b.gap || a.across - b.across || a.distance - b.distance);
   } else {
     // Visit the adjacent visual row first, then retain the nearest column.

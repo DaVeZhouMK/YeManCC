@@ -131,32 +131,65 @@ inline Json readAt(const std::wstring& root,const std::wstring& path){
     }catch(...){return Json::object();}
 }
 inline Json read(const std::wstring& exe,const std::wstring& pc){try{auto root=directory();auto j=readAt(root,pathFor(root,exe));return matches(j,exe,pc)?j:Json::object();}catch(...){return Json::object();}}
+// New authorizations and phase records always use an explicit protected DACL.
+inline bool writeProtectedFile(const std::wstring& path,const std::string& bytes){
+    auto sd=descriptor();SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};
+    HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE|READ_CONTROL,0,&sa,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);LocalFree(sd);
+    if(h==INVALID_HANDLE_VALUE)return false;
+    struct Close{HANDLE value;~Close(){CloseHandle(value);}} close{h};DWORD written=0;
+    return secureHandle(h)&&WriteFile(h,bytes.data(),static_cast<DWORD>(bytes.size()),&written,nullptr)&&written==bytes.size()&&FlushFileBuffers(h);
+}
 inline std::wstring writeAt(const std::wstring& root,const std::wstring& exe,const std::wstring& pc,const std::string& id,const std::string& version,const std::string& sha){
     if(id.empty()||id.size()>128||id.find('\0')!=std::string::npos||!validSha(sha)||!ymcc::updateconfig::version(version)||normalized(exe).empty()||normalized(pc).empty())throw std::runtime_error("UPDATE_RECOVERY_ID_INVALID");
-    if(!secureDirectory(root,true))throw std::runtime_error("UPDATE_RECOVERY_DIRECTORY_NOT_PROTECTED");
-    const auto path=pathFor(root,exe);const auto before=ymcc::updateconfig::read(path,65536);
-    if(before.kind!=ymcc::updateconfig::Kind::missing){
-        if(before.kind!=ymcc::updateconfig::Kind::ready||!matches(before.value,exe,pc)||readAt(root,path)!=before.value)throw std::runtime_error("UPDATE_RECOVERY_PREVIOUS_JOURNAL_UNCONFIRMED");
-        if(live(before.value))throw std::runtime_error("UPDATE_RECOVERY_INSTALLER_ACTIVE");
+    // The user-authorized incoming installation is the new baseline. Legacy
+    // journals cannot veto it; an actually active installer still owns the lock.
+    struct MaintenanceLease{
+        HANDLE handle=nullptr;bool held=false;
+        MaintenanceLease(){handle=CreateMutexW(nullptr,FALSE,L"Global\\YeManCC.ModuleMaintenance");if(!handle)throw std::runtime_error("UPDATE_RECOVERY_MAINTENANCE_UNAVAILABLE");
+            const auto wait=WaitForSingleObject(handle,0);held=wait==WAIT_OBJECT_0||wait==WAIT_ABANDONED;if(!held){CloseHandle(handle);handle=nullptr;throw std::runtime_error("UPDATE_RECOVERY_INSTALLER_ACTIVE");}}
+        ~MaintenanceLease(){if(handle){if(held)ReleaseMutex(handle);CloseHandle(handle);}}
+    } maintenance;
+    const auto retire=[](const std::wstring& old){const auto retired=old+L".ymcc-retired-"+ymcc::updateconfig::suffix();
+        for(unsigned attempt=0;attempt<6;++attempt){if(MoveFileExW(old.c_str(),retired.c_str(),MOVEFILE_WRITE_THROUGH))return;
+            const auto error=GetLastError();if((error!=ERROR_SHARING_VIOLATION&&error!=ERROR_LOCK_VIOLATION&&error!=ERROR_ACCESS_DENIED)||attempt==5)throw std::runtime_error("UPDATE_RECOVERY_LEGACY_PATH_BUSY");Sleep(50);}};
+    if(normalized(root).empty()||std::filesystem::path(root).parent_path().empty()||!ymcc::updateconfig::ordinaryParents(std::filesystem::path(root)))throw std::runtime_error("UPDATE_RECOVERY_PATH_UNSAFE");
+    if(!secureDirectory(root,true)){
+        if(GetFileAttributesW(root.c_str())!=INVALID_FILE_ATTRIBUTES)retire(root);
+        if(!secureDirectory(root,true))throw std::runtime_error("UPDATE_RECOVERY_DIRECTORY_NOT_PROTECTED");
     }
+    const auto path=pathFor(root,exe);
+    const auto flags=GetFileAttributesW(path.c_str());
+    if(flags!=INVALID_FILE_ATTRIBUTES&&(flags&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))retire(path);
+    auto before=ymcc::updateconfig::read(path,65536);
+    for(unsigned attempt=0;before.kind==ymcc::updateconfig::Kind::unavailable&&attempt<5;++attempt){Sleep(50);before=ymcc::updateconfig::read(path,65536);}
+    if(before.kind==ymcc::updateconfig::Kind::unavailable)throw std::runtime_error("UPDATE_RECOVERY_SOURCE_UNAVAILABLE");
+    if(before.kind!=ymcc::updateconfig::Kind::missing&&(before.info.dwFileAttributes&FILE_ATTRIBUTE_READONLY)){
+        if(!SetFileAttributesW(path.c_str(),before.info.dwFileAttributes&~FILE_ATTRIBUTE_READONLY))throw std::runtime_error("UPDATE_RECOVERY_LEGACY_ATTRIBUTES_UNAVAILABLE");
+    }
+    if(before.kind==ymcc::updateconfig::Kind::ready&&matches(before.value,exe,pc)&&readAt(root,path)==before.value&&live(before.value))throw std::runtime_error("UPDATE_RECOVERY_INSTALLER_ACTIVE");
     Json j={{"schema",1},{"owner","YMCC.FullInstall"},{"phase","authorized"},{"operationId",id},{"version",version},{"sha256",sha},
         {"exePath",utf8(normalized(exe))},{"powerControl",utf8(normalized(pc))},{"authorizedAt",now()},{"launcherPid",GetCurrentProcessId()},{"launcherImage",utf8(exe)}};
     FILETIME c{},e{},k{},u{};if(!GetProcessTimes(GetCurrentProcess(),&c,&e,&k,&u))throw std::runtime_error("UPDATE_RECOVERY_LAUNCHER_UNKNOWN");j["launcherCreation"]=std::to_string(filetime(c));
-    if(before.kind==ymcc::updateconfig::Kind::ready){
-        const std::set<std::string> owned={"schema","owner","phase","operationId","version","sha256","exePath","powerControl","authorizedAt","launcherPid","launcherImage","launcherCreation","helperPid","helperImage","helperCreation","updatedAt"};
-        for(auto it=before.value.begin();it!=before.value.end();++it)if(!owned.contains(it.key()))j[it.key()]=*it;
-    }
+    // Never merge historical fields or require a historical preimage backup.
+    // Corrupt/oversized/future records are overwritten only by this fresh,
+    // protected authorization for the verified incoming package.
     if(!journalValid(j))throw std::runtime_error("UPDATE_RECOVERY_ID_INVALID");const auto text=j.dump();if(text.size()>65536)throw std::runtime_error("UPDATE_RECOVERY_JOURNAL_TOO_LARGE");
-    if(before.kind==ymcc::updateconfig::Kind::ready){
-        const auto backup=path+L".ymcc-before-"+ymcc::updateconfig::suffix();
-        if(!ymcc::updateconfig::sameImage(before,ymcc::updateconfig::read(path,65536))||!CopyFileW(path.c_str(),backup.c_str(),TRUE)||ymcc::updateconfig::read(backup,65536).raw!=before.raw||readAt(root,backup)!=before.value)throw std::runtime_error("UPDATE_RECOVERY_PREIMAGE_UNCONFIRMED");
-    }
-    const auto temp=path+L".tmp-"+ymcc::updateconfig::suffix();auto sd=descriptor();SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};
-    HANDLE h=CreateFileW(temp.c_str(),GENERIC_WRITE|READ_CONTROL,0,&sa,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);LocalFree(sd);
-    if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("UPDATE_RECOVERY_WRITE_FAILED");DWORD written=0;
-    bool ok=secureHandle(h)&&WriteFile(h,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()&&FlushFileBuffers(h);CloseHandle(h);
+    const auto temp=path+L".tmp-"+ymcc::updateconfig::suffix();
+    bool ok=writeProtectedFile(temp,text);
     if(ok)ok=readAt(root,temp)==j&&ymcc::updateconfig::read(temp,65536).raw==text&&ymcc::updateconfig::sameImage(before,ymcc::updateconfig::read(path,65536))&&secureDirectory(root,false);
-    if(ok)ok=MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE;
+    if(ok){
+        ok=false;
+        for(unsigned attempt=0;attempt<6;++attempt){
+            // A temporary reader may deny replacement. Revalidate the captured
+            // original on every retry; never replace a changed transaction.
+            const auto current=ymcc::updateconfig::read(path,65536);
+            if(!ymcc::updateconfig::sameImage(before,current)||!secureDirectory(root,false))break;
+            if(MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){ok=true;break;}
+            const auto error=GetLastError();
+            if((error!=ERROR_SHARING_VIOLATION&&error!=ERROR_LOCK_VIOLATION&&error!=ERROR_ACCESS_DENIED)||attempt==5)break;
+            Sleep(50);
+        }
+    }
     if(!ok){DeleteFileW(temp.c_str());throw std::runtime_error("UPDATE_RECOVERY_COMMIT_FAILED");}
     if(readAt(root,path)!=j||ymcc::updateconfig::read(path,65536).raw!=text)throw std::runtime_error("UPDATE_RECOVERY_READBACK_FAILED");
     return path;

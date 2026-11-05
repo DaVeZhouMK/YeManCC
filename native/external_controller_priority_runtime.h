@@ -63,54 +63,87 @@ static json externalControllerPrioritySnapshot(){
 }
 // A USB root on a non-user-connectable port is internal. USB bus/VID/slot0
 // alone never establish this. Unsupported IOCTL is unknown, not internal.
-static int externalPriorityUsbHopKind(const std::string& root){
+static int externalPriorityUsbHopKind(const std::string& root,json* evidence=nullptr,DWORD desiredAccess=GENERIC_WRITE){
+    json detail;if(evidence)detail={{"node",root},{"desiredAccess",desiredAccess}};
+    const auto done=[&](int result,const char* reason){
+        if(evidence){detail["portKind"]=result;detail["reason"]=reason;*evidence=std::move(detail);}return result;
+    };
     DEVINST node=0,parent=0;auto wide=U2W(root);
-    if(CM_Locate_DevNodeW(&node,wide.data(),CM_LOCATE_DEVNODE_NORMAL)!=CR_SUCCESS ||
-        CM_Get_Parent(&parent,node,0)!=CR_SUCCESS)return -1;
+    const auto locate=CM_Locate_DevNodeW(&node,wide.data(),CM_LOCATE_DEVNODE_NORMAL);
+    if(locate!=CR_SUCCESS){if(evidence)detail["configRet"]=locate;return done(-1,"locate-failed");}
+    const auto parentRc=CM_Get_Parent(&parent,node,0);
+    if(parentRc!=CR_SUCCESS){if(evidence)detail["configRet"]=parentRc;return done(-1,"parent-failed");}
     ULONG port=0,bytes=sizeof(port),type=0;
-    if(CM_Get_DevNode_Registry_PropertyW(node,CM_DRP_ADDRESS,&type,&port,&bytes,0)!=CR_SUCCESS || !port)return -1;
+    const auto addressRc=CM_Get_DevNode_Registry_PropertyW(node,CM_DRP_ADDRESS,&type,&port,&bytes,0);
+    if(evidence){detail["addressConfigRet"]=addressRc;detail["addressType"]=type;detail["addressBytes"]=bytes;detail["port"]=port;}
+    if(addressRc!=CR_SUCCESS || !port || bytes!=sizeof(port) || type!=REG_DWORD)return done(-1,"port-address-unproven");
     wchar_t parentId[MAX_DEVICE_ID_LEN]{};
-    if(CM_Get_Device_IDW(parent,parentId,MAX_DEVICE_ID_LEN,0)!=CR_SUCCESS)return -1;
+    const auto idRc=CM_Get_Device_IDW(parent,parentId,MAX_DEVICE_ID_LEN,0);
+    if(idRc!=CR_SUCCESS){if(evidence)detail["configRet"]=idRc;return done(-1,"parent-id-failed");}
+    if(evidence)detail["parent"]=W2U(parentId);
     HDEVINFO set=SetupDiGetClassDevsW(&GUID_DEVINTERFACE_USB_HUB,nullptr,nullptr,DIGCF_PRESENT|DIGCF_DEVICEINTERFACE);
-    if(set==INVALID_HANDLE_VALUE)return -1;
-    int result=-1;
+    if(set==INVALID_HANDLE_VALUE){if(evidence)detail["win32Error"]=GetLastError();return done(-1,"hub-enumeration-failed");}
+    int result=-1;const char* reason="exact-parent-hub-interface-missing";
     for(DWORD i=0;;++i){
         SP_DEVICE_INTERFACE_DATA iface{};iface.cbSize=sizeof(iface);
         if(!SetupDiEnumDeviceInterfaces(set,nullptr,&GUID_DEVINTERFACE_USB_HUB,i,&iface))break;
         DWORD count=0;SetupDiGetDeviceInterfaceDetailW(set,&iface,nullptr,0,&count,nullptr);
-        if(count<sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W))continue;
-        std::vector<BYTE> storage(count);auto* detail=reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(storage.data());
-        detail->cbSize=sizeof(*detail);SP_DEVINFO_DATA dev{};dev.cbSize=sizeof(dev);
-        if(!SetupDiGetDeviceInterfaceDetailW(set,&iface,detail,count,nullptr,&dev))continue;
+        if(count<sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) || count>65536)continue;
+        std::vector<BYTE> storage(count);auto* detailPath=reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(storage.data());
+        detailPath->cbSize=sizeof(*detailPath);SP_DEVINFO_DATA dev{};dev.cbSize=sizeof(dev);
+        if(!SetupDiGetDeviceInterfaceDetailW(set,&iface,detailPath,count,nullptr,&dev))continue;
         const auto id=hidHideDeviceInstanceId(set,dev);
         if(hidHideUpper(id)!=hidHideUpper(W2U(parentId)))continue;
-        HANDLE hub=CreateFileW(detail->DevicePath,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
-        if(hub==INVALID_HANDLE_VALUE)break;
-        std::vector<BYTE> info(sizeof(USB_PORT_CONNECTOR_PROPERTIES)+4096);
+        // Connector properties are a query, not a port write. OneX explicitly
+        // requests a zero-access query handle; legacy callers keep their access.
+        HANDLE hub=CreateFileW(detailPath->DevicePath,desiredAccess,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
+        if(hub==INVALID_HANDLE_VALUE){if(evidence)detail["openError"]=GetLastError();reason="hub-open-failed";break;}
+        const bool readOnlyQuery=desiredAccess==0;
+        std::vector<BYTE> info(sizeof(USB_PORT_CONNECTOR_PROPERTIES)+(readOnlyQuery?0:4096));
         auto* props=reinterpret_cast<USB_PORT_CONNECTOR_PROPERTIES*>(info.data());props->ConnectionIndex=port;
         DWORD returned=0;
-        if(DeviceIoControl(hub,IOCTL_USB_GET_PORT_CONNECTOR_PROPERTIES,props,(DWORD)info.size(),props,(DWORD)info.size(),&returned,nullptr) &&
-            returned>=sizeof(USB_PORT_CONNECTOR_PROPERTIES))result=props->UsbPortProperties.PortIsUserConnectable?1:0;
+        bool queried=DeviceIoControl(hub,IOCTL_USB_GET_PORT_CONNECTOR_PROPERTIES,props,(DWORD)info.size(),props,(DWORD)info.size(),&returned,nullptr)!=FALSE;
+        const DWORD firstError=queried?ERROR_SUCCESS:GetLastError();
+        if(evidence){detail["queryError"]=firstError;detail["returnedBytes"]=returned;detail["queryAttempts"]=1;}
+        if(readOnlyQuery && queried && returned>=sizeof(USB_PORT_CONNECTOR_PROPERTIES)){
+            const ULONG actual=props->ActualLength;if(evidence)detail["actualLength"]=actual;
+            if(actual<sizeof(USB_PORT_CONNECTOR_PROPERTIES) || actual>65536){queried=false;if(evidence)detail["queryError"]=ERROR_INVALID_DATA;}
+            else if(actual>info.size()){
+                info.assign(actual,0);props=reinterpret_cast<USB_PORT_CONNECTOR_PROPERTIES*>(info.data());props->ConnectionIndex=port;
+                queried=DeviceIoControl(hub,IOCTL_USB_GET_PORT_CONNECTOR_PROPERTIES,props,(DWORD)info.size(),props,(DWORD)info.size(),&returned,nullptr)!=FALSE;
+                const DWORD secondError=queried?ERROR_SUCCESS:GetLastError();
+                if(evidence){detail["queryAttempts"]=2;detail["queryError"]=secondError;detail["returnedBytes"]=returned;}
+                if(queried && (returned<sizeof(USB_PORT_CONNECTOR_PROPERTIES) || props->ActualLength>info.size() || props->ActualLength<sizeof(USB_PORT_CONNECTOR_PROPERTIES))){queried=false;if(evidence)detail["queryError"]=ERROR_INVALID_DATA;}
+            }
+        }
+        if(queried && returned>=sizeof(USB_PORT_CONNECTOR_PROPERTIES)){
+            result=props->UsbPortProperties.PortIsUserConnectable?1:0;reason=result?"user-connectable":"non-user-connectable";
+        }else reason=queried?"connector-reply-incomplete":"connector-query-failed";
         CloseHandle(hub);break;
     }
-    SetupDiDestroyDeviceInfoList(set);return result;
+    SetupDiDestroyDeviceInfoList(set);return done(result,reason);
 }
 // Internal behind an internal hub must also have an internal upstream port.
 // A soldered controller inside a removable USB dock is still external.
-static int externalPriorityUsbPortKind(const std::string& root){
-    std::string current=root;bool observed=false;
+static int externalPriorityUsbPortKindWithEvidence(const std::string& root,json* evidence,DWORD desiredAccess){
+    std::string current=root;bool observed=false;json hops;if(evidence)hops=json::array();
+    const auto done=[&](int result,const char* reason){if(evidence)*evidence={{"portKind",result},{"reason",reason},{"desiredAccess",desiredAccess},{"hops",hops}};return result;};
     for(unsigned depth=0;depth<16;++depth){
         const auto upper=hidHideUpper(current);
-        if(upper.rfind("USB\\ROOT_HUB",0)==0)return observed?0:-1;
-        if(upper.rfind("USB\\VID_",0)!=0)return -1;
-        const int kind=externalPriorityUsbHopKind(current);if(kind!=0)return kind;
+        if(upper.rfind("USB\\ROOT_HUB",0)==0)return done(observed?0:-1,observed?"internal-through-root-hub":"no-device-hop");
+        if(upper.rfind("USB\\VID_",0)!=0)return done(-1,"non-usb-ancestor");
+        json hop;const int kind=externalPriorityUsbHopKind(current,evidence?&hop:nullptr,desiredAccess);
+        if(evidence)hops.push_back(std::move(hop));if(kind!=0)return done(kind,kind==1?"user-connectable-hop":"hop-unproven");
         observed=true;DEVINST node=0,parent=0;auto wide=U2W(current);
         if(CM_Locate_DevNodeW(&node,wide.data(),CM_LOCATE_DEVNODE_NORMAL)!=CR_SUCCESS ||
-            CM_Get_Parent(&parent,node,0)!=CR_SUCCESS)return -1;
-        wchar_t id[MAX_DEVICE_ID_LEN]{};if(CM_Get_Device_IDW(parent,id,MAX_DEVICE_ID_LEN,0)!=CR_SUCCESS)return -1;
+            CM_Get_Parent(&parent,node,0)!=CR_SUCCESS)return done(-1,"ancestor-changed");
+        wchar_t id[MAX_DEVICE_ID_LEN]{};if(CM_Get_Device_IDW(parent,id,MAX_DEVICE_ID_LEN,0)!=CR_SUCCESS)return done(-1,"ancestor-id-failed");
         current=W2U(id);
     }
-    return -1;
+    return done(-1,"ancestor-depth-exhausted");
+}
+static int externalPriorityUsbPortKind(const std::string& root){
+    return externalPriorityUsbPortKindWithEvidence(root,nullptr,GENERIC_WRITE);
 }
 static bool externalPriorityKnownHandheld(){
     return g_machineIdentity.resolved && g_machineIdentity.family!=YmccFamily::Unknown &&

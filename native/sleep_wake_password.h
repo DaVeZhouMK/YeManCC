@@ -7,6 +7,7 @@
 #include <powrprof.h>
 #include <mutex>
 #pragma comment(lib, "powrprof.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace ymcc::sleep_wake_password {
 inline constexpr GUID Scheme = {0x1cb8b882, 0xa900, 0x4b9f, {0x9b, 0xac, 0x99, 0xd1, 0x51, 0xe6, 0x44, 0x41}};
@@ -27,18 +28,64 @@ struct ApplyResult {
     const char* stage = "read";
     bool changed = false;
     bool reactivated = false;
+    DWORD reactivationError = ERROR_SUCCESS;
     bool rollbackOk = true;
     Snapshot state;
 };
 
+// Store only this scheme's setting. Policy-aware PowerWrite* may reject 1260
+// before touching the plan. A GPO can still control sign-in independently of
+// these saved indices; it is never edited or overridden here.
+inline constexpr wchar_t SchemeKey[] =
+    L"SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes\\"
+    L"1cb8b882-a900-4b9f-9bac-99d151e64441";
+inline constexpr wchar_t SettingKey[] =
+    L"fea3413e-7e05-4911-9a71-700331f1c294\\0e796bdb-100d-47d6-a2d5-f7d2daa51f51";
+struct RegistryKey {
+    HKEY value = nullptr;
+    RegistryKey() = default;
+    RegistryKey(const RegistryKey&) = delete;
+    RegistryKey& operator=(const RegistryKey&) = delete;
+    ~RegistryKey() { if (value) RegCloseKey(value); }
+};
 struct WindowsPowerApi {
     DWORD read(bool ac, DWORD& value) {
+        RegistryKey scheme, setting;
+        LONG error = RegOpenKeyExW(HKEY_LOCAL_MACHINE, SchemeKey, 0, KEY_READ, &scheme.value);
+        if (error != ERROR_SUCCESS) return static_cast<DWORD>(error);
+        error = RegOpenKeyExW(scheme.value, SettingKey, 0, KEY_QUERY_VALUE, &setting.value);
+        if (error == ERROR_SUCCESS) {
+            DWORD type = 0, size = sizeof(value);
+            error = RegQueryValueExW(setting.value, ac ? L"ACSettingIndex" : L"DCSettingIndex",
+                nullptr, &type, reinterpret_cast<BYTE*>(&value), &size);
+            if (error == ERROR_SUCCESS)
+                return type == REG_DWORD && size == sizeof(value) ? ERROR_SUCCESS : ERROR_INVALID_DATA;
+        }
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+            return static_cast<DWORD>(error);
+        // An existing plan can inherit an index without an explicit value yet.
+        // Read its default only; a missing scheme above is never created.
         return ac ? PowerReadACValueIndex(nullptr, &Scheme, &Subgroup, &Setting, &value)
                   : PowerReadDCValueIndex(nullptr, &Scheme, &Subgroup, &Setting, &value);
     }
     DWORD write(bool ac, DWORD value) {
-        return ac ? PowerWriteACValueIndex(nullptr, &Scheme, &Subgroup, &Setting, value)
-                  : PowerWriteDCValueIndex(nullptr, &Scheme, &Subgroup, &Setting, value);
+        if (value > 1) return ERROR_INVALID_DATA;
+        RegistryKey scheme, setting;
+        LONG error = RegOpenKeyExW(HKEY_LOCAL_MACHINE, SchemeKey, 0, KEY_READ, &scheme.value);
+        if (error != ERROR_SUCCESS) return static_cast<DWORD>(error);
+        error = RegOpenKeyExW(scheme.value, SettingKey, 0, KEY_SET_VALUE, &setting.value);
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            // The root scheme must already exist. Only its one subgroup/setting
+            // can be created to materialize inherited defaults.
+            RegistryKey writableScheme;
+            error = RegOpenKeyExW(HKEY_LOCAL_MACHINE, SchemeKey, 0, KEY_CREATE_SUB_KEY, &writableScheme.value);
+            if (error == ERROR_SUCCESS)
+                error = RegCreateKeyExW(writableScheme.value, SettingKey, 0, nullptr, 0, KEY_SET_VALUE,
+                    nullptr, &setting.value, nullptr);
+        }
+        if (error != ERROR_SUCCESS) return static_cast<DWORD>(error);
+        return static_cast<DWORD>(RegSetValueExW(setting.value, ac ? L"ACSettingIndex" : L"DCSettingIndex",
+            0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value)));
     }
     DWORD activeIsYeman(bool& yeman) {
         GUID* active = nullptr;
@@ -61,9 +108,9 @@ Snapshot read(Api& api) {
     return state;
 }
 
-// Used under the domain mutex + main.cpp's HardwareWriteLease. Writes and reads
-// only the hard-coded scheme. An inactive YMCC plan is edited without activation.
-// Every failed partial write is restored/read back, so the UI never assumes ACK.
+// Explicit user action only. Store the fixed plan's indices first. Reapply it
+// once only when it is already active; another selected scheme is never replaced.
+// Reactivation is a separate receipt, not a reason to undo confirmed saved values.
 template<class Api>
 ApplyResult apply(Api& api, bool enabled) {
     ApplyResult result;
@@ -71,48 +118,43 @@ ApplyResult apply(Api& api, bool enabled) {
     result.state = before;
     if (!before.known) { result.error = before.error; return result; }
     const DWORD desired = enabled ? 1 : 0;
-    if (before.ac == desired && before.dc == desired) { result.ok = true; result.stage = "unchanged"; return result; }
 
     auto fail = [&](DWORD error, const char* stage) {
         result.error = error;
         result.stage = stage;
+        result.state = read(api);
+        // A rejected first write normally changes nothing. Do not issue two
+        // more denied writes and misreport that as a failed rollback.
+        if (result.state.known && result.state.ac == before.ac && result.state.dc == before.dc) return result;
         const DWORD restoreAC = api.write(true, before.ac);
         const DWORD restoreDC = api.write(false, before.dc);
-        bool active = false;
-        const DWORD activeError = api.activeIsYeman(active);
-        DWORD reactivate = ERROR_SUCCESS;
-        if (activeError == ERROR_SUCCESS && active) reactivate = api.reactivateYeman();
         result.state = read(api);
-        result.rollbackOk = restoreAC == ERROR_SUCCESS && restoreDC == ERROR_SUCCESS &&
-            activeError == ERROR_SUCCESS && reactivate == ERROR_SUCCESS && result.state.known &&
+        result.rollbackOk = restoreAC == ERROR_SUCCESS && restoreDC == ERROR_SUCCESS && result.state.known &&
             result.state.ac == before.ac && result.state.dc == before.dc;
         return result;
     };
 
-    DWORD error = api.write(true, desired);
-    if (error != ERROR_SUCCESS) return fail(error, "write-ac");
-    result.changed = true;
-    error = api.write(false, desired);
-    if (error != ERROR_SUCCESS) return fail(error, "write-dc");
-    auto state = read(api);
-    if (!state.known || state.ac != desired || state.dc != desired)
-        return fail(state.error ? state.error : ERROR_INVALID_DATA, "readback");
-
-    // Never activate YMCC while another plan (especially Balanced) is active.
-    // Check immediately before applying the stored values to the current plan.
-    bool active = false;
-    error = api.activeIsYeman(active);
-    if (error != ERROR_SUCCESS) return fail(error, "active-scheme");
-    if (active) {
-        error = api.reactivateYeman();
-        if (error != ERROR_SUCCESS) return fail(error, "apply");
-        result.reactivated = true;
+    if (before.ac != desired || before.dc != desired) {
+        DWORD error = api.write(true, desired);
+        if (error != ERROR_SUCCESS) return fail(error, "write-ac");
+        result.changed = true;
+        error = api.write(false, desired);
+        if (error != ERROR_SUCCESS) return fail(error, "write-dc");
+        const auto stored = read(api);
+        if (!stored.known || stored.ac != desired || stored.dc != desired)
+            return fail(stored.error ? stored.error : ERROR_INVALID_DATA, "readback");
     }
-    state = read(api);
+    bool active = false;
+    result.reactivationError = api.activeIsYeman(active);
+    if (result.reactivationError == ERROR_SUCCESS && active) {
+        result.reactivationError = api.reactivateYeman();
+        result.reactivated = result.reactivationError == ERROR_SUCCESS;
+    }
+    const auto state = read(api);
     if (!state.known || state.ac != desired || state.dc != desired)
         return fail(state.error ? state.error : ERROR_INVALID_DATA, "final-readback");
-    result.ok = true;
-    result.stage = "complete";
+    result.ok = true; // Confirms saved AC/DC, not effective Windows sign-in policy.
+    result.stage = result.changed ? "complete" : "unchanged";
     result.state = state;
     return result;
 }

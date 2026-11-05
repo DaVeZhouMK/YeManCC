@@ -18,7 +18,9 @@ export function prepareOwnedBuildCase({evidenceDir,caseId,repo,workspace}){
  need(typeof evidenceDir==='string'&&path.isAbsolute(evidenceDir)&&!/[\0\r\n]/.test(evidenceDir),'BRIDGE_ABSOLUTE_EVIDENCE_REQUIRED');
  const out=path.resolve(evidenceDir),repository=path.resolve(repo),buildRoot=path.resolve(workspace,'Build');noReparse(buildRoot);need(fs.statSync(buildRoot).isDirectory(),'BRIDGE_BUILD_ROOT_REQUIRED');
  const onD=path.parse(out).root.toLowerCase()==='d:\\';
- need(!out.startsWith('\\\\')&&(onD||inside(buildRoot,out))&&out!==path.parse(out).root&&!inside(repository,out)&&!inside(out,repository)&&!inside(path.resolve('C:/SOFT/YeMan'),out),'BRIDGE_EVIDENCE_MUST_BE_D_OR_OWNED_BUILD');
+ const coreEvidenceRoot=path.resolve(workspace,'Testing/YMCC/Evidence');
+ const inCoreEvidence=inside(coreEvidenceRoot,out)&&key(out)!==key(coreEvidenceRoot);
+ need(!out.startsWith('\\\\')&&(inCoreEvidence||onD||inside(buildRoot,out))&&out!==path.parse(out).root&&!inside(repository,out)&&!inside(out,repository)&&!inside(path.resolve('C:/SOFT/YeMan'),out),'BRIDGE_EVIDENCE_MUST_BE_CORE_D_OR_OWNED_BUILD');
  noReparse(out);need(!fs.existsSync(out),'BRIDGE_FRESH_EVIDENCE_REQUIRED');need(fs.statSync(path.dirname(out)).isDirectory(),'BRIDGE_EVIDENCE_PARENT_REQUIRED');fs.mkdirSync(out);
  const container=fs.mkdtempSync(path.join(buildRoot,'ymcc-fb-')),executionRoot=path.join(container,'case');
  const owner={schemaVersion:1,kind:'ymcc-feedback-build-owner',nonce:randomUUID(),id:caseId,repo:repository,buildRoot:fs.realpathSync(buildRoot),container:fs.realpathSync(container),executionRoot,outerEvidenceRoot:fs.realpathSync(out),nodePid:process.pid,startedAt:new Date().toISOString()};

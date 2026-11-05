@@ -27,9 +27,9 @@ static owner::HandoffRecord* writable(const owner::Admission& admission,HANDLE& 
     auto* record=static_cast<owner::HandoffRecord*>(MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(owner::HandoffRecord)));
     if(!record){CloseHandle(mapping);throw std::runtime_error("map own record");}return record;
 }
-static json debtCase(){
-    json checks=json::array();owner::Owner native;owner::Context context{7,9,true,"HandheldCompanion.Devices.AYANEO3"};
-    const std::wstring path=L"\\\\?\\hid#vid_1c4f&pid_0002#software-only-owner";
+static json debtCase(owner::Context context={7,9,true,"HandheldCompanion.Devices.AYANEO3"},
+    std::wstring path=L"\\\\?\\hid#vid_1c4f&pid_0002#software-only-owner",json checks=json::array()){
+    owner::Owner native;
     auto admission=native.begin(context,path);check(admission.has_value(),"native begin",checks);
     const auto leaveName=L"Local\\YMCC-SuperJoy-OwnerTest-Leave-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(birth());
     HANDLE leave=CreateEventW(nullptr,TRUE,FALSE,leaveName.c_str());if(!leave)throw std::runtime_error("exit event");
@@ -60,11 +60,37 @@ int wmain(int argc,wchar_t** argv){
             const auto status=WaitForSingleObject(leave,15000);CloseHandle(leave);return status==WAIT_OBJECT_0?0:6;
         }
         if(argc==2&&std::wstring(argv[1])==L"--debt"){std::cout<<debtCase().dump()<<std::endl;return 0;}
-        if(argc!=6)throw std::runtime_error("scenario dotnet fixture.dll child-result.json ready-event");
-        const std::string scenario=std::filesystem::path(argv[1]).string();
+        if(argc!=6&&!(argc==2&&std::wstring(argv[1])==L"apex-debt"))throw std::runtime_error("scenario dotnet fixture.dll child-result.json ready-event");
+        const std::string selectedScenario=std::filesystem::path(argv[1]).string();
+        const bool apex=selectedScenario.rfind("apex-",0)==0;
+        const std::string scenario=apex?selectedScenario.substr(5):selectedScenario;
+        owner::Context context{7,9,true,apex?"HandheldCompanion.Devices.OneXPlayerApex":"HandheldCompanion.Devices.AYANEO3"};
+        const std::wstring path=apex?L"\\\\?\\hid#vid_1a2c&pid_b001#software-only-owner":L"\\\\?\\hid#vid_1c4f&pid_0002#software-only-owner";
+        json checks=json::array();
+        if(apex){
+            // Pure native source controls run in the selected owner scenario before resource creation.
+            const std::string aya="HandheldCompanion.Devices.AYANEO3",other="HandheldCompanion.Devices.OneXPlayer3";
+            check(owner::sourceModel(context.model)&&!owner::sourceModel(other),"apex exact model whitelist",checks);
+            check(owner::sourcePath(context.model,path),"apex exact model/path admitted",checks);
+            check(!owner::sourcePath(context.model,L"\\\\?\\hid#vid_1c4f&pid_0002#software-only-owner"),"apex rejects AYA path",checks);
+            check(!owner::sourcePath(aya,path)&&!owner::sourcePath("HandheldCompanion.Devices.AYANEONEXT2",path),"AYA models reject apex path",checks);
+            check(!owner::sourcePath(other,path),"unknown model cannot claim apex path",checks);
+            check(owner::sourceDescriptor(context.model,0x1A2C,0xB001,0xFF01,1,0,65),"apex write-only descriptor accepts input zero",checks);
+            check(owner::sourceDescriptor(context.model,0x1A2C,0xB001,0xFF01,1,65535,65),"apex input length is unconstrained",checks);
+            check(!owner::sourceDescriptor(context.model,0x1A2C,0xB001,0xFF00,1,0,65),"apex rejects FF00 usage page",checks);
+            check(!owner::sourceDescriptor(context.model,0x1A2C,0xB001,0xFF01,1,0,64),"apex rejects output64",checks);
+            check(!owner::sourceDescriptor(aya,0x1A2C,0xB001,0xFF01,1,0,65)&&!owner::sourceDescriptor(other,0x1A2C,0xB001,0xFF01,1,0,65),"descriptor cannot cross model",checks);
+            check(!owner::sourceDescriptor(context.model,0x1A86,0xB001,0xFF01,1,0,65),"apex rejects controller vendor",checks);
+            check(!owner::sourceDescriptor(context.model,0x1A2C,0xB002,0xFF01,1,0,65),"apex rejects other product",checks);
+            check(!owner::sourceDescriptor(context.model,0x1A2C,0xB001,0xFF01,2,0,65),"apex rejects other usage",checks);
+            check(owner::sourceDescriptor(aya,0x1C4F,2,0xFF00,1,65,65)&&!owner::sourceDescriptor(aya,0x1C4F,2,0xFF00,1,0,65),"AYA descriptor retains input65",checks);
+        }
+        if(apex&&scenario=="debt"){
+            auto result=debtCase(context,path,std::move(checks));result["scenario"]=selectedScenario;
+            std::cout<<result.dump()<<std::endl;return 0;
+        }
         if(scenario=="foreign-helper"){
-            json checks=json::array();owner::Owner native;owner::Context context{7,9,true,"HandheldCompanion.Devices.AYANEO3"};
-            const std::wstring path=L"\\\\?\\hid#vid_1c4f&pid_0002#software-only-owner";
+            owner::Owner native;
             const auto admission=native.begin(context,path);check(admission.has_value(),"foreign case begins intended admission",checks);
             const auto exitName=L"Local\\YMCC-SuperJoy-ForeignTest-Exit-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(birth());
             HANDLE leave=CreateEventW(nullptr,TRUE,FALSE,exitName.c_str());HANDLE ready=CreateEventW(nullptr,TRUE,FALSE,argv[5]);
@@ -82,10 +108,9 @@ int wmain(int argc,wchar_t** argv){
             check(readyStatus==WAIT_OBJECT_0&&probeWait==WAIT_OBJECT_0,"foreign probe process returned",checks);
             check(wait.returned&&released,"intended child actually returned and released",checks);
             check(probeExit==0,"different helper PID cannot join the intended child admission",checks);
-            std::cout<<json{{"status","PASS"},{"scenario",scenario},{"checks",checks},{"hardwareIo",false}}.dump()<<std::endl;return 0;
+            std::cout<<json{{"status","PASS"},{"scenario",selectedScenario},{"checks",checks},{"hardwareIo",false}}.dump()<<std::endl;return 0;
         }
-        json checks=json::array();owner::Owner native;owner::Context context{7,9,true,"HandheldCompanion.Devices.AYANEO3"};
-        const std::wstring path=L"\\\\?\\hid#vid_1c4f&pid_0002#software-only-owner";
+        owner::Owner native;
         auto admission=native.begin(context,path);check(admission.has_value(),"current native admission",checks);
         check(native.observation().phase==owner::Phase::Admitting,"no child means admitting, never Active",checks);
         check(!native.begin(context,path),"concurrent native admission refused",checks);
@@ -110,7 +135,7 @@ int wmain(int argc,wchar_t** argv){
         while(GetTickCount64()<readyDeadline){native.refresh(context);readyStatus=WaitForSingleObject(ready,50);if(readyStatus==WAIT_OBJECT_0)break;}
         check(readyStatus==WAIT_OBJECT_0,"child joined or explicitly refused native contract",checks);CloseHandle(ready);
         if(scenario=="parent-exit"){
-            std::cout<<json{{"status","PARENT_EXIT_ARMED"},{"parentPid",admission->parentPid},{"token",admission->token},{"activeRecordLeftForGuardian",true},{"childPid",child.dwProcessId},{"childBirth",childBirth}}.dump()<<std::endl;
+            std::cout<<json{{"status","PARENT_EXIT_ARMED"},{"scenario",selectedScenario},{"checks",checks},{"parentPid",admission->parentPid},{"token",admission->token},{"activeRecordLeftForGuardian",true},{"childPid",child.dwProcessId},{"childBirth",childBirth}}.dump()<<std::endl;
             TerminateProcess(GetCurrentProcess(),0);return 7;
         }
         HANDLE waitEntered=nullptr;std::atomic<bool> prematureFinishRefused{false};std::thread stopper;
@@ -151,7 +176,7 @@ int wmain(int argc,wchar_t** argv){
         const bool released=native.finish(admission->token);check(released,"exact helper return releases ownership",checks);
         check(native.observation().phase==owner::Phase::Idle&&native.observation().observedReturns==1,"single return accounted",checks);
         check(!native.finish(admission->token),"duplicate completion refused",checks);
-        std::cout<<json{{"status","PASS"},{"scenario",scenario},{"checks",checks},{"token",admission->token},{"recordBytes",sizeof(owner::HandoffRecord)},
+        std::cout<<json{{"status","PASS"},{"scenario",selectedScenario},{"checks",checks},{"token",admission->token},{"recordBytes",sizeof(owner::HandoffRecord)},
             {"parentPid",admission->parentPid},{"parentBirth",admission->parentBirth},{"childReturned",wait.returned},{"childExitCode",wait.exitCode},
             {"terminationAttempted",wait.terminationAttempted},{"ownerReleased",released},{"hardwareIo",false}}.dump()<<std::endl;return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<std::endl;return 1;}

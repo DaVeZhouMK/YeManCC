@@ -30,7 +30,7 @@ try{
  for(const config of ['Release','Checked'])execute('current',baselinePath,config);
  const faults=[
   ['discard-unified-profile','return oemUnifiedInputBindingFor(family, cls).profileId;','return static_cast<int>(OemChordProfileId::None);','full gate consumes unified canonical profile'],
-  ['raw-alias-capture-predicate','const std::string consumerClass = binding.model ? std::string(binding.model->consumerClass) : g_machineIdentity.deviceClass;','const std::string consumerClass = g_machineIdentity.deviceClass;','query aliases retain complete canonical capture predicates and routes'],
+  ['raw-alias-capture-predicate','const std::string consumerClass = binding.model ? std::string(binding.model->consumerClass) : g_machineIdentity.deviceClass;\n        OemCatalogRef ref = binding.catalog;','const std::string consumerClass = g_machineIdentity.deviceClass;\n        OemCatalogRef ref = binding.catalog;','query aliases retain complete canonical capture predicates and routes'],
   ['lost-profile-epoch','g_oemShortcutEdgeEpoch.fetch_add(1, std::memory_order_acq_rel);\n    const bool chordCapable','g_oemShortcutEdgeEpoch.fetch_add(0, std::memory_order_acq_rel);\n    const bool chordCapable','full gate keeps profile-change epoch'],
   ['cached-live-interface','const bool gpdIfaceReady = g_gpdBackIfaceReady.load(std::memory_order_acquire);','const bool gpdIfaceReady = true;','same cached model must recheck live GPD interface'],
   ['release-other-source','g_oemKbDownRaw.store(0, std::memory_order_release);\n    oemBackHookRecompute();','g_oemKbDownRaw.store(0, std::memory_order_release);\n    g_oemKbDown = 0;\n    oemBackHookRecompute();','raw source return preserves hook lane'],

@@ -1,3 +1,4 @@
+import {WallpaperPowerPolicy,wallpaperPowerBlocked,captureWallpaperPower,wallpaperPowerCurrent} from '../src/bridge/wallpaperPowerPolicy';
 import {readFileSync} from 'node:fs';
 import {resolve as resolveSourcePath} from 'node:path';
 import {startSteamWallpaperHost} from '../src/bridge/steamWallpaperHost';
@@ -20,6 +21,9 @@ class SharedGameMedia extends ProductionSharedGameMedia {
   override ensure(target:Parameters<ProductionSharedGameMedia['ensure']>[0],consumer:Parameters<ProductionSharedGameMedia['ensure']>[1],priority=false,completePair=false,demand?:Parameters<ProductionSharedGameMedia['ensure']>[4]){return super.ensure(target,consumer,priority,completePair,consumer==='steam'?(demand||steamTicket()):demand);}
 }
 const stabilityRecoveryOnly=process.argv.includes('--stability-recovery');
+const dcPowerOnly=process.argv.includes('--dc-power');
+for(const option of process.argv.slice(2))if(!['--stability-recovery','--dc-power'].includes(option))throw Error('Unknown media scenario selection: '+option);
+if(dcPowerOnly&&stabilityRecoveryOnly)throw Error('Choose one exact selection');
 let cases=0,checks=0;
 
 function equal(actual:unknown,expected:unknown,message:string){checks++;assert.deepEqual(actual,expected,message);}
@@ -69,7 +73,7 @@ const target=(id:number)=>({appId:id,name:'Fixture '+id,verified:true});
 const cached=(id:number):GameMediaEntry=>({key:'steam-'+id,appId:id,bindingRevision:4,status:'ready',ready:true,url:'http://fixture/'+id});
 
 const reports:any[]=[];
-async function run(name:string,fn:()=>Promise<void>|void){if(stabilityRecoveryOnly&&!name.startsWith('R18 recovery:'))return;try{await fn();reports.push({name,ok:true});console.log('PASS '+name);}catch(error){reports.push({name,ok:false,error:String(error instanceof Error?error.message:error)});console.log('FAIL '+name);}cases++;}
+async function run(name:string,fn:()=>Promise<void>|void){if(dcPowerOnly&&!name.startsWith('DC power:'))return;if(stabilityRecoveryOnly&&!name.startsWith('R18 recovery:'))return;try{await fn();reports.push({name,ok:true});console.log('PASS '+name);}catch(error){reports.push({name,ok:false,error:String(error instanceof Error?error.message:error)});console.log('FAIL '+name);}cases++;}
 
 
 async function lookupCoalescingCases(){
@@ -411,8 +415,9 @@ await run('stopping native demand preserves accepted work without followup',asyn
  const f=nativeDemandFixture();try{const work=[f.owner.ensure(target(570),'steam'),f.owner.ensure(target(570),'steam')];await admissionTick();equal(f.pending.length,1,'accepted same-ticket native work has one submission');let finished=false;void Promise.all(work).then(()=>finished=true);f.owner.stop();await admissionTick();equal(finished,false,'stop cannot invent completion for an accepted native promise');f.pending[0].resolve({});await Promise.all(work);await f.owner.ensure(target(570),'library');equal(f.pending.length,1,'stopped owner cannot enqueue followup');equal(f.timers.length,0,'stopped native owner leaves no retry timer');}finally{f.stop();}
 });
 await run('independent consumers never join a revocable Steam admission',async()=>{const f=nativeDemandFixture();try{const work=[f.owner.ensure(target(570),'steam'),f.owner.ensure(target(570),'ymcc'),f.owner.ensure(target(570),'library'),f.owner.ensure(target(570),'steam')];await admissionTick();equal(f.pending.length,2,'one captured Steam ticket and one independent admission remain separate');equal(f.pending.filter(x=>x.args.demandConsumer==='steam').length,1,'Steam same-ticket callers still coalesce');equal(f.pending.filter(x=>x.args.demandConsumer!=='steam').length,1,'YMCC and library retain their independent shared owner');for(const p of f.pending)p.resolve({});await Promise.all(work);equal(f.timers.length,0,'separate ownership creates no polling');}finally{f.stop();}});
-if(!stabilityRecoveryOnly)await foregroundDemandCases();
-await stabilityRecoveryCases();
+if(!stabilityRecoveryOnly&&!dcPowerOnly)await foregroundDemandCases();
+if(!dcPowerOnly)await stabilityRecoveryCases();
+if(!stabilityRecoveryOnly)await dcPowerCases();
 // Reuse the shipping refresh body and its retry subscription. Remove only its
 // one erased TypeScript call annotation; do not model the dispatch algorithm.
 async function stabilityRecoveryCases(){
@@ -430,7 +435,7 @@ async function stabilityRecoveryCases(){
   const schedule=((fn:()=>void,ms:number)=>{timers.set(++id,{fn,ms});return id;}) as any,cancel=((timer:number)=>timers.delete(timer)) as any;
   const owner=new ProductionSharedGameMedia({enabled:()=>settings.steam,backgroundEnabled:()=>settings.background,nativeBackground:true,now:()=>clock,schedule,cancel,invoke:(async(command:string,args:any)=>{calls.push({command,args});if(command==='gameMedia.resolve')return {...record};if(command==='gameMedia.background')return {};throw Error('unexpected owner command '+command);}) as any});
   const actualEnsure=owner.ensure.bind(owner);owner.ensure=((...args:any[])=>{ensures.push(args);return (actualEnsure as any)(...args);}) as any;
-  const env:any={disposed:false,refreshing:false,refreshAgain:false,revisions:new Map([['steam-570',4]]),aliases:new Map(),reconcileMediaAliases,sharedGameMedia:owner,steamWallpaperEnabled:()=>settings.steam,backgroundDownloadEnabled:()=>settings.background,manualAllowed:()=>false,getUiSetting:()=>settings.ymcc,gameMediaPairComplete,window:{dispatchEvent(){}},CustomEvent:globalThis.CustomEvent,Date:{now:()=>clock},scan(){},invoke:async(command:string)=>{calls.push({command});if(command!=='gameMedia.snapshot')throw Error(command);return {entries:{'steam-570':{...record}},aliases:{}};}};
+  const env:any={wallpaperPowerBlocked,captureWallpaperPower,wallpaperPowerCurrent,disposed:false,refreshing:false,refreshAgain:false,revisions:new Map([['steam-570',4]]),aliases:new Map(),reconcileMediaAliases,sharedGameMedia:owner,steamWallpaperEnabled:()=>settings.steam,backgroundDownloadEnabled:()=>settings.background,manualAllowed:()=>false,getUiSetting:()=>settings.ymcc,gameMediaPairComplete,window:{dispatchEvent(){}},CustomEvent:globalThis.CustomEvent,Date:{now:()=>clock},scan(){},invoke:async(command:string)=>{calls.push({command});if(command!=='gameMedia.snapshot')throw Error(command);return {entries:{'steam-570':{...record}},aliases:{}};}};
   const reader=makeRefresh(env);let host:ReturnType<typeof startSteamWallpaperHost>|null=null,extension:any,foreground:(value:any)=>void=()=>{};
   if(options.attachHost){host=startSteamWallpaperHost({enabled:()=>settings.steam,readForeground:async()=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'live-retry',revision:1}),onForeground:handler=>{foreground=handler;return()=>{};},onResume:()=>()=>{},inventory:()=>{},appearance:()=>({opacity:.64,blur:0}),media:owner,now:()=>clock,schedule,cancel,register:value=>{extension=value;return()=>{};},invoke:(async(command:string)=>{if(command==='deckySidebar.mirrorReply')return true;throw Error(command);}) as any});host.ready();extension.connected({connection:'1',runId:'a'.repeat(32)});extension.request({connection:'1',runId:'a'.repeat(32),request:{command:'wallpaper.context',contextSeq:1,appId:'570',visible:true}});}
   return {owner,reader,calls,ensures,timers,settings,env,foreground,async fire(){const next=[...timers][0];assert.ok(next,'retained failure needs a deadline timer');timers.delete(next[0]);clock+=next[1].ms;next[1].fn();await flush();},setRecord(value:Partial<GameMediaEntry>){record={...record,...value};},async settle(){await flush();},stop(){host?.stop();reader.stop();owner.stop();}};
@@ -442,6 +447,49 @@ async function stabilityRecoveryCases(){
  await run('R18 recovery: explicit library refresh and disabled independent owners retain their own gates',async()=>{const manual=harness('steam',{steam:false,requested:true,deadline:false});try{await manual.reader.refresh();equal(manual.ensures.length,1,'explicit library request is preserved');equal(manual.ensures[0][1],'library','explicit edit uses independent library consumer');}finally{manual.stop();}for(const [consumer,settings] of [['ymcc',{steam:false,ymcc:false}],['library',{steam:false,background:false}],['background',{steam:true}],['unrecognized',{steam:true}]] as const){const f=harness(consumer,{...settings,deadline:false});try{await f.reader.refresh();equal(f.ensures.length,0,'disabled/unknown owner has no implicit fallback authorization');equal(f.timers.size,0,'disabled/unknown owner has no retry clock');}finally{f.stop();}}});
 }
 
+
+async function dcPowerCases(){
+ await run('DC power: default OFF, physical source, unknown and ABA boundaries',()=>{
+  const gate=new WallpaperPowerPolicy();
+  for(const source of [null,'ac','dc'] as const){gate.update(false,source);equal(gate.blocked,false,'default OFF preserves physical '+source);}
+  gate.update(true,'ac');const epoch=gate.capture();equal(gate.current(epoch),true,'AC admits current work');
+  gate.update(true,'dc');equal(gate.blocked,true,'real DC blocks');equal(gate.reason,'wallpaper-on-battery','DC reason');equal(gate.current(epoch),false,'unplug revokes old work');
+  gate.update(true,'ac');equal(gate.current(epoch),false,'AC cannot revive pre-unplug callbacks');const fresh=gate.capture();gate.update(true,'ac');equal(gate.current(fresh),true,'same AC is stable');
+  gate.update(true,null);equal(gate.reason,'wallpaper-power-unknown','unknown is not AC');gate.update(false,'dc');equal(gate.blocked,false,'explicit opt-out restores independent old policy');
+ });
+ await run('DC power: blocked consumer has zero cache/network/quarantine IPC',async()=>{
+  const calls:string[]=[];const timers:any[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>false,invoke:(async command=>{calls.push(command);throw Error(command);}) as any,schedule:((fn:any)=>{timers.push(fn);return 1;}) as any});
+  try{await assert.rejects(()=>owner.lookup(target(570)),/wallpaper-power-paused/);checks++;for(const consumer of ['steam','ymcc','library'] as const){const entry=await owner.ensure(target(570),consumer,true,true,consumer==='steam'?steamTicket():undefined);equal(entry.status,'consumer-inactive',consumer+' inactive');}
+   await assert.rejects(()=>owner.playbackFailed({key:'steam-570',assetId:'x',bindingRevision:1}),/wallpaper-power-paused/);checks++;await owner.supplement();await owner.prewarm([target(570)]);owner.retryWhen(Date.now()+60000);equal(calls,[],'no native work at all');equal(timers.length,0,'no retry/prefetch timer');equal(owner.inspect().tasks,0,'no retained media task');
+  }finally{owner.stop();}
+ });
+ await run('DC power: coalesced reads withdraw across unplug/replug and fresh demand recovers',async()=>{
+  let allowed=true,release!:(v:any)=>void;const calls:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,invoke:(async command=>{calls.push(command);if(command==='gameMedia.resolve'&&calls.length===1)return new Promise(r=>release=r);return cached(570);}) as any});
+  try{const a=owner.lookup(target(570)),b=owner.lookup(target(570));const outcome=Promise.allSettled([a,b]);equal(calls.length,1,'overlapping source reads still coalesce');allowed=false;owner.reconcilePreparation();allowed=true;owner.reconcilePreparation();release(cached(570));const old=await outcome;equal(old.map(x=>x.status),['rejected','rejected'],'both old readers are revoked after AC ABA');const [fresh,copy]=await Promise.all([owner.lookup(target(570)),owner.lookup(target(570))]);equal(fresh.ready,true,'fresh AC read succeeds');equal(calls.length,2,'one fresh native read');fresh.ready=false;equal(copy.ready,true,'per-consumer clone remains isolated');
+  }finally{owner.stop();}
+ });
+ await run('DC power: delayed cache response cannot enqueue native downloads',async()=>{
+  let allowed=true,release!:(v:any)=>void;const calls:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,enabled:()=>true,backgroundEnabled:()=>true,invoke:(async command=>{calls.push(command);return new Promise(r=>release=r);}) as any});
+  try{const work=owner.ensure(target(570),'ymcc',true,true);const outcome=Promise.allSettled([work]);allowed=false;owner.reconcilePreparation();allowed=true;owner.reconcilePreparation();release({key:'steam-570',bindingRevision:1,status:'missing'});equal((await outcome)[0].status,'rejected','old ensure withdrawn');equal(calls,['gameMedia.resolve'],'no native background request after old answer');}finally{owner.stop();}
+ });
+ await run('DC power: owned retry timer is cancelled, cannot rearm, and resumes only on AC',()=>{
+  let allowed=true,id=0;const timers=new Map<number,any>();const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,schedule:((fn:any)=>{timers.set(++id,fn);return id;}) as any,cancel:((id:number)=>timers.delete(id)) as any});
+  try{owner.retryWhen(Date.now()+60000);equal(timers.size,1,'one existing retry');allowed=false;owner.reconcilePreparation();equal(timers.size,0,'actual timer cancelled');owner.retryWhen(Date.now()+60000);equal(timers.size,0,'no battery rearming');allowed=true;owner.reconcilePreparation();owner.retryWhen(Date.now()+60000);equal(timers.size,1,'original retry owner works again on AC');}finally{owner.stop();equal(timers.size,0,'stop releases retry');}
+ });
+ await run('DC power: inventory result crossing DC cannot submit after AC returns',async()=>{
+  let allowed=true,release!:(v:any)=>void;const calls:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,backgroundEnabled:()=>true,installed:()=>new Promise(r=>release=r),invoke:(async command=>{calls.push(command);return [];}) as any});
+  try{const work=owner.supplement();allowed=false;owner.reconcilePreparation();allowed=true;owner.reconcilePreparation();release([target(570)]);await work;equal(calls,['gameMedia.inventory'],'stale inventory has no native enqueue');}finally{owner.stop();}
+ });
+ await run('DC power: retired preparation cannot erase a fresh same-game job',async()=>{
+  let allowed=true,release!:(v:any)=>void,reads=0,plans=0;const calls:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,nativeBackground:false,enabled:()=>true,backgroundEnabled:()=>true,candidates:async()=>{if(++plans===1)return new Promise(r=>release=r);return {name:'fixture',urls:['https://video.steamstatic.com/movie/fresh.mp4']};},invoke:(async command=>{calls.push(command);if(command==='gameMedia.resolve')return ++reads>2?cached(570):{key:'steam-570',bindingRevision:1,status:'missing'};if(command==='gameMedia.begin')return {key:'steam-570',bindingRevision:1,status:'pending',acquired:true,taskSlots:['dynamic'],taskId:'fixture'};if(command==='gameMedia.install')return cached(570);if(command==='gameMedia.finish')return {};throw Error(command);}) as any});
+  try{const old=owner.ensure(target(570),'ymcc',true,true);const retired=Promise.allSettled([old]);for(let n=0;n<8&&!release;n++)await Promise.resolve();equal(typeof release,'function','old preparation is running');allowed=false;owner.reconcilePreparation();allowed=true;owner.reconcilePreparation();let fresh:any;const work=owner.ensure(target(570),'ymcc',true,true).then(v=>fresh=v);for(let n=0;n<8;n++)await Promise.resolve();release({name:'old',urls:[]});await retired;for(let n=0;n<24;n++)await Promise.resolve();equal(fresh?.ready,true,'fresh same-key job completes after retired callback');await work;equal(plans,2,'both owners reached their own candidates');equal(owner.inspect().tasks,0,'all tasks released');}finally{owner.stop();}
+ });
+ await run('DC power: compatibility preparation cancels before playlist and install',async()=>{
+  let allowed=true,release!:(v:any)=>void;const calls:string[]=[],network:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,nativeBackground:false,enabled:()=>true,backgroundEnabled:()=>true,candidates:()=>new Promise(r=>release=r),request:(async url=>{network.push(String(url));return {body:''};}) as any,invoke:(async command=>{calls.push(command);if(command==='gameMedia.resolve')return {key:'steam-570',bindingRevision:1,status:'missing'};if(command==='gameMedia.begin')return {key:'steam-570',bindingRevision:1,status:'pending',acquired:true,taskSlots:['dynamic'],taskId:'fixture'};throw Error(command);}) as any});
+  try{const work=owner.ensure(target(570),'ymcc',true,true);const outcome=Promise.allSettled([work]);for(let n=0;n<8&&!release;n++)await Promise.resolve();equal(typeof release,'function','actual candidate preparation reached');allowed=false;owner.reconcilePreparation();release({name:'fixture',urls:['https://video.steamstatic.com/movie/master.m3u8']});await outcome;for(let n=0;n<8;n++)await Promise.resolve();equal(network,[],'no playlist network after DC');equal(calls,['gameMedia.resolve','gameMedia.begin'],'no install, fail, finish or cache reload');equal(owner.inspect().tasks,0,'no queued callback owns work');}finally{owner.stop();}
+ });
+}
+
 const ok=reports.every(row=>row.ok);if(!ok)process.exitCode=1;
-console.log(JSON.stringify({ok,selection:stabilityRecoveryOnly?'stability-recovery':'default',cases,checks,reports,admissionSamples,scope:'production preparation queue and HLS planner; transport fixture only'}));
+console.log(JSON.stringify({ok,selection:dcPowerOnly?'dc-power':stabilityRecoveryOnly?'stability-recovery':'default',cases,checks,reports,admissionSamples,scope:'production preparation queue and HLS planner; transport fixture only'}));
 

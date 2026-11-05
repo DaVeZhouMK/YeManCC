@@ -80,6 +80,17 @@ class AuditTests(unittest.TestCase):
                 (8,{'event':'boot-single-instance-acquired','pid':7}), (9,row)]
         self.assertEqual([i for i,_ in repeated_frame_observations(rows)], [2,5])
 
+    def test_v2_neutral_activity_is_not_a_resident_transition(self):
+        source = dict(snapshotKnown=True, inputSource='xinput', powerGeneration=1,
+                      topologyGeneration=7, primarySlot=0, admittedMask=1, live=True, readContextStable=True)
+        row = dict(event='input-host-frame-evidence', pid=7, powerGeneration=1, formatVersion=2,
+                   source=source, hostSubmission='frame-accepted', semanticNeutral=False, frameProof={},
+                   snapshotReason='state-change')
+        rows = [(1,row), (2,{**row,'semanticNeutral':True}), (3,row),
+                (4,{**row,'source':{**source,'live':False}}), (5,{**row,'pid':8}),
+                (6,{**row,'powerGeneration':2}), (7,{**row,'formatVersion':999})]
+        self.assertEqual([i for i,_ in repeated_frame_observations(rows)], [2,3])
+
     def test_clock_domains_are_not_guessed(self):
         self.assertEqual(stamp({'utcEpochMs':1791916346323}), '2026-10-13T18:32:26.323+00:00')
         self.assertEqual(stamp({'t':1791916347737}, 'input-host-cost.log.1'), '2026-10-13T18:32:27.737+00:00')
@@ -157,6 +168,7 @@ class AuditTests(unittest.TestCase):
                 z.writestr('yeman-fan-host-runtime.12.log',json.dumps({'eventName':'host.start','processId':8})+'\n')
                 z.writestr('msi-controller-visibility-wake-2.log.12',json.dumps({'event':'observer.start','observerPid':9})+'\n')
                 z.writestr('unknown.log','bad row\n')
+                z.writestr('gamepad-driver-setup.json.hidhide.log','MSI installer text, not JSON\n')
             report=audit_zip(path,{'baseEvents':[]})
             files={f['file']:f for f in report['files']}
             text=files['yeman-fan-host20261015.log']
@@ -164,6 +176,7 @@ class AuditTests(unittest.TestCase):
             host=files['yeman-fan-host-runtime.12.log']
             self.assertEqual((host['rotation'],host['lane'],host['counts']['byPid']),(True,'fan-host-mixed',{'8':1}))
             self.assertEqual(files['msi-controller-visibility-wake-2.log.12']['counts']['byPid'],{'9':1})
+            self.assertEqual(files['gamepad-driver-setup.json.hidhide.log']['lane'],'external-installer-text')
             self.assertEqual([x['file'] for x in report['coverageWarnings']],['unknown.log'])
         self.assertEqual(canonical_log_name('yeman-fan-host-runtime.previous.log'),'yeman-fan-host-runtime.log')
         self.assertEqual(canonical_log_name('native-detail.log.12'),'native-detail.log')
@@ -193,6 +206,26 @@ class AuditTests(unittest.TestCase):
         self.assertTrue(overlap['overlappingIntervals'])
         self.assertIsNone(overlap['weightedCpuMsPerSec'])
         self.assertIsNone(overlap['oneLogicalCoreEquivalent'])
+
+    def test_adaptation_unique_rows_and_key_trajectory_lanes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'adaptation.zip'
+            rows=[{'event':event,'pid':7,**detail} for event,detail in (
+                ('onex-back-buttons',{'down':True}),('onex-oem-input-edge',{'mask':1}),
+                ('rog-oem-key',{'code':1}),('oem-producer-edge',{'status':'queued','reason':'state-transition'}),
+                ('msi-wmi-key',{'reason':'queued','accepted':True,'posted':True}),
+                ('oem-producer-edge',{'status':'refused','reason':'no-route'}),
+                ('msi-wmi-key',{'reason':'queued','accepted':True,'posted':False}))]
+            unique={'event':'model-adaptation-unique','writerPid':7,'uniqueKey':{'model':'fixture','code':1}}
+            with zipfile.ZipFile(path,'w') as z:
+                z.writestr('native-lifecycle.log',''.join(json.dumps(row)+'\n' for row in rows))
+                z.writestr('model-adaptation.log',json.dumps(unique)+'\n')
+            report=audit_zip(path,{'baseEvents':[],'baseEventCount':0})
+            self.assertEqual(len(report['violations']),5)
+            observed=next(f for f in report['files'] if f['file']=='model-adaptation.log')
+            self.assertEqual(observed['lane'],'adaptation-low')
+            parsed=list(iter_ai_records(path))
+            self.assertTrue(any(item['record']=='json_record' and item.get('value')==unique for item in parsed))
 
     def test_archive_evidence(self):
         with tempfile.TemporaryDirectory(prefix='ymcc-log-audit-') as folder:

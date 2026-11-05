@@ -9,6 +9,19 @@ export function AnchoredDropdown(props: { label: any; selectedOption: string; rg
   opened: boolean; onMenuWillOpen: (show: () => void) => boolean; onCancel: () => void; onChange: (choice: Choice) => void }) {
   const root = React.useRef(null), trigger = React.useRef(null), wasOpen = React.useRef(false);
   const latest = React.useRef(props); latest.current = props;
+  const lifetime=React.useRef({active:true}),cycle=React.useRef({opened:props.opened,consumed:false});
+  if(cycle.current.opened!==props.opened)cycle.current={opened:props.opened,consumed:false};
+  const owned=cycle.current;
+  React.useEffect(()=>{lifetime.current.active=true;return()=>{lifetime.current.active=false;};},[]);
+  const select=(data:string)=>{
+    const current=latest.current;
+    if(!lifetime.current.active||cycle.current!==owned||owned.consumed||!current.opened||current.disabled)return;
+    const choice=current.rgOptions.find(option=>option.data===data&&!option.disabled);
+    if(!choice)return;
+    // Native A and mouse click can reach the same activation before React
+    // commits the closing state. A menu opening admits at most one selection.
+    owned.consumed=true;current.onChange(choice);
+  };
   const cancel = (event?: any, owner = props) => { event?.stopPropagation?.(); event?.preventDefault?.(); owner.onCancel(); return true; };
   // Registered while closed, so Steam can cancel even before the conditional
   // options join its native focus tree. The stable callback reads current props.
@@ -46,13 +59,19 @@ export function AnchoredDropdown(props: { label: any; selectedOption: string; rg
       // focus background around the label and trigger, especially in core pairs.
       highlightOnFocus={false}
       controlled={true} childrenContainerWidth="max" bottomSeparator="none" disabled={props.disabled}
-      dropDownControlRef={trigger} onMenuWillOpen={() => { if (props.opened) props.onCancel(); else props.onMenuWillOpen(() => {}); return false; }}
-      onChange={(option: Choice) => { if (!props.opened && !props.disabled && !option.disabled) { props.onMenuWillOpen(() => {}); props.onChange(option); } }} />
+      dropDownControlRef={trigger} onMenuWillOpen={() => {
+        if(!lifetime.current.active||cycle.current!==owned||latest.current.disabled)return false;
+        if(latest.current.opened)latest.current.onCancel();else latest.current.onMenuWillOpen(()=>{});
+        return false;
+      }}
+      // The native popup is intercepted above. Only this opening's visible
+      // inline options can select; late native callbacks cannot open and write.
+      onChange={(option: Choice) => select(option?.data)} />
     {props.opened && <DFL.Focusable className="ymcc-anchored-options" role="listbox" aria-label="方案选项"
       flow-children="column" focusable={false} onCancel={cancel}>
       {props.rgOptions.map(option => <DFL.Focusable key={option.data} role="option" aria-selected={option.data === props.selectedOption}
         aria-disabled={!!option.disabled} focusable={!option.disabled} preferredFocus={option.data === props.selectedOption && !option.disabled}
-        className="ymcc-anchored-option" onActivate={() => { if (!option.disabled) props.onChange(option); }}>
+        className="ymcc-anchored-option" onActivate={() => select(option.data)}>
         {option.label}
       </DFL.Focusable>)}
       <DFL.Focusable role="button" className="ymcc-anchored-option ymcc-anchored-cancel" focusable={true} onActivate={cancel}>取消</DFL.Focusable>

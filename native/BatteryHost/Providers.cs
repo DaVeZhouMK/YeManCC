@@ -11,11 +11,108 @@ internal interface IChargeProvider : IDisposable
     Reading Read();
     void Write(int value,Reading before);
 }
+// In-process facts come exclusively from the native process's static cdecl
+// uint64_t reader(void). Binding and decoding never query Windows or devices.
+internal sealed class NativePowerReader
+{
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate ulong Callback();
+    readonly object gate=new();
+    Callback? callback;
+    ulong address;
+    bool stopped;
+
+    internal void Bind(System.Text.Json.JsonElement envelope,bool required=true)
+    {
+        lock(gate)
+        {
+            if(stopped)throw new IOException("进程内电源快照已关闭");
+            System.Text.Json.JsonElement? registered=null;
+            foreach(var property in envelope.EnumerateObject())
+                if(property.NameEquals("nativePowerReader"))
+                {
+                    if(registered is not null)throw new IOException("nativePowerReader 不允许重复字段");
+                    registered=property.Value;
+                }
+            if(registered is null)
+            {
+                if(required&&callback is null)throw new IOException("首次请求必须注册 nativePowerReader");
+                return;
+            }
+            var field=registered.Value;
+            ulong candidate=0;
+            bool valid;
+            if(field.ValueKind==System.Text.Json.JsonValueKind.Number)valid=field.TryGetUInt64(out candidate);
+            else if(field.ValueKind==System.Text.Json.JsonValueKind.String)
+            {
+                string text=field.GetString()!;
+                bool hex=text.StartsWith("0x",StringComparison.OrdinalIgnoreCase);
+                valid=ulong.TryParse(hex?text[2..]:text,hex?System.Globalization.NumberStyles.AllowHexSpecifier:
+                    System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out candidate);
+            }
+            else valid=false;
+            if(!valid||candidate==0||candidate>(ulong)nint.MaxValue)throw new IOException("nativePowerReader 必须是有效的进程内函数指针");
+            if(callback is not null)
+            {
+                if(candidate!=address)throw new IOException("nativePowerReader 已注册，不能切换函数指针");
+                return;
+            }
+            callback=Marshal.GetDelegateForFunctionPointer<Callback>((nint)candidate);
+            address=candidate;
+        }
+    }
+
+    internal (bool Present,bool Ac,int? Percent) Read()
+    {
+        lock(gate)
+        {
+            if(stopped||callback is null)return(false,false,null);
+            ulong packed=callback(); // One pure cached read; never a Win32 fallback.
+            // bit0 readable, bit1 sourceKnown, bit2 batteryKnown, bit3 hasBattery,
+            // bit4 AC, bits8..15 battery percent (255 unknown); other bits reserved.
+            if((packed&7)!=7)return(false,false,null);
+            bool present=(packed&8)!=0,ac=(packed&16)!=0;
+            int percent=(int)((packed>>8)&255);
+            return(present,ac,present&&percent<=100?percent:null);
+        }
+    }
+    internal void Stop(){lock(gate){stopped=true;callback=null;}}
+}
+
+// Standalone compatibility only: no timer, and repeated reads (including no
+// battery/unknown) remain cached until an actual power-status/sleep event.
+internal sealed class PowerFactsCache(Func<(bool Present,bool Ac,int? Percent)> collect)
+{
+    readonly object gate=new();
+    bool stale=true;
+    (bool Present,bool Ac,int? Percent) value;
+    internal (bool Present,bool Ac,int? Percent) Read()
+    {
+        lock(gate)
+        {
+            if(stale){value=collect();stale=false;}
+            return value;
+        }
+    }
+    internal void PowerChanged(Microsoft.Win32.PowerModes mode)
+    {
+        // Invalidate on suspend too: the standalone controller's existing resume
+        // handler may run before this cache receives the matching resume event.
+        if(mode is Microsoft.Win32.PowerModes.StatusChange or Microsoft.Win32.PowerModes.Suspend or Microsoft.Win32.PowerModes.Resume)
+            lock(gate){stale=true;}
+    }
+}
+
 internal static class WindowsFacts
 {
     [StructLayout(LayoutKind.Sequential)] internal struct PowerStatus { public byte Ac,Flags,Percent,SystemFlag; public uint Life,FullLife; }
     [DllImport("kernel32.dll")] [return:MarshalAs(UnmanagedType.Bool)] static extern bool GetSystemPowerStatus(out PowerStatus status);
-    public static (bool Present,bool Ac,int? Percent) Power()
+    static class StandalonePower
+    {
+        internal static readonly PowerFactsCache Cache=new(CollectPower);
+        static StandalonePower(){Microsoft.Win32.SystemEvents.PowerModeChanged+=(_,e)=>Cache.PowerChanged(e.Mode);}
+    }
+    public static (bool Present,bool Ac,int? Percent) Power()=>StandalonePower.Cache.Read();
+    static (bool Present,bool Ac,int? Percent) CollectPower()
     {
         if(!GetSystemPowerStatus(out var p))return(false,false,null);
         return(p.Flags!=255&&(p.Flags&128)==0,p.Ac==1,p.Percent<=100?p.Percent:null);
@@ -28,8 +125,14 @@ internal static class WindowsFacts
         using var bios=Wmi.First("root\\CIMV2","Win32_BIOS");
         static string S(ManagementBaseObject o,string k)=>Convert.ToString(o[k])?.Trim()??"";
         static int N(ManagementBaseObject o,string k)=>o[k] is null?255:Convert.ToInt32(o[k]);
-        return new(S(board,"Manufacturer"),S(board,"Product"),S(system,"Model"),S(cpu,"Name"),S(bios,"SMBIOSBIOSVersion"),N(bios,"EmbeddedControllerMajorVersion"),N(bios,"EmbeddedControllerMinorVersion"));
+        return CaptureIdentity(Convert.ToString(board["Manufacturer"])??"",Convert.ToString(board["Product"])??"",
+            S(system,"Model"),S(cpu,"Name"),S(bios,"SMBIOSBIOSVersion"),N(bios,"EmbeddedControllerMajorVersion"),N(bios,"EmbeddedControllerMinorVersion"));
     }
+    // Preserve the original normalized storage key while passing exact board
+    // observations to the sole catalog's source-bound ordinal predicate.
+    internal static Identity CaptureIdentity(string manufacturer,string boardProduct,string systemProduct,string processor,string bios,int ecMajor,int ecMinor)=>
+        new(manufacturer.Trim(),boardProduct.Trim(),systemProduct.Trim(),processor.Trim(),bios.Trim(),ecMajor,ecMinor)
+        {BoardManufacturerRaw=manufacturer,BoardProductRaw=boardProduct};
 }
 internal static class Wmi
 {
@@ -173,7 +276,7 @@ internal sealed class EcAccess : IEcAccess
         if(entered){entered=false;try{ec?.Dispose();io?.Close();}finally{bus!.ReleaseMutex();bus.Dispose();}}
     }
 }
-internal sealed class EcProvider(Route route,Func<bool,IEcAccess>? accessFactory=null) : IChargeProvider
+internal sealed class EcProvider(Route route,Func<bool,IEcAccess>? accessFactory=null) : IChargeProvider,IChargeWriteAdmission
 {
     IEcAccess Open()=>accessFactory?.Invoke(Direct)??new EcAccess(Direct);
     bool Direct=>route.RouteId is "oxp-x1-amd-ec" or "oxp-x1-intel-ec" or "ayaneo-ceii-bypass";
@@ -189,10 +292,14 @@ internal sealed class EcProvider(Route route,Func<bool,IEcAccess>? accessFactory
         if(raw<route.Min||raw>100)throw new IOException("EC 充电阈值未知");
         return new(raw,raw);
     }
-    public void Write(int value,Reading before)
+    public void Write(int value,Reading before)=>Write(value,before,static ()=>{});
+    public void Write(int value,Reading before,Action requireAvailable)
     {
         using var access=Open();
         if(before.Raw is null||access.Read(Address)!=before.Raw.Value)throw new IOException("充电状态已被其他软件改变，请重新读取");
+        // Firmware writes must recheck admission after bus acquisition and the final pre-read.
+        // Software bypass retains its existing suspend/stop restoration semantics.
+        if(!route.Software)requireAvailable();
         access.Write(Address,(byte)(route.Software?(value==1?Pause:Resume):value));
     }
     public void Dispose(){}
@@ -239,6 +346,6 @@ internal static class Providers
     public static IChargeProvider Open(Route route,string powerRoot)=>route.RouteId switch
     {
         "asus-ally-acpi"=>new AsusProvider(),"lenovo-go-conservation"=>new LenovoProvider(),"msi-claw-wmi"=>new MsiProvider(),"msi-claw-cg3em-ap"=>new MsiApProvider(),
-        "valve-deck-firmware"=>new DeckProvider(powerRoot),"oxp3-wmi-ec"=>new Oxp3WmiProvider(),_=>new EcProvider(route)
+        "valve-deck-firmware"=>new DeckProvider(powerRoot),"oxp3-wmi-ec"=>new Oxp3WmiProvider(),"oxp-superx-dual-ec"=>new SuperXChargeProvider(),_=>new EcProvider(route)
     };
 }

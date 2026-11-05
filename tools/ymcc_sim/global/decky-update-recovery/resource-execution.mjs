@@ -19,10 +19,18 @@ export function resourceDeclaredSourcePins(repo,inputs){
  }
  return result;
 }
+// Both resources spend the original baseline's remainder, including preparation and cleanup.
+export function allocateResourceBudget(deadlineEpochMs,allocatedAtEpochMs=Date.now()){
+ const parentBudgetMs=240000,originalBudgetMs=240000,cleanupReserveMs=5000;
+ const parentStartedAtEpochMs=deadlineEpochMs-parentBudgetMs,parentRemainingBeforeMs=deadlineEpochMs-allocatedAtEpochMs;
+ if(![deadlineEpochMs,allocatedAtEpochMs,parentStartedAtEpochMs].every(value=>Number.isSafeInteger(value)&&value>0)||allocatedAtEpochMs<parentStartedAtEpochMs)throw Error('Invalid original resource execution contract');
+ if(parentRemainingBeforeMs<=cleanupReserveMs)throw Error('Original baseline resource budget exhausted');
+ return {allocatedAtEpochMs,parentStartedAtEpochMs,parentBudgetMs,originalBudgetMs,parentRemainingBeforeMs,allocatedBudgetMs:Math.min(originalBudgetMs,parentRemainingBeforeMs),deadlineEpochMs,cleanupReserveMs};
+}
 // The explicit sequential option exists for paired cost measurement of these same producers.
 export async function executeBaselineResources({repo:root,out,sourceInputs:inputs,deadlineEpochMs,mode='auto',mutations=true}){
  if(typeof mutations!=='boolean'||!['auto','owned-sequential'].includes(mode)||!Number.isFinite(deadlineEpochMs)||deadlineEpochMs>Date.now()+240000)throw Error('Invalid original resource execution contract');
- const resourceStarted=performance.now(),report={},resourceOwnedProducers=[];let executionError=null;
+ const resourceStarted=performance.now(),report={resourceScheduling:{originalBaselineBudgetMs:240000,parentStartedAtEpochMs:deadlineEpochMs-240000,parentBudgetMs:240000,deadlineEpochMs,allocations:{}}},resourceOwnedProducers=[];let executionError=null;
  try{
  // Bind the original complete in-process producer to this exact baseline child.
  report.resourceExecutions={};
@@ -40,9 +48,9 @@ export async function executeBaselineResources({repo:root,out,sourceInputs:input
   resourceRuntime={tools,host,ownerStartTicks:owner.stdout.trim(),sources:resourceDeclaredSourcePins(root,inputs),toolCleanupPolicy:{kind:'MSVC_VCTIP_AFTER_ROOT_EXIT',maximumProcesses:1,program:telemetry}};
  }
  const executeOwnedResource=async(family,module,folder)=>{
-  const deadline=deadlineEpochMs,remaining=deadline-Date.now();
-  if(remaining<=5000)throw Error('Original baseline resource budget exhausted');
-  const producer=startOwnedRawProducer({id:'resource-'+family,program:process.execPath,args:[path.join(root,module),folder,...(mutations?[]:['--positive-only'])],cwd:root,env:process.env,host:resourceRuntime.host,powershell:resourceLauncher.program,ownerStartTicks:resourceRuntime.ownerStartTicks,directory:path.join(out,'owned-resource-'+family),stdoutPath:path.join(out,'resource-'+family+'.stdout.bin'),stderrPath:path.join(out,'resource-'+family+'.stderr.bin'),deadlineEpochMs:deadline,cleanupReserveMs:5000,sourceInputs:resourceRuntime.sources,toolArtifacts:resourceRuntime.tools,originalBudgetMs:240000,parentRemainingBeforeMs:remaining,toolCleanupPolicy:resourceRuntime.toolCleanupPolicy});
+  const allocation=allocateResourceBudget(deadlineEpochMs);
+  report.resourceScheduling.allocations[family]=allocation;
+  const producer=startOwnedRawProducer({id:'resource-'+family,program:process.execPath,args:[path.join(root,module),folder,...(mutations?[]:['--positive-only'])],cwd:root,env:process.env,host:resourceRuntime.host,powershell:resourceLauncher.program,ownerStartTicks:resourceRuntime.ownerStartTicks,directory:path.join(out,'owned-resource-'+family),stdoutPath:path.join(out,'resource-'+family+'.stdout.bin'),stderrPath:path.join(out,'resource-'+family+'.stderr.bin'),...allocation,sourceInputs:resourceRuntime.sources,toolArtifacts:resourceRuntime.tools,toolCleanupPolicy:resourceRuntime.toolCleanupPolicy});
   resourceOwnedProducers.push({family,producer});
   const proof=await producer.wait(),proofFile=path.join(out,'resource-'+family+'-process.json');
   fs.writeFileSync(proofFile,JSON.stringify(proof,null,2)+'\n',{flag:'wx'});
@@ -65,13 +73,13 @@ export async function executeBaselineResources({repo:root,out,sourceInputs:input
  if(resourceRuntime&&mode!=='owned-sequential'){
   const executions=await Promise.allSettled([captureResource('cache','tools/decky_resource_cache_selftest.mjs','resourceCacheTests',resourceCacheTests),captureResource('worker','tools/decky_resource_worker_selftest.mjs','resourceWorkerTests',resourceWorkerTests)]);
   const failure=executions.find(row=>row.status==='rejected');
-  report.resourceScheduling={mode:'owned-parallel',elapsedMs:performance.now()-resourceStarted,originalBaselineBudgetMs:240000,producerCount:2,joinedProducers:executions.length,mutations,coverageChanged:false};
+  report.resourceScheduling={...report.resourceScheduling,mode:'owned-parallel',elapsedMs:performance.now()-resourceStarted,originalBaselineBudgetMs:240000,producerCount:2,joinedProducers:executions.length,mutations,coverageChanged:false};
   if(failure)throw failure.reason;
   [report.resourceCache,report.resourceWorker]=executions.map(row=>row.value);
  }else{
   report.resourceCache=await captureResource('cache','tools/decky_resource_cache_selftest.mjs','resourceCacheTests',resourceCacheTests);
   report.resourceWorker=await captureResource('worker','tools/decky_resource_worker_selftest.mjs','resourceWorkerTests',resourceWorkerTests);
-  report.resourceScheduling={mode:resourceRuntime?'owned-sequential':'original-sequential',elapsedMs:performance.now()-resourceStarted,originalBaselineBudgetMs:240000,producerCount:2,mutations,coverageChanged:false};
+  report.resourceScheduling={...report.resourceScheduling,mode:resourceRuntime?'owned-sequential':'original-sequential',elapsedMs:performance.now()-resourceStarted,originalBaselineBudgetMs:240000,producerCount:2,mutations,coverageChanged:false};
  }
  return report;
  }catch(error){executionError=error;throw error;}

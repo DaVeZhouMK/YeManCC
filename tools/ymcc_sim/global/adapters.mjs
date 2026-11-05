@@ -149,6 +149,7 @@ const gyroXYZLayoutInputs = [
 
 
   "src/bridge/gyroPresentation.ts",
+  "src/bridge/stickPresentation.ts",
 
 
   "src/components/Dropdown.vue",
@@ -1051,6 +1052,9 @@ const gameLibraryMediaShortcutsInputs = [
 
 
   "tsconfig.json",
+  "src/bridge/wallpaperPowerPolicy.ts",
+  "src/bridge/powerSource.ts",
+  "src/bridge/tdpRuntimeState.ts"
 
 
 ];
@@ -1102,6 +1106,10 @@ const gameLibraryMediaDownloadsInputs = [
 
 
   "tsconfig.json",
+  "src/bridge/wallpaperPowerPolicy.ts",
+  "src/bridge/powerSource.ts",
+  "src/bridge/tdpRuntimeState.ts",
+  "src/bridge/uiLifecycle.ts"
 
 
 ];

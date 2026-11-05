@@ -1,3 +1,4 @@
+import { normalizeScreenTouchpadSummon } from './screenTouchpadDefaults';
 /** Scenes replace the one global configuration; dedicated game profiles keep priority. */
 import { loadSettings, updateSettings, compareAndSwapInputSettings, getSettingsRecoveryState, getSettingsGeneration, assertSettingsGeneration, type UnifiedSettings } from './settingsRepository';
 import { cloneBootValue, normalizeBootConfig, normalizeBootModeDocument, normalizeBootStartupResult, isBootModeId, type BootStartupResult, resolveBootMode, executeBootModeSteps, BOOT_MODE_MODULES, type BootModeDocument, type BootModeId, type BootModeCategory, type BootModeSnapshot, type BootModeModule, type BootDeviceCapabilities, type BootApplyStep } from './bootModeModel';
@@ -85,7 +86,7 @@ const LABELS: Record<BootModeModule, string> = { performance: '性能调度', fa
 const BACKGROUND_KEYS = ['theme', 'dynamicBackgroundEnabled', 'backgroundOpacity', 'backgroundBlur', 'videoBatteryPause'] as const;
 const backgroundSettings = (value: UiSettings) => Object.fromEntries(BACKGROUND_KEYS.map(key => [key, value[key]]));
 const TOUCH_KEYS = Object.keys(screenTouchpadDefaults('disabled')) as Array<keyof ScreenTouchpadConfig>;
-function touchConfig(value: Partial<ScreenTouchpadConfig>) { return Object.fromEntries(TOUCH_KEYS.filter(key => value[key] !== undefined).map(key => [key, value[key]])); }
+function touchConfig(value: Partial<ScreenTouchpadConfig>) { const next=normalizeScreenTouchpadSummon(value);return Object.fromEntries(TOUCH_KEYS.filter(key => next[key] !== undefined).map(key => [key, next[key]])); }
 interface BootModeSharedReads {
     charge: ReturnType<typeof optional<Awaited<ReturnType<typeof batteryCharge.get>>>>;
     hibernate: ReturnType<typeof optional<Awaited<ReturnType<typeof readHibernateState>>>>;
@@ -567,7 +568,10 @@ async function applyRuntimeModule(id: BootModeModule, value: any, before: any, r
         for (const persona of PERSONAS) {
             const config = value.profiles?.[persona];
             if (config && !same(config, before.profiles?.[persona])) {
-                const result = await screenTouchpadsSet(touchConfig(config), persona);
+                const desired=touchConfig(config),previous=touchConfig(before.profiles?.[persona]||{});
+                const patch=Object.fromEntries(Object.entries(desired).filter(([key,value])=>!same(value,previous[key])));
+                if(!Object.keys(patch).length)continue;
+                const result = await screenTouchpadsSet(patch, persona);
                 if (!result.ok && !result.settingsSaved)
                     throw Error('屏幕触摸配置未保存');
                 if (result.settingsSaved && !result.ok)

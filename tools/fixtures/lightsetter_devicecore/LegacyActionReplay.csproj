@@ -51,4 +51,10 @@
   <Target Name="RequireIsolatedOwnerSources" BeforeTargets="BeforeCompile">
     <Error Condition="'$(LegacyTestSource)' == '' Or '$(ReplayOwnerSource)' == ''" Text="Use verify.ps1: legacy owner positives require the private owner source and actual ABI-v2 fake-data adaptation." />
   </Target>
+
+  <ItemGroup>
+    <Compile Include="../../../FanLab/LightSetter/ApexLightingConsumer.cs" Link="ApexLightingConsumer.cs" />
+    <Compile Include="../../../FanLab/LightSetter/ApexWindowsHidTransport.cs" Link="ApexWindowsHidTransport.cs" />
+    <Compile Include="../../LightSetterSelfTest/ApexLightingTests.cs" Link="ApexLightingTests.cs" />
+  </ItemGroup>
 </Project>

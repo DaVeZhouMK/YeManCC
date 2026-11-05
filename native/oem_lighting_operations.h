@@ -5,7 +5,7 @@
 #include <string_view>
 #include "../capabilities/hc-device-catalog.generated.h"
 namespace ymcc::lighting {
-inline constexpr char kCatalogSha256[] = "2b1f4189623fa73ebb828ee7f4fcb368b573982df39ee06646b51668001683ce";
+inline constexpr char kCatalogSha256[] = "7a8f3a5f3d5a33167ce944d9ddae123f14f3f24947032632fdd1f72d524dbde3";
 inline constexpr const char* kExtensionLightingClasses[] = {"HandheldCompanion.Devices.OneXPlayer3", "HandheldCompanion.Devices.AYANEO3", "HandheldCompanion.Devices.AYANEONEXT2", "HandheldCompanion.Devices.OneXPlayerX2MiniPro"};
 inline bool identityMatches(std::string_view actual, std::string_view expected) noexcept {
     for (const char* cls : kExtensionLightingClasses) if (actual == cls && expected == cls) return true;
@@ -14,7 +14,7 @@ inline bool identityMatches(std::string_view actual, std::string_view expected) 
     if (a->deviceId == e->deviceId) return true;
     if (e->deviceId == "hc.device.AynLoki") return a->deviceId == "hc.device.LokiMax6600U" || a->deviceId == "hc.device.LokiMax6800U" || a->deviceId == "hc.device.LokiMiniPro" || a->deviceId == "hc.device.LokiZero";
     if (e->deviceId == "hc.device.OneXPlayerG1") return a->deviceId == "hc.device.OneXPlayerG1AMD" || a->deviceId == "hc.device.OneXPlayerG1Intel";
-    if (e->deviceId == "hc.device.OneXPlayerX1") return a->deviceId == "hc.device.OneXPlayerApex" || a->deviceId == "hc.device.OneXPlayerX1AMD" || a->deviceId == "hc.device.OneXPlayerX1Intel" || a->deviceId == "hc.device.OneXPlayerX1Mini" || a->deviceId == "hc.device.OneXPlayerX1Pro";
+    if (e->deviceId == "hc.device.OneXPlayerX1") return a->deviceId == "hc.device.OneXPlayerX1AMD" || a->deviceId == "hc.device.OneXPlayerX1Intel" || a->deviceId == "hc.device.OneXPlayerX1Mini" || a->deviceId == "hc.device.OneXPlayerX1Pro";
     return false;
 }
 struct Preset { const char* id; const char* label; int hcValue; };
@@ -32,8 +32,8 @@ inline constexpr std::array<Preset, 11> kOneXPresets = {{
     {"LEDPreset_OneXPlayerX1_Preset11", "预设 11", 0x8},
  }};
 enum class NativeProvider : unsigned char { Helper, RogAura, MsiHid };
-enum class SourceAdapter : unsigned char { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid };
-struct Route {bool registered, brightness, preset, declaredPresetWithoutTransport; NativeProvider provider; unsigned colorEffects; bool fixedSpeed = false, presetSecondColor = false;};
+enum class SourceAdapter : unsigned char { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid, ApexHidV2 };
+struct Route {bool registered, brightness, preset, declaredPresetWithoutTransport; NativeProvider provider; unsigned colorEffects; bool fixedSpeed = false, presetSecondColor = false; SourceAdapter sourceAdapter = SourceAdapter::FrozenHc;};
 // Aligned to the shared identity table: one binary identity lookup, then constant-time operation/provider selection.
 inline constexpr std::array<Route, 92> routes = {{
     {true, true, false, false, NativeProvider::Helper, 5, false, false}, // AOKZOEA1
@@ -107,20 +107,20 @@ inline constexpr std::array<Route, 92> routes = {{
     {false, false, false, false, NativeProvider::Helper, 0},
     {false, false, false, false, NativeProvider::Helper, 0},
     {false, false, false, false, NativeProvider::Helper, 0},
-    {true, true, true, false, NativeProvider::Helper, 1, false, false}, // OneXPlayerApex
-    {true, true, false, false, NativeProvider::Helper, 5, false, false}, // OneXPlayerG1
-    {true, true, false, false, NativeProvider::Helper, 5, false, false}, // OneXPlayerG1AMD
-    {true, true, false, false, NativeProvider::Helper, 5, false, false}, // OneXPlayerG1Intel
+    {true, true, false, false, NativeProvider::Helper, 5, true, false, SourceAdapter::ApexHidV2}, // OneXPlayerApex
+    {true, true, false, false, NativeProvider::Helper, 5, true, false}, // OneXPlayerG1
+    {true, true, false, false, NativeProvider::Helper, 5, true, false}, // OneXPlayerG1AMD
+    {true, true, false, false, NativeProvider::Helper, 5, true, false}, // OneXPlayerG1Intel
     {false, false, false, false, NativeProvider::Helper, 0},
     {false, false, false, false, NativeProvider::Helper, 0},
     {false, false, false, false, NativeProvider::Helper, 0},
     {false, false, false, false, NativeProvider::Helper, 0},
-    {true, true, false, false, NativeProvider::Helper, 5, false, false}, // OneXPlayerOneXFly
-    {true, true, false, false, NativeProvider::Helper, 5, false, false}, // OneXPlayerOneXFlyF1Pro
+    {true, true, false, false, NativeProvider::Helper, 5, true, false}, // OneXPlayerOneXFly
+    {true, true, false, false, NativeProvider::Helper, 5, true, false}, // OneXPlayerOneXFlyF1Pro
     {true, true, true, false, NativeProvider::Helper, 1, false, false}, // OneXPlayerX1
     {true, true, true, false, NativeProvider::Helper, 1, false, false}, // OneXPlayerX1AMD
     {true, true, true, false, NativeProvider::Helper, 1, false, false}, // OneXPlayerX1Intel
-    {true, true, false, true, NativeProvider::Helper, 5, false, false}, // OneXPlayerX1Mini
+    {true, true, false, true, NativeProvider::Helper, 5, true, false}, // OneXPlayerX1Mini
     {true, true, true, false, NativeProvider::Helper, 1, false, false}, // OneXPlayerX1Pro
     {true, true, false, false, NativeProvider::RogAura, 87, false, false}, // ROGAlly
     {true, true, false, false, NativeProvider::RogAura, 87, false, false}, // ROGAllyX
@@ -146,6 +146,10 @@ inline constexpr std::array<ExtensionRoute, 4> extensionRoutes = {{
     {"HandheldCompanion.Devices.OneXPlayerX2MiniPro", "ymcc.device.OneXPlayerX2MiniPro", kOneXPlayerX2MiniProPresetIds.data(), 0, SourceAdapter::OneXX2MiniHid, {true, true, false, true, NativeProvider::Helper, 3, true, false}}, // OneXPlayerX2MiniPro
 }};
 inline SourceAdapter sourceAdapter(std::string_view cls) noexcept {
+    if (const auto* device = ymcc::capabilities::find(cls); device && device->deviceId == "hc.device.OneXPlayerApex") {
+        const auto* route = resolve(device);
+        return route ? route->sourceAdapter : SourceAdapter::FrozenHc;
+    }
     for (const auto& row : extensionRoutes) if (cls == row.deviceClass) return row.sourceAdapter;
     return SourceAdapter::FrozenHc;
 }

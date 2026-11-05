@@ -1,0 +1,591 @@
+{
+  "schemaVersion": 1,
+  "role": "documentation-navigation-only",
+  "runtimeConsumer": false,
+  "date": "2026-11-05",
+  "status": "SOURCE_FIXES_SOFTWARE_VERIFIED_HARDWARE_PENDING",
+  "userNamedModel": "OP3",
+  "fieldObservedDeviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
+  "identityOverridden": false,
+  "canonicalBinding": "capabilities/HcOemInputCapabilityBinding.h",
+  "vendorContract": "capabilities/HcOneXVendorInputContract.h",
+  "nativeConsumers": [
+    "oem.keys.get",
+    "oem.keys.status",
+    "gamepadOemPressedKeys",
+    "onexBackParse",
+    "onexX2OwnerTick",
+    "nativeKeyboardShortcutHandleOemEdge",
+    "nativeOemProducerDrain",
+    "nativeOneXOemObserve"
+  ],
+  "report": "capabilities/ONEX-OEM-CONSUMPTION-20261105.md",
+  "latestOp3Source": {
+    "query": "https://api.github.com/repos/Valkirie/HandheldCompanion/commits?path=HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs&per_page=1",
+    "commit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+    "date": "2026-10-30T08:21:37Z",
+    "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/f2e58468d9917189d4be7ccfc242385ce2c3035b/HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+    "sha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+    "sameAsReviewedLocal": true
+  },
+  "frozenOneXSourceClasses": 17,
+  "reviewedExtensionClasses": [
+    "OneXPlayerX2",
+    "OneXPlayerX2MiniPro",
+    "OneXPlayer3"
+  ],
+  "rearSourceRoutesVerified": 9,
+  "hardwareIo": false,
+  "physicalAcceptance": "UNKNOWN",
+  "dedicatedPhysicalActions": "PENDING_NEW_BUILD_PHYSICAL_ACCEPTANCE",
+  "officialFrontendCause": "UNKNOWN",
+  "newHcDll": false,
+  "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3Keys1105",
+  "completionAudit": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3Keys1105\\completion-audit.json",
+  "confirmedFixes": [
+    "Apex inherited vendor rear keys missing from unified OEM catalog; reader already queued both keys",
+    "OneX short keyboard edges dropped by snapshot-only UI observation",
+    "OneX queued keyboard recorder discarded all receipts while recording"
+  ],
+  "fieldKeyboardEvidence": {
+    "userConfirmedPressed": true,
+    "uiDidNotRecognize": true,
+    "matchedChords": {
+      "keyboard": 8,
+      "turbo": 8,
+      "orange": 6,
+      "orangelp": 1
+    },
+    "shortChordsDurationMs": [
+      0,
+      16
+    ],
+    "senderIdentityProven": false,
+    "actionExecutionProven": false,
+    "evidence": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Keys1105/dedicated-field-replay.json"
+  },
+  "uiObserver": {
+    "event": "oem.keys.observed",
+    "meaning": "observed canonical receipt, not held state or output/action success",
+    "familyBoundary": "onexplayer and exact current usage.deviceClass",
+    "regularExportEvent": "onex-oem-input-edge"
+  },
+  "softwareChecks": {
+    "oemChecksPerConfiguration": 41338,
+    "oemCompiledFaultExecutions": 12,
+    "uiPresentationChecks": 29,
+    "statusNativeExecutions": 8,
+    "recorderChecks": 737,
+    "recorderModelsAndAliases": 33,
+    "typecheckExitCode": 0
+  },
+  "latestFieldCountCorrection": {
+    "archive": "G:/YeManCC-Work/日志/其他/YeManCC-logs-20261105-023324-onexplayer3.zip",
+    "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3Keys1105\\field-023324",
+    "rearRecognition": "USER_CONFIRMED_AND_CURRENT_EDGES_OBSERVED",
+    "physicalDedicatedKeys": [
+      "turbo",
+      "keyboard",
+      "orange"
+    ],
+    "dedicatedOperationIds": [
+      "turbo",
+      "keyboard",
+      "orange",
+      "orangekb",
+      "orangetb",
+      "orangelp"
+    ],
+    "schemaField": "physicalKeyIds",
+    "countAfterAllThree": "3/3",
+    "countAfterAllOperations": "3/3",
+    "gesturesAndSavedRulesPreserved": true,
+    "newBuildPhysicalCountAcceptance": "PENDING",
+    "softwareResults": {
+      "feature": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3Keys1105\\field-023324\\feature-status\\2026-11-04T18-47-01-087Z-8bdcc68c\\cases\\controller.native-and-virtual-feature-status\\features\\result.json",
+      "oem": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3C1105\\2026-11-04T18-51-23-455Z-047ea579\\cases\\controller.unified-oem-input-consumers\\oem-consumers\\result.json",
+      "typecheckExitCode": 0
+    },
+    "audit": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3Keys1105\\field-023324\\COUNT-INTAKE.json"
+  },
+  "familyGoal": {
+    "objective": "对onexplayer家族背部按键 专用按键 灯光 震动 做适配",
+    "status": "active",
+    "lighting": "current exact Apex HID-v2 source integrated by dedicated lighting task; same-enumeration discovery logs verified here; endpoint and physical effect pending; previous fixed ZIP retains serial diagnostics",
+    "vibration": "manual xinput physical backend receipts accepted; physical/game consumer pending"
+  },
+  "latestLightingAndVibrationIntake": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OP3Light1105\\INTAKE.json",
+    "status": "SOURCE_DIAGNOSTICS_READY_PHYSICAL_GAME_CHAIN_PENDING",
+    "serial": {
+      "currentSourceCases": 27,
+      "checks": 132,
+      "previousSourceExpectedFailure": true,
+      "sameRowIdentityFields": [
+        "DeviceId",
+        "VID",
+        "PID"
+      ],
+      "noAdditionalQueriesOrAdmission": true
+    },
+    "nativeVibration": {
+      "id": "controller.xinput-feedback-lifecycle",
+      "casesPerMode": 76,
+      "checksPerMode": 381,
+      "compiledFaults": 9,
+      "hardwareIo": false
+    },
+    "gameFeedback": "original formal writer native context generator remains unclosed; no actual game behavior accepted",
+    "overallGoal": "active",
+    "nextBoundedWork": "complete current-source native POWER_CONTEXT/PROTOCOL_POWER_CONTEXT/ROG_IDENTITY binding in existing writer fixture; preserve same physical source and original assertions"
+  },
+  "latestFixedSnapshotDelivery": {
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Delivery1105/DELIVERY-RECEIPT.json",
+    "package": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-Keys-TestPackage-20261105-035647\\YeManCC.zip",
+    "sha256": "2511a66e14192b5aee81cbbf20c3ab23871df0f4bbe383c2ec73f55ae50b5416",
+    "bytes": 110495073,
+    "version": "0.0.38",
+    "buildId": "a0f1d1aa414c0c66bdd0229fe2667e14787e75c045dc7e7fd3ed5db59bdd7b06",
+    "scope": "fixed captured source; later mainline modifications not included",
+    "sourceCurrentness": "STALE_concurrent_mainline_changes_preserved",
+    "keyCount": "three physical dedicated keys; six existing actions retained",
+    "newBuildPhysicalAcceptance": "PENDING",
+    "ordinaryExportFixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "deployed": false,
+    "newHcDll": false,
+    "lighting": "same-row serial identity diagnostics included; endpoint not physically accepted",
+    "gameFeedback": "backend accepted is not physical/game feedback acceptance",
+    "goalStatus": "active"
+  },
+  "latestCurrentSourceFollowup": {
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Followup1105/INTAKE.json",
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Followup1105/REPORT.md",
+    "status": "APEX_DISCOVERY_DIAGNOSTICS_SOFTWARE_VERIFIED_GAME_CLOSURE_INCOMPLETE",
+    "event": "onex-lighting-discovery",
+    "onlyModel": "HandheldCompanion.Devices.OneXPlayerApex",
+    "ordinaryLog": true,
+    "sameEnumeration": true,
+    "candidateLimit": 4,
+    "softwareCases": 12,
+    "softwareChecks": 67,
+    "compiledMissingEvidenceFaultDetected": true,
+    "fieldEndpointMatch": "UNKNOWN_old_archive_not_full_HID_inventory",
+    "originalGameFeedbackPreparation": "shared actual lifecycle context; original single ROG OFF execution closure still incomplete; no compilation/business PASS",
+    "newDiagnosticsInPreviousZip": false,
+    "newPackageBuilt": false,
+    "deployed": false,
+    "hardwareIo": false,
+    "goalStatus": "active"
+  },
+  "latestIntegratedDelivery": {
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Integrated1105/DELIVERY-RECEIPT.json",
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Integrated1105/REPORT.md",
+    "goalAudit": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Integrated1105/GOAL-COMPLETION-AUDIT.json",
+    "package": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-Integrated-TestPackage-20261105-043536\\YeManCC.zip",
+    "sha256": "bf8b631dd73b2fbc18baa9c0eb88493b0e4b9c84d197dfde66c46212265f6a4c",
+    "buildId": "78e18dc406c2f9f963b8d8f12b9c9ea34999b351f0b6d811994688db10983329",
+    "status": "ONEX_INTEGRATED_FIXED_SNAPSHOT_TEST_PACKAGE_READY_NOT_DEPLOYED",
+    "newApexHidAndOrdinaryDiscoveryIncluded": true,
+    "threeKeyCountIncluded": true,
+    "sourceCurrentness": "STALE_two_postcapture_test_build_tools_at_comparison",
+    "newHcDll": false,
+    "fixtureValidation": "NOT_RUN",
+    "physicalAcceptance": "PENDING_four_feature_evidence",
+    "deployed": false,
+    "goalStatus": "active"
+  },
+  "latestActionTraceDelivery": {
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Final3-20261105/DELIVERY-RECEIPT.json",
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Final3-20261105/REPORT.md",
+    "package": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-ActionTrace-TestPackage-20261105-052000\\YeManCC.zip",
+    "sha256": "6d140ebbe96f8bd59229eddd7840d9f8aa0c0409b316663ba20504d1c1758832",
+    "buildId": "e423b8403d485a99991c9eddb623aed0d8427705c993411b301cecf8348ec511",
+    "newEvent": "oem-shortcut-dispatch",
+    "eventScope": "OneX L4/R4/Special/Orange/Keyboard rules only",
+    "eventMeaning": "queue-result only; no action execution/game consumption claim",
+    "shortcutRegression": "7701 checks / 0 failures",
+    "newHcDll": false,
+    "fixtureValidation": "NOT_RUN",
+    "physicalAcceptance": "pending",
+    "sourceCurrentness": "STALE_postcapture_changes_preserved",
+    "goalStatus": "active"
+  },
+  "latestSourceReadyDelivery": {
+    "receipt": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Final5-20261105/DELIVERY-RECEIPT.json",
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/OP3Final5-20261105/REPORT.md",
+    "package": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-SourceReady-TestPackage-20261105-060000\\YeManCC.zip",
+    "sha256": "cc725fe52c369ec2d5da386acc8c6b1af1ef5613de9b72f0ed88056222242781",
+    "status": "ONEX_SOURCE_READY_SOFTWARE_VALIDATED_TEST_PACKAGE_READY_NOT_DEPLOYED",
+    "softwareNativeCases": 40,
+    "softwareNativeChecks": 927,
+    "ordinaryLogChecks": 161,
+    "ordinaryLogFailures": 0,
+    "shortcutRegressionChecks": 7701,
+    "shortcutRegressionFailures": 0,
+    "physicalAcceptance": "pending",
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "deployed": false,
+    "newHcDll": false,
+    "goalStatus": "active",
+    "currentnessAfterBoundedFollowup": "STALE_NATIVE_MAIN_CHANGED_BY_ONEX_QUEUE_DIAGNOSTICS; original package and historical validation preserved"
+  },
+  "latestBoundedCountAndTraceAudit": {
+    "status": "BOUNDED_SOURCE_FIX_AND_FEATURE_TEST_PASS_PHYSICAL_PENDING",
+    "objective": "对onexplayer家族背部按键 专用按键 灯光 震动 做适配",
+    "goalStatus": "active",
+    "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105",
+    "archive": "G:\\YeManCC-Work\\日志\\其他\\YeManCC-logs-20261105-023324-onexplayer3.zip",
+    "physicalDedicatedKeys": [
+      "turbo",
+      "keyboard",
+      "orange"
+    ],
+    "retainedDedicatedOperations": 6,
+    "rearKeys": 2,
+    "physicalCountCurrentCode": "3/3 after all three actual observations; old archive cannot verify new build",
+    "nativeInternalSelftestCorrection": {
+      "oldOperationCount": 6,
+      "currentOperationCount": 8,
+      "fullMachineIdentitySelftestExecuted": false
+    },
+    "queueTrace": {
+      "event": "oem-shortcut-dispatch",
+      "scope": "OneX family only; 12 existing OneX canonical IDs, not twelve physical keys on one device",
+      "ids": [
+        "turbo",
+        "keyboard",
+        "orange",
+        "orangekb",
+        "orangetb",
+        "orangelp",
+        "l4",
+        "r4",
+        "special",
+        "home",
+        "function",
+        "gkey"
+      ],
+      "queueAdmissionOnly": true,
+      "actionExecutionProven": false,
+      "behavioralBranchesUnchanged": true
+    },
+    "featureTest": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\feature\\2026-11-04T22-34-22-881Z-3ca2d613\\cases\\controller.native-and-virtual-feature-status\\features\\result.json",
+      "status": "PASS",
+      "presentationChecks": 30,
+      "nativeExecutions": 8,
+      "nativeSemanticRejections": 6,
+      "registeredCase": "controller.native-and-virtual-feature-status"
+    },
+    "supplementalNative": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\supplemental-native-attempt3\\RESULT.json",
+      "status": "SUPPLEMENTAL_NATIVE_PASS_WITH_OLD_SOURCE_REJECTION",
+      "candidateDiagnosticChecks": 558,
+      "candidateKeyboardChecks": 179,
+      "candidateFailures": 0,
+      "oldSourceDiagnosticFailures": 84,
+      "familyMaskResultScenarios": 168,
+      "registeredCasePass": false
+    },
+    "sourceExtractorTests": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\source-extract-contract.log",
+      "passed": 4,
+      "failed": 0
+    },
+    "retainedFailures": [
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\shortcut-run.log",
+        "reason": "Existing full shortcut extraction lacks current Legion activation and recorder closure; compile failed. Task edits to this unrelated harness restored exactly."
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\diagnostics-run.log",
+        "reason": "Registered controller.input-diagnostics BLOCKED: fixed tsc shim hash differs. Authority pin not changed; no current registered PASS claimed."
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\supplemental-run.log",
+        "reason": "Supplemental shell preparation rejected; compiler not entered."
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountAudit-20261105\\supplemental-run-attempt2.log",
+        "reason": "Clean child PATH did not fix shell startup. Confirmed forward-slash cmd.exe selection causes Node spawn syntax failure; backslash cmd control works. Failed preparation retained."
+      }
+    ],
+    "sourceCurrentness": {
+      "mainSha256": "829988b5c33fb2051acacd7e30d3bc02aeda830a229cc58dbc7b76b248653fd1",
+      "previous060000PackageMatchesCurrentSource": false,
+      "previousPackageContainsThreeKeyCount": true,
+      "newQueueScopeInPreviousPackage": false
+    },
+    "boundaries": {
+      "inputRoutesChanged": false,
+      "savedRulesChanged": false,
+      "hardwareIo": false,
+      "productAppStarted": false,
+      "oemSoftwareOperated": false,
+      "registryChanged": false,
+      "hcDllAdded": false,
+      "newPackageBuilt": false,
+      "fullProductAcceptance": false
+    },
+    "remaining": {
+      "threeKeyCountField": "PENDING",
+      "dedicatedActionExecution": "PENDING after configured action plus ordinary export",
+      "rearKeys": "User confirms recognition; downstream action/game proof not complete",
+      "lighting": "APEX source integration present; physical endpoint/effect PENDING",
+      "vibration": "Backend receipts only; physical motor/game feedback PENDING",
+      "virtualSteamVisibility": "PENDING external consumer evidence"
+    }
+  },
+  "latestCountTraceDelivery": {
+    "schemaVersion": 1,
+    "status": "BYTE_IDENTICAL_TEST_PACKAGE_COPIED",
+    "package": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-CountTrace-TestPackage-20261105-070219\\YeManCC.zip",
+    "sha256": "195deecf90210f059aaa7d39f6eca93e053947c70be539d355c2cc3f48e6764d",
+    "bytes": 110512898,
+    "originalPackage": "G:\\YeManCC-Work\\Build\\Exports\\20261105-063606-hc078-ec-write-admission-ordinary-r2\\Mainline\\Release\\Packages\\YeManCC.zip",
+    "buildId": "6acae643d3c499cbca0ed254051071276bebb765fbfcc6233f13ca5dd00cb37d",
+    "dllNameCount": 114,
+    "newHcDll": false,
+    "onexRuntimeSourceFilesMatched": 79,
+    "existingPublisherReused": true,
+    "newPublisherStarted": false,
+    "deployed": false,
+    "physicalAcceptance": "PENDING",
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "goalStatus": "active",
+    "notes": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-CountTrace-TestPackage-20261105-070219\\测试说明.md",
+    "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountTraceDelivery-20261105\\PACKAGE-IDENTITY.json",
+    "runtimeSourceBinding": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountTraceDelivery-20261105\\ONEX-SOURCE-PACKAGE-BINDING.json",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXCountTraceDelivery-20261105\\REPORT.md",
+    "fieldInstructionsCorrectIndependentEmitAndDeliveryExpectation": true,
+    "priorFailuresPreserved": true
+  },
+  "latestField093203": {
+    "scope": "OneXPlayer-family-with-exact-model-protocols",
+    "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105",
+    "userReportedVibration": "FAILED_NO_PHYSICAL_VIBRATION",
+    "vibrationRootCause": "UNKNOWN",
+    "dedicatedPreviewBug": "FOUND_SHORT_EDGE_NOT_CONSUMED_BY_VISUALIZER",
+    "physicalGrouping": "PROJECT_EXISTING_GESTURE_METADATA_ONTO_PHYSICAL_KEYS",
+    "configuredRulesInField": 0,
+    "newHcDll": false,
+    "deviceIo": false,
+    "uiChecks": 177,
+    "nativeRecordingChecks": 1106,
+    "feedbackLifecycle": {
+      "off": {
+        "cases": 77,
+        "checks": 386
+      },
+      "on": {
+        "cases": 77,
+        "checks": 386
+      }
+    },
+    "goalComplete": false,
+    "nativeModelAndAliasCases": 49,
+    "oneXCatalogEntries": 21,
+    "nativePreviewApiIdentity": "EXACT_DEVICE_CLASS_ADDED_AND_ACTUAL_REPLY_TESTED",
+    "g1UnregisteredOemChordEntries": 3,
+    "delivery": {
+      "package": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-Family-KeyFeedback-20261105-101518\\YeManCC.zip",
+      "sha256": "ae4cc2d46fac2ad604c7c1c4f2623d96ca5f18a7f68f005f869b5fffe25d205b",
+      "nativeSha256": "f6116f633164c71c4c1d5b975162ef112e569470fa5b0bd41f6e7c96cc5ff8c4",
+      "receipt": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105\\FINAL-DELIVERY.json",
+      "deployed": false,
+      "vibrationFixed": false
+    },
+    "postDeliveryFollowup": {
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105\\FOLLOWUP-LIGHTING-AND-ACTION-CONSUMER.json",
+        "bytes": 14195,
+        "sha256": "1fcda52deabe989ef684a39c31d7f53e4c5a46feb5020e6bd4039476d814a239"
+      },
+      "runtimeChanges": false,
+      "newPackage": false,
+      "ordinaryConfiguredActionConsumer": "SELECTED_ONEX_PRESS_ACTION_CONSUMER_3766_PASS; FULL_SUITE_F7_FAIL_RETAINED",
+      "lightingBackend": "093203 exact HID-v2 writes/release accepted",
+      "nativeMotorRecoveryOwner": "HC084 capability task active; packet and readback not yet recovered"
+    },
+    "ordinaryActionConsumptionFollowup": {
+      "testProducer": "tools/input_shortcut_toggle_selftest.mjs",
+      "selectedMode": "onex-consumption",
+      "audit": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105\\shortcut-closure-repair\\SELECTED-CONSUMER-AUDIT.json",
+        "bytes": 3494,
+        "sha256": "c0f7957d5b860cba7b076d8e438df9eb12840403edb469dae2930132c941cb40"
+      },
+      "currentScopeReference": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105\\shortcut-closure-repair\\CURRENT-SCOPE-REFERENCE.json",
+        "bytes": 822,
+        "sha256": "0f834316f6ee469d3c31c1750c21d0bf9d8e6841f38e694be216550da8ae3acd"
+      },
+      "checks": 3766,
+      "familyAliasEntries": 21,
+      "catalogActionIds": 77,
+      "keyModeCases": 231,
+      "cancellationCasesPerKind": 231,
+      "physicalOsOrDeviceEffectsProven": false,
+      "fullSuite": "FAIL-retired-Start-F7-ownership-assertion-retained",
+      "productRuntimeChangesThisFollowup": false,
+      "newPackageThisFollowup": false,
+      "motorIntake": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105\\shortcut-closure-repair\\MOTOR-SOURCE-INTAKE.json",
+        "bytes": 1688,
+        "sha256": "dfb1edcd0a8509cf1bdf83abf8b508e66bd3e24743405fb97a543ad9b13fb255"
+      },
+      "finalReceipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField093203-20261105\\shortcut-closure-repair\\FINAL-CONSUMER-RECEIPT.json",
+        "bytes": 2093,
+        "sha256": "b0c5afaee27e0f1d33f817cf9f927552a57da2850eea56468f555a83271b35ec"
+      },
+      "realOsOrDeviceEffectStillUnknown": true
+    }
+  },
+  "latestField112441": {
+    "scope": "OneXPlayer family rear buttons, dedicated keys, vibration; virtual-controller repair explicitly excluded by latest user instruction",
+    "status": "ACTIVE_NOT_HARDWARE_ACCEPTED",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField112441-20261105\\REPORT.zh-CN.md",
+    "evidence": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField112441-20261105\\KEYS-AND-VIBRATION-REVIEW.json",
+      "bytes": 111772,
+      "sha256": "addc05b5004d7945659df0042bdaca4dc3617a17b83e1a9788cab8e4307d8017"
+    },
+    "archiveSha256": "c39f00bd31214949ab7f6461bbd8d1a766a86befcc5d2e103b8011095c2f95a5",
+    "configuredRulesForObservedKey": 0,
+    "dedicatedPhysicalKeys": [
+      "turbo",
+      "keyboard",
+      "orange"
+    ],
+    "rearKeysRegistered": [
+      "l4",
+      "r4"
+    ],
+    "physicalRearPressObservedInThisSession": false,
+    "keyboardChordObservation": "Win+D interpreted as orangelp; actual OEM hardware origin unproven",
+    "currentConcurrentRawKeyboardAncestry": "Netease UUYCInput at export; not event-time sender proof and not a blocker finding",
+    "manualPulses": 4,
+    "manualPulseStopElapsedMs": [
+      125,
+      125,
+      125,
+      125
+    ],
+    "latestPhysicalVibration": "USER_RESULT_NOT_STATED",
+    "runtimeChanges": false,
+    "newPackage": false,
+    "newSoftwareTestsExecuted": false,
+    "hardwareAccepted": false,
+    "goalComplete": false,
+    "oemSettingsSourceAudit": {
+      "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField112441-20261105\\OEM-SAVED-PREFERENCE-AND-INPUT-BOUNDARY.md",
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField112441-20261105\\OEM-PREFERENCE-SOURCE-REVIEW.json",
+        "bytes": 18547,
+        "sha256": "52a0df4365abae29584d13a147c3131a496d650dcedece6582bbf88a915383d9"
+      },
+      "sourceSha256": "2eb89e3244f44baeb508ccfaa6d98c73cc1849e4b7bdb08eba71b165aae52726",
+      "storage": "Electron userData/db/core.db: setting.vibrationLevel",
+      "oemLoadMutatesSettings": true,
+      "savedGradeIsHardwareReadback": false,
+      "setGradeMaySilentlyNoOpWhenClosed": true,
+      "failedSetMayStillPersistRequestedGrade": true,
+      "plainShakeAndGradeChangeAreSeparate": true,
+      "keysMenuFieldIsOemUnlockProven": false,
+      "runtimeEdits": false,
+      "automaticCollectorAdded": false,
+      "hardwareAccepted": false
+    },
+    "latestReadinessAudit": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField112441-20261105\\POST-DELIVERY-BLOCKER-AUDIT-03.json",
+      "bytes": 2313,
+      "sha256": "9d51fe3aa6d8e73261d399ede76a6c44655d2b95b903360953854e8e5a3caded",
+      "state": "awaiting-physical-evidence",
+      "requestedGoalStatus": "blocked",
+      "consecutiveBlockedAudits": 3,
+      "blockedAuditPassed": true,
+      "newTestsExecuted": false,
+      "wholeFamilyHardwareAccepted": false,
+      "nextAction": "Physical OneX key/action/vibration results from delivered package or new authoritative source contract."
+    },
+    "loggingTestDelivery": {
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\OneXField112441-20261105\\LOGGING-TEST-PACKAGE-DELIVERY.json",
+        "bytes": 1299,
+        "sha256": "f246c2fcb27bd55166c4ff38b3286e08075849510abb6ff74412d58262c1b393"
+      },
+      "package": {
+        "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-KeyEvidence-20261105-122348\\YeManCC.zip",
+        "bytes": 110573928,
+        "sha256": "9b5bd9b851b4aa938d50ee35cbfb96e58bb09e5cdf006f1dacd8afd2a9e47fc2"
+      },
+      "guide": "G:\\YeManCC-Work\\Deliverables\\YMCC-OneX-KeyEvidence-20261105-122348\\测试说明.md",
+      "nativeSha256": "fc0f6cc8e081ae5dbe74a7f15e08995c25edb03c49f087b8ea453d5c0ca6c2ce",
+      "inputHostSha256": "83ca393eaf4f3d90b4ffb966790dcf6b3197bd1b2bb940ee8cd502f174652210",
+      "sourceSnapshotStamp": "20261105-122348",
+      "buildId": "4692c97845fa23d58c5a5d617158e6efbdc2d6698e90b3622fd2600fafa1c6b5",
+      "newKeyTypeAndFirstRawReportEvidence": true,
+      "runtimeControlPolicyEditsByThisFollowup": false,
+      "fixtureValidation": "NOT_RUN",
+      "formalReleaseAccepted": false,
+      "hardwareAccepted": false,
+      "deployed": false
+    }
+  },
+  "currentHc089X2ConsumptionAudit": {
+    "status": "CURRENT_SOURCE_CONSUMPTION_TRACE_REVIEWED_HARDWARE_UNKNOWN",
+    "atUtc": "2026-11-05T05:51:51.659951+00:00",
+    "trace": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\CURRENT-CONSUMPTION-TRACE.json",
+      "bytes": 5154,
+      "sha256": "dbabb85537fbe538694097013bae118f8086ea8b3a572e79feb9466206749769"
+    },
+    "traceReport": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\CURRENT-CONSUMPTION-REPORT.md",
+      "bytes": 3700,
+      "sha256": "195e5ba9adeeeeb9f14743659d24f28bdb9bc0797a8dc16de0a91d11e00b9aec"
+    },
+    "sourceSnapshot": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\SOURCE-SNAPSHOT.json",
+      "bytes": 5528,
+      "sha256": "a0ee7c3fe92eadfb839831807211a4fb049e49da468f25f91d686960a31059ce"
+    },
+    "protocolParentVerification": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\PROTOCOL-PARENT-VERIFICATION.json",
+      "bytes": 4697,
+      "sha256": "5ca80335bb05d9c9388d608c9d0179c947afae62b8f64fa23bb9dd42d3b1f51d"
+    },
+    "protocolResult": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\agent-protocol\\RESULT.json",
+      "bytes": 10704,
+      "sha256": "fe67cfbeb4e87ae4635e6559072e5bdecae78a63e8fb9c9ec6af9ac070875deb"
+    },
+    "protocolReport": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\agent-protocol\\REPORT.md",
+      "bytes": 5027,
+      "sha256": "2e844de08f1f24ce9e361e507708beefc5d14dda972ddc07727e603902eb74e0"
+    },
+    "consumerScopeAck": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-089-ONEX-X2-LIVE-LIBRARY-CONSUMPTION-AUDIT\\CONSUMER-HC088-SCOPE-ACK.json",
+      "bytes": 1034,
+      "sha256": "02f36f374fa300d74485e92b06120345748234b2935c561743307490c52a5b36"
+    },
+    "classes": [
+      "HandheldCompanion.Devices.OneXPlayerX2",
+      "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+      "HandheldCompanion.Devices.OneXPlayer3"
+    ],
+    "scope": "Static captured source, not executed lifecycle or physical acceptance",
+    "miniProRear": "F15/F16 canonical keyboard route; duplicate vendor rear publication excluded",
+    "x2Home": "vendor click",
+    "exactOneXPlayer3HomeAndGKey": "vendor held; distinct from Apex",
+    "standardGameRootOrSlotProvenByVendor": false,
+    "wholeFamilyComplete": false,
+    "newRuntimeRows": 0,
+    "consumerImplementationByThisLane": false
+  }
+}

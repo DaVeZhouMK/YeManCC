@@ -1,4 +1,5 @@
 #pragma once
+#include "power_source_state.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -105,7 +106,7 @@ inline bool libraryForeground(const std::filesystem::path& executable) {
 struct ResourcePorts {
   std::function<int()> ac = []() {
     SYSTEM_POWER_STATUS power{};
-    return GetSystemPowerStatus(&power) && power.ACLineStatus <= 1
+    return ymcc::powerSource::read(power) && power.ACLineStatus <= 1
                ? int(power.ACLineStatus)
                : -1;
   };

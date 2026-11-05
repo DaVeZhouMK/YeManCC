@@ -52,6 +52,7 @@ struct Surface {
 namespace sp {
 #include "types.inc"
 #include "config.inc"
+#include "auto_hide_validation.inc"
 #include "auto_hide_state.inc"
 inline AutoHideState autoHide;
 inline bool initialized=true,inputTeardown=false;
@@ -75,6 +76,7 @@ inline ButtonInputRecovery buttonInputRecovery;
 inline void nativeButtonSink(HWND,const ymcc::screeninput::Event&,void*){}
 
 inline std::array<UINT32,7> buttonContacts{};
+inline std::atomic<bool> summonWindowOnLeft{false};
 inline void (*quickAccessContextObserver)()=nullptr;
 inline Config getConfig(){std::lock_guard<std::mutex> lock(mutex);return core.config;}
 inline bool nativePad(Mode mode){return mode==Mode::Deck||mode==Mode::DualSense;}
@@ -109,7 +111,7 @@ inline Json cases=Json::array();inline bool passed=true;
 void check(const char* name,bool ok){cases.push_back({{"name",name},{"ok",ok}});passed=passed&&ok;}
 void setup(int profile=1,bool pads=false,StandaloneSpecialMode standalone=StandaloneSpecialMode::Off){
  initialized=true;inputTeardown=false;windowError=0;clockNow=1000;timerArms=timerStops=draws=refreshes=releases=contactSyncs=0;lastTimer=0;
- autoHide={};core={};core.config.enabled=pads;core.config.specialMask=profile==3?1:3;core.config.specialEnabled=profile!=0;core.config.standaloneSpecialMode=standalone;
+ autoHide={};core={};core.config.summonPosition=SummonPosition::Off;core.config.summonEnabled=false;core.config.enabled=pads;core.config.specialMask=profile==3?1:3;core.config.specialEnabled=profile!=0;core.config.standaloneSpecialMode=standalone;
  if(profile==0)core.config.specialMask=0;
  activeProfile=profile;appliedProfile=profile;controlTargetEnabled=profile!=0;controlEdgeEnabled=profile==2;available=profile==1;psAvailable=profile==2;
  buttonContacts={};buttonRefreshEpoch=0;buttonInputRecovery={};nativeInputCandidateRequested=true;createdWindows.clear();
@@ -118,9 +120,31 @@ void setup(int profile=1,bool pads=false,StandaloneSpecialMode standalone=Standa
  for(int i=0;i<7;++i){nativeButtonSurfaces[i]={};nativeButtonSurfaces[i].root_=buttonWindows[i];}
  refresh();
 }
-void expire(){clockNow=autoHide.lastTouch+60000;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);}
+void expire(){clockNow=autoHide.lastTouch+(ULONGLONG)autoHide.seconds*1000;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);}
 int main(int argc,char** argv){
  if(argc!=2)return 2;
+ check("new-config-and-timer-default-to-15-seconds",Config{}.autoHideSeconds==15&&AutoHideState{}.seconds==15);
+ for(const int seconds:{1,3,5,10,15,30,45,60,120}) {
+  setup(1,true);auto cfg=getConfig();cfg.autoHideSeconds=seconds;cfg.summonPosition=SummonPosition::Right;configure(cfg,1,true);
+  const auto timeout=(ULONGLONG)seconds*1000;
+  check(("accepted-hide-duration-"+std::to_string(seconds)).c_str(),validAutoHideSeconds(seconds)&&autoHide.timer&&lastDelay==timeout);
+  clockNow=autoHide.lastTouch+timeout-1;autoHideSync();
+  check(("not-hidden-before-deadline-"+std::to_string(seconds)).c_str(),!autoHide.hidden&&buttonVisibilityState(cfg)["artworkVisibleMask"]==7);
+  ++clockNow;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);
+  check(("pads-summon-and-special-hide-at-deadline-"+std::to_string(seconds)).c_str(),autoHide.hidden&&!autoHide.timer&&buttonVisibilityState(cfg)["artworkVisibleMask"]==0&&buttonVisibilityState(cfg)["inputVisibleMask"]==7);
+ }
+ check("invalid-hide-durations-remain-rejected",!validAutoHideSeconds(-1)&&!validAutoHideSeconds(2)&&!validAutoHideSeconds(11)&&!validAutoHideSeconds(121));
+ setup(0,false);auto summon=getConfig();summon.summonPosition=SummonPosition::Right;summon.standaloneSpecialMode=StandaloneSpecialMode::Off;summon.autoHideSeconds=1;configure(summon,0,true);
+ check("summon-alone-arms-shared-timer",autoHide.visibleMask==16&&autoHide.timer&&lastDelay==1000);
+ expire();check("summon-alone-hides-only-artwork",autoHide.hidden&&buttonVisibilityState(summon)["inputVisibleMask"]==1&&buttonVisibilityState(summon)["artworkVisibleMask"]==0&&!buttonsNeedRefresh(summon));
+ refresh();check("refresh-does-not-force-hidden-summon-visible",autoHide.hidden&&buttonVisibilityState(summon)["artworkVisibleMask"]==0);
+ buttonContacts[0]=81;autoHideTouch();
+ check("touch-hidden-summon-restores-artwork-and-retains-contact",!autoHide.hidden&&buttonVisibilityState(summon)["artworkVisibleMask"]==1&&buttonContacts[0]==81);
+ clockNow+=10000;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);check("held-summon-does-not-hide-or-poll",!autoHide.hidden&&!autoHide.timer);
+ buttonContacts[0]=0;autoHideTouch();check("summon-release-restarts-configured-deadline",autoHide.timer&&lastDelay==1000);
+ expire();summon.autoHideSeconds=0;configure(summon,0,true);
+ check("disable-auto-hide-restores-summon-without-timer",!autoHide.hidden&&!autoHide.timer&&buttonVisibilityState(summon)["artworkVisibleMask"]==1);
+
  const std::array<int,5> profiles={0,0,1,2,3};
  const std::array<const char*,5> names={"standalone-Steam","standalone-PS5","Steam-Deck","PS5","Xbox"};
  for(int i=0;i<5;++i){
@@ -152,13 +176,13 @@ int main(int argc,char** argv){
  setup(1,true);expire();saved=getConfig();inputTeardown=true;const auto priorArms=timerArms;configure(saved,1,true);
  check("terminal-owner-refuses-settings-reveal",autoHide.hidden&&timerArms==priorArms&&buttonVisibilityState(saved)["artworkVisibleMask"]==0);
  setup(1,false);expire();saved=getConfig();saved.summonPosition=SummonPosition::Right;saved.rearMask=15;configure(saved,1,true);expire();
- check("summon-and-rear-keys-retain-original-nonhiding-behavior",autoHide.hidden&&buttonVisibilityState(saved)["artworkVisibleMask"]==121);
+ check("summon-hides-with-pads-and-special-keys-while-rear-remains",autoHide.hidden&&buttonVisibilityState(saved)["artworkVisibleMask"]==120);
  setup(1,true);expire();saved=getConfig();configure(saved,1,true);if(autoHide.hidden)autoHideSync(true);const auto arms=timerArms,paint=draws;for(int i=0;i<10000;++i){clockNow+=1;autoHideTouch();}
  check("10000-touch-moves-do-not-rearm-or-redraw",timerArms==arms&&draws==paint);
  core.pads[0].down=true;clockNow+=60000;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);
  check("stationary-held-contact-prevents-hiding-and-polling",!autoHide.hidden&&!autoHide.timer);
  core.pads[0].down=false;autoHideTouch();
- check("release-resumes-single-deadline",autoHide.timer&&lastDelay==60000);
+ check("release-resumes-single-deadline",autoHide.timer&&lastDelay==15000);
  setup(1,false);saved=getConfig();activeProfile=2;
  check("visibility-diagnostics-separate-permission-from-old-windows",buttonVisibilityState(saved)["permittedMask"]==0&&buttonVisibilityState(saved)["inputVisibleMask"]==6);
  // Field failure: left key missing, right key visible, selected mask unchanged.

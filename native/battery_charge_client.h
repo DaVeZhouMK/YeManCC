@@ -1,4 +1,5 @@
 #pragma once
+#include "power_source_state.h"
 // In-process component boundary. The existing charge/display adapters run inside YeManCC.
 #include <windows.h>
 #include <filesystem>
@@ -17,7 +18,15 @@ inline std::timed_mutex& lock(){static auto* m=new std::timed_mutex;return *m;}
 inline std::atomic<bool>& stopping(){static auto* value=new std::atomic<bool>{false};return *value;}
 inline managed::Component& component(){static auto* value=new managed::Component;return *value;}
 inline void seal() noexcept {stopping().store(true,std::memory_order_release);}
-inline bool hasBattery(){SYSTEM_POWER_STATUS s{};return GetSystemPowerStatus(&s)&&s.BatteryFlag!=255&&(s.BatteryFlag&128)==0;}
+inline bool hasBattery(){const auto state=ymcc::powerSource::snapshot();return state.batteryKnown&&state.hasBattery;}
+// Same-process ABI: passive receipt only. No OS sampling or managed callback under
+// the owner lock; the component stops using this function before process teardown.
+inline std::uint64_t __cdecl nativePowerReader() noexcept {
+    const auto state=ymcc::powerSource::snapshot();
+    const auto percent=state.readable&&state.batteryKnown&&state.hasBattery&&state.status.BatteryLifePercent<=100?state.status.BatteryLifePercent:255u;
+    return (state.readable?1ull:0ull)|(state.known?2ull:0ull)|(state.batteryKnown?4ull:0ull)|
+        (state.hasBattery?8ull:0ull)|(state.ac==1?16ull:0ull)|(std::uint64_t(percent)<<8);
+}
 inline Json failure(const char* reason){return {{"schema",1},{"ok",false},{"supported",false},{"batteryPresent",hasBattery()},{"model",""},{"family",""},{"kind","unsupported"},{"choices",Json::array()},{"currentLimit",nullptr},{"requestedLimit",nullptr},{"managed",false},{"verification","unknown"},{"fence",""},{"reason",reason}};}
 // Validate before loading the component; route-specific choices stay authoritative.
 inline bool validSetRequest(const Json& args){
@@ -65,7 +74,7 @@ inline Json requestCore(const std::wstring& powerRoot,const std::wstring& stateR
         detail["runtime"]=runtimeIdentity(powerRoot);detail["stage"]="load-in-process";
         component().load(powerRoot);
         if(stopping().load(std::memory_order_acquire))return failure("充电组件正在退出");
-        const auto envelope=[&](Json request){return Json{{"powerRoot",utf8Path(powerRoot)},{"stateRoot",utf8Path(stateRoot)},{"request",std::move(request)}};};
+        const auto envelope=[&](Json request){return Json{{"powerRoot",utf8Path(powerRoot)},{"stateRoot",utf8Path(stateRoot)},{"nativePowerReader",std::to_string(reinterpret_cast<std::uintptr_t>(&nativePowerReader))},{"request",std::move(request)}};};
         detail["phase"]="handshake";
         const auto hello=component().call(envelope({{"op","hello"}}));detail["hostIdentity"]=hello;
         if(!matchingHost(hello))return failure("充电组件与主程序版本不一致，请退出 YMCC 后更新完整程序包");

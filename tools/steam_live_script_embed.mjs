@@ -17,7 +17,12 @@ const modeEnd=js.indexOf('    // Steam sleep captures',modeStart);
 const footerStart=js.lastIndexOf('  } catch (error) {');
 if(!(prefixEnd>0&&modeStart>prefixEnd&&modeEnd>modeStart&&footerStart>modeEnd))throw Error('Steam mode source boundaries changed');
 const mode=js.slice(0,prefixEnd)+js.slice(modeStart,modeEnd)+js.slice(footerStart);
-const output='// Generated from steam_live.js; do not edit. Adjacent literals avoid MSVC C2026.\n#pragma once\nnamespace ymcc::steamlive {\ninline constexpr const char kScript[] =\n'+literals(js)+';\ninline constexpr const char kUiModeScript[] =\n'+literals(mode)+';\n}\n';
+const accountEnd=js.indexOf('    // Approved bounded repair:',prefixEnd);
+const lightStart=js.indexOf("    if (request.operation === 'input.gamepadLease') {",js.indexOf('    checkAccount();',accountEnd));
+const lightEnd=js.indexOf("    if (request.operation === 'diagnostics.apps.api.read') {",lightStart);
+if(!(accountEnd>prefixEnd&&lightStart>accountEnd&&lightEnd>lightStart&&footerStart>lightEnd))throw Error('Steam light gamepad source boundaries changed');
+const light=js.slice(0,prefixEnd)+js.slice(prefixEnd,accountEnd)+'    checkAccount();\n'+js.slice(lightStart,lightEnd)+"    fail('unsupported-light-gamepad-operation');\n"+js.slice(footerStart);
+const output='// Generated from steam_live.js; do not edit. Adjacent literals avoid MSVC C2026.\n#pragma once\nnamespace ymcc::steamlive {\ninline constexpr const char kScript[] =\n'+literals(js)+';\ninline constexpr const char kUiModeScript[] =\n'+literals(mode)+';\ninline constexpr const char kLightGamepadScript[] =\n'+literals(light)+';\n}\n';
 const file='native/steam_live_script.h';
 if(process.argv.includes('--check')){
   if(!fs.existsSync(file)||fs.readFileSync(file,'utf8')!==output)throw Error('Steam live script embed is stale');

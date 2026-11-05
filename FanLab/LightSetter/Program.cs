@@ -118,7 +118,8 @@ internal static class Program
     // Only internal software fixtures may supply terminal factories; no CLI bypass.
     internal static Dictionary<string, object?> RunWithSuperJoyPorts(string[] args,
         Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, ISuperJoyLightingTransport> openHid,
-        Func<string, CancellationToken, IAyaneoCeLightingEc> openEc)
+        Func<string, CancellationToken, IAyaneoCeLightingEc> openEc,
+        Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, IApexLightingTransport>? openApex = null)
     {
         string? hcPath = null, runtimeRootOpt = null, action = null, level = null, statusArg = null, presetId = null, expectedDeviceClass = null;
         string? corePath = null, coreCallerHash = null, ownerInterfacePath = null, ownerGeneration = null;
@@ -170,6 +171,10 @@ internal static class Program
             return ExecuteSuperJoyLighting(expectedDeviceClass!, action!, level, statusArg,
                 r, g, b, r2, g2, b2, brightness, presetId, timeoutMs,
                 runtimeRootOpt, ownerInterfacePath, ownerGeneration, openHid, openEc);
+        if (string.Equals(expectedDeviceClass, ApexLightingConsumer.Model, StringComparison.Ordinal))
+            return ExecuteApexLighting(action!, level, r, g, b, r2, g2, b2, speed, brightness, presetId,
+                ownerInterfacePath, ownerGeneration, timeoutMs,
+                openApex ?? ((identity, owner, stop) => ApexWindowsHidTransport.Open(identity, () => owner.IsCurrent, stop)));
         if (string.Equals(expectedDeviceClass, Oxp3DeviceClass, StringComparison.Ordinal))
             return ExecuteOxp3Lighting(action!, level, r, g, b, r2, g2, b2, brightness, speed, presetId,
                 timeoutMs, ownerInterfacePath, ownerGeneration);
@@ -251,6 +256,56 @@ internal static class Program
             ["queuedWriteFailures"] = transaction.FailedTasks,
             ["physicalEffectVerified"] = false,
         };
+    }
+
+    private static Dictionary<string, object?> ExecuteApexLighting(string action, string? level,
+        int? r, int? g, int? b, int? r2, int? g2, int? b2, int? speed, int? brightness, string? presetId,
+        string? ownerPath, string? ownerToken, int timeoutMs,
+        Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, IApexLightingTransport> open)
+    {
+        // Require the same generated capability policy as native admission,
+        // before acquiring the lease or opening any device.
+        var operation = HcLightingCapabilityCatalog.Require(ApexLightingConsumer.Model, ApexLightingConsumer.Model,
+            action, level, brightness is not null, presetId);
+        if (operation.Capabilities.SourceAdapter != LightingSourceAdapter.ApexHidV2 ||
+            operation.PreferredProvider != "onex-apex-hid-v2")
+            throw new InvalidOperationException("APEX_LIGHTING_ROUTE_NOT_CONNECTED");
+        // Existing callers may repeat the primary color and the default speed.
+        // A different secondary color or a custom speed has no V2 consumer.
+        ValidateApexOptionalArguments(action, r, g, b, r2, g2, b2, speed);
+        var request = ApexLightingRequest.Create(action, level, r, g, b, brightness);
+        if (string.IsNullOrWhiteSpace(ownerPath) || string.IsNullOrWhiteSpace(ownerToken))
+            throw new ArgumentException("APEX_NATIVE_OWNER_REQUIRED");
+        var parts = SuperJoyOwnerLease.ParseToken(ownerToken);
+        var identity = ApexLightingConsumer.OwnerIdentity(ownerPath, checked((long)parts[2]));
+        using var deadline = new CancellationTokenSource(timeoutMs);
+        using var owner = SuperJoyOwnerLease.Acquire(identity, ownerToken, deadline.Token);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(owner.Token, deadline.Token);
+        var result = ApexLightingConsumer.Apply(identity, request, () => owner.IsCurrent, stop.Token,
+            () => open(identity, owner, stop.Token));
+        return new()
+        {
+            ["deviceClass"] = ApexLightingConsumer.Model, ["capabilityId"] = operation.Device.DeviceId,
+            ["capabilityOperation"] = operation.OperationId,
+            ["capabilityCatalogSha256"] = HcLightingCapabilityCatalog.CatalogSha256,
+            ["backend"] = "onex-apex-hid-v2", ["action"] = action,
+            ["note"] = result.Completed ? "ok" : result.Reason,
+            ["protocolResult"] = result.Reason, ["queuedWritesCompleted"] = result.Completed,
+            ["hidWrites"] = result.Writes, ["released"] = result.Released,
+            ["ownerAdmission"] = "native-owner-handoff-v2", ["ownerGeneration"] = identity.Generation,
+            ["hcSha256"] = "", ["physicalEffectVerified"] = false,
+        };
+    }
+
+    internal static void ValidateApexOptionalArguments(string action, int? r, int? g, int? b,
+        int? r2, int? g2, int? b2, int? speed)
+    {
+        if (speed is not null && speed != 50) throw new NotSupportedException("APEX_FIXED_SPEED");
+        if (r2 is not null || g2 is not null || b2 is not null)
+        {
+            if (action != "color" || r2 != r || g2 != g || b2 != b || r is null || g is null || b is null)
+                throw new NotSupportedException("APEX_SECOND_COLOR_UNAVAILABLE");
+        }
     }
 
     private static Dictionary<string, object?> ExecuteSuperJoyLighting(string model, string action,

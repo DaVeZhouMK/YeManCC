@@ -57,6 +57,9 @@ def check_families(module):
         ("AMD Ryzen Mobile", 26, 68, "desktop"),
        ("AMD Ryzen 7 7840U", 25, 116, "apu_ft6_old"),
         ("Unknown AMD", 26, 127, "unknown"),
+        ("AMD RYZEN AI MAX+ 388", 26, 112, "apu_ft6_new"),
+        ("AMD RYZEN AI MAX+ 395", 26, 112, "apu_ft6_new"),
+        ("Unknown AMD marketing name", 26, 112, "apu_ft6_new"),
     )
     cases += tuple(("AMD future CPU", 26, model, "hsmp_fp10_am5")
                    for model in (*range(128, 144), *range(224, 228)))
@@ -122,6 +125,7 @@ def capture_route(module, cfg, values):
 
 
 def check_amd_routes(module):
+    check_strix_halo_pm_compatibility(module)
     assert capture_route(module, module.FAM_DESKTOP_AM4_V1, (40000, 41000, 42000)) == [
         ("mp1", 0x31, 40000), ("rsmu", 0x64, 40000)
     ]
@@ -390,8 +394,16 @@ def check_amd_routes(module):
         # The same value is preserved across the declared candidates after a
         # genuine terminal UNKNOWN_CMD or FAILED; neither is a local I/O byte.
         for firmware_status in (0xFE, 0xFF):
-            for offset in (module.UV_AMD_MIN, -20, -1, 0, 1, 20, module.UV_AMD_MAX):
+            for offset in (module.UV_AMD_MIN, -20, -1, 0, 1, 20, 60, module.UV_AMD_MAX):
                 backend = MailboxPort("firmware", firmware_status, secondary=("success", 1))
+                if offset > 0:
+                    # Preserve the encoding assertion, but a positive request must never reach a mailbox.
+                    assert module._co_arg_encode(offset, cfg) == offset
+                    assert module.amd_uv_set_with(backend, cfg, offset, diagnostics) == 2
+                    assert backend.calls == []
+                    assert diagnostics["failure"] == {"origin": "validation", "stage": "offset",
+                        "helperExitCode": 2, "mailboxStatus": None}
+                    continue
                 assert module.amd_uv_set_with(backend, cfg, offset, diagnostics) == 0
                 expected = offset if offset >= 0 else 0x100000 - (-offset)
                 argument_writes = [row for row in backend.calls
@@ -555,7 +567,7 @@ def check_uv_receipts(module):
             "readback": False, "current_semantics": "not_readable"})
         assert described["available"] is True
         assert described["unit"] == "co_step"
-        assert described["offset"] == {"min": -60, "max": 60, "step": 1, "signed": True}
+        assert described["offset"] == {"min": -60, "max": 0, "step": 1, "signed": True}
         assert described["scope"] == {"kind": "amd_all_core", "planes": []}
         assert described["readbackCapability"] is False
         assert described["encoding"] == "u20"
@@ -651,6 +663,12 @@ def check_uv_receipts(module):
             module.detect_amd_family = lambda: legacy_cfg
             module._amd_open = open_port
             module._send_mailbox = send_port
+            for positive in (1, 20, 60):
+                for dry in (False, True):
+                    rc, result = dispatch(positive, dry=dry)
+                    assert rc == 2 and result["accepted"] is False
+                    assert result["readback"] is False and result["observed"] is None
+                    assert opens == [] and sends == []
             rc, result = dispatch(-70)
             assert rc == 2 and result["failure"] == {
                 "origin": "validation", "stage": "offset", "helperExitCode": 2, "mailboxStatus": None}
@@ -846,7 +864,7 @@ def check_uv_receipts(module):
         assert module.UV_PLANES_SAFE == tuple(module.UV_POLICY["intel"]["planes"])
         assert module.INTEL_OC_CMD_SET_VF == intel_protocol["setCommand"]
         assert module.INTEL_OC_OFFSET_MASK == 0xFFE00000
-        assert (module.UV_AMD_MIN, module.UV_AMD_MAX) == (-60, 60)
+        assert (module.UV_AMD_MIN, module.UV_AMD_MAX) == (-60, 0)
         assert (module.UV_INTEL_MIN, module.UV_INTEL_MAX) == (-150, 0)
         for mv, payload in ((-150, 0xECC00000), (-75, 0xF6600000), (-25, 0xFCC00000), (0, 0)):
             assert module._uv_mv_to_data32(mv) == payload
@@ -1067,6 +1085,96 @@ def check_daemon_pipe_session(module):
         for name, value in saved.items():
             setattr(module, name, value)
 
+
+def check_strix_halo_pm_compatibility(module):
+    """Extend the existing AMD protocol group; all hardware ports remain in memory."""
+    import struct
+    compat = module.YMCC_TDP_COMPATIBILITY["amdStrixHalo"]
+    assert compat["cpu"] == {"family": 26, "models": [112]}
+    assert compat["familyRecipe"] == "FAM_APU_FT6_NEW"
+    assert set(compat["readback"]["tableVersions"]) == {0x64010C, 0x64020C}
+    assert module._amd_tdp_pm_compatibility(module.FAM_APU_FT6_NEW_GENERIC) is None
+    assert module._amd_tdp_pm_compatibility(module.FAM_UNKNOWN) is None
+    assert capture_route(module, module.FAM_APU_FT6_NEW, (31000, 53000, 47000)) == [
+        ("mp1", 0x14, 31000), ("rsmu", 0x31, 31000),
+        ("mp1", 0x15, 53000), ("rsmu", 0x32, 53000),
+        ("mp1", 0x16, 47000), ("rsmu", 0x33, 47000)]
+    class PmPort:
+        def __init__(self, version=0x64010C, values=(31, 53, 47), failed=None):
+            self.version, self.values, self.failed = version, values, failed
+            self.calls, self.updated = [], False
+        def execute(self, command, args, outputs):
+            self.calls.append((command, args, outputs))
+            if command == self.failed:
+                return 0x80004005, []
+            if command == "ioctl_resolve_pm_table":
+                assert outputs == 2
+                return 0, [self.version, 0x180000000]
+            if command == "ioctl_update_pm_table":
+                assert outputs == 0
+                self.updated = True
+                return 0, []
+            assert command == "ioctl_read_pm_table" and outputs == 3 and self.updated
+            raw = struct.pack("<6f", self.values[0], 7.5, self.values[1], 9.5, self.values[2], 8.5)
+            return 0, list(struct.unpack("<3Q", raw))
+    target = {"stapm": 31, "fast": 53, "slow": 47}
+    for version in (0x64010C, 0x64020C):
+        port = PmPort(version)
+        observed = module._amd_tdp_readback(port, module.FAM_APU_FT6_NEW, target)
+        assert observed["readbackMatched"] is True and observed["unit"] == "w"
+        assert observed["observedLimitsW"] == target and observed["physicalPowerVerified"] is False
+        assert [call[0] for call in port.calls] == ["ioctl_resolve_pm_table", "ioctl_update_pm_table", "ioctl_read_pm_table"]
+    port = PmPort(0x64030C)
+    unknown = module._amd_tdp_readback(port, module.FAM_APU_FT6_NEW, target)
+    assert unknown["readbackState"] == "unavailable" and unknown["readbackMatched"] == "not-observed"
+    assert len(port.calls) == 1, "unknown table must not be decoded or used as permission"
+    for failed in ("ioctl_resolve_pm_table", "ioctl_update_pm_table", "ioctl_read_pm_table"):
+        result = module._amd_tdp_readback(PmPort(failed=failed), module.FAM_APU_FT6_NEW, target)
+        assert result["readbackMatched"] == "not-observed" and "observedLimitsW" not in result
+    for invalid in (0, float("nan"), float("inf"), 1001):
+        result = module._amd_tdp_readback(PmPort(values=(invalid, 53, 47)), module.FAM_APU_FT6_NEW, target)
+        assert result["readbackState"] == "unavailable" and "observedLimitsW" not in result
+    assert module._amd_tdp_readback(PmPort(), module.FAM_APU_FT6_NEW)["readbackMatched"] == "not-observed"
+    saved = {name: getattr(module, name) for name in ("amd_set_with", "_daemon_amd_gate_call", "log")}
+    writes = []
+    try:
+        module.log = lambda *args: None
+        module.amd_set_with = lambda p, cfg, *values: writes.append(values) or 0
+        module._daemon_amd_gate_call = lambda callback: callback()
+        port = PmPort(values=(55, 55, 55))
+        hardware = {"p": port, "cfg": module.FAM_APU_FT6_NEW}
+        def request(watts, verify=True):
+            return module._daemon_dispatch_request("amd", hardware, {"version": 1, "requestId": "fixture-current", "op": "set", "args": {"watts": watts, "verifyTdp": verify}})[0]
+        mismatch = request(31)
+        assert mismatch["rc"] == 6 and mismatch["ok"] is False and "amd_tdp_readback_mismatch" in mismatch["error"]
+        assert mismatch["result"]["amdObservation"]["observedLimitsW"]["slow"] == 55
+        assert len(writes) == 1, "readback mismatch cannot replay a write"
+        port.values = (31, 31, 31)
+        recovered = request(31)
+        assert recovered["ok"] and recovered["result"]["amdObservation"]["readbackMatched"] is True
+        assert len(writes) == 2, "a fresh explicit request must recover without a permanent latch"
+        port.calls.clear()
+        floating = request(32, False)
+        assert floating["ok"] and not port.calls and "amdObservation" not in floating["result"]
+        before_count = len(writes)
+        for bad in (1, "true", None):
+            rejected = request(32, bad)
+            assert rejected["rc"] == 2 and len(writes) == before_count
+        port.version = 0x64030C
+        unknown = request(33)
+        assert unknown["ok"] and unknown["result"]["amdObservation"]["readbackMatched"] == "not-observed"
+        hardware["cfg"] = module.FAM_APU_FT6_NEW_GENERIC
+        port.calls.clear()
+        generic = request(30)
+        assert generic["ok"] and not port.calls and "amdObservation" not in generic["result"]
+        module.amd_set_with = lambda *args: 6
+        hardware["cfg"] = module.FAM_APU_FT6_NEW
+        port.calls.clear()
+        failed_write = request(30)
+        assert failed_write["rc"] == 6 and not port.calls and "amdObservation" not in failed_write["result"]
+    finally:
+        for name, value in saved.items():
+            setattr(module, name, value)
 
 def main():
     module = load_module()

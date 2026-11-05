@@ -3,7 +3,7 @@ import {closeBrace} from '../hc_remaining_model_capabilities/expectations.mjs';
 import {MOTOR_FIXTURE,need,hash,write} from './contract.mjs';
 import {preparePhysicalFixture} from './prepare-physical-fixture.mjs';
 import {refinePhysicalBridge} from './refine-physical-bridge.mjs';
-import {lifecycleContext} from '../controller_game_motor_pipe/lifecycle-context.mjs';
+import {lifecycleContext,bindLifecycleOwnerContext} from '../controller_game_motor_pipe/lifecycle-context.mjs';
 import {targetReturnContext} from '../controller_game_motor_pipe/target-return-context.mjs';
 export function prepareCombinedFixture({sourceFile,out,sourceSet}){
  need(!fs.existsSync(out),'FRESH_COMBINED_GENERATION_REQUIRED');fs.mkdirSync(out,{recursive:true});
@@ -48,22 +48,34 @@ const fixtureHasSettings= /\bg_realStickTest\b/.test(pipe);
 if(!fixtureHasSettings)once('@@FRAME_ADMISSION@@','struct FixtureRealStickAdmission {bool enabled=true;bool virtualTargetEnabled=true;std::string virtualTargetPersona;};\nstatic FixtureRealStickAdmission g_realStickTest;\n@@FRAME_ADMISSION@@');
 once('  g_inputHostPrepared=g_inputHostNeutralized=false;','  g_realStickTest.enabled=true;g_realStickTest.virtualTargetEnabled=true;\n  g_inputHostPrepared=g_inputHostNeutralized=false;');
 const lifecycle=lifecycleContext({sourceFile,resolveInput,startProtection:true});
+const targetReturn=targetReturnContext({sourceFile,resolveInput});
+const ownerContext=bindLifecycleOwnerContext({sourceFile,resolveInput,lifecycle,targetReturn});
+once('@@ROG_IDENTITY@@',ownerContext.rogIdentity);
+// All combined paths share the original physical fixture power endpoint.
+// Do not create another power state or resurrect the removed literal anchor.
+once('@@POWER_CONTEXT@@','using PhysicalMemory::currentPowerGeneration;');
+once('@@PROTOCOL_POWER_CONTEXT@@',ownerContext.protocolPowerContext);
+for(const binding of ownerContext.bindings)if(['initialPowerGeneration','g_powerGeneration','currentPowerGeneration'].includes(binding.symbol)){binding.emitted=false;binding.environmentOwner='PhysicalMemory power endpoint';}
 once('@@FRAME_ADMISSION@@',lifecycle.code+'\n@@PERSONA_MATCH@@\n@@FRAME_ADMISSION@@');
 once('fixturePersona=selected;','fixturePersona=selected;fixtureSetMatchingPersona(selected);');
 
-const targetReturn=targetReturnContext({sourceFile,resolveInput});
+
 once('@@REQUEST@@',targetReturn.code+'\n@@REQUEST@@\n@@DIAGNOSTIC_CONSUMER@@');
 once('static void closeCommands(){','static void closeCommands(){\n inputHostLogSubmitStats("combined-writer-end");');
-once('static auto currentPowerGeneration(){return 3ULL;}','static auto currentPowerGeneration(){return PhysicalMemory::currentPowerGeneration();}');
+
 once('#include "NativeMotorPipeTests.cpp"','@@COMBINED_TESTS@@');
 
  fs.writeFileSync(path.join(out,'NativeCombined.template.cpp'),pipe,{flag:'wx'});
  refinePhysicalBridge(path.join(out,'PhysicalMemory.inc'));
  write(path.join(out,'namespace-bridge.json'),{
-  status:'SOURCE_EXACT_SHARED_FRAME_PHYSICAL_NAMESPACE_BRIDGE',mode:sourceSet.mode,
-  fullMainSha256:hash(sourceFile),sourceFile,targetReturn:{inputs:targetReturn.inputs,bindings:targetReturn.bindings,boundary:targetReturn.boundary},lifecycle:{inputs:lifecycle.inputs,bindings:lifecycle.bindings,boundaries:lifecycle.boundaries},physicalFixture:physicalBase.file,physicalRanges:physicalBase.rangeFile,
+  status:lifecycle.unclosedDefinitions.length?'DEPENDENCY_CLOSURE_REQUIRED_BEFORE_COMPILATION':'SOURCE_EXACT_SHARED_FRAME_PHYSICAL_NAMESPACE_BRIDGE',mode:sourceSet.mode,
+  fullMainSha256:hash(sourceFile),sourceFile,targetReturn:{inputs:targetReturn.inputs,bindings:targetReturn.bindings,boundary:targetReturn.boundary},lifecycle:{inputs:lifecycle.inputs,bindings:lifecycle.bindings,boundaries:lifecycle.boundaries,unclosedDefinitions:lifecycle.unclosedDefinitions.map(({code,...row})=>row)},physicalFixture:physicalBase.file,physicalRanges:physicalBase.rangeFile,
   transformations:['Separate inert hardware API symbols from actual Windows pipe API in PhysicalMemory namespace','Alias same frame/Inbox/source/power state into real native request; no second JSON conversion','Actual write/stop RAII and snapshot from physical source; actual low-frequency logger and request wrapper at existing close boundary','Only the declared fake monotonic endpoint uses Windows tick for cross-pipe freshness','ASCII-only controlled physical label converter; native pipe Unicode functions remain actual source'],
   physicalMemorySha256:hash(path.join(out,'PhysicalMemory.inc')),templateSha256:hash(path.join(out,'NativeCombined.template.cpp')),macros,controlledSettings:{enabled:true,virtualTargetEnabled:true,sharedRequestFixtureDeclarationReused:fixtureHasSettings,actualCurrentAndMayIssueNotReplaced:true,personaMatchDerivedByActualRefreshSetClear:true},productionEdited:false
  });
+ if(lifecycle.unclosedDefinitions.length){
+  write(path.join(out,'lifecycle-closure-required.json'),{schemaVersion:1,status:'DEPENDENCY_CLOSURE_REQUIRED_BEFORE_COMPILATION',sourceFile,sourceSha256:hash(sourceFile),unresolved:lifecycle.unclosedDefinitions.map(({code,...row})=>row),boundaries:lifecycle.boundaries,compilerStarted:false,businessStarted:false,semanticRejection:false,productModified:false,hardwareIo:false});
+  throw Error('CURRENT_LIFECYCLE_DEPENDENCY_CLOSURE_REQUIRED:'+lifecycle.unclosedDefinitions.map(row=>row.symbol).join(','));
+ }
  return{physicalMemory:path.join(out,'PhysicalMemory.inc'),template:path.join(out,'NativeCombined.template.cpp'),bridge:path.join(out,'namespace-bridge.json'),sourceRanges:physicalBase.rangeFile};
 }

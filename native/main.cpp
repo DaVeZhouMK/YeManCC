@@ -46,6 +46,8 @@
 #include "fan_physical_wake.h"
 #include "http_request_deadline.h"
 #include <windows.h>
+#include "power_source_state.h"
+#include "power_source_channel.h"
 #include <objbase.h> // COM declarations required before UIAutomation dependencies.
 #include "exit_cleanup_wait.h"
 #include "input_capture_completion.h"
@@ -97,6 +99,7 @@
 #include "hc_generic_motion_catalog.h"
 #include "../capabilities/HcMotionCapabilityCatalog.h"
 #include "../capabilities/HcControllerInputCapabilityCatalog.h"
+#include "../capabilities/HcOneXVirtualControllerCapability.h"
 #include "../capabilities/HcControllerFeedbackCapabilityCatalog.h"
 #include "../capabilities/HcControllerMotionCapabilityCatalog.h"
 #include "../capabilities/HcOemInputCapabilityBinding.h"
@@ -243,6 +246,7 @@ static ymcc::msi::rearObservation::Counters g_msiRearSourceObservation;
 #include "ai_fan_close_evidence.h"
 #include "log_frequency_policy.h"
 #include "virtual_signal_evidence.h"
+#include "virtual_adaptation_evidence.h"
 #include "log_snapshot_state.h"
 #include "log_jsonl_boundary.h"
 #include "steam_log_export.h"
@@ -796,8 +800,31 @@ struct FocusSessionState {
     bool ownedTopmost = false;
     ULONGLONG returnStarted = 0;
     ULONGLONG returnDeadline = 0;
+    bool lightNoGame = false;
+    bool strictReturnOnly = false;
+    bool lightForegroundAcquired = false;
+    HWND summonOrigin = nullptr;
+    ULONGLONG summonDeadline = 0;
+    ULONGLONG summonNextAt = 0;
+    ULONGLONG returnNextAt = 0;
 };
 static FocusSessionState g_focusSession;
+static unsigned long long g_focusSessionSequence = 0;
+static std::atomic<unsigned long long> g_summonRegistrationGeneration{0};
+static std::atomic<ULONGLONG> g_focusLightProofNotBefore{0};
+static void focusClearSession();
+struct FocusLightIsolationTicket {
+    unsigned long long power = 0;
+    unsigned long long rules = 0;
+    unsigned long long host = 0;
+    unsigned long long source = 0;
+    unsigned topology = 0;
+};
+static std::atomic<std::shared_ptr<const FocusLightIsolationTicket>> g_focusLightIsolationTicket;
+static bool focusLightIsolationBegin();
+static bool focusLightIsolationCurrent();
+static void focusLightRecheckOnUi();
+static void steamLightGamepadUiChanged();
 static FocusTargetSnapshot g_pendingSummonTarget; // LB/RB 首个肩键按下时抓取，防覆盖层在0.5s内抢前台
 static FocusTargetSnapshot g_rememberedGameTarget; // 一键启动LS前由前端登记的真实游戏
 static ULONGLONG g_rememberedGameDeadline = 0;
@@ -1257,6 +1284,14 @@ static int               g_lastAcState  = -1;      // -1=未初始化 0=离电(D
 static std::atomic<unsigned long long> g_acdcDebounceGeneration{1};
 static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的真实切换时间戳
 
+#define WM_POWER_SOURCE_UPDATE (WM_USER + 34)
+#define TIMER_ID_POWER_SOURCE_RECOVERY 0xA104
+static ymcc::powerSource::Heartbeat g_powerSourceHeartbeat;
+static std::atomic<bool> g_powerSourcePosted{false};
+static bool g_powerSourceRecoveryRunning=false;
+static std::uint64_t g_powerSourceRecoverySerial=0,g_powerSourceRecoveryGeneration=0;
+static int g_lastPowerEventAc=-1;
+static void beginPowerSourceRecovery(HWND h,bool sourceEdge=false);
 #define TIMER_ID_ACDC     0xA100  // 尾防抖 SetTimer id（避开已用的 99）
 #define ACDC_DEBOUNCE_MS  5000    // 每次变化后延迟 5s 刷新；期间再变化则顺延重新计时
 #define ACDC_BURST_MS     5000    // 熔断滑动窗口 = 5s
@@ -1271,12 +1306,15 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 static constexpr UINT WM_SG_ABNORMAL_EVIDENCE=WM_APP+825;
 static constexpr UINT WM_SG_STATIC_SCAN=WM_APP+826;
 static constexpr UINT WM_STEAM_WALLPAPER_FOREGROUND=WM_APP+827;
+static constexpr UINT WM_LIGHT_ISOLATION_RECHECK=WM_APP+828;
 static void steamWallpaperForegroundSignal();
 static void steamWallpaperForegroundWake();
 static void steamWallpaperForegroundObserver(bool active);
 static void steamWallpaperForegroundPreference(const json& document);
 static json steamWallpaperForegroundRead();
 static void steamWallpaperForegroundPublish();
+static void sharedGameMediaPowerChanged();
+static ymcc::media::Store& sharedGameMediaStore();
 static constexpr UINT_PTR SG_STATIC_SCAN_TIMER_ID=0xA213;
 #define RESUME_GAME_FOCUS_TIMER_ID 0xA211 // bounded, optional post-thaw focus scheduling
 // GP-926R17c（operator 指定）：唤醒对焦 nudge 的延迟计时器（5 s 一次性；无目标则跳过）。
@@ -1407,6 +1445,7 @@ static bool sgCleanupBeforeExit(bool nonBlocking = false);
 static void sgStopWorkThread(DWORD timeoutMs = INFINITE);
 static void poolStop(DWORD timeoutMs = INFINITE);
 static bool stopWatcher(FileWatcher* w, DWORD timeoutMs);
+static void cpuUvTrialStop(const char* reason);
 static void beginAsyncExit(HWND hwnd, WPARAM code, const char* trigger = "unknown");
 
 // GP-926R17 R17-2/R17-3：借用取消（纯内存）与真实电源边沿（同步失效旧借用）——前置声明，
@@ -1415,6 +1454,9 @@ static void physicalReleaseWindowCancelBorrow(const char* reason);
 static void physicalReleaseWindowOnPowerEdge(unsigned long long generation);
 static bool oemVendorStackApplyIfNeeded(const char* reason);
 static void oemVendorStackRestore(const char* reason);
+static void msiForceGamepadRequest(const char* reason,unsigned delayMs);
+static void msiForceGamepadShieldChanged(bool enabled);
+static void msiForceGamepadExitRestore();
 static void startRecoveryService();
 static void stopRecoveryService();
 
@@ -1698,6 +1740,15 @@ static void fanActivityRevokeOnCleanExit();
 static void traceInit();
 static void appendNativeLifecycleLog(const char* event, const json& observed = json::object());
 static void flushNativeLifecycleLogs(bool closeDetail = false);
+static void modelAdaptationChord(int profile,uint32_t chord,uint64_t mapped,bool mouse,int physical) noexcept;
+static void modelAdaptationProducer(unsigned source,uint64_t mask,unsigned code) noexcept;
+static void modelAdaptationOnexReport(const BYTE* raw,size_t bytes,bool orange) noexcept;
+static void modelAdaptationRogReport(const BYTE* raw,size_t bytes,unsigned code,uint64_t mapped) noexcept;
+static void modelAdaptationFlush() noexcept;
+static void modelAdaptationObserveRecord(const char* event,const json& detail) noexcept;
+static json modelAdaptationStatus();
+static void modelAdaptationCatalog() noexcept;
+static void virtualAdaptationFrameReceipt(const ymcc::virtualAdaptation::FrameStamp& stamp,const json& frame,const std::string& wireText,const std::string& requestId,const json& receipt) noexcept;
 static void monitorDetailGateChanged(bool enabled);
 static void monitorDetailIdle();
 static void monitorRecordDetailedSnapshot(long long nowMs,unsigned long long pollTime,unsigned long long periodMs,bool periodKnown,bool readable,bool healthy,const ymcc::monitorgpu::Device* selectedGpu,const ymcc::monitorgpu::Readings& gpuReadings);
@@ -2441,7 +2492,7 @@ static json sgSleepEnvironmentSnapshot() {
     SYSTEM_POWER_CAPABILITIES caps{};
     const bool capsKnown = GetPwrCapabilities(&caps) != FALSE;
     SYSTEM_POWER_STATUS status{};
-    const bool statusKnown = GetSystemPowerStatus(&status) != FALSE;
+    const bool statusKnown = ymcc::powerSource::read(status) != FALSE;
     return {
         {"capabilitiesKnown", capsKnown},
         {"systemS1", capsKnown && caps.SystemS1},
@@ -4399,18 +4450,16 @@ static double nativeCpuUsagePct(json* coreUsageOut = nullptr, bool* validOut = n
 static bool nativeBatteryStatus(bool& ac, bool& hasBattery, double& remainMin, int& batteryPercent, bool* sourceKnown = nullptr, bool* charging = nullptr) {
     if (sourceKnown) *sourceKnown = false;
     if (charging) *charging = false;
-    // ACLineStatus can briefly be 255 while Windows is switching power
-    // sources. Keep the last known value instead of treating unknown as DC.
-    static bool lastAc = true;
-    SYSTEM_POWER_STATUS sps{};
-    if (!GetSystemPowerStatus(&sps)) return false;
-    if (sourceKnown) *sourceKnown = sps.ACLineStatus == 0 || sps.ACLineStatus == 1;
-    hasBattery = sps.BatteryFlag != 255 && !(sps.BatteryFlag & 128) && sps.BatteryLifePercent <= 100;
-    if (charging) *charging = hasBattery && (sps.BatteryFlag & 8) != 0;
-    if (sps.ACLineStatus == 1) lastAc = true;
-    else if (sps.ACLineStatus == 0) lastAc = false;
-    ac = lastAc;
-    batteryPercent = hasBattery && sps.BatteryLifePercent != 255
+    // The existing monitor cadence feeds one receipt. Read all battery/source
+    // fields from that same revision, including transient UNKNOWN.
+    const auto state=ymcc::powerSource::refreshMonitor();
+    if (!state.readable) return false;
+    const auto& sps=state.status;
+    if (sourceKnown) *sourceKnown = state.known;
+    hasBattery = state.batteryKnown && state.hasBattery;
+    if (charging) *charging = hasBattery && sps.BatteryFlag != 255 && (sps.BatteryFlag & 8) != 0;
+    ac = state.known && state.ac == 1;
+    batteryPercent = hasBattery && sps.BatteryLifePercent <= 100
         ? static_cast<int>(sps.BatteryLifePercent) : -1;
     remainMin = (sps.BatteryLifeTime != 0xFFFFFFFFu && sps.BatteryLifeTime > 0)
         ? static_cast<double>(sps.BatteryLifeTime) / 60.0 : -1.0;
@@ -5154,10 +5203,26 @@ struct NativeGameValveSnapshot {
     // selection advances this lease, so a heartbeat cannot revoke a reader
     // that has just verified the same original process and rule epoch.
     unsigned long long identityGeneration = 0;
+    unsigned long long qualificationRulesEpoch = 0;
+    unsigned long long qualificationPower = 0;
+    unsigned long long qualificationInventory = 0;
 };
 static NativeGameValveSnapshot g_gameValveTarget;
 // Same elected authority, immutable publication for latency-sensitive focus consumers.
 static std::atomic<std::shared_ptr<const NativeGameValveSnapshot>> g_gameValveObservation;
+static bool focusLightNoGameQualified(ULONGLONG now) {
+    const auto observation = g_gameValveObservation.load(std::memory_order_acquire);
+    return observation && !observation->game.pid &&
+        observation->discoveryState == NativeGameDiscoveryState::Complete &&
+        observation->qualificationObservedAt && now >= observation->qualificationObservedAt &&
+        observation->qualificationObservedAt >= g_focusLightProofNotBefore.load(std::memory_order_acquire) &&
+        now - observation->qualificationObservedAt <= 30000 &&
+        observation->qualificationRulesEpoch == g_gameRulesEpoch.load(std::memory_order_acquire) &&
+        observation->qualificationPower == currentPowerGeneration() &&
+        observation->qualificationInventory == ymcc::gameInventory::invalidation.load(std::memory_order_acquire) &&
+        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+        !g_exitRequested.load(std::memory_order_acquire);
+}
 static unsigned long long g_gameValveGeneration = 0;
 static std::mutex g_gameValvePublishMx;
 static unsigned long long g_gameValvePublishedGeneration = 0;
@@ -5289,15 +5354,24 @@ static json nativeGameTargetJson(const NativeGameValveSnapshot& target) {
 static void nativeValvePublish(const NativeGameValveSnapshot& target, bool rulesAvailable = true) {
     std::lock_guard<std::mutex> publishLock(g_gameValvePublishMx);
     if (!target.generation || target.generation < g_gameValvePublishedGeneration) return;
+    const auto observed = g_gameValveObservation.load(std::memory_order_acquire);
+    if (observed && target.generation < observed->generation) return;
     const bool observationComplete = rulesAvailable && target.discoveryState == NativeGameDiscoveryState::Complete;
     if (!observationComplete) {
         // Pending discovery and unavailable inputs cannot authorize idle work.
         // Revoke previous idle proof even for a repeated tombstone generation.
         g_updateGameDetected.store(true,std::memory_order_release);
         g_updateGameObservationTick.store(0,std::memory_order_release);
+        auto unavailable = target;
+        unavailable.qualificationObservedAt = 0;
+        g_gameValveObservation.store(std::make_shared<const NativeGameValveSnapshot>(unavailable),std::memory_order_release);
     }
     if (target.generation == g_gameValvePublishedGeneration) return;
-    g_gameValveObservation.store(std::make_shared<const NativeGameValveSnapshot>(target),std::memory_order_release);
+    auto observation = target;
+    if (!observationComplete) observation.qualificationObservedAt = 0;
+    g_gameValveObservation.store(std::make_shared<const NativeGameValveSnapshot>(observation),std::memory_order_release);
+    if (g_hwnd && g_focusLightIsolationTicket.load(std::memory_order_acquire))
+        PostMessageW(g_hwnd, WM_LIGHT_ISOLATION_RECHECK, 0, 0);
     if (observationComplete) {
         g_updateGameDetected.store(target.game.pid != 0,std::memory_order_release);
         // Re-publishing a cached empty result cannot renew its idle proof.
@@ -5336,6 +5410,8 @@ static void nativeValvePublish(const NativeGameValveSnapshot& target, bool rules
 // eligible configured executable priority over other candidates.
 static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned retryCount = 0,
     NativeGameValveSnapshot* observation = nullptr) {
+    const auto qualificationPower = currentPowerGeneration();
+    const auto qualificationInventory = ymcc::gameInventory::invalidation.load(std::memory_order_acquire);
     NativeGameValveSnapshot published;
     NativeDetectedGame result;
     bool shouldPublish = false;
@@ -5432,6 +5508,11 @@ static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned re
                     g_gameValveTarget.game.pid || !g_gameValveTarget.generation ||
                     g_gameValveTarget.discoveryState != discoveryState) {
                     nativeValveClearLocked(discoveryState, qualificationObservedAt);
+                    if (discoveryState == NativeGameDiscoveryState::Complete) {
+                        g_gameValveTarget.qualificationRulesEpoch = rulesEpoch;
+                        g_gameValveTarget.qualificationPower = qualificationPower;
+                        g_gameValveTarget.qualificationInventory = qualificationInventory;
+                    }
                 }
                 shouldPublish = true;
             } else {
@@ -6312,6 +6393,7 @@ static void nativeMonitorLoop() {
     // A5（191 §2）：闲置转换的"清理一次"标记；活跃期每轮复位，保证下一次闲置转换
     // 仍会清理一次，而同一段闲置期间不会重复删除。
     bool idleCleanupDone = false;
+    ULONGLONG powerMonitorSampleAt=GetTickCount64();
     for (;;) {
         bool top = false, fps = false, fileSystemDemand = true;
         unsigned long long iterGeneration = 0, iterFpsEpoch = 0;
@@ -6331,7 +6413,12 @@ static void nativeMonitorLoop() {
                 iterGeneration = monitorSnapshotGeneration();
             }
         }
-        if (!top) { batteryFallback.stop(); batteryModel.reset(); fpsLimitReader.reset(); fileSystemReader.reset(); } // No demand => no independent collection.
+        if (!top) { batteryModel.reset(); fpsLimitReader.reset(); fileSystemReader.reset(); }
+        const auto powerMonitorNeeded=[] {
+            return ymcc::powerSource::monitorNeeded(ymcc::powerSource::snapshot(),
+                g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready);
+        };
+        if (!top && !powerMonitorNeeded()) batteryFallback.stop();
         if (!top || !fileSystemDemand) fileSystemReader.reset();
         if (!fps) frameOutput.reset();
         if (!top && !fps) {
@@ -6350,10 +6437,29 @@ static void nativeMonitorLoop() {
                 monitorDetailIdle();
                 idleCleanupDone = true;
             }
+            // Display demand may sleep indefinitely, but a battery machine
+            // keeps one quiet 30s monitor lane. It never reads HWiNFO, RTSS,
+            // CPU/process counters, files, or starts a second timer/thread.
             std::unique_lock<std::mutex> lock(g_nativeMonitorMx);
-            g_nativeMonitorCv.wait(lock, [] {
-                return monitorIdleWaitPredicate(g_nativeMonitorStop, g_nativeMonitorTop, g_nativeMonitorFps);
-            });
+            if (!powerMonitorNeeded()) {
+                g_nativeMonitorCv.wait(lock, [&] {
+                    return monitorIdleWaitPredicate(g_nativeMonitorStop,g_nativeMonitorTop,g_nativeMonitorFps)||powerMonitorNeeded();
+                });
+            } else {
+                const auto delay=ymcc::powerSource::monitorDelay(powerMonitorSampleAt,GetTickCount64());
+                if (delay) g_nativeMonitorCv.wait_for(lock,std::chrono::milliseconds(delay),[&] {
+                    return monitorIdleWaitPredicate(g_nativeMonitorStop,g_nativeMonitorTop,g_nativeMonitorFps)||!powerMonitorNeeded();
+                });
+                else {
+                    lock.unlock();
+                    const auto state=ymcc::powerSource::refreshMonitor();
+                    powerMonitorSampleAt=GetTickCount64();
+                    const auto boundary=ymcc::powerSource::owner().monitorBoundary();
+                    const auto tick=GetTickCount64();
+                    (void)batteryFallback.sample(tick,state.known,state.ac==1);
+                    (void)ymcc::powerSource::owner().monitorEvent(batteryFallback.sourceAc(),tick,boundary);
+                }
+            }
             continue;
         }
         idleCleanupDone = false;
@@ -6471,13 +6577,17 @@ static void nativeMonitorLoop() {
         double winRemain = -1.0;
         bool powerSourceKnown = false, charging = false;
         nativeBatteryStatus(ac, hasBattery, winRemain, batteryPercent, &powerSourceKnown, &charging);
+        powerMonitorSampleAt=GetTickCount64();
         ymcc::monitorbattery::Power battery;
         ymcc::monitorbattery::RemainingTime batteryTime;
         // Sole data layer, cached battery query once at the existing 1 Hz cadence.
         // Even a real HWiNFO Rate shares this capacity snapshot for aligned runtime.
         if (ymcc::monitorbattery::eligible(top, hasBattery, batteryPercent)) {
             const auto tick = GetTickCount64();
+            const auto boundary=ymcc::powerSource::owner().monitorBoundary();
             const auto fallback = batteryFallback.sample(tick, powerSourceKnown, ac);
+            const auto verified=ymcc::powerSource::owner().monitorEvent(batteryFallback.sourceAc(),tick,boundary);
+            powerSourceKnown=verified.known;ac=verified.ac==1;
             if (hwHealthy && hw.chargeWFound && !batteryFallback.hasMultipleSystemBatteries()) {
                 battery = ymcc::monitorbattery::measuredRate(hw.chargeW, "hwinfo", powerSourceKnown,
                                                             ac, charging, powerSourceKnown && !ac);
@@ -6494,7 +6604,17 @@ static void nativeMonitorLoop() {
             const double sensorRemain = hwHealthy && hw.remainMin >= 0 && !batteryFallback.hasMultipleSystemBatteries() ? hw.remainMin : winRemain;
             batteryTime = ymcc::monitorbattery::remainingTime(battery, batteryFallback.remaining(batteryPercent),
                                                              true, powerSourceKnown, ac, charging, sensorRemain);
-        } else { batteryFallback.stop(); batteryModel.reset(); }
+        } else {
+            batteryModel.reset();
+            if (ymcc::powerSource::snapshot().batteryKnown && !hasBattery) batteryFallback.stop();
+            else {
+                const auto boundary=ymcc::powerSource::owner().monitorBoundary();
+                const auto tick=GetTickCount64();
+                (void)batteryFallback.sample(tick,powerSourceKnown,ac);
+                const auto verified=ymcc::powerSource::owner().monitorEvent(batteryFallback.sourceAc(),tick,boundary);
+                powerSourceKnown=verified.known;ac=verified.ac==1;
+            }
+        }
         const double remain = batteryTime.valid ? batteryTime.minutes : -1;
         json coreUsage = json::array(); bool cpuUsageValid = false;
         // FPS-only policy demand never needs a CPU snapshot. Keep collection
@@ -6667,6 +6787,17 @@ static void nativeMonitorSetMode(bool top, bool fps, bool enabled,
     if(!hadDemand&&hasDemand)g_monitorHWiNFORecoveryElevationAllowed.store(true,std::memory_order_release);
     if (wasFps != g_nativeMonitorFps) ++g_nativeMonitorFpsEpoch;
     monitorSnapshotOnModeChange(top, fps, enabled, g_nativeMonitorTop, g_nativeMonitorFps);
+    g_nativeMonitorCv.notify_all();
+}
+
+static void ensureNativePowerMonitor() {
+    if(g_exitRequested.load(std::memory_order_acquire)||
+       !ymcc::powerSource::monitorNeeded(ymcc::powerSource::snapshot(),
+           g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready)) return;
+    std::lock_guard<std::mutex> lock(g_nativeMonitorMx);
+    if(!g_nativeMonitorThread.joinable()){
+        g_nativeMonitorStop=false;g_nativeMonitorThread=std::thread(nativeMonitorLoop);
+    }
     g_nativeMonitorCv.notify_all();
 }
 
@@ -7517,11 +7648,12 @@ static void closeScreenTouchpadsForExit(const char* entry) {
     appendNativeLifecycleLog("screen-touchpads-exit-release",receipt);
 }
 static void beginAsyncExit(HWND hwnd, WPARAM code, const char* trigger) {
+    cpuUvTrialStop("exit");
     g_optiCatalogStartup.cancel();
     if (!hwnd || !IsWindow(hwnd)) return;
     bool expected = false;
     if (!g_exitRequested.compare_exchange_strong(expected, true)) return;
-    focusLosslessReturnCancel();
+    focusClearSession();
     g_exitCode.store(code, std::memory_order_relaxed);
     ymcc::screenpads::quiesceForOwner(); // Input HWNDs withdraw before external cleanup can wait.
     g_exitBeginTick=GetTickCount64();
@@ -8443,43 +8575,72 @@ static bool refocusWebView(bool allowAltFallback = false) {
 }
 
 static void focusReleaseOwnedTopmost() {
-    if (g_focusSession.ownedTopmost && g_hwnd && IsWindow(g_hwnd))
+    const bool ownedTopmost = g_focusSession.ownedTopmost;
+    g_focusSession.ownedTopmost = false;
+    if (ownedTopmost && g_hwnd && IsWindow(g_hwnd))
         SetWindowPos(g_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    g_focusSession.ownedTopmost = false;
 }
 
 static void focusClearSession() {
+    ++g_focusSessionSequence;
+    const bool strictReturnOnly = g_focusSession.lightNoGame || g_focusSession.strictReturnOnly;
+    const bool ownedTopmost = g_focusSession.ownedTopmost;
+    g_focusLightIsolationTicket.store({}, std::memory_order_release);
+    g_summonRegistrationGeneration.store(0, std::memory_order_release);
+    steamLightGamepadUiChanged();
+    if (g_focusSession.lightNoGame) g_deferFirstShow = false;
     focusLosslessReturnCancel();
     if (g_hwnd) {
         KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
         KillTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID);
     }
-    focusReleaseOwnedTopmost();
     g_focusSession = {};
+    g_focusSession.strictReturnOnly = strictReturnOnly;
     g_pendingSummonTarget = {};
     g_summonFocusRetries = 0;
     g_summonAltTried = false;
     g_bClosePending = false;
     g_bClosePendingSince = 0;
     g_bCloseReadyAt = 0;
+    if (ownedTopmost && g_hwnd && IsWindow(g_hwnd))
+        SetWindowPos(g_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-static void focusPrepareSummonSession() {
+static bool focusPrepareSummonSession() {
+    if (g_focusSession.lightNoGame && g_focusSession.active && !g_focusSession.returning &&
+        focusMainWindowIsForeground()) return true;
     focusLosslessReturnCancel();
     const bool summonedFromAnotherProcess = !focusMainWindowIsForeground();
+    const bool lightNoGame = focusLightIsolationBegin();
+    const auto sequence = ++g_focusSessionSequence;
     if (g_pendingSummonTarget.valid || summonedFromAnotherProcess) {
         focusReleaseOwnedTopmost();
+        if (sequence != g_focusSessionSequence) return false;
         g_focusSession = {};
         g_focusSession.target = g_pendingSummonTarget;
     }
     g_pendingSummonTarget = {};
+    g_focusSession.lightNoGame = lightNoGame;
+    g_focusSession.strictReturnOnly = lightNoGame;
+    g_focusSession.lightForegroundAcquired = false;
+    g_focusSession.summonOrigin = GetForegroundWindow();
+    g_focusSession.summonDeadline = GetTickCount64() + 1200;
+    g_focusSession.summonNextAt = GetTickCount64() + 80;
+    if (lightNoGame) g_focusSession.target = focusCaptureTarget(g_focusSession.summonOrigin);
     g_focusSession.active = true;
     g_focusSession.returning = false;
     g_focusSession.returnStarted = 0;
     g_focusSession.returnDeadline = 0;
+    appendNativeLifecycleLog("summon-isolation-selected", {
+        {"session", sequence}, {"mode", lightNoGame ? "light-no-game" : "original"},
+        {"authority", "unique-game-observation"}, {"nativeBorrowExemptionRequested", lightNoGame},
+        {"physicalIsolationPolicy", lightNoGame ? "keep-device-steam-navigation-lease" : "original-owner"}
+    });
     const LONG_PTR exStyle = GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE);
     if ((exStyle & WS_EX_TOPMOST) == 0) g_focusSession.ownedTopmost = true;
+    return true;
 }
 
 static HMONITOR focusCurrentTargetMonitor() {
@@ -8787,10 +8948,65 @@ static bool focusForegroundIsTransientOrShell() {
 
 #include "lossless_return_focus.h"
 
+static bool focusLightMayRefocus(ULONGLONG now) {
+    if (!g_focusSession.lightNoGame) return true;
+    if (!g_focusSession.active || g_focusSession.returning || !focusLightIsolationCurrent()) return false;
+    if (g_focusSession.lightForegroundAcquired) return focusMainWindowIsForeground();
+    const auto foreground = GetForegroundWindow();
+    return now < g_focusSession.summonDeadline &&
+        (!foreground || foreground == g_focusSession.summonOrigin || focusMainWindowIsForeground());
+}
+
+static void focusLightForegroundChanged() {
+    if (g_focusSession.lightNoGame && g_focusSession.active && !g_focusSession.returning &&
+        GetForegroundWindow() && !focusLightMayRefocus(GetTickCount64()))
+        focusClearSession();
+}
+
+static bool focusLightReturnTick(ULONGLONG now) {
+    if (!g_focusSession.lightNoGame || !g_focusSession.active || !g_focusSession.returning) return true;
+    if (!focusLightIsolationCurrent() || now >= g_focusSession.returnDeadline) return true;
+    const auto target = g_focusSession.target;
+    DWORD pid = 0;
+    if (!target.valid || !target.hwnd || !target.pid || !target.processCreated || target.path.empty() ||
+        !isUsableFocusWindow(target.hwnd, target.pid) || focusGameControlBlocked() ||
+        focusPidIsManuallyPaused(target.pid)) return true;
+    GetWindowThreadProcessId(target.hwnd, &pid);
+    std::wstring path;
+    ULONGLONG created = 0;
+    if (pid != target.pid || !focusQueryProcessIdentity(pid, &path, &created) ||
+        created != target.processCreated || _wcsicmp(path.c_str(), target.path.c_str()) != 0 ||
+        focusWindowClass(target.hwnd) != target.className) return true;
+    const auto foreground = GetForegroundWindow();
+    if (foreground == target.hwnd) return true;
+    if (foreground && !focusMainWindowIsForeground()) return true;
+    if (now < g_focusSession.returnNextAt) return false;
+    g_focusSession.returnNextAt = now + 50;
+    SetForegroundWindow(target.hwnd);
+    return GetForegroundWindow() == target.hwnd;
+}
+
 static void focusBeginReturnToPreviousWindow(ULONGLONG now) {
     KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
     g_summonFocusRetries = 0;
     g_summonAltTried = false;
+    if (g_focusSession.lightNoGame || g_focusSession.strictReturnOnly) {
+        if (g_focusSession.returning) return;
+        const auto sequence = g_focusSessionSequence;
+        g_focusSession.returning = true;
+        g_focusSession.returnStarted = now;
+        g_focusSession.returnDeadline = now + 800;
+        g_focusSession.returnNextAt = 0;
+        focusReleaseOwnedTopmost();
+        if (sequence != g_focusSessionSequence || !g_focusSession.returning) return;
+        const bool completed = focusLightReturnTick(now);
+        if (sequence != g_focusSessionSequence || !g_focusSession.returning) return;
+        hideWindowAnimated(g_hwnd);
+        if (sequence != g_focusSessionSequence || !g_focusSession.returning) return;
+        if (completed) focusClearSession();
+        else SetTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID, 50, nullptr);
+        return;
+    }
     if (focusLosslessReturnBegin(now)) return;
     g_focusSession.returning = true;
     g_focusSession.returnStarted = now;
@@ -8985,17 +9201,22 @@ static void armPowerResumeWatchdog(unsigned long long generation, UINT delayMs) 
 
 static void bringToFront(HWND hwnd, bool maximizeWindow = false) {
     if (!hwnd) return;
-    focusPrepareSummonSession();
+    if (!focusPrepareSummonSession()) return;
+    const auto sequence = g_focusSessionSequence;
     focusReflowMainWindow();
+    if (sequence != g_focusSessionSequence) return;
     // 最小化(WS_VISIBLE 仍在但已收进任务栏，IsWindowVisible 仍返回 TRUE)也必须恢复，
     // 否则呼出/抢焦时 ShowWindow 被跳过 → 窗口仍是最小化、看不到（"程序觉得有页面但实际没有"）。
     // Always use the normal restore path.  The HWND can remain marked visible
     // after an animated tray hide while WebView2 and the frontend media are
     // already paused, so a controller-only restore is not sufficient.
     showWindowAnimated(hwnd, maximizeWindow ? SW_MAXIMIZE : IsIconic(hwnd) ? SW_RESTORE : SW_SHOW, false);
+    if (sequence != g_focusSessionSequence) return;
     ipc_emit("window.summoned", {});
     // 置顶仅属于本次呼出会话；隐藏/返回游戏时恢复原状态。
-    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE |
+        (g_focusSession.lightNoGame ? SWP_NOACTIVATE : 0));
+    if (sequence != g_focusSessionSequence) return;
     // 先使用标准前台切换；失败后定时器只进行一次 Alt 兼容兜底。
     g_summonFocusRetries = 0;
     g_summonAltTried = false;
@@ -9003,10 +9224,15 @@ static void bringToFront(HWND hwnd, bool maximizeWindow = false) {
     // the Alt-assisted foreground handoff immediately so the first controller
     // input is delivered to YeManCC without requiring a mouse click.  The
     // bounded timer below remains as a retry for compositor races.
-    if (refocusWebView(true)) {
-        KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
+    if (!focusLightMayRefocus(GetTickCount64())) {
+        focusClearSession();
     } else {
-        SetTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID, 80, nullptr);
+        const bool focused = refocusWebView(true);
+        if (sequence != g_focusSessionSequence) return;
+        if (focused) {
+            if (g_focusSession.lightNoGame) g_focusSession.lightForegroundAcquired = true;
+            KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
+        } else SetTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID, 80, nullptr);
     }
 }
 // 后台手柄轮询线程：检测任意手柄 LB+RB 同时按住满 0.5 秒 → 呼出程序（仅当窗口未在前台时）
@@ -9025,7 +9251,7 @@ static void openTouchKeyboard();   // 选择 + X → 呼出 Windows 触摸键盘
 static bool returnToDesktop();     // 选择 + A → 内部 Win+D 立即返回桌面
 static void toggleMouseMode();     // 选择 + Y → 启停当前选中的模拟鼠标后端
 static void ipc_emit(const std::string& ev, const json& data);
-static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target);
+static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target, unsigned long long summonGeneration);
 static bool poolSubmit(std::function<void()> job);
 
 // Keep the first summon notification free of process enumeration and file I/O.
@@ -9055,7 +9281,8 @@ static void queueSummonGameRegistration(
     unsigned long long summonGeneration) {
     if (!target.valid || !target.pid || target.pid == GetCurrentProcessId()) return;
     poolSubmit([target, summonGeneration] {
-        json result = nativeAutoRegisterSummonGame(target);
+        if (g_summonRegistrationGeneration.load(std::memory_order_acquire) != summonGeneration) return;
+        json result = nativeAutoRegisterSummonGame(target, summonGeneration);
         result["summonGeneration"] = summonGeneration;
         if (!g_hwnd || g_exitRequested.load(std::memory_order_acquire)) return;
         auto* payload = new json(result);
@@ -9331,6 +9558,27 @@ static YmccXInputSetStateFn ymccResolveXInputSetState14() {
         } catch(...) {}
     });
     return g_ymccXInputSetState14;
+}
+
+// Read-only evidence for the explicit OneX manual test, from the SAME module
+// that owns the canonical slot namespace. Never change routing on its result.
+static json nativeManualXInputCapabilitiesEvidence(DWORD slot) {
+    json row={{"attempted",false},{"physicalMotorEffectObserved",false}};
+    if (!g_ymccXInput14Module) return row;
+    using GetCapsFn=DWORD (WINAPI*)(DWORD,DWORD,XINPUT_CAPABILITIES*);
+    const auto getCaps=reinterpret_cast<GetCapsFn>(GetProcAddress(g_ymccXInput14Module,"XInputGetCapabilities"));
+    row["resolved"]=getCaps!=nullptr;
+    if (!getCaps) return row;
+    XINPUT_CAPABILITIES caps{};
+    const DWORD rc=getCaps(slot,0,&caps);
+    row["attempted"]=true;row["rc"]=rc;
+    if (rc==ERROR_SUCCESS) {
+        row["type"]=caps.Type;row["subType"]=caps.SubType;row["flags"]=caps.Flags;
+        row["leftMotorMaximum"]=caps.Vibration.wLeftMotorSpeed;
+        row["rightMotorMaximum"]=caps.Vibration.wRightMotorSpeed;
+    }
+    row["scope"]="same-canonical-module-capability-report;not-motor-response";
+    return row;
 }
 
 static DWORD ymccXInputSetState14(DWORD userIndex, XINPUT_VIBRATION* vibration) {
@@ -11600,6 +11848,7 @@ static void oemBackHookRecompute() {
     uint32_t prefixMask = 0;
     oemChordEvalRules(profileId, kbDown, mouseChord, gpdIfaceReady,
                       &keyMask, &state, &physState, &baseKeyMask, &prefixMask);
+    modelAdaptationChord(profileId,kbDown,keyMask,mouseChord,physState); // POD-only unique adaptation witness.
     // GP-MSIG3E-2-R1（R4）：这里只发布**原始**键盘结果——不再把"按 MSI 权威过滤后的缓存"写进
     // 发布态：缓存会让来源切换/失效时出现 1→0→1 的假边沿（同一物理按压被当成第二次按下）。
     // 来源选择移到**消费边界**（oemBackMergedKeyMask / oemBackMergedDisplayState）按 MSI 专用
@@ -14373,6 +14622,7 @@ static bool onexBackBind() {
 // 事件式解析（按下/释放两条帧）→ 累积位图 → g_oemBackState。
 static void onexBackParse(const BYTE* data, size_t len, uint64_t actionGeneration) {
     if (actionGeneration && !oemProducerCurrent(OemProducerId::OneX, actionGeneration)) return;
+    modelAdaptationOnexReport(data,len,g_onexBack.desc.role21Orange);
     data = ymcc::capabilities::oem::onex::inputFrame(data, len);
     if (!data) return;
     if (data[0] == kOnexBackStatusCmd) {
@@ -14555,6 +14805,46 @@ static HANDLE g_oxp3OwnerRetiredProcess = 0;
 static std::string g_oxp3OwnerRetiredProcessToken;
 static std::atomic<bool> g_oxp3OwnerChildReturnObserved{false};
 static std::atomic<std::uint64_t> g_oxp3OwnerAdmissionSequence{0};
+static std::mutex g_legacyLightSetterDebtMx;
+static HANDLE g_legacyLightSetterRetiredProcess = nullptr;
+static bool legacyLightSetterDebtClass(const std::string& deviceClass) {
+    return deviceClass == "HandheldCompanion.Devices.OneXPlayerOneXFly" ||
+        deviceClass == "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro" ||
+        deviceClass == "HandheldCompanion.Devices.OneXPlayerG1" ||
+        deviceClass == "HandheldCompanion.Devices.OneXPlayerG1AMD" ||
+        deviceClass == "HandheldCompanion.Devices.OneXPlayerG1Intel";
+}
+static bool legacyLightSetterReapReturned() noexcept {
+    HANDLE returned = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_legacyLightSetterDebtMx);
+        if (!g_legacyLightSetterRetiredProcess ||
+            WaitForSingleObject(g_legacyLightSetterRetiredProcess, 0) != WAIT_OBJECT_0) return false;
+        returned = g_legacyLightSetterRetiredProcess;
+        g_legacyLightSetterRetiredProcess = nullptr;
+    }
+    CloseHandle(returned);
+    return true;
+}
+static bool legacyLightSetterHasDebt() noexcept {
+    (void)legacyLightSetterReapReturned();
+    std::lock_guard<std::mutex> lock(g_legacyLightSetterDebtMx);
+    return g_legacyLightSetterRetiredProcess != nullptr;
+}
+static bool legacyLightSetterRetain(HANDLE process) noexcept {
+    if (!process) return false;
+    std::lock_guard<std::mutex> lock(g_legacyLightSetterDebtMx);
+    if (g_legacyLightSetterRetiredProcess) return false;
+    g_legacyLightSetterRetiredProcess = process;
+    return true;
+}
+static bool legacyLightSetterStopRetire(std::uint64_t deadline) noexcept {
+    while (legacyLightSetterHasDebt()) {
+        if (GetTickCount64() >= deadline) return false;
+        Sleep(10);
+    }
+    return true;
+}
 static bool oxp3OwnerDenyWrite() { return false; }
 static bool oxp3OwnerDenyBind(const std::wstring&) { return false; }
 static bool onexX2OwnerWriteAllowed() {
@@ -14785,8 +15075,23 @@ static bool oxp3OwnerAdmit(std::uint64_t deadline, std::string& reason) {
     }
     // Drain the previous initialization write through short state transactions;
     // never hold the input/stop owner mutex across the wait or Sleep.
-    auto state = g_onexX2Transport.snapshot();
-    bool live = g_onexX2Transport.hasDevice();
+    struct OwnerSnapshot {
+        ymcc::onex_x2::Snapshot state{};
+        bool live = false;
+        std::wstring path;
+        std::uint64_t topology = 0;
+    };
+    // Called only under g_onexX2OwnerMx. Never borrow the transport's path
+    // across that lock, and keep every admission/debt decision on one sample.
+    const auto observeLocked = [](std::uint64_t now) {
+        // A detached tick can discover devices; only service an already-live
+        // owner here. Retirement cannot rebind in this same tick's backoff.
+        if (g_onexX2Transport.snapshot().phase == ymcc::onex_x2::Phase::Live)
+            g_onexX2Transport.tick(now, oxp3OwnerDenyWrite, oxp3OwnerDenyBind);
+        return OwnerSnapshot{g_onexX2Transport.snapshot(), g_onexX2Transport.hasDevice(),
+            g_onexX2Transport.devicePath(), g_onexX2DeviceEpoch.load(std::memory_order_acquire)};
+    };
+    OwnerSnapshot observed;
     for (;;) {
         bool stopRequested = false;
         {
@@ -14801,16 +15106,15 @@ static bool oxp3OwnerAdmit(std::uint64_t deadline, std::string& reason) {
         const ULONGLONG now = GetTickCount64();
         {
             std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
-            g_onexX2Transport.tick(now, oxp3OwnerDenyWrite, oxp3OwnerDenyBind);
-            state = g_onexX2Transport.snapshot();
-            live = g_onexX2Transport.hasDevice();
+            observed = observeLocked(now);
         }
         oxp3OwnerHeartbeat(now);
-        if (state.phase != ymcc::onex_x2::Phase::Live || !state.writePending) break;
+        if (observed.state.phase != ymcc::onex_x2::Phase::Live || !observed.state.writePending) break;
         if (GetTickCount64() >= deadline) break;
         Sleep(5);
     }
-    if (state.phase != ymcc::onex_x2::Phase::Live || !live ||
+    const auto& state = observed.state;
+    if (state.phase != ymcc::onex_x2::Phase::Live || !observed.live ||
         state.requested != expectedModel || state.bound != expectedModel) {
         oxp3OwnerAbandonReservation();
         reason = "owner-quiesce-not-live";
@@ -14818,9 +15122,8 @@ static bool oxp3OwnerAdmit(std::uint64_t deadline, std::string& reason) {
     }
     if (state.writePending) {
         // Retain the outstanding initialization debt instead of claiming ready.
-        const std::uint64_t topology = g_onexX2DeviceEpoch.load(std::memory_order_acquire);
-        oxp3OwnerRetainDebtRecord(state.generation, topology, g_onexX2Transport.devicePath(),
-            ymcc::oxp3_owner::makeAdmissionToken(state.generation, topology, reservedAdmission));
+        oxp3OwnerRetainDebtRecord(state.generation, observed.topology, observed.path,
+            ymcc::oxp3_owner::makeAdmissionToken(state.generation, observed.topology, reservedAdmission));
         reason = "owner-pending-write-debt";
         return false;
     }
@@ -14829,8 +15132,8 @@ static bool oxp3OwnerAdmit(std::uint64_t deadline, std::string& reason) {
         reason = "owner-initialization-not-complete"; return false;
     }
     const std::uint64_t generation = state.generation;
-    const std::uint64_t topology = g_onexX2DeviceEpoch.load(std::memory_order_acquire);
-    const std::wstring interfacePath = g_onexX2Transport.devicePath();
+    const std::uint64_t topology = observed.topology;
+    const std::wstring interfacePath = observed.path;
     const std::string token = ymcc::oxp3_owner::makeAdmissionToken(generation, topology, reservedAdmission);
     const std::wstring eventName = oxp3OwnerEventNameFor(token);
     if (g_oxp3OwnerRevokedEvent && g_oxp3OwnerEventName != eventName) {
@@ -14852,41 +15155,44 @@ static bool oxp3OwnerAdmit(std::uint64_t deadline, std::string& reason) {
         reason = "owner-event-reset-failed";
         return false;
     }
+    bool matched = false, published = false;
+    OwnerSnapshot finalObserved;
     {
         std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
-        g_onexX2Transport.tick(GetTickCount64(), oxp3OwnerDenyWrite, oxp3OwnerDenyBind);
-        state = g_onexX2Transport.snapshot();
-        live = g_onexX2Transport.hasDevice();
+        finalObserved = observeLocked(GetTickCount64());
+        const auto& finalState = finalObserved.state;
+        matched = finalState.phase == ymcc::onex_x2::Phase::Live && finalObserved.live &&
+            !finalState.writePending && finalState.initialized &&
+            finalState.requested == expectedModel && finalState.bound == expectedModel &&
+            g_machineIdentity.family == YmccFamily::OneXPlayer &&
+            ymcc::onex_x2::modelForClass(g_machineIdentity.deviceClass) == expectedModel &&
+            finalState.generation == generation && finalObserved.topology == topology &&
+            finalObserved.path == interfacePath;
+        if (matched) {
+            // Same owner -> state order as the existing capture tick. Keep the
+            // final match and Active publication in this short owner transaction.
+            std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
+            if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Admitting) {
+                g_oxp3OwnerLease.generation.store(generation, std::memory_order_release);
+                g_oxp3OwnerLease.topology.store(topology, std::memory_order_release);
+                g_oxp3OwnerLease.modelTag.store(static_cast<std::uint32_t>(expectedModel), std::memory_order_release);
+                g_oxp3OwnerLease.interfacePath = W2U(interfacePath);
+                g_oxp3OwnerInterfacePath = interfacePath;
+                g_oxp3OwnerLease.generationToken = token;
+                g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Active;
+                oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Active);
+                published = true;
+            }
+        }
     }
-    if (state.phase != ymcc::onex_x2::Phase::Live || !live || state.writePending || !state.initialized ||
-        state.requested != expectedModel || state.bound != expectedModel ||
-        g_machineIdentity.family != YmccFamily::OneXPlayer ||
-        ymcc::onex_x2::modelForClass(g_machineIdentity.deviceClass) != expectedModel ||
-        state.generation != generation || g_onexX2DeviceEpoch.load(std::memory_order_acquire) != topology ||
-        g_onexX2Transport.devicePath() != interfacePath) {
-        if (state.writePending)
-            oxp3OwnerRetainDebtRecord(generation, topology, interfacePath, token);
+    if (!matched) {
+        if (finalObserved.state.writePending)
+            oxp3OwnerRetainDebtRecord(finalObserved.state.generation, finalObserved.topology, finalObserved.path,
+                ymcc::oxp3_owner::makeAdmissionToken(finalObserved.state.generation, finalObserved.topology, reservedAdmission));
         else
             oxp3OwnerAbandonReservation();
-        reason = state.writePending ? "owner-pending-write-debt" : "owner-quiesce-not-live";
+        reason = finalObserved.state.writePending ? "owner-pending-write-debt" : "owner-quiesce-not-live";
         return false;
-    }
-    bool published = false;
-    {
-        std::lock_guard<std::mutex> stateLock(g_oxp3OwnerStateMx);
-        if (g_oxp3OwnerState == ymcc::oxp3_owner::OwnerState::Admitting) {
-            g_oxp3OwnerLease.generation.store(generation, std::memory_order_release);
-            g_oxp3OwnerLease.topology.store(topology, std::memory_order_release);
-            g_oxp3OwnerLease.modelTag.store(static_cast<std::uint32_t>(expectedModel), std::memory_order_release);
-            g_oxp3OwnerLease.interfacePath = W2U(interfacePath);
-            g_oxp3OwnerInterfacePath = interfacePath;
-            g_oxp3OwnerLease.generationToken = token;
-            g_oxp3OwnerState = ymcc::oxp3_owner::OwnerState::Active;
-            // Publish the authoritative handoff inside the same transaction so a
-            // concurrent stop cannot leave an Active record behind Retiring state.
-            oxp3OwnerPublishLeaseState(ymcc::oxp3_owner::OwnerState::Active);
-            published = true;
-        }
     }
     if (!published) {
         oxp3OwnerAbandonReservation();
@@ -15206,8 +15512,11 @@ static ymcc::superjoy_owner::Context superJoyLightingContext() {
         g_superJoyLightingNotifyReady.load(std::memory_order_acquire), g_machineIdentity.deviceClass};
 }
 static bool superJoyLightingRouteAdmitted() {
-    return ymcc::superjoy_owner::sourceModel(g_machineIdentity.deviceClass) &&
-        ymcc::lighting::sourceAdapter(g_machineIdentity.deviceClass) == ymcc::lighting::SourceAdapter::SuperJoyCec;
+    const auto& model = g_machineIdentity.deviceClass;
+    if (!ymcc::superjoy_owner::sourceModel(model)) return false;
+    const auto expected = model == "HandheldCompanion.Devices.OneXPlayerApex" ?
+        ymcc::lighting::SourceAdapter::ApexHidV2 : ymcc::lighting::SourceAdapter::SuperJoyCec;
+    return ymcc::lighting::sourceAdapter(model) == expected;
 }
 static bool superJoyLightingEnsureNotification() {
     std::lock_guard<std::mutex> lock(g_superJoyLightingNotifyMx);
@@ -15242,12 +15551,43 @@ static void superJoyLightingObserveDeviceChange(WPARAM event, LPARAM payload) {
 static bool superJoyLightingSelectInterface(std::wstring& selected, std::string& reason) {
     selected.clear();
     const auto before = superJoyLightingContext();
+    // Same already-required enumeration, only for exact APEX. This receipt
+    // grants no write, fallback, protocol match or physical-effect proof.
+    const bool apex = before.model == "HandheldCompanion.Devices.OneXPlayerApex";
+    json observed = apex ? json::array() : json();
+    unsigned enumerated = 0, candidates = 0;
+    const auto candidate = [&](const std::wstring& path, bool opened,
+        const HIDD_ATTRIBUTES* attrs, const HIDP_CAPS* caps, bool matches) noexcept {
+        if (!apex) return;
+        ++candidates;
+        try {
+            if (observed.size() >= 4) return;
+            observed.push_back({{"path", W2U(path).substr(0, 260)}, {"pathTruncated", path.size() > 260},
+                {"openedForMetadata", opened}, {"attributesObserved", attrs != nullptr}, {"capsObserved", caps != nullptr},
+                {"vid", attrs ? json(attrs->VendorID) : json(nullptr)}, {"pid", attrs ? json(attrs->ProductID) : json(nullptr)},
+                {"usagePage", caps ? json(caps->UsagePage) : json(nullptr)}, {"usage", caps ? json(caps->Usage) : json(nullptr)},
+                {"inputReportBytes", caps ? json(caps->InputReportByteLength) : json(nullptr)},
+                {"outputReportBytes", caps ? json(caps->OutputReportByteLength) : json(nullptr)}, {"descriptorMatched", matches}});
+        } catch (...) { /* Observation cannot alter selection. */ }
+    };
+    const auto note = [&](bool admitted) noexcept {
+        if (!apex) return;
+        try { appendNativeLifecycleLog("onex-lighting-discovery", {
+            {"schemaVersion", 1}, {"deviceClass", before.model}, {"route", "onex-apex-hid-v2"},
+            {"powerGeneration", before.generation}, {"topologyGeneration", before.topology},
+            {"selected", admitted}, {"reason", admitted ? "selected" : reason},
+            {"enumeratedInterfaces", enumerated}, {"candidateCount", candidates}, {"candidateLimit", 4},
+            {"candidatesOmitted", candidates > observed.size() ? candidates - observed.size() : 0},
+            {"candidates", observed}, {"hardwareWriteProven", false}, {"physicalEffectProven", false}});
+        } catch (...) { /* Optional diagnostics never change admission. */ }
+    };
+
     if (!before.writesAllowed || !ymcc::superjoy_owner::sourceModel(before.model)) {
-        reason = "superjoy-owner-context-unavailable"; return false;
+        reason = "superjoy-owner-context-unavailable"; note(false); return false;
     }
     HDEVINFO set = SetupDiGetClassDevsW(&kYeManGuidDeviceInterfaceHid, nullptr, nullptr,
         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    if (set == INVALID_HANDLE_VALUE) { reason = "superjoy-hid-enumeration-failed"; return false; }
+    if (set == INVALID_HANDLE_VALUE) { reason = "superjoy-hid-enumeration-failed"; note(false); return false; }
     bool valid = true, finished = false;
     for (DWORD index = 0; index < 4096; ++index) {
         SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
@@ -15256,6 +15596,7 @@ static bool superJoyLightingSelectInterface(std::wstring& selected, std::string&
             if (!finished) { valid = false; reason = "superjoy-hid-enumeration-incomplete"; }
             break;
         }
+        if (apex) ++enumerated;
         DWORD bytes = 0;
         (void)SetupDiGetDeviceInterfaceDetailW(set, &iface, nullptr, 0, &bytes, nullptr);
         if (bytes < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) || bytes > 65536) {
@@ -15271,10 +15612,10 @@ static bool superJoyLightingSelectInterface(std::wstring& selected, std::string&
         const wchar_t* end = std::find(detail->DevicePath, detail->DevicePath + capacity, L'\0');
         if (end == detail->DevicePath + capacity) { valid = false; reason = "superjoy-hid-path-invalid"; break; }
         const std::wstring path(detail->DevicePath, static_cast<size_t>(end - detail->DevicePath));
-        if (!ymcc::superjoy_owner::sourcePath(path)) continue;
+        if (!ymcc::superjoy_owner::sourcePath(before.model, path)) continue;
         HANDLE probe = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (probe == INVALID_HANDLE_VALUE) { valid = false; reason = "superjoy-endpoint-observation-failed"; break; }
+        if (probe == INVALID_HANDLE_VALUE) { candidate(path, false, nullptr, nullptr, false); valid = false; reason = "superjoy-endpoint-observation-failed"; break; }
         HIDD_ATTRIBUTES attributes{}; attributes.Size = sizeof(attributes);
         PHIDP_PREPARSED_DATA preparsed = nullptr; HIDP_CAPS caps{};
         const bool attrsOk = HidD_GetAttributes(probe, &attributes) != FALSE;
@@ -15282,9 +15623,11 @@ static bool superJoyLightingSelectInterface(std::wstring& selected, std::string&
         const bool capsOk = prepOk && HidP_GetCaps(preparsed, &caps) == HIDP_STATUS_SUCCESS;
         if (preparsed) HidD_FreePreparsedData(preparsed);
         CloseHandle(probe);
+        const bool matches = attrsOk && capsOk && ymcc::superjoy_owner::sourceDescriptor(before.model,
+            attributes.VendorID, attributes.ProductID, caps.UsagePage, caps.Usage,
+            caps.InputReportByteLength, caps.OutputReportByteLength);
+        candidate(path, true, attrsOk ? &attributes : nullptr, capsOk ? &caps : nullptr, matches);
         if (!attrsOk || !capsOk) { valid = false; reason = "superjoy-endpoint-descriptor-unavailable"; break; }
-        const bool matches = attributes.VendorID == 0x1C4F && attributes.ProductID == 2 &&
-            caps.UsagePage == 0xFF00 && caps.Usage == 1 && caps.InputReportByteLength == 65 && caps.OutputReportByteLength == 65;
         if (!matches) continue;
         if (!selected.empty()) { valid = false; reason = "superjoy-endpoint-ambiguous"; break; }
         selected = path;
@@ -15295,8 +15638,9 @@ static bool superJoyLightingSelectInterface(std::wstring& selected, std::string&
     if (!after.writesAllowed || before.generation != after.generation || before.topology != after.topology || before.model != after.model) {
         valid = false; reason = "superjoy-owner-context-changed";
     }
-    if (!valid) { selected.clear(); return false; }
-    if (selected.empty()) { reason = "superjoy-endpoint-unavailable"; return false; }
+    if (!valid) { selected.clear(); note(false); return false; }
+    if (selected.empty()) { reason = "superjoy-endpoint-unavailable"; note(false); return false; }
+    note(true);
     return true;
 }
 static std::optional<ymcc::superjoy_owner::Admission> superJoyLightingAdmit(std::string& reason) {
@@ -15348,6 +15692,7 @@ static void superJoyLightingOwnerResume() noexcept {
 // END SuperJoy lighting native lifecycle
 
 static void onexX2OwnerTick() noexcept {
+    (void)legacyLightSetterReapReturned();
     superJoyLightingOwnerTick();
     using namespace ymcc::onex_x2;
     std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
@@ -15421,6 +15766,7 @@ static void onexX2OwnerTick() noexcept {
     }
 }
 static void onexX2OwnerStop() noexcept {
+    (void)legacyLightSetterStopRetire(GetTickCount64() + 5000);
     // Keep the retiring/debt state until the admitted helper actually returns;
     // a timeout must not reopen admission or rebinding.
     const auto stopDeadline = GetTickCount64() + 5000;
@@ -15509,6 +15855,7 @@ static void msiWmiHandleEvent(long rawCode, uint64_t generation) {
     const int code = static_cast<int>(rawCode) & 0xFF;
     const uint64_t bit = code == kMsiWmiEventClaw ? kOemBitClaw :
         code == kMsiWmiEventQs ? kOemBitQs : 0;
+    if(msiWmiGenerationCurrent(generation))modelAdaptationProducer(16,bit,static_cast<unsigned>(rawCode));
     if (!bit) return;
     MsiWmiClickReceipt receipt;
     bool accepted = false, current = false;
@@ -16227,7 +16574,8 @@ static bool msiDinputEpisodeOverBudget(unsigned episodeOpens, ULONGLONG elapsedM
     return episodeOpens >= kMsiDinputEpisodeOpenBudget || elapsedMs >= kMsiDinputEpisodeBudgetMs;
 }
 // 定义在本区之后（msiClawSwitchMode 同族区）：pump 只按 bool 契约调用。
-static bool msiClawRequestDInputMode(const char* diagnosticReason="route-arm",uint64_t* completedMode=nullptr);
+static bool msiClawRequestDInputMode(const char* diagnosticReason="route-arm",uint64_t* completedMode=nullptr,
+    const std::function<bool()>& contextCurrent=std::function<bool()>());
 static bool msiClawRestoreXInputMode(const char* reason);
 // GP-MSIG3E-3-R1（R5c）：模式写**意图**提交（定义在 inputHostQueueLifecycleWork 之后）。
 // pump/BUS 线程只提意图，不做同步 HID 模式写、不取阻塞事务锁。
@@ -18849,7 +19197,6 @@ static const std::vector<std::string>& ymccDeviceClassSecondColorSet() {
         "HandheldCompanion.Devices.AYANEOKUN",
         "HandheldCompanion.Devices.AYANEOSlide",
         "HandheldCompanion.Devices.GamingZone",
-        "HandheldCompanion.Devices.OneXPlayerApex",
         "HandheldCompanion.Devices.OneXPlayerX1",
         "HandheldCompanion.Devices.OneXPlayerX1AMD",
         "HandheldCompanion.Devices.OneXPlayerX1Intel",
@@ -18880,6 +19227,7 @@ static std::vector<std::string> ymccDeviceClassLedEffects(const std::string& dev
         deviceClass == "HandheldCompanion.Devices.AOKZOEA1Pro" ||
         deviceClass == "HandheldCompanion.Devices.AOKZOEA1X" ||
         deviceClass == "HandheldCompanion.Devices.AOKZOEA2" ||
+        deviceClass == "HandheldCompanion.Devices.OneXPlayerApex" ||
         deviceClass == "HandheldCompanion.Devices.OneXPlayerG1" ||
         deviceClass == "HandheldCompanion.Devices.OneXPlayerG1AMD" ||
         deviceClass == "HandheldCompanion.Devices.OneXPlayerG1Intel" ||
@@ -18920,8 +19268,7 @@ static std::vector<std::string> ymccDeviceClassLedEffects(const std::string& dev
         deviceClass == "HandheldCompanion.Devices.LegionGoTablet" ||
         deviceClass == "HandheldCompanion.Devices.LegionGoTablet2")
         return {"solid", "breathing", "rainbow", "wheel"};
-    if (deviceClass == "HandheldCompanion.Devices.OneXPlayerApex" ||
-        deviceClass == "HandheldCompanion.Devices.OneXPlayerX1" ||
+    if (deviceClass == "HandheldCompanion.Devices.OneXPlayerX1" ||
         deviceClass == "HandheldCompanion.Devices.OneXPlayerX1AMD" ||
         deviceClass == "HandheldCompanion.Devices.OneXPlayerX1Intel" ||
         deviceClass == "HandheldCompanion.Devices.OneXPlayerX1Pro")
@@ -19032,6 +19379,7 @@ static void ymccResolveMachineIdentityOnce() {
             {"inputHidKey", g_machineIdentity.inputHidKey},
             {"resolved", g_machineIdentity.resolved}
         });
+        modelAdaptationCatalog(); // Once-only static catalog evidence, no extra query.
     } catch (...) {
         // Read-only probe must never break startup or sensor input.
     }
@@ -19245,10 +19593,14 @@ static const OemKeyDef kOneXMiniKeys[] = {
 static const OemKeyDef kOneXApexKeys[] = {
     {"turbo", "Turbo", 0, OemKeyForm::KeyboardVk, false},     // OEM1，Ctrl+Alt+Win
     {"keyboard", "Keyboard", 0, OemKeyForm::KeyboardVk, false}, // OEM2，Ctrl+Win+O
-    {"orange", "Orange", 0, OemKeyForm::KeyboardVk, false},   // OEM3，Win+G
+    {"orange", "Orange", 0, OemKeyForm::HidButton, false}, // vendor 0x21; Win+G compatibility chord stays in kP_OneXApex
     {"orangekb", "Keyboard + Orange", 0, OemKeyForm::KeyboardVk, false}, // OEM4，Ctrl+Alt+Del
     {"orangetb", "Turbo + Orange", 0, OemKeyForm::KeyboardVk, false},    // OEM5，Win+Snapshot
     {"orangelp", "Orange, Long-press", 0, OemKeyForm::KeyboardVk, false}, // OEM6，Win+D
+    // The vendor reader already publishes 0x22/0x23 as these canonical bits.
+    // HC OEMChords.Clear removes keyboard chords, not inherited HID rear keys.
+    {"l4", "L4", 1, OemKeyForm::HidButton, false},
+    {"r4", "R4", 2, OemKeyForm::HidButton, false},
 };
 
 // OneXPlayer 2 / 2Pro（OneXPlayer2.cs:57）：Turbo 单键（Win+Alt+Ctrl）
@@ -20021,8 +20373,10 @@ static bool machineIdentitySelfTest() {
                        3, "turbo", "Turbo", 0, false, 0)) return false;
         if (!checkKeys("catalog-onex-mini", YmccFamily::OneXPlayer, "HandheldCompanion.Devices.OneXPlayerMiniPro",
                        3, "orange", "Orange", 0, false, 0)) return false;
+        // Eight operation entries: three physical dedicated keys, their three
+        // firmware gestures, and two rear keys. Do not count gestures as keys.
         if (!checkKeys("catalog-onex-apex", YmccFamily::OneXPlayer, "HandheldCompanion.Devices.OneXPlayerApex",
-                       6, "turbo", "Turbo", 0, false, 0)) return false;
+                       8, "turbo", "Turbo", 0, false, 0)) return false;
         if (!checkKeys("catalog-onex-2", YmccFamily::OneXPlayer, "HandheldCompanion.Devices.OneXPlayer2",
                        1, "turbo", "Turbo", 0, false, 0)) return false;
         if (!checkKeys("catalog-onex-other", YmccFamily::OneXPlayer, "HandheldCompanion.Devices.OneXPlayerG1AMD",
@@ -25658,7 +26012,7 @@ enum class InputHostRecoveryAdmission : uint8_t { Allowed, DeferredPower, Cancel
 // retains that request and deadline; none of these fields represent a new ON.
 // VC-COMMON-SELF-HEAL-20261103-R1: local visibility faults are facts about
 // this owned contract, not transport errors or proof of external double input.
-enum class InputHostSwitchLocalFault : std::uint8_t { None, DeferredPhysicalHide, OwnedHiddenTargetMissing };
+enum class InputHostSwitchLocalFault : std::uint8_t { None, DeferredPhysicalHide, OwnedHiddenTargetMissing, OwnedRootRefreshIncomplete };
 struct InputHostSwitchRecoveryRequest {
     std::uint64_t requestId=0,power=0,hostEpoch=0,deadline=0;
     std::string stoppedRunId; // Exact old tuple; return proof cannot authorize another Host.
@@ -25666,6 +26020,11 @@ struct InputHostSwitchRecoveryRequest {
     bool tupleFault=false; // A sequence receipt fault is distinct from a transport error.
     InputHostSwitchLocalFault localFault=InputHostSwitchLocalFault::None;
     bool resolved=false; // Keep an offered ticket after ordinary execution repairs its fault.
+    // The ordinary execution stage remains authoritative. Pin only its proof,
+    // never a second refresh budget or a replacement physical-device identity.
+    std::string localPhysicalIdentity, localRoot;
+    std::vector<std::string> localTargets;
+    std::uint64_t localConfigurationRevision=0, localIntentRevision=0, localStageDeadline=0;
     DWORD error=ERROR_SUCCESS;
     bool pending=false,queued=false,spent=false,awaitingCleanup=false,stopInvoked=false;
     bool executionCleanup=false; // Mandatory fault Stop is execution, not a fallback attempt.
@@ -25695,6 +26054,9 @@ static void inputHostPerformTupleRecovery(const std::string&);
 static void inputHostTupleRecoveryAcceptedLocked(std::uint64_t,std::uint64_t,bool);
 static InputHostSwitchLocalFault inputHostSwitchLocalFaultCurrentLocked(std::uint64_t);
 static bool inputHostSwitchLocalFaultResolvedLocked(std::uint64_t,InputHostSwitchLocalFault);
+struct InputHostDeferredPhysicalHide;
+static bool inputHostSwitchRootRefreshSnapshotLocked(std::uint64_t,InputHostDeferredPhysicalHide&);
+static bool inputHostSwitchRootRefreshOfferCurrentLocked(const InputHostSwitchRecoveryRequest&,InputHostDeferredPhysicalHide* = nullptr);
 static void inputHostSwitchRecoveryOfferLocked(std::uint64_t,std::uint64_t,DWORD,bool tupleFault=false,
     InputHostSwitchLocalFault localFault=InputHostSwitchLocalFault::None);
 static void inputHostSwitchRecoveryMaintenanceLocked();
@@ -26463,13 +26825,31 @@ struct InputHostDeferredPhysicalHide {
     unsigned long long hostGen=0, powerGen=0, deadline=0, requestId=0;
     bool refreshRequired=true, refreshAttempted=false; // one initial owned-root refresh, never a reconnect loop
     bool executionContinuationAttempted=false; // ROG164155: one original partial-hide completion
+    // ROG003611: progress within this original Start, never another lifecycle.
+    bool configurationApplied=false, configurationReady=false, continuationRetired=false;
+    std::string configurationPhysicalIdentity, configurationRoot;
+    std::vector<std::string> configurationTargets;
 };
+// OneX-specific scoped write authority. Never persisted or shared with ROG/GPD.
+struct OneXVirtualStartEpisode;
+static thread_local OneXVirtualStartEpisode* t_inputHostOneXStartWrite=nullptr;
+static thread_local bool t_inputHostOneXHideTargetWrite=false;
+static bool inputHostOneXStartCurrent();
+static bool inputHostOneXStartMayIssue();
+static uint64_t inputHostOneXStartDeadline();
+struct HidHidePhysicalIdentity;
+static bool inputHostOneXRefreshSourcesCurrent(const std::vector<HidHidePhysicalIdentity>&);
+static bool inputHostOneXRefreshTargetsCurrent(const std::vector<std::string>&);
+static bool inputHostOneXHideTargetCurrent(const std::wstring&,const std::wstring&);
 static thread_local const InputHostDeferredPhysicalHide* t_inputHostDeferredPhysicalHideWrite=nullptr;
+static thread_local bool t_inputHostDeferredPhysicalHideRefreshIssueActive=false;
 static std::mutex g_inputHostDeferredPhysicalHideMx;
 static InputHostDeferredPhysicalHide g_inputHostDeferredPhysicalHide;
+static std::atomic<bool> g_inputHostDeferredPhysicalHideSourcePending{false};
 static void inputHostDeferredPhysicalHideClear() {
     std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
     g_inputHostDeferredPhysicalHide={};
+    g_inputHostDeferredPhysicalHideSourcePending.store(false,std::memory_order_release);
 }
 static void inputHostDeferredPhysicalHideArm(bool required, const std::string& runId,
         unsigned long long hostGen, unsigned long long powerGen,
@@ -26479,6 +26859,7 @@ static void inputHostDeferredPhysicalHideArm(bool required, const std::string& r
     g_inputHostDeferredPhysicalHide=required
         ? InputHostDeferredPhysicalHide{runId,persona,hostGen,powerGen,deadline,requestId,refreshRequired,false}
         : InputHostDeferredPhysicalHide{};
+    g_inputHostDeferredPhysicalHideSourcePending.store(false,std::memory_order_release);
 }
 static const char* inputHostDeferredPhysicalHideCurrentReason(unsigned long long hostGen,
         const std::string& runId, unsigned long long powerGen,
@@ -26487,6 +26868,7 @@ static const char* inputHostDeferredPhysicalHideCurrentReason(unsigned long long
     const auto& debt=g_inputHostDeferredPhysicalHide;
     if(!hostGen || !powerGen || runId.empty())return "current-owner-unbound";
     if(!debt.hostGen || debt.runId.empty())return "start-debt-absent";
+    if(debt.continuationRetired)return "ordinary-continuation-retired";
     if(now>=debt.deadline)return "original-deadline-expired";
     if(debt.hostGen!=hostGen)return "host-generation-changed";
     if(debt.runId!=runId)return "host-run-changed";
@@ -27069,22 +27451,125 @@ static bool inputHostDeferredPhysicalHideIntentCurrent() {
     if(debt->hostGen!=g_inputHostEpoch)return inputHostDeferredPhysicalHideRefuse("host-generation-changed");
     if(debt->runId!=g_inputHostRunId)return inputHostDeferredPhysicalHideRefuse("host-run-changed");
     const auto now=inputHostStartProtectionNow();
-    if(debt->requestId && g_virtualStartProtection.view(now).requestId!=debt->requestId)
+    const auto view=g_virtualStartProtection.view(now);
+    if(debt->requestId && view.requestId!=debt->requestId)
         return inputHostDeferredPhysicalHideRefuse("player-request-changed");
     const auto* reason=inputHostDeferredPhysicalHideCurrentReason(debt->hostGen,debt->runId,
         currentPowerGeneration(),inputHostConfiguredPersona(),now);
-    return !reason || inputHostDeferredPhysicalHideRefuse(reason);
+    if(reason)return inputHostDeferredPhysicalHideRefuse(reason); // Keep the original deadline/owner diagnosis first.
+    // A cancelled/final ticket can retain its ID and cooldown lock; it still
+    // cannot authorize a write. The current-owner deadline above remains authoritative.
+    if(debt->requestId && (!view.locked || (view.phase!="pending" && view.phase!="verifying") || view.persona!=debt->persona))
+        return inputHostDeferredPhysicalHideRefuse("player-request-not-executable");
+    return true;
 }
+// A read in progress temporarily zeros the mutable mask. Do not sample that
+// intermediate state from the lifecycle writer. Never keep this try-lock over IO.
+static const char* inputHostDeferredPhysicalHideSourceReason() {
+    // This repair is ROG-only. Other families retain their original source
+    // predicate; they do not gain a lock-busy refusal without a matching waiter.
+    if(!g_machineIdentity.resolved || !ymccIsRogFamily()) {
+        if(!g_xinputPhysicalSourceLocked)return "physical-source-unlocked";
+        return (g_xinputConnectedMask & g_xinputPhysicalSourceMask)==0 ? "physical-source-mask-not-live" : nullptr;
+    }
+    std::unique_lock<std::mutex> lock(g_gamepadReadMx,std::try_to_lock);
+    if(!lock.owns_lock())return "physical-source-read-busy";
+    if(!g_xinputPhysicalSourceLocked)return "physical-source-unlocked";
+    if((g_xinputConnectedMask & g_xinputPhysicalSourceMask)==0)return "physical-source-mask-not-live";
+    return nullptr;
+}
+static bool inputHostDeferredPhysicalHideSame(const InputHostDeferredPhysicalHide& a,
+        const InputHostDeferredPhysicalHide& b) {
+    return a.hostGen==b.hostGen && a.runId==b.runId && a.powerGen==b.powerGen &&
+        a.persona==b.persona && a.requestId==b.requestId && a.deadline==b.deadline;
+}
+// A source-only pause may retain either untouched work, or a positively bound
+// configuration progress whose root refresh has NOT issued. Resume never replays
+// a completed Apply. The original request/Host/power/deadline never changes.
+static void inputHostDeferredPhysicalHideWaitSource(unsigned long long host,const std::string& run,
+        const char* reason, bool afterConfiguration=false) {
+    if(!reason || (std::strcmp(reason,"physical-source-read-busy") &&
+       std::strcmp(reason,"physical-source-unlocked") && std::strcmp(reason,"physical-source-mask-not-live")))return;
+    if(!g_machineIdentity.resolved || !ymccIsRogFamily())return;
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    const auto& d=g_inputHostDeferredPhysicalHide;
+    if(d.hostGen==host && d.runId==run && d.powerGen==currentPowerGeneration() &&
+       !d.continuationRetired && (!afterConfiguration || (d.configurationApplied && !d.refreshAttempted)) &&
+       d.deadline>inputHostStartProtectionNow())g_inputHostDeferredPhysicalHideSourcePending.store(true,std::memory_order_release);
+}
+static bool inputHostDeferredPhysicalHideResumeSourceReady(InputHostDeferredPhysicalHide& captured) {
+    if(!g_inputHostDeferredPhysicalHideSourcePending.load(std::memory_order_acquire))return false;
+    std::unique_lock<InputHostMutex> lock(g_inputHostMx,std::try_to_lock);
+    if(!lock.owns_lock())return false;
+    {
+        std::lock_guard<std::mutex> debtLock(g_inputHostDeferredPhysicalHideMx);
+        captured=g_inputHostDeferredPhysicalHide;
+    }
+    const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
+    const bool retired=captured.continuationRetired || !captured.hostGen || captured.hostGen!=g_inputHostEpoch || captured.runId!=g_inputHostRunId ||
+        captured.powerGen!=currentPowerGeneration() || captured.persona!=inputHostConfiguredPersona() ||
+        now>=captured.deadline || !view.locked || view.persona!=captured.persona ||
+        (view.phase!="pending" && view.phase!="verifying") || (captured.requestId && captured.requestId!=view.requestId) ||
+        !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled || inputHostExitFenceRaised() || g_exitRequested;
+    if(retired){
+        std::lock_guard<std::mutex> debtLock(g_inputHostDeferredPhysicalHideMx);
+        if(inputHostDeferredPhysicalHideSame(captured,g_inputHostDeferredPhysicalHide))
+            g_inputHostDeferredPhysicalHideSourcePending.store(false,std::memory_order_release);
+        return false;
+    }
+    if(!g_machineIdentity.resolved || !ymccIsRogFamily() || !g_inputHostHello || !g_inputHostPrepared ||
+       g_inputHostTransportFault || g_inputHostReleaseQuarantined || g_inputHostFaultHoldsStart ||
+       g_inputHostPowerAdmissionRevoked || g_powerLifecycle.load()!=PowerLifecycle::Ready ||
+       g_externalPriorityVirtualSuspended || g_shortcutRecordingActive || physicalReleaseWindowActive())return false;
+    return inputHostDeferredPhysicalHideSourceReason()==nullptr;
+}
+static void inputHostDeferredPhysicalHideSourceResumed(const InputHostDeferredPhysicalHide& captured) {
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    if(inputHostDeferredPhysicalHideSame(captured,g_inputHostDeferredPhysicalHide))
+        g_inputHostDeferredPhysicalHideSourcePending.store(false,std::memory_order_release);
+}
+
 // Availability is mandatory BEFORE writes; a successful physical refresh may
 // itself take the source offline. Completion still requires current intent.
 static bool inputHostDeferredPhysicalHideWriteCurrent() {
     if(!t_inputHostDeferredPhysicalHideWrite)return true;
     if(!inputHostDeferredPhysicalHideIntentCurrent())return false;
-    if(!g_xinputPhysicalSourceLocked)return inputHostDeferredPhysicalHideRefuse("physical-source-unlocked");
-    if((g_xinputConnectedMask & g_xinputPhysicalSourceMask)==0)
-        return inputHostDeferredPhysicalHideRefuse("physical-source-mask-not-live");
+    if(const auto* reason=inputHostDeferredPhysicalHideSourceReason())return inputHostDeferredPhysicalHideRefuse(reason);
     return true;
 }
+// Called only by the existing last pipe-write guard. Reserving here separates
+// a sampler-busy rejection BEFORE dispatch from a possibly executed USB cycle.
+static bool inputHostDeferredPhysicalHideReserveRefreshIssue() {
+    if(!t_inputHostDeferredPhysicalHideRefreshIssueActive)return true;
+    const auto* debt=t_inputHostDeferredPhysicalHideWrite;
+    if(!debt || !g_inputHostMx.ownedByCurrentThread() || !inputHostDeferredPhysicalHideWriteCurrent())return false;
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    auto& current=g_inputHostDeferredPhysicalHide;
+    if(!inputHostDeferredPhysicalHideSame(*debt,current) || !current.configurationReady ||
+       current.continuationRetired || current.refreshAttempted)
+        return inputHostDeferredPhysicalHideRefuse("refresh-issue-not-admitted");
+    current.refreshAttempted=true; // BEFORE the actual possible wire write. Unknown remains spent.
+    return true;
+}
+// Shared fallback may take over only AFTER charging its existing original ticket.
+// Keep real return debt; invalidate only ordinary continuation, including old queued tokens.
+static bool inputHostDeferredPhysicalHideRetireForRecoveryLocked(const InputHostDeferredPhysicalHide& captured) {
+    if(!g_inputHostMx.ownedByCurrentThread())return false;
+    const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
+    if(!captured.configurationApplied || !captured.configurationReady || captured.refreshAttempted || captured.continuationRetired ||
+       !view.locked || !view.remainingMs || !view.fallbackAttempts || view.requestId!=captured.requestId ||
+       view.persona!=captured.persona || captured.hostGen!=g_inputHostEpoch || captured.runId!=g_inputHostRunId ||
+       captured.powerGen!=currentPowerGeneration() || captured.persona!=inputHostConfiguredPersona() || now>=captured.deadline)return false;
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    auto& current=g_inputHostDeferredPhysicalHide;
+    if(!inputHostDeferredPhysicalHideSame(captured,current) || !current.configurationReady || current.refreshAttempted ||
+       current.continuationRetired || captured.configurationPhysicalIdentity!=current.configurationPhysicalIdentity ||
+       captured.configurationRoot!=current.configurationRoot || captured.configurationTargets!=current.configurationTargets)return false;
+    current.continuationRetired=true;
+    g_inputHostDeferredPhysicalHideSourcePending.store(false,std::memory_order_release);
+    return true;
+}
+
 static bool inputHostDeferredPhysicalHideCliCurrent(const std::wstring& arguments) {
     const bool visibilityWrite=arguments.rfind(L"--dev-hide",0)==0 ||
         arguments.rfind(L"--cloak-on",0)==0 || arguments.rfind(L"--app-reg",0)==0;
@@ -28320,6 +28805,21 @@ static void inputHostRecoveryHealthAcceptedLocked(
         tracking ? inputHostRecoveryHealthLatestSourceLocked(eligible) : source, GetTickCount64());
     g_inputHostHealthySinceTick.store(g_inputHostRecoveryHealth.since(), std::memory_order_release);
 }
+static json inputHostRecoveryEpisodeLogRecord(const json& requestId,unsigned long long hostEpoch,
+        const std::string& runId,const std::string& hostInstanceId,unsigned long long powerGeneration,
+        unsigned long long intentRevision,unsigned long long presentationGeneration,unsigned long long observedTick) {
+    static std::atomic<unsigned long long> observationSequence{0};
+    const auto& writer=ymcc::sleepfactlog::writerIdentity();
+    return {{"via","external-intent-or-power-cycle"},{"policy","fresh-recovery-budget"},
+        {"episodeId",observationSequence.fetch_add(1,std::memory_order_relaxed)+1},
+        {"episodeIdScope","writerInstanceId+diagnostic-reset-observation;not-recovery-authority"},
+        {"writerInstanceId",writer.creation100ns?json("native:"+std::to_string(writer.pid)+":"+std::to_string(writer.creation100ns)):json(nullptr)},
+        {"requestId",requestId},{"requestIdScope",requestId.is_null()?"unobserved;logger-does-not-read-start-protection":"explicit-supplied-context;not-authority"},
+        {"hostEpoch",hostEpoch},{"runId",runId},{"hostInstanceId",hostInstanceId},
+        {"powerGeneration",powerGeneration},{"intentRevision",intentRevision},{"presentationGeneration",presentationGeneration},
+        {"observedTick",observedTick},{"observedTickScope","existing-maintenance-boot-tick;not-start-protection-clock-or-deadline-authority"},
+        {"triggerScope","existing-coalesced-reset-flag;exact-origin-not-recorded"}};
+}
 static void inputHostRecoveryMaintenanceTick() {
     if (!g_inputHostSwitchVerificationPending.load(std::memory_order_acquire) &&
         !g_inputHostSwitchExecutionReturnPending.load(std::memory_order_acquire) &&
@@ -28343,10 +28843,12 @@ static void inputHostRecoveryMaintenanceTick() {
             g_inputHostRecoveryPending.store(false, std::memory_order_release);
             g_inputHostRecoveryDeferredUntil.store(0, std::memory_order_release);
             g_inputHostRecoveryFallbackState.store(0, std::memory_order_release);
-            appendNativeLifecycleLog("input-host-recovery-episode-new", {
-                {"via", "external-intent-or-power-cycle"},
-                {"policy", "fresh-recovery-budget"}
-            });
+            try {
+                appendNativeLifecycleLog("input-host-recovery-episode-new",inputHostRecoveryEpisodeLogRecord(
+                    json(nullptr),g_inputHostEpoch,g_inputHostRunId,g_inputHostHostInstanceId,currentPowerGeneration(),
+                    g_inputHostVirtualIntentRevision.load(std::memory_order_acquire),
+                    g_inputHostPresentationWorkGeneration.load(std::memory_order_acquire),now));
+            } catch (...) { /* Optional evidence cannot interrupt the accepted reset. */ }
         }
         inputHostSwitchExecutionReturnMaintenanceLocked();
         inputHostSwitchRecoveryMaintenanceLocked();
@@ -29047,6 +29549,9 @@ static bool hidHideCliReapPendingLocked(ULONGLONG absoluteDeadlineTick=0) {
 
 static bool hidHideRun(const std::wstring& arguments,std::string* output=nullptr,
                        DWORD* exitCodeOut=nullptr,ULONGLONG absoluteDeadlineTick=0) {
+    // OneX's pre-target continuation has one Host and one absolute deadline.
+    // A failed/unknown pipe receipt cannot create a second CLI operation.
+    if(t_inputHostOneXStartWrite){if(exitCodeOut)*exitCodeOut=ERROR_OPERATION_ABORTED;return false;}
     DWORD localExit=ERROR_GEN_FAILURE;
     if(!exitCodeOut)exitCodeOut=&localExit;
     struct FailureReceipt {
@@ -29658,6 +30163,8 @@ static void msiForegroundIsolationObserveNative(const HidHidePhysicalIdentity& s
 static void msiNativeForegroundObserveSource(const HidHidePhysicalIdentity& source,uint64_t sourceGeneration);
 static bool gamepadUiInputEligible();
 static bool gamepadUiOutputIsolationEligible();
+static bool radialHasInputOwner();
+static bool customSteamLibraryInputSuppressed();
 static bool physicalReleaseWindowActive();
 static bool msiForegroundIsolationBorrowBusy();
 static auto msiUiBoundTargetAdmitted(const std::string& boundPersona) -> bool;
@@ -30212,6 +30719,7 @@ static bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot& snapshot
     // Host 不可达（restore 在 SHUTDOWN 后）才回退 CLI 快照。调用方须持
     // g_inputHostMx（与 inputHostRequestLocked Locked 语义一致）。
     if (hidHideCaptureVisibilitySnapshotViaPipe(snapshot)) return true;
+    if(t_inputHostOneXStartWrite)return false; // Keep this continuation within its existing pipe deadline.
     return hidHideCaptureVisibilitySnapshotViaCli(snapshot);
 }
 
@@ -31249,8 +31757,10 @@ static bool hidHideResolveRawInputIdentity(HANDLE rawDevice, HidHidePhysicalIden
 }
 
 static bool hidHideResolvePhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out,
-                                              bool* complete = nullptr) {
+                                              bool* complete = nullptr,
+                                              std::vector<HidHidePhysicalIdentity>* eligibleChildren = nullptr) {
     out.clear();
+    if(eligibleChildren)eligibleChildren->clear();
     if (complete) *complete = false;
     bool observedComplete = true;
     HDEVINFO set = SetupDiGetClassDevsW(&kYeManGuidDeviceInterfaceHid, nullptr, nullptr,
@@ -31276,8 +31786,14 @@ static bool hidHideResolvePhysicalIdentities(std::vector<HidHidePhysicalIdentity
         }
         HidHidePhysicalIdentity candidate;
         HidResolveReject reject = HidResolveReject::None;
-        if (hidHideResolveInterfaceIdentity(detail->DevicePath, &data, set, candidate, &reject))
+        if (hidHideResolveInterfaceIdentity(detail->DevicePath, &data, set, candidate, &reject)) {
+            // Optional read-only observation before root grouping. One root may
+            // expose several GAME children; the legacy preferred row is not a
+            // child uniqueness proof. Existing two-argument consumers are unchanged.
+            if(eligibleChildren && candidate.usagePage==1 && (candidate.usage==4 || candidate.usage==5))
+                eligibleChildren->push_back(candidate);
             groups[ascii_lower(candidate.baseContainerDeviceInstanceId)].push_back(std::move(candidate));
+        }
         else if (reject != HidResolveReject::VirtualMarker && reject != HidResolveReject::NotGamepad &&
                  reject != HidResolveReject::NoBaseContainer)
             observedComplete = false; // An unavailable probe is not proof that no other source exists.
@@ -32876,6 +33392,15 @@ static int externalPriorityUsbPortKind(const std::string& root);
 // Steam's existing physical endpoint. Complete that original ROG Start with the
 // same exact owned-root refresh used by initial Hide(true), not another target.
 // Host mutex held; original request/deadline and final pipe issue guard apply.
+// Preserve the pre-existing optional ROG-only refresh policy. It authorizes
+// this specialized step, never admission of the virtual controller as a whole.
+static bool inputHostDeferredPhysicalHideRogRefreshPolicyApplies() {
+    const auto& physical=g_hidHideVisibilityJournal.physical;
+    const auto root=hidHideUpper(physical.baseContainerDeviceInstanceId);
+    return nativeForegroundRootCandidate(root) &&
+        nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(physical.deviceInstanceId,root),
+            physical.vendorId,physical.productId,physical.usagePage,physical.usage);
+}
 static bool inputHostDeferredPhysicalHideRefreshLocked(const char** outcome) {
     const auto done=[&](const char* why,bool ok){if(outcome)*outcome=why;return ok;};
     const auto* debt=t_inputHostDeferredPhysicalHideWrite;
@@ -32890,10 +33415,7 @@ static bool inputHostDeferredPhysicalHideRefreshLocked(const char** outcome) {
     if(!journal.active || !physical.resolved || root.empty())return done("physical-journal-unproven",false);
     // Preserve the established 045E no-cycle safety policy and all external
     // controller paths. Only the selected on-board 0B05 USB root is new behavior.
-    if(!nativeForegroundRootCandidate(root) ||
-       !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(physical.deviceInstanceId,root),
-           physical.vendorId,physical.productId,physical.usagePage,physical.usage))
-        return done("not-rog-game-root",true);
+    if(!inputHostDeferredPhysicalHideRogRefreshPolicyApplies())return done("not-rog-game-root",true);
     if(journal.transactionId!=debt->runId ||
        !hidHideContainsPath(journal.hiddenByUs,physical.baseContainerDeviceInstanceId) ||
        std::any_of(journal.physicalSources.begin(),journal.physicalSources.end(),[&](const auto& source){
@@ -32921,8 +33443,13 @@ static bool inputHostDeferredPhysicalHideRefreshLocked(const char** outcome) {
         // A failed/unknown external cycle is not permission to hammer the port.
         // Keep the debt, never report completion and do not issue it twice.
         if(current.refreshAttempted)return done("refresh-unproven-no-reissue",false);
-        current.refreshAttempted=true;
+        if(!current.configurationReady || current.continuationRetired)return done("configuration-progress-unproven",false);
     }
+    struct RefreshIssueScope {
+        bool previous=t_inputHostDeferredPhysicalHideRefreshIssueActive;
+        RefreshIssueScope(){t_inputHostDeferredPhysicalHideRefreshIssueActive=true;}
+        ~RefreshIssueScope(){t_inputHostDeferredPhysicalHideRefreshIssueActive=previous;}
+    } issueScope;
     const bool refreshed=hidHideCycleInstance(U2W(physical.baseContainerDeviceInstanceId),
         "deferred-start-hide",budget);
     if(refreshed && !inputHostDeferredPhysicalHideIntentCurrent())
@@ -32958,6 +33485,60 @@ static bool inputHostRogPartialHideConfigurationCurrent(const HidHideVisibilityS
         hidHideContainsPath(value.applications,W2U(module)) &&
         hidHideInverseApplicationListState(value.inverseRaw)=="off";
 }
+// Positive configuration readback is a separate fact from Apply success.
+// Keep the applied progress even if source sampling is busy before the refresh;
+// a resume checks the exact same owned journal and never writes Hide again.
+static bool inputHostDeferredPhysicalHideConfigurationLocked(bool remember) {
+    const auto* debt=t_inputHostDeferredPhysicalHideWrite;
+    if(!debt || !g_inputHostMx.ownedByCurrentThread() || !inputHostDeferredPhysicalHideIntentCurrent() ||
+       !g_machineIdentity.resolved || !ymccIsRogFamily() || !g_inputHostProcess || !g_inputHostHello ||
+       !g_inputHostPrepared || g_inputHostTransportFault || g_inputHostPipeRetired || g_inputHostReleaseQuarantined)return false;
+    const auto physical=g_hidHideVisibilityJournal.physical;
+    const auto identity=hidHideUpper(physical.physicalIdentity),root=hidHideUpper(physical.baseContainerDeviceInstanceId);
+    if(!physical.resolved || identity.empty() || root.empty() || !nativeForegroundRootCandidate(root) ||
+       !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(physical.deviceInstanceId,root),
+           physical.vendorId,physical.productId,physical.usagePage,physical.usage))return false;
+    std::vector<std::string> targets{hidHideUpper(physical.deviceInstanceId),root};
+    std::sort(targets.begin(),targets.end());
+    if(targets.front().empty() || targets.front()==targets.back())return false;
+    const auto journalCurrent=[&](){
+        const auto& j=g_hidHideVisibilityJournal;
+        if(!j.active || j.transactionId!=debt->runId || j.physicalSources.size()!=1)return false;
+        const auto same=[&](const HidHidePhysicalIdentity& source){return source.resolved &&
+            source.vendorId==physical.vendorId && source.productId==physical.productId &&
+            source.usagePage==physical.usagePage && source.usage==physical.usage &&
+            hidHideUpper(source.physicalIdentity)==identity &&
+            hidHideUpper(source.deviceInstanceId)==hidHideUpper(physical.deviceInstanceId) &&
+            hidHideUpper(source.baseContainerDeviceInstanceId)==root;};
+        std::vector<std::string> owned;for(const auto& value:j.hiddenByUs)owned.push_back(hidHideUpper(W2U(value)));
+        std::sort(owned.begin(),owned.end());owned.erase(std::unique(owned.begin(),owned.end()),owned.end());
+        return same(j.physical) && same(j.physicalSources.front()) && owned==targets;
+    };
+    if(!journalCurrent())return false;
+    {
+        std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+        auto& current=g_inputHostDeferredPhysicalHide;
+        if(!inputHostDeferredPhysicalHideSame(*debt,current) || current.continuationRetired || current.refreshAttempted)return false;
+        if(remember && !current.configurationApplied){
+            current.configurationApplied=true; // Write accepted; not yet a positive configuration proof.
+            current.configurationPhysicalIdentity=identity;current.configurationRoot=root;current.configurationTargets=targets;
+        }
+        if(!current.configurationApplied || current.configurationPhysicalIdentity!=identity ||
+           current.configurationRoot!=root || current.configurationTargets!=targets)return false;
+        current.configurationReady=false; // An unknown/new readback cannot borrow the old green observation.
+    }
+    HidHideVisibilitySnapshot after;
+    if(!hidHideCaptureVisibilitySnapshot(after) || !inputHostRogPartialHideConfigurationCurrent(after) ||
+       !std::all_of(targets.begin(),targets.end(),[&](const auto& target){return hidHideContainsPath(after.hidden,target);}) ||
+       !inputHostDeferredPhysicalHideIntentCurrent() || !journalCurrent())return false;
+    std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);
+    auto& current=g_inputHostDeferredPhysicalHide;
+    if(!inputHostDeferredPhysicalHideSame(*debt,current) || current.continuationRetired || current.refreshAttempted ||
+       current.configurationPhysicalIdentity!=identity || current.configurationRoot!=root || current.configurationTargets!=targets)return false;
+    current.configurationReady=true;
+    return true;
+}
+
 static bool inputHostCompleteRogPartialHideLocked(const char** outcome) {
     const auto* debt=t_inputHostDeferredPhysicalHideWrite;
     if(!debt || !debt->refreshRequired || !ymccIsRogFamily())return false;
@@ -33044,7 +33625,7 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
     // Same-session hide of the CURRENT physical identity without CyclePort.
     // Sleep/wake re-enumerates instance ids; the old journal hide list does
     // not cover the new node. Never Unhide here.
-    hidHideServiceHealth("p-hid-refresh");
+    if(!t_inputHostOneXStartWrite)hidHideServiceHealth("p-hid-refresh");
     std::vector<HidHidePhysicalIdentity> physicalSources;
     if (!hidHideGetPhysicalIdentities(physicalSources)) {
         appendNativeLifecycleLog("hidhide.p-hid-refresh-deferred", {
@@ -33055,7 +33636,8 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
         });
         return false;
     }
-    if(!inputHostRogPartialHideSourcesCurrent(physicalSources))return false;
+    if(!inputHostRogPartialHideSourcesCurrent(physicalSources) ||
+       !inputHostOneXRefreshSourcesCurrent(physicalSources))return false;
     if(t_rogPartialHideIdentity && (g_inputHostTransportFault || g_inputHostPipeRetired ||
         !g_hidHideVisibilityJournal.active || g_hidHideVisibilityJournal.transactionId!=transactionId ||
         !inputHostDeferredPhysicalHideWriteCurrent()))return false;
@@ -33081,7 +33663,8 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
     }
     std::sort(targets.begin(), targets.end());
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
-    if(!inputHostRogPartialHideTargetsCurrent(targets))return false;
+    if(!inputHostRogPartialHideTargetsCurrent(targets) ||
+       !inputHostOneXRefreshTargetsCurrent(targets))return false;
     if(!msiCrashRecoveryBeforeHide(physicalSources.front(),targets,before,transactionId))return false;
     bool ok = true;
     for (const auto& target : targets) {
@@ -33188,7 +33771,41 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
 // → 物理手柄对 Steam 不可用」（0914-7 实据：远程 Xbox 360 VID_045E&PID_028E
 // 在无 YMCC 运行的情况下仍被 HidHide 隐藏）。
 #include "msi_foreground_isolation_runtime.h"
+static bool focusLightIsolationBegin() {
+    g_focusLightIsolationTicket.store({}, std::memory_order_release);
+    if (!focusLightNoGameQualified(GetTickCount64())) return false;
+    auto ticket = std::make_shared<FocusLightIsolationTicket>();
+    ticket->power = currentPowerGeneration();
+    ticket->rules = g_gameRulesEpoch.load(std::memory_order_acquire);
+    ticket->host = g_inputHostEpochMirror.load(std::memory_order_acquire);
+    ticket->source = g_msiMainSourceRevision.load(std::memory_order_acquire);
+    ticket->topology = g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    g_focusLightIsolationTicket.store(ticket, std::memory_order_release);
+    return focusLightIsolationCurrent();
+}
+
+static bool focusLightIsolationCurrent() {
+    auto ticket = g_focusLightIsolationTicket.load(std::memory_order_acquire);
+    if (!ticket) return false;
+    const bool current = focusLightNoGameQualified(GetTickCount64()) &&
+        ticket->power == currentPowerGeneration() &&
+        ticket->rules == g_gameRulesEpoch.load(std::memory_order_acquire) &&
+        ticket->host == g_inputHostEpochMirror.load(std::memory_order_acquire) &&
+        ticket->source == g_msiMainSourceRevision.load(std::memory_order_acquire) &&
+        ticket->topology == g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    if (!current) g_focusLightIsolationTicket.compare_exchange_strong(ticket, {}, std::memory_order_acq_rel);
+    return current;
+}
+
 #include "msi_native_foreground_isolation_runtime.h"
+
+static void focusLightRecheckOnUi() {
+    steamLightGamepadUiChanged();
+    if (!g_focusSession.lightNoGame || !g_focusSession.active || focusLightIsolationCurrent()) return;
+    appendNativeLifecycleLog("summon-light-ended", {{"session", g_focusSessionSequence}, {"reason", "proof-or-context-revoked"}});
+    focusClearSession();
+    msiNativeForegroundUiEvent(true);
+}
 
 static void controllerFrontendIsolationRefreshSettings(const json& input) {
     const bool enabled=controllerFrontendIsolationSetting(input);
@@ -33197,6 +33814,7 @@ static void controllerFrontendIsolationRefreshSettings(const json& input) {
     // only invalidates/queues; it never performs driver I/O or changes persona.
     if(!enabled)msiForegroundIsolationSetUiOwned(false);
     msiNativeForegroundUiEvent(true);
+    steamLightGamepadUiChanged();
     appendNativeLifecycleLog("controller-frontend-isolation",{{"enabled",enabled},
         {"reason","settings-refresh"},{"scope","ymcc-main-window"}});
 }
@@ -34233,27 +34851,31 @@ static json steamLiveRequest(DWORD account, json request, const std::function<bo
     const auto operation = request.value("operation", std::string());
     std::unique_lock<std::mutex> liveLock(liveMx, std::defer_lock);
     const bool runningLinkRead = ymcc::steamlive::isRunningLinkRead(request);
+    const bool lightGamepadLease = operation == "input.gamepadLease";
     const bool qamFollowup = operation.rfind("menu.qam.",0)==0;
-    if (qamFollowup || operation == "sleep.session.inspect" || runningLinkRead || operation == "desktopMouse.get" || operation == "desktopMouse.set") {
-        if (!liveLock.try_lock()) return {{"ok",false},{"reason","live-busy"},{"mutated",false}};
-    } else liveLock.lock();
+    if (!lightGamepadLease) {
+        if (qamFollowup || operation == "sleep.session.inspect" || runningLinkRead || operation == "desktopMouse.get" || operation == "desktopMouse.set") {
+            if (!liveLock.try_lock()) return {{"ok",false},{"reason","live-busy"},{"mutated",false}};
+        } else liveLock.lock();
+    }
     const bool sleepOperation = operation == "sleep.session.inspect" || operation == "sleep.inspect" || operation == "sleep.reconcile" || operation == "sleep.input-resume";
-    const bool boundSleep = sleepOperation && request.contains("sleepSessionProcess");
+    const bool boundSleep = (sleepOperation && request.contains("sleepSessionProcess")) ||
+        (lightGamepadLease && request.contains("lightSessionProcess"));
     if (boundSleep) {
-        const auto witness = request["sleepSessionProcess"];
+        const auto witness = request[lightGamepadLease ? "lightSessionProcess" : "sleepSessionProcess"];
         const auto root = sofRegSZ(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath");
         if (!sleepSteamLiveProcessMatches(witness, root)) return {{"ok",false},{"reason","steam-session-changed"},{"mutated",false}};
         const DWORD verifiedPid = witness["pid"].get<DWORD>(); DWORD registeredPid = 0, active = 0;
         sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"pid", &registeredPid);
         sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"ActiveUser", &active);
         const bool discovery = operation == "sleep.session.inspect";
-        const bool setter = operation == "sleep.reconcile" || operation == "sleep.input-resume";
+        const bool setter = lightGamepadLease || operation == "sleep.reconcile" || operation == "sleep.input-resume";
         if (!discovery && !account) return {{"ok",false},{"reason","steam-session-starting"},{"mutated",false}};
         // A registry account is authoritative only with this verified steam.exe.
         if (!discovery && registeredPid == verifiedPid && (!active || active != account))
             return {{"ok",false},{"reason",active ? "steam-account-changed" : "steam-session-starting"},{"mutated",false}};
         request["account"] = account;
-        auto result = ymcc::steamlive::run(root, request, admitAction, runningLinkRead ? 2000 : discovery ? 400 : 0);
+        auto result = ymcc::steamlive::run(root, request, admitAction, lightGamepadLease ? 500 : runningLinkRead ? 2000 : discovery ? 400 : 0);
         DWORD afterPid = 0, afterAccount = 0;
         sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"pid", &afterPid);
         sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"ActiveUser", &afterAccount);
@@ -34277,7 +34899,7 @@ static json steamLiveRequest(DWORD account, json request, const std::function<bo
         }
         return result;
     }
-    if (operation == "sleep.session.inspect") return {{"ok",false},{"reason","steam-session-process-witness-required"},{"mutated",false}};
+    if (operation == "sleep.session.inspect" || lightGamepadLease) return {{"ok",false},{"reason","steam-session-process-witness-required"},{"mutated",false}};
     DWORD active = 0, pid = 0;
     sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"ActiveUser", &active);
     if (!active) return {{"ok", false}, {"reason", "steam-session-starting"}, {"mutated", false}};
@@ -34306,6 +34928,7 @@ static json steamLiveRequest(DWORD account, json request, const std::function<bo
     return result;
 }
 static bool steamLiveCanDefer(const json& result) { return ymcc::steamlive::canDefer(result); }
+#include "steam_light_gamepad_runtime.h"
 static void steamSettingsQueue(const char* reason);
 static std::atomic<bool> g_sofQueued{false};
 static std::atomic<unsigned long long> g_sofRequestSerial{0};
@@ -38072,7 +38695,8 @@ static HANDLE inputHostCreateServerPipeLocked() {
 static bool inputHostFrameSubmissionMayIssue(void*) noexcept;
 static void inputHostFrameSubmissionTransportRejected() noexcept;
 static bool inputHostPipeIo(HANDLE pipe, bool write, void* buffer, DWORD size, DWORD timeoutMs,
-                            DWORD* transferredOut, DWORD* errorOut) {
+                            DWORD* transferredOut, DWORD* errorOut, bool* contextRejectedOut=nullptr) {
+    if (contextRejectedOut) *contextRejectedOut = false;
     if (transferredOut) *transferredOut = 0;
     if (errorOut) *errorOut = ERROR_SUCCESS;
     try {
@@ -38081,6 +38705,7 @@ static bool inputHostPipeIo(HANDLE pipe, bool write, void* buffer, DWORD size, D
             buffer, size, timeoutMs, 50,
             write && t_inputFrameTransportGuard ? inputHostFrameSubmissionMayIssue : nullptr,
             write && t_inputFrameTransportGuard ? t_inputFrameSubmission : nullptr);
+        if(contextRejectedOut)*contextRejectedOut=result.contextRejected;
         if(result.contextRejected)inputHostFrameSubmissionTransportRejected();
         if (transferredOut) *transferredOut = result.transferred;
         if (errorOut) *errorOut = result.error;
@@ -38490,6 +39115,11 @@ bool scanSubmitFrameReceiptBound(const char* begin, const char* end, const char*
                 seen |= bit;
                 if (!captureValue(p, end, fields[idx], nxt)) return false;
             } else {
+                // First SDK witnesses must reach responseOut through the existing
+                // DOM path. The fast path intentionally does not retain metadata.
+                const auto keyBytes = static_cast<std::size_t>(ke - ks);
+                if ((keyBytes == 17 && std::memcmp(ks, "sdkFirstWitnesses", 17) == 0) ||
+                    (keyBytes == 23 && std::memcmp(ks, "sdkFirstWitnessCoverage", 23) == 0)) return false;
                 if (!validateValue(p, end, 0, nxt)) return false;
             }
             p = skipWs(nxt, end);
@@ -38765,10 +39395,12 @@ static bool inputHostWindowsMotionSubmissionCurrent(InputFrameSubmission& frame)
     return false;
 }
 static bool inputHostFrameSubmissionMayIssue(void* context) noexcept {
+    if(t_inputHostOneXStartWrite){try{return inputHostOneXStartMayIssue();}catch(...){return false;}}
     // Runtime invokes this after mutex/buffer/event preparation, immediately
     // before WriteFile. Deferred visibility borrows that existing issue guard.
     if(t_inputHostDeferredPhysicalHideWrite){
-        try{if(!inputHostDeferredPhysicalHideWriteCurrent())return false;}catch(...){return false;}
+        try{if(t_inputHostDeferredPhysicalHideRefreshIssueActive ?
+            !inputHostDeferredPhysicalHideReserveRefreshIssue() : !inputHostDeferredPhysicalHideWriteCurrent())return false;}catch(...){return false;}
     }
     auto* frame=static_cast<InputFrameSubmission*>(context);
     if(!frame)return t_inputHostDeferredPhysicalHideWrite!=nullptr;
@@ -38792,6 +39424,11 @@ static void inputHostFrameSubmissionTransportRejected() noexcept {
     if(t_inputFrameSubmission)inputHostFrameSubmissionNote(t_inputFrameSubmission->reason,"before-overlapped-issue",false);
 }
 static bool inputHostFrameSubmissionRequestCurrent(const char* command,json* responseOut,const char* phase) {
+    if(t_inputHostOneXStartWrite && command && std::strncmp(command,"HIDHIDE_",8)==0 && !inputHostOneXStartCurrent()){
+        if(responseOut)*responseOut={{"status","visibility-context-retired"},{"detail","OneX-original-start-not-current"},
+            {"deviceWriteAttempted",false},{"phase",phase}};
+        return false;
+    }
     if(t_inputHostDeferredPhysicalHideWrite && command &&
         (std::strcmp(command,"HIDHIDE_HIDE")==0 || std::strcmp(command,"HIDHIDE_CLOAK")==0 ||
          std::strcmp(command,"HIDHIDE_APP_REG")==0 || std::strcmp(command,"HIDHIDE_CYCLE")==0) && !inputHostDeferredPhysicalHideWriteCurrent()) {
@@ -38940,7 +39577,8 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
         (std::strcmp(command,"HIDHIDE_HIDE")==0 || std::strcmp(command,"HIDHIDE_CLOAK")==0 ||
          std::strcmp(command,"HIDHIDE_APP_REG")==0 || std::strcmp(command,"HIDHIDE_CYCLE")==0);
     const InputFrameTransportScope frameTransportScope((t_inputFrameSubmission && command &&
-        std::strcmp(command,"SUBMIT_FRAME")==0) || deferredVisibilityCommand);
+        std::strcmp(command,"SUBMIT_FRAME")==0) || deferredVisibilityCommand ||
+        (t_inputHostOneXStartWrite && command && std::strncmp(command,"HIDHIDE_",8)==0));
     if(!inputHostFrameSubmissionRequestCurrent(command,responseOut,"before-envelope"))return false;
     // R2：envelope 合并+dump 段计时（仅 SUBMIT_FRAME 且门内；并入 frameBuild 阶段）。
     const bool reqBuildCostOn = tickCostEnabled() && std::strcmp(command, "SUBMIT_FRAME") == 0;
@@ -39016,11 +39654,14 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
     }
     std::vector<char> responseBuffer(16 * 1024);
     DWORD responseBytes = 0;
-    const auto executionDeadline=inputHostRequestHasExecutionDeadline(command)
+    auto executionDeadline=inputHostRequestHasExecutionDeadline(command)
         ? g_inputHostSwitchRecoveryStartDeadline : std::uint64_t{0};
+    const auto oneXDeadline=t_inputHostOneXStartWrite && command && std::strncmp(command,"HIDHIDE_",8)==0
+        ? inputHostOneXStartDeadline() : std::uint64_t{0};
+    if(oneXDeadline)executionDeadline=executionDeadline?(std::min)(executionDeadline,oneXDeadline):oneXDeadline;
     // Connect/write/read share one command ceiling and the original player
     // deadline. A successful preceding stage never renews either clock.
-    const auto commandDeadline=timeoutMs && (inputHostRequestIsLifecycleCommand(command) || t_inputHostDeferredPhysicalHideWrite)
+    const auto commandDeadline=timeoutMs && (inputHostRequestIsLifecycleCommand(command) || t_inputHostDeferredPhysicalHideWrite || oneXDeadline)
         ? inputHostStartProtectionNow()+std::uint64_t(timeoutMs) : std::uint64_t{0};
     const auto ioDeadline=executionDeadline && commandDeadline
         ? (std::min)(executionDeadline,commandDeadline) : executionDeadline ? executionDeadline : commandDeadline;
@@ -39054,12 +39695,19 @@ static bool inputHostRequestPreparedLocked(const char* command, const json& payl
     // ACK loss retains it; deadline/connect rejection before write creates no claim.
     if (connected && (!ioDeadline||writeBudget) && std::strcmp(command,"PREPARE_TARGET")==0)
         g_inputHostPrepareMayHaveReachedHost = true;
+    bool writeContextRejected=false;
     const bool written = connected && (!ioDeadline||writeBudget) && inputHostPipeIo(pipe, true, const_cast<char*>(requestText.data()),
-        (DWORD)requestText.size(), writeBudget, nullptr, &lastError);
+        (DWORD)requestText.size(), writeBudget, nullptr, &lastError, &writeContextRejected);
     const auto writeElapsedUs = static_cast<unsigned long long>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - writeStarted).count());
     const auto readStarted = std::chrono::steady_clock::now();
+    if(writeContextRejected && (t_inputHostDeferredPhysicalHideWrite || t_inputHostOneXStartWrite)) {
+        if(responseOut)*responseOut={{"status","visibility-context-retired"},
+            {"detail","deferred-Start-intent-or-source-not-ready"},
+            {"deviceWriteAttempted",false},{"phase","before-overlapped-issue"}};
+        return false; // Proven not dispatched; retain the healthy pipe/Host for this original continuation.
+    }
     if(t_inputFrameSubmission && t_inputFrameSubmission->rejected) {
         if(responseOut)*responseOut={{"status","frame-context-retired"},
             {"detail",ymcc::input::frameSubmission::name(t_inputFrameSubmission->reason)},
@@ -39689,6 +40337,11 @@ static bool inputHostHidHideResolveApplyCommand(const std::wstring& operation, c
 
 static bool inputHostHidHideApplyViaPipeImpl(const std::wstring& operation, const std::wstring& target,
                                              bool adoptedEntry) {
+    if(!inputHostOneXHideTargetCurrent(operation,target))return false;
+    struct OneXHideWriteScope {bool previous=t_inputHostOneXHideTargetWrite;
+        explicit OneXHideWriteScope(bool active){t_inputHostOneXHideTargetWrite=active;}
+        ~OneXHideWriteScope(){t_inputHostOneXHideTargetWrite=previous;}}
+        oneXHideWriteScope(t_inputHostOneXStartWrite && operation==L"hide");
     if(t_inputHostDeferredPhysicalHideWrite && operation!=L"unhide" &&
         !inputHostDeferredPhysicalHideWriteCurrent())return false;
     const bool hostAlive = g_inputHostProcess && !g_inputHostTransportFault;
@@ -39829,7 +40482,10 @@ static bool inputHostAdmitSelectedPhysicalSource() {
     // 显式指回其主导槽位。OpenXInput 跨设备重枚举保持槽位稳定（HC
     // DeviceManager.GetXInputIndex/AssignXInputSlot 语义）；指派失败仅记录，
     // 不改变现有准入结果，槽位决策仍以系统 XInput canonical 采样为准。
-    if (ymccOpenXInputAvailable()) {
+    // The OneX continuation already reverse-proved its exact root and slot.
+    // Its admission runs under the sampling mutex; optional SDK slot sync must
+    // not issue external calls there. Other entry paths retain their old sync.
+    if (!t_inputHostOneXStartWrite && ymccOpenXInputAvailable()) {
         const HidHidePhysicalIdentity physical = [] {
             std::lock_guard<std::mutex> guard(g_hidHidePhysicalIdentityMx);
             return g_hidHidePhysicalIdentity;
@@ -41379,10 +42035,10 @@ static MsiClawCommandOutcome msiClawSwitchModeOnHandle(BYTE mode,HANDLE handle,c
     return out;
 }
 
-static MsiClawCommandOutcome msiClawSwitchMode(BYTE mode) {
+static MsiClawCommandOutcome msiClawSwitchMode(BYTE mode,const std::function<bool()>& contextCurrent={}) {
     MsiClawHidDiag diag;
     const HANDLE handle=msiClawOpenModeCommand(diag);
-    return msiClawSwitchModeOnHandle(mode,handle,diag);
+    return msiClawSwitchModeOnHandle(mode,handle,diag,false,contextCurrent);
 }
 static bool msiTerminalReturnMissingTransport(const MsiClawCommandOutcome& out) {
     return out.diag.enumerationComplete && out.diag.enumerationError==0 &&
@@ -41536,7 +42192,9 @@ static void msiControllerProbeBeforeRearm(const char* reason) {
         appendNativeLifecycleLog("msi-controller-mode-probe",std::move(row));
     }catch(...){/* Failure of diagnostics never changes the recovery result. */}
 }
-static bool msiClawRequestDInputMode(const char* diagnosticReason,uint64_t* completedMode) {
+static bool msiClawRequestDInputMode(const char* diagnosticReason,uint64_t* completedMode,
+        const std::function<bool()>& contextCurrent) {
+    if(contextCurrent && !contextCurrent())return false;
     if(completedMode)*completedMode=0;
     ymccResolveMachineIdentityOnce();
     // GP-MSIG3E-3-R1（R4/N6）：收紧为已登记板号授权；未知 MICRO-STAR 回落 CG3EM 不再获写权限。
@@ -41545,7 +42203,7 @@ static bool msiClawRequestDInputMode(const char* diagnosticReason,uint64_t* comp
     msiOwnedReturnCancel("new-dinput-request");
     if(msiControllerTraceEnabled())msiControllerTraceLog("mode2-write-begin",{{"requestedMode",2},{"reason",diagnosticReason?diagnosticReason:"unspecified"}},true);
     msiControllerProbeBeforeRearm(diagnosticReason);
-    const MsiClawCommandOutcome outcome = msiClawSwitchMode(2); // GamepadMode.DirectInput
+    const MsiClawCommandOutcome outcome = msiClawSwitchMode(2,contextCurrent); // GamepadMode.DirectInput
     msiOwnedReturnMode2Outcome(outcome); // failed mode2 must not erase the old physical duty
     const bool sent = outcome.write.ok;
     // GP-MSIG3E-3-R2（r2-6）：模式切换会引起设备重枚举 ⇒ 登记为"最近受管事务"，
@@ -42652,6 +43310,11 @@ static bool inputHostXboxConfirmStartupLocked(json receipt, ULONGLONG prepareSta
         return false;
     }
     struct SlotReadback {
+        // Numeric defaults remain for compatibility. These flags distinguish
+        // a real API observation from a gate that was never reached this poll.
+        bool stateAttempted = false, pathAttempted = false;
+        bool targetInterfaceAttempted = false, targetInterfaceMatched = false;
+        bool indexAttempted = false, confirmAttempted = false;
         DWORD stateResult = ERROR_DEVICE_NOT_CONNECTED;
         DWORD confirmResult = ERROR_DEVICE_NOT_CONNECTED;
         BYTE mappedSlot = 0xFF;
@@ -42664,7 +43327,10 @@ static bool inputHostXboxConfirmStartupLocked(json receipt, ULONGLONG prepareSta
         for (DWORD slot = 0; slot < 4; ++slot) {
             const auto& s = slots[slot];
             rows.push_back({{"slot", slot}, {"stage", s.stage}, {"stateResult", s.stateResult},
-                {"confirmResult", s.confirmResult}, {"mappedSlot", s.mappedSlot}, {"path", W2U(s.path)}});
+                {"confirmResult", s.confirmResult}, {"mappedSlot", s.mappedSlot}, {"path", W2U(s.path)},
+                {"stateAttempted", s.stateAttempted}, {"pathAttempted", s.pathAttempted},
+                {"targetInterfaceAttempted", s.targetInterfaceAttempted}, {"targetInterfaceMatched", s.targetInterfaceMatched},
+                {"indexAttempted", s.indexAttempted}, {"confirmAttempted", s.confirmAttempted}});
         }
         return rows;
     };
@@ -42679,19 +43345,25 @@ static bool inputHostXboxConfirmStartupLocked(json receipt, ULONGLONG prepareSta
             s = SlotReadback{};
             XINPUT_STATE state{};
             // 必须在路径查询之前：这次读才会经 ProcessAPIRequest 发现新出现的 Xbox。
+            s.stateAttempted = true;
             s.stateResult = ymccXInputGetState14(slot, &state);
             s.stage = "state-unavailable";
             if (!inputHostXboxStartupAllowed(powerGeneration) || g_inputHostTransportFault) return false;
             if (s.stateResult != ERROR_SUCCESS) continue;
+            s.pathAttempted = true;
             s.path = ymccOpenXInputGetDevicePath(slot);
             s.stage = "path-unavailable";
             if (s.path.empty()) continue;
             s.stage = "target-mismatch";
             std::wstring observedHid;
-            if (!inputHostXboxInterfaceIsTarget(s.path, expected, &observedHid)) continue;
+            s.targetInterfaceAttempted = true;
+            s.targetInterfaceMatched = inputHostXboxInterfaceIsTarget(s.path, expected, &observedHid);
+            if (!s.targetInterfaceMatched) continue;
+            s.indexAttempted = true;
             s.mappedSlot = ymccOpenXInputGetUserIndex(s.path);
             s.stage = "index-mismatch";
             if (s.mappedSlot != slot) continue;
+            s.confirmAttempted = true;
             s.confirmResult = ymccXInputGetState14(slot, &state);
             s.stage = "readback-changed";
             if (s.confirmResult != ERROR_SUCCESS || ymccOpenXInputGetUserIndex(s.path) != slot ||
@@ -42727,6 +43399,8 @@ static bool inputHostXboxConfirmStartupLocked(json receipt, ULONGLONG prepareSta
     return false;
 }
 
+#include "virtual_controller_onex_start_runtime.h"
+#include "msi_force_gamepad_runtime.h"
 #include "virtual_controller_start_runtime.h"
 
 #include "virtual_switch_recovery_runtime.h"
@@ -43255,6 +43929,14 @@ static InputHostLateHideEnqueueOutcome inputHostCoordinatorLateHideEnqueue(unsig
 // fence; it performs all HidHide I/O off the BUS.  A rejected generation-zero
 // episode cannot consume the later confirmed-generation episode.
 static void inputHostCoordinatorLateSourceVisibilityTick(bool publicationWanted, bool hostRunning) {
+    // Retire only the source-wait metadata on cancelled intent, even though the
+    // ordinary producer is OFF. Actual hide/return duties stay with their owner.
+    if(g_inputHostDeferredPhysicalHideSourcePending.load(std::memory_order_acquire) &&
+       (!publicationWanted || !hostRunning || inputHostExitFenceRaised() ||
+        !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled)) {
+        InputHostDeferredPhysicalHide cancelled;
+        inputHostDeferredPhysicalHideResumeSourceReady(cancelled);
+    }
     if (!publicationWanted || !hostRunning || inputHostExitFenceRaised() ||
         !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled ||
         kVirtualTestKeepPhysicalVisible) return;
@@ -43264,7 +43946,11 @@ static void inputHostCoordinatorLateSourceVisibilityTick(bool publicationWanted,
         (g_xinputConnectedMask != 0 || managedMsiConfirmed) &&
         inputHostCanCreateTargetWithoutPhysicalSource() &&
         inputHostAdmitSelectedPhysicalSource();
-    if (!managedMsiConfirmed && !lateXinputAdmission) return;
+    InputHostDeferredPhysicalHide resumedDebt;
+    const bool deferredSourceResume=!g_inputHostLifecycleWorkInFlight.load(std::memory_order_acquire) &&
+        !g_inputHostLifecycleWorkRequested.load(std::memory_order_acquire) &&
+        inputHostDeferredPhysicalHideResumeSourceReady(resumedDebt);
+    if (!managedMsiConfirmed && !lateXinputAdmission && !deferredSourceResume) return;
 
     // DInput is already admitted by its canonical-frame/source-valid gate.
     // Do not report an old XInput slot as the new DInput source, and do not
@@ -43280,13 +43966,22 @@ static void inputHostCoordinatorLateSourceVisibilityTick(bool publicationWanted,
     // Defer new managed-MSI work during the release window; keep admission side effects above.
     if (managedMsiConfirmed && physicalReleaseWindowActive()) return;
     unsigned long long token = 0;
+    // Consume before publication: a fast worker may refuse again and publish
+    // a NEW source wait before enqueue returns. Never clear that new receipt.
+    if(deferredSourceResume)inputHostDeferredPhysicalHideSourceResumed(resumedDebt);
     const auto outcome = inputHostCoordinatorLateHideEnqueue(&token);
+    if(deferredSourceResume && outcome==InputHostLateHideEnqueueOutcome::Refused){
+        std::lock_guard<std::mutex> debtLock(g_inputHostDeferredPhysicalHideMx);
+        if(inputHostDeferredPhysicalHideSame(resumedDebt,g_inputHostDeferredPhysicalHide) &&
+           !g_inputHostDeferredPhysicalHide.continuationRetired && !g_inputHostDeferredPhysicalHide.refreshAttempted)
+            g_inputHostDeferredPhysicalHideSourcePending.store(true,std::memory_order_release);
+    }
     if (outcome == InputHostLateHideEnqueueOutcome::Enqueued) {
         appendNativeLifecycleLog("input-host-lifecycle-work-requested", {
             {"action", "late-hide-after-source-return"},
             {"reason", "physical-source-returned-after-skip"},
             {"sourceKind", managedMsiConfirmed ? "msi-dinput" : "xinput"},
-            {"trigger", managedMsiConfirmed ? "confirmed-main-source" : "late-xinput-admission"},
+            {"trigger", deferredSourceResume ? "deferred-start-source-resumed" : managedMsiConfirmed ? "confirmed-main-source" : "late-xinput-admission"},
             {"owner", "coordinator-bus"}, {"busBlocking", false},
             {"queueToken", token}
         });
@@ -44102,6 +44797,11 @@ static void inputHostPerformWakeHotReplace(const std::string& reason) {
 // 拥有的隐藏与虚拟输出，尽力让物理回可用；只清自有目标，不冒充"虚拟正常"。
 #include "msi_crash_recovery_runtime.h"
 #include "msi_owned_return_runtime.h"
+static bool msiForceGamepadNativeDebtClear() {
+    std::lock_guard lock(g_msiCrashMx);msiCrashLoadLocked();
+    return g_msiCrashLoaded&&!g_msiCrashStoreInvalid&&!g_msiCrashReadRetryPending.load()&&
+        !g_msiCrashInheritedPending.load()&&!msiCrashHasDuty(g_msiCrashRecord);
+}
 
 static void inputHostRecoveryPhysicalFallback() {
     if (!(g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled)) return;   // Off/退出走原路径
@@ -44380,6 +45080,7 @@ static void inputHostRunQueuedLifecycleWork() {
     msiCrashRecoveryMaintenance(GetTickCount64()); // MSI inherited duty; virtual OFF still restores owned state
     msiOwnedReturnMaintenance(GetTickCount64()); // expected physical identity, retained OFF duty; idle is atomic-only
     msiTerminalReturnMaintenance(GetTickCount64()); // legacy/deferred transport fixture path
+    msiForceGamepadMaintenance(); // event-only MSI policy/mode work; idle does not read hardware
     msiVisibilityObserverWakeMaintenance(); // MSI diagnostic-only child poll; existing owner, no new timer
     msiNativeForegroundMaintenance(); // MSI-only pending handles/power edge; idle returns without I/O
     // Read-only, nonblocking child poll on the existing worker; no new timer/thread.
@@ -44679,6 +45380,7 @@ static void inputHostRunQueuedLifecycleWork() {
                     g_realStickTest.virtualTargetEnabled) {
                     bool lateHideApplied = false;
                     bool deferredStartCurrent = true;
+                    bool configurationApplied=false,configurationReady=false,rootRefreshMayHaveIssued=false,ordinaryContinuationRetired=false;
                     const char* deferredRefreshOutcome="not-requested";
                     const char* deferredStartContextReason=nullptr;
                     const char* deferredContextPhase="worker-entry";
@@ -44698,13 +45400,14 @@ static void inputHostRunQueuedLifecycleWork() {
                                 if(physicalReleaseWindowActive())return "physical-release-window";
                                 if(!g_realStickTest.enabled)return "capture-disabled";
                                 if(!g_realStickTest.virtualTargetEnabled)return "virtual-target-disabled";
-                                if(!g_xinputPhysicalSourceLocked)return "physical-source-unlocked";
-                                if((g_xinputConnectedMask & g_xinputPhysicalSourceMask)==0)return "physical-source-mask-not-live";
-                                return inputHostDeferredPhysicalHideCurrentReason(g_inputHostEpoch,g_inputHostRunId,
-                                    currentPowerGeneration(),inputHostConfiguredPersona(),inputHostStartProtectionNow());
+                                if(const auto* ownerReason=inputHostDeferredPhysicalHideCurrentReason(g_inputHostEpoch,g_inputHostRunId,
+                                    currentPowerGeneration(),inputHostConfiguredPersona(),inputHostStartProtectionNow()))return ownerReason;
+                                return inputHostDeferredPhysicalHideSourceReason();
                             };
                             deferredStartContextReason=contextReason();
                             deferredStartCurrent=deferredStartContextReason==nullptr;
+                            if(!deferredStartCurrent)inputHostDeferredPhysicalHideWaitSource(
+                                lateHideEpisode.hostGen,lateHideEpisode.runId,deferredStartContextReason);
                         }
                         if(deferredStartCurrent) {
                             InputHostDeferredPhysicalHide writeDebt;
@@ -44730,15 +45433,33 @@ static void inputHostRunQueuedLifecycleWork() {
                                     g_inputHostSwitchRecoveryStartDeadline=deadline;
                                     g_inputHostSwitchRecoveryStartRequestId=request;g_inputHostSwitchRecoveryStartPower=power;}
                             } writeScope{lateHideEpisode.deferredStartHide,writeDebt};
-                            lateHideApplied = hidHideApplyPhysicalTransaction(g_inputHostRunId, /*powerCycle=*/false);
-                            if(!lateHideApplied && lateHideEpisode.deferredStartHide)
-                                lateHideApplied=inputHostCompleteRogPartialHideLocked(&deferredRefreshOutcome);
+                            const bool stagedRog=lateHideEpisode.deferredStartHide && writeDebt.refreshRequired &&
+                                g_machineIdentity.resolved && ymccIsRogFamily();
+                            if(stagedRog && writeDebt.configurationApplied) {
+                                lateHideApplied=inputHostDeferredPhysicalHideConfigurationLocked(false);
+                            } else {
+                                lateHideApplied = hidHideApplyPhysicalTransaction(g_inputHostRunId, /*powerCycle=*/false);
+                                if(!lateHideApplied && lateHideEpisode.deferredStartHide)
+                                    lateHideApplied=inputHostCompleteRogPartialHideLocked(&deferredRefreshOutcome);
+                                if(lateHideApplied && stagedRog && inputHostDeferredPhysicalHideRogRefreshPolicyApplies())
+                                    lateHideApplied=inputHostDeferredPhysicalHideConfigurationLocked(true);
+                            }
                             if(lateHideApplied && lateHideEpisode.deferredStartHide)
                                 lateHideApplied=inputHostDeferredPhysicalHideRefreshLocked(&deferredRefreshOutcome);
                             if(lateHideEpisode.deferredStartHide && !lateHideApplied){
                                 deferredContextPhase="transaction-or-refresh";
-                                deferredStartCurrent=inputHostDeferredPhysicalHideWriteCurrent();
+                                deferredStartCurrent=inputHostDeferredPhysicalHideWriteCurrent() && !t_inputHostDeferredPhysicalHideFirstRefusal;
                                 deferredStartContextReason=t_inputHostDeferredPhysicalHideFirstRefusal;
+                                inputHostDeferredPhysicalHideWaitSource(lateHideEpisode.hostGen,lateHideEpisode.runId,
+                                    deferredStartContextReason,true);
+                            }
+                        }
+                        if(lateHideEpisode.deferredStartHide){
+                            std::lock_guard<std::mutex> stageLock(g_inputHostDeferredPhysicalHideMx);
+                            const auto& stage=g_inputHostDeferredPhysicalHide;
+                            if(stage.hostGen==lateHideEpisode.hostGen && stage.runId==lateHideEpisode.runId){
+                                configurationApplied=stage.configurationApplied;configurationReady=stage.configurationReady;
+                                rootRefreshMayHaveIssued=stage.refreshAttempted;ordinaryContinuationRetired=stage.continuationRetired;
                             }
                         }
                         if(lateHideApplied && lateHideEpisode.deferredStartHide)
@@ -44752,6 +45473,8 @@ static void inputHostRunQueuedLifecycleWork() {
                         {"deferredStartContextCurrent",deferredStartCurrent},
                         {"deferredStartContextReason",deferredStartContextReason?deferredStartContextReason:""},
                         {"deferredContextPhase",deferredContextPhase},
+                        {"configurationApplied",configurationApplied},{"configurationReady",configurationReady},
+                        {"rootRefreshMayHaveIssued",rootRefreshMayHaveIssued},{"ordinaryContinuationRetired",ordinaryContinuationRetired},
                         {"deferredRefreshOutcome",deferredRefreshOutcome},
                         {"queueToken", lateHideToken},
                         {"runId", lateHideEpisode.runId},
@@ -48105,6 +48828,11 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
                 catch(...) {++g_commonFrameEvidenceFailures;commonFrameReceipt=nullptr;}
             }
             const auto tupleReportSequence=g_inputHostSequence+1;
+            ymcc::virtualAdaptation::FrameStamp virtualEvidenceStamp{g_inputHostEpoch,nativeSignalRequestPower,
+                t_commonFrameSource?t_commonFrameSource->readContinuityGeneration:0,
+                t_commonFrameSource?t_commonFrameSource->readTopologyGeneration:0,tupleReportSequence,nativeSignalWireSample,nativeSignalWireTick,
+                semanticNeutral,false,physicalSourceAdmitted,false};
+            virtualEvidenceStamp.captureBinding(g_inputHostRunId,g_inputHostHostInstanceId); // Fixed-size metadata before the existing request.
             const auto switchAcceptedSource=ymcc::inputHost::switchVerificationRuntime::captureAcceptedSourceLocked(physicalSourceAdmitted);
             const auto recoveryHealthRequestContext = inputHostRecoveryHealthContextLocked(false);
             const auto virtualGyroReadyConfig=g_virtualGyroWake.needsReady(g_inputHostEpoch,currentPowerGeneration())
@@ -48134,6 +48862,8 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
             chainAck.parsedFastHostInstanceId = &fastReceipt.hostInstanceId;
             chainAck.parsedDomReceipt = &receipt;
             diagSubmitAttempted = true;
+            virtualEvidenceStamp.accepted=accepted;virtualEvidenceStamp.fastReceipt=fastReceipt.used;
+            virtualAdaptationFrameReceipt(virtualEvidenceStamp,frame,frameRequestText,frameRequestId,receipt); // Passive first witness only.
             if(!accepted)ymcc::screenpads::observeNativeTransport(g_inputHostEpoch,false);
             inputHostNotePublicationStage(accepted ? (semanticNeutral ? InputHostPublicationStage::NeutralCleanupAccepted : InputHostPublicationStage::Accepted) : InputHostPublicationStage::Rejected);
             inputHostNoteIdleSubmit(effectiveContent,accepted);
@@ -49599,7 +50329,9 @@ static void inputCaptureCommonFrameEvidence(const json& hostFrame,bool semanticN
             {outcome,hostId,runId,sample?std::string_view(sample->inputSource):std::string_view("unknown")},
             {epoch,sample?sample->readTopologyGeneration:0ULL,sample?sample->readPowerGeneration:0ULL,
                 sample?sample->primarySlot:0ULL,sample?sample->connectedMask:0ULL},
-            {sample&&sample->live,sample&&sample->readContextStable,semanticNeutral}};
+            // Ordinary control neutrality is sampled, not a resident transition.
+            // Its first SDK witnesses are retained by the separate bounded journal.
+            {sample&&sample->live,sample&&sample->readContextStable,false}};
         static thread_local ymcc::logging::FrameEvidenceLogState previous;
         static thread_local ULONGLONG lastTick=0;
         const bool changed=previous.changed(state);
@@ -49631,6 +50363,7 @@ static void inputCaptureCommonFrameEvidence(const json& hostFrame,bool semanticN
             if(lock.owns_lock() && g_hidHidePhysicalIdentity.resolved)identity=hidHideIdentityJson(g_hidHidePhysicalIdentity);}
         appendNativeLifecycleLog("input-host-frame-evidence",{{"formatVersion",2},{"diagnosticOnly",true},
             {"snapshotReason",changed?"state-change":"periodic"},
+            {"transitionScope","source-host-admission-outcome;control-neutrality-is-sampled"},
             {"family",ymccFamilyName(g_machineIdentity.family)},{"board",g_machineIdentity.product},
             {"observedTick",now},{"source",std::move(source)},{"frameProof",proof},
             {"physicalIdentityCache",std::move(identity)},{"physicalIdentitySampleBindingProven",false},
@@ -50989,6 +51722,7 @@ static void inputCaptureBusTick() {
     // C（裁决14 §4.2）：下面的准入调用会捕获 preTarget 物理源掩码；在它之前
     // 先完成一次受控同步全扫（一次性，见函数注释）。
     xinputSlotsEnsurePreTargetBoundaryDiscovery();
+    if(publicationWanted && !hostRunning)inputHostRetireUnownedRogWakeHoldForStart();
     inputHostCoordinatorLateSourceVisibilityTick(publicationWanted, hostRunning);
     // HC VirtualManager serializes a persona change even when the old target
     // process is still alive: Disconnect -> Dispose -> construct/connect the
@@ -52340,6 +53074,7 @@ static void gamepadReadStateUnlocked(bool publishUi) {
             g_xinputPhysicalDropSinceLastLine.store(false, std::memory_order_relaxed);
         }
     }
+    msiForceGamepadObserveShoulders(live&&!externalPriority,pad.wButtons);
     ymcc::VirtualOutputSourceWindow statusSourceWindow;
     {
         std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
@@ -53699,6 +54434,7 @@ static bool nativeScreenStandaloneSubmit(ymcc::screenpads::StandaloneAction acti
 static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool maximizeWindow = false) {
     if (!g_hwnd || !IsWindow(g_hwnd)) return false;
     const auto generation = ++g_summonGeneration; // invalidate late registration receipts on hide too
+    g_summonRegistrationGeneration.store(generation, std::memory_order_release);
     focusShortcutInputEvidence("before-decision",generation,target.valid);
     if (ymcc::summonPressHides(true, IsWindowVisible(g_hwnd) != FALSE,
             IsIconic(g_hwnd) != FALSE, IsZoomed(g_hwnd) != FALSE,
@@ -53714,13 +54450,22 @@ static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool max
     // recognizer also seeds this slot, but custom chords/OEM keys need the same
     // handoff to focusPrepareSummonSession before UI input ownership begins.
     g_pendingSummonTarget = target;
+    const bool selectedLightNoGame = focusLightNoGameQualified(GetTickCount64());
     bringToFront(g_hwnd, maximizeWindow);
+    if (generation != g_summonGeneration) return true;
     focusShortcutInputEvidence("show-returned",generation,target.valid);
-    ipc_emit("gamepad.summon", nativeSummonCandidateSnapshot(target, generation));
+    const bool lightNoGame = selectedLightNoGame || g_focusSession.lightNoGame;
+    auto candidate = nativeSummonCandidateSnapshot(target, generation);
+    if (lightNoGame) {
+        candidate["isolationMode"] = "light-no-game";
+        candidate["skipGameRegistration"] = true;
+    }
+    ipc_emit("gamepad.summon", candidate);
     appendNativeLifecycleLog("gamepad-summon-emitted", {
-        {"generation", generation}, {"targetCaptured", target.valid}
+        {"generation", generation}, {"targetCaptured", target.valid},
+        {"isolationMode", lightNoGame ? "light-no-game" : "original"}
     });
-    queueSummonGameRegistration(target, generation);
+    if (!lightNoGame) queueSummonGameRegistration(target, generation);
     return true;
 }
 // Match the built/live target too, not only the requested settings persona.
@@ -54151,17 +54896,39 @@ static void nativeOemKeyboardConsumeMaintain(ULONGLONG now) {
 
 static bool nativeKeyboardShortcutDispatch(const NativeKeyboardShortcutRule& rule, uint64_t sourceEpoch, uint64_t wmiGeneration = 0, uint64_t wmiSequence = 0, OemProducerTokens producerTokens = {}) {
     const bool keyboardWmiFallback = !wmiGeneration && (rule.requiredMask & (kOemBitClaw | kOemBitQs));
-            if (!rule.uiAction.empty()) return nativeShortcutUiDispatch(rule, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
+    const std::string actionId = !rule.uiAction.empty() ? rule.uiAction :
+        rule.ownAction.empty() ? rule.inputAction : rule.ownAction;
+    // These canonical bits are shared with other families. Limit this ordinary
+    // diagnostic to OneX, and retain every existing OneX action/gesture ID.
+    const uint64_t onexMask = kOemBitL4 | kOemBitR4 | kOemBitSpecial | kOemBitTurbo |
+        kOemBitKeyboard | kOemBitHome | kOemBitOrange | kOemBitFunction |
+        kOemBitOrangeKb | kOemBitOrangeTb | kOemBitOrangeLp | kOemBitGKey;
+    const bool onexRule = g_machineIdentity.family == YmccFamily::OneXPlayer &&
+        (rule.requiredMask & onexMask) != 0;
+    const auto traceDispatch = [&](bool accepted, const char* stage) {
+        if (!onexRule) return accepted;
+        appendNativeLifecycleLog("oem-shortcut-dispatch", {
+            {"requiredMask", rule.requiredMask}, {"actionId", actionId},
+            {"sourceEpoch", sourceEpoch}, {"wmiGeneration", wmiGeneration},
+            {"wmiSequence", wmiSequence}, {"keyboardWmiFallback", keyboardWmiFallback},
+            {"accepted", accepted}, {"stage", stage},
+            {"familyId", "onexplayer"}, {"deviceClass", g_machineIdentity.deviceClass},
+            {"queueAdmissionOnly", true}, {"actionExecutionProven", false}
+        });
+        return accepted;
+    };
+
+            if (!rule.uiAction.empty()) return traceDispatch(nativeShortcutUiDispatch(rule, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens), "queue-result");
             if (!rule.ownAction.empty()) {
-                return nativeYmccShortcutEmit(rule.ownAction, rule.actionDelta, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
+                return traceDispatch(nativeYmccShortcutEmit(rule.ownAction, rule.actionDelta, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens), "queue-result");
             } else if (!rule.inputAction.empty()) {
                 const auto action = rule.inputAction;
                 const auto preset = rule.preset;
                 const auto context = ymcc::inputShortcutContext(ymSettingsSection("input"), gameInputOwnerSession());
-                return nativeYmccShortcutSubmit([action, preset, context] { nativeInputShortcutToggle(action, preset, context); },
-                    SerialJobKind::YmccOwn, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
+                return traceDispatch(nativeYmccShortcutSubmit([action, preset, context] { nativeInputShortcutToggle(action, preset, context); },
+                    SerialJobKind::YmccOwn, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens), "queue-result");
             } else {
-                return nativeKeyboardSequenceDispatch(rule, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens);
+                return traceDispatch(nativeKeyboardSequenceDispatch(rule, sourceEpoch, wmiGeneration, wmiSequence, keyboardWmiFallback, producerTokens), "queue-result");
             }
 }
 
@@ -54501,12 +55268,50 @@ static void nativeOnexX2HomeDispatch(const OemProducerEdgeReceipt& receipt) {
                 accepted ? "action-dispatch-accepted" : "action-dispatch-refused"}});
     }
 }
+// OneX firmware may emit a complete keyboard chord between gamepad snapshots.
+// Keep its receipt separate from held-state/output and from action acceptance.
+// Called on the existing UI delivery lane, never in a low-level hook callback.
+static void nativeOneXOemObserve(uint64_t mask, const char* route) {
+    if (g_machineIdentity.family != YmccFamily::OneXPlayer) return;
+    const json keys = gamepadOemPressedKeys(mask);
+    size_t configuredRuleCount = 0, matchingRuleCount = 0;
+    for (const auto& rule : g_nativeKeyboardShortcuts) {
+        if (!(rule.requiredMask & mask)) continue;
+        ++configuredRuleCount;
+        if (rule.requiredMask == mask && rule.desktopKeys.empty()) ++matchingRuleCount;
+    }
+    const bool recording = g_shortcutRecordingActive.load(std::memory_order_acquire);
+    const char* actionStatus = keys.empty() ? "neutral-observation" : recording ? "recording-owned" :
+        !configuredRuleCount ? "no-configured-rule-for-observed-keys" : "configured-awaiting-evaluation";
+    const json receipt = {
+        {"schemaVersion", 1}, {"familyId", "onexplayer"},
+        {"deviceClass", g_machineIdentity.deviceClass}, {"route", route},
+        {"observedKeys", keys}, {"sourceEpoch", g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)},
+        {"recording", recording},
+        {"configuredRuleCount", configuredRuleCount}, {"matchingRuleCount", matchingRuleCount},
+        {"actionStatus", actionStatus},
+        {"actionExecutionProven", false}
+    };
+    appendNativeLifecycleLog("onex-oem-input-edge", receipt);
+    if (!keys.empty()) ipc_emit("oem.keys.observed", receipt);
+}
+
 // Existing UI lane only. Receipt times, not dispatch times, drive short press/
 // release and double/hold history. Ordinary evaluation drains before live sampling.
 static void nativeOemProducerDrain() {
+    modelAdaptationFlush(); // Existing UI/event drain only; no new worker.
     nativeKeyboardShortcutsRefresh(GetTickCount64());
     OemProducerEdgeReceipt receipt;
     for (size_t n = 0; n < kOemProducerEdgeCapacity && oemProducerTryPop(receipt); ++n) {
+        if ((receipt.source == OemProducerId::OneX || receipt.source == OemProducerId::OneXX2Rear ||
+             receipt.source == OemProducerId::OneXX2Home) &&
+            oemProducerCurrent(receipt.source, receipt.generation) &&
+            receipt.ruleEpoch == g_oemShortcutEdgeEpoch.load(std::memory_order_acquire) &&
+            !g_exitRequested.load(std::memory_order_acquire))
+            nativeOneXOemObserve(receipt.mask, oemProducerName(receipt.source));
+        if(receipt.source!=OemProducerId::OneX&&receipt.source!=OemProducerId::RogClick&&oemProducerCurrent(receipt.source,receipt.generation)&&
+            receipt.ruleEpoch==g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)&&!g_exitRequested.load(std::memory_order_acquire))
+            modelAdaptationProducer(static_cast<unsigned>(receipt.source),receipt.mask,receipt.terminalClick?receipt.clickCode:0);
         if (oemProducerCurrent(receipt.source, receipt.generation) &&
             receipt.ruleEpoch == g_oemShortcutEdgeEpoch.load(std::memory_order_acquire) &&
             !g_exitRequested.load(std::memory_order_acquire) && g_shortcutRecordingActive.load(std::memory_order_acquire)) {
@@ -54552,11 +55357,22 @@ static void nativeKeyboardShortcutHandleOemEdge(WPARAM maskValue, LPARAM tokenVa
         g_oemShortcutEdgeEpoch.load(std::memory_order_acquire),
         g_gpdBackIfaceGen.load(std::memory_order_acquire), gpd,
         g_oemKeyHooksActive.load(std::memory_order_acquire));
+    const bool oneX = g_machineIdentity.family == YmccFamily::OneXPlayer;
     if (!current || g_exitRequested.load(std::memory_order_acquire) ||
-        g_shortcutRecordingActive.load(std::memory_order_acquire)) {
+        (!oneX && g_shortcutRecordingActive.load(std::memory_order_acquire))) {
         appendNativeLifecycleLog("oem-shortcut-edge-delivery", {
             {"ok", false}, {"reason", "source-rule-recording-or-exit-cancel"}});
         return;
+    }
+    if (oneX) {
+        nativeOneXOemObserve(static_cast<uint64_t>(maskValue), "keyboard-chord");
+        if (g_shortcutRecordingActive.load(std::memory_order_acquire) &&
+            (!gamepadUiInputEligible() || customSteamLibraryInputSuppressed())) {
+            const bool custom = customSteamLibraryInputSuppressed();
+            nativeShortcutRecordingStop(!custom);
+            ipc_emit("shortcut.recording.stopped", {{"reason", custom ? "owner-changed" : "focus-lost"}});
+            return;
+        }
     }
     msiNativeRearKeyboardEdgeNote(static_cast<uint64_t>(maskValue)); // bounded native rear evidence; no action/control change
     nativeOemProducerDrain();
@@ -54570,10 +55386,17 @@ static void nativeKeyboardShortcutHandleOemEdge(WPARAM maskValue, LPARAM tokenVa
         keyboard &= ~(kOemBitClaw | kOemBitQs);
     keyboard &= ~oemProducerAuthorityMask();
     const uint64_t oem = keyboard | oemProducerActionMask() | oemProducerActionMask(true);
+    if (oneX && g_shortcutRecordingActive.load(std::memory_order_acquire)) {
+        // Use the posted press/release, even if live sampling is already neutral.
+        // Recording owns the chord and must never execute the configured action.
+        gamepadRecordShortcutChord(gamepadShortcutRecordingMask(g_curW, g_curPad) | oem);
+        return;
+    }
     nativeKeyboardShortcutsEvaluate(g_curW, g_curPad, now, true, &oem, true);
 }
 
 static void gamepadEval() {
+    focusLightRecheckOnUi();
     std::lock_guard<std::mutex> gamepadReadLock(g_gamepadReadMx);
     const ULONGLONG HOLD_MS = 500;
     const ULONGLONG B_DOUBLE_MS = 500;
@@ -56014,6 +56837,8 @@ static json gameCorePolicyClear(const json& args) {
 //  CCD 核心控制：L3 域拓扑检测 + 全局进程亲和性（UXTU 同款思路）
 // ================================================================
 
+#include "cpu_undervolt_trial_native.h"
+
 static int popcountPtr(ULONG_PTR m) {
     int c = 0;
     while (m) { c++; m &= (m - 1); }
@@ -56029,7 +56854,33 @@ static std::string toHexU(ULONG_PTR v) {
     return s;
 }
 
+static std::vector<ULONG_PTR> ccdProcessorRelationMasks(LOGICAL_PROCESSOR_RELATIONSHIP relationship) {
+    DWORD bytes = 0;
+    if (GetLogicalProcessorInformationEx(relationship, nullptr, &bytes) ||
+        GetLastError() != ERROR_INSUFFICIENT_BUFFER || bytes == 0 || bytes > 1024 * 1024) return {};
+    std::vector<BYTE> buffer(bytes);
+    if (!GetLogicalProcessorInformationEx(relationship,
+            reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data()), &bytes) ||
+        bytes > buffer.size()) return {};
+    std::vector<ULONG_PTR> masks;
+    for (size_t offset = 0; offset < bytes;) {
+        const auto* rec = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
+        const size_t minimum = offsetof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, Processor) +
+            offsetof(PROCESSOR_RELATIONSHIP, GroupMask) + sizeof(GROUP_AFFINITY);
+        if (bytes - offset < sizeof(DWORD) * 2 || rec->Size < minimum || rec->Size > bytes - offset ||
+            rec->Relationship != relationship || rec->Processor.GroupCount != 1 ||
+            rec->Processor.GroupMask[0].Group != 0 || rec->Processor.GroupMask[0].Mask == 0) return {};
+        masks.push_back(static_cast<ULONG_PTR>(rec->Processor.GroupMask[0].Mask));
+        offset += rec->Size;
+    }
+    return masks;
+}
+static bool ccdDieMasksMatchL3(std::vector<ULONG_PTR> dies, std::vector<ULONG_PTR> caches, ULONG_PTR packageMask);
+
 struct CcdTopology {
+    bool architectureDetected = false;
+    bool multiCcdConfirmed = false;
+    bool heterogeneous = false;
     int logical = 0;
     int l3Domains = 0;
     int physicalCores = 0;
@@ -56040,6 +56891,9 @@ struct CcdTopology {
 
 static CcdTopology detectCcdTopology() {
     CcdTopology t;
+    const auto architecture = detectCoreArchitecture();
+    t.architectureDetected = architecture.detected;
+    t.heterogeneous = architecture.heterogeneous;
     // A single process affinity mask cannot represent targets across multiple
     // active processor groups; keep the capability unavailable in that case.
     if (GetActiveProcessorGroupCount() > 1) t.groupRepresentable = false;
@@ -56062,6 +56916,10 @@ static CcdTopology detectCcdTopology() {
     BYTE* end = buf.data() + len;
     while (ptr < end) {
         auto* rec = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
+        if (end - ptr < sizeof(DWORD) * 2 || rec->Size < sizeof(DWORD) * 2 || rec->Size > end - ptr) {
+            t.groupRepresentable = false;
+            return t;
+        }
         if (rec->Relationship == RelationCache) {
             // SDK 10.0.26100 的 CACHE_RELATIONSHIP 使用 GroupMasks[]。
             auto& c = rec->Cache;
@@ -56106,6 +56964,18 @@ static CcdTopology detectCcdTopology() {
         SmtLive lv = detectSmtLive();
         t.logical = lv.logic;
     }
+    if (t.architectureDetected && !t.heterogeneous && t.groupRepresentable && t.l3Domains >= 2) {
+        int vendor[4]{};
+        __cpuid(vendor, 0);
+        const bool amd = vendor[1] == 0x68747541 && vendor[3] == 0x69746E65 && vendor[2] == 0x444D4163;
+        if (amd) {
+            const auto packages = ccdProcessorRelationMasks(RelationProcessorPackage);
+            const auto dies = ccdProcessorRelationMasks(RelationProcessorDie);
+            // Require one real L3 domain per OS-reported AMD die, within one package.
+            // Multiple CCX/L3 domains inside one die must not look like multiple CCDs.
+            t.multiCcdConfirmed = packages.size() == 1 && ccdDieMasksMatchL3(dies, masks, packages[0]);
+        }
+    }
     return t;
 }
 
@@ -56130,6 +57000,21 @@ static bool ccdTopologySupported(const CcdTopology& t) {
         sum += t.domainLogical[i];
     }
     return sum == t.logical && popcountPtr(unionMask) == t.logical;
+}
+
+static bool ccdDieMasksMatchL3(std::vector<ULONG_PTR> dies, std::vector<ULONG_PTR> caches, ULONG_PTR packageMask) {
+    if (dies.size() < 2 || dies.size() != caches.size() || packageMask == 0) return false;
+    std::sort(dies.begin(), dies.end());
+    std::sort(caches.begin(), caches.end());
+    ULONG_PTR combined = 0;
+    for (size_t i = 0; i < dies.size(); ++i) {
+        if (!dies[i] || dies[i] != caches[i] || (combined & dies[i])) return false;
+        combined |= dies[i];
+    }
+    return combined == packageMask;
+}
+static bool ccdPerformanceSupported(const CcdTopology& t) {
+    return ccdTopologySupported(t) && t.architectureDetected && !t.heterogeneous && t.multiCcdConfirmed;
 }
 
 static std::atomic<int>       g_ccdMode{0};
@@ -56602,7 +57487,7 @@ static void nativeApplyBrightness(int dir, bool enabled, int step) {
         IsEqualGUID(*active, YM_GUID_YEMAN_SCHEME);
     if (active) LocalFree(active);
     SYSTEM_POWER_STATUS sps{};
-    const bool dc = GetSystemPowerStatus(&sps) && sps.ACLineStatus == 0;
+    const bool dc = ymcc::powerSource::read(sps) && sps.ACLineStatus == 0;
     if (!yeman) {
         gamepadSerialPostEvent("gamepad.brightness", json{{"ok", false}, {"reason", "not-yeman"}, {"mode", dc ? "dc" : "ac"}});
         return;
@@ -56882,6 +57767,7 @@ static HRESULT gamebarMouseGet(bool& enabled) {
 }
 
 static HRESULT gamebarMouseSet(bool enabled, bool& actual) {
+    if(enabled&&ymccIsRogFamily())return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
     ymcc::mouseMode::ComApartment apartment;
     if (!apartment.ready()) return apartment.status;
     actual = false;
@@ -56930,6 +57816,12 @@ static json mouseModeSteamDeckState(bool operation) {
         {"error", operation ? "SteamDeck 虚拟手柄启用时鼠标由 Steam 管理，不能开启 YMCC 模拟鼠标。" : ""}};
 }
 
+static json mouseModeGamebarModelRejection() {
+    return {{"ok",false},{"backend",mouseModeSelectedBackend()},{"mutated",false},
+        {"reason","gamebar_model_unsupported"},
+        {"error","ROG 家族机型暂不支持微软鼠标，请使用 JoyXoff。此限制无法通过安装环境组件解除。"}};
+}
+
 static bool mouseModeGamebarAbsent(HRESULT hr) {
     return hr == REGDB_E_CLASSNOTREG || hr == E_NOINTERFACE;
 }
@@ -56943,7 +57835,8 @@ static json mouseModeStateLocked() {
         {"provider", "ymcc"}, {"controlAllowed", true},
         {"on", joy.running || gamebarOn}, {"joyxoffOn", joy.running},
         {"gamebarOn", gamebarOn}, {"joyxoffAvailable", fspath::exists(JOYXOFF_EXE)},
-        {"gamebarAvailable", SUCCEEDED(hr)},
+        {"gamebarAvailable", !ymccIsRogFamily()&&SUCCEEDED(hr)},
+        {"gamebarModelSupported", !ymccIsRogFamily()},
         {"stateKnown", joy.known && (SUCCEEDED(hr) || mouseModeGamebarAbsent(hr))},
         {"mappingVerified", false},
         {"verification", joy.running ? "process-liveness" : gamebarOn ? "component-readback" : "backend-state"}};
@@ -56961,12 +57854,13 @@ static json mouseModeSetBackend(const std::string& backend) {
         return {{"ok",false},{"backend",mouseModeSelectedBackend()},
             {"reason",backend == "steam" ? "steam-desktop-mouse-retired" : "invalid_backend"},
             {"error",backend == "steam" ? "Steam 鼠标仅用于 SteamDeck 模式。" : "未知模拟鼠标方案"}};
+    if (backend == "gamebar" && ymccIsRogFamily()) return mouseModeGamebarModelRejection();
     if (backend == "joyxoff" && !fspath::exists(JOYXOFF_EXE))
         return {{"ok", false}, {"backend", mouseModeSelectedBackend()}, {"error", "未找到 C:\\SOFT\\Joyxoff\\Joyxoff.exe"}};
     if (backend == "gamebar") {
         bool enabled = false;
         const HRESULT hr = gamebarMouseGet(enabled);
-        if (FAILED(hr)) return {{"ok", false}, {"backend", mouseModeSelectedBackend()}, {"error", gamebarMouseError(hr)}};
+        if (FAILED(hr)) return {{"ok", false}, {"backend", mouseModeSelectedBackend()}, {"reason",mouseModeGamebarAbsent(hr)?"gameinput_redist_missing":"gamebar_interface_error"}, {"error", gamebarMouseError(hr)}};
     }
     if (mouseModeSteamDeckBlocked()) return mouseModeSteamDeckState(true);
     {
@@ -56985,6 +57879,7 @@ static json mouseModeApplyState(std::optional<bool> requested, const std::string
     const std::string backend = backendOverride.empty() ? mouseModeSelectedBackend() : backendOverride;
     if (backend != "joyxoff" && backend != "gamebar")
         return {{"ok", false}, {"backend", backend}, {"reason", "invalid_backend"}, {"error", "未知模拟鼠标方案"}};
+    if (backend == "gamebar" && requested.value_or(false) && ymccIsRogFamily()) return mouseModeGamebarModelRejection();
     auto failure = [&](const char* reason, const std::string& message) {
         json state = mouseModeStateLocked();
         state["ok"] = false; state["reason"] = reason; state["error"] = message;
@@ -57000,6 +57895,7 @@ static json mouseModeApplyState(std::optional<bool> requested, const std::string
         return failure("gamebar_unavailable", gamebarMouseError(hr));
     const bool current = backend == "joyxoff" ? joy.running : gamebarOn;
     const bool enabled = requested.value_or(!current);
+    if (enabled && backend == "gamebar" && ymccIsRogFamily()) return mouseModeGamebarModelRejection();
     if (enabled && backend == "joyxoff" && !fspath::exists(JOYXOFF_EXE))
         return failure("joyxoff_missing", "未找到 C:\\SOFT\\Joyxoff\\Joyxoff.exe");
     if (mouseModeSteamDeckBlocked()) return mouseModeSteamDeckState(true);
@@ -57539,8 +58435,8 @@ static bool sgWriteGameRuleFile(const std::wstring& path,const std::vector<std::
 
 static ymcc::mousePolicy::Context mouseModeObserveForeground() {
     using namespace ymcc::mousePolicy;
-    auto context=observeForeground(mouseModeSteamDeckBlocked(),g_mousePolicy.current()==Mode::Auto);
-    if(context.steam||context.ymcc||!context.identityKnown||g_mousePolicy.current()!=Mode::Auto)return context;
+    auto context=observeForeground(mouseModeSteamDeckBlocked(),g_mousePolicy.current()!=Mode::Off);
+    if(context.steam||context.ymcc||!context.identityKnown||g_mousePolicy.current()==Mode::Off)return context;
     const auto image=lower(U2W(context.foregroundImage));
     context=applyAutoOverrides(context,image,g_mouseAutoRules.load(std::memory_order_acquire)->overrides);
     GameContextRules rules;
@@ -57602,13 +58498,14 @@ static json sgGameRulesSnapshot() {
     };
 }
 
-static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target) {
+static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target, unsigned long long summonGeneration) {
     json result = {
         {"valid", false},
         {"autoAdded", false},
         {"blocked", false},
     };
-    if (!target.valid || !target.pid || target.pid == GetCurrentProcessId()) return result;
+    if (g_summonRegistrationGeneration.load(std::memory_order_acquire) != summonGeneration ||
+        !target.valid || !target.pid || target.pid == GetCurrentProcessId()) return result;
 
     // The target is captured when the first shoulder button goes down. It
     // must still be the same process instance and the same window when the
@@ -57679,6 +58576,8 @@ static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target) {
             return result;
         }
         if (!latestWhitelisted) {
+            if (g_summonRegistrationGeneration.load(std::memory_order_acquire) != summonGeneration ||
+                g_exitRequested.load(std::memory_order_acquire)) return result;
             latestWhitelist.push_back(name);
             if (!sgWriteGameRuleFile(SG_GAME_WHITELIST, latestWhitelist)) return result;
             result["autoAdded"] = true;
@@ -58963,7 +59862,7 @@ static SgSleepMode sgPowerButtonSleepMode() {
     // outside SleepTask; its system broadcasts are not trusted as an S3-like
     // entry/wake lifecycle.
     SYSTEM_POWER_STATUS status{};
-    const bool haveStatus = GetSystemPowerStatus(&status) != FALSE;
+    const bool haveStatus = ymcc::powerSource::read(status) != FALSE;
     const auto decode = [](bool known, ULONG action) {
         if (!known) return SgSleepMode::Unknown;
         if (action == 1) return SgSleepMode::S3;
@@ -59832,6 +60731,8 @@ static std::string nativeLifecycleTimestamp() {
 static bool nativeLifecycleEventIsBase(const char* event) {
     if (!event || !*event) return false;
     static const char* const kBaseEvents[] = {
+        "onex-oem-input-edge", // Canonical receipt edges only; no raw typing, polling or action-success claim.
+        "onex-lighting-discovery", // Exact APEX, one bounded receipt per existing explicit discovery.
         "network-acceleration-wake", // At most one result per wake generation; no credentials or polling.
         "gpu-schedule-first-run", // One configuration-bootstrap attempt; include denied writes/readback failures.
         "monitor-notice-native", // Lease/owner receipts only; never frame telemetry.
@@ -59911,6 +60812,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "msi-native-foreground-isolation", // MSI native-only temporary visibility lease.
         "native-foreground-isolation",
         "controller-frontend-isolation",
+        "summon-isolation-selected", "summon-light-ended", "summon-light-gamepad",
         "input-host.native-helper-diagnostic", // One terminal failure; ordinary export even with detail off.
         "hidhide.owned-game-reconnect-plan", // Four deferred observations + one exhaustion per bound episode.
         "hidhide.family-game-visibility-plan",
@@ -59978,6 +60880,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         // GP-BACKKEY-CAPABILITY-2 C3：GPD chord/背键诊断三事件（边沿触发，非周期刷日志）。
         "gpd-back-chord-match", "gpd-back-chord-state", "virtual-pad-backbuttons",
         "onex-back-bind", "onex-back-buttons", "onex-back-gate", "onex-back-remap",
+        "onex-manual-feedback-stop", // Explicit manual tests only; original stop ownership unchanged.
         "rog-oem-key", "rog-oem-key-gate", "rog.controller-remap",
         // B1/B2 聚焦隔离（实验，默认关闭）：**只留转场、结果类别变化与 stale-ack** 三类事件，零周期开销。
         // （B0 的每拍 focus-isolation-frame 已在 125Hz 下不是零开销，B1 移除，改为计数汇总。）
@@ -60011,15 +60914,17 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "oem-shortcut-edge-delivery",    // LL physical receipt cancelled/post failed; no hook I/O
         "oem-shortcut-edge",             // 背键规则按下/松开边沿（matched/emit）
         "oem-shortcut-emit",             // 背键规则真的发出按键动作
+        "oem-shortcut-dispatch",       // OneX 专用键动作队列准入/拒绝
         "oem-shortcut-neutral-required", // 中性样本门挡住了本次 OEM 按下
         "oem-shortcut-rules",            // OEM 规则清单（区分"没配规则"与"配了没命中"）
         "oem-vendor-stack",              // HC OEM service lease
         // 虚拟手柄塔关键状态（T0 生命周期证据）
         "gamepad-driver-setup",
-        "input-host-started", "input-host-start-blocked", "input-host-start-deferred",
+        "input-host-started", "input-host-start-blocked", "input-host-start-deferred", "input-host-start-hold-retired",
         "virtual-start-protection", "virtual-start-protection-state", "input-host-switch-recovery", "input-host-switch-verification",
         "input-host-msi-source-before-target",
         "input-host-rog-source-before-target", "input-host-rog-hide-continuation",
+        "input-host-onex-start-refresh", // Sparse OneX Start stages; retain ordinary export evidence without detail.
         "input-host-switch-execution", "input-host-tuple-recovery", "input-host-wake-execution", "input-host-player-start-work", "input-host-ps-return-proof",
         "msi-crash-record-read",
         "input-host-xbox-startup",
@@ -60208,6 +61113,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
 
 static void flushNativeLifecycleLogs(bool closeDetail) {
     try {
+        modelAdaptationFlush();
         {
             std::lock_guard<std::mutex> lock(g_nativeLifecycleLogMx);
             if (g_nativeLifecycleLog.is_open()) g_nativeLifecycleLog.flush();
@@ -60304,12 +61210,21 @@ static json nativeSteamGameLinkLogDetail(const json& detail) {
     return out;
 }
 
+#include "model_adaptation_log_native.inc"
+
 static bool nativeLifecycleRecordIsStreaming(const char* event, const json& detail) {
     if (!event) return false;
 #if YMCC_ROG_FSE_DIAGNOSTICS
     if (std::strcmp(event, "rog-raw-input-window") == 0) return true;
 #endif
     if (std::strcmp(event, "input-native-signal-window") == 0) return true;
+    // Per-press input trajectories are detailed. A separate always-on journal
+    // retains first unique adaptation types independently of the detail switch.
+    if (std::strcmp(event,"onex-back-buttons")==0||std::strcmp(event,"onex-oem-input-edge")==0||
+        std::strcmp(event,"rog-oem-key")==0||std::strcmp(event,"rog-oem-key-unknown")==0) return true;
+    if (std::strcmp(event,"oem-producer-edge")==0&&detail.value("status","")=="queued"&&
+        detail.value("reason","")=="state-transition") return true;
+    if (std::strcmp(event,"msi-wmi-key")==0&&detail.value("reason","")=="queued"&&detail.value("accepted",false)&&detail.value("posted",false))return true;
     if (std::strcmp(event, "physical-controller-identity") == 0)
         return detail.value("snapshotReason", "") == "repeat";
     if (std::strcmp(event, "msi-dinput-trigger-evidence") == 0 &&
@@ -60417,6 +61332,8 @@ static void appendNativeLifecycleLog(const char* event, const json& observed) {
     try {
         static const json empty = json::object();
         const json* evidence = observed.is_object() ? &observed : &empty;
+        modelAdaptationObserveRecord(event,*evidence); // Cached facts only, independent of detail.
+        virtualAdaptationObserveRecord(event,*evidence);
         json projected;
         if (event && std::strcmp(event, "steam-game-link-state") == 0) {
             projected = nativeSteamGameLinkLogDetail(*evidence); evidence = &projected;
@@ -60436,7 +61353,12 @@ static void appendNativeLifecycleLog(const char* event, const json& observed) {
         detail["hwnd"] = static_cast<uintptr_t>(reinterpret_cast<uintptr_t>(g_hwnd));
         detail["powerLifecycle"] = powerLifecycleName(
             g_powerLifecycle.load(std::memory_order_acquire));
-        detail["powerGeneration"] = g_powerGeneration.load(std::memory_order_acquire);
+        const auto observedPowerGeneration=g_powerGeneration.load(std::memory_order_acquire);
+        if(evidence->contains("powerGeneration")){
+            if(!detail.contains("producerPowerGeneration"))detail["producerPowerGeneration"]=(*evidence)["powerGeneration"];
+            detail["observedPowerGeneration"]=observedPowerGeneration;
+        }
+        detail["powerGeneration"] = observedPowerGeneration;
         {
             std::lock_guard<std::mutex> lock(g_nativeLifecycleLogMx);
             // Recheck after acquiring the stream lock: a concurrent gate-off must
@@ -63513,8 +64435,10 @@ static void showWindowAnimated(HWND hwnd, int showCmd, bool activate) {
         SetTimer(g_hwnd, WEBVIEW_POST_SHOW_NUDGE_TIMER_ID, 60, nullptr);
     }
 
-    if (hwnd == g_hwnd && !isMinimize)
+    if (hwnd == g_hwnd && !isMinimize) {
+        msiForceGamepadRequest("window-open",0);
         ipc_emit("window.shown");
+    }
 
     if (activate && !isMinimize)
         SetForegroundWindow(hwnd);
@@ -64003,6 +64927,8 @@ static void reg_window() {
         const std::string side = a.value("side", std::string{});
         if (side != "left" && side != "right") throw std::runtime_error("Invalid window placement");
         if (!g_hwnd || !IsWindow(g_hwnd)) return false;
+        if(ymcc::screenpads::summonWindowOnLeft.exchange(side=="left")!=(side=="left"))
+            PostMessageW(g_hwnd,ymcc::screenpads::kRefreshMessage,0,0);
         // Preserve maximized/minimized state; the saved side applies on the next normal reflow.
         if (IsZoomed(g_hwnd) || IsIconic(g_hwnd)) return true;
         if (g_fullHeight) return applyFullHeightLayout(focusCurrentTargetMonitor(), side == "left");
@@ -65927,6 +66853,10 @@ static void reg_fs() {
         // native 主体（app_data_dir）
         addRotated(appDir + L"\\app.log");
         addRotated(appDir + L"\\native-lifecycle.log");
+        addFile(dataDir + L"\\model-adaptation.log");
+        addFile(dataDir + L"\\virtual-adaptation.log");
+        availability["modelAdaptation"]=modelAdaptationStatus();
+        availability["virtualAdaptation"]=virtualAdaptationStatus();
         addRotated(appDir + L"\\native-detail.log");
         addRotated(appDir + L"\\monitor-detail.log");
         addRotated(appDir + L"\\input-capture.jsonl");
@@ -66243,6 +67173,8 @@ static void reg_fs() {
                 manifest << "inputSignalKeyStateEvidenceVersion=1\n";
                 manifest << "inputSignalKeyStateEvidenceFile=focus-trace.log;native-detail.log event=input-signal-activity field=keyStateEvidence\n";
                 manifest << "injectedGamepadKeyEvidenceVersion=1;eventContext=focus-trace.log input-edge-window events[].injectedGamepadForeground;heldAge=input-signal-activity keyStateEvidence.keys[].injectedGamepadHold;diagnostic-only;no-auto-release\n";
+                manifest << "modelAdaptationEvidence=model-adaptation.log;alwaysOn=true;uniqueBy=model-source-protocol-code-chord;maxUnique=256;maxBytes=1048576;firstRawWitness;no-counters-in-key;status=log-export-availability.json#modelAdaptation\n";
+                manifest << "virtualAdaptationEvidence=virtual-adaptation.log;alwaysOn=true;maxBytes=8388608;maxUniqueRecords=4096;perContextFirstOutcomeSamples;status=log-export-availability.json#virtualAdaptation;NativeAckNotSdkOrSteamProof\n";
                 manifest << "costArchiveExportBudgetBytes=" << ymcc::logexport::HostCostArchiveExportMaxBytes << "\n";
                 manifest << "costArchiveExportPolicy=single-active-log-only;fileMaxBytes=20000000;newest-overwrites-oldest;legacy-volumes-omitted;inventory=log-export-availability.json costArchiveDiscovery.exportSelection;export-does-not-delete\n";
                 manifest << "inputSignalKeyStateEvidenceBudget=existing-5000ms-drain;max16-async-reads;max1-queue-read;no-background-thread\n";
@@ -66632,42 +67564,78 @@ static void steamWallpaperForegroundObserver(bool active) {
 }
 static void steamWallpaperForegroundPreference(const json& committedDocument) {
     std::lock_guard serial(g_steamWallpaperPreferenceMutex);
-    // Only settings events read disk. A slow older post-commit refresh must not
-    // resurrect ON after a newer OFF commit; take the latest compatible bytes.
-    json document;
-    try{const auto latest=ymSettingsReadSnapshot("");if(!latest.contains("readFault"))
-        document=ymcc::settingsBaseline::parseDocument(latest.value("content",std::string{}));}catch(...){}
-    (void)committedDocument;
-    bool known=false,enabled=false;
-    if(document.is_object()&&ymcc::settingsBaseline::supported(document)) {
-        const auto ui=document.find("ui");
-        if(ui==document.end()||ui->is_object()) {
-            known=true;enabled=true;
-            if(ui!=document.end()) {
-                const auto value=ui->find("steamDynamicWallpaperEnabled");
-                if(value!=ui->end()){known=value->is_boolean();enabled=known&&value->get<bool>();}
+    static bool propagationPending=true;
+    static fspath::path propagatedRoot;
+    struct Updating {
+        bool active=false;
+        void start(){active=true;g_steamWallpaperPreferenceUpdating.store(true,std::memory_order_release);}
+        ~Updating(){if(active)g_steamWallpaperPreferenceUpdating.store(false,std::memory_order_release);}
+    } updating;
+    try {
+        // Settings events alone read the latest committed bytes. A slow older
+        // save cannot resurrect an earlier preference after a newer commit.
+        json document;
+        try{const auto latest=ymSettingsReadSnapshot("");if(!latest.contains("readFault"))
+            document=ymcc::settingsBaseline::parseDocument(latest.value("content",std::string{}));}catch(...){}
+        (void)committedDocument;
+        bool known=false,enabled=false,pauseOnBattery=false;
+        if(document.is_object()&&ymcc::settingsBaseline::supported(document)) {
+            const auto ui=document.find("ui");
+            if(ui==document.end()||ui->is_object()) {
+                known=true;enabled=true;
+                if(ui!=document.end()) {
+                    const auto pause=ui->find("steamWallpaperPauseOnBattery");
+                    if(pause!=ui->end())pauseOnBattery=pause->is_boolean()&&pause->get<bool>();
+                    const auto value=ui->find("steamDynamicWallpaperEnabled");
+                    if(value!=ui->end()){known=value->is_boolean();enabled=known&&value->get<bool>();}
+                }
             }
         }
+        const bool changed=g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire)!=known||
+            g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire)!=enabled;
+        // The authoritative local gate and socket cancellation precede all
+        // queue IO. A failed propagation cannot reopen this process from an
+        // older durable queue copy or poison the settings post-commit chain.
+        if(changed||(known&&ymcc::media::powerPolicy::enabled()!=pauseOnBattery))updating.start();
+        const bool powerChanged=known&&ymcc::media::powerPolicy::own(pauseOnBattery);
+        if(changed||powerChanged){
+            steamWallpaperForegroundSignal();
+            g_steamWallpaperPreferenceKnown.store(known,std::memory_order_release);
+            g_steamWallpaperPreferenceEnabled.store(enabled,std::memory_order_release);
+            sharedGameMediaPowerChanged();
+        }
+        const auto& root=sharedGameMediaStore().root();
+        bool propagated=false;
+        if(known&&(powerChanged||propagationPending||propagatedRoot!=root)){
+            propagationPending=true;
+            ymcc::media::downloads::Queue(root).configureWallpaperPower(pauseOnBattery);
+            propagatedRoot=root;propagationPending=false;propagated=true;
+        }
+        if(changed||powerChanged||propagated){
+            ymcc::media::downloads::notifyOwner(root);
+            ipc_emit("gameMedia.preparationPolicyChanged",json::object());
+        }
+    }catch(...){
+        propagationPending=true;
+        // Keep native cancellation effective and report this separate from the
+        // already committed settings. The next settings event may repair it.
+        try{sharedGameMediaPowerChanged();steamWallpaperForegroundSignal();
+            deckySidebarDiagnostic("wallpaper-prepare",{{"ok",false},{"stage","power-policy"},{"reason","wallpaper-power-propagation-failed"}});
+            ipc_emit("gameMedia.preparationPolicyChanged",json::object());}catch(...){}
     }
-    const bool wasKnown=g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire);
-    const bool wasEnabled=g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire);
-    if(wasKnown==known&&wasEnabled==enabled)return;
-    g_steamWallpaperPreferenceUpdating.store(true,std::memory_order_release);
-    steamWallpaperForegroundSignal();
-    g_steamWallpaperPreferenceKnown.store(known,std::memory_order_release);
-    g_steamWallpaperPreferenceEnabled.store(enabled,std::memory_order_release);
-    g_steamWallpaperPreferenceUpdating.store(false,std::memory_order_release);
 }
 static json steamWallpaperForegroundRead() {
     using namespace ymcc::steamwallpaperForeground;
     auto& owner=steamWallpaperForegroundOwner();const auto ticket=owner.ticket();Facts facts;
-    facts.enabled=!g_steamWallpaperPreferenceUpdating.load(std::memory_order_acquire)&&
+    const auto wallpaperPower=ymcc::media::powerPolicy::ticket();
+    facts.enabled=wallpaperPower.ac==1&&!g_steamWallpaperPreferenceUpdating.load(std::memory_order_acquire)&&
         g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire)&&
         g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire);
     facts.ready=!g_exitRequested.load(std::memory_order_acquire)&&
         g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready&&
         g_steamWallpaperForegroundObserverReady.load(std::memory_order_acquire);
     facts.power=currentPowerGeneration();
+    if(wallpaperPower.ac!=1){auto proof=owner.observe(facts,ticket);proof["reason"]=ymcc::media::powerPolicy::reason(wallpaperPower);return proof;}
     const auto session=g_steamSettingsObserver.sessionSnapshot();
     const auto mode=g_steamModeObserver.snapshot(session);
     facts.steamPid=session.pid;facts.steamBirth=session.created;
@@ -66714,7 +67682,8 @@ static json steamWallpaperForegroundRead() {
        g_steamWallpaperPreferenceUpdating.load(std::memory_order_acquire)||
        !g_steamWallpaperForegroundObserverReady.load(std::memory_order_acquire)||
        !g_steamWallpaperPreferenceKnown.load(std::memory_order_acquire)||
-       !g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire)||g_exitRequested.load(std::memory_order_acquire))
+       !g_steamWallpaperPreferenceEnabled.load(std::memory_order_acquire)||
+       !ymcc::media::powerPolicy::current(wallpaperPower)||g_exitRequested.load(std::memory_order_acquire))
         return owner.observe(Facts{},ticket);
     facts.pid=pid;facts.birth=(static_cast<ULONGLONG>(birth.dwHighDateTime)<<32)|birth.dwLowDateTime;
     facts.window=static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(window));facts.physical=true;
@@ -66735,7 +67704,9 @@ static std::string sharedGameMediaLocalUrl(const json& asset) {
     auto raw=W2U(relative.generic_wstring());std::string encoded;for(unsigned char c:raw){if(std::isalnum(c)||c=='/'||c=='-'||c=='_'||c=='.')encoded+=static_cast<char>(c);else{encoded+='%';encoded+="0123456789ABCDEF"[c>>4];encoded+="0123456789ABCDEF"[c&15];}}
     return "https://game-media.localhost/"+encoded+"?v="+asset.value("revision",std::string{});
 }
-static ymcc::media::Server& sharedGameMediaServer(){static ymcc::media::Server server;return server;}
+static std::atomic<ymcc::media::Server*> g_sharedGameMediaServer{nullptr};
+static ymcc::media::Server& sharedGameMediaServer(){static ymcc::media::Server server;g_sharedGameMediaServer.store(&server,std::memory_order_release);return server;}
+static void sharedGameMediaPowerChanged(){if(auto* server=g_sharedGameMediaServer.load(std::memory_order_acquire))server->powerChanged();}
 static json describeSharedGameMedia(json entry) {
     auto& server=sharedGameMediaServer();server.reconcile(entry);
     if(entry.contains("assets"))for(const auto* slot:{"static","dynamic"})if(entry["assets"].contains(slot)&&entry.value(std::string(slot)+"Ready",false)){auto variant=entry;variant["asset"]=entry["assets"][slot];entry[std::string(slot)+"Url"]=server.expose(sharedGameMediaStore(),variant);entry[std::string(slot)+"LocalUrl"]=sharedGameMediaLocalUrl(variant["asset"]);}
@@ -67139,8 +68110,9 @@ static void reg_background() {
     ipc_on("gameMedia.snapshot", [](const json&) -> json { return sharedGameMediaStore().snapshot(); });
     ipc_on("gameMedia.preparationPolicy", [](const json&) -> json {
         const auto space = ymcc::media::capacity::inspect(sharedGameMediaStore().root());
-        const auto blocked = g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ? "media-power-transition" : ymcc::media::capacity::reason(space, 1, true, ymcc::media::capacity::admissionBytes);
-        SYSTEM_POWER_STATUS status{}; const bool powerKnown = GetSystemPowerStatus(&status) != FALSE;
+        const auto wallpaperReason=ymcc::media::powerPolicy::reason();
+        const auto blocked = !wallpaperReason.empty()?wallpaperReason:g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ? "media-power-transition" : ymcc::media::capacity::reason(space, 1, true, ymcc::media::capacity::admissionBytes);
+        SYSTEM_POWER_STATUS status{}; const bool powerKnown = ymcc::powerSource::read(status) != FALSE;
         return {{"blockedReason", blocked}, {"powerKnown", powerKnown},
             {"batterySaver", powerKnown && status.SystemStatusFlag == 1},
             {"onBattery", powerKnown && status.ACLineStatus == 0},
@@ -67174,6 +68146,7 @@ static void reg_background() {
         return json{{"verified",false},{"reason","library-identity-result-unavailable"}};
     });
     ipc_on("gameMedia.legacy", [](const json& a) -> json {
+        if(!ymcc::media::workDemand::allowed(a))return ymcc::media::steamDemand::inactive();
         NativeDetectedGame game;if(!nativeDynamicValveTargetMatches(a,&game)||ymcc::media::normalized(W2U(game.path))!=ymcc::media::normalized(a.value("executable",std::string{})))return json::object();
         auto current=sharedGameMediaStore().resolve(a);if(current.value("dynamicReady",false))return describeSharedGameMedia(current);
         std::lock_guard<std::mutex> lock(g_backgroundMtx);const auto config=ymcc::media::read(fspath::path(background_assets_dir())/L"dynamic.json");
@@ -67211,8 +68184,12 @@ static void reg_background() {
         ipc_emit("gameMedia.changed",entry);return describeSharedGameMedia(entry);
     });
     ipc_on("gameMedia.install", [](const json& a) -> json {
+        ymcc::media::workDemand::require(a);
+        const auto wallpaperPower=ymcc::media::powerPolicy::ticket();
         const auto current=sharedGameMediaStore().resolve(a);
         if(current.value("taskId",std::string{})!=a.value("taskId",std::string{})||current.value("bindingRevision",uint64_t{0})!=a.value("bindingRevision",uint64_t{0}))throw std::runtime_error("media-stale-task");
+        ymcc::media::workDemand::require(current);
+        const auto cancelled=[&]{return !ymcc::media::powerPolicy::current(wallpaperPower)||!ymcc::media::workDemand::allowed(a)||!ymcc::media::workDemand::allowed(current)||g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready;};
         const auto source=a.value("source",std::string{});
         URL_COMPONENTS parts{};parts.dwStructSize=sizeof parts;parts.dwHostNameLength=static_cast<DWORD>(-1);
         const auto url=U2W(source);
@@ -67226,16 +68203,17 @@ static void reg_background() {
             const auto segments=a.value("segments",json::array());
             if(!segments.is_array()||segments.size()>601)throw std::runtime_error("media-segment-count-invalid");
             if(segments.empty()){
-                auto result=downloadFileAttempt(source,temp.wstring(),{},deadline,0,{},false,{},ymcc::media::capacity::maxAssetBytes);
+                auto result=downloadFileAttempt(source,temp.wstring(),{},deadline,0,{},false,{},ymcc::media::capacity::maxAssetBytes,cancelled);
                 if(!result.ok)throw std::runtime_error("media-download-failed");
             }else{
                 std::ofstream combined(temp,std::ios::binary|std::ios::trunc);uint64_t total=0;
                 for(const auto& item:segments){
+                    if(cancelled())throw std::runtime_error("media-download-cancelled");
                     if(total>=ymcc::media::capacity::maxAssetBytes)throw std::runtime_error("media-size-invalid");
                     const auto segment=item.get<std::string>();auto segmentUrl=U2W(segment);URL_COMPONENTS part{};part.dwStructSize=sizeof part;part.dwHostNameLength=static_cast<DWORD>(-1);
                     if(!WinHttpCrackUrl(segmentUrl.c_str(),0,0,&part)||part.nScheme!=INTERNET_SCHEME_HTTPS||!(isSteamHostName(std::wstring(part.lpszHostName,part.dwHostNameLength).c_str())||ascii_lower(W2U(std::wstring(part.lpszHostName,part.dwHostNameLength)))=="shared.cdn.queniuqe.com"))throw std::runtime_error("media-segment-source-denied");
                     auto fragment=temp;fragment+=L".segment";
-                    try{auto result=downloadFileAttempt(segment,fragment.wstring(),{},deadline,0,{},false,{},ymcc::media::capacity::maxAssetBytes-total);if(!result.ok)throw std::runtime_error("media-segment-download-failed");
+                    try{auto result=downloadFileAttempt(segment,fragment.wstring(),{},deadline,0,{},false,{},ymcc::media::capacity::maxAssetBytes-total,cancelled);if(!result.ok)throw std::runtime_error("media-segment-download-failed");
                         auto bytes=fspath::file_size(fragment);total+=bytes;if(total>300ull*1024*1024)throw std::runtime_error("media-size-invalid");
                         std::ifstream input(fragment,std::ios::binary);combined<<input.rdbuf();if(!input||!combined)throw std::runtime_error("media-segment-write-failed");
                         std::error_code ec;fspath::remove(fragment,ec);
@@ -67243,11 +68221,13 @@ static void reg_background() {
                 }
                 combined.flush();if(!combined)throw std::runtime_error("media-segment-write-failed");
             }
+            if(cancelled())throw std::runtime_error("media-download-cancelled");
             auto entry=sharedGameMediaStore().publish(a,temp,false);
             std::error_code ec;fspath::remove(temp,ec);ipc_emit("gameMedia.changed",entry);return describeSharedGameMedia(entry);
-        }catch(...){std::error_code ec;fspath::remove(temp,ec);throw;}
+        }catch(...){std::error_code ec;fspath::remove(temp,ec);if(cancelled())sharedGameMediaStore().cancel(current);throw;}
     });
     ipc_on("dynamicBackground.get", [](const json&) -> json {
+        if(ymcc::media::powerPolicy::blocked())return json::object();
         const auto valveTarget = nativeDetectGame();
         std::lock_guard<std::mutex> lock(g_backgroundMtx);
         const auto targetMatches = [&valveTarget](const json& cfg) {
@@ -67322,6 +68302,8 @@ static void reg_background() {
         };
     });
     ipc_on("dynamicBackground.installOnline", [](const json& a) -> json {
+        ymcc::media::workDemand::require(a);
+        const auto wallpaperPower=ymcc::media::powerPolicy::ticket();
         NativeDetectedGame valveTarget;
         if (!nativeDynamicValveTargetMatches(a, &valveTarget))
             throw std::runtime_error("Dynamic background target is not admitted by the game valve");
@@ -67340,6 +68322,7 @@ static void reg_background() {
                 urls.push_back(item.get<std::string>());
         }
         auto dir = background_assets_dir();
+        if(!ymcc::media::powerPolicy::current(wallpaperPower))throw std::runtime_error("media-stale-wallpaper-power");
         for (const auto& old : {L"dynamic.jpg", L"dynamic.png", L"dynamic.mp4", L"dynamic.webm", L"dynamic.json"})
             DeleteFileW((dir + L"\\" + old).c_str());
         const auto appId = a.value("appId", 0);
@@ -67363,6 +68346,9 @@ static void reg_background() {
         };
     });
     ipc_on("dynamicBackground.installUrl", [](const json& a) -> json {
+        ymcc::media::workDemand::require(a);
+        const auto wallpaperPower=ymcc::media::powerPolicy::ticket();
+        const auto cancelled=[&]{return !ymcc::media::powerPolicy::current(wallpaperPower)||g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready;};
         NativeDetectedGame valveTarget;
         if (!nativeDynamicValveTargetMatches(a, &valveTarget))
             throw std::runtime_error("Dynamic background target is not admitted by the game valve");
@@ -67382,7 +68368,9 @@ static void reg_background() {
         // Each refresh gets its own temporary file so overlapping UI/game-status refreshes
         // cannot delete or truncate another download in progress.
         auto temp = target + L".tmp." + std::to_wstring(GetTickCount64());
-        if (!downloadFile(source, temp)) throw std::runtime_error("Failed to download Steam background media");
+        if (!downloadFileAttempt(source,temp,{},GetTickCount64()+120000,0,{},false,{},
+                kind=="video"?300ULL*1024*1024:30ULL*1024*1024,cancelled).ok)
+            throw std::runtime_error("Failed to download Steam background media");
         std::error_code ec;
         auto size = fspath::file_size(temp, ec);
         if (ec || size == 0 || size > (kind == "video" ? 300ULL * 1024ULL * 1024ULL : 30ULL * 1024ULL * 1024ULL)) {
@@ -67400,6 +68388,7 @@ static void reg_background() {
                 throw std::runtime_error("Steam video is shorter than 30 seconds (" + std::to_string(duration) + "s)");
             }
         }
+        if(cancelled()){DeleteFileW(temp.c_str());throw std::runtime_error("media-download-cancelled");}
         if (!MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
             DeleteFileW(temp.c_str());
             throw std::runtime_error("Failed to activate Steam background media");
@@ -68224,8 +69213,8 @@ static void reg_shell_app() {
             row["rc"]=response.value("rc",-1);row["ok"]=response.value("ok",false);row["error"]=response.value("error",std::string{});
             row["durationMs"]=GetTickCount64()-observationStarted;row["helperCommandReturned"]=response.contains("rc");row["hardwareCommandReturned"]="not-observed";row["readbackMatched"]="not-observed";
             if(response.contains("result")){row["helperResult"]=response["result"];
-                if(response["result"].is_object()&&response["result"].contains("msrObservation")){
-                    const auto& msr=response["result"]["msrObservation"];if(msr.is_object()){
+                if(response["result"].is_object()){
+                    const char* key=response["result"].contains("amdObservation")?"amdObservation":"msrObservation";const auto msr=response["result"].value(key,json::object());if(msr.is_object()){
                         row["hardwareCommandReturned"]=msr.value("hardwareCommandReturned",json("not-observed"));
                         row["readbackMatched"]=msr.value("readbackMatched",json("not-observed"));
                         row["verificationScope"]=msr.value("verificationScope",std::string("not-observed"));
@@ -72890,10 +73879,11 @@ static void rogOemKeyParse(const BYTE* data, size_t len, uint64_t actionGenerati
         case kRogKeyEventLib: bit = kOemBitLib; break;
         case kRogKeyEventCc: bit = kOemBitCc; break;
         default:
-            writeLog("INFO", json({{"event", "rog-oem-key-unknown"},
-                {"code", static_cast<int>(code)}}).dump());
+            modelAdaptationRogReport(data,len,code,0);
+            appendNativeLifecycleLog("rog-oem-key-unknown", {{"code",static_cast<int>(code)}});
             return;
     }
+    modelAdaptationRogReport(data,len,code,bit);
     const ULONGLONG now = GetTickCount64();
     g_rogOemKey.pulseMask = bit;
     g_rogOemKey.pulseUntil = now + kRogKeyPulseMs;
@@ -75452,17 +76442,22 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
                                  int speed, int brightness, const std::string& presetId = {}) {
     const bool superJoyOwnerRoute = ymcc::superjoy_owner::sourceModel(g_machineIdentity.deviceClass);
     // A source whitelist is not admission: the sole catalog must admit the
-    // complete native/CEc provider before any discovery or process creation.
+    // complete native/source provider before any discovery or process creation.
     if (superJoyOwnerRoute && !superJoyLightingRouteAdmitted())
         return json{{"ok", false}, {"reason", "superjoy-lighting-route-not-connected"},
                     {"ownerAdmitted", false}, {"runtimeRouteAdmitted", false}};
-    if (superJoyOwnerRoute && enabled && mode != "solid")
+    if (superJoyOwnerRoute &&
+        ymcc::lighting::sourceAdapter(g_machineIdentity.deviceClass) == ymcc::lighting::SourceAdapter::SuperJoyCec &&
+        enabled && mode != "solid")
         return json{{"ok", false}, {"reason", "superjoy-solid-only"}, {"ownerAdmitted", false}};
     if (GetFileAttributesW(kLightSetterExe.c_str()) == INVALID_FILE_ATTRIBUTES)
         return json{{"ok", false}, {"reason", "light-setter-missing"}};
     const std::wstring hcDll = kLightSetterHcRuntimeRoot + L"\\HandheldCompanion.dll";
     const bool presetAction = enabled && mode == "preset";
     const std::string action = !enabled ? "off" : presetAction ? "preset" : "color";
+    const bool legacyReturnDebtRoute = legacyLightSetterDebtClass(g_machineIdentity.deviceClass);
+    if (legacyReturnDebtRoute && legacyLightSetterHasDebt())
+        return json{{"ok", false}, {"reason", "light-setter-legacy-return-debt"}, {"ownerAdmitted", false}};
     const bool independentCore = !superJoyOwnerRoute && ymcc::lighting::useIndependentDeviceCore(
         g_machineIdentity.deviceClass, action, mode);
     if (ymcc::lighting::sourceAdapter(g_machineIdentity.deviceClass) == ymcc::lighting::SourceAdapter::OneXX2MiniHid &&
@@ -75531,10 +76526,12 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     } else {
         cmd << L" --action color --level " << U2W(mode)
             << L" --r " << static_cast<int>(r1) << L" --g " << static_cast<int>(g1)
-            << L" --b " << static_cast<int>(b1)
-            << L" --r2 " << static_cast<int>(r2) << L" --g2 " << static_cast<int>(g2)
-            << L" --b2 " << static_cast<int>(b2)
-            << L" --speed " << speed;
+            << L" --b " << static_cast<int>(b1);
+        if (ymcc::lighting::sourceAdapter(g_machineIdentity.deviceClass) != ymcc::lighting::SourceAdapter::ApexHidV2) {
+            cmd << L" --r2 " << static_cast<int>(r2) << L" --g2 " << static_cast<int>(g2)
+                << L" --b2 " << static_cast<int>(b2)
+                << L" --speed " << speed;
+        }
         if (brightnessSupported) cmd << L" --brightness " << brightness;
     }
 
@@ -75652,6 +76649,9 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
     }
     CloseHandle(hOutR);
     CloseHandle(pi.hThread);
+    if (legacyReturnDebtRoute && !ownerAdmitted && !ownerChildReturned) {
+        if (legacyLightSetterRetain(pi.hProcess)) retainProcessHandle = true;
+    }
     if (!retainProcessHandle) CloseHandle(pi.hProcess);
 
     // 子进程输出契约（LightSetter/Program.cs）：成功
@@ -75676,7 +76676,7 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
             const auto& child = cj["result"];
             note = child.value("note", std::string());
             // Bounded operation evidence only; not physical-effect verification.
-            for (const char* key : {"queuedWriteManaged", "queuedWritesCompleted", "handbackAttempted", "handbackCompleted"})
+            for (const char* key : {"queuedWriteManaged", "queuedWritesCompleted", "released", "handbackAttempted", "handbackCompleted"})
                 if (child.contains(key) && child[key].is_boolean()) helperReceipt[key] = child[key];
             for (const char* key : {"queuedWriteTasks", "queuedWriteFailures"})
                 if (child.contains(key) && child[key].is_number_integer()) helperReceipt[key] = child[key];
@@ -75694,11 +76694,28 @@ static json ymccLightSetterApply(bool enabled, const std::string& mode,
             childOperationAccepted = child.value("capabilityOperation", std::string()) == operation &&
                 child.value("action", std::string()) == action && (!presetAction || child.value("presetId", std::string()) == presetId);
             if (superJoyAdmission) {
-                childOwnerAccepted = child.value("backend", std::string()) == "superjoy-cec-v1" &&
-                    child.value("ownerAdmission", std::string()) == "native-owner-handoff-v2" &&
-                    child.value("ownerGeneration", std::uint64_t(0)) == superJoyAdmission->generation &&
-                    child.value("handbackAttempted", false) && child.value("handbackCompleted", false) &&
-                    child.value("queuedWritesCompleted", false);
+                const auto& ownerModel = superJoyAdmission->model;
+                const auto adapter = ymcc::lighting::sourceAdapter(ownerModel);
+                if (ownerModel == "HandheldCompanion.Devices.OneXPlayerApex" &&
+                    adapter == ymcc::lighting::SourceAdapter::ApexHidV2) {
+                    // The helper reports token parts[2], the admitted power generation.
+                    childOwnerAccepted = actualClass == ownerModel &&
+                        child.value("backend", std::string()) == "onex-apex-hid-v2" &&
+                        child.value("ownerAdmission", std::string()) == "native-owner-handoff-v2" &&
+                        child.contains("ownerGeneration") && child["ownerGeneration"].is_number_integer() &&
+                        child["ownerGeneration"] == superJoyAdmission->generation &&
+                        child.value("queuedWritesCompleted", false) && child.value("released", false) &&
+                        child.contains("physicalEffectVerified") && child["physicalEffectVerified"].is_boolean() &&
+                        !child["physicalEffectVerified"].get<bool>();
+                } else if ((ownerModel == "HandheldCompanion.Devices.AYANEO3" ||
+                            ownerModel == "HandheldCompanion.Devices.AYANEONEXT2") &&
+                           adapter == ymcc::lighting::SourceAdapter::SuperJoyCec) {
+                    childOwnerAccepted = child.value("backend", std::string()) == "superjoy-cec-v1" &&
+                        child.value("ownerAdmission", std::string()) == "native-owner-handoff-v2" &&
+                        child.value("ownerGeneration", std::uint64_t(0)) == superJoyAdmission->generation &&
+                        child.value("handbackAttempted", false) && child.value("handbackCompleted", false) &&
+                        child.value("queuedWritesCompleted", false);
+                }
             }
             if (childIdentityAccepted) { resolvedCapabilityId = actualId; resolvedDeviceClass = actualClass; }
         }
@@ -76008,6 +77025,10 @@ struct PhysicalFeedbackTarget {
     unsigned sourceTopology=0;
     ymcc::input::identityRefresh::Proof xinputIdentity;
     std::shared_ptr<const HidHideMsiMainSourceRecord> record;
+    // OneX manual-test evidence only; no new device writes or stop ownership.
+    ULONGLONG manualEvidenceTick=0;
+    unsigned long long manualEvidenceGeneration=0;
+    int manualEvidenceDurationMs=0;
 };
 static ymcc::game_feedback::ExecutionStats g_gameMotorExecutionStats;
 static PhysicalFeedbackTarget g_feedbackPulseTarget;
@@ -76028,6 +77049,25 @@ static bool physicalFeedbackSlotCurrent(const PhysicalFeedbackTarget& target) {
 static void physicalFeedbackStopTarget(const PhysicalFeedbackTarget& target,bool touch=false,bool* unresolved=nullptr,bool* zeroAccepted=nullptr,DWORD* stopError=nullptr) {
     bool observedAttempted=false,observedAccepted=false,observedPending=false;
     ymcc::game_feedback::StopObservation<> gameCost(g_gameMotorExecutionStats,observedAttempted,observedAccepted,observedPending,target.game,target.game&&tickCostEnabled());
+    // Observe all existing return paths, including an identity/power cancellation.
+    // Destructor must not affect the stop or retain any new device resources.
+    struct ManualStopEvidence {
+        const PhysicalFeedbackTarget& target;bool& attempted;bool& accepted;bool& pending;
+        ~ManualStopEvidence() noexcept {
+            if (!target.manualEvidenceTick) return;
+            try { appendNativeLifecycleLog("onex-manual-feedback-stop", {
+                {"pulseGeneration",target.manualEvidenceGeneration},{"slot",target.slot},
+                {"identityEpisode",target.xinputIdentity.episode},{"identityEpoch",target.identityEpoch},
+                {"sourceGeneration",target.sourceGeneration},{"sourceTopology",target.sourceTopology},
+                {"sourcePowerGeneration",target.powerGeneration},
+                {"requestedDurationMs",target.manualEvidenceDurationMs},
+                {"elapsedSinceWriteMs",GetTickCount64()-target.manualEvidenceTick},
+                {"zeroWriteAttempted",attempted},{"zeroApiAccepted",accepted},{"ownershipPending",pending},
+                {"stopStatus",attempted?(accepted?"zero-api-accepted":"zero-api-rejected"):
+                    pending?"identity-unresolved":"source-retired-or-power-gated"},
+                {"hardwareStopObserved",false}}); } catch(...) {}
+        }
+    } manualStopEvidence{target,observedAttempted,observedAccepted,observedPending};
     if(target.powerGeneration!=currentPowerGeneration() || !hardwareWriteAllowed())return;
     if(target.msi) {
         if(!target.record)return;
@@ -76220,12 +77260,38 @@ static ymcc::touchhaptic::Receipt nativePhysicalFeedbackStart(int strength,int d
         const WORD level=(WORD)((DWORD)receipt.strength*65535u/100u);
         XINPUT_VIBRATION pulse{game?(WORD)((*gameMotors)[0]*257u):level,game?(WORD)((*gameMotors)[1]*257u):level};
         if(gameCommand&&!nativeGameFeedbackCommandCurrent(*gameCommand)){receipt.reason=Reason::SourceChanged;return receipt;}
+        json manualCapabilities;
+        if(!touch&&!game&&g_machineIdentity.family==YmccFamily::OneXPlayer){
+            // Observe BEFORE starting the motor; a slow metadata read must not
+            // extend the pulse while its stop has not yet been scheduled.
+            try{manualCapabilities=nativeManualXInputCapabilitiesEvidence(target.slot);}catch(...){}
+            if(!hardwareWriteAllowed()||target.powerGeneration!=currentPowerGeneration()){
+                receipt.reason=Reason::PowerTransition;return receipt;}
+            const auto proof=g_xinputFeedbackIdentity[target.slot].capture(target.identityEpoch,target.powerGeneration);
+            if(!physicalFeedbackSlotCurrent(target)||!proof.valid||proof.episode!=target.xinputIdentity.episode||
+                target.sourceTopology!=g_xinputTopologyEpoch.load()){
+                receipt.reason=Reason::SourceChanged;return receipt;}
+            target.manualEvidenceTick=GetTickCount64();target.manualEvidenceGeneration=g_rogVibratePulseGen+1;
+            target.manualEvidenceDurationMs=receipt.durationMs;
+        }
         const DWORD rc=g_feedbackSetState(target.slot,&pulse);receipt.ok=rc==ERROR_SUCCESS;receipt.attempted=true;
         receipt.error=rc;receipt.motor=level;if(!receipt.ok)receipt.reason=Reason::WriteFailed;
         if(touch&&receipt.ok&&receipt.strength>0)touchOutputBaseline=outputSource;
-        if(!touch&&!game)appendNativeLifecycleLog("gamepad-vibrate",{{"slot",target.slot},{"connectedMask",g_xinputConnectedMask},
-            {"admittedMask",g_xinputAdmittedMask},{"primarySlot",g_xinputPrimarySlot},{"strength",receipt.strength},
-            {"level",level},{"durationMs",receipt.durationMs},{"touchFeedback",touch},{"rc",rc},{"ok",receipt.ok}});
+        if(!touch&&!game)try{
+            json log={{"slot",target.slot},{"connectedMask",g_xinputConnectedMask},
+                {"admittedMask",g_xinputAdmittedMask},{"primarySlot",g_xinputPrimarySlot},{"strength",receipt.strength},
+                {"level",level},{"durationMs",receipt.durationMs},{"touchFeedback",touch},{"rc",rc},{"ok",receipt.ok}};
+            if(target.manualEvidenceTick){
+                log["pulseGeneration"]=target.manualEvidenceGeneration;
+                log["supersedesPulseGeneration"]=g_feedbackPulseActive?g_feedbackPulseTarget.manualEvidenceGeneration:0;
+                log["identityEpisode"]=target.xinputIdentity.episode;log["identityEpoch"]=target.identityEpoch;
+                log["sourceGeneration"]=target.sourceGeneration;log["sourceTopology"]=target.sourceTopology;
+                log["sourcePowerGeneration"]=target.powerGeneration;
+                log["outputCapabilities"]=std::move(manualCapabilities);
+                log["physicalMotorEffectObserved"]=false;
+            }
+            appendNativeLifecycleLog("gamepad-vibrate",log);
+        }catch(...){/* Evidence must not prevent committing the existing pulse owner. */}
     }
     g_xinputDeferredFeedbackStop.clear();
     g_feedbackPulseTarget=target;g_feedbackPulseActive=!(game&&receipt.ok&&(*gameMotors)[0]==0&&(*gameMotors)[1]==0);g_feedbackPulseTouch=touch;
@@ -78470,7 +79536,7 @@ static std::mutex g_updatePredownloadPolicyMtx;
 static std::wstring updatePredownloadPolicyPath() { return app_data_dir() + L"\\update\\predownload-policy.json"; }
 static json updatePredownloadPolicyRead() {
     const auto stored=ymcc::updateconfig::read(updatePredownloadPolicyPath(),65536);
-    auto policy=ymcc::updateconfig::policyDefaults(stored.kind==ymcc::updateconfig::Kind::missing);
+    auto policy=ymcc::updateconfig::policyDefaults(stored.kind!=ymcc::updateconfig::Kind::unavailable);
     if(stored.kind==ymcc::updateconfig::Kind::ready&&ymcc::updateconfig::policyValid(stored.value)){
         policy.update(stored.value);return policy;
     }
@@ -78933,9 +79999,10 @@ static void reg_updater() {
             fspath::remove(zip, cleanupEc);
             failInstall("Update package archive entries are unsafe", "更新包内文件路径或链接不安全");
         }
-        auto staging = app_data_dir() + L"\\update\\staging";
-        std::error_code ec; fspath::remove_all(staging, ec);
-        if (ec) failInstall("Failed to clear stale update staging", "无法清理上次安装暂存目录");
+        // Each verified installation gets fresh staging. An occupied or corrupt
+        // legacy cache is not a prerequisite for extracting the incoming package.
+        auto staging = app_data_dir() + L"\\update\\staging-" + ymcc::updateconfig::suffix();
+        std::error_code ec;
         if (!unzipTar(zip, staging)) {
             fspath::remove_all(staging, ec);
             fspath::remove(zip, ec);
@@ -79074,11 +80141,11 @@ static void reg_updater() {
             f << "$customSteamLibraryDir = " << psLiteral(customSteamLibraryDir) << "\n";
             f << "$customSteamLibraryManifest = Join-Path $customSteamLibrarySource 'package-manifest.json'\n";
             f << "$supportPath = " << psLiteral(supportPath) << "\n";
-            f << "$backup = $exePath + '.old'\n";
-            f << "$newExe = $exePath + '.new'\n";
+            f << "$exeBackupConfirmed=$false; $exeCommitStarted=$false; $exeBeforeSha256=''; $exeAfterSha256=''\n";
             f << "$state = Join-Path (Split-Path -Parent $staging) 'update-state.json'\n";
             f << "$rollbackRoot = Join-Path (Split-Path -Parent $staging) ('rollback-' + [guid]::NewGuid().ToString('N'))\n";
             f << "$rollbackFiles = Join-Path $rollbackRoot 'files'\n";
+            f << "$backup = Join-Path $rollbackRoot 'YeManCC.exe.preimage'\n";
              f << "$rollbackAddedFiles = New-Object 'System.Collections.Generic.List[string]'\n";
              f << "$ordinaryRollbackPrepared = $false\n";
              f << "$fanHostTarget = Join-Path $pcDir 'fan-host-v2'\n";
@@ -79102,26 +80169,68 @@ static void reg_updater() {
              // host 二进制 / …）后必须实算重填，禁止手改哈希；build-workspace.ps1
              // Assert-PublishPreGate 会自动对拍，不一致即 halt 并打印实算值，
              // 更新安装 ps1 侧（Assert-FanHostV2Payload）同用此常量。
-             f << "$expectedFanHostV2ManifestSha256 = '00d9aa83d3d035bffe93293b43342ca81b06be325514b4b1e8f77b70b168d46f'\n";
+             f << "$expectedFanHostV2ManifestSha256 = '4e1a8160bdbb38b4359b89f562ce2b881ecba8cf8f1f3438b5e49fd9d2ca55eb'\n";
              f << "$expectedFanHostV2ManifestFileCount = 9\n";
              f << "$expectedFanHostV2LhmSha256 = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'\n";
-             f << "function Write-Utf8Atomic([string]$path, [string]$text) {\n";
-             f << "  $parent = Split-Path -Parent $path\n";
+             f << "function Write-Utf8Atomic([string]$path, [string]$text, [ValidateRange(1,60)][int]$Attempts=60) {\n";
+             f << "  $parent=Resolve-YmccDeckyPath ([IO.Path]::GetDirectoryName($path))\n";
+             f << "  $leaf=[IO.Path]::GetFileName($path)\n";
+             f << "  if ($leaf -cnotin @('update-progress.json','update-state.json')) { throw 'UPDATE_DIAGNOSTIC_PATH_SCOPE_INVALID' }\n";
+             f << "  $path=Join-Path $parent $leaf\n";
+             f << "  $old=Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue\n";
+             f << "  if ($old -and ($old.PSIsContainer -or ($old.Attributes -band [IO.FileAttributes]::ReparsePoint))) {\n";
+             f << "    $retired=$path+'.ymcc-retired-'+[guid]::NewGuid().ToString('N')\n";
+             f << "    if ($old.PSIsContainer) { [IO.Directory]::Move($path,$retired) } else { [IO.File]::Move($path,$retired) }\n";
+             f << "  } elseif ($old -and ($old.Attributes -band [IO.FileAttributes]::ReadOnly)) { [IO.File]::SetAttributes($path,($old.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly))) }\n";
              f << "  if (!(Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }\n";
              f << "  $temp = $path + '.tmp-' + [guid]::NewGuid().ToString('N')\n";
-             f << "  $encoding = New-Object System.Text.UTF8Encoding -ArgumentList $false\n";
-             f << "  [System.IO.File]::WriteAllText($temp, $text, $encoding)\n";
-             f << "  $lastAtomicError = ''\n";
-             f << "  for ($attempt = 1; $attempt -le 60; $attempt++) {\n";
-             f << "    try { Move-Item -LiteralPath $temp -Destination $path -Force -ErrorAction Stop; return } catch { $lastAtomicError = $_.Exception.Message; if ($attempt -lt 60) { Start-Sleep -Milliseconds 100 } }\n";
+             f << "  $bytes=[Text.UTF8Encoding]::new($false).GetBytes($text)\n";
+             f << "  try {\n";
+             f << "    $stream=[IO.File]::Open($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)\n";
+             f << "    try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}\n";
+             f << "    $lastAtomicError = ''\n";
+             f << "    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {\n";
+             f << "      try {\n";
+             f << "        $path=Resolve-YmccDeckyPath $parent ([IO.Path]::GetFileName($path))\n";
+             f << "        if ([IO.File]::Exists($path)) { [IO.File]::Replace($temp,$path,[NullString]::Value) } else { [IO.File]::Move($temp,$path) }\n";
+             f << "        return\n";
+             f << "      } catch { $lastAtomicError = $_.Exception.Message; if ($attempt -lt $Attempts) { Start-Sleep -Milliseconds 100 } }\n";
+             f << "    }\n";
+             f << "    throw ('atomic write failed: ' + $path + ': ' + $lastAtomicError)\n";
+             f << "  } finally { if ([IO.File]::Exists($temp)) { try { [IO.File]::Delete($temp) } catch { Write-Warning 'UPDATE_DIAGNOSTIC_TEMP_CLEANUP_PENDING' } } }\n";
+             f << "}\n";
+             f << "function Install-YmccUpdateExecutable {\n";
+             f << "  $script:exeBackupConfirmed=$false\n";
+             f << "  if (!(Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'UPDATE_EXECUTABLE_PREIMAGE_MISSING' }\n";
+             f << "  $script:exeBeforeSha256=Get-YmccDeckyHash $exePath\n";
+             f << "  Set-YmccDeckyAtomic (Split-Path -Parent $backup) (Split-Path -Leaf $backup) $exePath $null $script:exeBeforeSha256\n";
+             f << "  if ((Get-YmccDeckyHash $backup) -cne $script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_BACKUP_UNCONFIRMED' }\n";
+             f << "  $script:exeBackupConfirmed=$true\n";
+             f << "  if ((Get-YmccDeckyHash $exePath) -cne $script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_SOURCE_CHANGED' }\n";
+             f << "  $script:exeAfterSha256=Get-YmccDeckyHash $packageExe\n";
+             f << "  $script:exeCommitStarted=$true\n";
+             f << "  Set-YmccDeckyAtomic $exeDir 'YeManCC.exe' $packageExe $null $script:exeAfterSha256\n";
+             f << "  Assert-FileMatch $packageExe $exePath 'executable commit'\n";
+             f << "}\n";
+             f << "function Restore-YmccUpdateExecutable {\n";
+             f << "  # A stale/failed .old is never permission to overwrite an untouched EXE.\n";
+             f << "  if (!$script:exeCommitStarted) { return }\n";
+             f << "  if (!$script:exeBackupConfirmed -or !$script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_ROLLBACK_UNCONFIRMED' }\n";
+             f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) {\n";
+             f << "    $current=Get-YmccDeckyHash $exePath\n";
+             f << "    if ($current -ceq $script:exeBeforeSha256) { return }\n";
+             f << "    if ($current -cne $script:exeAfterSha256) { throw 'UPDATE_EXECUTABLE_ROLLBACK_TARGET_CHANGED' }\n";
              f << "  }\n";
-             f << "  Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue\n";
-             f << "  throw ('atomic write failed: ' + $path + ': ' + $lastAtomicError)\n";
+             f << "  if (!(Test-Path -LiteralPath $backup -PathType Leaf) -or (Get-YmccDeckyHash $backup) -cne $script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_ROLLBACK_BACKUP_CHANGED' }\n";
+             f << "  Set-YmccDeckyAtomic $exeDir 'YeManCC.exe' $backup $null $script:exeBeforeSha256\n";
              f << "}\n";
              f << "function Set-UpdateProgress([string]$phase, [string]$message, [string]$error = '') {\n";
              f << "  $obj = [ordered]@{ operationId = $operationId; version = $version; stage = 'install'; sha256 = $sha256; phase = $phase; percent = 100; message = $message; error = $error; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n";
-             f << "  Write-Utf8Atomic $progressPath ($obj | ConvertTo-Json -Compress)\n";
-            f << "}\n";
+             f << "  # This writable UI snapshot is not installation authority. An unavailable\n";
+             f << "  # snapshot must not abort/roll back a protected installation transaction.\n";
+             f << "  try { Write-Utf8Atomic $progressPath ($obj | ConvertTo-Json -Compress) 3; $script:UpdateProgressPersistenceError='' }\n";
+             f << "  catch { $script:UpdateProgressPersistenceError=$_.Exception.Message; Write-Warning ('UPDATE_PROGRESS_NOT_PERSISTED: '+$script:UpdateProgressPersistenceError) }\n";
+             f << "}\n";
             // YeManTdpCtl.exe and its PyInstaller _internal directory are a
             // single runtime.  Give transient file locks enough time to
             // clear, then verify every TDP runtime file before committing the
@@ -79706,9 +80815,7 @@ static void reg_updater() {
             f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
             f << "  Set-UpdateProgress 'installing' 'TDP 运行时校验通过'\n";
             f << "  Write-Utf8Atomic $state ('{\"phase\":\"tdp-verified\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
-            f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) { Copy-Item -LiteralPath $exePath -Destination $backup -Force }\n";
-            f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
-            f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
+            f << "  Install-YmccUpdateExecutable\n";
             f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html','/XD',(Join-Path $programSource 'CustomSteamLibrary'))\n";
             f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
             f << "  if ($customRootPresent) { Set-UpdateProgress 'installing' '正在验证 CustomSteamLibrary 独立启动健康'; Invoke-CustomSteamLibraryHealthCheck }\n";
@@ -79768,7 +80875,7 @@ static void reg_updater() {
             f << "    try { Restore-YmccDeckyPackage $deckyTransaction } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; Decky rollback: ' + $_.Exception.Message } }\n";
             f << "    try { if ($moduleTransaction) { Restore-YmccModulePackage $moduleTransaction } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; Input module rollback: ' + $_.Exception.Message } }\n";
             f << "    try { Restore-OrdinaryFiles } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; ordinary rollback: ' + $_.Exception.Message } }\n";
-            f << "    try { if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force -ErrorAction Stop } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
+            f << "    try { Restore-YmccUpdateExecutable } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
              f << "    if (!$rollbackError) { $rollbackSucceeded = $true }\n";
              f << "  }\n";
              f << "  $errorMessage = $installError\n";
@@ -79790,8 +80897,7 @@ static void reg_updater() {
              f << "    try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
              f << "  }\n";
             f << "} finally {\n";
-            f << "  Exit-YmccModuleMaintenance $moduleLease\n";
-            f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
+            f << "  try {\n";
             f << "  Remove-Item -LiteralPath $tdpStage -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  if ($updateCommitted) {\n";
             f << "    foreach ($cleanupPath in @($backup, $tdpBackup, $rollbackRoot)) {\n";
@@ -79804,8 +80910,9 @@ static void reg_updater() {
             f << "  }\n";
              f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
              f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
-             f << "  if (!$immutableRepairPending -and $rollbackChildExitConfirmed) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }\n";
+             f << "  if (($updateCommitted -or $rollbackSucceeded) -and !$immutableRepairPending -and $rollbackChildExitConfirmed) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }\n";
              f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
+             f << "  } finally { Exit-YmccModuleMaintenance $moduleLease }\n";
              f << "}\n";
              f.flush();
              helperScriptWritten = f.good();
@@ -80317,7 +81424,8 @@ static void reg_extras() {
                     : key.form == OemKeyForm::WmiEvent ? "wmi-event" : "embedded"}
             });
             if (g_machineIdentity.family == YmccFamily::OneXPlayer &&
-                (consumerClass == "HandheldCompanion.Devices.OneXPlayerX2" ||
+                (ymcc::capabilities::oem::onex::descriptorFor(consumerClass).valid ||
+                 consumerClass == "HandheldCompanion.Devices.OneXPlayerX2" ||
                  consumerClass == "HandheldCompanion.Devices.OneXPlayer3" ||
                  consumerClass == "HandheldCompanion.Devices.OneXPlayerX2MiniPro")) {
                 const bool implemented = oemKeyCaptureImplemented(g_machineIdentity.family, consumerClass, key.keyId);
@@ -80327,6 +81435,16 @@ static void reg_extras() {
                     std::string(key.keyId) == "home" ? "onex-x2-vendor-click" :
                     (consumerClass != "HandheldCompanion.Devices.OneXPlayerX2MiniPro" &&
                      (std::string(key.keyId) == "l4" || std::string(key.keyId) == "r4")) ? "onex-x2-vendor-held" : "keyboard-vk";
+                // The same total-library descriptor used by the legacy reader
+                // also explains the route to UI and normal exported logs.
+                if (ymcc::capabilities::oem::onex::descriptorFor(consumerClass).valid) {
+                    arr.back()["captureRoute"] = ymcc::capabilities::oem::onex::captureRoute(consumerClass, key.keyId);
+                    const auto physical = ymcc::capabilities::oem::onex::physicalKeyIds(consumerClass, key.keyId);
+                    if (!physical[0].empty()) {
+                        arr.back()["physicalKeyIds"] = json::array();
+                        for (const auto id : physical) if (!id.empty()) arr.back()["physicalKeyIds"].push_back(std::string(id));
+                    }
+                }
                 if (!implemented) arr.back()["captureReason"] = "vendor-hid-reader-not-integrated";
             }
             if (g_machineIdentity.family == YmccFamily::ValveSteamDeck &&
@@ -80345,7 +81463,8 @@ static void reg_extras() {
                 {"verificationScope", "catalog-declaration-only;not-physical-input-or-output-proof"}
             });
         }
-        return {{"familyId", familyId}, {"supported", ref.count > 0}, {"keys", arr}};
+        return {{"familyId", familyId}, {"deviceClass", g_machineIdentity.deviceClass},
+            {"supported", ref.count > 0}, {"keys", arr}};
     });
 
     // Read-only presentation of the SAME capability-bound OEM catalog. No probe,
@@ -80362,10 +81481,20 @@ static void reg_extras() {
                 {"triggerCapability",key.clickOnly?"click-only":"full"},
                 {"physicalForm",key.form==OemKeyForm::KeyboardVk?"keyboard-vk":key.form==OemKeyForm::HidButton?"hid-button":key.form==OemKeyForm::WmiEvent?"wmi-event":"embedded"},
                 {"captureImplemented",oemKeyCaptureImplemented(g_machineIdentity.family,captureClass,key.keyId)}});
+            if (g_machineIdentity.family == YmccFamily::OneXPlayer &&
+                ymcc::capabilities::oem::onex::descriptorFor(captureClass).valid) {
+                keys.back()["captureRoute"] = ymcc::capabilities::oem::onex::captureRoute(captureClass, key.keyId);
+                const auto physical = ymcc::capabilities::oem::onex::physicalKeyIds(captureClass, key.keyId);
+                if (!physical[0].empty()) {
+                    keys.back()["physicalKeyIds"] = json::array();
+                    for (const auto id : physical) if (!id.empty()) keys.back()["physicalKeyIds"].push_back(std::string(id));
+                }
+            }
         }
         const bool msi = g_machineIdentity.family == YmccFamily::MsiClaw;
         json result = {{"schemaVersion",1},{"familyId",ymccFamilyName(g_machineIdentity.family)},
-            {"deviceClass",g_machineIdentity.deviceClass},{"supported",ref.count>0},{"keys",keys},
+            {"deviceClass",g_machineIdentity.deviceClass},{"captureClass",captureClass},
+            {"bindingSource","oemUnifiedInputBindingFor/current-total-catalog"},{"supported",ref.count>0},{"keys",keys},
             {"runtime",{{"keyboardActive",g_oemKeyHooksActive.load(std::memory_order_acquire)},
                 {"rawKeyboardActive",g_oemRawPathActive.load(std::memory_order_acquire)},
                 {"msiWmiState",msi?g_msiWmiState.load(std::memory_order_acquire):0},
@@ -80647,13 +81776,15 @@ static void reg_extras() {
     // ── sys.info：系统静态信息一次直读（全部 Win32/注册表 API，毫秒级）。
     //    取代前端为拿 CPU 名/物理核数/内存/AC-DC 而各自冷启动一个
     //    powershell -NoProfile（每次 600~1900ms）的旧路径。──
-    // Foreground AC/DC repair is read-only and intentionally independent of
-    // HWiNFO/monitor snapshots and native adapter debounce/write pipelines.
-    ipc_on("power.sourceSnapshot", [](const json&) -> json {
-        SYSTEM_POWER_STATUS status{};
-        const bool readable = GetSystemPowerStatus(&status) != FALSE;
-        const bool known = readable && (status.ACLineStatus == 0 || status.ACLineStatus == 1);
-        return json{{"known", known}, {"acLine", known ? static_cast<int>(status.ACLineStatus) : 255}};
+    ipc_on("power.sourceSnapshot", [](const json& args) -> json {
+        if (args.value("refresh", false)) {
+            const auto current=ymcc::powerSource::snapshot();
+            if(!(current.batteryKnown&&!current.hasBattery)) (void)ymcc::powerSource::refresh(false,2000);
+        }
+        const auto state = ymcc::powerSource::snapshot();
+        return json{{"known", state.known}, {"acLine", state.known ? state.ac : 255},
+            {"batteryKnown", state.batteryKnown}, {"hasBattery", state.hasBattery},
+            {"revision", state.revision}, {"generation", currentPowerGeneration()}};
     });
 
     ipc_on("sys.info", [](const json&) -> json {
@@ -80689,18 +81820,13 @@ static void reg_extras() {
             r["totalMemoryBytes"] = GlobalMemoryStatusEx(&ms)
                 ? (double)ms.ullTotalPhys : 0.0;
         }
-        // AC/DC：GetSystemPowerStatus（0=电池 DC，1=交流 AC，255=未知→按 AC）
+        // Compatibility fields consume the same owner; UNKNOWN is explicit.
         {
-            SYSTEM_POWER_STATUS sps{};
-            if (GetSystemPowerStatus(&sps)) {
-                r["acLine"] = (int)sps.ACLineStatus;      // 0/1/255 原样给前端
-                r["powerMode"] = (sps.ACLineStatus == 0) ? "dc" : "ac";
-                r["hasBattery"] = sps.BatteryFlag != 128;
-            } else {
-                r["acLine"] = 255;
-                r["powerMode"] = "ac";
-                r["hasBattery"] = false;
-            }
+            const auto state=ymcc::powerSource::snapshot();
+            r["acLine"] = state.known ? state.ac : 255;
+            r["powerMode"] = state.known ? json(state.ac == 0 ? "dc" : "ac") : json(nullptr);
+            r["hasBattery"] = state.batteryKnown && state.hasBattery;
+            r["batteryKnown"] = state.batteryKnown;
         }
         // 公共启动目录 + 用户目录（取代 [Environment]::GetFolderPath / $env:USERPROFILE）
         {
@@ -80734,7 +81860,8 @@ static void reg_extras() {
         return json{{"ok", result.ok}, {"known", result.state.known}, {"enabled", result.state.enabled()},
             {"mixed", result.state.mixed()}, {"ac", result.state.ac}, {"dc", result.state.dc},
             {"win32Error", result.error}, {"stage", result.stage}, {"changed", result.changed},
-            {"reactivated", result.reactivated}, {"rollbackOk", result.rollbackOk}, {"preferenceSaved", preferenceSaved}};
+            {"reactivated", result.reactivated}, {"reactivationError", result.reactivationError},
+            {"rollbackOk", result.rollbackOk}, {"preferenceSaved", preferenceSaved}};
     });
 
     // Fresh read-only existence check. Do not create powercfg or capture its
@@ -81089,6 +82216,10 @@ static void reg_extras() {
 
     // ── cpu.topology：检测 L3 缓存域（CCD）拓扑，决定 CPU 核心控制卡片是否显示。
     //    明确声明为进程亲和性作用域，不把 L3 域或亲和性结果说成物理 CCD 断电。──
+    ipc_on("cpu.undervolt.state", [](const json&) -> json {return cpuUvTrialSnapshot();});
+    ipc_on("cpu.undervolt.begin", [](const json&) -> json {return cpuUvTrialBegin();});
+    ipc_on("cpu.undervolt.arm", [](const json& a) -> json {return cpuUvTrialArm(a);});
+    ipc_on("cpu.undervolt.cancel", [](const json&) -> json {cpuUvTrialStop("cancelled");cpuUvTrialEmit();return cpuUvTrialSnapshot();});
     ipc_on("cpu.topology", [](const json&) -> json {
         CcdTopology t = detectCcdTopology();
         const bool supported = ccdTopologySupported(t);
@@ -81124,6 +82255,10 @@ static void reg_extras() {
         r["ccdMasks"]  = t.ccdMasks;
         r["domains"]   = domains;
         r["singleGroupRepresentable"] = t.groupRepresentable;
+        r["performanceSupported"] = ccdPerformanceSupported(t);
+        r["multiCcdConfirmed"] = t.multiCcdConfirmed;
+        r["coreArchitectureDetected"] = t.architectureDetected;
+        r["heterogeneous"] = t.heterogeneous;
         r["operation"] = std::string(ymcc::capabilities::tdp::ccdOperation);
         r["effectScope"] = std::string(ymcc::capabilities::tdp::ccdEffectScope);
         r["mechanism"] = std::string(ymcc::capabilities::tdp::ccdMechanism);
@@ -82232,24 +83367,28 @@ static void finalizeWebViewRenderReady(
     completeWebViewRecovery();
     recordHealthyWebViewGpuBoot();
 
+    if (g_focusSession.lightNoGame && !focusLightMayRefocus(GetTickCount64())) focusClearSession();
+    const auto focusSequence = g_focusSessionSequence;
     if (g_deferFirstShow) {
         const int showCmd = g_firstShowCmd;
         g_deferFirstShow = false;
-        showWindowAnimated(g_hwnd, showCmd, true);
+        showWindowAnimated(g_hwnd, showCmd, !g_focusSession.lightNoGame);
         UpdateWindow(g_hwnd);
     }
 
     // The summon may have requested focus while the first frame was still
     // pending.  Now that WebView2 is ready, give the native focus state
     // machine one immediate attempt and retain its bounded retry as fallback.
-    if (g_focusSession.active && !g_focusSession.returning &&
+    if (focusSequence == g_focusSessionSequence && g_focusSession.active && !g_focusSession.returning && focusLightMayRefocus(GetTickCount64()) &&
         IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd)) {
-        if (refocusWebView(true)) {
-            KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
-            g_summonFocusRetries = 0;
-            g_summonAltTried = false;
-        } else {
-            SetTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID, 80, nullptr);
+        const bool focused = refocusWebView(true);
+        if (focusSequence == g_focusSessionSequence) {
+            if (focused) {
+                if (g_focusSession.lightNoGame) g_focusSession.lightForegroundAcquired = true;
+                KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
+                g_summonFocusRetries = 0;
+                g_summonAltTried = false;
+            } else SetTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID, 80, nullptr);
         }
     }
 
@@ -82910,6 +84049,7 @@ static void showDegradedBalloon() {
 }
 
 static void enterWebViewDegradedState(const char* kind, size_t attempt, const WebViewFailureInfo& info) {
+    if (g_focusSession.lightNoGame) focusClearSession();
     const bool first = !g_webviewDegraded.exchange(true, std::memory_order_acq_rel);
     // GP-926 S1-1：进入降级即作废在飞的恢复回调（旧 generation 的 continuation 自行放弃），并确保
     // 恢复计时器/挂起动作不会在后台继续 —— 不再无限恢复、也不再有隐式退出。
@@ -82976,6 +84116,7 @@ static void beginWebViewRecovery(const char* kind, const char* action, size_t at
 }
 
 static void failWebViewRecovery(const char* reason) {
+    if (g_focusSession.lightNoGame) focusClearSession();
     appendWebViewDiagnostic({
         {"event", "recovery-failed"},
         {"action", g_webviewRecoveryAction},
@@ -83945,10 +85086,11 @@ static LRESULT gamepadDispatchRawInput(HWND h, WPARAM w, LPARAM l) {
         return 0;
 }
 
-// Windows source events and the existing 30s app heartbeat share one owner.
+// Windows events, existing monitor samples and bounded recovery share one owner.
 // TDP dispatch never queries the supply or creates a second polling loop.
-static bool acceptAcDcSource(HWND h, int ac, const char* source) {
-    if (ac != 0 && ac != 1) return false;
+static bool acceptAcDcSource(HWND h, const ymcc::powerSource::Snapshot& state, const char* source) {
+    const int ac=state.ac;
+    if (!state.known || (ac != 0 && ac != 1)) return false;
                 if (g_lastAcState < 0) {
                     // 注册后系统会立即回调一次当前状态：仅记录，不算切换、不刷新
                     g_lastAcState = ac;
@@ -83958,6 +85100,7 @@ static bool acceptAcDcSource(HWND h, int ac, const char* source) {
                     g_acdcDebounceGeneration.store(generation, std::memory_order_release);
                     sgRecordFact("acdc-change", {
                         {"ac", ac == 1},
+                        {"known",true},{"revision",state.revision},
                         {"generation", generation},
                         {"source", source}
                     });
@@ -83965,6 +85108,7 @@ static bool acceptAcDcSource(HWND h, int ac, const char* source) {
                     // 视频背景专用轻量事件：即时暂停/恢复；不触发 CPU/TDP 等重型链路。
                     ipc_emit("power.sourceChanged", {
                         {"ac", ac == 1},
+                        {"known",true},{"revision",state.revision},
                         {"generation", generation},
                         {"source", source}
                     });
@@ -83990,9 +85134,13 @@ static bool acceptAcDcSource(HWND h, int ac, const char* source) {
                         SetTimer(h, TIMER_ID_ACDC, ACDC_DEBOUNCE_MS,
                         [](HWND hh, UINT, UINT_PTR id, DWORD) {
                             KillTimer(hh, id);
+                            const auto receipt=ymcc::powerSource::snapshot();
+                            const auto generation=g_acdcDebounceGeneration.load(std::memory_order_acquire);
+                            if(!receipt.known || generation!=currentPowerGeneration()) return;
                             ipc_emit("power.acChanged", {
-                                {"ac", g_lastAcState == 1},
-                                {"generation", g_acdcDebounceGeneration.load(std::memory_order_acquire)},
+                                {"ac", receipt.ac == 1},{"known",true},{"revision",receipt.revision},
+                                {"batteryKnown",receipt.batteryKnown},{"hasBattery",receipt.hasBattery},
+                                {"generation", generation},
                                 {"source", "native.acdc.debounced"}
                             });
                         });
@@ -84000,16 +85148,45 @@ static bool acceptAcDcSource(HWND h, int ac, const char* source) {
     return false;
 }
 
-static void reconcileAcDcSourceHeartbeat(HWND h) {
-    if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) return;
-    SYSTEM_POWER_STATUS status{};
-    if (GetSystemPowerStatus(&status) && (status.ACLineStatus == 0 || status.ACLineStatus == 1)) {
-        const bool ac=status.ACLineStatus == 1;
-        if (acceptAcDcSource(h, ac ? 1 : 0, "native.acdc.heartbeat")) return;
-        // Re-publish checked state so a dropped WebView notification is repaired
-        // even when Windows itself has not changed side since the last sample.
-        ipc_emit("power.sourceHeartbeat", {{"ac",ac},{"generation",currentPowerGeneration()},{"source","native.acdc.heartbeat"}});
+static void publishPowerSourceReceipt(HWND h, const char* source) {
+    const auto state = ymcc::powerSource::snapshot();
+    if (!state.known) {
+        ipc_emit("power.sourceHeartbeat", {{"known",false},{"revision",state.revision},
+            {"batteryKnown",state.batteryKnown},{"hasBattery",state.hasBattery},
+            {"generation",currentPowerGeneration()},{"source",source}});
+        return;
     }
+    if (acceptAcDcSource(h, state, source)) return;
+    ipc_emit("power.sourceHeartbeat", {{"known",true},{"ac",state.ac==1},
+        {"revision",state.revision},{"batteryKnown",state.batteryKnown},{"hasBattery",state.hasBattery},
+        {"generation",currentPowerGeneration()},{"source",source}});
+}
+static void beginPowerSourceRecovery(HWND h,bool sourceEdge) {
+    const auto generation=currentPowerGeneration();
+    if(g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ||
+       (!sourceEdge&&generation==g_powerSourceRecoveryGeneration)) return;
+    g_powerSourceRecoveryGeneration=generation;
+    KillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);g_powerSourceRecoveryRunning=false;
+    ymcc::powerSource::owner().beginActiveWindow(GetTickCount64());
+    const auto state=ymcc::powerSource::refresh(true);
+    if(g_lastPowerEventAc<0&&state.known)g_lastPowerEventAc=state.ac;
+    ensureNativePowerMonitor();
+    publishPowerSourceReceipt(h,"native.acdc.recovery");
+    if(g_powerSourceHeartbeat.arm(++g_powerSourceRecoverySerial,GetTickCount64(),state))
+        g_powerSourceRecoveryRunning=SetTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY,2000,nullptr)!=0;
+}
+static void reconcileAcDcSourceHeartbeat(HWND h) {
+    if(g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready){
+        g_powerSourceHeartbeat.cancel();g_powerSourceRecoveryRunning=false;KillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);return;
+    }
+    const auto now=GetTickCount64();
+    const bool monitorReady=ymcc::powerSource::owner().finishActiveWindow(now);
+    if(!g_powerSourceHeartbeat.due(now,ymcc::powerSource::snapshot(),monitorReady)){
+        g_powerSourceRecoveryRunning=false;KillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);return;
+    }
+    // Reuse a recent monitor sample; no separate per-consumer polling.
+    (void)ymcc::powerSource::refresh(false,2000);
+    publishPowerSourceReceipt(h,"native.acdc.recovery-heartbeat");
 }
 
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -84018,6 +85195,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     static const UINT usbipProgressMessage=RegisterWindowMessageW(L"YeManCC.UsbipUpgrade.Changed");
     if (usbipProgressMessage && m==usbipProgressMessage && w==GetCurrentProcessId()) {
         gamepadDriverSetupRequestRead();return 0;
+    }
+    if (m == WM_POWER_SOURCE_UPDATE) {
+        g_powerSourcePosted.store(false,std::memory_order_release);ensureNativePowerMonitor();
+        if(!ymcc::powerSource::snapshot().known&&!g_powerSourceRecoveryRunning)beginPowerSourceRecovery(h,true);
+        else publishPowerSourceReceipt(h,"native.acdc.owner");return 0;
     }
     if (m == ymcc::taskView::foreground::message) return ymcc::taskView::foreground::deliver(h, w);
     // R2（二批需求单）：WndProc 总耗时（门控；析构覆盖全部 return 路径）。
@@ -84110,6 +85292,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_SHOWWINDOW:
         PostMessageW(h, ymcc::gesturesummon::kRefreshMessage, 0, 0);
         msiNativeForegroundUiEvent();
+        steamLightGamepadUiChanged();
         if (w) {
             if (g_fullHeight || IsZoomed(h)) scheduleTaskbarLayoutRecheck();
             if (g_webviewReady) {
@@ -84126,7 +85309,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 
     case WM_ACTIVATE:
         PostMessageW(h, ymcc::gesturesummon::kRefreshMessage, 0, 0);
+        if (LOWORD(w) == WA_INACTIVE) focusLightForegroundChanged();
         msiNativeForegroundUiEvent();
+        steamLightGamepadUiChanged();
         if (LOWORD(w) != WA_INACTIVE) ymcc::screenpads::release();
         if (LOWORD(w) != WA_INACTIVE && g_webviewNeedsShowNudge && g_webviewReady &&
             IsWindowVisible(h) && !IsIconic(h)) {
@@ -84134,6 +85319,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             SetTimer(g_hwnd, WEBVIEW_POST_SHOW_NUDGE_TIMER_ID, 30, nullptr);
         }
         break;
+
+    case WM_LIGHT_ISOLATION_RECHECK:
+        focusLightRecheckOnUi();
+        return 0;
 
     case WM_ENTERSIZEMOVE:
         g_resizing = true;
@@ -84279,6 +85468,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_TIMER: {
         // R2（二批需求单）：WM_TIMER 分支总耗时 + per-timerId 槽（门控）。
         UiCostWmTimerScope timerCost(w);
+        if(w==CPU_UV_TRIAL_TIMER){cpuUvTrialTick();return 0;}
         if (w == TASKBAR_LAYOUT_RECHECK_TIMER_ID) {
             taskbarLayoutRecheckTick();
             return 0;
@@ -84352,19 +85542,35 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         }
         if (w == SUMMON_FOCUS_TIMER_ID) {
+            const auto now = GetTickCount64();
+            if (g_focusSession.lightNoGame && (!g_focusSession.active || g_focusSession.returning ||
+                g_focusSession.lightForegroundAcquired)) {
+                KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
+                return 0;
+            }
+            if (g_focusSession.lightNoGame && !focusLightMayRefocus(now)) {
+                focusClearSession();
+                return 0;
+            }
+            if (g_focusSession.lightNoGame && now < g_focusSession.summonNextAt) return 0;
+            g_focusSession.summonNextAt = now + 80;
             if (!g_focusSession.active || g_focusSession.returning ||
-                !IsWindowVisible(g_hwnd)) {
+                (!IsWindowVisible(g_hwnd) && !g_focusSession.lightNoGame)) {
                 KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
                 g_summonFocusRetries = 0;
                 g_summonAltTried = false;
             } else {
                 ++g_summonFocusRetries;
-                const bool useAlt = !g_summonAltTried && g_summonFocusRetries >= 2;
+                const bool useAlt = !g_focusSession.lightNoGame && !g_summonAltTried && g_summonFocusRetries >= 2;
                 if (useAlt) g_summonAltTried = true;
                 // Full-screen games and WebView2 restore can take several
                 // compositor turns. Keep the retry bounded, but allow about
                 // one second for the native window and controller to settle.
-                if (refocusWebView(useAlt) || g_summonFocusRetries >= 12) {
+                const auto sequence = g_focusSessionSequence;
+                const bool focused = refocusWebView(useAlt);
+                if (sequence != g_focusSessionSequence) return 0;
+                if (focused && g_focusSession.lightNoGame) g_focusSession.lightForegroundAcquired = true;
+                if (focused || g_summonFocusRetries >= 12) {
                     KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
                     g_summonFocusRetries = 0;
                     g_summonAltTried = false;
@@ -84373,6 +85579,13 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         if (w == RETURN_GAME_FOCUS_TIMER_ID) {
             const ULONGLONG now = GetTickCount64();
+            if (g_focusSession.lightNoGame) {
+                if (!g_focusSession.active || !g_focusSession.returning) return 0;
+                const auto sequence = g_focusSessionSequence;
+                const bool completed = focusLightReturnTick(now);
+                if (sequence == g_focusSessionSequence && completed) focusClearSession();
+                return 0;
+            }
             if (!focusLosslessReturnTimerTick(now) && g_focusSession.returning) {
                 const bool userMovedElsewhere = g_focusSession.returnStarted &&
                     now - g_focusSession.returnStarted >= 900 && !focusForegroundIsTransientOrShell();
@@ -84385,8 +85598,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         if (w == FOCUS_DISPLAY_TIMER_ID) taskbarDisplayReflowTick();
         if (w == MONITOR_HUD_PULSE_TIMER_ID) monitorHudPulseTick();
+        if (w == TIMER_ID_POWER_SOURCE_RECOVERY) { reconcileAcDcSourceHeartbeat(h); return 0; }
         if (w == MEM_TRAY_TIMER_ID) {
-            reconcileAcDcSourceHeartbeat(h);
             // Existing 30s tick is the fallback when capture initialization was skipped/failed.
             // Completed setup returns immediately; no new timer, reader or install attempt.
             gamepadDriverSetupRequestRead();
@@ -84471,6 +85684,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             rogEnsureXboxFaceEnabled("window-hidden");
         return 0;
     case WM_SYSCOMMAND:
+        if ((w & 0xFFF0) == SC_MINIMIZE && g_focusSession.lightNoGame) focusClearSession();
         if ((w & 0xFFF0) == SC_MAXIMIZE) {
             focusReflowMainWindow();
             scheduleTaskbarLayoutRecheck();
@@ -84549,6 +85763,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_WEBVIEW_PROCESS_FAILED: {
         auto* info = reinterpret_cast<WebViewFailureInfo*>(l);
         if (!info) return 0;
+        if(info->generation==0 || info->generation==g_webviewGeneration.load(std::memory_order_acquire))cpuUvTrialStop("interrupted");
         appendWebViewFailureDiagnostic(*info);
         recoverWebViewProcess(*info);
         delete info;
@@ -84598,9 +85813,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
          if (g_schemeNotify) { UnregisterPowerSettingNotification(g_schemeNotify); g_schemeNotify = nullptr; }
          sgStopKernelPowerSubscription();
          if (g_suspendResumeNotify) { PowerUnregisterSuspendResumeNotification(g_suspendResumeNotify); g_suspendResumeNotify = nullptr; }
+        ymcc::powerSource::owner().listen(nullptr);ymcc::powerSource::owner().observe(nullptr);g_powerSourceHeartbeat.cancel();g_powerSourceRecoveryRunning=false;KillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);
         KillTimer(h, TIMER_ID_ACDC);
         KillTimer(h, SUMMON_FOCUS_TIMER_ID);
-        focusLosslessReturnCancel();
+        focusClearSession();
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, RESUME_GAME_FOCUS_TIMER_ID);
         KillTimer(h, WAKE_FOCUS_NUDGE_TIMER_ID);
@@ -84652,6 +85868,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         return 0;
     case WM_POWER_RESUME_COMMIT:
+        beginPowerSourceRecovery(h);
         if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {
             stopPowerResumeWatchdog();
             steamAppearanceResumeCommitted(currentPowerGeneration()); // CSS only; repeated Ready is coalesced.
@@ -84749,6 +85966,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_QUERYENDSESSION:
+        cpuUvTrialStop("exit");
         ymcc::screenpads::release();
         // 系统注销/关机前先恢复被冻结游戏；返回 TRUE 允许会话结束继续。
         (void)sgCleanupBeforeExit(true);
@@ -84775,6 +85993,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         msiNativeForegroundStartObserver();
         return 0;
     case WM_DESTROY:
+            cpuUvTrialStop("exit");
             ymcc::batterycharge::seal();
             // Retire before shutdown callbacks can pump/discard queued results.
             // WebView recovery alone must not retire the process-lifetime owner.
@@ -84834,9 +86053,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (g_suspendResumeNotify) { PowerUnregisterSuspendResumeNotification(g_suspendResumeNotify); g_suspendResumeNotify = nullptr; }
         sgStopWorkThread(1000);
         sgStopSleepRetry();
+        ymcc::powerSource::owner().listen(nullptr);ymcc::powerSource::owner().observe(nullptr);g_powerSourceHeartbeat.cancel();g_powerSourceRecoveryRunning=false;KillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);
         KillTimer(h, TIMER_ID_ACDC);
         KillTimer(h, SUMMON_FOCUS_TIMER_ID);
-        focusLosslessReturnCancel();
+        focusClearSession();
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, RESUME_GAME_FOCUS_TIMER_ID);
         KillTimer(h, WAKE_FOCUS_NUDGE_TIMER_ID);
@@ -84958,6 +86178,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_INPUT: return gamepadDispatchRawInput(h, w, l);
     case WM_INPUT_DEVICE_CHANGE:
+        if (g_focusSession.lightNoGame) focusClearSession();
         g_keyboardModifierDeviceGeneration.fetch_add(1,std::memory_order_acq_rel);
         // 手柄插拔：native 刷新连接态并按需发布 gamepad.state。
         // 批次B：设备增删含重枚举（hDevice 会被复用），共享解析缓存整体失效。
@@ -84972,6 +86193,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         gamepadEval();
         return 0;
     case WM_DEVICECHANGE:
+        if(w==DBT_DEVNODES_CHANGED){(void)ymcc::powerSource::refresh(true);publishPowerSourceReceipt(h,"native.acdc.device-change");}
         {
             if (w == DBT_DEVNODES_CHANGED || w == DBT_DEVICEARRIVAL || w == DBT_DEVICEREMOVECOMPLETE)
                 g_cpuPolicyTopologyEpoch.fetch_add(1, std::memory_order_acq_rel);
@@ -85090,6 +86312,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         sgAbnormalHandleEvent(l);
         return 0;
     case WM_SG_S0_INTENT: {
+        // Ignore stale/unsupported intent before changing the source recovery.
+        // Its existing timer checks the admitted lifecycle before any probe.
         if (!sgModernStandbyRepairSupported()) return 0;
         const int reason = static_cast<int>(w);
         const ULONGLONG eventFileTime = static_cast<ULONGLONG>(l);
@@ -85303,14 +86527,19 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_POWERBROADCAST: {
+        if(w==PBT_APMSUSPEND){cpuUvTrialStop("suspended");cpuUvTrialEmit();g_powerSourceHeartbeat.cancel();g_powerSourceRecoveryRunning=false;KillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);}
+        if(w==PBT_APMPOWERSTATUSCHANGE){(void)ymcc::powerSource::refresh(true);publishPowerSourceReceipt(h,"native.acdc.windows-status");}
+
         sgSleepTimeoutPowerBroadcast(static_cast<ULONG>(w));
         g_sleepNotificationEvidence.handled(static_cast<ULONG>(w),GetTickCount64());
         if(w==PBT_APMSUSPEND||w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND||
            w==PBT_APMRESUMECRITICAL||w==PBT_APMPOWERSTATUSCHANGE)steamWallpaperForegroundSignal();
         if (w == PBT_APMSUSPEND || w == PBT_APMRESUMEAUTOMATIC ||
-            w == PBT_APMRESUMESUSPEND || w == PBT_APMRESUMECRITICAL)
-            focusLosslessReturnCancel();
-        if(w==PBT_APMPOWERSTATUSCHANGE){ymcc::media::downloads::notify(sharedGameMediaStore().root());ipc_emit("gameMedia.preparationPolicyChanged",json::object());}
+            w == PBT_APMRESUMESUSPEND || w == PBT_APMRESUMECRITICAL) {
+            g_focusLightProofNotBefore.store(GetTickCount64(), std::memory_order_release);
+            focusClearSession();
+        }
+        if(w==PBT_APMPOWERSTATUSCHANGE){ymcc::media::powerPolicy::ticket();sharedGameMediaPowerChanged();ymcc::media::downloads::notify(sharedGameMediaStore().root());ipc_emit("gameMedia.preparationPolicyChanged",json::object());}
         struct MsiNativePowerCompletion {
             WPARAM event;
             ~MsiNativePowerCompletion(){if(event!=PBT_APMSUSPEND)msiNativeForegroundPowerEvent(event);}
@@ -85361,9 +86590,15 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             }
             else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_ACDC_POWER_SOURCE) &&
                 pbs->DataLength >= sizeof(DWORD)) {
-                DWORD cond = *reinterpret_cast<DWORD*>(pbs->Data); // SYSTEM_POWER_CONDITION
-                int ac = (cond == 0 /*PoAc*/) ? 1 : 0;            // 0=插电 1/2=离电
-                if (acceptAcDcSource(h, ac, "native.acdc")) return 0;
+                DWORD cond=0;memcpy(&cond,pbs->Data,sizeof(cond));
+                if(cond<=2){
+                    // The notification carries the authoritative source; no second OS query.
+                    const auto state=ymcc::powerSource::owner().sourceEvent(cond,GetTickCount64());
+                    const bool edge=g_lastPowerEventAc>=0&&g_lastPowerEventAc!=state.ac;
+                    g_lastPowerEventAc=state.ac;
+                    if(edge)beginPowerSourceRecovery(h,true);
+                    publishPowerSourceReceipt(h,"native.acdc.windows-event");
+                }
             }
         else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_ACTIVE_POWERSCHEME)) {
                 // Windows 活动电源方案变化广播：仅转发事件，方案是否恢复由前端 CPU guard 决定。
@@ -92026,7 +93261,17 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     if (!g_aiFanMockSession.isolated) rogRecoverBindSerialized("boot");   // §22：初始化也走同一会话所有权
     if (!g_aiFanMockSession.isolated) rogEnsureXboxFaceEnabled("boot");
 
-    // 订阅 AC/DC 电源来源变化（推送式，零轮询）。系统会在注册后立即回调一次当前状态。
+    // One source owner: monitor/event receipts also feed authenticated child
+    // readers. Only startup/resume open a bounded repair heartbeat window.
+    (void)ymcc::powerSource::channel::startPublisher();
+    ymcc::powerSource::owner().observe([](const ymcc::powerSource::Snapshot& state) noexcept {
+        (void)ymcc::powerSource::channel::publish(state);
+    });
+    ymcc::powerSource::owner().listen([](const ymcc::powerSource::Snapshot&) noexcept {
+        if(g_hwnd&&!g_powerSourcePosted.exchange(true,std::memory_order_acq_rel))
+            if(!PostMessageW(g_hwnd,WM_POWER_SOURCE_UPDATE,0,0))g_powerSourcePosted.store(false,std::memory_order_release);
+    });
+    beginPowerSourceRecovery(g_hwnd);
     g_acdcNotify = RegisterPowerSettingNotification(
         g_hwnd, &YM_GUID_ACDC_POWER_SOURCE, DEVICE_NOTIFY_WINDOW_HANDLE);
     // 显示器开关通知：S0 现代待机没有 S3，不会发 PBT_APMSUSPEND，改用显示器关闭/亮起
@@ -92075,6 +93320,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         ymcc::screenpads::quickAccessEdgeObserver=nativeQamEdge;
         ymcc::screenpads::quickAccessContextObserver=nativeQamContext;
         ymcc::screenpads::outputEvidenceObserver=inputSignalObserveScreenTouchpad;
+        ymcc::screenpads::summonWindowOnLeft.store(windowPlacementIsLeft());
         ymcc::screenpads::initializeForOwner(hi,g_hwnd,bank.slots[profile],profile,GetCommandLineW());
     }
     if (!g_fxSoundRecovery.start(fxSoundRecoveryEnabled(), [](const ymcc::fxsound::Attempt& result) {

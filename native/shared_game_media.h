@@ -19,6 +19,7 @@
 #include "json.hpp"
 #include "custom-steam-library/custom_steam_library_paths.h"
 #include "shared_game_media_capacity.h"
+#include "shared_game_media_power.h"
 #include "custom-steam-library/custom_steam_library_identity_cache.h"
 #pragma comment(lib, "bcrypt.lib")
 namespace ymcc::media {
@@ -48,6 +49,7 @@ inline bool positiveToken(const Json& object,const char* key){
 }
 inline bool allowed(const Json& a){
     if(!steam(a))return true;
+    if(!powerPolicy::allowed(a))return false;
     try{
         const auto proof=foreground();if(!proof.is_object())return false;const auto epoch=a.value("demandEpoch",std::string{});
         return !epoch.empty()&&epoch.size()<=128&&integer(a,"demandRevision",9007199254740991ULL)&&
@@ -59,9 +61,13 @@ inline bool allowed(const Json& a){
             proof["revision"].get<uint64_t>()==a["demandRevision"].get<uint64_t>();
     }catch(...){return false;}
 }
-inline Json inactive(){return {{"ready",false},{"acquired",false},{"status","consumer-inactive"},{"demandConsumer","steam"},{"reason","media-steam-foreground-inactive"}};}
+inline Json inactive(){const auto reason=powerPolicy::reason();return {{"ready",false},{"acquired",false},{"status","consumer-inactive"},{"demandConsumer","steam"},{"reason",reason.empty()?"media-steam-foreground-inactive":reason}};}
 inline void require(const Json& a){if(!allowed(a))throw std::runtime_error("media-stale-steam-demand");}
 } // namespace steamDemand
+namespace workDemand {
+inline bool allowed(const Json& a){return powerPolicy::allowed(a)&&steamDemand::allowed(a);}
+inline void require(const Json& a){powerPolicy::require(a);steamDemand::require(a);}
+} // namespace workDemand
 inline int preferredVideoHeight(const Json& entry){
     const auto selected=entry.value("selectedVideo",Json::object());
     const auto height=selected.value("preferredHeight",720);
@@ -95,7 +101,19 @@ inline std::string normalized(const std::string& v) { auto p=wide(v);std::replac
 inline std::string digestKey(const std::string& s) { uint64_t n=1469598103934665603ull;for(unsigned char c:s){n^=c;n*=1099511628211ull;}std::ostringstream o;o<<std::hex<<n;return o.str(); }
 inline bool safeKey(const std::string& s) { return !s.empty()&&s.size()<=100&&std::all_of(s.begin(),s.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-';}); }
 inline Json read(const fs::path& p) { std::error_code ec;if(!fs::exists(p,ec))return Json::object();auto size=fs::file_size(p,ec);if(ec||size>16*1024*1024)throw std::runtime_error("media-index-unreadable");std::ifstream in(p,std::ios::binary);if(!in)throw std::runtime_error("media-index-unreadable");Json j;in>>j;if(!j.is_object())throw std::runtime_error("media-index-invalid");return j; }
-struct Lock { HANDLE value=nullptr;explicit Lock(const fs::path& root){auto name=L"Local\\YMCC-SharedMedia-"+wide(digestKey(normalized(utf8(fs::absolute(root).wstring()))));value=CreateMutexW(nullptr,FALSE,name.c_str());if(!value)throw std::runtime_error("media-lock-unavailable");auto result=WaitForSingleObject(value,10000);if(result!=WAIT_OBJECT_0&&result!=WAIT_ABANDONED){CloseHandle(value);value=nullptr;throw std::runtime_error("media-owner-busy");}}~Lock(){if(value){ReleaseMutex(value);CloseHandle(value);}}Lock(const Lock&)=delete; };
+// A cold library process consumes the queue's durable preference once. Its
+// existing download watcher refreshes it on queue events; no settings polling.
+inline void refreshMediaPowerPreference(const fs::path& root){
+    const auto document=read(root/L"config"/L"game-media-downloads.json");
+    const auto value=document.find("wallpaperPauseOnBattery");
+    if(value!=document.end()&&value->is_boolean())powerPolicy::consume(value->get<bool>());
+}
+inline void bindMediaPowerPreference(const fs::path& root){
+    static std::mutex mutex;static std::set<fs::path> bound;
+    std::lock_guard lock(mutex);const auto key=fs::absolute(root).lexically_normal();
+    if(bound.contains(key))return;refreshMediaPowerPreference(root);bound.insert(key);
+}
+struct Lock { HANDLE value=nullptr;explicit Lock(const fs::path& root,DWORD timeout=10000){auto name=L"Local\\YMCC-SharedMedia-"+wide(digestKey(normalized(utf8(fs::absolute(root).wstring()))));value=CreateMutexW(nullptr,FALSE,name.c_str());if(!value)throw std::runtime_error("media-lock-unavailable");auto result=WaitForSingleObject(value,timeout);if(result!=WAIT_OBJECT_0&&result!=WAIT_ABANDONED){CloseHandle(value);value=nullptr;throw std::runtime_error("media-owner-busy");}}~Lock(){if(value){ReleaseMutex(value);CloseHandle(value);}}Lock(const Lock&)=delete; };
 inline void atomicWrite(const fs::path& p,const Json& j) { fs::create_directories(p.parent_path());auto tmp=p;tmp+=L".tmp."+std::to_wstring(GetCurrentProcessId())+L"."+std::to_wstring(GetTickCount64());{std::ofstream o(tmp,std::ios::binary|std::ios::trunc);o<<j.dump(2);o.flush();if(!o)throw std::runtime_error("media-write-failed");}if(!MoveFileExW(tmp.c_str(),p.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){std::error_code e;fs::remove(tmp,e);throw std::runtime_error("media-publish-failed");} }
 inline std::string randomId() { unsigned char b[16];if(BCryptGenRandom(nullptr,b,sizeof b,BCRYPT_USE_SYSTEM_PREFERRED_RNG)<0)throw std::runtime_error("media-entropy-unavailable");std::string r;for(auto c:b){r+="0123456789abcdef"[c>>4];r+="0123456789abcdef"[c&15];}return r; }
 inline std::string mediaKind(const fs::path& p) { std::ifstream in(p,std::ios::binary);unsigned char b[16]{};in.read(reinterpret_cast<char*>(b),sizeof b);auto n=in.gcount();if(n>=8&&b[4]=='f'&&b[5]=='t'&&b[6]=='y'&&b[7]=='p')return "mp4";if(n>=4&&b[0]==0x1a&&b[1]==0x45&&b[2]==0xdf&&b[3]==0xa3)return "webm";if(n>=8&&b[0]==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G')return "png";if(n>=3&&b[0]==0xff&&b[1]==0xd8&&b[2]==0xff)return "jpg";if(n>=12&&b[0]=='R'&&b[1]=='I'&&b[2]=='F'&&b[3]=='F'&&b[8]=='W'&&b[9]=='E'&&b[10]=='B'&&b[11]=='P')return "webp";if(n>=2&&b[0]=='B'&&b[1]=='M')return "bmp";if(n>=4&&b[0]==0&&b[1]==0&&b[2]==1&&b[3]==0)return "ico";throw std::runtime_error("media-unsupported-container"); }
@@ -272,17 +290,17 @@ class Store {
     }
 
 public:
-    explicit Store(fs::path root):root_(std::move(root)){}
+    explicit Store(fs::path root):root_(std::move(root)){bindMediaPowerPreference(root_);}
     const fs::path& root()const{return root_;}
     Json snapshot()const{Lock lock(root_);auto j=document();for(auto& e:j["entries"])if(e.value("status",std::string{})=="pending"&&leaseOwnerGone(e)){e["leaseUntil"]=0;e["leaseAbandoned"]=true;}return j;}
-    Json resolve(const Json& a)const{if(!steamDemand::allowed(a))return steamDemand::inactive();Lock lock(root_);if(!steamDemand::allowed(a))return steamDemand::inactive();auto j=document();if(!steamDemand::allowed(a))return steamDemand::inactive();return resolveDocument(j,a);}
+    Json resolve(const Json& a)const{if(!workDemand::allowed(a))return steamDemand::inactive();Lock lock(root_);if(!workDemand::allowed(a))return steamDemand::inactive();auto j=document();if(!workDemand::allowed(a))return steamDemand::inactive();return resolveDocument(j,a);}
     Json resolveMany(const Json& targets)const{
         if(!targets.is_array()||targets.size()>4)throw std::runtime_error("media-prewarm-target-limit");
         if(targets.empty())return Json::array();
-        const auto hasDemand=[&](){bool any=false;for(const auto& target:targets){if(!target.is_object())throw std::runtime_error("media-prewarm-target-invalid");if(steamDemand::allowed(target))any=true;}return any;};
+        const auto hasDemand=[&](){bool any=false;for(const auto& target:targets){if(!target.is_object())throw std::runtime_error("media-prewarm-target-invalid");if(workDemand::allowed(target))any=true;}return any;};
         const auto inactive=[&](){Json entries=Json::array();for(const auto& target:targets)entries.push_back(steamDemand::inactive());return entries;};
         if(!hasDemand())return inactive();Lock lock(root_);if(!hasDemand())return inactive();auto j=document();Json entries=Json::array();
-        for(const auto& target:targets)entries.push_back(steamDemand::allowed(target)?resolveDocument(j,target):steamDemand::inactive());return entries;
+        for(const auto& target:targets)entries.push_back(workDemand::allowed(target)?resolveDocument(j,target):steamDemand::inactive());return entries;
     }
 private:
     Json resolveDocument(const Json& j,const Json& a)const{
@@ -301,15 +319,15 @@ private:
     }
 public:
     Json registerEntry(const Json& a){
-        if(!steamDemand::allowed(a))return steamDemand::inactive();
-        Lock lock(root_);if(!steamDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto key=canonicalKey(j,a);const bool exists=j["entries"].contains(key);auto e=seed(j,a);
+        if(!workDemand::allowed(a))return steamDemand::inactive();
+        Lock lock(root_);if(!workDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto key=canonicalKey(j,a);const bool exists=j["entries"].contains(key);auto e=seed(j,a);
         const bool changed=adoptStatic(e);if(changed){e["bindingRevision"]=e.value("bindingRevision",uint64_t{0})+1;releasePreparation(e);}
-        e=normalizeEntry(e);if(!exists||changed||j.value("_mediaChanged",false)){j["entries"][key]=e;steamDemand::require(a);save(j);}return e;
+        e=normalizeEntry(e);if(!exists||changed||j.value("_mediaChanged",false)){j["entries"][key]=e;workDemand::require(a);save(j);}return e;
     }
     Json begin(const Json& a,const std::string& manualRequest={}){
-        if(!steamDemand::allowed(a))return steamDemand::inactive();
-        Lock lock(root_);if(!steamDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto originalKey=keyFor(a);const bool existed=j["entries"].contains(canonicalKey(j,a));auto e=seed(j,a);const bool adopted=adoptStatic(e);if(adopted){e["bindingRevision"]=e.value("bindingRevision",uint64_t{0})+1;releasePreparation(e);}e=normalizeEntry(e);
-        const bool revoked=steamDemand::steam(e)&&e.value("leaseUntil",int64_t{0})>0&&!e.value("taskId",std::string{}).empty()&&e.value("leasePid",DWORD{0})==GetCurrentProcessId()&&!steamDemand::allowed(e);
+        if(!workDemand::allowed(a))return steamDemand::inactive();
+        Lock lock(root_);if(!workDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto originalKey=keyFor(a);const bool existed=j["entries"].contains(canonicalKey(j,a));auto e=seed(j,a);const bool adopted=adoptStatic(e);if(adopted){e["bindingRevision"]=e.value("bindingRevision",uint64_t{0})+1;releasePreparation(e);}e=normalizeEntry(e);
+        const bool revoked=(!powerPolicy::allowed(e)||steamDemand::steam(e)&&e.value("leaseUntil",int64_t{0})>0&&!e.value("taskId",std::string{}).empty()&&e.value("leasePid",DWORD{0})==GetCurrentProcessId()&&!workDemand::allowed(e));
         if(revoked){releasePreparation(e);e["status"]=e.value("ready",false)?"ready":"missing";}
         const bool retryOnce=safeKey(manualRequest)&&e.value("lastManualRetry",std::string{})!=manualRequest;
         Json slots=Json::array();for(const auto* slot:{"dynamic","static"}){
@@ -317,17 +335,17 @@ public:
             const bool refresh=pendingMediaRefresh(e,slot)||(std::string(slot)=="dynamic"&&a.value("videoQualityPolicy",0)>=videoQualityPolicy&&needsVideoQualityUpgrade(e,now()));
             if((!exists||refresh)&&!e["deletedSlots"].value(slot,false)&&(!e["manualSlots"].value(slot,false)||refresh)&&!(e.value(std::string(slot)=="dynamic"?"videoUnavailableUntil":"staticUnavailableUntil",int64_t{0})>now()&&!refresh&&!retryOnce))slots.push_back(slot);
         }
-        const auto returnExisting=[&](){if(!existed||adopted||revoked||j.value("_mediaChanged",false)){j["entries"][e["key"].get<std::string>()]=e;steamDemand::require(a);save(j);}e["acquired"]=false;return e;};
+        const auto returnExisting=[&](){if(!existed||adopted||revoked||j.value("_mediaChanged",false)){j["entries"][e["key"].get<std::string>()]=e;workDemand::require(a);save(j);}e["acquired"]=false;return e;};
         if(e.value("deleted",false)||slots.empty())return returnExisting();
         if((e.value("leaseUntil",int64_t{0})>now()&&!leaseOwnerGone(e))||(e.value("retryAt",int64_t{0})>now()&&!retryOnce))return returnExisting();
         if(retryOnce){e["lastManualRetry"]=manualRequest;e["retryAt"]=0;e["attempts"]=0;e["error"]="";}
-        if(!steamDemand::allowed(a))return steamDemand::inactive();
+        if(!workDemand::allowed(a))return steamDemand::inactive();
         if(steamDemand::steam(a)){e["demandEpoch"]=a["demandEpoch"];e["demandRevision"]=a["demandRevision"];}else{e.erase("demandEpoch");e.erase("demandRevision");}
         if(!e.value("refreshRequested",false)&&pendingMediaRefresh(e,"dynamic")){e["refreshRequested"]=true;e["refreshSlot"]="dynamic";}
-        e["demandConsumer"]=a.value("demandConsumer",std::string{"library"});e["taskId"]=randomId();e["taskSlots"]=slots;e["leasePid"]=GetCurrentProcessId();e["leaseBirth"]=processBirthToken(GetCurrentProcessId());e["leaseUntil"]=now()+600000;e["status"]="pending";e["updatedAt"]=now();
+        powerPolicy::stamp(e);e["demandConsumer"]=a.value("demandConsumer",std::string{"library"});e["taskId"]=randomId();e["taskSlots"]=slots;e["leasePid"]=GetCurrentProcessId();e["leaseBirth"]=processBirthToken(GetCurrentProcessId());e["leaseUntil"]=now()+600000;e["status"]="pending";e["updatedAt"]=now();
         if(e.value("name",std::string{}).empty())e["name"]=a.value("name",std::string{});
         if(e.value("executable",std::string{}).empty())e["executable"]=a.value("executable",std::string{});
-        j["entries"][e["key"].get<std::string>()]=e;steamDemand::require(a);save(j);e["acquired"]=true;return e;
+        j["entries"][e["key"].get<std::string>()]=e;workDemand::require(a);workDemand::require(e);save(j);e["acquired"]=true;return e;
     }
     fs::path assetPath(const Json& asset)const{
         const auto id=asset.value("id",std::string{}),ext=asset.value("extension",std::string{});
@@ -339,18 +357,18 @@ public:
         if(normalized(utf8(path.wstring())).rfind(base,0)!=0)throw std::runtime_error("media-storage-escape");return path;
     }
     Json publish(const Json& a,const fs::path& source,bool manual){
-        steamDemand::require(a);
+        if(manual)steamDemand::require(a);else workDemand::require(a);
         const auto ext=mediaKind(source);std::error_code ec;const auto bytes=fs::file_size(source,ec);if(ec||bytes==0||bytes>capacity::maxAssetBytes)throw std::runtime_error("media-size-invalid");
         const auto slot=ext=="mp4"||ext=="webm"?"dynamic":"static";
         if(a.contains("slot")&&a.value("slot",std::string{})!=slot)throw std::runtime_error("media-slot-container-mismatch");
-        Lock lock(root_);steamDemand::require(a);auto j=document();auto e=seed(j,a);if(!manual)steamDemand::require(e);const auto expected=a.value("bindingRevision",uint64_t{0});
+        Lock lock(root_);if(manual)steamDemand::require(a);else workDemand::require(a);auto j=document();auto e=seed(j,a);if(!manual)workDemand::require(e);const auto expected=a.value("bindingRevision",uint64_t{0});
         if(expected!=e.value("bindingRevision",uint64_t{0})||(!manual&&(e["manualSlots"].value(slot,false)||e["deletedSlots"].value(slot,false)||e.value("taskId",std::string{})!=a.value("taskId",std::string{}))))throw std::runtime_error("media-stale-publication");
         if(manual&&std::string(slot)=="static")e["libraryStaticSource"]=localStatic(e.value("executable",std::string{}),e.value("gameDirectory",std::string{}));
         const auto id=randomId();Json asset={{"id",id},{"revision",id},{"extension",ext},{"kind",std::string(slot)=="dynamic"?"video":"image"},{"mime",ext=="mp4"?"video/mp4":ext=="webm"?"video/webm":ext=="jpg"?"image/jpeg":"image/"+ext},{"bytes",bytes}};
         if(!manual&&std::string(slot)=="dynamic"&&a.value("videoQualityPolicy",0)>=videoQualityPolicy){asset["qualityPolicy"]=videoQualityPolicy;asset["targetHeight"]=preferredVideoHeight(e);if(a.value("selectedHeight",0)>0)asset["selectedHeight"]=a["selectedHeight"];}
         capacity::require(root_,bytes,!manual);
         const auto path=assetPath(asset);fs::create_directories(path.parent_path());fs::copy_file(source,path,fs::copy_options::none);
-        try{steamDemand::require(a);if(!manual)steamDemand::require(e);}catch(...){fs::remove(path,ec);throw;}
+        try{if(manual)steamDemand::require(a);else{workDemand::require(a);workDemand::require(e);}}catch(...){fs::remove(path,ec);throw;}
         e["assets"][slot]=asset;e["invalidSlots"].erase(slot);e["manualSlots"][slot]=manual;e["deletedSlots"][slot]=false;e["bindingRevision"]=expected+1;e["manual"]=e["manualSlots"].value(e["wallpaperMode"].get<std::string>(),false);e["deleted"]=false;
         if(e.contains("taskSlots")){Json remaining=Json::array();for(const auto& value:e["taskSlots"])if(value!=slot)remaining.push_back(value);e["taskSlots"]=remaining;}
         if(e.value("refreshRequested",false)&&e.value("refreshSlot",std::string{"dynamic"})==slot)e["refreshRequested"]=false;
@@ -362,6 +380,7 @@ public:
         try{save(j);}catch(...){fs::remove(path,ec);throw;}return e;
     }
     Json importLegacy(const Json& a,const fs::path& source,const std::function<bool()>& admitted){
+        if(!workDemand::allowed(a))return steamDemand::inactive();
         auto current=resolve(a);if(current.value("dynamicReady",false)||current.value("deleted",false)||current.value("manualSlots",Json::object()).value("dynamic",false)||current.value("deletedSlots",Json::object()).value("dynamic",false))return current;
         const auto fingerprint=digestKey(normalized(utf8(fs::absolute(source).wstring()))+":"+std::to_string(fs::file_size(source))+":"+std::to_string(fs::last_write_time(source).time_since_epoch().count()));
         if(current.value("legacySourceFingerprint",std::string{})==fingerprint)return current;
@@ -374,19 +393,30 @@ public:
         catch(...){if(!borrowed)fail(lease);throw;}
     }
     Json finish(const Json& a){
-        if(!steamDemand::allowed(a))return steamDemand::inactive();
-        Lock lock(root_);if(!steamDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto key=canonicalKey(j,a);if(!j["entries"].contains(key))return Json::object();auto e=seed(j,a);if(!steamDemand::allowed(e))return steamDemand::inactive();
+        if(!workDemand::allowed(a))return steamDemand::inactive();
+        Lock lock(root_);if(!workDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto key=canonicalKey(j,a);if(!j["entries"].contains(key))return Json::object();auto e=seed(j,a);if(!workDemand::allowed(e))return steamDemand::inactive();
         if(e.value("taskId",std::string{})!=a.value("taskId",std::string{})||e.value("bindingRevision",uint64_t{0})!=a.value("bindingRevision",uint64_t{0}))return e;
         if(a.value("videoUnavailable",false))e["videoUnavailableUntil"]=now()+24ll*60*60*1000;
         if(a.value("staticUnavailable",false))e["staticUnavailableUntil"]=now()+24ll*60*60*1000;
         if(e.value("refreshRequested",false)&&((e.value("refreshSlot",std::string{"dynamic"})=="dynamic"&&a.value("videoUnavailable",false)&&e.value("selectedVideo",Json::object()).empty())||(e.value("refreshSlot",std::string{})=="static"&&a.value("staticUnavailable",false))))e["refreshRequested"]=false;
-        e["leaseUntil"]=0;e["taskSlots"]=Json::array();e["retryAt"]=0;e["error"]="";e["attempts"]=0;e["status"]=e.contains("asset")?"ready":"missing";j["entries"][key]=e;steamDemand::require(a);steamDemand::require(e);save(j);return e;
+        e["leaseUntil"]=0;e["taskSlots"]=Json::array();e["retryAt"]=0;e["error"]="";e["attempts"]=0;e["status"]=e.contains("asset")?"ready":"missing";j["entries"][key]=e;workDemand::require(a);workDemand::require(e);save(j);return e;
+    }
+    // Cancellation releases only the exact owned lease. It is cleanup, so a
+    // revoked power/foreground ticket cannot prevent it; budgets stay intact.
+    Json cancel(const Json& a){
+        Lock lock(root_);auto j=document();const auto key=canonicalKey(j,a);
+        if(!j["entries"].contains(key))return Json::object();auto e=j["entries"][key];
+        if(a.value("taskId",std::string{}).empty()||e.value("taskId",std::string{})!=a.value("taskId",std::string{})||
+           e.value("bindingRevision",uint64_t{0})!=a.value("bindingRevision",uint64_t{0})||
+           e.value("leasePid",DWORD{0})!=GetCurrentProcessId()||leaseOwnerGone(e))return e;
+        e["taskId"]="";e["leaseUntil"]=0;e["status"]=e.value("ready",false)?"ready":"missing";
+        j["entries"][key]=e;save(j);return e;
     }
     Json fail(const Json& a){
-        if(!steamDemand::allowed(a))return steamDemand::inactive();
-        Lock lock(root_);if(!steamDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto key=canonicalKey(j,a);if(!j["entries"].contains(key))return Json::object();auto e=seed(j,a);if(!steamDemand::allowed(e))return steamDemand::inactive();
+        if(!workDemand::allowed(a))return steamDemand::inactive();
+        Lock lock(root_);if(!workDemand::allowed(a))return steamDemand::inactive();auto j=document();const auto key=canonicalKey(j,a);if(!j["entries"].contains(key))return Json::object();auto e=seed(j,a);if(!workDemand::allowed(e))return steamDemand::inactive();
         if(e.value("taskId",std::string{})!=a.value("taskId",std::string{})||e.value("bindingRevision",uint64_t{0})!=a.value("bindingRevision",uint64_t{0}))return e;
-        const auto attempts=std::min(8,e.value("attempts",0)+1);e["status"]="error";e["attempts"]=attempts;e["leaseUntil"]=0;e["retryAt"]=now()+(e.value("demandConsumer",std::string{})=="background"?20000ll:std::min<int64_t>(3600000,30000ll*(1ll<<attempts)));e["error"]=a.value("reason",std::string{"prepare-failed"}).substr(0,160);j["entries"][key]=e;steamDemand::require(a);steamDemand::require(e);save(j);return e;
+        const auto attempts=std::min(8,e.value("attempts",0)+1);e["status"]="error";e["attempts"]=attempts;e["leaseUntil"]=0;e["retryAt"]=now()+(e.value("demandConsumer",std::string{})=="background"?20000ll:std::min<int64_t>(3600000,30000ll*(1ll<<attempts)));e["error"]=a.value("reason",std::string{"prepare-failed"}).substr(0,160);j["entries"][key]=e;workDemand::require(a);workDemand::require(e);save(j);return e;
     }
     Json edit(const Json& a){
         if(!steamDemand::allowed(a))return steamDemand::inactive();

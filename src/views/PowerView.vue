@@ -8,6 +8,7 @@ import {computed,ref,reactive,onMounted,onUnmounted,onActivated,inject,watch,typ
 import {taskExists,toggleTask,searchState,openSearchFolder,readBootMirrorState,toggleBootMirror,BOOT_MIRROR_CHANGED_EVENT,readHardwareGpuSchedule,writeHardwareGpuSchedule,readBootRtssState,toggleBootRtss,deleteAllYemanTasks,restoreAllYemanTasks} from '@/bridge/yeman';
 import {shell} from '@/bridge/api';
 import {DESKTOP_MODE_BOOT_TASK,DESKTOP_MODE_BOOT_CHANGED_EVENT,setDesktopModeStartup} from '@/bridge/desktopModeStartup';
+import {NETWORK_ACCELERATION_BOOT_TASK,NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,setNetworkAccelerationStartup} from '@/bridge/networkAccelerationStartup';
 import {readSettingsSection,saveSettingsSection} from '@/bridge/settingsRepository';
 const desktopBootOn=ref(false),bootOn=ref(false),fanControlOnBoot=ref(false),rtssBootOn=ref(false),steamCommunityBoot=ref(false);
 const hardwareGpuSchedule=ref(false),gpuScheduleKnown=ref(false),gpuScheduleReadFailed=ref(false);
@@ -16,18 +17,18 @@ const gpuScheduleDescription=computed(()=>{
  return state+'通常建议开启，AMD Ryzen AI Max 385 / Max+ 388、395 建议关闭';
 });
 const tasks=reactive({energyStar:false,cleanMem:false});type TaskKey=keyof typeof tasks;
-const STEAMCOMMUNITY_TASK='Steamcommunity_302';
+const STEAMCOMMUNITY_TASK=NETWORK_ACCELERATION_BOOT_TASK;
 const searchSt=ref<'hidden'|'trimmed'|'full'>('full');
 const busy=ref(false),errMsg=ref(''),taskToolsBusy=ref(false),taskToolsMsg=ref('');
-let fanBootSettingRevision=0,desktopBootSettingRevision=0,refreshRevision=0;
+let fanBootSettingRevision=0,desktopBootSettingRevision=0,networkBootSettingRevision=0,refreshRevision=0;
 async function safeExists(name:string){return taskExists(name).catch(()=>false);}
 async function refresh(){
- const revision=++refreshRevision,fanRevision=fanBootSettingRevision,desktopRevision=desktopBootSettingRevision;
+ const revision=++refreshRevision,fanRevision=fanBootSettingRevision,desktopRevision=desktopBootSettingRevision,networkRevision=networkBootSettingRevision;
  const results=await Promise.allSettled([safeExists('节能-能源之星'),safeExists('内存-开机自动内存清理并关闭'),safeExists(STEAMCOMMUNITY_TASK),searchState(),readBootMirrorState(),readBootRtssState(),readSettingsSection<{fanControl?:boolean}>('startupDesired'),readHardwareGpuSchedule(),safeExists(DESKTOP_MODE_BOOT_TASK)]);
  if(revision!==refreshRevision||busy.value)return;
  const [energy,memory,community,search,boot,rtss,fan,gpu,desktop]=results;
  if(energy.status==='fulfilled')tasks.energyStar=energy.value;if(memory.status==='fulfilled')tasks.cleanMem=memory.value;
- if(community.status==='fulfilled')steamCommunityBoot.value=community.value;if(search.status==='fulfilled')searchSt.value=search.value;
+ if(networkRevision===networkBootSettingRevision&&community.status==='fulfilled')steamCommunityBoot.value=community.value;if(search.status==='fulfilled')searchSt.value=search.value;
  if(boot.status==='fulfilled')bootOn.value=boot.value;if(rtss.status==='fulfilled')rtssBootOn.value=rtss.value;
  if(fanRevision===fanBootSettingRevision&&fan.status==='fulfilled')fanControlOnBoot.value=fan.value.fanControl===true;
  if(gpu.status==='fulfilled'){hardwareGpuSchedule.value=gpu.value;gpuScheduleKnown.value=true;gpuScheduleReadFailed.value=false;}
@@ -152,13 +153,14 @@ async function onHardwareGpuSchedule(v: boolean) {
 }
 
 async function onSteamCommunityBoot(v: boolean) {
+  ++networkBootSettingRevision;
   errMsg.value = '';
   const prev = steamCommunityBoot.value;
   steamCommunityBoot.value = v;
   busy.value = true;
   try {
-    await toggleTask(STEAMCOMMUNITY_TASK, v);
-    steamCommunityBoot.value = await safeExists(STEAMCOMMUNITY_TASK);
+    await setNetworkAccelerationStartup(v);
+    steamCommunityBoot.value = v;
   } catch (e) {
     steamCommunityBoot.value = prev;
     errMsg.value = 'Steamcommunity_302 开机启动设置失败：' + (e as Error).message;
@@ -191,8 +193,9 @@ async function onSearch() {
 const globalRefreshKey=inject<Ref<number>>('globalRefreshKey');if(globalRefreshKey)watch(globalRefreshKey,()=>{void refresh();});
 async function onBootMirrorChanged(){bootOn.value=await readBootMirrorState().catch(()=>bootOn.value);}
 function onDesktopModeBootChanged(event:Event){const value=(event as CustomEvent<{enabled:boolean}>).detail?.enabled;if(typeof value==='boolean'){++desktopBootSettingRevision;desktopBootOn.value=value;}}
-onMounted(()=>{window.addEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.addEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);});
-onUnmounted(()=>{refreshRevision++;window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.removeEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);});
+function onNetworkAccelerationBootChanged(event:Event){const value=(event as CustomEvent<{enabled:boolean}>).detail?.enabled;if(typeof value==='boolean'){++networkBootSettingRevision;steamCommunityBoot.value=value;}}
+onMounted(()=>{window.addEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.addEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);window.addEventListener(NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,onNetworkAccelerationBootChanged);});
+onUnmounted(()=>{refreshRevision++;window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.removeEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);window.removeEventListener(NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,onNetworkAccelerationBootChanged);});
 onActivated(()=>{void refresh();});
 </script>
 
@@ -217,7 +220,7 @@ onActivated(()=>{void refresh();});
 <Toggle v-model="tasks.energyStar" label="能源之星" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('节能-能源之星', v, 'energyStar')" />
 <Toggle v-model="tasks.cleanMem" label="清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
 
-<Toggle v-model="steamCommunityBoot" label="网络加速" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
+<Toggle :model-value="steamCommunityBoot" label="网络加速" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
 <Toggle class="gpu-schedule-setting" :model-value="hardwareGpuSchedule" label="硬件加速GPU计划" :description="gpuScheduleDescription" color="accent" :disabled="busy || !gpuScheduleKnown" @update:model-value="onHardwareGpuSchedule" /></div></section>
  <section class="settings-section-panel" aria-label="系统工具" data-boot-startup-group="tools"><header class="settings-section-heading"><h3><InlineIcon name="tools"/>系统工具</h3></header><div class="startup-setting-list"><div class="row">
         <span><InlineIcon name="search" /> Windows 任务栏搜索</span>

@@ -42,7 +42,13 @@ async function verifyDownloadFeedback(page,viewport){
    suspendMediaDownloadPaint();rows.push({label:'background-progress-paused',paused:document.querySelector('#shared-wallpaper-download-status progress').hasAttribute('value')});
    state.active={};state.manualItems[entry.key]={state:'pending',lastError:'media-network-request-failed-12002',retryAt:Date.now()+20000,requestBindingRevision:10};inspect('retry-backoff');
    state.manualItems[entry.key]={state:'unavailable',autoStopped:true,lastError:'media-network-request-failed-12002',requestBindingRevision:10};inspect('stopped-error');
-   state.manualItems[entry.key]={state:'done',requestBindingRevision:10};entry.refreshRequested=false;entry.assets.dynamic.id='new';inspect('completed');
+   state.manualItems[entry.key]={state:'unavailable',autoStopped:true,lastError:'media-task-time-budget',stopReason:'automatic-time-budget-exhausted',requestBindingRevision:10};state.manualUntil=0;state.pauseReason='game-running';inspect('budget-error-during-game');
+   state.resourcePauseReason='on-battery';inspect('budget-error-on-battery');state.resourcePauseReason='';
+   state.manualItems[entry.key]={state:'pending',lastError:'',requestBindingRevision:10};state.manualState='cancelled';inspect('cancelled-during-game');
+   state.manualState='running';state.manualUntil=Date.now()+60000;state.active[entry.key]={key:entry.key,phase:'downloading',bytes:50,totalBytes:100};inspect('manual-progress-during-game');
+   state.resourcePauseReason='cpu-busy';inspect('manual-progress-with-cpu-gate');state.resourcePauseReason='on-battery';inspect('manual-power-gate');
+   state.active={};state.pauseReason='';state.resourcePauseReason='';state.manualItems={};state.manualState='';sharedWallpaperDownloadRequests.delete(uiKey);inspect('retained-choice-without-queue-receipt');
+   setSharedWallpaperDownloadRequest({key:uiKey},{phase:'queued',revision:10,assetId:'old'});state.manualItems[entry.key]={state:'done',requestBindingRevision:10};entry.refreshRequested=false;entry.assets.dynamic.id='new';inspect('completed');
    selectedActionGame={...savedGame,gameDirectory:'C:/another',primaryExecutable:'C:/another/game.exe',gameMedia:{key:'steam-other',wallpaperMode:'dynamic'}};snapshot.gameMedia.entries={};inspect('other-game');
   }finally{selectedActionGame=savedGame;snapshot=savedSnapshot;sharedWallpaperDownloadRequests.clear();for(const[key,value]of savedRequests)sharedWallpaperDownloadRequests.set(key,value);renderSharedWallpaperDownloadStatus();}
   return rows;
@@ -56,6 +62,13 @@ async function verifyDownloadFeedback(page,viewport){
  check(get('background-progress-paused').paused,'wallpaper progress animation is suspended with existing background paint policy');
  check(get('retry-backoff').status==='retrying'&&get('retry-backoff').retry,'recoverable failure keeps choice and explains bounded retry');
  check(get('stopped-error').status==='error'&&get('stopped-error').retry,'exhausted failure is displayed and offers explicit candidate reselection');
+ check(get('budget-error-during-game').status==='error'&&get('budget-error-during-game').retry&&get('budget-error-during-game').text.includes('时间'),'terminal per-game time budget failure is not hidden by a global game pause');
+ check(get('budget-error-on-battery').status==='error','a later power pause cannot turn an exhausted transfer back into resumable work');
+ check(get('cancelled-during-game').text.includes('已停止')&&get('cancelled-during-game').retry,'cancelled manual work is identified before the global game-running gate');
+ check(get('manual-progress-during-game').status==='downloading'&&get('manual-progress-during-game').value===0.5,'manual download keeps actual progress while game-running soft gate is bypassed');
+ check(get('manual-progress-with-cpu-gate').status==='downloading','manual download feedback follows the native CPU soft-gate exemption');
+ check(get('manual-power-gate').status==='waiting','manual feedback retains the native power protection gate');
+ check(get('retained-choice-without-queue-receipt').status==='waiting'&&get('retained-choice-without-queue-receipt').retry&&!get('retained-choice-without-queue-receipt').text.includes('已加入下载队列'),'persisted replacement intent alone cannot claim durable queue admission');
  check(get('completed').status==='done'&&get('completed').value===1,'publication receipt completes current artwork progress');
  check(!get('other-game').visible,'another game never inherits the previous game download status');
  await page.evaluate(()=>{window.__feedbackScreenshotSnapshot=snapshot;const entry={...selectedActionGame.gameMedia,refreshRequested:true,refreshSlot:'dynamic'};snapshot={...snapshot,gameMedia:{entries:{[entry.key]:entry}},mediaDownloads:{active:{[entry.key]:{key:entry.key,phase:'downloading',bytes:10485760,totalBytes:20971520}}}};renderSharedWallpaperDownloadStatus();});

@@ -50,6 +50,7 @@ def run():
   (frozen/'types.inc').write_text('\n'.join(types),encoding='utf-8')
   for filename,content in [
    ('config.inc',segment(h,'Config','struct')),
+   ('auto_hide_validation.inc',segment(h,'validAutoHideSeconds')),
    ('auto_hide_state.inc',segment(h,'AutoHideState','struct')),
    ('selectors.inc','\n'.join(segment(h,n) for n in ['effectiveSummonPosition','effectiveSpecialMask','effectiveRearMask','standaloneSpecialProfile'])),
    ('button_permitted.inc',segment(bh,'buttonPermitted')),

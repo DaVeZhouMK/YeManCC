@@ -43,12 +43,27 @@ static_assert(offsetof(HandoffRecord,sequence)==8&&offsetof(HandoffRecord,parent
     offsetof(HandoffRecord,heartbeat)==56&&offsetof(HandoffRecord,childPid)==64&&offsetof(HandoffRecord,childBirth)==72&&
     offsetof(HandoffRecord,token)==80&&offsetof(HandoffRecord,model)==208&&offsetof(HandoffRecord,path)==304);
 inline bool sourceModel(const std::string& model){
-    return model=="HandheldCompanion.Devices.AYANEO3"||model=="HandheldCompanion.Devices.AYANEONEXT2";
+    return model=="HandheldCompanion.Devices.AYANEO3"||model=="HandheldCompanion.Devices.AYANEONEXT2"||
+        model=="HandheldCompanion.Devices.OneXPlayerApex";
 }
-inline bool sourcePath(const std::wstring& path){
-    const std::wstring prefix=L"\\\\?\\hid#vid_1c4f&pid_0002";
+inline bool sourcePath(const std::string& model,const std::wstring& path){
+    if(!sourceModel(model))return false;
+    const std::wstring prefix=model=="HandheldCompanion.Devices.OneXPlayerApex"?
+        L"\\\\?\\hid#vid_1a2c&pid_b001":L"\\\\?\\hid#vid_1c4f&pid_0002";
     return path.size()>prefix.size()&&path.size()<kPathLength&&path.find(L'\0')==std::wstring::npos&&
         std::equal(prefix.begin(),prefix.end(),path.begin(),[](wchar_t a,wchar_t b){return std::towlower(a)==std::towlower(b);});
+}
+inline bool sourcePath(const std::wstring& path){
+    // Topology notifications may invalidate either audited endpoint.
+    return sourcePath("HandheldCompanion.Devices.AYANEO3",path)||
+        sourcePath("HandheldCompanion.Devices.OneXPlayerApex",path);
+}
+inline bool sourceDescriptor(const std::string& model,std::uint16_t vendorId,std::uint16_t productId,
+    std::uint16_t usagePage,std::uint16_t usage,std::uint16_t inputReportByteLength,std::uint16_t outputReportByteLength){
+    if(model=="HandheldCompanion.Devices.OneXPlayerApex")
+        return vendorId==0x1A2C&&productId==0xB001&&usagePage==0xFF01&&usage==1&&outputReportByteLength==65;
+    return sourceModel(model)&&vendorId==0x1C4F&&productId==2&&usagePage==0xFF00&&usage==1&&
+        inputReportByteLength==65&&outputReportByteLength==65;
 }
 inline std::wstring widen(const std::string& text){return std::wstring(text.begin(),text.end());}
 inline std::wstring mappingName(DWORD pid,std::uint64_t birth){
@@ -129,7 +144,7 @@ public:
     std::optional<Admission> begin(const Context& context,const std::wstring& path){
         std::lock_guard<std::mutex> lock(mutex_);(void)settleLocked();
         if(phase_!=Phase::Idle||outstanding_||child_||!context.writesAllowed||!context.generation||!context.topology||
-            !sourceModel(context.model)||!sourcePath(path)||counter_==(std::numeric_limits<std::uint64_t>::max)())return std::nullopt;
+            !sourceModel(context.model)||!sourcePath(context.model,path)||counter_==(std::numeric_limits<std::uint64_t>::max)())return std::nullopt;
         if(!ensureMappingLocked())return std::nullopt;
         Admission next;next.parentPid=parentPid_;next.parentBirth=parentBirth_;next.generation=context.generation;
         next.topology=context.topology;next.number=++counter_;next.model=context.model;next.path=path;

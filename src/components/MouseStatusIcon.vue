@@ -6,7 +6,7 @@ const state=computed(()=>{
   if(s?.provider==='steam')return 'sd';
   if(!s||s.pending)return 'pending';
   if(!s.ok||!s.stateKnown)return 'unknown';
-  return s.mode==='off'?'off':s.mode==='auto'?'auto':s.on?'on':'unknown';
+  return s.mode==='off'?'off':s.mode==='auto'?'auto':'on';
 });
 const label=computed(()=>({on:'ON',auto:'A',sd:'SD',pending:'…',unknown:'?',off:''})[state.value]);
 const description=computed(()=>({on:'鼠标开启',auto:'鼠标自动',sd:'鼠标由 Steam 管理',pending:'鼠标状态待确认',unknown:'鼠标状态待确认',off:'鼠标关闭'})[state.value]);

@@ -20,6 +20,31 @@ export async function steamDesktopMouseCases({height,open,command,press,actionCa
   await f.evaluate(()=>window.__fixture.mouseBackendThrow=false);await press(f,f.getByRole('button',{name:'微软鼠标',exact:true}));
   assert.equal(await f.getByRole('button',{name:'微软鼠标',exact:true}).evaluate(el=>el.classList.contains('active')),true);
  });
+ await actionCase('ROG Microsoft mouse uses the existing warning without installing or changing backend',height,async()=>{
+  await press(f,f.getByRole('button',{name:'JoyXoff',exact:true}));
+  const before=await f.evaluate(()=>window.__fixture.mouseWrites??0);
+  await f.evaluate(()=>window.__fixture.mouseRogModel=true);await press(f,f.getByRole('button',{name:'微软鼠标',exact:true}));
+  const warning=f.getByRole('alertdialog',{name:'微软鼠标不可用',exact:true});await warning.waitFor();
+  assert.match(await warning.innerText(),/ROG 家族/);assert.equal(await warning.getByRole('button',{name:/确认修复/}).count(),0);
+  assert.equal(await f.evaluate(()=>window.__fixture.mouseWrites??0),before);
+  assert.equal(await f.getByRole('button',{name:'JoyXoff',exact:true}).evaluate(el=>el.classList.contains('active')),true);
+  assert.equal(await f.evaluate(()=>window.__previewCalls.filter(c=>c.cmd==='gameinput.redist.install').length),0);
+  await command(f,'back');await f.waitForFunction(()=>!document.querySelector('.gameinput-repair-confirm'));
+  assert.equal(await f.getByRole('button',{name:'微软鼠标',exact:true}).evaluate(el=>document.activeElement===el),true);
+  await f.evaluate(()=>{window.__fixture.mouseRogModel=false;window.__fixture.mouseComponentMissing=true;});
+  await press(f,f.getByRole('button',{name:'微软鼠标',exact:true}));
+  await f.getByRole('alertdialog',{name:'修复微软鼠标组件',exact:true}).waitFor();
+  assert.equal(await f.getByRole('button',{name:'确认修复',exact:true}).isVisible(),true);
+  await command(f,'back');await f.waitForFunction(()=>!document.querySelector('.gameinput-repair-confirm'));
+  await f.evaluate(()=>window.__fixture.mouseComponentMissing=false);
+ });
+ await actionCase('ON selection remains ON while YMCC pauses the backend and shares list explanations',height,async()=>{
+  await press(f,f.locator('.mouse-policy-modes').getByRole('button',{name:'开启',exact:true}));
+  assert.equal(await f.locator('.mouse-policy-modes').getByRole('button',{name:'开启',exact:true}).getAttribute('aria-pressed'),'true');
+  assert.equal(await f.locator('.nav-touch-mouse .mouse-status-icon').getAttribute('data-mouse-icon-state'),'on');
+  assert.match(await f.locator('.mouse-settings').innerText(),/开启挡暂停 · YMCC/);
+  assert.match(await f.locator('.mouse-settings').innerText(),/自动、开启均遵循鼠标名单/);
+ });
  f=await open('/touch-mouse',height,{steamMouseSeed:'legacy-steam'});
  await actionCase('Old Steam backend receipt does not remount imports or ordinary sensitivity',height,async()=>{
   await f.getByRole('button',{name:'JoyXoff',exact:true}).waitFor();assert.equal(await f.getByRole('button',{name:'JoyXoff',exact:true}).evaluate(el=>el.classList.contains('active')),true);

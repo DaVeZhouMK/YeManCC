@@ -307,7 +307,9 @@ export function focusGamepadElement(el: HTMLElement | null, options: { scroll?: 
   if (style.display === 'none' || style.visibility === 'hidden') return false;
   el.focus({ preventScroll: true });
   if (options.scroll !== 'preserve') {
-    getGamepadViewportSafeArea();
+    // Teleported dialogs scroll in their own ancestors. Measuring the covered
+    // app-content here mutates its padding and forces unrelated layout work.
+    if (el.closest('.app-content')) getGamepadViewportSafeArea();
     scrollElementIntoSafeArea(el);
   }
   setGamepadFocused(el);

@@ -1571,6 +1571,8 @@ internal static class FanCapabilityRoundtrip
                 new("pinned-source", "source-terminals-curve-and-owners", () => PinnedFanSourceChecks.Run(Require)),
                 new("pinned-host", "source-host-and-outer-lifecycle", () => PinnedFanHostConsumerChecks.Run(Require,directory))
             };
+            cases.AddRange(PinnedBankedWmiChecks.Cases(Require,directory)
+                .Select(item => new FixtureCase("pinned-source",item.Name,item.Run)));
             cases.AddRange(PinnedUmaFanChecks.Cases(Require,directory)
                 .Select(item => new FixtureCase("pinned-uma",item.Name,item.Run)));
             cases.AddRange(new FixtureCase[] {

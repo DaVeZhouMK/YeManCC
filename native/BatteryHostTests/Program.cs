@@ -54,6 +54,7 @@ internal sealed class Oxp3WmiMethodFixture : IOxp3WmiMethod
     public int Reads,Writes,DisposeCalls;
     public bool FailRead,FailWrite,NullRead,NullWrite,ThrowDispose;
     public string? ReadResponse,WriteResponse;
+    public Action? BeforeReadReturn;
     public readonly List<(string Method,uint Arg)> Calls=[];
     public string? Invoke(string method,object[] arguments)
     {
@@ -62,7 +63,9 @@ internal sealed class Oxp3WmiMethodFixture : IOxp3WmiMethod
         {
             Reads++;if(FailRead)throw new IOException("mock OXP3 WMI method failed");
             if(NullRead)return null;
-            return ReadResponse??("0,"+Limit.ToString("X2"));
+            var response=ReadResponse??("0,"+Limit.ToString("X2"));
+            BeforeReadReturn?.Invoke();
+            return response;
         }
         if(method=="WriteECReg")
         {
@@ -74,6 +77,23 @@ internal sealed class Oxp3WmiMethodFixture : IOxp3WmiMethod
         throw new Exception("unexpected OXP3 WMI method");
     }
     public void Dispose(){DisposeCalls++;if(ThrowDispose)throw new IOException("mock OXP3 WMI method disposal failed");}
+}
+// Mirrors ManagementObject: public Dispose hides Component.Dispose instead of remapping IDisposable.
+internal sealed class Oxp3HiddenDisposeFixture : System.ComponentModel.Component
+{
+    public int PublicDisposeCalls,BaseDisposeCalls;
+    public bool ThrowPublicDispose;
+    public new void Dispose()
+    {
+        PublicDisposeCalls++;
+        if(ThrowPublicDispose)throw new IOException("mock concrete OXP3 cleanup failed");
+        base.Dispose();
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if(disposing)BaseDisposeCalls++;
+        base.Dispose(disposing);
+    }
 }
 internal sealed class Rig
 {
@@ -96,28 +116,203 @@ internal sealed class Rig
 }
 internal static class Program
 {
-    static int count;
+    static int count,assertions;
     static string? selectedCase;
-    static void Check(bool value,string reason="assertion failed"){if(!value)throw new Exception(reason);}
+    static string? selectedPart;
+    static void Check(bool value,string reason="assertion failed"){assertions++;if(!value)throw new Exception(reason);}
     static void Test(string name,Action test)
     {
         if(selectedCase is not null&&!string.Equals(name,selectedCase,StringComparison.Ordinal))return;
         test();count++;Console.WriteLine("PASS "+name);
+    }
+    sealed class PackedFacts
+    {
+        internal ulong Value;
+        internal int Reads;
+        internal readonly NativePowerReader.Callback Callback;
+        internal readonly ulong Address;
+        internal PackedFacts()
+        {
+            Callback=()=>{Reads++;return Value;};
+            Address=(ulong)System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(Callback);
+        }
+        internal static ulong Pack(bool readable=true,bool known=true,bool batteryKnown=true,
+            bool hasBattery=true,bool ac=true,byte percent=90)=>
+            (readable?1UL:0)|(known?2UL:0)|(batteryKnown?4UL:0)|(hasBattery?8UL:0)|(ac?16UL:0)|((ulong)percent<<8);
+    }
+    sealed class PowerToken(Action? dispose=null) : IDisposable
+    {public void Dispose()=>dispose?.Invoke();}
+    static JsonElement PowerEnvelope(object? pointer)=>JsonSerializer.SerializeToElement(new {nativePowerReader=pointer},Policy.Json);
+    static JsonElement PowerCall(InProcessRuntime runtime,string op,object? pointer=null,bool includePointer=false,string? fence=null,int? target=null)
+    {
+        var envelope=new Dictionary<string,object?>
+        {
+            ["powerRoot"]=@"C:\fixture\PowerControl",["stateRoot"]=@"C:\fixture\State",
+            ["request"]=new {op,fence,target,protocol=RuntimeContract.Protocol,sourceId=RuntimeContract.SourceId}
+        };
+        if(includePointer)envelope["nativePowerReader"]=pointer;
+        using var result=JsonDocument.Parse(runtime.Invoke(JsonSerializer.SerializeToUtf8Bytes(envelope,Policy.Json)));
+        return result.RootElement.Clone();
     }
     static void Main(string[] args)
     {
         if(args.Length==1&&args[0]=="--in-process"){InProcessFixture.Run();return;}
         if(args.Length!=0)
         {
-            if(args.Length!=2||args[0]!="--case"||string.IsNullOrWhiteSpace(args[1]))
+            bool lifecyclePart=args.Length==4&&args[0]=="--case"&&args[1]=="Super X checked dual transport and cleanup ownership"&&args[2]=="--part"&&args[3]=="lifecycle";
+            if((args.Length!=2&&!lifecyclePart)||args[0]!="--case"||string.IsNullOrWhiteSpace(args[1]))
             {
                 Console.Error.WriteLine("FAIL invalid arguments; use no arguments, --in-process or --case <exact existing Test name>; count=0.");
                 Environment.ExitCode=1;return;
             }
-            selectedCase=args[1];
+            selectedCase=args[1];selectedPart=lifecyclePart?"lifecycle":null;
         }
+        Test("native shared power packed facts preserve unknown battery and AC DC",()=>{
+            var source=new PackedFacts();var reader=new NativePowerReader();
+            Check(reader.Read()==(false,false,(int?)null)&&source.Reads==0,"unbound reader collected facts");
+            reader.Bind(PowerEnvelope(source.Address.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            Check(source.Reads==0,"registration sampled native facts");
+            var samples=new (ulong Packed,(bool Present,bool Ac,int? Percent) Expected)[]
+            {
+                (PackedFacts.Pack(readable:false),(false,false,null)),
+                (PackedFacts.Pack(known:false),(false,false,null)),
+                (PackedFacts.Pack(batteryKnown:false),(false,false,null)),
+                (PackedFacts.Pack(hasBattery:false),(false,true,null)),
+                (PackedFacts.Pack(hasBattery:false,ac:false),(false,false,null)),
+                (PackedFacts.Pack(percent:255),(true,true,null)),
+                (PackedFacts.Pack(percent:101),(true,true,null)),
+                (PackedFacts.Pack(percent:0),(true,true,0)),
+                (PackedFacts.Pack(percent:100),(true,true,100)),
+                (PackedFacts.Pack(ac:false,percent:65),(true,false,65)),
+                (PackedFacts.Pack(percent:65)|(1UL<<63)|(1UL<<7),(true,true,65))
+            };
+            foreach(var sample in samples)
+            {
+                source.Value=sample.Packed;int before=source.Reads;
+                Check(reader.Read()==sample.Expected,"packed flags/percent were guessed");
+                Check(source.Reads==before+1,"one consumer read did not equal one native cached read");
+            }
+            int reads=source.Reads;reader.Stop();
+            Check(reader.Read()==(false,false,(int?)null)&&source.Reads==reads,"stopped reader entered native callback");
+            GC.KeepAlive(source.Callback);
+        });
+        Test("native shared power binding is immutable and never samples",()=>{
+            var source=new PackedFacts();var other=new PackedFacts();var reader=new NativePowerReader();
+            static void Reject(NativePowerReader target,JsonElement envelope)
+            {
+                try{target.Bind(envelope);throw new Exception("invalid binding accepted");}catch(IOException){}
+            }
+            Reject(reader,JsonSerializer.SerializeToElement(new {}));
+            foreach(object? invalid in new object?[]{null,true,0,-1,1.5,"","0","-1","+1"," 1","0x","0x0","18446744073709551616","18446744073709551615"})
+                Reject(reader,PowerEnvelope(invalid));
+            using(var duplicate=JsonDocument.Parse("{\"nativePowerReader\":0,\"nativePowerReader\":0}"))Reject(reader,duplicate.RootElement);
+            reader.Bind(PowerEnvelope(source.Address.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            reader.Bind(PowerEnvelope("0x"+source.Address.ToString("x")));
+            reader.Bind(PowerEnvelope("0X"+source.Address.ToString("X")));
+            reader.Bind(PowerEnvelope(source.Address));
+            reader.Bind(JsonSerializer.SerializeToElement(new {}));
+            Reject(reader,PowerEnvelope(other.Address.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            Check(source.Reads==0&&other.Reads==0,"binding or rebinding invoked a collector");
+            source.Value=PackedFacts.Pack();Check(reader.Read()==(true,true,(int?)90));
+            reader.Stop();Reject(reader,PowerEnvelope(source.Address));
+            Check(reader.Read()==(false,false,(int?)null)&&source.Reads==1&&other.Reads==0);
+            GC.KeepAlive(source.Callback);GC.KeepAlive(other.Callback);
+        });
+        Test("in process controller uses shared native power and seals callback on shutdown",()=>{
+            var source=new PackedFacts{Value=PackedFacts.Pack()};var other=new PackedFacts();
+            var rig=new Rig("ayaneo-cec-bypass");
+            int owners=0,domains=0,timers=0,subscriptions=0,timerStops=0,eventStops=0;
+            Action? lateTick=null;Action<Microsoft.Win32.PowerModes>? powerEvent=null;
+            Func<(bool Present,bool Ac,int? Percent)>? consumedPower=null;
+            var runtime=new InProcessRuntime(
+                schedule:(tick,_)=>{timers++;lateTick=tick;return new PowerToken(()=>timerStops++);},
+                subscribe:(power,_)=>{subscriptions++;powerEvent=power;return new PowerToken(()=>eventStops++);},
+                acquireOwner:()=>{owners++;return new PowerToken();},
+                createPowerDomains:(_,_,ready,power)=>
+                {
+                    domains++;consumedPower=power;
+                    return new HostDomainRouter(()=>new Controller(rig.Id,rig.Store,_=>rig.Device,power),
+                        _=>throw new Exception("unexpected display domain"),ready);
+                });
+            try
+            {
+                _=PowerCall(runtime,"hello",source.Address.ToString(),true);
+                Check(source.Reads==0&&owners==0&&domains==0&&timers==0&&subscriptions==0);
+                Check(PowerCall(runtime,"get").TryGetProperty("error",out _));
+                Check(source.Reads==0&&owners==0&&domains==0,"missing registration reached owner/domain");
+                var first=PowerCall(runtime,"get",source.Address.ToString(),true);
+                Check(first.GetProperty("ok").GetBoolean()&&first.GetProperty("batteryPresent").GetBoolean());
+                var applied=PowerCall(runtime,"set",fence:first.GetProperty("fence").GetString(),target:80);
+                Check(applied.GetProperty("ok").GetBoolean()&&rig.Device.Raw==0x55,"AC fact did not pause fake charge");
+                source.Value=PackedFacts.Pack(ac:false);lateTick!();
+                Check(rig.Device.Raw==0xaa,"DC fact did not resume fake charge");
+                source.Value=PackedFacts.Pack();lateTick!();
+                Check(rig.Device.Raw==0x55,"AC change was not consumed by existing tick");
+                int before=source.Reads;
+                Check(PowerCall(runtime,"get",other.Address.ToString(),true).TryGetProperty("error",out _));
+                Check(source.Reads==before&&other.Reads==0,"different binding reached a consumer");
+                Check(PowerCall(runtime,"get","0x"+source.Address.ToString("X"),true).GetProperty("ok").GetBoolean());
+                source.Value=PackedFacts.Pack(known:false);
+                var unknown=PowerCall(runtime,"get");
+                Check(!unknown.GetProperty("batteryPresent").GetBoolean()&&!unknown.GetProperty("ok").GetBoolean());
+                source.Value=PackedFacts.Pack(hasBattery:false);
+                Check(!PowerCall(runtime,"get").GetProperty("batteryPresent").GetBoolean());
+                Check(consumedPower!()==(false,true,(int?)null));
+                source.Value=PackedFacts.Pack();
+                Check(owners==1&&domains==1&&timers==1&&subscriptions==1,"binding started extra runtime work");
+                before=source.Reads;var stopped=PowerCall(runtime,"shutdown");
+                Check(stopped.GetProperty("cleanupCompleted").GetBoolean());
+                Check(consumedPower!()==(false,false,(int?)null));
+                lateTick!();powerEvent!(Microsoft.Win32.PowerModes.Resume);
+                Check(PowerCall(runtime,"get",source.Address.ToString(),true).TryGetProperty("error",out _));
+                Check(source.Reads==before&&other.Reads==0,"shutdown/late callback entered native reader");
+                Check(timerStops==1&&eventStops==1,"existing monitoring was not disposed");
+            }
+            finally{_=runtime.Shutdown();GC.KeepAlive(source.Callback);GC.KeepAlive(other.Callback);}
+            // Exercise the production default before any identity/WMI/owner path.
+            var production=new InProcessRuntime(acquireOwner:()=>throw new Exception("missing reader acquired owner"));
+            try{Check(PowerCall(production,"get").GetProperty("error").GetString()!.Contains("nativePowerReader"));}
+            finally{_=production.Shutdown();}
+        });
+        Test("standalone power fallback caches no battery until power events",()=>{
+            int collects=0;
+            (bool Present,bool Ac,int? Percent) sample=(false,true,null);
+            var cache=new PowerFactsCache(()=>{collects++;return sample;});
+            for(int i=0;i<100;i++)Check(cache.Read()==(false,true,(int?)null));
+            Check(collects==1,"no-battery steady state resampled Windows facts");
+            sample=(true,false,42);cache.PowerChanged(Microsoft.Win32.PowerModes.StatusChange);
+            cache.PowerChanged(Microsoft.Win32.PowerModes.StatusChange);
+            Check(collects==1,"event eagerly sampled facts");
+            Check(cache.Read()==sample&&collects==2);
+            for(int i=0;i<100;i++)Check(cache.Read()==sample);
+            Check(collects==2,"battery steady state resampled Windows facts");
+            sample=(false,false,null);cache.PowerChanged(Microsoft.Win32.PowerModes.Resume);
+            Check(collects==2&&cache.Read()==sample&&collects==3);
+            for(int i=0;i<100;i++)Check(cache.Read()==sample);
+            Check(collects==3,"unknown steady state resampled Windows facts");
+            cache.PowerChanged(Microsoft.Win32.PowerModes.Suspend);sample=(true,true,67);
+            Check(collects==3,"suspend eagerly sampled facts");
+            // Existing standalone resume consumers can run before our own event handler.
+            Check(cache.Read()==sample&&collects==4,"resume consumer reused pre-suspend facts");
+            cache.PowerChanged(Microsoft.Win32.PowerModes.Resume);
+            Check(collects==4&&cache.Read()==sample&&collects==5);
+        });
+        Test("Super X checked dual transport and cleanup ownership",()=>{
+            if(selectedPart=="lifecycle")
+            {
+                Console.WriteLine("Selected child part=lifecycle; prior identity/UMA/transport not executed in this invocation.");
+                _=SuperXChargeLifecycleFixture.Run();return;
+            }
+            _=SuperXChargeIdentityFixture.Run();
+            _=SuperXUmaChargeReaderFixture.Run();
+            _=SuperXChargeTransportFixture.Run();
+            _=SuperXChargeLifecycleFixture.Run();
+        });
+        Test("OneX firmware rejection records observed facts without opening providers",()=>{
+            _=OneXFieldFeedbackFixture.Run();
+        });
         Test("unified catalog selects every exact actual battery rule and trusted receipt",()=>{
-            Check(Policy.Routes.Length==41);
+            Check(Policy.Routes.Length==42);
             foreach(var route in Policy.Routes)foreach(var value in route.Identity.Values){
                 var id=new Identity(route.Identity.Manufacturers[0],route.Identity.Field=="boardProduct"?value:"board",route.Identity.Field=="systemProduct"?value:"system","HX 370","2.10",2,route.RouteId=="gpd-win-mini-2025"?7:80);
                 var binding=Policy.ResolveCapability(id);Check(binding is not null&&ReferenceEquals(binding.Consumer,route));
@@ -237,6 +432,32 @@ internal static class Program
         Test("firmware mismatch never opens a low-level provider",()=>{
             var r=new Rig();var controller=new Controller(r.Id with {EcMinor=255},r.Store,_=>{throw new Exception("must not open");},()=> (true,true,70));
             Check(!controller.Read().Supported);Check(!controller.Apply("",80).Ok);
+            // The 2026-11-05 archive is named OXP3 but records APEX DMI. Its
+            // EC fields were absent, so exercise gate boundaries, not invented field values.
+            var x1Routes=Policy.Routes.Where(x=>x.RouteId is "oxp-x1-amd-ec" or "oxp-x1-intel-ec").ToArray();
+            Check(x1Routes.Length==5);
+            foreach(var route in x1Routes){
+                var id=new Identity("ONE-NETBOOK",route.Identity.Values[0],route.Identity.Values[0],"fixture CPU","fixture BIOS",route.FirmwareGate.MajorMin,route.FirmwareGate.MinorMin);
+                Check(Policy.Resolve(id)?.RouteId==route.RouteId);
+                Check(Policy.FirmwareAllowed(route,id),"exact component boundary rejected");
+                var fake=new Fake(route);var opens=0;
+                Controller New(Identity facts,MemoryStore store)=>new(facts,store,_=>{opens++;return fake;},()=> (true,true,70));
+                var allowed=New(id,new MemoryStore()).Read();Check(allowed.Supported&&opens==1&&fake.Writes==0);
+                foreach(var ec in new[]{(255,id.EcMinor),(id.EcMajor,255),(id.EcMajor,id.EcMinor-1),(id.EcMajor+1,id.EcMinor-1),(-1,id.EcMinor),(id.EcMajor,-1)}){
+                    var blockedId=id with {EcMajor=ec.Item1,EcMinor=ec.Item2};var store=new MemoryStore();
+                    store.Save(Controller.SettingsFile,new Preference(1,blockedId.Key,route.RouteId,80,true));
+                    var blocked=New(blockedId,store);var beforeOpens=opens;var state=blocked.Read();
+                    Check(!state.Ok&&!state.Supported&&state.BatteryPresent&&state.CurrentLimit is null&&state.Verification=="unknown");
+                    Check(state.Reason=="当前 EC 或 BIOS 版本尚未通过充电接口校验");
+                    Check(!blocked.Apply(state.Fence,80).Ok);blocked.StartSaved();blocked.Suspend();blocked.Resume();blocked.Tick();
+                    Check(opens==beforeOpens&&fake.Writes==0,"firmware rejection opened a provider or replayed saved target");
+                }
+                if(route.Identity.DeviceClass=="OneXPlayerApex"){
+                    Check(Policy.Resolve(id with {SystemProduct="ONEXPLAYER 3"})?.RouteId==route.RouteId,"product label overrode exact APEX board route");
+                }
+            }
+            var op3=new Identity("ONE-NETBOOK","ONEXPLAYER 3","ONEXPLAYER 3","fixture CPU","fixture BIOS",255,255);
+            Check(Policy.Resolve(op3)?.RouteId=="oxp3-wmi-ec");Check(Policy.FirmwareAllowed(Policy.Resolve(op3)!,op3),"OXP3 WMI route inherited X1 EC gate");
         });
         Test("ASUS real adapter validates presence and write acknowledgement without a fabricated threshold",()=>{
             var writes=0;using var p=new AsusProvider((method,value)=>{if(method==0x53545344)return 0x10001;if(method==0x53564544&&value==80){writes++;return 1;}throw new Exception("wrong ASUS request");});
@@ -487,6 +708,48 @@ internal static class Program
             var c=New();var state=c.Read();Check(state.Ok&&state.CurrentLimit==80);
             var applied=c.Apply(state.Fence,90);Check(applied.Ok&&applied.CurrentLimit==90&&mem.Reads>=2&&mem.Writes==1);
 
+            // Execute the real Controller -> provider -> EC adapter; only the WMI method is inert.
+            foreach(var change in new[]{"stable","shutdown","suspend","readyLost","batteryAbsent"})
+            {
+                var terminal=new Oxp3WmiMethodFixture();var journal=new MemoryStore();
+                bool present=true,ready=true;int edges=0,opens=0;Controller? boundary=null;
+                terminal.BeforeReadReturn=()=>
+                {
+                    // Read(), Apply preflight, then the provider's final ReadECReg.
+                    if(terminal.Reads!=3)return;
+                    edges++;
+                    Check(terminal.Calls.Last()==("ReadECReg",0xA304u),"OXP3 final admission edge changed method/address: "+change);
+                    if(change=="shutdown")boundary!.Shutdown();
+                    else if(change=="suspend")boundary!.Suspend();
+                    else if(change=="readyLost")ready=false;
+                    else if(change=="batteryAbsent")present=false;
+                };
+                boundary=new Controller(id,journal,_=>{opens++;return new Oxp3WmiProvider(new Oxp3WmiEc(terminal));},()=> (present,true,75),()=>ready);
+                var initial=boundary.Read();
+                Check(initial.Ok&&initial.CurrentLimit==80&&terminal.Reads==1&&terminal.Writes==0,"OXP3 initial read failed: "+change);
+                var result=boundary.Apply(initial.Fence,90);
+                Check(edges==1&&terminal.Reads>=3,"OXP3 final WMI pre-read callback did not execute: "+change);
+                if(change=="stable")
+                {
+                    Check(result.Ok&&result.CurrentLimit==90&&result.Verification=="readback"&&terminal.Limit==90,"OXP3 stable final admission failed");
+                    Check(terminal.Writes==1&&terminal.Calls.Count(call=>call.Method=="WriteECReg"&&call.Arg==0x5AA304u)==1,"OXP3 stable write packing/count changed");
+                    Check(journal.Load<Recovery>(Controller.RecoveryFile) is null,"OXP3 stable write left recovery debt");
+                }
+                else
+                {
+                    Check(!result.Ok&&terminal.Writes==0&&terminal.Limit==80&&!terminal.Calls.Any(call=>call.Method=="WriteECReg"),"OXP3 final WMI pre-read bypassed admission: "+change);
+                    Check(result.Reason==(change=="batteryAbsent"?"未检测到内置电池":"正在停止、睡眠或恢复，充电设置稍后可用"),"OXP3 final admission lost its rejection reason: "+change);
+                    var debt=journal.Load<Recovery>(Controller.RecoveryFile);
+                    Check(debt is {Software:false,OriginalRaw:80,OwnedRaw:null}&&debt.IdentityKey==id.Key&&debt.RouteId=="oxp3-wmi-ec","OXP3 rejection lost exact firmware recovery debt: "+change);
+                }
+                Check(terminal.Calls.Where(call=>call.Method=="ReadECReg").All(call=>call.Arg==0xA304u),"OXP3 boundary read touched another register: "+change);
+                int writes=terminal.Writes,closes=terminal.DisposeCalls;
+                boundary.Shutdown();boundary.Shutdown();
+                Check(terminal.Writes==writes&&terminal.DisposeCalls==closes&&closes==opens,"OXP3 shutdown replayed a firmware write or leaked an endpoint: "+change);
+                Check(change=="stable"||journal.Load<Recovery>(Controller.RecoveryFile) is {Software:false,OriginalRaw:80,OwnedRaw:null},"OXP3 shutdown erased unconfirmed firmware debt: "+change);
+                Console.WriteLine($"OXP3 final admission {change}: edges={edges}, writes={terminal.Writes}, reads={terminal.Reads}, closed={terminal.DisposeCalls}");
+            }
+
             // Exercise the production selector with inert method objects, never a WMI query.
             int yielded=0,returned=0;
             IEnumerable<Oxp3WmiMethodFixture> Candidates(Oxp3WmiMethodFixture[] values,bool failMoveNext=false,bool failDispose=false)
@@ -541,6 +804,57 @@ internal static class Program
                 Check(yielded==1&&returned==1&&first.DisposeCalls==1,"failed OXP3 enumeration leaked its selected endpoint or enumerator");
                 Check(first.Calls.Count==0,"failed OXP3 endpoint enumeration invoked a method");
             }
+
+            var interfaceOnly=new Oxp3HiddenDisposeFixture();
+            ((IDisposable)interfaceOnly).Dispose();
+            Check(interfaceOnly.PublicDisposeCalls==0&&interfaceOnly.BaseDisposeCalls==1,"hidden Dispose fixture does not model inherited interface dispatch");
+            IEnumerable<Oxp3HiddenDisposeFixture> HiddenCandidates(Oxp3HiddenDisposeFixture[] values,bool failMoveNext=false,bool failDispose=false)
+            {
+                yielded=returned=0;
+                try
+                {
+                    foreach(var value in values){yielded++;yield return value;}
+                    if(failMoveNext)throw new IOException("mock hidden OXP3 enumeration failed");
+                }
+                finally
+                {
+                    returned++;
+                    if(failDispose)throw new IOException("mock hidden OXP3 enumerator disposal failed");
+                }
+            }
+            var concreteUnique=new Oxp3HiddenDisposeFixture();
+            var concreteSelected=Oxp3WmiManagementMethod.SelectUniqueInstance(HiddenCandidates([concreteUnique]),static item=>item.Dispose());
+            Check(ReferenceEquals(concreteSelected,concreteUnique)&&yielded==1&&returned==1&&concreteUnique.PublicDisposeCalls==0&&concreteUnique.BaseDisposeCalls==0,"concrete selector did not retain unique ownership");
+            concreteSelected.Dispose();
+            Check(concreteUnique.PublicDisposeCalls==1&&concreteUnique.BaseDisposeCalls==1,"unique concrete cleanup was bypassed");
+            try{Oxp3WmiManagementMethod.SelectUniqueInstance(HiddenCandidates([]),static item=>item.Dispose());throw new Exception("empty hidden OXP3 set accepted");}catch(IOException){}
+            Check(yielded==0&&returned==1,"empty hidden enumeration was not returned");
+            foreach(var mode in new[]{"distinct","first-dispose","second-dispose","both-dispose","enumerator-dispose"})
+            {
+                var first=new Oxp3HiddenDisposeFixture{ThrowPublicDispose=mode is "first-dispose" or "both-dispose"};
+                var second=new Oxp3HiddenDisposeFixture{ThrowPublicDispose=mode is "second-dispose" or "both-dispose"};
+                var untouched=new Oxp3HiddenDisposeFixture();
+                try{Oxp3WmiManagementMethod.SelectUniqueInstance(HiddenCandidates([first,second,untouched],failDispose:mode=="enumerator-dispose"),static item=>item.Dispose());throw new Exception("ambiguous hidden OXP3 set accepted: "+mode);}catch(IOException){}
+                Check(yielded==2&&returned==1,"hidden ambiguity did not stop and return enumeration: "+mode);
+                Check(first.PublicDisposeCalls==1&&second.PublicDisposeCalls==1&&untouched.PublicDisposeCalls==0&&untouched.BaseDisposeCalls==0,"hidden ambiguity bypassed concrete cleanup or touched unacquired object: "+mode);
+                Check(first.BaseDisposeCalls==(first.ThrowPublicDispose?0:1)&&second.BaseDisposeCalls==(second.ThrowPublicDispose?0:1),"hidden cleanup did not reach the expected concrete body: "+mode);
+            }
+            foreach(var nullFirst in new[]{true,false})
+            {
+                var first=new Oxp3HiddenDisposeFixture();var untouched=new Oxp3HiddenDisposeFixture();
+                Oxp3HiddenDisposeFixture[] values=nullFirst?[null!,untouched]:[first,null!,untouched];
+                try{Oxp3WmiManagementMethod.SelectUniqueInstance(HiddenCandidates(values),static item=>item.Dispose());throw new Exception("null hidden OXP3 endpoint accepted");}catch(IOException){}
+                Check(yielded==(nullFirst?1:2)&&returned==1&&first.PublicDisposeCalls==(nullFirst?0:1)&&first.BaseDisposeCalls==(nullFirst?0:1)&&untouched.PublicDisposeCalls==0&&untouched.BaseDisposeCalls==0,"null hidden endpoint cleanup ownership failed");
+            }
+            var concreteDuplicate=new Oxp3HiddenDisposeFixture();var concreteAfter=new Oxp3HiddenDisposeFixture();
+            try{Oxp3WmiManagementMethod.SelectUniqueInstance(HiddenCandidates([concreteDuplicate,concreteDuplicate,concreteAfter]),static item=>item.Dispose());throw new Exception("duplicate hidden reference accepted");}catch(IOException){}
+            Check(yielded==2&&returned==1&&concreteDuplicate.PublicDisposeCalls==1&&concreteDuplicate.BaseDisposeCalls==1&&concreteAfter.PublicDisposeCalls==0&&concreteAfter.BaseDisposeCalls==0,"duplicate hidden endpoint not released exactly once");
+            foreach(var failMoveNext in new[]{true,false})
+            {
+                var first=new Oxp3HiddenDisposeFixture();
+                try{Oxp3WmiManagementMethod.SelectUniqueInstance(HiddenCandidates([first],failMoveNext:failMoveNext,failDispose:!failMoveNext),static item=>item.Dispose());throw new Exception("failed hidden enumeration accepted");}catch(IOException){}
+                Check(yielded==1&&returned==1&&first.PublicDisposeCalls==1&&first.BaseDisposeCalls==1,"failed hidden enumeration bypassed concrete cleanup");
+            }
         });
         if(selectedCase is not null)
         {
@@ -550,6 +864,7 @@ internal static class Program
                 Environment.ExitCode=1;return;
             }
             Console.WriteLine($"Selected case count={count}.");
+            Console.WriteLine($"Selected case assertions={assertions}.");
         }
         Console.WriteLine($"{count} groups passed; fake providers only, no hardware writes.");
     }

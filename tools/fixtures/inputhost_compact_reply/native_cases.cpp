@@ -166,6 +166,25 @@ static void pipes(){
  auto bad=compact();bad["frameReplyBinding"]=tokenB;probe("private-pipe-stale-token",throughPrivatePipe(bad.dump(),"wrong-token",pending),0,0);
 }
 
+// Optional actual Host-generated first-witness payload: the original scanner and
+// DOM contract must keep it across full/compact replies and a private pipe.
+static void sdkWitnesses(const std::string& out){
+ std::ifstream input(out+"/../../inputs/sdk-first-response.json");if(!input)return;
+ json actual;input>>actual;require(actual.contains("sdkFirstWitnesses")&&actual["sdkFirstWitnesses"].is_array()&&!actual["sdkFirstWitnesses"].empty(),"actual SDK sample missing");
+ auto synthetic=full();synthetic["sdkFirstWitnesses"]=json::array({{{"outcome","returned"},{"sample",{{"ordinal","1"},{"sdkArguments",{{"kind","SubmitRawReport"},{"hex","000100"}}}}}}});
+ auto p=probe("logging-sdk-synthetic-witness",synthetic.dump(),0,1,nullptr);require(p.parsed.response["sdkFirstWitnesses"]==synthetic["sdkFirstWitnesses"],"integer-only evidence skipped by fast parser");
+ auto coverage=full();coverage["sdkFirstWitnessCoverage"]={{"emittedSamples",0},{"dropped",1},{"scope","response-emission-only"}};
+ p=probe("logging-sdk-coverage-only",coverage.dump(),0,1,nullptr);require(p.parsed.response["sdkFirstWitnessCoverage"]==coverage["sdkFirstWitnessCoverage"],"coverage-only evidence lost");
+ auto f=full(),c=compact();for(const char* key:{"sdkFirstWitnesses","sdkFirstWitnessCoverage"}){f[key]=actual[key];c[key]=actual[key];}
+ p=probe("logging-sdk-actual-full",f.dump(),0,1,nullptr);require(p.parsed.response["sdkFirstWitnesses"]==actual["sdkFirstWitnesses"]&&p.parsed.response["sdkFirstWitnessCoverage"]==actual["sdkFirstWitnessCoverage"],"actual full SDK payload changed");
+ p=probe("logging-sdk-actual-compact",c.dump(),0,1);require(p.parsed.expanded&&p.parsed.response["sdkFirstWitnesses"]==actual["sdkFirstWitnesses"],"compact DOM expansion dropped SDK payload");
+ auto bad=f;bad["requestId"]="wrong-request";probe("logging-sdk-bad-request",bad.dump(),0,0,nullptr);
+ bad=f;bad["powerGeneration"]=fixturePower+1;probe("logging-sdk-bad-power",bad.dump(),0,0,nullptr);
+ probe("logging-sdk-stale-binding",c.dump(),0,0,&tokenB);
+ bool pending=false;p=probe("logging-sdk-private-pipe",throughPrivatePipe(f.dump(),"logging-sdk-witness",pending),0,1,nullptr);
+ require(p.parsed.response["sdkFirstWitnesses"]==actual["sdkFirstWitnesses"]&&p.parsed.response["sdkFirstWitnessCoverage"]==actual["sdkFirstWitnessCoverage"],"pipe SDK payload changed");
+}
+
 static void focusedFailures(){
  const auto f=full().dump(),c=compact().dump();probe("directed-full-terminal-nul",f+std::string(1,'\0'),0,1,nullptr);probe("directed-compact-terminal-nul",c+std::string(1,'\0'),0,0);probe("directed-compact-nul-suffix",c+std::string(1,'\0')+"{garbage}",0,0);
  auto extension=append(c,",\"extension\":{\"amount\":1.25,\"key\":\"新😀\"}");probe("directed-extension-fallback",extension,0,1);probe("directed-extension-stale-token",extension,0,0,&tokenB);
@@ -237,6 +256,6 @@ static void requestBudget(const std::string& out,bool negativeOnly=false){
 int main(int argc,char**argv){
  if(argc!=2&&argc!=4)return 2;const std::string selected=argc==4?argv[3]:"all";const bool directed=selected=="compact-regressions",budget=selected=="request-budget"||selected=="request-budget-negative";if(argc==4&&(std::string(argv[2])!="--case-group"||(!directed&&!budget)))return 2;const std::string out=argv[1];raw.open(out+"/cases.tsv",std::ios::binary);errors.open(out+"/failures.jsonl",std::ios::binary);transports.open(out+"/pipe.jsonl",std::ios::binary);if(!raw||!errors||!transports)return 3;
  raw<<"case\tgroup\tbytes\trawScanner\tfast\tdom\texpectedFast\texpectedDom\texpanded\tfirstFrame\tsubmitElapsedUs\tmotorPresent\tmotorValid\tgeneration\trevision\tleft\tright\tcompatibility\tsdkSequence\n";
- bool complete=false;std::string exception;try{if(budget)requestBudget(out,selected=="request-budget-negative");else{core();if(directed)focusedFailures();else parserCorpus();motor();lifecycle();pipes();}complete=true;}catch(const std::exception& e){exception=e.what();require(false,exception.c_str());}
+ bool complete=false;std::string exception;try{if(budget)requestBudget(out,selected=="request-budget-negative");else{core();if(directed)focusedFailures();else parserCorpus();motor();lifecycle();pipes();sdkWitnesses(out);}complete=true;}catch(const std::exception& e){exception=e.what();require(false,exception.c_str());}
  raw.flush();errors.flush();transports.flush();json summary={{"selectedCaseGroup",selected},{"status",complete&&failures==0?"PASS":"FAIL"},{"complete",complete},{"cases",cases},{"checks",checks},{"failures",failures},{"fastAccepted",fastAccepted},{"domAccepted",domAccepted},{"fallbackAccepted",fallbackAccepted},{"groups",groups},{"pipeCases",pipeCases},{"pipeFragments",pipeFragments},{"exception",exception},{"performanceMeasured",false},{"realTransportScope",budget?"NOT_EXECUTED; request construction only":"private Win32 message pipes only; 73-byte diagnostic reassembly, not product transport integration"},{"oneSendTimeoutReplay","source-bound attachment only; full product timeout/replay path NOT_EXECUTED"}};std::ofstream(out+"/summary.json")<<summary.dump(2)<<'\n';std::cout<<summary.dump()<<'\n';return complete&&failures==0?0:1;
 }

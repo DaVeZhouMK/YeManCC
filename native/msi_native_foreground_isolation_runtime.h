@@ -190,6 +190,7 @@ static bool msiNativeForegroundRepairReaderLocked(uint64_t power,uint64_t edge) 
 #endif
 }
 static bool msiNativeForegroundUiEligible() {
+    if (focusLightIsolationCurrent() && !radialHasInputOwner() && !customSteamLibraryInputSuppressed()) return false;
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
     if(g_msiNativeForegroundTestIo.ui) return g_controllerFrontendIsolationEnabled.load(std::memory_order_acquire) && g_msiNativeForegroundTestIo.ui();
 #endif
@@ -419,8 +420,10 @@ static void msiNativeForegroundSourceArrival(HANDLE rawDevice) {
     if(hidHideResolveRawInputIdentity(rawDevice,source,&generation))msiNativeForegroundObserveSource(source,generation);
 }
 static void CALLBACK msiNativeForegroundObserved(HWINEVENTHOOK,DWORD event,HWND,LONG,LONG,DWORD,DWORD) {
-    if(event==EVENT_SYSTEM_FOREGROUND && g_msiNativeForegroundObserverActive.load(std::memory_order_acquire))
+    if(event==EVENT_SYSTEM_FOREGROUND && g_msiNativeForegroundObserverActive.load(std::memory_order_acquire)) {
+        focusLightForegroundChanged();
         msiNativeForegroundUiEvent(); // evaluates the unchanged common owner gate
+    }
 }
 static void msiNativeForegroundStartObserver() {
     if(!nativeForegroundFamilyAllowed() || g_msiNativeForegroundObserverActive.load(std::memory_order_acquire))return;

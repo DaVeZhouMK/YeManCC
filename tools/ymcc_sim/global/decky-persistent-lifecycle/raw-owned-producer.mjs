@@ -23,17 +23,75 @@ export function verifyRawProducerCompletion(terminal,toolCleanupPolicy,toolArtif
  const pinned=toolArtifacts.find(row=>key(row.path)===key(expected.path));assert(pinned&&pinned.sha256===expected.sha256,'RAW_TOOL_UNDECLARED');
  return {kind:'DECLARED_TOOL_FINALIZATION',forcedToolFinalization:true,productResourcesWaived:false,member};
 }
-export function startOwnedRawProducer({id,program,args,cwd,env,host,powershell,ownerStartTicks,directory,stdoutPath,stderrPath,deadlineEpochMs,cleanupReserveMs=5000,sourceInputs,toolArtifacts,originalBudgetMs,parentRemainingBeforeMs,toolCleanupPolicy=null}){
+// Admission reopens the pinned request/terminal; a raw marker alone grants no budget exception.
+export function verifyRawProducerBudget(process,originalBudgetMs,parentBudgetMs){
+ const raw=process.rawExecution;
+ const checked=row=>{assert(row&&path.isAbsolute(row.path)&&/^[a-f0-9]{64}$/.test(row.sha256),'RAW_BUDGET_PIN_REQUIRED');assert.equal(hash(row.path),row.sha256,'RAW_BUDGET_PIN_CHANGED');return row;};
+ const samePin=(actual,expected)=>{assert.equal(key(actual.path),key(expected.path),'RAW_BUDGET_PIN_PATH');assert.equal(actual.sha256,expected.sha256,'RAW_BUDGET_PIN_DIGEST');};
+ const terminal=read(checked(raw.terminal).path),request=read(checked(raw.request).path);
+ assert.equal(terminal.kind,'ymcc-raw-program-terminal-v1');assert.equal(request.schemaVersion,1);assert.equal(request.kind,'ymcc-raw-program-v1');
+ samePin(terminal.request,raw.request);assert.equal(terminal.request.bytes,fs.statSync(raw.request.path).size);
+ const budget=request.budget;assert(budget&&budget.schemaVersion===1,'RAW_PRECISE_BUDGET_REQUIRED');assert.deepEqual(raw.budget,budget,'RAW_BUDGET_PROOF_MISMATCH');
+ for(const field of ['parentStartedAtEpochMs','parentBudgetMs','allocatedAtEpochMs','requestCreatedEpochMs','originalBudgetMs','allocatedBudgetMs','parentRemainingBeforeMs','deadlineEpochMs','cleanupReserveMs'])assert(Number.isSafeInteger(budget[field])&&budget[field]>0,'RAW_BUDGET_INTEGER:'+field);
+ assert.equal(budget.parentBudgetMs,parentBudgetMs,'RAW_PARENT_BUDGET_CHANGED');assert.equal(budget.originalBudgetMs,originalBudgetMs,'RAW_ORIGINAL_BUDGET_CHANGED');
+ assert(budget.allocatedAtEpochMs>=budget.parentStartedAtEpochMs,'RAW_ALLOCATION_BEFORE_PARENT');
+ assert.equal(budget.parentRemainingBeforeMs,parentBudgetMs-(budget.allocatedAtEpochMs-budget.parentStartedAtEpochMs),'RAW_PARENT_REMAINING_MISMATCH');
+ assert.equal(budget.allocatedBudgetMs,Math.min(originalBudgetMs,budget.parentRemainingBeforeMs),'RAW_ALLOCATION_CLIPPED_OR_EXPANDED');
+ assert.equal(budget.deadlineEpochMs,budget.allocatedAtEpochMs+budget.allocatedBudgetMs,'RAW_ALLOCATION_DEADLINE_MISMATCH');
+ assert.equal(process.originalBudgetMs,originalBudgetMs);assert.equal(process.parentRemainingBeforeMs,budget.parentRemainingBeforeMs);
+ assert.equal(process.budgetClipped,budget.allocatedBudgetMs<originalBudgetMs,'RAW_CLIPPED_SEMANTICS');
+ assert(Number.isSafeInteger(raw.launchRequestedEpochMs)&&raw.launchRequestedEpochMs>=budget.requestCreatedEpochMs,'RAW_LAUNCH_TIME_REQUIRED');
+ assert(budget.requestCreatedEpochMs>=budget.allocatedAtEpochMs&&raw.launchRequestedEpochMs<budget.deadlineEpochMs,'RAW_REQUEST_OUTSIDE_ALLOCATION');
+ assert.equal(process.timeoutMs,budget.deadlineEpochMs-raw.launchRequestedEpochMs,'RAW_EFFECTIVE_TIMEOUT_MISMATCH');
+ assert.equal(terminal.deadlineEpochMs,budget.deadlineEpochMs,'RAW_TERMINAL_DEADLINE_MISMATCH');assert.equal(terminal.cleanupReserveMs,budget.cleanupReserveMs);
+ assert.equal(terminal.runCutoffEpochMs,budget.deadlineEpochMs-budget.cleanupReserveMs);assert.equal(terminal.business.originalDeadlineEpochMs,budget.deadlineEpochMs);
+ assert.equal(terminal.business.runCutoffEpochMs,terminal.runCutoffEpochMs);assert.equal(terminal.business.cleanupReserveMs,budget.cleanupReserveMs);
+ assert(terminal.startedEpochMs>=raw.launchRequestedEpochMs&&terminal.finishedEpochMs>=terminal.startedEpochMs&&terminal.finishedEpochMs<=budget.deadlineEpochMs,'RAW_TERMINAL_OUTSIDE_ALLOCATION');
+ assert.equal(process.finishedAt,new Date(terminal.finishedEpochMs).toISOString());assert.equal(process.exitCode,terminal.businessExitCode);
+ assert.equal(process.pid,terminal.business.pid);samePin(process.program,terminal.business.program);assert.deepEqual(process.arguments,terminal.business.arguments);assert.equal(key(process.cwd),key(terminal.business.cwd));assert.equal(key(request.cwd),key(process.cwd));
+ assert.equal(terminal.business.atomicJobAdmission,true);assert.equal(terminal.owner.handleBound,true);assert.equal(terminal.logsClosedAndFlushed,true);assert.equal(terminal.declaredPinsUnchanged,true);assert.equal(terminal.job.cleanupError,null);
+ for(const field of ['collectionComplete','cancelled','ownerLost','residualDescendants']){assert.equal(raw[field],terminal[field]);assert.equal(terminal[field],field==='collectionComplete');}
+ assert.equal(process.timedOut,terminal.timedOut);assert.equal(terminal.timedOut,false);assert.equal(terminal.outputLimitExceeded,false);
+ for(const [field,value]of [['launcher',terminal.launcher],['actualBusiness',terminal.business],['job',terminal.job],['logs',terminal.logs],['sourceBefore',terminal.declaredInputsBefore],['sourceAfter',terminal.declaredInputsAfter]])assert.deepEqual(raw[field],value,'RAW_BUDGET_TERMINAL_PROOF:'+field);
+ assert.equal(raw.helperPid,terminal.launcher.pid);assert.equal(raw.helperExitCode,terminal.helperExitCode);assert.equal(raw.helperSignal,null);
+ samePin(checked(raw.helperSource),terminal.launcher.helper);samePin(checked(raw.arguments),terminal.argumentsPin);samePin(raw.arguments,request.arguments);assert.deepEqual(read(raw.arguments.path),process.arguments);
+ for(const kind of ['stdout','stderr']){checked(terminal.logs[kind]);assert.equal(checked(process[kind]).sha256,terminal.logs[kind].sha256,'RAW_BUDGET_LOG_PROOF');}
+ const declared=[...request.sources.map(row=>({role:'sources',...row})),...request.tools.map(row=>({role:'tools',...row}))];
+ // The actual helper keeps roles in admission rows; Raw-Hash emits only
+ // path/bytes/hash at closing. Bind role and order before, then the exact same
+ // regular-file identity after. Never infer success from a role-only marker.
+ assert.equal(terminal.declaredInputsBefore.length,declared.length,'RAW_BUDGET_DECLARED_BEFORE_COUNT');
+ assert.equal(terminal.declaredInputsAfter.length,declared.length,'RAW_BUDGET_DECLARED_AFTER_COUNT');
+ for(let i=0;i<declared.length;i++){
+  const before=terminal.declaredInputsBefore[i],after=terminal.declaredInputsAfter[i],expected=declared[i];
+  assert.deepEqual([before.role,key(before.path),before.sha256],[expected.role,key(expected.path),expected.sha256],'RAW_BUDGET_DECLARED_BEFORE:'+i);
+  assert(Number.isSafeInteger(before.bytes)&&before.bytes>=0,'RAW_BUDGET_DECLARED_SIZE:'+i);
+  if(expected.bytes!==undefined)assert.equal(before.bytes,expected.bytes,'RAW_BUDGET_DECLARED_EXPECTED_SIZE:'+i);
+  assert.deepEqual(Object.keys(after).sort(),['bytes','path','sha256'],'RAW_BUDGET_DECLARED_AFTER_SCHEMA:'+i);
+  assert.deepEqual([key(after.path),after.sha256,after.bytes],[key(before.path),before.sha256,before.bytes],'RAW_BUDGET_DECLARED_AFTER:'+i);
+ }
+ if(process.boundSourceInputs)assert.deepEqual(request.sources.map(row=>[key(row.path),row.sha256]),process.boundSourceInputs.map(row=>[key(path.resolve(process.cwd,row.path)),row.sha256]),'RAW_BUDGET_BOUND_SOURCES');
+ if(process.toolArtifacts)assert.deepEqual(request.tools,process.toolArtifacts,'RAW_BUDGET_BOUND_TOOLS');
+ assert.deepEqual(raw.completion,verifyRawProducerCompletion(terminal,request.toolCleanupPolicy??null,request.tools),'RAW_BUDGET_COMPLETION_PROOF');
+ return budget;
+}
+export function startOwnedRawProducer({id,program,args,cwd,env,host,powershell,ownerStartTicks,directory,stdoutPath,stderrPath,deadlineEpochMs,allocatedAtEpochMs,parentStartedAtEpochMs,parentBudgetMs,cleanupReserveMs=5000,sourceInputs,toolArtifacts,originalBudgetMs,parentRemainingBeforeMs,toolCleanupPolicy=null}){
  assert(path.isAbsolute(directory)&&!fs.existsSync(directory),'RAW_PRODUCER_FRESH_DIRECTORY');
  assert(/^\d{17,20}$/.test(String(ownerStartTicks)),'RAW_PRODUCER_OWNER_BIRTH');
  fs.mkdirSync(directory,{recursive:true});assert.equal(key(fs.realpathSync(directory)),key(directory),'RAW_PRODUCER_REPARSE');
  const argumentsFile=path.join(directory,'arguments.json'),requestFile=path.join(directory,'request.json'),nonce=crypto.randomBytes(32).toString('hex');
  fs.writeFileSync(argumentsFile,JSON.stringify(args)+'\n',{flag:'wx'});
  const environment={};for(const [name,value]of Object.entries(env)){assert.equal(typeof value,'string');environment[name]=value;}
- const request={schemaVersion:1,kind:'ymcc-raw-program-v1',cancelNonce:nonce,cwd,arguments:{...pin(argumentsFile)},environment,sources:sourceInputs,tools:toolArtifacts,...(toolCleanupPolicy?{toolCleanupPolicy}:{}),maxOutputBytes:16*1024*1024};
+ const allocatedBudgetMs=deadlineEpochMs-allocatedAtEpochMs,requestCreatedEpochMs=Date.now();
+ for(const value of [allocatedAtEpochMs,parentStartedAtEpochMs,parentBudgetMs,originalBudgetMs,parentRemainingBeforeMs,allocatedBudgetMs,deadlineEpochMs])assert(Number.isSafeInteger(value)&&value>0,'RAW_PRECISE_ALLOCATION_REQUIRED');
+ assert(allocatedAtEpochMs>=parentStartedAtEpochMs&&requestCreatedEpochMs>=allocatedAtEpochMs,'RAW_ALLOCATION_CLOCK_ORDER');
+ assert.equal(parentRemainingBeforeMs,parentBudgetMs-(allocatedAtEpochMs-parentStartedAtEpochMs));assert.equal(allocatedBudgetMs,Math.min(originalBudgetMs,parentRemainingBeforeMs),'RAW_ALLOCATION_MISMATCH');
+ const budget={schemaVersion:1,parentStartedAtEpochMs,parentBudgetMs,allocatedAtEpochMs,requestCreatedEpochMs,originalBudgetMs,allocatedBudgetMs,parentRemainingBeforeMs,deadlineEpochMs,cleanupReserveMs};
+ const request={schemaVersion:1,kind:'ymcc-raw-program-v1',budget,cancelNonce:nonce,cwd,arguments:{...pin(argumentsFile)},environment,sources:sourceInputs,tools:toolArtifacts,...(toolCleanupPolicy?{toolCleanupPolicy}:{}),maxOutputBytes:16*1024*1024};
  fs.writeFileSync(requestFile,JSON.stringify(request)+'\n',{flag:'wx'});
  const launchArgs=['-NoLogo','-NoProfile','-NonInteractive','-File',host,'-RawProgram','-ProgramPath',program,'-ArgumentsPath',argumentsFile,'-RawDirectory',directory,'-RawRequestPath',requestFile,'-RawRequestSha256',hash(requestFile),'-OwnerProcessId',String(process.pid),'-OwnerStartTicks',String(ownerStartTicks),'-DeadlineEpochMs',String(deadlineEpochMs),'-CleanupReserveMs',String(cleanupReserveMs)];
- const requested=Date.now(),child=spawn(powershell,launchArgs,{cwd,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+ const requested=Date.now();assert(requested>=requestCreatedEpochMs&&requested<deadlineEpochMs,'RAW_PREPARATION_EXHAUSTED_DEADLINE');
+ const child=spawn(powershell,launchArgs,{cwd,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
  const helperOut=[],helperErr=[];let helperBytes=0,helperError=null,done=false,cancelWritten=false;
  const collect=(rows,data)=>{helperBytes+=data.length;if(helperBytes<=1024*1024)rows.push(Buffer.from(data));};
  child.stdout.on('data',data=>collect(helperOut,data));child.stderr.on('data',data=>collect(helperErr,data));
@@ -57,7 +115,7 @@ export function startOwnedRawProducer({id,program,args,cwd,env,host,powershell,o
    const born=Number((BigInt(terminal.business.startFileTimeUtc)-116444736000000000n)/10000n);
    assert(born>=requested-100&&born<=finish,'RAW_BUSINESS_START_WINDOW');
    let completion=null;try{completion=verifyRawProducerCompletion(terminal,toolCleanupPolicy,toolArtifacts);}catch{}const natural=completion!==null;
-   proof={id,pid:terminal.business.pid,startedAt:new Date(born).toISOString(),finishedAt:new Date(terminal.finishedEpochMs).toISOString(),program:terminal.business.program,arguments:args,cwd,originalBudgetMs,timeoutMs:Math.max(1,deadlineEpochMs-requested),parentRemainingBeforeMs,budgetClipped:deadlineEpochMs-requested<originalBudgetMs,elapsedMs:finish-requested,exitCode:terminal.businessExitCode,signal:null,error:natural?null:'RAW_PRODUCER_'+terminal.reason,timedOut:terminal.timedOut===true,outputTruncated:terminal.outputLimitExceeded===true,stdout:pin(stdoutPath),stderr:pin(stderrPath),rawExecution:{terminal:pin(terminalFile),request:pin(requestFile),arguments:pin(argumentsFile),helperSource:pin(host),launcher:terminal.launcher,helperPid:child.pid,helperExitCode:helperExit,helperSignal,actualBusiness:terminal.business,completion,job:terminal.job,logs:terminal.logs,sourceBefore:terminal.declaredInputsBefore,sourceAfter:terminal.declaredInputsAfter,collectionComplete:true,cancelled:terminal.cancelled===true,ownerLost:terminal.ownerLost===true,residualDescendants:terminal.residualDescendants===true}};
+   proof={id,pid:terminal.business.pid,startedAt:new Date(born).toISOString(),finishedAt:new Date(terminal.finishedEpochMs).toISOString(),program:terminal.business.program,arguments:args,cwd,originalBudgetMs,timeoutMs:Math.max(1,deadlineEpochMs-requested),parentRemainingBeforeMs,budgetClipped:allocatedBudgetMs<originalBudgetMs,elapsedMs:finish-requested,exitCode:terminal.businessExitCode,signal:null,error:natural?null:'RAW_PRODUCER_'+terminal.reason,timedOut:terminal.timedOut===true,outputTruncated:terminal.outputLimitExceeded===true,stdout:pin(stdoutPath),stderr:pin(stderrPath),rawExecution:{budget,launchRequestedEpochMs:requested,terminal:pin(terminalFile),request:pin(requestFile),arguments:pin(argumentsFile),helperSource:pin(host),launcher:terminal.launcher,helperPid:child.pid,helperExitCode:helperExit,helperSignal,actualBusiness:terminal.business,completion,job:terminal.job,logs:terminal.logs,sourceBefore:terminal.declaredInputsBefore,sourceAfter:terminal.declaredInputsAfter,collectionComplete:true,cancelled:terminal.cancelled===true,ownerLost:terminal.ownerLost===true,residualDescendants:terminal.residualDescendants===true}};
   }catch(caught){error=String(caught.stack??caught);proof={id,pid:terminal?.business?.pid??null,startedAt:new Date(requested).toISOString(),finishedAt:new Date(finish).toISOString(),program:pin(program),arguments:args,cwd,originalBudgetMs,timeoutMs:Math.max(1,deadlineEpochMs-requested),parentRemainingBeforeMs,elapsedMs:finish-requested,exitCode:null,signal:null,error,timedOut:terminal?.timedOut===true,outputTruncated:false,rawExecution:{terminal:fs.existsSync(terminalFile)?pin(terminalFile):null,helperPid:child.pid,helperExitCode:helperExit,helperSignal,collectionComplete:false}};}
   resolve(proof);
  }));

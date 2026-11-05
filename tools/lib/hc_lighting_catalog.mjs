@@ -1,4 +1,4 @@
-import {lightingSourceAdapterTypes,lightingSourceAdapterType,validateSuperJoyExtension,validateX2MiniExtension} from './hc_lighting_source_adapters.mjs';
+import {lightingSourceAdapterTypes,lightingSourceAdapterType,validateSuperJoyExtension,validateX2MiniExtension,validateApexConsumerOverride} from './hc_lighting_source_adapters.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -55,6 +55,27 @@ export function buildLightingArtifacts({repo,catalog,policy,main}){
   function availableFactoryDescendants(n){return catalog.devices.filter(c=>c.factoryInstantiable&&c.inheritance.includes(n)).map(c=>c.deviceId);}
   return {deviceId:d.deviceId,deviceClass:d.consumerClass,name:d.name,brightness,secondColor:consumerSecondColor,...secondColorFacts,declaredEffects,presetDeclared,presetAvailable,statusAvailable:implemented('SetLedStatus')&&!policy.disabledActions.some(r=>r.device===d.name&&r.action==='status'),statusTransportDisabled:implemented('SetLedStatus')&&policy.disabledActions.some(r=>r.device===d.name&&r.action==='status'),nativeAliasTargets,methodSources:methods,independent:independentFor(d.name)};
  });
+ // Consumer overrides are source-bound corrections to existing rows, never extensions.
+ const reviewedConsumerOverrides=policy.reviewedConsumerOverrides;
+ if(!Array.isArray(reviewedConsumerOverrides)||reviewedConsumerOverrides.length!==1)throw Error('LIGHTING_APEX_OVERRIDE_REQUIRED');
+ for(const rule of reviewedConsumerOverrides){
+  const device=by.get(rule.name),row=rows.find(row=>row.name===rule.name);
+  const facts=validateApexConsumerOverride(repo,rule,device,row);
+  const frozenConsumer={brightness:row.brightness,secondColor:row.secondColor,declaredEffects:row.declaredEffects,
+   presetDeclared:row.presetDeclared,presetAvailable:row.presetAvailable,statusAvailable:row.statusAvailable,
+   statusTransportDisabled:row.statusTransportDisabled,methodSources:row.methodSources};
+  Object.assign(row,{brightness:rule.brightness,secondColor:rule.secondColor,sourceDeclaredSecondColor:row.secondColor,
+   consumerSecondColor:rule.secondColor,declaredEffects:rule.ledEffects.map(effect=>effectNames[effect]),
+   presetDeclared:rule.presetDeclared,presetAvailable:rule.presetAvailable,statusAvailable:rule.statusAvailable,
+   statusTransportDisabled:rule.statusTransportDisabled,offAvailable:rule.offAvailable,fixedSpeed:rule.fixedSpeed,
+   consumerFixedSpeed:rule.fixedSpeed,origin:'reviewed-consumer-override',sourceAdapter:rule.sourceAdapter,
+   sourcePins:rule.sourcePins,sourceDependencies:rule.sourceDependencies,consumerSources:rule.consumerSources,
+   semanticSourceFacts:facts,frozenConsumer,requestLimits:rule.requestLimits});
+  // A different reviewed consumer cannot inherit another row's execution identity.
+  // Keep methodSources and frozenConsumer as frozen HC provenance, not HID methods.
+  for(const other of rows)if(other!==row&&other.nativeAliasTargets.includes(row.deviceId))
+   other.nativeAliasTargets=other.nativeAliasTargets.filter(id=>id!==row.deviceId);
+ }
  const source=fs.readFileSync(path.join(repo,'deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1.cs'),'utf8'),list=source.match(/LEDPresets\s*=\s*\[([\s\S]*?)\];/);
  if(!list)throw Error('MISSING_NAMED_LED_PRESETS');
  const presets=[...list[1].matchAll(/new\s*\(\s*"([^"]+)"\s*,\s*"[^"]+"\s*,\s*(0x[0-9A-Fa-f]+|\d+)\s*\)/g)].map((m,i)=>({id:m[1],label:'预设 '+(i+1),value:Number(m[2])}));
@@ -98,16 +119,32 @@ export function buildLightingArtifacts({repo,catalog,policy,main}){
   extensionNative.push({row:extensionRows.at(-1),presetArray:'k'+ext.name+'PresetIds',presets:extPresets});
  }
  const allRows=[...rows,...extensionRows];
+ // Effective consumer facts do not add frozen declared capability bits or admit rows.
+ const consumerFixedSpeed=policy.consumerFixedSpeed===undefined?[]:policy.consumerFixedSpeed;
+ if(!Array.isArray(consumerFixedSpeed))throw Error('LIGHTING_CONSUMER_FIXED_SPEED_POLICY');
+ const speedNames=new Set(),admittedByName=new Map(allRows.map(row=>[row.name,row]));
+ for(const rule of consumerFixedSpeed){
+  if(!rule||!Array.isArray(rule.devices)||rule.devices.length===0||rule.consumerFixedSpeed!==true||typeof rule.methodOwner!=='string'||!/^[a-f0-9]{64}$/.test(rule.methodSha256)||!Array.isArray(rule.admittedEffects))throw Error('LIGHTING_CONSUMER_FIXED_SPEED_RULE');
+  for(const name of rule.devices){
+   if(typeof name!=='string'||speedNames.has(name))throw Error('LIGHTING_CONSUMER_FIXED_SPEED_DUPLICATE_OR_INVALID: '+name);
+   const row=admittedByName.get(name);
+   if(!row)throw Error('LIGHTING_CONSUMER_FIXED_SPEED_NOT_ADMITTED: '+name);
+   const source=row.methodSources.SetLedColor,admittedEffects=row.declaredEffects.filter(effect=>effect!=='preset'||row.presetAvailable);
+   if(source?.owner!==rule.methodOwner||source.sourceSha256!==rule.methodSha256||JSON.stringify(admittedEffects)!==JSON.stringify(rule.admittedEffects))throw Error('LIGHTING_CONSUMER_FIXED_SPEED_SOURCE_OR_EFFECTS: '+name);
+   speedNames.add(name);row.consumerFixedSpeed=true;row.fixedSpeed=true;
+  }
+ }
  for(const route of policy.nativeAdapters??[])if(!["rog-aura","msi-claw-native-hid"].includes(route.id)||route.devices.some(n=>!rows.some(r=>r.name===n)))throw Error("UNREVIEWED_NATIVE_LIGHTING_ADAPTER");
- const metadata={schemaVersion:1,registeredClasses:rows.length,rows,presets,frozenRegisteredClasses:rows.length,reviewedExtensionRows:extensionRows.length,allRegisteredClasses:allRows.length,extensionRows,extensionModels:extensionRows.map(r=>({name:r.name,deviceId:r.deviceId,deviceClass:r.deviceClass,sourceFile:r.sourceFile,sourceSha256:r.sourceSha256,sourcePin:r.sourcePin,sourceAdapter:r.sourceAdapter,sourceDependencies:r.sourceDependencies,...(r.consumerSources?{consumerSources:r.consumerSources}:{}),presetIds:r.presetIds,requestLimits:r.requestLimits})),independentCore:policy.independentCore,nativeBaseAliases:policy.nativeBaseAliases,disabledActions:policy.disabledActions,secondColorExclusions,brightnessCompatibility:policy.brightnessCompatibility??[],nativeAdapters:policy.nativeAdapters??[]};
+ const metadata={schemaVersion:1,registeredClasses:rows.length,rows,presets,frozenRegisteredClasses:rows.length,reviewedExtensionRows:extensionRows.length,allRegisteredClasses:allRows.length,extensionRows,extensionModels:extensionRows.map(r=>({name:r.name,deviceId:r.deviceId,deviceClass:r.deviceClass,sourceFile:r.sourceFile,sourceSha256:r.sourceSha256,sourcePin:r.sourcePin,sourceAdapter:r.sourceAdapter,sourceDependencies:r.sourceDependencies,...(r.consumerSources?{consumerSources:r.consumerSources}:{}),presetIds:r.presetIds,requestLimits:r.requestLimits})),independentCore:policy.independentCore,nativeBaseAliases:policy.nativeBaseAliases,disabledActions:policy.disabledActions,secondColorExclusions,consumerFixedSpeed,reviewedConsumerOverrides,brightnessCompatibility:policy.brightnessCompatibility??[],nativeAdapters:policy.nativeAdapters??[]};
  metadata.catalogSha256=createHash('sha256').update(JSON.stringify({sourceBaseline:catalog.sourceBaseline,runtimeAliasSource:catalog.runtimeAliasSource,metadata})).digest('hex');
  const extensionClasses=extensionRows.map(r=>q(r.deviceClass)).join(', ');
  const nativeIdentity=['inline constexpr const char* kExtensionLightingClasses[] = {'+extensionClasses+'};','inline bool identityMatches(std::string_view actual, std::string_view expected) noexcept {','    for (const char* cls : kExtensionLightingClasses) if (actual == cls && expected == cls) return true;','    const auto* a=ymcc::capabilities::find(actual); const auto* e=ymcc::capabilities::find(expected);','    if (!a || !e) return false;','    if (a->deviceId == e->deviceId) return true;',...rows.filter(r=>r.nativeAliasTargets.length).map(r=>'    if (e->deviceId == '+q(r.deviceId)+') return '+r.nativeAliasTargets.map(id=>'a->deviceId == '+q(id)).join(' || ')+';'),'    return false;','}'].join('\n');
  const enumBits=names=>names.length?names.map(n=>'HcSourceLedEffect.'+Object.keys(effectNames).find(k=>effectNames[k]===n)).join(' | '):'HcSourceLedEffect.None';
  const capBits=names=>names.length?names.map(n=>'HcSourceCapability.'+n).join(' | '):'HcSourceCapability.None';
+ const managedConsumerProperties=r=>{const props=[];if(r.sourceAdapter)props.push('SourceAdapter = LightingSourceAdapter.'+lightingSourceAdapterTypes[r.sourceAdapter]);if(r.sourceAdapter||r.fixedSpeed)props.push('FixedSpeed = '+String(!!r.fixedSpeed));return props.length?' { '+props.join(', ')+' }':'';};
  const extensionCs=extensionRows.flatMap(r=>[
   '        (new HcDeviceDescriptor('+[q(r.deviceId),q(r.deviceClass),q(r.deviceClass),q(r.family),q(r.sourceFile),q(r.sourceSha256),'false',capBits(r.capabilities),capBits(r.capabilities),enumBits(r.declaredEffects),enumBits(r.declaredEffects)].join(', ')+'),',
-  '         new LightingCapabilityDescriptor('+[q(r.deviceId),String(r.brightness),String(r.secondColor),enumBits(r.declaredEffects),String(r.statusAvailable),String(r.presetDeclared),String(r.presetAvailable),r.independent?'true':'false',String(r.statusTransportDisabled)].join(', ')+') { SourceAdapter = LightingSourceAdapter.'+lightingSourceAdapterTypes[r.sourceAdapter]+' }),'
+  '         new LightingCapabilityDescriptor('+[q(r.deviceId),String(r.brightness),String(r.secondColor),enumBits(r.declaredEffects),String(r.statusAvailable),String(r.presetDeclared),String(r.presetAvailable),r.independent?'true':'false',String(r.statusTransportDisabled)].join(', ')+')'+managedConsumerProperties(r)+'),'
  ]).join('\n');
  const extensionPresetsCs=extensionRows.flatMap(r=>r.presets.map(p=>'        ('+q(r.deviceId)+', '+q(p.id)+', 0x'+p.value.toString(16)+'),')).join('\n');
  const extensionCsBlock=extensionRows.length?['    internal static readonly (HcDeviceDescriptor Device, LightingCapabilityDescriptor Consumer)[] GeneratedExtensionRoutes = {',extensionCs,'    };','    internal static readonly (string DeviceId, string Id, int Value)[] GeneratedExtensionPresets = {',extensionPresetsCs,'    };']:[];
@@ -116,7 +153,7 @@ export function buildLightingArtifacts({repo,catalog,policy,main}){
   [r.independent.brightness?'action == "brightness"':null,r.independent.off?'action == "off"':null,
    '(action == "color" && ('+r.independent.color.map(effect=>'effect == '+q(effect)).join(' || ')+'))'].filter(Boolean).join(' || ')+';'),
   '        return false;','    }'];
- const cs=['// Generated by tools/hc_capability_catalog_generate.mjs. Do not edit.','using System;','namespace YeManFanBackend.Capabilities;','public static partial class HcLightingCapabilityCatalog','{','    public const string CatalogSha256 = '+q(metadata.catalogSha256)+';','    private static readonly LightingCapabilityDescriptor[] GeneratedRoutes = {',...rows.map(r=>'        new('+[q(r.deviceId),String(r.brightness),String(r.secondColor),enumBits(r.declaredEffects),String(r.statusAvailable),String(r.presetDeclared),String(r.presetAvailable),r.independent?'true':'false',String(r.statusTransportDisabled)].join(', ')+'),'),'    };','    private static readonly string[] GeneratedPresetIds = { '+presets.map(p=>q(p.id)).join(', ')+' };',...extensionCsBlock,...independentGate,'    private static readonly (string Expected, string Actual)[] GeneratedIdentityAliases = {',...rows.flatMap(r=>r.nativeAliasTargets.map(actual=>'        ('+q(r.deviceId)+', '+q(actual)+'),')),'    };','    public const string IndependentProvider = '+q(policy.independentCore.provider)+';','}',''].join('\n');
+ const cs=['// Generated by tools/hc_capability_catalog_generate.mjs. Do not edit.','using System;','namespace YeManFanBackend.Capabilities;','public static partial class HcLightingCapabilityCatalog','{','    public const string CatalogSha256 = '+q(metadata.catalogSha256)+';','    private static readonly LightingCapabilityDescriptor[] GeneratedRoutes = {',...rows.map(r=>'        new('+[q(r.deviceId),String(r.brightness),String(r.secondColor),enumBits(r.declaredEffects),String(r.statusAvailable),String(r.presetDeclared),String(r.presetAvailable),r.independent?'true':'false',String(r.statusTransportDisabled)].join(', ')+')'+managedConsumerProperties(r)+','),'    };','    private static readonly string[] GeneratedPresetIds = { '+presets.map(p=>q(p.id)).join(', ')+' };',...extensionCsBlock,...independentGate,'    private static readonly (string Expected, string Actual)[] GeneratedIdentityAliases = {',...rows.flatMap(r=>r.nativeAliasTargets.map(actual=>'        ('+q(r.deviceId)+', '+q(actual)+'),')),'    };','    public const string IndependentProvider = '+q(policy.independentCore.provider)+';','}',''].join('\n');
  function setFunction(name,entries){return 'static const std::vector<std::string>& '+name+'() {\n    // Generated from the unified HC catalog; runtime IO remains consumer-owned.\n    static const std::vector<std::string> s_set = {\n'+entries.map(r=>'        '+q(r.deviceClass)+',').join('\n')+'\n    };\n    return s_set;\n}';}
  const groups=new Map();for(const row of allRows){const key=row.declaredEffects.join(',');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
  const effectFunction='static std::vector<std::string> ymccDeviceClassLedEffects(const std::string& deviceClass) {\n    // Generated declared effects; preset transport availability is a separate gate.\n'+[...groups].map(([key,group])=>'    if ('+group.map(r=>'deviceClass == '+q(r.deviceClass)).join(' ||\n        ')+')\n        return {'+key.split(',').map(q).join(', ')+'};').join('\n')+'\n    return {};\n}';
@@ -133,12 +170,12 @@ export function buildLightingArtifacts({repo,catalog,policy,main}){
  const nativeRouteRows=catalog.devices.map(d=>{
   const r=rows.find(row=>row.deviceId===d.deviceId);if(!r)return '    {false, false, false, false, NativeProvider::Helper, 0},';
   const provider=policy.nativeAdapters?.find(route=>route.devices.includes(r.name))?.id;
-  return '    {'+[true,r.brightness,r.presetAvailable,r.presetDeclared&&!r.presetAvailable,'NativeProvider::'+(provider==='rog-aura'?'RogAura':provider==='msi-claw-native-hid'?'MsiHid':'Helper'),r.declaredEffects.reduce((bits,n)=>n==='preset'?bits:bits|1<<colorNames.indexOf(n),0),!!r.fixedSpeed,!!r.presetSecondColor].join(', ')+'}, // '+r.name;
+  return '    {'+[true,r.brightness,r.presetAvailable,r.presetDeclared&&!r.presetAvailable,'NativeProvider::'+(provider==='rog-aura'?'RogAura':provider==='msi-claw-native-hid'?'MsiHid':'Helper'),r.declaredEffects.reduce((bits,n)=>n==='preset'?bits:bits|1<<colorNames.indexOf(n),0),!!r.fixedSpeed,!!r.presetSecondColor,...(r.sourceAdapter?['SourceAdapter::'+lightingSourceAdapterTypes[r.sourceAdapter]]:[])].join(', ')+'}, // '+r.name;
  });
  const nativeRoutes=[
  'enum class NativeProvider : unsigned char { Helper, RogAura, MsiHid };',
-  'enum class SourceAdapter : unsigned char { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid };',
- 'struct Route {bool registered, brightness, preset, declaredPresetWithoutTransport; NativeProvider provider; unsigned colorEffects; bool fixedSpeed = false, presetSecondColor = false;};',
+  'enum class SourceAdapter : unsigned char { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid, ApexHidV2 };',
+ 'struct Route {bool registered, brightness, preset, declaredPresetWithoutTransport; NativeProvider provider; unsigned colorEffects; bool fixedSpeed = false, presetSecondColor = false; SourceAdapter sourceAdapter = SourceAdapter::FrozenHc;};',
  '// Aligned to the shared identity table: one binary identity lookup, then constant-time operation/provider selection.',
  'inline constexpr std::array<Route, '+catalog.devices.length+'> routes = {{',...nativeRouteRows,' }};',
  'inline const Route* resolve(const ymcc::capabilities::Device* device) noexcept {',
@@ -151,6 +188,11 @@ export function buildLightingArtifacts({repo,catalog,policy,main}){
  ...extensionNative.map(ext=>'    {'+q(ext.row.deviceClass)+', '+q(ext.row.deviceId)+', '+ext.presetArray+'.data(), '+ext.presets.length+', SourceAdapter::'+lightingSourceAdapterTypes[ext.row.sourceAdapter]+', {'+[true,ext.row.brightness,ext.row.presetAvailable,ext.row.presetDeclared&&!ext.row.presetAvailable,'NativeProvider::Helper',ext.row.declaredEffects.reduce((bits,n)=>n==='preset'?bits:bits|1<<colorNames.indexOf(n),0),!!ext.row.fixedSpeed,!!ext.row.presetSecondColor].join(', ')+'}}, // '+ext.row.name),
  '}};',
  'inline SourceAdapter sourceAdapter(std::string_view cls) noexcept {',
+ ...rows.filter(r=>r.sourceAdapter).flatMap(r=>[
+  '    if (const auto* device = ymcc::capabilities::find(cls); device && device->deviceId == '+q(r.deviceId)+') {',
+  '        const auto* route = resolve(device);',
+  '        return route ? route->sourceAdapter : SourceAdapter::FrozenHc;',
+  '    }']),
   '    for (const auto& row : extensionRoutes) if (cls == row.deviceClass) return row.sourceAdapter;',
   '    return SourceAdapter::FrozenHc;',
   '}',

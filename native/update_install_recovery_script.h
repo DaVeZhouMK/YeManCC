@@ -44,7 +44,21 @@ function Assert-YmccRecoveryDocument($Journal){
     foreach($key in @('launcherPid','helperPid')){if($Journal.PSObject.Properties[$key] -and !(Test-YmccRecoveryInteger $Journal.$key ([uint32]::MaxValue))){throw 'UPDATE_RECOVERY_PID_INVALID'}}
     foreach($key in @('launcherCreation','helperCreation')){if($Journal.PSObject.Properties[$key] -and ($Journal.$key -isnot [string] -or $Journal.$key -cnotmatch '^[0-9]{1,20}$')){throw 'UPDATE_RECOVERY_CREATION_INVALID'}}
 }
+function Test-YmccRecoverySharingViolation($ErrorRecord,[switch]$Replacing){
+    $exception=$ErrorRecord.Exception
+    while($exception.InnerException){$exception=$exception.InnerException}
+    $code=$exception.HResult -band 65535
+    return ($code -in @(32,33) -or ($Replacing -and $code -in @(5,1175)))
+}
 function Get-YmccRecoverySnapshot([string]$Path){
+    for($attempt=0;$attempt -lt 6;$attempt++){
+        try{return (Get-YmccRecoverySnapshotOnce $Path)}catch{
+            if(!(Test-YmccRecoverySharingViolation $_) -or $attempt -eq 5){throw}
+            Start-Sleep -Milliseconds 50
+        }
+    }
+}
+function Get-YmccRecoverySnapshotOnce([string]$Path){
     Assert-YmccRecoveryAcl (Split-Path -Parent $Path);Assert-YmccRecoveryAcl $Path
     if(([IO.File]::GetAttributes($Path) -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0){throw 'UPDATE_RECOVERY_NOT_REGULAR'}
     $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
@@ -73,6 +87,16 @@ function Get-YmccInstallJournal {
 function Test-YmccRecoveryBytes([byte[]]$Left,[byte[]]$Right){
     if($Left.Length -ne $Right.Length){return $false};for($i=0;$i -lt $Left.Length;$i++){if($Left[$i] -ne $Right[$i]){return $false}};return $true
 }
+function Write-YmccRecoveryFile([string]$Path,[byte[]]$Bytes) {
+    # CreateNew never replaces a pre-existing backup. The protected parent is
+    # still required; apply the explicit file ACL before writing journal bytes.
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+        Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop;Assert-YmccRecoveryAcl $Path
+        $stream.Write($Bytes,0,$Bytes.Length);$stream.Flush($true)
+    }finally{$stream.Dispose()}
+}
 function Set-YmccInstallJournal([string]$Phase) {
     $before=Get-YmccRecoverySnapshot $recoveryJournal;$j=Get-YmccInstallJournal
     $current=Get-YmccRecoverySnapshot $recoveryJournal
@@ -89,18 +113,27 @@ function Set-YmccInstallJournal([string]$Phase) {
     Assert-YmccRecoveryDocument $j;$text=$j|ConvertTo-Json -Depth 32 -Compress
     Initialize-YmccModuleJournalJson;[Ymcc.ModuleJournalJson]::AssertObject($text)
     $bytes=[Text.UTF8Encoding]::new($false,$true).GetBytes($text);if($bytes.Length -gt 65536){throw 'UPDATE_RECOVERY_JOURNAL_SIZE_INVALID'}
-    $temporary=$recoveryJournal+'.tmp-'+[guid]::NewGuid().ToString('N');$backup=$recoveryJournal+'.ymcc-before-'+[guid]::NewGuid().ToString('N')
+    $temporary=$recoveryJournal+'.tmp-'+[guid]::NewGuid().ToString('N')
     if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_SOURCE_CHANGED'}
-    [IO.File]::Copy($recoveryJournal,$backup,$false);Assert-YmccRecoveryAcl $backup
-    if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $backup).Bytes)){throw 'UPDATE_RECOVERY_PREIMAGE_UNCONFIRMED'}
-    $stream=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-    try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
-    $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)')
-    Set-Acl -LiteralPath $temporary -AclObject $acl -ErrorAction Stop;Assert-YmccRecoveryAcl $temporary
-    if(!(Test-YmccRecoveryBytes $bytes (Get-YmccRecoverySnapshot $temporary).Bytes)){throw 'UPDATE_RECOVERY_TEMP_UNCONFIRMED'}
-    if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_SOURCE_CHANGED'}
-    Move-Item -LiteralPath $temporary -Destination $recoveryJournal -Force -ErrorAction Stop
-    if(!(Test-YmccRecoveryBytes $bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_READBACK_FAILED'}
+    try{
+        Write-YmccRecoveryFile $temporary $bytes
+        if(!(Test-YmccRecoveryBytes $bytes (Get-YmccRecoverySnapshot $temporary).Bytes)){throw 'UPDATE_RECOVERY_TEMP_UNCONFIRMED'}
+        for($attempt=0;$attempt -lt 6;$attempt++){
+            try{
+                if(!(Test-YmccRecoveryBytes $before.Bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_SOURCE_CHANGED'}
+                # Replace publishes on the same volume without deleting the old
+                # authority first. Never fall back to remove-then-move.
+                [IO.File]::Replace($temporary,$recoveryJournal,[NullString]::Value)
+                break
+            }catch{
+                if(!(Test-YmccRecoverySharingViolation $_ -Replacing) -or $attempt -eq 5){throw}
+                Start-Sleep -Milliseconds 50
+            }
+        }
+        if(!(Test-YmccRecoveryBytes $bytes (Get-YmccRecoverySnapshot $recoveryJournal).Bytes)){throw 'UPDATE_RECOVERY_READBACK_FAILED'}
+    }finally{
+        if([IO.File]::Exists($temporary)){try{[IO.File]::Delete($temporary)}catch{Write-Warning 'UPDATE_RECOVERY_TEMP_CLEANUP_PENDING'}}
+    }
 }
 )YMCCRECOVERY";}
 }

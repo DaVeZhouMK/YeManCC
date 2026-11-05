@@ -79,5 +79,17 @@ try {
   expect(rectReads,2,'one navigation measures each rectangle once');expect(styleReads,2,'one navigation measures each style once');
   shifted=-240;
   expect(nearestSpatialTarget([measuredA,measuredB],measuredA,{dx:1,dy:0},createSpatialMeasurements()),null,'next navigation sees moved layout instead of stale geometry');
+  // A pane bridge is explicit. Ordinary same-row navigation remains strict.
+  const bridgeScope=rectangle('bridge-scope',0,0),bridgePane=rectangle('bridge-list',0,0),editPane=rectangle('bridge-edit',400,0);
+  bridgeScope.hasAttribute=(name:string)=>name==='data-gp-pane-bridge';
+  Object.assign(bridgePane,{dataset:{gpPane:'list'}});Object.assign(editPane,{dataset:{gpPane:'edit'}});
+  const bridgeA=rectangle('bridge-a',0,0),bridgeB=rectangle('bridge-b',120,0),offRow=rectangle('off-row',420,70),outsideScope=rectangle('outsideScope',550,0);
+  for(const el of [bridgeA,bridgeB]){const original=el.closest.bind(el);el.closest=((selector:string)=>selector==='[data-gp-scope]'?bridgeScope:selector==='[data-gp-pane]'?bridgePane:original(selector)) as typeof el.closest;}
+  {const original=offRow.closest.bind(offRow);offRow.closest=((selector:string)=>selector==='[data-gp-scope]'?bridgeScope:selector==='[data-gp-pane]'?editPane:original(selector)) as typeof offRow.closest;}
+  expect(nearestSpatialTarget([bridgeA,bridgeB,offRow,outsideScope],bridgeA,{dx:1,dy:0}),bridgeB,'same row card wins before cross-pane bridge');
+  expect(nearestSpatialTarget([bridgeA,bridgeB,offRow,outsideScope],bridgeB,{dx:1,dy:0}),offRow,'blank row can bridge to nearest control in other pane');
+  expect(nearestSpatialTarget([bridgeA,bridgeB,offRow,outsideScope],offRow,{dx:-1,dy:0}),bridgeB,'bridge returns to nearest right edge of list');
+  bridgeScope.hasAttribute=()=>false;
+  expect(nearestSpatialTarget([bridgeA,bridgeB,offRow,outsideScope],bridgeB,{dx:1,dy:0}),null,'pane bridge is never enabled for unmarked pages');
 } finally { globalThis.getComputedStyle = previousStyle; }
-console.log('gamepad spatial selftest: 29/29 passed');
+console.log('gamepad spatial selftest: 33/33 passed');

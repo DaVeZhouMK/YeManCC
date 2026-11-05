@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {OWNED_SOURCES,OWNED_INPUTS,ownedToolDeclaration} from './owned-adapter.mjs';
-import {ORIGINAL_CASES,ORIGINAL_SELECTION,ORIGINAL_REGISTRATION_IDS,originalReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
+import {ORIGINAL_CASES,ORIGINAL_SELECTION,ORIGINAL_REGISTRATION_IDS,originalReadyConsumer,originalCommittedReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
 import {resourceZero,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {lockBundledNodeTools,verifyBundledToolScope} from '../bundled-node-tool-authority.mjs';
 const repo=path.resolve(import.meta.dirname,'../../../..');
@@ -73,6 +73,10 @@ if(get('--consumer-native')){
   write(path.join(out,'SOURCE-PINS.json'),report.sourceInputs);write(path.join(out,'TOOL-PINS.json'),report.toolArtifacts);
   const originalCpp=fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8');
   assert.deepEqual([...originalCpp.matchAll(/\btest\("([^"]+)"/g)].map(m=>m[1]).filter(id=>ORIGINAL_REGISTRATION_IDS.includes(id)),ORIGINAL_CASES.map(r=>r.registrationId),'ORIGINAL_SOURCE_REGISTRATIONS_CHANGED');
+  const main=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8'),start=main.indexOf('    case WM_POWER_RESUME_COMMIT:'),begin=main.indexOf('        if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {',start),end=main.indexOf('            ipc_emit("power.resumed"',begin);
+  assert(start>=0&&begin>start&&end>begin,'CURRENT_READY_EXTRACTION_BOUNDARY_CHANGED');const slice=main.slice(begin,end);
+  assert(slice.includes('PowerLifecycle::Ready'),'CURRENT_READY_GUARD_REQUIRED');
+  assert.equal(slice.split('deckySidebarResumeAfterIntent(currentPowerGeneration(),"committed-ready")').length-1,1,'CURRENT_SHARED_READY_CONSUMER_REQUIRED');
   const originalDir=path.join(work,'o');
   const originalRun=run('original-typed',process.execPath,[path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),originalDir],{timeout:135000});
   const raw=read(path.join(originalDir,'typed-runtime-result.json')),originalResult=read(path.join(originalDir,'RESULT.json'));
@@ -81,6 +85,7 @@ if(get('--consumer-native')){
   assert.deepEqual(frozen.files.map(r=>r.path).sort(),[...OWNED_SOURCES].sort(),'ORIGINAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED');
   const originalFrozen=new Map();for(const row of frozen.files){assert.equal(sourcePins.get(row.path)?.sha256,row.sha256);const p=path.join(frozen.source,row.path);assert.equal(sha(p),row.sha256);originalFrozen.set(key(p),row);}
   const readyConsumer=originalReadyConsumer(frozen.source);originalFrozen.set(key(readyConsumer.path),readyConsumer);report.generatedReadyConsumer=readyConsumer;
+  const committedConsumer=originalCommittedReadyConsumer(frozen.source);originalFrozen.set(key(committedConsumer.path),committedConsumer);report.generatedCommittedReadyConsumer=committedConsumer;
   const offlineConsumer=originalOfflineConsumer(frozen.source);originalFrozen.set(key(offlineConsumer.path),offlineConsumer);report.generatedOfflineConsumer=offlineConsumer;
    const managedBackendConsumer=originalManagedBackendConsumer(frozen.source);originalFrozen.set(key(managedBackendConsumer.path),managedBackendConsumer);report.generatedManagedBackendConsumer=managedBackendConsumer;
   report.originalCompilerGraph=validateGraph(path.join(originalDir,'dependencies.json'),originalFrozen);
@@ -96,11 +101,9 @@ if(get('--consumer-native')){
    const target=path.join(source,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(repo,relative),target);assert.equal(sha(target),sourcePins.get(relative).sha256);nativeFrozen.set(key(target),{path:target,sha256:sha(target)});
   }
   const currentReadyConsumer=originalReadyConsumer(source,{write:true});nativeFrozen.set(key(currentReadyConsumer.path),currentReadyConsumer);report.generatedCurrentReadyConsumer=currentReadyConsumer;
+  const currentCommittedConsumer=originalCommittedReadyConsumer(source,{write:true});nativeFrozen.set(key(currentCommittedConsumer.path),currentCommittedConsumer);report.generatedCurrentCommittedReadyConsumer=currentCommittedConsumer;
   const mainStart=originalCpp.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END');assert(mainStart>0&&originalCpp.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END',mainStart+1)<0,'ORIGINAL_PREAMBLE_BOUNDARY_CHANGED');
   const helper=path.join(source,'tools/current-runtime-helpers.inc');fs.writeFileSync(helper,originalCpp.slice(0,mainStart)+'\n');nativeFrozen.set(key(helper),pin(helper));
-  const main=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8'),start=main.indexOf('    case WM_POWER_RESUME_COMMIT:'),begin=main.indexOf('\n',start)+1,end=main.indexOf('            ipc_emit("power.resumed"',begin);
-  assert(start>=0&&end>begin,'CURRENT_READY_EXTRACTION_BOUNDARY_CHANGED');const slice=main.slice(begin,end);
-  for(const fragment of ['PowerLifecycle::Ready','requestPreparationRefresh(currentPowerGeneration())','requestBindingRefresh(currentPowerGeneration())','requestConnectionCheck()'])assert(slice.includes(fragment),'CURRENT_READY_CONSUMER_CHANGED:'+fragment);
   const ready=path.join(source,'tools/current-committed-ready.inc');fs.writeFileSync(ready,'static void consumeCommittedReady(){\n'+slice+'        }\n}\n');nativeFrozen.set(key(ready),pin(ready));
   const crashPolicy=fs.readFileSync(path.join(repo,'tools/decky_sidebar_crash_breaker_selftest.cpp'),'utf8'),policyBegin=crashPolicy.indexOf('static void policy(){'),policyEnd=crashPolicy.indexOf('\nint wmain(',policyBegin);
   assert(policyBegin>=0&&policyEnd>policyBegin,'ORIGINAL_CRASH_POLICY_BOUNDARY_CHANGED');

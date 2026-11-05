@@ -6,7 +6,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 export const oemInputBindingFunctions = ['oemUnifiedInputBindingFor', 'oemBoundChordProfileIdFor', 'oemBoundCatalogForFamily'];
 export function captureOemInputHeaders({repo, out, source}) {
     if (!source.includes('oemUnifiedInputBindingFor(')) return {preamble: '', inputs: [], unchanged: () => true};
-    const files = ['capabilities/HcOemInputCapabilityBinding.h', 'capabilities/hc-device-catalog.generated.h'];
+    const files = ['capabilities/HcOemInputCapabilityBinding.h','capabilities/HcOneXVendorInputContract.h', 'capabilities/hc-device-catalog.generated.h'];
     const inputs = files.map(file => {
         const original = path.join(repo, file), bytes = fs.readFileSync(original);
         const copy = path.join(out, 'oem-input-headers', file);

@@ -8,7 +8,7 @@ import {verifyParentBaselineReference,verifyPackageMaintenanceReference,verifyCu
 import {baselineEnvironment,packageMaintenanceEnvironment} from '../global/decky-persistent-lifecycle/baseline-environment.mjs';
 import {PARENT_ID} from '../global/decky-persistent-lifecycle/current-parent-global.mjs';
 import {simulationCorePath} from '../global/release-host-environment.mjs';
-const repo=path.resolve(import.meta.dirname,'../../..'),root=path.join(simulationCorePath(),'Evidence/FixtureIntake-20261030/Continuation-20261031/BaselineReuse-20261031/Controls');fs.mkdirSync(root,{recursive:true});
+const repo=path.resolve(import.meta.dirname,'../../..'),controlCore=path.resolve(simulationCorePath()),root=process.env.YMCC_BASELINE_REFERENCE_CONTROL_ROOT?path.resolve(process.env.YMCC_BASELINE_REFERENCE_CONTROL_ROOT):path.join(controlCore,'Evidence/FixtureIntake-20261030/Continuation-20261031/BaselineReuse-20261031/Controls');assert(root.toLowerCase().startsWith(controlCore.toLowerCase()+path.sep),'REFERENCE_CONTROL_ROOT_MUST_STAY_IN_CORE');fs.mkdirSync(root,{recursive:true});
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),pin=file=>({path:file,sha256:hash(file),bytes:fs.statSync(file).size}),write=(f,v)=>{fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,JSON.stringify(v,null,2)+'\n');};
 // Inert JSON/source fixtures validate bindings only; none is an original product acceptance.
 function fixture(){
@@ -65,7 +65,7 @@ try{. $actual}catch{if($_.Exception.Message -ne 'ORIGINAL_PARENT_FAIL'){throw};$
 // INERT metadata admission controls only. Owned text files named .exe are never executed.
 // Extend the existing reference tests; no new registered business ID or release parent.
 const inertPackageMutations=[
- {name:'allow-downgrade',expectedCase:'old YMCC package cannot downgrade a recorded newer Loader',expectedFailure:'Expected rejection DOWNGRADE_REFUSED, got '},
+ {name:'skip-incoming-integrity',expectedCase:'package hash mismatch is rejected before any installed mutation',expectedFailure:'Expected rejection PACKAGE_HASH_MISMATCH, got '},
  {name:'no-rollback',expectedCase:'mid-transaction copy failure restores all prior committed files',expectedFailure:'Failed install did not restore exact prior state'},
  {name:'stale-rollback-snapshot',expectedCase:'rollback revalidates every file after its initial snapshot before restoring it',expectedFailure:'Expected rejection ROLLBACK_CONCURRENT_CHANGE, got '}
 ];

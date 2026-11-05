@@ -1059,6 +1059,7 @@ static void oemVendorStackShieldWakeBegin(unsigned long long generation, const c
       g_oemVendorShieldWake.until = now + kOemVendorShieldWakeWindowMs;
       g_oemVendorShieldWake.next = now;
       oemVendorStackShieldWakeRequestLocked(); }
+    msiForceGamepadRequest("wake",0);
     appendNativeLifecycleLog("oem-vendor-stack", {{"state", "wake-guard-started"}, {"generation", generation},
         {"reason", reason ? reason : "wake"}, {"windowMs", kOemVendorShieldWakeWindowMs},
         {"intervalMs", kOemVendorShieldWakeIntervalMs}, {"controllerInputBlocked", false}});
@@ -1118,6 +1119,7 @@ static void oemVendorStackShieldRequest(bool wanted) {
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
       g_oemVendorShieldWanted = accepted;
       if (family == YmccFamily::MsiClaw && oemVendorStackMachineSupported()) g_oemVendorMsiTaskShieldPreferenceSeen = true; }
+    msiForceGamepadShieldChanged(accepted);
     oemVendorStackUpdateIntent("msi-controller-shield", wanted);
 }
 static bool oemVendorStackShieldIsWanted() {
@@ -1156,5 +1158,6 @@ static void oemVendorStackRestore(const char* reason) {
       g_oemVendorStackLastOutcomeKnown = false; g_oemVendorStackLastOutcome = "pending";
       ++g_oemVendorStackRequested; g_oemVendorStackAttempts = 0; g_oemVendorStackRetryAt = 0; }
     std::lock_guard<std::mutex> io(g_oemVendorStackIoMx);
+    msiForceGamepadExitRestore();
     (void)oemVendorStackRestoreLocked(reason);
 }

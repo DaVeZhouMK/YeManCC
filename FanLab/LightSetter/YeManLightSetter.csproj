@@ -44,4 +44,7 @@
     <Compile Include="../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
     <Compile Include="../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../capabilities/upstream/huesync-7176803c/LICENSE" Link="LICENSE.HueSync.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

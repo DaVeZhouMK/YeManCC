@@ -31,6 +31,10 @@ internal static class Program {
   a.Join();c.Join();
   var inFlight=b.GetType().GetField("temperatureWatchdogInFlight",F);Check(inFlight is null||(int)inFlight.GetValue(b)! == 0,prefix+" running marker is retired");
  }
+ private sealed class DutyDevice {
+  internal readonly List<double> Duties=[]; internal bool Fail;
+  public void SetFanDuty(double duty){if(Fail)throw new IOException("fixture-duty-rejected");Duties.Add(duty);}
+ }
  public static int Main(string[] args){
   var dll=Path.GetFullPath(args[0]);AssemblyLoadContext.Default.Resolving+=(_,n)=>{var p=Path.Combine(Path.GetDirectoryName(dll)!,n.Name+".dll");return File.Exists(p)?AssemblyLoadContext.Default.LoadFromAssemblyPath(p):null;};host=AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);
   T("Program").GetProperty("IsSelfTestProcess",F)!.SetValue(null,true);
@@ -61,6 +65,35 @@ internal static class Program {
    Check((long)Field(b,"temperatureHealthRevision")! ==9L,"detached source callback cannot bless an OFF control session");
    Call(old,"Dispose");Call(current,"Dispose");
   }finally{DisposeBackend(b);}
+  var maximum=Backend();try{
+   var monitor=TemperatureMonitor();Set(maximum,"cpuTemperatureMonitor",monitor);
+   Set(maximum,"activeCurveDuties",Enumerable.Repeat(100d,11).ToArray());Set(maximum,"activeFanProfile",new object());
+   maximum.GetType().GetProperty("IsOpen",F)!.SetValue(maximum,true);
+   Set(maximum,"lastTemperatureTick",Environment.TickCount64-10000);
+   Call(maximum,"TemperatureWatchdogTick");
+   Check(ReferenceEquals(Field(maximum,"cpuTemperatureMonitor"),monitor),"maximum-duty curve cannot be retired by a late no-temperature watchdog");
+   Check(!(bool)Field(maximum,"temperatureStaleSignaled")!,"maximum-duty curve does not claim a temperature-stale restore obligation");
+  }finally{DisposeBackend(maximum);}
+  var direct=Backend();try{
+   var writer=new DutyDevice();Set(direct,"device",writer);direct.GetType().GetProperty("IsOpen",F)!.SetValue(direct,true);
+   var maximumDuties=Enumerable.Repeat(100d,11).ToArray();Set(direct,"activeCurveDuties",maximumDuties);
+   Check(Call(direct,"TrySubmitMaximumFanDuty",maximumDuties,0L) is true&&writer.Duties.SequenceEqual(new[]{100d}),"maximum submits an actual original duty writer without any temperature sample");
+   Check(Field(direct,"cpuTemperatureMonitor") is null&&Field(direct,"temperatureWatchdog") is null&&Field(direct,"lastTemperatureC") is null,"maximum neither starts a temperature poller nor fabricates a temperature");
+   var target=Call(direct,"MonitorTargetForRead");
+   Check(target is not null&&(double)target.GetType().GetProperty("Percent",F)!.GetValue(target)! ==100d&&
+    (bool)target.GetType().GetProperty("TemperatureIndependent",F)!.GetValue(target)!,"maximum publishes an exact current target receipt without a HW temperature");
+   foreach(var values in new[]{Enumerable.Repeat(99d,11).ToArray(),new[]{100d},Enumerable.Range(0,11).Select(i=>i*10d).ToArray(),Enumerable.Repeat(double.NaN,11).ToArray()})
+    Check(Call(direct,"TrySubmitMaximumFanDuty",values,0L) is false&&writer.Duties.Count==1,"lower/normal/invalid curves retain temperature and HC thermal-trip responsibility");
+   foreach(var reason in new[]{"epoch","closed","timeout","not-open"}){
+    Set(direct,"closeWriteBlocked",reason=="closed"?1:0);Set(direct,"operationTimedOut",reason=="timeout");
+    direct.GetType().GetProperty("IsOpen",F)!.SetValue(direct,reason!="not-open");
+    bool refused=false;try{Call(direct,"TrySubmitMaximumFanDuty",maximumDuties,reason=="epoch"?1L:0L);}catch{refused=true;}
+    Check(refused&&writer.Duties.Count==1,"maximum keeps exact lifecycle write refusal: "+reason);
+   }
+   Set(direct,"closeWriteBlocked",0);Set(direct,"operationTimedOut",false);direct.GetType().GetProperty("IsOpen",F)!.SetValue(direct,true);
+   writer.Fail=true;bool failed=false;try{Call(direct,"TrySubmitMaximumFanDuty",maximumDuties,0L);}catch{failed=true;}
+   Check(failed&&writer.Duties.Count==1,"real writer failure is not maximum control success");
+  }finally{DisposeBackend(direct);}
   Check(!AppDomain.CurrentDomain.GetAssemblies().Any(a=>a.GetName().Name=="HandheldCompanion"),"HC assembly is not loaded by this metadata/callback/lock fixture");
   Console.WriteLine(JsonSerializer.Serialize(new{ok=failures.Count==0,checks,failed=failures.Count,failures,scope="actual-host-temperature-watchdog-lock-and-callback-owner-fixtures-no-host-start-hc-load-device-or-cpu-benchmark"},new JsonSerializerOptions{WriteIndented=true}));return failures.Count==0?0:1;
  }

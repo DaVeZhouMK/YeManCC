@@ -87,7 +87,7 @@ export class PerformanceIntentQueue<View> {
         this.confirming=true;this.notify();
         if(this.applying===intent)this.confirmationTimer=this.deps.schedule(()=>this.finishApplying(intent),5000);
       },()=>this.finishApplying(intent));
-    }, this.deps.delayMs ?? 3000);
+    }, this.deps.delayMs ?? 2000);
   }
   choose(field: string, value: PerformanceValue, expected: View) {
     if (this.disposed||this.applying) return;

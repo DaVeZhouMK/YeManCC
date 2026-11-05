@@ -31,6 +31,14 @@ export function normalizeOemInputUsage(raw: unknown): OemInputUsage | null {
       failed: requested && f.pending === false && f.lastOutcomeKnown === true && f.lastOutcomeOk === false },
   };
 }
+/** OneX short-edge receipt: observational only, never a synthetic held state. */
+export function oneXOemObservationKeys(raw: unknown, usage?: OemKeysSnapshot | null): string[] {
+  if (!usage?.deviceClass || !usage.supported || usage.familyId !== 'onexplayer' || !raw || typeof raw !== 'object') return [];
+  const value = raw as Record<string, unknown>;
+  if (value.schemaVersion !== 1 || value.familyId !== usage.familyId || value.deviceClass !== usage.deviceClass || !Array.isArray(value.observedKeys)) return [];
+  const known = new Set(usage.keys.filter(key => key.captureImplemented !== false).map(key => key.keyId));
+  return [...new Set(value.observedKeys.filter((key): key is string => typeof key === 'string' && known.has(key)))];
+}
 export interface ControllerFeatureStatus {
   id: 'back' | 'dedicated' | 'gyro'; name: string; value: string; hint: string;
   tone: 'on' | 'off' | 'warning' | 'pending'; detail: string;
@@ -58,6 +66,12 @@ function keysStatus(id: 'back' | 'dedicated', context: ControllerFeatureContext)
   const implemented = keys.filter(key => key.captureImplemented !== false);
   const observed = implemented.filter(key => context.observedKeys?.includes(key.keyId));
   const names = (list: OemSpecialKey[]) => list.map(key => key.label).join('、');
+  const physicalIds = (list: OemSpecialKey[]) => [...new Set(list.flatMap(key => key.physicalKeyIds?.length ? key.physicalKeyIds : [key.keyId]))];
+  const physical = physicalIds(keys), implementedPhysical = physicalIds(implemented), observedPhysical = physicalIds(observed);
+  const physicalNames = (ids: string[]) => ids.map(id => keys.find(key => key.keyId === id)?.label || id).join('、');
+  const registration = physical.length < keys.length
+    ? '实体按键：' + physicalNames(physical) + '。组合与长按不额外计数。可识别操作：' + names(keys) + '。'
+    : '总库登记：' + names(keys) + '。';
   const output = id !== 'back' ? '专用按键的YMCC快捷动作不要求虚拟手柄。'
     : !context.virtualEnabled ? '本机模式使用现有物理／键盘路线执行YMCC快捷动作；独立背键如何进入游戏仍取决于固件和游戏。'
     : context.persona === 'elite' ? 'Xbox虚拟输出没有独立背键通道；背键仍可用于已有的YMCC快捷动作。'
@@ -75,9 +89,9 @@ function keysStatus(id: 'back' | 'dedicated', context: ControllerFeatureContext)
     ? (usage.runtime.msiWmiState === 3 ? '当前WMI事件订阅失败。' : '当前WMI事件订阅尚未有效。') +
       (qsFallback ? 'QS仍可尝试已有Win+G／Win+Tab兼容采集，是否由本机固件输出需按键确认；CLAW仍需WMI事件。' : '') +
       '是否受官方软件影响需结合日志确认。' : '';
-  const detail = '总库登记：' + names(keys) + '。' + output + mappingDetail + wmiDetail + frontendDetail(usage) + '收到按键信号不等于快捷动作已执行或游戏已收到。';
+  const detail = registration + output + mappingDetail + wmiDetail + frontendDetail(usage) + '收到按键信号不等于快捷动作已执行或游戏已收到。';
   if (!implemented.length) return { ...base, tone: 'warning', value: '采集未接入', hint: '仅有机型登记', detail };
-  if (observed.length) return { ...base, tone: 'on', value: '已收到 ' + observed.length + '/' + keys.length,
+  if (observed.length) return { ...base, tone: 'on', value: '已收到 ' + observedPhysical.length + '/' + physical.length,
     hint: '本页已收到按键信号', detail: '本页当前模式曾收到：' + names(observed) + '。' + detail };
   if (wmiMissing) {
     if (qsFallback) return { ...base, tone: 'warning', value: '待按键确认', hint: 'QS有兼容采集路线', detail };
@@ -89,7 +103,7 @@ function keysStatus(id: 'back' | 'dedicated', context: ControllerFeatureContext)
     return { ...base, value: '等待采集', hint: '键盘采集尚未就绪', detail };
   }
   return { ...base, tone: implemented.length < keys.length ? 'warning' : 'pending', value: '待按键确认',
-    hint: implemented.length < keys.length ? implemented.length + '/' + keys.length + ' 键已接入' : '采集路线已接入', detail };
+    hint: implementedPhysical.length < physical.length ? implementedPhysical.length + '/' + physical.length + ' 键已接入' : '采集路线已接入', detail };
 }
 export function controllerFeatureStatuses(context: ControllerFeatureContext): ControllerFeatureStatus[] {
   const gyro: ControllerFeatureStatus = { id: 'gyro', name: '陀螺仪', value: '需虚拟手柄', hint: '本机模式未接入', tone: 'warning',

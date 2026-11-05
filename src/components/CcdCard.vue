@@ -12,9 +12,9 @@ let active = false, generation = 0;
 const visible = computed(() => capability.value?.supported === true && capability.value.available === true &&
   capability.value.operation === 'process_affinity' && !capability.value.physicalCcdPowerOff);
 const options = computed(() => [
-  { value: 0, label: '使用全部域' },
+  { value: 0, label: 'CCD · 全部' },
   ...(capability.value?.domains ?? []).map(domain => ({
-    value: domain.index, label: `仅使用域 ${domain.index}`, sub: `${domain.logical} 个逻辑处理器`,
+    value: domain.index, label: `CCD · ${domain.index}`, sub: `${domain.logical} 个逻辑处理器`,
   })),
 ]);
 const dirty = computed(() => draft.value !== baseline.value);

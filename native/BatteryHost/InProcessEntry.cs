@@ -47,7 +47,9 @@ internal sealed class InProcessRuntime
     internal static readonly TimeSpan PollingInterval=TimeSpan.FromSeconds(60);
     internal static readonly TimeSpan ShutdownTimeout=TimeSpan.FromMilliseconds(1500);
     readonly object stateGate=new(),operationGate=new();
-    readonly Func<string,string,Func<bool>,HostDomainRouter> createDomains;
+    readonly Func<string,string,Func<bool>,Func<(bool Present,bool Ac,int? Percent)>,HostDomainRouter> createDomains;
+    readonly NativePowerReader powerReader=new();
+    readonly bool requiresNativePowerReader;
     readonly Func<Action,TimeSpan,IDisposable> schedule;
     readonly Func<Action<PowerModes>,Action,IDisposable> subscribe;
     readonly TimeSpan shutdownTimeout;
@@ -56,16 +58,19 @@ internal sealed class InProcessRuntime
     string? powerRoot,stateRoot;
     HostDomainRouter? domains;
     IDisposable? timer,events;
-    Task? cleanup;
-    string? cleanupError;
+    Task<string?>? cleanup;
     volatile bool stopped,suspended;
 
     internal InProcessRuntime(Func<string,string,Func<bool>,HostDomainRouter>? createDomains=null,
         Func<Action,TimeSpan,IDisposable>? schedule=null,
         Func<Action<PowerModes>,Action,IDisposable>? subscribe=null,TimeSpan? shutdownTimeout=null,
-        Func<IDisposable>? acquireOwner=null)
+        Func<IDisposable>? acquireOwner=null,
+        Func<string,string,Func<bool>,Func<(bool Present,bool Ac,int? Percent)>,HostDomainRouter>? createPowerDomains=null)
     {
-        this.createDomains=createDomains??CreateDomains;
+        // Legacy fixtures replace all facts themselves. Production and shared
+        // reader fixtures must bind before owner acquisition or domain creation.
+        this.createDomains=createPowerDomains??(createDomains is null?CreateDomains:(power,state,ready,_)=>createDomains(power,state,ready));
+        requiresNativePowerReader=createDomains is null||createPowerDomains is not null;
         this.acquireOwner=acquireOwner??(()=>InProcessOwnerLease.Acquire());
         this.schedule=schedule??((tick,interval)=>new System.Threading.Timer(_=>tick(),null,interval,interval));
         this.subscribe=subscribe??((power,ending)=>new PowerSubscription(power,ending));
@@ -73,14 +78,15 @@ internal sealed class InProcessRuntime
         if(this.shutdownTimeout<TimeSpan.Zero||this.shutdownTimeout>ShutdownTimeout)throw new ArgumentOutOfRangeException(nameof(shutdownTimeout));
     }
 
-    static HostDomainRouter CreateDomains(string powerRoot,string stateRoot,Func<bool> ready)
+    static HostDomainRouter CreateDomains(string powerRoot,string stateRoot,Func<bool> ready,
+        Func<(bool Present,bool Ac,int? Percent)> power)
     {
         TraceLog.Configure(stateRoot);
         var identity=WindowsFacts.Identity();
-        TraceLog.Write("in-process-start",new {identity.Manufacturer,identity.BoardProduct,identity.SystemProduct,
+        TraceLog.Write("in-process-start",new {identity.Manufacturer,identity.BoardProduct,identity.SystemProduct,identity.Processor,identity.Bios,identity.EcMajor,identity.EcMinor,
             powerRoot,stateRoot,pollingIntervalMs=(int)PollingInterval.TotalMilliseconds},true);
         return new HostDomainRouter(
-            ()=>new Controller(identity,new Store(stateRoot),route=>Providers.Open(route,powerRoot)),
+            ()=>new Controller(identity,new Store(stateRoot),route=>Providers.Open(route,powerRoot),power,ready),
             domainReady=>new SecondaryDisplayController(identity,new Store(stateRoot),ready:domainReady),ready);
     }
 
@@ -130,7 +136,11 @@ internal sealed class InProcessRuntime
         if(op is not ("get" or "refresh" or "release" or "set" or "restore" or
             "secondaryDisplay.get" or "secondaryDisplay.set" or "secondaryDisplay.toggle" or "secondaryDisplay.release"))throw new IOException("未知进程内操作");
         string power=Root(envelope,"powerRoot"),state=Root(envelope,"stateRoot");
-        lock(stateGate){RequireRunning();CheckRoots(power,state);powerRoot??=power;stateRoot??=state;}
+        lock(stateGate)
+        {
+            RequireRunning();CheckRoots(power,state);powerReader.Bind(envelope,requiresNativePowerReader);
+            powerRoot??=power;stateRoot??=state;
+        }
         lock(operationGate)
         {
             RequireRunning();
@@ -138,11 +148,12 @@ internal sealed class InProcessRuntime
             // shutdown can seal immediately even if an operation never returns.
             owner??=acquireOwner();
             RequireRunning();
-            domains??=createDomains(power,state,()=>!stopped&&!suspended);
+            domains??=createDomains(power,state,()=>!stopped&&!suspended,powerReader.Read);
             RequireRunning();
             StartMonitoring();
             RequireRunning();
             var result=domains.Dispatch(request);
+            RequireRunning(); // A slow admitted WMI read cannot publish a stopped generation.
             if(result is Snapshot battery)TraceLog.Result(op,battery);
             else if(result is SecondaryDisplaySnapshot display)TraceLog.SecondaryDisplayResult(op,display);
             return result;
@@ -151,22 +162,47 @@ internal sealed class InProcessRuntime
 
     void StartMonitoring()
     {
-        lock(stateGate){RequireRunning();if(timer is not null)return;}
+        lock(stateGate)
+        {
+            RequireRunning();if(timer is not null)return;
+            if(events is not null)throw new IOException("原事件注册尚未归还，不能创建新监控代次");
+        }
+        // Own each returned registration before any later operation can fail.
         var registration=subscribe(PowerChanged,()=>{_ = Shutdown();});
-        IDisposable? scheduled=null;
+        lock(stateGate){events=registration;}
         try
         {
-            RequireRunning();scheduled=schedule(Tick,PollingInterval);
-            lock(stateGate)
-            {
-                RequireRunning();events=registration;timer=scheduled;
-            }
+            RequireRunning();var scheduled=schedule(Tick,PollingInterval);
+            lock(stateGate){timer=scheduled;RequireRunning();}
         }
         catch
         {
-            try{scheduled?.Dispose();}finally{registration.Dispose();}
+            _=CloseRegistrations(); // Failed objects remain exact cleanup debt.
             throw;
         }
+    }
+    List<string> CloseRegistrations()
+    {
+        IDisposable? oldTimer,oldEvents;
+        lock(stateGate){oldTimer=timer;oldEvents=events;}
+        var errors=new List<string>();
+        var registrations=new List<IDisposable>();
+        if(oldTimer is not null)registrations.Add(oldTimer);
+        if(oldEvents is not null&&!ReferenceEquals(oldEvents,oldTimer))registrations.Add(oldEvents);
+        foreach(var registration in registrations)
+        {
+            try
+            {
+                registration.Dispose();
+                lock(stateGate)
+                {
+                    if(ReferenceEquals(timer,registration))timer=null;
+                    if(ReferenceEquals(events,registration))events=null;
+                }
+            }
+            catch(Exception error){errors.Add(error.Message);}
+        }
+        return errors;
     }
     internal void Tick()
     {
@@ -194,36 +230,46 @@ internal sealed class InProcessRuntime
 
     internal object Shutdown()
     {
-        Task pending;
+        Task<string?> pending;
         lock(stateGate)
         {
-            stopped=true;suspended=true;
-            pending=cleanup??=Task.Run(Cleanup);
+            stopped=true;suspended=true;powerReader.Stop();
+            if(cleanup is null||cleanup.IsCompleted&&(cleanup.IsFaulted||cleanup.IsCanceled||cleanup.Result is not null))
+                cleanup=Task.Run(Cleanup);
+            pending=cleanup;
         }
-        bool completed=pending.Wait(shutdownTimeout);
+        bool completed;
+        try{completed=pending.Wait(shutdownTimeout);}catch{completed=true;}
+        string? cleanupError=null;
+        if(completed)
+        {
+            try{cleanupError=pending.GetAwaiter().GetResult();}
+            catch(Exception error){cleanupError=error.Message;}
+        }
         // Controller.Shutdown can retain unresolved restoration debt internally.
         // Its return is never proof of hardware restoration or journal deletion.
         return new {ok=completed&&cleanupError is null,execution="in-process",stopped=true,
-            cleanupCompleted=completed,cleanupPending=!completed,cleanupError=completed?cleanupError:null,
+            cleanupCompleted=completed&&cleanupError is null,cleanupPending=!completed||cleanupError is not null,cleanupError=completed?cleanupError:null,
             hardwareRestoration="not-confirmed",journalPolicy="preserve-unconfirmed",
             shutdownTimeoutMs=(int)shutdownTimeout.TotalMilliseconds};
     }
-    void Cleanup()
+    string? Cleanup()
     {
-        IDisposable? oldTimer,oldEvents;
-        lock(stateGate){oldTimer=timer;oldEvents=events;timer=null;events=null;}
         var errors=new List<string>();
-        try{oldTimer?.Dispose();}catch(Exception error){errors.Add(error.Message);}
-        try{oldEvents?.Dispose();}catch(Exception error){errors.Add(error.Message);}
-        // Keep ownership until the actual domain cleanup returns. A timed out
-        // caller leaves this worker and the lease alive with recovery debt intact.
+        // Drain an already admitted operation before taking registrations. A
+        // slow subscription/schedule may return an owned object after stop.
         lock(operationGate)
         {
-            try{domains?.Shutdown();}catch(Exception error){errors.Add(error.Message);}
-            try{owner?.Dispose();}catch(Exception error){errors.Add(error.Message);}
+            errors.AddRange(CloseRegistrations());
+            try{domains?.Shutdown();domains=null;}catch(Exception error){errors.Add(error.Message);}
+            if(errors.Count==0)
+            {
+                try{owner?.Dispose();owner=null;}catch(Exception error){errors.Add(error.Message);}
+            }
         }
-        if(errors.Count!=0)cleanupError=string.Join("；",errors);
+        string? cleanupError=errors.Count==0?null:string.Join("；",errors);
         TraceLog.Write("in-process-stop",new {cleanupError,hardwareRestoration="not-confirmed",journalPolicy="preserve-unconfirmed"},true);
+        return cleanupError;
     }
 
     sealed class PowerSubscription : IDisposable

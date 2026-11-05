@@ -7,21 +7,40 @@ import {fileURLToPath} from 'node:url';
 import {createOfflineHostFixture} from './msi_steamdeck_release_fence_1726_selftest.mjs';
 import {extract} from './ymcc_sim/global/inputhost-protocol/extract-parser.mjs';
 const self=fileURLToPath(import.meta.url),repo=path.resolve(path.dirname(self),'..');
-const args=process.argv.slice(2),option=(key,fallback)=>{const i=args.indexOf(key);return i<0?fallback:args[i+1];};
+const args=process.argv.slice(2),valueOptions=new Set(['--out','--fault','--runtime-source-closure','--source-identity-manifest','--source-identity-sha256','--case']),options=new Map();
+for(let i=0;i<args.length;i++){
+ const key=args[i];
+ if(key!=='--eligibility-only'&&key!=='--prepare-owned-child'&&!valueOptions.has(key))throw Error('MANAGED_TERMINAL_ARGV_UNKNOWN:'+key);
+ if(options.has(key))throw Error('MANAGED_TERMINAL_ARGV_DUPLICATE:'+key);
+ if(key==='--eligibility-only'||key==='--prepare-owned-child'){options.set(key,true);continue;}
+ const value=args[++i];
+ if(typeof value!=='string'||value.trim()===''||value.startsWith('--'))throw Error('MANAGED_TERMINAL_ARGV_VALUE_REQUIRED:'+key);
+ options.set(key,value);
+}
+const option=(key,fallback)=>options.has(key)?options.get(key):fallback;
 const out=path.resolve(option('--out','G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostManaged23/run-001'));
-const fault=option('--fault','none'); const eligibility=args.includes('--eligibility-only');
+const fault=option('--fault','none'),eligibility=options.has('--eligibility-only'),prepareOwnedChild=options.has('--prepare-owned-child');
+const closureFile=option('--runtime-source-closure',null),identityFile=option('--source-identity-manifest',null),identitySha=option('--source-identity-sha256',null);
+if([closureFile,identityFile,identitySha].some(Boolean)&&![closureFile,identityFile,identitySha].every(Boolean))throw Error('MANAGED_TERMINAL_ARGV_IDENTITY_ARGUMENTS_REQUIRED_TOGETHER');
 if(!['none','terminal-suppress-failure','terminal-no-retry','terminal-retry-sdk','terminal-repeat-shutdown','terminal-log-fatal'].includes(fault))throw Error('Unsupported semantic negative');
+const selectedCase=option('--case',null),selectedCases=selectedCase===null?null:selectedCase.split(',');
+const permanentCase='terminal-shutdown-output-fixed';
+const directedCases=['terminal-shutdown-healthy-fixed','terminal-read-loss-healthy-fixed',permanentCase];
+if(selectedCases&&(eligibility||selectedCases.length===0||selectedCases.some(name=>!directedCases.includes(name))||new Set(selectedCases).size!==selectedCases.length||selectedCases.includes(permanentCase)&&selectedCases.length!==1))throw Error('MANAGED_TERMINAL_ARGV_CASE_SELECTION_INVALID');
+const directedFaultAllowed=selectedCases?.[0]===permanentCase
+ ? fault==='none'||fault==='terminal-suppress-failure'
+ : fault==='none'||fault==='terminal-log-fatal'||fault==='terminal-repeat-shutdown'&&selectedCases?.length===1&&selectedCases[0]==='terminal-shutdown-healthy-fixed';
+if(selectedCases&&!directedFaultAllowed)throw Error('MANAGED_TERMINAL_ARGV_CASE_FAULT_CONFLICT');
+if(prepareOwnedChild&&(eligibility||selectedCase!==permanentCase||!['none','terminal-suppress-failure'].includes(fault)))throw Error('MANAGED_TERMINAL_ARGV_OWNED_CHILD_PREPARATION_CONFLICT');
 if(fs.existsSync(out))throw Error('Fresh evidence required: '+out);
 fs.mkdirSync(out,{recursive:true});
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const fixtureRel='tools/fixtures/input_host_managed_lifecycle_20261023';
 const sdkRel='tools/fixtures/hidmaestro/2.0.0';
 const sdkSpec=JSON.parse(fs.readFileSync(path.join(repo,sdkRel,'binary-binding.json')));
-const sourceNames=['Program.cs','ScreenTouchpadReport.cs','ScreenButtonReport.cs','PsEndpointOwnership.cs','HostGameOutputObservation.cs','HostControllerOutputStop.cs','HostControllerIdleCtsRelease.cs','ParentProcessLifetime.cs','MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','HostTerminalCleanup.cs'];
+const sourceNames=['Program.cs','ScreenTouchpadReport.cs','ScreenButtonReport.cs','PsEndpointOwnership.cs','HostGameOutputObservation.cs','HostControllerOutputStop.cs','HostControllerIdleCtsRelease.cs','ParentProcessLifetime.cs','MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','CompactFrameReplyBinding.cs','HostTerminalCleanup.cs'];
 const relativeInputs=[...sourceNames.map(n=>'InputHost/'+n),path.relative(repo,self),'tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.mjs','tools/inputhost_lifecycle_selftest.cs','tools/inputhost_parent_lifecycle_selftest.cs','tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs','tools/ymcc_sim/global/inputhost-protocol/provenance.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs',fixtureRel+'/Workers.cs.in',fixtureRel+'/ManagedCases.cs',fixtureRel+'/TerminalCases.cs',fixtureRel+'/TerminalPorts.cs',sdkRel+'/binary-binding.json',...Object.keys(sdkSpec.members).map(n=>sdkRel+'/'+n)];
 const inputs=[...new Set(relativeInputs)].map(relative=>{const file=path.join(repo,relative),bytes=fs.readFileSync(file),snapshot=path.join(out,'sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return {relative,path:file,snapshot,sha256:sha(bytes),bytes:bytes.length};});
-const closureFile=option('--runtime-source-closure',null),identityFile=option('--source-identity-manifest',null),identitySha=option('--source-identity-sha256',null);
-if([closureFile,identityFile,identitySha].some(Boolean)&&![closureFile,identityFile,identitySha].every(Boolean))throw Error('All runtime closure and explicit identity arguments are required together');
 const pin=file=>({path:file,sha256:sha(fs.readFileSync(file))});
 let registrationBinding=null;
 if(identityFile){
@@ -94,11 +113,15 @@ if(fault==='skip-idle-stop')takeover=replaceOnce(takeover,'ManagedAdmission.Stop
 if(fault==='ignore-parent-cancellation')pipeLoop=pipeLoop.replaceAll('parentLifetime.ExitToken','CancellationToken.None');
 write(path.join(project,'ExtractedHost.cs'),fake);
 write(path.join(project,'Compatibility.cs'),'using HIDMaestro; using YeManInputHost.Diagnostics;\n'+compatibility);
-write(path.join(project,'Boundary.cs'),'// Explicit memory leaf; USB maintenance/reboot behavior is not exercised by the managed-release cases.\nnamespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending => false; } }\nnamespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDisposable { internal static UsbipMaintenanceGate? TryEnter(bool required)=>new(); public void Dispose(){} } }\ninternal static partial class Program { private sealed partial class HostSession { private void ResetVirtualSignalEvidenceSafely(){} } }\n');
+const boundary=[];
+if(!/class\s+UsbipMaintenanceState\b/.test(fake))boundary.push('namespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending => false; } }');
+if(!/class\s+UsbipMaintenanceGate\b/.test(fake))boundary.push('namespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDisposable { internal static UsbipMaintenanceGate? TryEnter(bool required)=>new(); public void Dispose(){} } }');
+if(!fake.includes('private void ResetVirtualSignalEvidenceSafely()'))boundary.push('internal static partial class Program { private sealed partial class HostSession { private void ResetVirtualSignalEvidenceSafely(){} } }');
+write(path.join(project,'Boundary.cs'),'// Existing generator owns available inert maintenance/signal declarations; only absent stand-ins are added here.\n'+boundary.join('\n')+'\n');
 write(path.join(project,'ExtraProduction.cs'),'using System.Reflection; using System.Buffers.Binary; using System.Diagnostics; using System.IO.Pipes; using System.Text; using System.Text.Json; using HIDMaestro; using YeManInputHost.Diagnostics;\ninternal static partial class Program {\n'+fatalFields+'\n'+fatalLogger+'\n'+reflectionField+'\n'+idleStop+'\n'+takeover+'\n'+pipeLoop+'\n'+codec+'\n private static async Task<int> ExecuteMainTerminalAsync(string pipeName,int parentPid,HostSession session,bool msiStageRequested=false){\n'+mainBlock+'\n}\n private static bool BypassOutput(HMController c,out string d){d="negative-output-skip";return true;}\n private static bool BypassClock(HMController c,out string d){d="negative-clock-skip";return true;}\n}\n');
 let legacy=read('tools/msi_steamdeck_release_fence_1726_selftest.cs').replace('internal static class Fixture','internal static partial class Fixture').replace('private static int Main()','private static int LegacyOriginalMain()');
 write(path.join(project,'LegacyDefinitions.cs'),legacy);
-for(const name of ['HostControllerOutputStop.cs','HostControllerIdleCtsRelease.cs','ParentProcessLifetime.cs','MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','HostTerminalCleanup.cs'])fs.copyFileSync(path.join(hostSnapshot,name),path.join(project,name));
+for(const name of ['HostControllerOutputStop.cs','HostControllerIdleCtsRelease.cs','ParentProcessLifetime.cs','MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','CompactFrameReplyBinding.cs','HostTerminalCleanup.cs'])fs.copyFileSync(path.join(hostSnapshot,name),path.join(project,name));
 let baseCases=read(fixtureRel+'/ManagedCases.cs');
 baseCases=removeBlock(baseCases,'private static async Task<Dictionary<string,object?>> PipeCase(');
 baseCases=removeBlock(baseCases,'private static async Task<int> Main(');
@@ -130,27 +153,56 @@ workers=replaceOnce(workers,'return ((Thread)t).Join(ms);','return TerminalTestP
 workers=replaceOnce(workers,':((Thread)t).Join(0);',':TerminalTestPorts.HasTerminated(t);');
 workers=replaceOnce(workers,'public bool IsPinnedClock(Type t)=>t==typeof(DeviceClock<StreamTick>);','public bool IsPinnedClock(Type t)=>!TerminalTestPorts.CaptureIdentityFailure&&t==typeof(DeviceClock<StreamTick>);');
 write(path.join(project,'Workers.cs'),workers+events);
-write(path.join(project,'Fixture.csproj'),'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NuGetAudit>false</NuGetAudit><EnableNETAnalyzers>false</EnableNETAnalyzers><UseAppHost>false</UseAppHost></PropertyGroup></Project>');
+write(path.join(project,'Fixture.csproj'),'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>'+(prepareOwnedChild?'<RuntimeFrameworkVersion>'+dotnetSpec.runtimeVersion+'</RuntimeFrameworkVersion><RollForward>Disable</RollForward>':'')+'<NuGetAudit>false</NuGetAudit><EnableNETAnalyzers>false</EnableNETAnalyzers><UseAppHost>false</UseAppHost></PropertyGroup></Project>');
 write(path.join(project,'NuGet.Config'),'<configuration><packageSources><clear /></packageSources></configuration>');
 write(path.join(project,'global.json'),{sdk:{version:dotnetSpec.sdkVersion,rollForward:'disable'}});
-write(path.join(out,'consumer-extractions.json'),{generated:generated.receipt,extra:selected,sdk:sdkSpec,mainTerminalBlock:'Exact current Main owned-session initialization and terminal try/finally executed; only diagnostic type name mapped to existing Stage port; product startup and Main never invoked',eligibilityOnly:eligibility,substitutions:['Existing generator fake PnP/clock/neutral/frame/HidHide/report-chain and diagnostic terminals retained.','Production output/clock helper files unchanged; three call sites route fake metadata through IRuntime seams.','Existing BCL SDK-stop scaffold clock Loop uses owned BCL Thread/Event; native timer pointer zero; native call forbidden.','All five SDK 2.0 HMController stop/dispose methods and three DeviceClock stop/close methods hash-bound; fake context callback only.']});
+write(path.join(out,'consumer-extractions.json'),{generated:generated.receipt,extra:selected,sdk:sdkSpec,mainTerminalBlock:prepareOwnedChild?'Exact current Main owned-session initialization and terminal try/finally prepared only; fixture and product Main never invoked':'Exact current Main owned-session initialization and terminal try/finally executed; only diagnostic type name mapped to existing Stage port; product startup and Main never invoked',eligibilityOnly:eligibility,substitutions:['Existing generator fake PnP/clock/neutral/frame/HidHide/report-chain and diagnostic terminals retained.','Production output/clock helper files unchanged; three call sites route fake metadata through IRuntime seams.','Existing BCL SDK-stop scaffold clock Loop uses owned BCL Thread/Event; native timer pointer zero; native call forbidden.','All five SDK 2.0 HMController stop/dispose methods and three DeviceClock stop/close methods hash-bound; fake context callback only.']});
 const commands=[];
-function command(label,exe,argv,cwd,timeout=60000){const r=spawnSync(exe,argv,{cwd,encoding:'utf8',windowsHide:true,timeout,maxBuffer:16*1024*1024});write(path.join(out,label+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({label,exe,argv,cwd,status:r.status,signal:r.signal,error:r.error?.message??null});write(path.join(out,'commands.json'),commands);return r;}
+function command(label,exe,argv,cwd,timeout=60000){const preparedStartedAtUtc=prepareOwnedChild?new Date().toISOString():null,preparedStarted=prepareOwnedChild?performance.now():0;const r=spawnSync(exe,argv,{cwd,encoding:'utf8',windowsHide:true,timeout,maxBuffer:16*1024*1024});write(path.join(out,label+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({label,exe,argv,cwd,status:r.status,signal:r.signal,error:r.error?.message??null,...(prepareOwnedChild?{startedAtUtc:preparedStartedAtUtc,finishedAtUtc:new Date().toISOString(),elapsedMs:performance.now()-preparedStarted}: {})});write(path.join(out,'commands.json'),commands);return r;}
 const profiles=[];
-for(const config of ['Release','Debug']){
- const build=command(config+'-build',dotnet,['build','Fixture.csproj','-c',config,'--nologo','-v:q'],project);
- if(build.status!==0)throw Error('Build failed: '+path.join(out,config+'-build.log'));
- const r=command(config+'-tests',dotnet,[path.join(project,'bin',config,'net10.0/Fixture.dll'),...(eligibility?['--eligibility-only']:[])],project);
+for(const config of prepareOwnedChild?['Release']:['Release','Debug']){
+ const build=command(config+'-build',dotnet,['build','Fixture.csproj','-c',config,'--nologo','-v:q',...(prepareOwnedChild?['-p:UseSharedCompilation=false','-nodeReuse:false']:[])],project);
+ if(build.status!==0||prepareOwnedChild&&(build.error||build.signal))throw Error('Build failed: '+path.join(out,config+'-build.log'));
+ if(prepareOwnedChild)continue;
+ const r=command(config+'-tests',dotnet,[path.join(project,'bin',config,'net10.0/Fixture.dll'),...(eligibility?['--eligibility-only']:selectedCase!==null?['--case',selectedCase]:[])],project);
  let result;try{result=JSON.parse(r.stdout.trim().split(/\r?\n/).at(-1));}catch{}
- profiles.push({config,exit:r.status,result});
+ const actualNames=result?.cases?.map(row=>row.name);
+ const scopeMatches=Array.isArray(actualNames)&&actualNames.length>0&&result.eligibilityOnly===eligibility&&result.actualMainTerminalBlockExecuted===!eligibility&&(selectedCases===null||result.selectedCase===selectedCase&&JSON.stringify(result.selectedCases)===JSON.stringify(selectedCases)&&JSON.stringify(actualNames)===JSON.stringify(selectedCases));
+ profiles.push({config,exit:r.status,result,scopeMatches});
 }
 const sourceStable=inputs.every(p=>sha(fs.readFileSync(p.path))===p.sha256);
 const failures=profiles.flatMap(p=>(p.result?.cases??[]).filter(r=>!r.pass).map(r=>({config:p.config,...r})));
 const runtimeSourceClosureStable=!registrationBinding||sha(fs.readFileSync(identityFile))===identitySha&&sha(fs.readFileSync(closureFile))===registrationBinding.runtimeSourceClosureIdentity.sha256&&Object.entries(registrationBinding.runtimeSourceClosure).every(([relative,expected])=>sha(fs.readFileSync(path.join(repo,relative)))===expected);
-const result={registrationBinding,runtimeSourceClosureStable,status:sourceStable&&runtimeSourceClosureStable&&profiles.every(p=>p.exit===0)?'PASS':'FAIL',resourceAcceptance:'BOUNDED_TERMINAL_RESULT_ONLY_OS_FALLBACK_UNKNOWN',eligibilityOnly:eligibility,fault,sourceStable,profiles,failures,inputs,toolchain:selectedToolchain,sdk:{path:sdkFile,sha256:sdkSpec.sdkSha256,loaded:false},productionMainExecuted:false,productOrInstalledProcessesTouched:false,ownedFixtureChildProcessesOnly:true,realDriverIo:false};
+if(prepareOwnedChild){
+ if(!sourceStable||!runtimeSourceClosureStable)throw Error('MANAGED_OWNED_CHILD_SOURCE_CHANGED');
+ if(selectedToolchain.some(row=>sha(fs.readFileSync(row.path))!==row.expected))throw Error('MANAGED_OWNED_CHILD_TOOLCHAIN_CHANGED');
+ const filePin=file=>{const bytes=fs.readFileSync(file);return {path:path.resolve(file),bytes:bytes.length,sha256:sha(bytes)};};
+ const emitPrepared=(file,value)=>{const fd=fs.openSync(file,'wx');try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
+ const bin=path.join(project,'bin/Release/net10.0');
+ const deployedFiles=root=>fs.readdirSync(root,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)).flatMap(entry=>{
+  const file=path.join(root,entry.name);if(entry.isSymbolicLink())throw Error('MANAGED_OWNED_CHILD_RUNTIME_LINK');
+  if(entry.isDirectory())return deployedFiles(file);
+  if(!entry.isFile())throw Error('MANAGED_OWNED_CHILD_RUNTIME_NOT_FILE');
+  return [filePin(file)];
+ });
+ const runtimeFiles=deployedFiles(bin),assembly=filePin(path.join(bin,'Fixture.dll'));
+ if(!runtimeFiles.some(row=>row.path===assembly.path&&row.sha256===assembly.sha256))throw Error('MANAGED_OWNED_CHILD_ASSEMBLY_NOT_DEPLOYED');
+ const generatedInputs=fs.readdirSync(project,{withFileTypes:true}).filter(entry=>entry.isFile()).sort((a,b)=>a.name.localeCompare(b.name)).map(entry=>filePin(path.join(project,entry.name)));
+ const descriptor={schemaVersion:1,kind:'ymcc-managed-retained-child-v1',program:filePin(dotnet),assembly,runtimeFiles,sourceInputs:inputs.map(({path,bytes,sha256})=>({path,bytes,sha256})),
+  argumentsTemplate:['<assembly>','--retained-owner-child','<proofPath>','<nonce>','<nativeParentPid>'],runtimeVersion:dotnetSpec.runtimeVersion,preparedOnly:true,executedCases:0,fixtureExecuted:false,behaviorPass:null,fault,
+  sourceStable,runtimeSourceClosureStable,toolchainStable:true,registrationBinding,toolchainInputs:selectedToolchain.map(row=>filePin(row.path)),sdkBinding:{...filePin(sdkFile),loaded:false},buildCommands:commands,toolchainManifest:filePin(path.join(repo,'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json')),toolchainReceipt:filePin(path.join(out,'toolchain.json')),
+  inputSnapshotManifest:filePin(path.join(out,'inputs-before.json')),sourceSnapshots:inputs.map(({snapshot,sha256,bytes})=>({path:snapshot,sha256,bytes})),generatedInputs,consumerExtractions:filePin(path.join(out,'consumer-extractions.json')),
+  buildReceipts:[filePin(path.join(out,'Release-build.log')),filePin(path.join(out,'commands.json'))],
+  boundary:{actualFixtureMainExecuted:false,productionMainExecuted:false,realSdkLoaded:false,realDriverIo:false,retainedWorkerBehavior:'NOT_RUN_PREPARATION_ONLY'}};
+ const descriptorPath=path.join(out,'owned-retained-child.json');emitPrepared(descriptorPath,descriptor);fs.chmodSync(descriptorPath,0o444);
+ const preparation={schemaVersion:1,status:'PREPARED',preparedOnly:true,executedCases:0,fixtureExecuted:false,behaviorPass:null,descriptor:filePin(descriptorPath),configuration:'Release',sourceStable,runtimeSourceClosureStable,toolchainStable:true,fault};
+ emitPrepared(path.join(out,'owned-child-preparation.json'),preparation);console.log(JSON.stringify(preparation));
+}else{
+const result={registrationBinding,runtimeSourceClosureStable,status:sourceStable&&runtimeSourceClosureStable&&profiles.length===2&&profiles.every(p=>p.exit===0&&p.result?.passed===true&&p.scopeMatches)?'PASS':'FAIL',resourceAcceptance:'BOUNDED_TERMINAL_RESULT_ONLY_OS_FALLBACK_UNKNOWN',eligibilityOnly:eligibility,selectedCase,selectedCases,fault,sourceStable,profiles,failures,inputs,toolchain:selectedToolchain,sdk:{path:sdkFile,sha256:sdkSpec.sdkSha256,loaded:false},productionMainExecuted:false,productOrInstalledProcessesTouched:false,ownedFixtureChildProcessesOnly:true,realDriverIo:false};
 write(path.join(out,'result.json'),result);
 console.log(JSON.stringify({status:result.status,fault,sourceStable,profiles:profiles.map(p=>({config:p.config,exit:p.exit,cases:p.result?.cases.map(r=>({name:r.name,pass:r.pass,error:r.error}))})),result:path.join(out,'result.json')}));
 if(result.status!=='PASS')process.exitCode=1;
+}
 
 
 

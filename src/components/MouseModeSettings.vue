@@ -62,7 +62,7 @@ onBeforeUnmount(()=>{alive=false;window.removeEventListener('ipc:gamepad-back',b
     </div>
     <p class="mouse-settings-hint" role="status">{{steamDeckActive?'由 Steam 管理，挡位不可切换':presentation.title+' · '+presentation.detail}}</p>
     <slot name="backend" :busy="busy"/>
-    <p class="mouse-settings-hint">名单仅影响自动挡，优先于系统游戏分类；YMCC 内仍暂停。开启、关闭挡位不受名单影响。</p>
+    <p class="mouse-settings-hint">自动、开启均遵循鼠标名单，YMCC 内暂停；开启挡允许游戏内使用，模拟器和游戏平台仍按名单处理。</p>
     <section v-for="list in lists" :key="list.kind" class="mouse-rule-list" :data-mouse-rule-list="list.kind">
       <div class="mouse-rule-heading"><h4>{{list.label}} <small>{{rules[list.kind].length}}</small></h4><button type="button" :data-mouse-add="list.kind" :disabled="blocked||!loaded" :aria-expanded="editor===list.kind" @click="editor===list.kind?closeEditor():openEditor(list.kind)">{{editor===list.kind?'收起':'添加程序'}}</button></div>
       <p class="mouse-settings-hint">{{list.hint}}，覆盖系统判断。</p>

@@ -15,7 +15,8 @@ export function mouseModeText(s:MouseModePresentation|null):{title:string;detail
  if(s.pending)return {title:'正在切换',detail:{auto:'自动',on:'开启',off:'关闭'}[s.mode],icon:'mouse'};
  if(!s.ok||!s.stateKnown)return {title:'状态待确认',detail:s.error||'模拟鼠标',icon:'warning'};
  if(s.on)return {title:'鼠标模式',detail:(s.mode==='on'?'手动开启':'自动 · 桌面')+(s.verification==='process-liveness'?' · 映射待确认':''),icon:'mouse'};
- if(s.mode==='auto'&&s.scene==='ymcc')return {title:'手柄模式',detail:'自动暂停 · YMCC',icon:'gamepad'};
+ if(s.mode!=='off'&&s.scene==='ymcc')return {title:'手柄模式',detail:(s.mode==='on'?'开启挡暂停':'自动暂停')+' · YMCC',icon:'gamepad'};
+ if(s.mode==='on')return {title:'手柄模式',detail:s.scene==='unknown'?'前台待确认':'开启挡暂停 · 名单限制',icon:'gamepad'};
  if(s.mode==='auto')return {title:'手柄模式',detail:s.scene==='unknown'?'前台待确认':'自动 · 非桌面',icon:'gamepad'};
  return {title:'已关闭',detail:'模拟鼠标',icon:'mouse'};
 }

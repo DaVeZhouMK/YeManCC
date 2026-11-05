@@ -59,6 +59,50 @@
       "reason": "Exact existing X1 Mini color writers use mainColor at side 0x00 and do not consume secondaryColor. Preserve the inherited source declaration; exclude only effective secondary-color consumption. This constraint adds no route, provider, model alias or write authority."
     }
   ],
+  "consumerFixedSpeed": [
+    {
+      "devices": [
+        "OneXPlayerG1",
+        "OneXPlayerG1AMD",
+        "OneXPlayerG1Intel"
+      ],
+      "consumerFixedSpeed": true,
+      "methodOwner": "OneXPlayerG1",
+      "methodSha256": "a55f55929440781185f9aee497128550adfe66fa8fab4069dc42681cb8e7b38c",
+      "admittedEffects": [
+        "solid",
+        "rainbow"
+      ],
+      "reason": "Effective existing HID v1 consumer fact: solid and built-in flowing rainbow do not consume speed. AMD and Intel inherit this exact writer. No frozen declared capability or model admission is changed."
+    },
+    {
+      "devices": [
+        "OneXPlayerOneXFly",
+        "OneXPlayerOneXFlyF1Pro"
+      ],
+      "consumerFixedSpeed": true,
+      "methodOwner": "OneXPlayerOneXFly",
+      "methodSha256": "ddb4d55f2131fa7011a519b7537ec33d8a41dc49b49ccfd4c8164f868a8aef18",
+      "admittedEffects": [
+        "solid",
+        "rainbow"
+      ],
+      "reason": "Effective existing HID v2 consumer fact: solid and built-in flowing rainbow do not consume speed. F1 Pro inherits this exact writer. No frozen declared capability or model admission is changed."
+    },
+    {
+      "devices": [
+        "OneXPlayerX1Mini"
+      ],
+      "consumerFixedSpeed": true,
+      "methodOwner": "OneXPlayerX1Mini",
+      "methodSha256": "6a343183d894a039d63255e315dd947204d9fbaf61ded1f1498c32447d483798",
+      "admittedEffects": [
+        "solid",
+        "rainbow"
+      ],
+      "reason": "Effective existing consumer fact: both the frozen source writer and pinned independent HID v1 writer ignore speed for solid and rainbow. The inherited unavailable preset and serial status remain excluded. No frozen declared capability or model admission is changed."
+    }
+  ],
   "independentCore": {
     "provider": "ymcc-onex-hid-v1",
     "assemblyFile": "YeManLightDeviceCore.dll",
@@ -97,6 +141,102 @@
       ],
       "methodOwner": "ClawA1M",
       "reason": "Preserve existing MSI brightness route: source flags omit brightness but SetLedBrightness performs the reviewed device.Write and returns its bool"
+    }
+  ],
+  "reviewedConsumerOverrides": [
+    {
+      "name": "OneXPlayerApex",
+      "deviceId": "hc.device.OneXPlayerApex",
+      "deviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
+      "family": "OneXPlayer",
+      "sourceAdapter": "onex-apex-hid-v2",
+      "sourcePins": {
+        "huesync": "7176803ce147d8bffef126720c21e4f42e0f3612",
+        "hcWindows": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+      },
+      "sourceDependencies": [
+        {
+          "role": "identity-mapping",
+          "path": "capabilities/upstream/huesync-7176803c/onexplayer_configs.py",
+          "sha256": "8a697b193db3a4f5c7801fb572eba4cadf0855e0ce50387b973c2a70a4e50d24"
+        },
+        {
+          "role": "endpoint-and-brightness",
+          "path": "capabilities/upstream/huesync-7176803c/onex_led_device_hid.py",
+          "sha256": "6ca7e1ab26165d548b8467905530cef3eca1a94243142ee2aadd267cb812ace3"
+        },
+        {
+          "role": "hid-v2-command",
+          "path": "capabilities/upstream/huesync-7176803c/oxp_hid_v2.py",
+          "sha256": "27c2f2b449271ac275e083daa39ae75fe7806f15bb42f0933f672c805d3feb08"
+        },
+        {
+          "role": "windows-wire",
+          "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+          "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+        },
+        {
+          "role": "windows-report",
+          "path": "capabilities/upstream/f2e58468/IDevice.cs",
+          "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+        },
+        {
+          "role": "frozen-device",
+          "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs",
+          "sha256": "c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60"
+        },
+        {
+          "role": "frozen-serial",
+          "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1.cs",
+          "sha256": "9948d5f99ec6b50f93a1c85ee557a309c3b0b6225a1ba50231c9c1e12ee49478"
+        },
+        {
+          "role": "source-facts",
+          "path": "capabilities/upstream/huesync-7176803c/apex-lighting.source-facts.json",
+          "sha256": "dea80706072e504feb51dd22867f154c663fd0719bba31859748c6a3134b4465"
+        }
+      ],
+      "consumerSources": [
+        {
+          "role": "protocol",
+          "path": "FanLab/LightSetter/ApexLightingConsumer.cs",
+          "sha256": "4818d9f5b3a2fe447b472feb50db490f1f6463abc5c8f256af9de7af16b2c973"
+        },
+        {
+          "role": "transport",
+          "path": "FanLab/LightSetter/ApexWindowsHidTransport.cs",
+          "sha256": "2817f7f34e0dcd4082fc21699504ae945bbe525c4426a0f8e413a849e04a15dc"
+        },
+        {
+          "role": "entry",
+          "path": "FanLab/LightSetter/Program.cs",
+          "sha256": "72b0fccbf895432ddbd2c762d22087cba487623a1b393026d52f5d2a7589308c"
+        },
+        {
+          "role": "owner",
+          "path": "FanLab/LightSetter/SuperJoyOwnerLease.cs",
+          "sha256": "8dfe4b4a2bcc632bdfe8d614e87ddf3a8296ccc6a76aac1aabb02b3085ca53b9"
+        }
+      ],
+      "ledEffects": [
+        "SolidColor",
+        "Rainbow"
+      ],
+      "brightness": true,
+      "secondColor": false,
+      "presetDeclared": false,
+      "presetAvailable": false,
+      "statusAvailable": false,
+      "statusTransportDisabled": true,
+      "offAvailable": true,
+      "fixedSpeed": true,
+      "requestLimits": [
+        "Override only the already registered exact APEX row; preserve frozen identity, inheritance and original source declarations. No reviewedExtensionModels entry or new alias.",
+        "Exact APEX consumes solid/rainbow, brightness and explicit disabled off only. No preset, serial status, secondary color or speed input.",
+        "Use native shared leased-HID ownership with exact VID1A2C/PIDB001/pageFF01/usage1 and output length65; retain generation, cancellation, deadline, release and parent cleanup. Do not add APEX to usesOneXVendorOwner.",
+        "Windows reports are ID0 plus the64-byte V2 payload. Brightness follows HueSync ties-even whole-update levels1/3/4; percent0 sends disabled/level1. HC always-enabled zero is not the off encoding.",
+        "Source-bound software admission and complete writes do not claim hardware, descriptor capture, physical effects or full-tree snapshot currency."
+      ]
     }
   ],
   "reviewedExtensionModels": [

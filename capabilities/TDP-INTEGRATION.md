@@ -92,3 +92,15 @@ G3E 策略的 `exactNormalizedBoard` 名称沿用已有声明；实际 native �
 审核结论：`Codex/reviews/0004/REVIEW.json`（SHA256 `2d4db586…f9b1`）`ACCEPTED_WITH_DEFERRED_ITEMS`，接受当前 CPU-only 软件范围；本有界任务停止，后续生效逻辑/激活/部署需用户另行授权。
 
 执行升级的现有聊天：[评估调优能力库最小升级与TDP修复](codex://threads/01a18e11-5454-72c3-82c2-4add8d8b6179)。调度实现、模块与交付资产由该任务维护；本说明与 tdp 域记录作为共享核对入口；performance 域继续维护HC CPU/GPU来源资料。
+
+## YMCC Strix Halo 388/395 小幅兼容（2026-11-06）
+
+`uxtu-tdp-policy.json#/ymccCompatibility/amdStrixHalo` 在原 `ymcc.uxtu.tdp` 总线内声明 YMCC 补充能力；仍由 family 26/model 112 选择既有 `FAM_APU_FT6_NEW`，不按 388/395 名称或 GPD/ONEX DMI 建立写准入。MP1/RSMU 写配方、目标计算、2–200W 应用请求域和原所有权/电源门保持原合同。
+
+固定 Linux 来源的功耗表版本 `0x64010C`（388）和 `0x64020C`（早期 Strix Halo）只用于已知布局的限值读回。生成器将同一声明派生到 helper 和目录元数据，不维护另一份 CPU 库。静态入口请求 `verifyTdp`/`--verify-tdp` 后，既有 PawnIO 通道按 resolve（2 个输出）→ update → 24 字节 read 顺序读取三项 W 单位限值。匹配是字段读回证据，不是物理耗电或长期有效保证；不一致明确报错且不重发，未知表或读失败保持未知。
+
+自动浮动仍仅发送原 watts 请求，不带 verifyTdp，不增加 PM 表读取、文件/CPU/AC/DC 检测或定时器。读取不驱动新的写入或恢复动作；既有 5 秒失败退避保留，退避后的新请求可以恢复。
+
+来源快照与 SHA 在 `capabilities/upstream/ymcc-strix-halo-pm` 及兼容声明中；Linux 388 原硬件是 ONEXPLAYER X2Mini PRO，不能代签 GPD WIN5 的实际表版本/效果。HHD 的 GPD ALIB 路线只作研究旁证，本次不启用 ACPI/EC 新通道，也不更换 driver/模块。以后只有固定 UXTU 提供等价 CPU/表/ABI 合同且消费者复核后，才撤销此扩展；不会按版本字符串自动切换。
+
+本轮源端与限定软件回执见 `G:/YeManCC-Work/Testing/YMCC/Evidence/GPDWin5-TDP-20261106/StrixHalo388-CapabilityBus/REPORT.md`。原完整前端夹具的电源回调 FAIL 与未验证的本机、GPD、构建/部署边界继续保留。

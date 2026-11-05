@@ -84,12 +84,12 @@ static json frame={{"hostSubmission","frame-accepted"},{"frameProof",{
         {"hostInstanceId","fixture-host-instance-with-long-identity"},{"runId","fixture-run-instance-with-long-identity"},
         {"epoch",1},{"commandSequence",5},{"sampleSequence",1},{"hostAckAccepted",true}}}}}};
 static volatile unsigned lookupSink=0;
-template<class Emit> static std::vector<json> exercise(Emit emit) {
+template<class Emit> static std::vector<json> exercise(Emit emit,bool includeNeutralOnly=true) {
     rows.clear();sample=Sample{};t_commonFrameSource=&sample;detailEnabled=true;fixtureTick=1000;
     auto f=frame;emit(f,false);emit(f,false); // first + immediate repeat
     fixtureTick=1999;emit(f,false);fixtureTick=2000;emit(f,false); // one-second boundary
     sample.connectedMask=0;emit(f,false);sample.live=false;emit(f,false);
-    sample.readContextStable=false;emit(f,false);emit(f,true);
+    sample.readContextStable=false;emit(f,false);if(includeNeutralOnly)emit(f,true);
     f["frameProof"]["hostReceipt"]["epoch"]=2;emit(f,true);
     f["frameProof"]["hostReceipt"]["runId"]="fixture-second-run";emit(f,true);
     f["frameProof"]["sampleSequence"]=900;emit(f,true); // rolling counters are not transitions
@@ -99,25 +99,34 @@ template<class Emit> static std::vector<json> exercise(Emit emit) {
     return rows;
 }
 int main() {
-    auto oldRows=exercise(before::inputCaptureCommonFrameEvidence);
+    auto oldRows=exercise(before::inputCaptureCommonFrameEvidence,false);
     auto newRows=exercise(after::inputCaptureCommonFrameEvidence);
     bool baselineLabelsMatch=oldRows.size()==newRows.size();
     for(size_t i=0;i<oldRows.size()&&i<newRows.size();++i){
         // Old baselines may predate snapshotReason; current baselines carry it.
         if(oldRows[i].contains("snapshotReason"))baselineLabelsMatch &= oldRows[i]["snapshotReason"]==newRows[i]["snapshotReason"];
-        oldRows[i].erase("snapshotReason");oldRows[i]["formatVersion"]=1;
+        oldRows[i].erase("snapshotReason");oldRows[i].erase("transitionScope");oldRows[i]["formatVersion"]=1;
     }
     unsigned periodic=0,changed=0;
     for(auto& row:newRows){if(row["snapshotReason"]=="periodic")++periodic;else if(row["snapshotReason"]=="state-change")++changed;
-        row.erase("snapshotReason");row["formatVersion"]=1;}
-    check("producer-preserves-existing-observation-fields-and-emission-boundaries",baselineLabelsMatch && oldRows==newRows && newRows.size()==10);
-    check("producer-labels-two-periodic-and-eight-state-observations",periodic==2&&changed==8);
+        row.erase("snapshotReason");row.erase("transitionScope");row["formatVersion"]=1;}
+    check("producer-preserves-context-fields-except-neutral-only-activity",baselineLabelsMatch && oldRows==newRows && newRows.size()==9);
+    check("producer-labels-two-periodic-and-seven-context-observations",periodic==2&&changed==7);
     check("producer-has-no-exceptions",g_commonFrameEvidenceFailures==0);
     const auto failuresBefore=g_commonFrameEvidenceFailures;const auto rowsBefore=rows.size();
     for(const json& invalid:{json(nullptr),json({{"frameProof",42}}),json({{"hostSubmission",42}})}){
         before::inputCaptureCommonFrameEvidence(invalid,false);after::inputCaptureCommonFrameEvidence(invalid,false);
     }
     check("malformed-log-input-keeps-failure-counter-and-produces-no-false-observation",g_commonFrameEvidenceFailures==failuresBefore+6 && rows.size()==rowsBefore);
+    rows.clear();sample=Sample{};t_commonFrameSource=&sample;fixtureTick=4000;
+    auto activityFrame=frame;activityFrame["frameProof"]["hostReceipt"]["epoch"]=700;
+    after::inputCaptureCommonFrameEvidence(activityFrame,false);rows.clear();allocations=0;countAllocations=true;
+    for(unsigned i=0;i<50000;++i)after::inputCaptureCommonFrameEvidence(activityFrame,(i&1)!=0);
+    countAllocations=false;
+    check("50000-neutral-flips-no-resident-row-or-allocation",rows.empty()&&allocations==0);
+    fixtureTick=5000;after::inputCaptureCommonFrameEvidence(activityFrame,true);
+    ++sample.readTopologyGeneration;after::inputCaptureCommonFrameEvidence(activityFrame,true);
+    check("activity-retained-in-periodic-and-real-source-transition-immediate",rows.size()==2&&rows[0]["snapshotReason"]=="periodic"&&rows[0]["semanticNeutral"]==true&&rows[1]["snapshotReason"]=="state-change");
     // Exact snapshot semantics including unknown fields, nested dynamic keys and types.
     using Kind=ymcc::logging::SnapshotKind;
     ymcc::logging::JsonSnapshotLogState snapshot;

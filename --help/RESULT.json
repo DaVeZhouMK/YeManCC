@@ -1,0 +1,11 @@
+{
+  "acceleratedCount": 74,
+  "checks": 7701,
+  "constantCount": 34,
+  "failures": [],
+  "nativeWorkerObservedHoldMs": 94,
+  "pass": true,
+  "physicalInput": false,
+  "settingsIo": "memory",
+  "variants": 243
+}
