@@ -63,6 +63,8 @@ if(process.argv.includes('--lossless')){
   if(!report.actions.some(row=>row.height===height&&row.name===name))throw Error('Missing Lossless action viewport');
   const states=report.results?.filter(row=>row.height===height&&row.name==='top-game-menu/lossless-button');
   if(!states?.length||states.some(row=>row.count<1||row.issues?.length||row.errors?.length))throw Error('Missing Lossless real-engine navigation state');
+  const popup=report.results?.find(row=>row.height===height&&row.name==='top-game-menu/lossless-actions');
+  if(!popup||popup.count!==3||popup.issues?.length||popup.errors?.length)throw Error('Missing Lossless popup navigation and B dismissal coverage');
  }
  for(const [relative,expected]of Object.entries(build.sourceHashes||{})){
   const file=path.isAbsolute(relative)?path.resolve(relative):path.resolve(root,...relative.split(/[\\/]/));
@@ -71,7 +73,7 @@ if(process.argv.includes('--lossless')){
   if(!(within(root,file)&&within(fs.realpathSync(root),actual))&&!(within(evidence,file)&&within(fs.realpathSync(evidence),actual)))throw Error('Untested current source outside source/evidence: '+relative);
   if(sha(actual)!==expected)throw Error('Tested UI source changed: '+relative);
  }
- for(const required of ['src/gamepad/engine.ts','src/gamepad/spatial.ts','src/gamepad/focus.ts','src/components/GameQuickActions.vue','src/bridge/quickapp.ts'])if(!Object.keys(build.sourceHashes||{}).some(file=>file.replaceAll('\\','/')===required))throw Error('Lossless original consumer source missing: '+required);
+ for(const required of ['src/gamepad/engine.ts','src/gamepad/spatial.ts','src/gamepad/focus.ts','src/components/GameQuickActions.vue','src/components/GameLosslessMenu.vue','src/bridge/quickapp.ts'])if(!Object.keys(build.sourceHashes||{}).some(file=>file.replaceAll('\\','/')===required))throw Error('Lossless original consumer source missing: '+required);
  for(const required of ['build-result.json','site/index.html','site/product.js','site/product.css','verify.mjs','engineAudit.ts','entry.ts','trainerMenuCases.mjs'])if(!report.testedInputs?.[required])throw Error('Missing Lossless test input fingerprint: '+required);
  for(const [relative,expected]of Object.entries(report.testedInputs||{})){
   const file=path.resolve(evidence,...relative.split(/[\\/]/));

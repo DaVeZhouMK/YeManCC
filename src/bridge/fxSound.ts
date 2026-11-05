@@ -7,7 +7,12 @@ export const unknownFxSound=():FxSoundState=>({known:false,installed:false,runni
 export class FxSoundOwner {
   private value=unknownFxSound();private flight:Promise<FxSoundState>|null=null;private busy=false;private epoch=0;
   private timer:ReturnType<typeof setTimeout>|null=null;private listeners=new Set<()=>void>();
-  constructor(private api:{read:()=>Promise<FxSoundState>;set:(enabled:boolean,expectedGeneration?:number)=>Promise<FxSoundResult>},private schedule= setTimeout,private cancel=clearTimeout){}
+  // Browser timer APIs require their Window receiver. Keep wrappers rather
+  // than storing the raw functions: this.schedule/this.cancel would otherwise
+  // pass FxSoundOwner as receiver and break Decky's retained observation.
+  constructor(private api:{read:()=>Promise<FxSoundState>;set:(enabled:boolean,expectedGeneration?:number)=>Promise<FxSoundResult>},
+    private schedule:(action:()=>void,delay:number)=>ReturnType<typeof setTimeout>=(action,delay)=>setTimeout(action,delay),
+    private cancel:(timer:ReturnType<typeof setTimeout>)=>void=timer=>clearTimeout(timer)){}
   private accept(value:FxSoundState){if(JSON.stringify(value)===JSON.stringify(this.value))return;this.value=value;for(const listener of this.listeners)listener();}
   read(){if(this.flight)return this.flight;if(this.busy)return Promise.resolve(this.value);const epoch=this.epoch;
     const task=this.api.read().then(value=>{if(epoch===this.epoch)this.accept(value);return this.value;},()=>{if(epoch===this.epoch)this.accept(unknownFxSound());return this.value;});

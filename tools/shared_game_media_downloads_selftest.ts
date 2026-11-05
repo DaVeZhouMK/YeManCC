@@ -11,4 +11,17 @@ check(downloadInterruptionReason('media-staging-budget-full').includes('暂存')
 check(calls[0].args.catalog===false,'loaded production settings never request popular discovery');check(!downloadDescription({enabled:true,catalogStatus:'fetching'}).includes('热门榜'),'legacy catalog status does not display retired discovery');check(!downloadDescription({enabled:true,phase:'deferred',catalogStatus:'deferred'}).includes('热门榜'),'legacy catalog failure cannot block the local queue');
 check(downloadInterruptionReason('media-video-selection-expired').includes('重新搜索'),'expired chosen video has an actionable status reason');check(downloadDescription({enabled:false,reason:'media-video-selection-expired',phase:'deferred'}).includes('重新搜索'),'auto-off does not hide selected video failure');check(downloadDescription({enabled:false,manualUntil:Date.now()+60000,manualTotal:1,manualCompleted:0,total:30,completed:20}).includes('0 / 1'),'selected request counts only its own target');
 check(downloadDescription({enabled:true,pauseReason:'game-running',reason:'media-video-selection-expired',manualState:'deferred'}).includes('重新搜索'),'game pause does not hide a failed chosen-video request');
+// The existing coordinator must stop its actual deferred work, not just relabel it.
+{
+ let allowed=true,id=0;const timers=new Map<number,()=>void>(),submitted:any[]=[],returns:((v:any)=>void)[]=[];
+ const owner=new MediaDownloads({workAllowed:()=>allowed,ready:()=>true,enabled:()=>true,listen:()=>()=>{},schedule:((fn:any)=>{timers.set(++id,fn);return id;}) as any,cancel:((token:number)=>timers.delete(token)) as any,invoke:((command:string,args:any)=>{submitted.push({command,args});return new Promise(resolve=>returns.push(resolve));}) as any});
+ const dispose=owner.start();returns.shift()!({statusRevision:1,enabled:true,resourcePauseReason:'startup-protection',startupProtectionUntil:Date.now()+30000});await tick();check(timers.size===1,'startup has one actual deferred check');
+ allowed=false;owner.policy('wallpaper-on-battery');check(timers.size===0,'DC policy cancels existing startup timer');returns.shift()!({statusRevision:2,enabled:true,pauseReason:'wallpaper-on-battery',phase:'paused'});await tick();
+ const before=submitted.length;await owner.refresh();await owner.recheck();check(submitted.length===before,'DC cannot issue read or self-heal IPC');await assert.rejects(()=>owner.requestNow(),/wallpaper-power/);checks++;check(submitted.length===before,'manual start cannot bypass DC');
+ check(downloadDescription(owner.state).includes('离电关闭'),'native pause reason visible');
+ allowed=true;owner.policy('capacity-unavailable');check(submitted.length===before+1,'AC retains original enabled preference');returns.shift()!({statusRevision:3,enabled:true,phase:'paused'});await tick();dispose();check(timers.size===0,'shutdown leaves no deferred checks');
+}
+{
+ const timers:any[]=[];const owner=new MediaDownloads({workAllowed:()=>false,ready:()=>true,enabled:()=>true,listen:()=>()=>{},schedule:((fn:any)=>{timers.push(fn);return 1;}) as any,invoke:(async()=>{throw Error('unavailable');}) as any});const dispose=owner.start();await tick();check(timers.length===0,'unavailable native host cannot start a recurring retry on DC');dispose();
+}
 console.log(JSON.stringify({ok:true,checks,scope:'production download coordinator; deterministic settings/IPC events, no native startup'}));

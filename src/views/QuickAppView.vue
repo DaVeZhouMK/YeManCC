@@ -63,6 +63,7 @@ import {
   toggleMute,
 } from '@/bridge/music';
 import InlineIcon from '@/components/InlineIcon.vue';
+import { getOptiDialogPlacement } from '@/components/optiDialogLayout';
 import Dropdown from '@/components/Dropdown.vue';
 import QuickAppIcon from '@/components/QuickAppIcon.vue';
 import { createDefaultQuickApps } from '@/bridge/quickAppDefaults';
@@ -164,20 +165,26 @@ function focusFsrTrigger(trigger = fsrTriggerEl.value) {
 
 function positionFsrDialog() {
   const trigger = fsrDialogTriggerEl.value;
-  const r = trigger?.getBoundingClientRect();
-  const POP_W = Math.min(420, window.innerWidth - 16);
-  const POP_H = 280;
-  const placement = getGamepadPopupPlacement(r ?? null, POP_W, POP_H, 8);
+  const placement = getOptiDialogPlacement(trigger, fsrPanelEl.value);
   fsrDialogAbove.value = placement.above;
   fsrDialogStyle.value = placement.style;
 }
 
 function positionOptiPicker() {
   const trigger = fsrTriggerEl.value;
-  const r = trigger?.getBoundingClientRect();
-  const placement = getGamepadPopupPlacement(r ?? null, Math.min(420, window.innerWidth - 16), 300, 8);
+  const placement = getOptiDialogPlacement(trigger, optiPickerPanelEl.value);
   optiPickerAbove.value = placement.above;
   optiPickerStyle.value = placement.style;
+}
+
+function resizeOptiDialogs(): void {
+  if (!fsrDialogOpen.value && !optiPickerOpen.value) return;
+  if (fsrDialogOpen.value) positionFsrDialog();
+  if (optiPickerOpen.value) positionOptiPicker();
+  nextTick(() => {
+    if (fsrDialogOpen.value) positionFsrDialog();
+    if (optiPickerOpen.value) positionOptiPicker();
+  });
 }
 
 function showOptiBackendPicker(): Promise<OptiAction | null> {
@@ -1002,6 +1009,7 @@ function onVolumeChange() {
 
 onMounted(async () => {
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
+  window.addEventListener('resize', resizeOptiDialogs);
   document.addEventListener('pointerdown', onFsrDialogPointer);
   await loadLaunchApps();
   await refreshDisplayModes();
@@ -1034,6 +1042,7 @@ onUnmounted(() => {
     unsubGame = null;
   }
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
+  window.removeEventListener('resize', resizeOptiDialogs);
   document.removeEventListener('pointerdown', onFsrDialogPointer);
 });
 </script>
@@ -1655,11 +1664,12 @@ onUnmounted(() => {
   background: #161d29;
   border: 1px solid #2a3342;
   border-radius: 12px;
-  padding: 18px 20px 17px;
+  box-sizing: border-box;
+  padding: 1.14em;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: .85em;
   max-width: calc(100vw - 16px);
   min-height: 0;
   overflow-y: auto;
@@ -1687,14 +1697,14 @@ onUnmounted(() => {
 .fsr-confirm .rc-title {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-size: 16px;
+  gap: .5em;
+  font-size: 1.14em;
   font-weight: 700;
   color: var(--text);
 }
 .fsr-confirm .rc-title :deep(svg) {
-  width: 20px;
-  height: 20px;
+  width: 1.25em;
+  height: 1.25em;
   color: var(--accent);
 }
 .fsr-confirm.tone-error .rc-title :deep(svg) { color: var(--danger); }
@@ -1702,24 +1712,26 @@ onUnmounted(() => {
 .fsr-confirm .rc-desc {
   margin: 0;
   color: var(--text-dim);
-  font-size: 14px;
+  font-size: 1em;
   line-height: 1.6;
   white-space: pre-line;
 }
 .fsr-confirm .rc-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: .7em;
   margin-top: 3px;
 }
 .fsr-confirm .rc-actions:has(> button:only-child) { grid-template-columns: 1fr; }
 .fsr-confirm .rc-actions button {
-  min-height: 44px;
+  min-width: 0;
+  min-height: 3.14em;
+  padding: .5em;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 9px;
   background: var(--bg-input);
   color: var(--text);
-  font-size: 14px;
+  font-size: 1em;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1737,30 +1749,31 @@ onUnmounted(() => {
   border-color: var(--danger);
 }
 .opti-picker {
-  width: min(420px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   overflow: auto;
 }
 .opti-picker-desc {
-  margin-bottom: 10px;
-  font-size: 12px;
+  margin-bottom: .7em;
+  font-size: 1em;
 }
-.opti-picker-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 8px; }
-.opti-picker-maintenance { margin-top: 8px; }
+.opti-picker-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7em; margin-top: .6em; }
+.opti-picker-maintenance { margin-top: .6em; }
 .opti-picker-maintenance .opti-option-btn { width: 100%; }
 .opti-picker-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: .7em;
+  margin-bottom: .7em;
 }
 .opti-option-btn {
-  min-height: 44px;
+  min-width: 0;
+  min-height: 3.14em;
+  padding: .5em;
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 8px;
   background: var(--bg-input);
   color: var(--text);
-  font-size: 13px;
+  font-size: 1em;
   font-weight: 700;
   cursor: pointer;
 }

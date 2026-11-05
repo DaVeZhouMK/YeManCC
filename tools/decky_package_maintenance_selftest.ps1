@@ -3,7 +3,7 @@ param([Parameter(Mandatory=$true)][string]$EvidenceDir,[switch]$SkipMutationProo
  [ValidateRange(1,30000)][int]$TotalBudgetMs=30000,
  [ValidateRange(1,25000)][int]$RunBudgetMs=25000,
  [ValidateRange(0,5000)][int]$CleanupReserveMs=5000,
- [ValidateSet('no-rollback','allow-downgrade','stale-rollback-snapshot')][string]$MutationCase)
+ [ValidateSet('no-rollback','skip-incoming-integrity','stale-rollback-snapshot')][string]$MutationCase)
 $ErrorActionPreference='Stop'
 # One stopwatch per consumer; includes all its preparation and all mutations.
 $taskBudgetWatch=[Diagnostics.Stopwatch]::StartNew()
@@ -33,17 +33,47 @@ if ($body.Contains('function Enter-YmccModuleMaintenance')) {
   $executionBody=$body.Replace($productMutexName,$fixtureMutexName)
   $fixtureMutexRemapped=$true
 }
-. ([scriptblock]::Create($executionBody))
 $cases=New-Object 'System.Collections.Generic.List[object]'
 
 $taskProgressFile=Join-Path $EvidenceDir 'case-progress.jsonl'
-$taskMutationStates=[ordered]@{'no-rollback'='NOT_RUN';'allow-downgrade'='NOT_RUN';'stale-rollback-snapshot'='NOT_RUN'}
+$taskMutationStates=[ordered]@{'no-rollback'='NOT_RUN';'skip-incoming-integrity'='NOT_RUN';'stale-rollback-snapshot'='NOT_RUN'}
 $taskMutationReceipts=New-Object 'System.Collections.Generic.List[object]'
 $taskMutationDefinitions=@(
-  @{name='no-rollback';from='Undo-YmccDeckyTransaction $transaction';to='Write-Verbose "injected missing rollback"';case='mid-transaction copy failure restores all prior committed files';failure='Failed install did not restore exact prior state'},
-  @{name='allow-downgrade';from="throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC'";to="Write-Verbose 'injected downgrade permission'";case='old YMCC package cannot downgrade a recorded newer Loader';failure='Expected rejection DOWNGRADE_REFUSED, got '},
-  @{name='stale-rollback-snapshot';from='if ($now -cne $entry.after) { throw ''DECKY_ROLLBACK_CONCURRENT_CHANGE'' }';to='Write-Verbose "injected stale rollback snapshot"';case='rollback revalidates every file after its initial snapshot before restoring it';failure='Expected rejection ROLLBACK_CONCURRENT_CHANGE, got '}
+  @{name='no-rollback';occurrences=1;from='Undo-YmccDeckyTransaction $transaction';to='Write-Verbose "injected missing rollback"';case='mid-transaction copy failure restores all prior committed files';failure='Failed install did not restore exact prior state'},
+  @{name='skip-incoming-integrity';occurrences=2;from='(Get-YmccDeckyHash $src) -cne $file.sha256';to='$false';case='package hash mismatch is rejected before any installed mutation';failure='Expected rejection PACKAGE_HASH_MISMATCH, got '},
+  @{name='stale-rollback-snapshot';occurrences=1;from='if ($now -cne $entry.after) { throw ''DECKY_ROLLBACK_CONCURRENT_CHANGE'' }';to='Write-Verbose "injected stale rollback snapshot"';case='rollback revalidates every file after its initial snapshot before restoring it';failure='Expected rejection ROLLBACK_CONCURRENT_CHANGE, got '}
+
 )
+$taskManifestGenerationCount=0;$taskManifestCloneCount=0;$taskManifestGenerationElapsedMs=0;$taskManifestCloneElapsedMs=0
+$taskNewCaseCount=0;$taskNewCasePreparationElapsedMs=0;$taskCommonManifestCacheKey=$null;$taskCommonManifestCacheKeySha256=$null;$taskCommonManifestTemplateJson=$null
+# Admit every original anchor and every generated mutant before ordinary cases,
+
+# Add-Type, or any child launch. A mutant child intentionally lacks its anchor.
+$taskMutationAdmission=New-Object 'System.Collections.Generic.List[object]'
+if (!$SkipMutationProof) {
+  try {
+    $admissionTokens=$null;$admissionErrors=$null
+    $fixtureAst=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$admissionTokens,[ref]$admissionErrors)
+    if($admissionErrors.Count){throw 'DECKY_PACKAGE_FIXTURE_SYNTAX_INVALID'}
+    [Management.Automation.Language.Parser]::ParseInput($body,[ref]$admissionTokens,[ref]$admissionErrors)|Out-Null
+    if($admissionErrors.Count){throw 'DECKY_PACKAGE_SOURCE_SYNTAX_INVALID'}
+    foreach($mutation in $taskMutationDefinitions){
+      $anchorCount=[regex]::Matches($body,[regex]::Escape($mutation.from)).Count
+      if($anchorCount -ne $mutation.occurrences){throw ('Mutation anchor count '+$mutation.name+': expected '+$mutation.occurrences+', got '+$anchorCount)}
+      $selected=@($fixtureAst.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Check' -and $node.CommandElements.Count -ge 3 -and $node.CommandElements[1] -is [Management.Automation.Language.StringConstantExpressionAst] -and $node.CommandElements[1].Value -ceq $mutation.case},$true))
+      if($selected.Count -ne 1){throw ('Mutation original case is not unique: '+$mutation.name)}
+      [Management.Automation.Language.Parser]::ParseInput($body.Replace($mutation.from,$mutation.to),[ref]$admissionTokens,[ref]$admissionErrors)|Out-Null
+      if($admissionErrors.Count){throw ('Mutation script syntax invalid: '+$mutation.name)}
+      $taskMutationAdmission.Add([pscustomobject]@{name=$mutation.name;anchorCount=$anchorCount;expectedAnchorCount=$mutation.occurrences;selectedCaseCount=$selected.Count;syntaxValid=$true})
+    }
+  } catch {
+    $admissionResult=[ordered]@{pass=$false;status='INCOMPLETE';complete=$false;phase='mutation-admission';error=$_.Exception.Message;count=0;passed=0;cases=@();declaredOrdinaryCaseCount=0;executedOrdinaryCaseCount=0;mutations=$taskMutationStates;mutationAdmission=$taskMutationAdmission.ToArray();mutationRetirement=@();totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=0;productProcessesLaunched=0}
+    $admissionResult|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $EvidenceDir 'result.json') -Encoding UTF8
+    Write-Error ('DECKY_PACKAGE_MUTATION_ADMISSION: '+$_.Exception.Message) -ErrorAction Continue
+    exit 2
+  }
+}
+. ([scriptblock]::Create($executionBody))
 # A child may select only the original assertion owned by its semantic mutation.
 # The ordinary parent executes all original 32 cases and the configuration storms.
 if($MutationCase -and !$SkipMutationProof){throw 'DECKY_PACKAGE_MUTATION_SCOPE_REQUIRES_SKIP_MUTATION_PROOF'}
@@ -100,17 +130,47 @@ function Put([string]$Base,[string]$Name,[string]$Text) {
   [IO.File]::WriteAllText($file,$Text,(New-Object Text.UTF8Encoding($false)))
   return $file
 }
+function Get-TaskTextHash([string]$Text) {
+  $sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+}
+function Get-TaskCommonFixtureCacheKey([string]$LockText) {
+  $parts=New-Object 'System.Collections.Generic.List[string]'
+  foreach($name in @(Get-YmccDeckyFiles)){
+    $payload=if($name -ceq 'plugins/ymcc-sidebar/plugin.json'){'{"name":"ymcc-sidebar"}'}else{'inert-v330-'+$name}
+    $parts.Add($name);$parts.Add(([Text.Encoding]::UTF8.GetByteCount($payload)).ToString([Globalization.CultureInfo]::InvariantCulture));$parts.Add($payload)
+  }
+  $parts.Add($LockText)
+  return ($parts -join "`0")
+}
+function New-TaskManifest([string]$Source,[string]$LoaderLock) {
+  $watch=[Diagnostics.Stopwatch]::StartNew();$script:taskManifestGenerationCount++
+  try{return New-YmccDeckyManifest $Source $LoaderLock}finally{$watch.Stop();$script:taskManifestGenerationElapsedMs+=$watch.Elapsed.TotalMilliseconds}
+}
 function New-Case([string]$Name) {
-  $caseRoot=Join-Path $EvidenceDir ($Name+'-'+[guid]::NewGuid().ToString('N'))
-  $incoming=Join-Path $caseRoot 'incoming';$installed=Join-Path $caseRoot 'installed'
-  [IO.Directory]::CreateDirectory($incoming) | Out-Null
-  [IO.Directory]::CreateDirectory($installed) | Out-Null
-  foreach ($name in Get-YmccDeckyFiles) { Put $incoming $name ('inert-v330-'+$name) | Out-Null }
-  Put $incoming 'plugins/ymcc-sidebar/plugin.json' '{"name":"ymcc-sidebar"}' | Out-Null
-  $lock=[ordered]@{schemaVersion=1;repository='SteamDeckHomebrew/decky-loader';origin='official-release';byteIdentical=$true;loaderPatches=0;version='v3.3.0';asset=@{sha256=(Get-YmccDeckyHash (Join-Path $incoming 'PluginLoader_noconsole.exe'));size=([IO.FileInfo](Join-Path $incoming 'PluginLoader_noconsole.exe')).Length}}
-  $lockFile=Put $caseRoot 'inert-lock.json' ($lock | ConvertTo-Json -Depth 8 -Compress)
-  $manifest=New-YmccDeckyManifest $incoming $lockFile
-  return [pscustomobject]@{home=$caseRoot;source=$incoming;target=$installed;manifest=$manifest;lock=$lockFile}
+  $caseWatch=[Diagnostics.Stopwatch]::StartNew();$script:taskNewCaseCount++
+  try {
+    $caseRoot=Join-Path $EvidenceDir ($Name+'-'+[guid]::NewGuid().ToString('N'))
+    $incoming=Join-Path $caseRoot 'incoming';$installed=Join-Path $caseRoot 'installed'
+    [IO.Directory]::CreateDirectory($incoming) | Out-Null
+    [IO.Directory]::CreateDirectory($installed) | Out-Null
+    foreach ($name in Get-YmccDeckyFiles) { Put $incoming $name ('inert-v330-'+$name) | Out-Null }
+    Put $incoming 'plugins/ymcc-sidebar/plugin.json' '{"name":"ymcc-sidebar"}' | Out-Null
+    $lock=[ordered]@{schemaVersion=1;repository='SteamDeckHomebrew/decky-loader';origin='official-release';byteIdentical=$true;loaderPatches=0;version='v3.3.0';asset=@{sha256=(Get-YmccDeckyHash (Join-Path $incoming 'PluginLoader_noconsole.exe'));size=([IO.FileInfo](Join-Path $incoming 'PluginLoader_noconsole.exe')).Length}}
+    $lockText=$lock | ConvertTo-Json -Depth 8 -Compress
+    $lockFile=Put $caseRoot 'inert-lock.json' $lockText
+    $cacheKey=Get-TaskCommonFixtureCacheKey $lockText
+    if($null -eq $script:taskCommonManifestCacheKey){
+      $manifest=New-TaskManifest $incoming $lockFile
+      $script:taskCommonManifestCacheKey=$cacheKey
+      $script:taskCommonManifestCacheKeySha256=Get-TaskTextHash $cacheKey
+      $script:taskCommonManifestTemplateJson=$manifest | ConvertTo-Json -Depth 8 -Compress
+    }else{
+      if($cacheKey -cne $script:taskCommonManifestCacheKey){throw 'DECKY_FIXTURE_COMMON_MANIFEST_CACHE_KEY_MISMATCH'}
+      $cloneWatch=[Diagnostics.Stopwatch]::StartNew()
+      try{$manifest=$script:taskCommonManifestTemplateJson | ConvertFrom-Json;$script:taskManifestCloneCount++}finally{$cloneWatch.Stop();$script:taskManifestCloneElapsedMs+=$cloneWatch.Elapsed.TotalMilliseconds}
+    }
+    return [pscustomobject]@{home=$caseRoot;source=$incoming;target=$installed;manifest=$manifest;lock=$lockFile}
+  }finally{$caseWatch.Stop();$script:taskNewCasePreparationElapsedMs+=$caseWatch.Elapsed.TotalMilliseconds}
 }
 function Seed($Case) {
   $plan=Get-YmccDeckyPlan $Case.source $Case.target $Case.manifest
@@ -118,6 +178,28 @@ function Seed($Case) {
 }
 function Snapshot([string]$caseRoot) {
   return (@(Get-ChildItem -LiteralPath $caseRoot -File -Recurse -Force | ForEach-Object { $_.FullName.Substring($caseRoot.Length)+':'+(Get-YmccDeckyHash $_.FullName) } | Sort-Object) -join "`n")
+}
+# Policy pin: docs/updater-data-priority-20261105.md, SHA256
+# e37b3dcbb6a9d5a5659ef7bb1c62ce4ac9bca160d8ad3602e8d1e9903dbda3f4.
+# Superseded refusal assertions retain their original scenes and storm variants.
+function Assert-IncomingPackage($Case) {
+  $receipt=Join-Path $Case.target '.ymcc-managed.receipt'
+  $expected=$Case.manifest|ConvertTo-Json -Depth 8 -Compress
+  Need ([IO.File]::Exists($receipt) -and [IO.File]::ReadAllText($receipt) -ceq $expected) 'Canonical receipt does not match the verified incoming manifest'
+  foreach($file in $Case.manifest.files){
+    $installed=Resolve-YmccDeckyPath $Case.target $file.path
+    Need ([IO.File]::Exists($installed) -and ([IO.FileInfo]$installed).Length -eq $file.bytes -and (Get-YmccDeckyHash $installed) -ceq $file.sha256) ('Incoming asset not restored: '+$file.path)
+  }
+}
+function Assert-QuarantinedFile([string]$Parent,[string]$ExpectedHash) {
+  $literal=@(Get-ChildItem -LiteralPath $Parent -File -Force -Filter '.ymcc-retired-*' | Where-Object { !($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and (Get-YmccDeckyHash $_.FullName) -ceq $ExpectedHash })
+  Need ($literal.Count -eq 1) 'Literal old metadata bytes were not quarantined exactly once'
+}
+function New-UnownedSentinels($Case) {
+  return [pscustomobject]@{settings=(Put $Case.target 'settings/config.json' '{"keep":true}');plugin=(Put $Case.target 'plugins/other/dist/index.js' 'foreign-plugin-sentinel')}
+}
+function Assert-UnownedSentinels($Sentinels) {
+  Need ([IO.File]::ReadAllText($Sentinels.settings) -ceq '{"keep":true}' -and [IO.File]::ReadAllText($Sentinels.plugin) -ceq 'foreign-plugin-sentinel') 'Unrelated settings or plugin sentinel changed'
 }
 Check 'Windows PowerShell direct source parses the same seven-file contract as the embedded UTF8 path' {
   $parseErrors=$null;$parseTokens=$null
@@ -145,38 +227,56 @@ Check 'official root JSON migration no longer consumes the YMCC receipt across t
   Need ([IO.File]::Exists((Join-Path $c.target '.ymcc-managed.receipt'))) 'Official settings migration consumed installed ownership metadata'
   Need ((Get-YmccDeckyPlan $c.source $c.target $c.manifest).entries.Count -eq 0) 'Repeated Loader startup invalidated the managed package identity'
 }
-Check 'duplicate legacy root receipt is retired transactionally while settings stay untouched' {
+Check 'duplicate legacy root retirement rolls back while corrupt optional settings metadata is quarantined' {
   $c=New-Case 'legacy-duplicate';Seed $c|Out-Null
   [IO.File]::Copy((Join-Path $c.target '.ymcc-managed.receipt'),(Join-Path $c.target '.ymcc-managed.json'))
-  $settings=Put $c.target 'settings/.ymcc-managed.json' 'old-private-settings-copy';$before=Snapshot $c.target
-  $transaction=Seed $c
+  $settings=Put $c.target 'settings/.ymcc-managed.json' 'old-private-settings-copy';$oldSettingsHash=Get-YmccDeckyHash $settings
+  $sentinels=New-UnownedSentinels $c
+  $plan=Get-YmccDeckyPlan $c.source $c.target $c.manifest
+  Need (![IO.File]::Exists($settings)) 'Corrupt optional settings metadata retained its original name'
+  Assert-QuarantinedFile (Join-Path $c.target 'settings') $oldSettingsHash
+  $before=Snapshot $c.target
+  $transaction=Install-YmccDeckyPackage $plan (Join-Path $c.home 'duplicate-backup') -BackendPort 0
   Need (![IO.File]::Exists((Join-Path $c.target '.ymcc-managed.json'))) 'Old root JSON still crashes official settings migration'
-  Need ([IO.File]::ReadAllText($settings) -ceq 'old-private-settings-copy') 'Settings-side metadata changed'
+  Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
   Undo-YmccDeckyTransaction $transaction
   Need ((Snapshot $c.target) -ceq $before) 'Migration rollback did not restore exact prior root and canonical receipt'
+  Assert-QuarantinedFile (Join-Path $c.target 'settings') $oldSettingsHash
+  Assert-UnownedSentinels $sentinels
 }
-Check 'legacy-only receipt adopts the safe name and still enforces downgrade refusal' {
+Check 'legacy-only receipt adopts the incoming baseline and its retirement remains transactional' {
   $c=New-Case 'legacy-only';Seed $c|Out-Null
   [IO.File]::Move((Join-Path $c.target '.ymcc-managed.receipt'),(Join-Path $c.target '.ymcc-managed.json'))
   Seed $c|Out-Null
   Need (![IO.File]::Exists((Join-Path $c.target '.ymcc-managed.json')) -and [IO.File]::Exists((Join-Path $c.target '.ymcc-managed.receipt'))) 'Legacy identity not migrated'
   [IO.File]::Move((Join-Path $c.target '.ymcc-managed.receipt'),(Join-Path $c.target '.ymcc-managed.json'))
   $old=Get-Content -LiteralPath (Join-Path $c.target '.ymcc-managed.json') -Raw|ConvertFrom-Json;$old.loaderVersion='v3.4.0';Put $c.target '.ymcc-managed.json' ($old|ConvertTo-Json -Depth 8 -Compress)|Out-Null
-  $before=Snapshot $c.target;Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} 'DOWNGRADE_REFUSED'
-  Need ((Snapshot $c.target) -ceq $before) 'Downgrade refusal mutated legacy identity'
+  $before=Snapshot $c.target;$transaction=Seed $c
+  Assert-IncomingPackage $c
+  Need (![IO.File]::Exists((Join-Path $c.target '.ymcc-managed.json'))) 'Validated legacy root was not retired'
+  Undo-YmccDeckyTransaction $transaction
+  Need ((Snapshot $c.target) -ceq $before) 'Legacy retirement rollback lost the previous identity'
 }
-Check 'settings-migrated old identity still prevents package downgrade when no root receipt exists' {
+Check 'settings-migrated old Loader label permits the incoming baseline without touching settings or link targets' {
   $c=New-Case 'moved-downgrade';Seed $c|Out-Null
-  $old=Get-Content -LiteralPath (Join-Path $c.target '.ymcc-managed.receipt') -Raw|ConvertFrom-Json;$old.loaderVersion='v3.4.0';Put $c.target 'settings/.ymcc-managed.json' ($old|ConvertTo-Json -Depth 8 -Compress)|Out-Null
-  [IO.File]::Delete((Join-Path $c.target '.ymcc-managed.receipt'));$before=Snapshot $c.target
-  Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} 'DOWNGRADE_REFUSED'
-  Need ((Snapshot $c.target) -ceq $before) 'Migrated settings identity was ignored or changed'
+  $old=Get-Content -LiteralPath (Join-Path $c.target '.ymcc-managed.receipt') -Raw|ConvertFrom-Json;$old.loaderVersion='v3.4.0';$moved=Put $c.target 'settings/.ymcc-managed.json' ($old|ConvertTo-Json -Depth 8 -Compress)
+  $movedHash=Get-YmccDeckyHash $moved;$sentinels=New-UnownedSentinels $c
+  [IO.File]::Delete((Join-Path $c.target '.ymcc-managed.receipt'));Seed $c|Out-Null
+  Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
+  Need ((Get-YmccDeckyHash $moved) -ceq $movedHash) 'Valid optional settings metadata changed'
+  $linked=New-Case 'moved-settings-junction';$external=Join-Path $linked.home 'external-settings'
+  Put $external '.ymcc-managed.json' '{bad'|Out-Null;Put $external 'config.json' 'external-settings-sentinel'|Out-Null
+  $externalBefore=Snapshot $external
+  New-Item -ItemType Junction -Path (Join-Path $linked.target 'settings') -Target $external|Out-Null
+  Seed $linked|Out-Null;Assert-IncomingPackage $linked
+  Need ((Snapshot $external) -ceq $externalBefore) 'Optional settings junction target changed'
+  Need (((Get-Item -LiteralPath (Join-Path $linked.target 'settings') -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) 'Foreign settings junction was retired'
 }
-Check 'foreign corrupt legacy JSON is never removed to hide a launch collision' {
-  $c=New-Case 'corrupt-legacy';Seed $c|Out-Null;Put $c.target '.ymcc-managed.json' '{bad'|Out-Null;$before=Snapshot $c.target
-  $refused=$false;try{Get-YmccDeckyPlan $c.source $c.target $c.manifest|Out-Null}catch{$refused=$true}
-  Need $refused 'Corrupt legacy root did not block the install'
-  Need ((Snapshot $c.target) -ceq $before) 'Corrupt or foreign legacy data was erased'
+Check 'corrupt legacy JSON is quarantined literally before the incoming canonical receipt is restored' {
+  $c=New-Case 'corrupt-legacy';Seed $c|Out-Null;$legacy=Put $c.target '.ymcc-managed.json' '{bad';$oldHash=Get-YmccDeckyHash $legacy
+  $sentinels=New-UnownedSentinels $c;Seed $c|Out-Null
+  Need (!(Test-Path -LiteralPath $legacy)) 'Corrupt legacy launch collision survived'
+  Assert-QuarantinedFile $c.target $oldHash;Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
 }
 Check 'missing and corrupt owned resources automatically repair as one paired package' {
   $c=New-Case 'repair';Seed $c | Out-Null
@@ -191,37 +291,39 @@ Check 'higher incoming official version consumes incoming identity rather than o
   Put $c.source 'PluginLoader_noconsole.exe' 'inert-v340-official' | Out-Null
   $lock=Get-Content -LiteralPath $c.lock -Raw | ConvertFrom-Json;$lock.version='v3.4.0';$lock.asset.sha256=Get-YmccDeckyHash (Join-Path $c.source 'PluginLoader_noconsole.exe');$lock.asset.size=([IO.FileInfo](Join-Path $c.source 'PluginLoader_noconsole.exe')).Length
   $lock | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $c.lock -Encoding UTF8
-  $c.manifest=New-YmccDeckyManifest $c.source $c.lock
+  $c.manifest=New-TaskManifest $c.source $c.lock
   $t=Seed $c
   Need ($t.plan.manifest.loaderVersion -eq 'v3.4.0') 'Upgrade pinned to outgoing version'
 }
-Check 'old YMCC package cannot downgrade a recorded newer Loader' {
-  $c=New-Case 'downgrade';Seed $c | Out-Null
-  $receipt=Join-Path $c.target '.ymcc-managed.receipt';$old=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json;$old.loaderVersion='v3.4.0';$old | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
-  $before=Snapshot $c.target
-  Reject { Get-YmccDeckyPlan $c.source $c.target $c.manifest } 'DOWNGRADE_REFUSED'
-  Need ((Snapshot $c.target) -eq $before) 'Downgrade rejection changed files'
+Check 'verified incoming bundle overrides a recorded newer Loader label' {
+  $c=New-Case 'downgrade';Seed $c|Out-Null
+  $receipt=Join-Path $c.target '.ymcc-managed.receipt';$old=Get-Content -LiteralPath $receipt -Raw|ConvertFrom-Json;$old.loaderVersion='v3.4.0';$old|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $receipt -Encoding UTF8
+  $sentinels=New-UnownedSentinels $c;Seed $c|Out-Null
+  Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
 }
-Check 'first old-updater package identity prevents later downgrade without a managed receipt' {
+Check 'first old-updater identity cannot veto the incoming bundle or canonical receipt repair' {
   $c=New-Case 'first-upgrade';Seed $c|Out-Null
   [IO.File]::Delete((Join-Path $c.target '.ymcc-managed.receipt'))
   $old=$c.manifest|ConvertTo-Json -Depth 8|ConvertFrom-Json;$old.loaderVersion='v3.4.0'
   $identity=Put $c.home 'program/decky-package.json' ($old|ConvertTo-Json -Depth 8 -Compress)
-  $before=Snapshot $c.target
-  Reject { Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity } 'DOWNGRADE_REFUSED'
-  Need ((Snapshot $c.target) -eq $before) 'First-upgrade downgrade changed files'
-  $old.loaderVersion='v3.3.0';[IO.File]::WriteAllText($identity,($old|ConvertTo-Json -Depth 8 -Compress))
+  $sentinels=New-UnownedSentinels $c
   $plan=Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity
   Need (!$plan.legacyAdoption) 'Known first-upgrade identity was discarded'
-  $t=Install-YmccDeckyPackage $plan (Join-Path $c.home 'first-managed-backup') -BackendPort 0
-  Need ([IO.File]::Exists((Join-Path $c.target '.ymcc-managed.receipt'))) 'Next transaction did not record managed receipt'
-  Put $c.target '.ymcc-managed.receipt' 'corrupt'|Out-Null
-  Reject { Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity } ''
+  Install-YmccDeckyPackage $plan (Join-Path $c.home 'first-managed-backup') -BackendPort 0|Out-Null
+  Assert-IncomingPackage $c
+  $old.loaderVersion='v3.3.0';[IO.File]::WriteAllText($identity,($old|ConvertTo-Json -Depth 8 -Compress));$identityHash=Get-YmccDeckyHash $identity
+  Need (@((Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity).entries).Count -eq 0) 'Matching old-updater identity broke idempotence'
+  $receipt=Put $c.target '.ymcc-managed.receipt' 'corrupt';$oldHash=Get-YmccDeckyHash $receipt
+  $plan=Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity
+  Install-YmccDeckyPackage $plan (Join-Path $c.home 'repaired-managed-backup') -BackendPort 0|Out-Null
+  Assert-QuarantinedFile $c.target $oldHash;Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
+  Need ((Get-YmccDeckyHash $identity) -ceq $identityHash) 'Old updater identity outside the managed target changed'
 }
 Check 'package hash mismatch is rejected before any installed mutation' {
   $c=New-Case 'tamper';Seed $c | Out-Null;$before=Snapshot $c.target
-  Put $c.source 'plugins/ymcc-sidebar/dist/index.js' 'tampered' | Out-Null
-  Reject { Seed $c } 'PACKAGE_HASH_MISMATCH'
+  $incomingPath=Join-Path $c.source 'plugins/ymcc-sidebar/dist/index.js';$incomingBytes=[IO.File]::ReadAllBytes($incomingPath)
+  $incomingBytes[0]=$incomingBytes[0] -bxor 1;[IO.File]::WriteAllBytes($incomingPath,$incomingBytes)
+  Reject { Get-YmccDeckyPlan $c.source $c.target $c.manifest } 'PACKAGE_HASH_MISMATCH'
   Need ((Snapshot $c.target) -eq $before) 'Tampered package changed installed files'
 }
 Check 'missing incoming manifest never authorizes blind merge' {
@@ -235,7 +337,7 @@ Check 'missing incoming file cannot form a partial plugin install' {
   Need ([string](Snapshot $c.target) -eq '') 'Partial incoming package installed'
 }
 Check 'foreign plugin identity cannot be consumed as YMCC' {
-  $c=New-Case 'foreign-plugin';Put $c.source 'plugins/ymcc-sidebar/plugin.json' '{"name":"other"}' | Out-Null;$c.manifest=New-YmccDeckyManifest $c.source $c.lock
+  $c=New-Case 'foreign-plugin';Put $c.source 'plugins/ymcc-sidebar/plugin.json' '{"name":"other"}' | Out-Null;$c.manifest=New-TaskManifest $c.source $c.lock
   Reject { Seed $c } 'PLUGIN_IDENTITY_INVALID'
 }
 Check 'old locked Loader fails before first mutation without killing its owner' {
@@ -255,30 +357,37 @@ Check 'receipt-owned obsolete code is removed only with exact original bytes' {
   Restore-YmccDeckyPackage $t -BackendPort 0
   Need ([IO.File]::ReadAllText($stale) -eq 'old chunk') 'Outer updater rollback lost retired code'
 }
-Check 'modified obsolete code and unrecorded files survive cleanup' {
+Check 'modified and unrecorded owned dist files retire transactionally while foreign content survives' {
   $c=New-Case 'modified-obsolete';Seed $c | Out-Null
   $stale=Put $c.target 'plugins/ymcc-sidebar/dist/old-chunk.js' 'old chunk';$unrecorded=Put $c.target 'plugins/ymcc-sidebar/dist/user.js' 'user'
   $receipt=Join-Path $c.target '.ymcc-managed.receipt';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
   $prev.files+= [pscustomobject]@{path='plugins/ymcc-sidebar/dist/old-chunk.js';bytes=([IO.FileInfo]$stale).Length;sha256=(Get-YmccDeckyHash $stale)}
   $prev | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
-  [IO.File]::WriteAllText($stale,'user-modified')
+  [IO.File]::WriteAllText($stale,'user-modified');$sentinels=New-UnownedSentinels $c;$before=Snapshot $c.target
   $t=Seed $c
-  Need (@($t.plan.preservedObsolete).Count -eq 1) 'Modified obsolete record lost'
-  Need (([IO.File]::ReadAllText($stale) -eq 'user-modified') -and [IO.File]::Exists($unrecorded)) 'User content erased'
+  Need (![IO.File]::Exists($stale) -and ![IO.File]::Exists($unrecorded)) 'Old modified or unrecorded owned dist file survived'
+  Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
+  Restore-YmccDeckyPackage $t -BackendPort 0
+  Need ((Snapshot $c.target) -ceq $before) 'Owned dist retirement rollback did not restore exact modified and unrecorded bytes'
+  Assert-UnownedSentinels $sentinels
 }
-Check 'receipt cannot claim settings or another plugin as obsolete code' {
+Check 'corrupt receipt cannot authorize foreign deletion and is quarantined before canonical repair' {
   foreach ($name in @('settings/config.json','plugins/other/dist/index.js','../outside.js','plugins/ymcc-sidebar/dist/../../settings/config.js')) {
     $c=New-Case 'bad-receipt';Seed $c | Out-Null;$receipt=Join-Path $c.target '.ymcc-managed.receipt';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
     $prev.files+= [pscustomobject]@{path=$name;bytes=1;sha256=('0'*64)}
     $prev | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
-    Reject { Seed $c } 'MANAGED_FILE_INVALID'
+    $oldHash=Get-YmccDeckyHash $receipt;$sentinels=New-UnownedSentinels $c
+    $outside=Put $c.home 'outside.js' 'outside-sentinel';$traversal=Put $c.target 'plugins/settings/config.js' 'traversal-sentinel'
+    Seed $c|Out-Null
+    Assert-QuarantinedFile $c.target $oldHash;Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
+    Need ([IO.File]::ReadAllText($outside) -ceq 'outside-sentinel' -and [IO.File]::ReadAllText($traversal) -ceq 'traversal-sentinel') 'Corrupt receipt authorized traversal deletion'
   }
 }
-Check 'malformed and oversized installed receipts fail safely' {
+Check 'malformed and oversized installed receipts are quarantined and rebuilt from incoming bytes' {
   foreach ($text in @('not-json',('x'*131073))) {
-    $c=New-Case 'bad-json';Put $c.target '.ymcc-managed.receipt' $text | Out-Null;$before=Snapshot $c.target
-    Reject { Seed $c } ''
-    Need ((Snapshot $c.target) -eq $before) 'Invalid receipt mutated target'
+    $c=New-Case 'bad-json';$receipt=Put $c.target '.ymcc-managed.receipt' $text;$oldHash=Get-YmccDeckyHash $receipt
+    $sentinels=New-UnownedSentinels $c;Seed $c|Out-Null
+    Assert-QuarantinedFile $c.target $oldHash;Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
   }
 }
 Check 'mid-transaction copy failure restores all prior committed files' {
@@ -329,12 +438,23 @@ Check 'rollback revalidates every file after its initial snapshot before restori
     Need ([IO.File]::ReadAllText($script:DeckyLateRaceTarget) -eq 'late-concurrent-owner') 'Late concurrent update was silently overwritten'
   } finally { Invoke-Expression ('function script:Get-YmccDeckyHash {'+$script:DeckyLateRaceHash.ToString()+'}') }
 }
-Check 'path traversal directory targets and overlapping source are rejected' {
+Check 'path traversal and overlapping source reject while a literal owned directory or link is quarantined and replaced' {
   $c=New-Case 'paths'
   foreach ($bad in @('../outside','/outside','C:/outside','a\\b','a//b','a./b')) { Reject { Resolve-YmccDeckyPath $c.target $bad } '' }
   Reject { Get-YmccDeckyPlan $c.source $c.source $c.manifest } 'OVERLAP'
-  [IO.Directory]::CreateDirectory((Join-Path $c.target 'PluginLoader_noconsole.exe')) | Out-Null
-  Reject { Seed $c } 'TARGET_FILE_IS_DIRECTORY'
+  foreach($kind in @('directory','junction')){
+    $owned=New-Case ('owned-target-'+$kind);$sentinels=New-UnownedSentinels $owned
+    $target=Join-Path $owned.target 'PluginLoader_noconsole.exe'
+    $external=Join-Path $owned.home 'external';Put $external 'keep.txt' 'external-target-sentinel'|Out-Null;$externalBefore=Snapshot $external
+    if($kind -ceq 'directory'){Put $target 'keep.txt' 'literal-directory-sentinel'|Out-Null}
+    else{New-Item -ItemType Junction -Path $target -Target $external|Out-Null}
+    Seed $owned|Out-Null;Assert-IncomingPackage $owned;Assert-UnownedSentinels $sentinels
+    $retired=@(Get-ChildItem -LiteralPath $owned.target -Force -Filter '.ymcc-retired-*')
+    Need ($retired.Count -eq 1 -and $retired[0].PSIsContainer) 'Literal owned target was not quarantined as one directory item'
+    if($kind -ceq 'directory'){Need ([IO.File]::ReadAllText((Join-Path $retired[0].FullName 'keep.txt')) -ceq 'literal-directory-sentinel') 'Quarantined directory contents changed'}
+    else{Need (($retired[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) 'Quarantined link lost its literal identity'}
+    Need ((Snapshot $external) -ceq $externalBefore) 'Owned leaf quarantine followed or changed its external target'
+  }
 }
 Check 'reparse ancestor cannot redirect cleanup or update outside managed home' {
   $c=New-Case 'junction';$external=Join-Path $c.home 'external';[IO.Directory]::CreateDirectory($external) | Out-Null
@@ -357,7 +477,7 @@ Check 'official provenance identity and size mismatches reject package construct
     $c=New-Case 'lock';$l=Get-Content -LiteralPath $c.lock -Raw | ConvertFrom-Json
     if ($kind -eq 'patched') { $l.loaderPatches=1 } elseif ($kind -eq 'origin') { $l.origin='fork' } elseif ($kind -eq 'hash') { $l.asset.sha256='0'*64 } else { $l.asset.size=1 }
     $l | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $c.lock -Encoding UTF8
-    Reject { New-YmccDeckyManifest $c.source $c.lock } ''
+    Reject { New-TaskManifest $c.source $c.lock } ''
   }
 }
 Check 'backend port lease refuses an active watcher and is returned on failure' {
@@ -412,7 +532,7 @@ Check 'native updater includes production transaction and excludes generic merge
 
 # Configuration storms stay on the original embedded transaction consumer.
 foreach($kind in @('empty','truncated','duplicate','escaped-duplicate','case-duplicate','array','future','schema-string','schema-float','owner-type','bytes-string','bytes-bool','oversize','trailing')) {
- Check ('storm installed receipt '+$kind+' preserves originals and rejects ownership') {
+ Check ('storm installed receipt '+$kind+' quarantines old bytes and restores incoming ownership') {
   $c=New-Case 'storm-receipt';Seed $c|Out-Null
   $good=$c.manifest|ConvertTo-Json -Depth 12 -Compress
   $bad=$good
@@ -433,24 +553,31 @@ foreach($kind in @('empty','truncated','duplicate','escaped-duplicate','case-dup
    'trailing'{$bad=$good+' {}'}
   }
   Need ($bad -cne $good) 'storm mutation unchanged'
-  $receipt=Put $c.target '.ymcc-managed.receipt' $bad;$before=Snapshot $c.target
-  Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} ''
-  Need ((Snapshot $c.target) -ceq $before -and [IO.File]::ReadAllText($receipt) -ceq $bad) 'Invalid ownership original was overwritten'
-  Put $c.target '.ymcc-managed.receipt' $good|Out-Null
-  Need (@((Get-YmccDeckyPlan $c.source $c.target $c.manifest).entries).Count -eq 0) 'Explicit valid receipt retry failed'
- }
+  $receipt=Put $c.target '.ymcc-managed.receipt' $bad;$oldHash=Get-YmccDeckyHash $receipt
+  $sentinels=New-UnownedSentinels $c;$before=Snapshot $c.target
+  $incomingPath=Join-Path $c.source 'plugins/ymcc-sidebar/dist/index.js';$incomingBytes=[IO.File]::ReadAllBytes($incomingPath);$damaged=[byte[]]$incomingBytes.Clone()
+  $damaged[0]=$damaged[0] -bxor 1;[IO.File]::WriteAllBytes($incomingPath,$damaged)
+  try{
+    Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} 'PACKAGE_HASH_MISMATCH'
+    Need ((Snapshot $c.target) -ceq $before -and (Get-YmccDeckyHash $receipt) -ceq $oldHash) 'Bad incoming bytes retired or changed old metadata'
+  }finally{[IO.File]::WriteAllBytes($incomingPath,$incomingBytes)}
+  Seed $c|Out-Null
+  Assert-QuarantinedFile $c.target $oldHash;Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
+  Need (@((Get-YmccDeckyPlan $c.source $c.target $c.manifest).entries).Count -eq 0) 'Rebuilt incoming receipt is not idempotent'
 }
-Check 'storm legacy duplicate ownership cannot retire prior receipt' {
- $c=New-Case 'storm-legacy';Seed $c|Out-Null;$good=$c.manifest|ConvertTo-Json -Depth 12 -Compress
- Put $c.target '.ymcc-managed.json' ('{"owner":"foreign",'+$good.Substring(1))|Out-Null
- $before=Snapshot $c.target;Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} ''
- Need ((Snapshot $c.target) -ceq $before) 'Invalid legacy receipt retired'
+}
+Check 'storm legacy duplicate ownership is quarantined literally without affecting canonical ownership' {
+  $c=New-Case 'storm-legacy';Seed $c|Out-Null;$good=$c.manifest|ConvertTo-Json -Depth 12 -Compress
+  $legacy=Put $c.target '.ymcc-managed.json' ('{"owner":"foreign",'+$good.Substring(1));$oldHash=Get-YmccDeckyHash $legacy
+  $sentinels=New-UnownedSentinels $c;Seed $c|Out-Null
+  Need (!(Test-Path -LiteralPath $legacy)) 'Duplicate-key legacy launch collision survived'
+  Assert-QuarantinedFile $c.target $oldHash;Assert-IncomingPackage $c;Assert-UnownedSentinels $sentinels
 }
 Check 'storm package lock duplicate owner fields cannot attest official bytes' {
  $c=New-Case 'storm-lock';$good=[IO.File]::ReadAllText($c.lock)
  [IO.File]::WriteAllText($c.lock,('{"origin":"foreign",'+$good.Substring(1)))
- Reject {New-YmccDeckyManifest $c.source $c.lock} ''
- [IO.File]::WriteAllText($c.lock,$good);Need ((New-YmccDeckyManifest $c.source $c.lock).files.Count -eq 7) 'Valid lock retry failed'
+ Reject {New-TaskManifest $c.source $c.lock} ''
+ [IO.File]::WriteAllText($c.lock,$good);Need ((New-TaskManifest $c.source $c.lock).files.Count -eq 7) 'Valid lock retry failed'
 }
 Check 'storm incoming manifest numeric strings cannot claim a managed file length' {
  $c=New-Case 'storm-consume';$c.manifest.files[2].bytes=[string]$c.manifest.files[2].bytes
@@ -476,9 +603,9 @@ foreach($kind in @('future','schema-string','schema-float')) {
   $c=New-Case 'storm-lock-schema';$good=[IO.File]::ReadAllText($c.lock)
   $replacement=switch($kind){'future'{'"schemaVersion":2'};'schema-string'{'"schemaVersion":"1"'};'schema-float'{'"schemaVersion":1.0'}}
   $bad=$good.Replace('"schemaVersion":1',$replacement);Need ($bad -cne $good) 'Lock schema mutation unchanged'
-  [IO.File]::WriteAllText($c.lock,$bad);Reject {New-YmccDeckyManifest $c.source $c.lock} ''
+  [IO.File]::WriteAllText($c.lock,$bad);Reject {New-TaskManifest $c.source $c.lock} ''
   Need ([IO.File]::ReadAllText($c.lock) -ceq $bad) 'Future lock original overwritten'
-  [IO.File]::WriteAllText($c.lock,$good);Need ((New-YmccDeckyManifest $c.source $c.lock).files.Count -eq 7) 'Current lock explicit retry failed'
+  [IO.File]::WriteAllText($c.lock,$good);Need ((New-TaskManifest $c.source $c.lock).files.Count -eq 7) 'Current lock explicit retry failed'
  }
 }
 
@@ -525,7 +652,7 @@ public sealed class YmccDeckyPackageFixtureJob : IDisposable {
 Write-TaskPackageProgress 'fixture-job-type-ready' @{compiler=$fixtureAuthority.compiler;manifestSha256=$fixtureAuthoritySha256;hostedEnvironment=($env:YMCC_RELEASE_HOSTED_ENVIRONMENT -ceq '1');moduleVersionId=[YmccDeckyPackageFixtureJob].Assembly.ManifestModule.ModuleVersionId.ToString();loadedModuleCompleteness=$false}
 }
 if (!$SkipMutationProof) {
-  Check 'rollback and downgrade semantic mutations fail their original production assertions' {
+  Check 'rollback and incoming integrity semantic mutations fail their original production assertions' {
     $mutations=$taskMutationDefinitions
     # Independent roots and Mutex namespaces share one wall-clock run deadline
     # and cleanup reserve. Each child executes only its selected original assertion;
@@ -536,7 +663,6 @@ if (!$SkipMutationProof) {
       foreach($mutation in $mutations) {
       [void](Get-TaskPackageRemaining)
       $taskMutationStates[$mutation.name]='RUNNING'
-      if (!$body.Contains($mutation.from)) { throw ('Missing mutation anchor '+$mutation.name) }
       $negativeRoot=Join-Path $EvidenceDir ('mutation-'+$mutation.name)
       [IO.Directory]::CreateDirectory((Join-Path $negativeRoot 'native'))|Out-Null
       [IO.Directory]::CreateDirectory((Join-Path $negativeRoot 'tools'))|Out-Null
@@ -634,7 +760,7 @@ if (!$SkipMutationProof) {
       if($negative.complete -ne $true -or $negative.status -cne 'FAIL'){$script:taskIncomplete=$true;if($negative.status -ceq 'TIMEOUT'){$script:taskBudgetExhausted=$true};$taskMutationStates[$owned.mutation.name]=$negative.status}
       Need ($negative.complete -eq $true -and $negative.status -ceq 'FAIL') 'TIMEOUT or INCOMPLETE cannot witness the original mutation assertion'
       Need ($negative.executionScope -ceq 'selected-original-mutation-assertion' -and $negative.selectedMutation -ceq $owned.mutation.name -and $negative.selectedCase -ceq $owned.mutation.case -and $negative.count -eq 1 -and $negative.declaredOrdinaryCaseCount -eq $taskOrdinaryDeclaredCount -and $negative.executedOrdinaryCaseCount -eq 1 -and @($negative.omittedOrdinaryCases).Count -eq ($taskOrdinaryDeclaredCount-1)) 'Negative test did not execute exactly its declared original assertion scope'
-      Need ($owned.exit -ne 0 -and $negative.pass -eq $false -and $expected.Count -eq 1 -and $expected[0].pass -eq $false) ('Mutation escaped original assertion '+$owned.mutation.name)
+      Need ($owned.exit -eq 1 -and $negative.pass -eq $false -and $expected.Count -eq 1 -and $expected[0].pass -eq $false) ('Mutation escaped original assertion '+$owned.mutation.name)
       Need ($expected[0].executed -eq $true -and $expected[0].error -ceq $owned.mutation.failure) ('Mutation failed outside its original semantic assertion '+$owned.mutation.name)
       $taskMutationStates[$owned.mutation.name]='EXPECTED_NONZERO'
     }
@@ -646,8 +772,8 @@ $taskMutationsComplete=$SkipMutationProof -or (@($taskMutationStates.Values|Wher
 if(!$taskMutationsComplete){$taskIncomplete=$true}
 $taskComplete=!$taskBudgetExhausted -and !$taskIncomplete -and $taskMutationsComplete
 $taskStatus=if($taskBudgetExhausted){'TIMEOUT'}elseif(!$taskComplete){'INCOMPLETE'}elseif($failures.Count){'FAIL'}else{'PASS'}
-$result=[ordered]@{pass=($failures.Count -eq 0 -and $taskComplete);status=$taskStatus;complete=$taskComplete;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=$taskCleanupUsedMs;executionScope=$taskExecutionScope;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;declaredOrdinaryCaseCount=$taskOrdinaryDeclaredCount;executedOrdinaryCaseCount=$taskOrdinaryExecutedCount;omittedOrdinaryCases=$taskOmittedCases.ToArray();mutations=$taskMutationStates;mutationRetirement=$taskMutationReceipts.ToArray();count=$cases.Count;passed=($cases.Count-$failures.Count);cases=$cases.ToArray();sourceSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance.ps1'));embeddedSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance_script.h'));realSteamActions=0;hardwareWrites=0;productProcessesLaunched=0;productionGlobalMutexAccessed=$false;fixtureMutexNamespaceRemapped=$fixtureMutexRemapped;scope=$(if($MutationCase){'Selected original assertion only: '+$taskSelectedCase+'; other '+($taskOrdinaryDeclaredCount-1)+' ordinary cases omitted. '}else{('Original 32 ordinary assertions plus '+($taskOrdinaryDeclaredCount-32)+' configuration storm assertions. ')})+'Exact embedded production PowerShell executes real file transactions in isolated evidence; inert Loader bytes, no installed/physical acceptance'}
+$result=[ordered]@{pass=($failures.Count -eq 0 -and $taskComplete);status=$taskStatus;complete=$taskComplete;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=$taskCleanupUsedMs;executionScope=$taskExecutionScope;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;declaredOrdinaryCaseCount=$taskOrdinaryDeclaredCount;executedOrdinaryCaseCount=$taskOrdinaryExecutedCount;omittedOrdinaryCases=$taskOmittedCases.ToArray();mutations=$taskMutationStates;mutationAdmission=$taskMutationAdmission.ToArray();mutationRetirement=$taskMutationReceipts.ToArray();manifestPreparation=[ordered]@{scope='invocation';commonCacheKeySha256=$taskCommonManifestCacheKeySha256;manifestGenerationCount=$taskManifestGenerationCount;manifestCloneCount=$taskManifestCloneCount;manifestGenerationElapsedMs=$taskManifestGenerationElapsedMs;manifestCloneElapsedMs=$taskManifestCloneElapsedMs;newCaseCount=$taskNewCaseCount;newCasePreparationElapsedMs=$taskNewCasePreparationElapsedMs;planMemoized=$false;releaseDecisionMemoized=$false;crossRunCache=$false};count=$cases.Count;passed=($cases.Count-$failures.Count);cases=$cases.ToArray();sourceSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance.ps1'));embeddedSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance_script.h'));realSteamActions=0;hardwareWrites=0;productProcessesLaunched=0;productionGlobalMutexAccessed=$false;fixtureMutexNamespaceRemapped=$fixtureMutexRemapped;scope=$(if($MutationCase){'Selected original assertion only: '+$taskSelectedCase+'; other '+($taskOrdinaryDeclaredCount-1)+' ordinary cases omitted. '}else{('Original 32 ordinary assertions plus '+($taskOrdinaryDeclaredCount-32)+' configuration storm assertions. ')})+'Exact embedded production PowerShell executes real file transactions in isolated evidence; inert Loader bytes, no installed/physical acceptance'}
 $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'result.json') -Encoding UTF8
-if (!$taskComplete){Write-Error ('DECKY_PACKAGE_TEST_'+$taskStatus) -ErrorAction Continue;exit 124}
-if ($failures.Count) { $failures | Format-Table -Wrap; throw ('Decky package maintenance failed '+$failures.Count+'/'+$cases.Count) }
+if (!$taskComplete){Write-Error ('DECKY_PACKAGE_TEST_'+$taskStatus) -ErrorAction Continue;if($taskStatus -ceq 'TIMEOUT'){exit 124};exit 2}
+if ($failures.Count) { $failures | Format-Table -Wrap; Write-Error ('Decky package maintenance failed '+$failures.Count+'/'+$cases.Count) -ErrorAction Continue;exit 1 }
 Write-Output ('DECKY_PACKAGE_MAINTENANCE_PASS cases='+$cases.Count)

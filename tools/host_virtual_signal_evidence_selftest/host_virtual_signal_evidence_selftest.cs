@@ -80,6 +80,7 @@ internal static partial class Program
         public long _lastSubmitElapsedUs, _backendSubmitOk, _backendSubmitFail, _backendNeutralOk, _backendNeutralFail;
         public long _costHidSubmitUsSum, _costHidSubmitCount;
         public string _lastBackendDetail = "";
+        protected HostSdkFirstWitness? _sdkFirstWitness;
         protected static string CostStateDir => Path.Combine(EvidenceDirectory, "unexpected-default-sink");
         protected static void RecordCostRole(string role) { }
         protected static void RecordCostFrame(long elapsed, bool rejected) { }
@@ -105,6 +106,9 @@ internal static partial class Program
         public void Close() => CloseReportChain1410Safely("release-local");
         public void InstallClock(Func<long> clock, Action<string> sink) => _virtualSignalEvidence = new(EvidenceDirectory, clock, sink);
         public HostVirtualSignalEvidence Collector => _virtualSignalEvidence!;
+        public void BindSdkLifetime(string ordinal,string token)=>(_sdkFirstWitness??=new()).BindLifetime(_controller,new{creationOrdinal=ordinal,lifetimeToken=token,closed=false});
+        public string SdkResponse(string response="{}")=>_sdkFirstWitness?.TryAppend(response,65536)??response;
+
         public void Sd(CommandEnvelope canonical, CommandEnvelope? cause, string reason = "live-frame", bool neutral = false) =>
             SubmitSteamDeckWithScreenPads(_controller!, _context!.GetProfile("steam-deck-composite"), canonical, _costFlagEnabled, neutral,
                 signalSession: this, signalCause: cause, signalReason: reason);
@@ -667,6 +671,71 @@ internal static partial class Program
             scope="original TrySubmitFrame/encoder/diagnostic wrappers; exact SDK profile lookup and actual data model; fake final device-submit and cost-role/frame ports; not parse/pipe/driver/game/process CPU",sharedSourceChanged=false};
         File.WriteAllText(Path.Combine(EvidenceDirectory,"profile-performance.json"),JsonSerializer.Serialize(result,new JsonSerializerOptions{WriteIndented=true}));return all?0:2;
     }
+    private static void FirstSdkWitnessReplies()
+    {
+        var e=Env() with {Buttons=4096,Lx=0,Ly=0,Rx=0,Ry=0,Lt=0,Rt=0,BackButtons=0,ScreenButtons=0};
+        var session=new HostSession(e,false,null);session.BindSdkLifetime("1","fixture-life-1");
+        var raw=new byte[]{0x11,0x22,0x33};session.Raw(e,raw);
+        var response=session.SdkResponse();using var doc=JsonDocument.Parse(response);
+        var witness=doc.RootElement.GetProperty("sdkFirstWitnesses")[0];var sample=witness.GetProperty("sample");
+        Check(witness.GetProperty("outcome").GetString()=="returned"&&sample.GetProperty("sdkArguments").GetProperty("hex").GetString()=="112233","actual SDK argument/return missing");
+        Check(sample.GetProperty("lifetimeKnown").GetBoolean()&&sample.GetProperty("targetCreationLifetimeEvidence").GetProperty("lifetimeToken").GetString()=="fixture-life-1","creation lifetime anchor missing");
+        Check(!response.Contains("fixture-nonce")&&!sample.GetProperty("request").TryGetProperty("startupNonce",out _),"SDK first witness retained transport auth");
+        File.WriteAllText(Path.Combine(EvidenceDirectory,"sdk-first-response.json"),response);
+        for(int i=0;i<50000;++i)session.Raw(e,raw);
+        Check(session._controller!.RawCalls==50001&&session.SdkResponse()=="{}","repeated controls produced more first witnesses or changed SDK calls");
+        var neutral=e with {Buttons=0};session.Raw(neutral,new byte[]{0,0,0});
+        using(var zero=JsonDocument.Parse(session.SdkResponse()))Check(zero.RootElement.GetProperty("sdkFirstWitnesses").GetArrayLength()==1,"first neutral missing");
+        session.Rebuild(e);session.BindSdkLifetime("2","fixture-life-2");session.Raw(e,raw);
+        using(var rebuilt=JsonDocument.Parse(session.SdkResponse()))Check(rebuilt.RootElement.GetProperty("sdkFirstWitnesses")[0].GetProperty("sample").GetProperty("targetCreationLifetimeEvidence").GetProperty("lifetimeToken").GetString()=="fixture-life-2","same tuple new creation was suppressed");
+        session.Rebuild(e);session.BindSdkLifetime("3","fixture-life-3");session._controller!.Failure=new InvalidOperationException("fake-sdk-failure");
+        bool propagated=false;try{session.Raw(e,raw);}catch(InvalidOperationException){propagated=true;}
+        using(var failed=JsonDocument.Parse(session.SdkResponse()))Check(propagated&&failed.RootElement.GetProperty("sdkFirstWitnesses")[0].GetProperty("outcome").GetString()=="threw","SDK exception changed or was labelled success");
+        session._controller!.Failure=null;session.Raw(e,raw);
+        using(var returned=JsonDocument.Parse(session.SdkResponse())){
+            var row=returned.RootElement.GetProperty("sdkFirstWitnesses")[0];
+            Check(row.GetProperty("outcome").GetString()=="returned"&&!row.GetProperty("firstAttempt").GetBoolean()&&row.GetProperty("firstReturned").GetBoolean(),"first throw suppressed later first returned SDK call");
+        }
+        session.Rebuild(e);session.BindSdkLifetime("4","fixture-life-4");session._controller!.Failure=null;session.Raw(e,raw);
+        Check(session.SdkResponse(new string('x',65536)+"}")==new string('x',65536)+"}","oversize diagnostics altered original response");
+        using(var retained=JsonDocument.Parse(session.SdkResponse()))Check(retained.RootElement.GetProperty("sdkFirstWitnessCoverage").GetProperty("emissionFailures").GetInt64()==1,"oversize reply consumed pending evidence");
+        Pass("FirstSdkWitnessReplies: detail-off,50000 repeats,actual arguments,creation lifetime,SDK throw,no transport auth");
+    }
+    private static void FirstSdkWitnessLossAndBudget()
+    {
+        var e=Env() with {Buttons=4096,Lx=0,Ly=0,Rx=0,Ry=0,Lt=0,Rt=0,BackButtons=0,ScreenButtons=0};
+        var controller=new object();var helper=new HostSdkFirstWitness();helper.BindLifetime(controller,new{lifetimeToken="loss-life",closed=false});
+        var attempt=helper.Begin("fixture-host",controller,e,e,1,true,"live-frame",null,new byte[]{1,2,3},null);
+        var gate=typeof(HostSdkFirstWitness).GetField("_gate",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(helper)!;
+        using var held=new System.Threading.ManualResetEventSlim();using var release=new System.Threading.ManualResetEventSlim();
+        var blocker=new System.Threading.Thread(()=>{lock(gate){held.Set();release.Wait(TimeSpan.FromSeconds(5));}});blocker.IsBackground=true;blocker.Start();
+        try{Check(held.Wait(TimeSpan.FromSeconds(5)),"contention fixture did not acquire gate");helper.Complete(attempt,null);}
+        finally{release.Set();Check(blocker.Join(TimeSpan.FromSeconds(5)),"contention fixture thread leaked");}
+        Check(helper.HasPending,"dropped first sample did not mark coverage pending");
+        using(var lost=JsonDocument.Parse(helper.TryAppend("{}",16384)))Check(lost.RootElement.GetProperty("sdkFirstWitnessCoverage").GetProperty("dropped").GetInt64()==1&&lost.RootElement.GetProperty("sdkFirstWitnesses").GetArrayLength()==0,"drop without another input type was invisible");
+        helper=new HostSdkFirstWitness();helper.BindLifetime(controller,new{lifetimeToken="batch-life",closed=false});
+        for(ulong i=1;i<=17;++i){var binding=e with {Epoch=e.Epoch+i};var a=helper.Begin("fixture-host",controller,binding,binding,i,true,"live-frame",null,new byte[512],null);helper.Complete(a,null);}
+        var total=0;for(var i=0;i<16;++i){using var part=JsonDocument.Parse(helper.TryAppend("{}",16384));total+=part.RootElement.GetProperty("sdkFirstWitnesses").GetArrayLength();Check(part.RootElement.GetProperty("sdkFirstWitnessCoverage").GetProperty("dropped").GetInt64()==1,"pending full omission not reported");}
+        Check(total==16&&!helper.HasPending,"bounded batch did not drain one actual witness per existing ACK");
+        helper=new HostSdkFirstWitness();helper.BindLifetime(controller,new{lifetimeToken="budget-life",closed=false});
+        attempt=helper.Begin("fixture-host",controller,e,e,1,true,"live-frame",null,new byte[512],null);helper.Complete(attempt,null);
+        var crowded=new string('x',1000)+"}";
+        for(var i=0;i<4;++i)Check(helper.TryAppend(crowded,1024)==crowded,"budget deferral changed original response");
+        Check(!helper.HasPending,"permanent budget shortage retained a per-frame hot path");
+        var allocated=GC.GetAllocatedBytesForCurrentThread();for(var i=0;i<50000;++i)helper.TryAppend(crowded,1024);
+        Check(GC.GetAllocatedBytesForCurrentThread()==allocated,"budget-exhausted path allocated on later frames");
+        helper.BindLifetime(controller,new{lifetimeToken="budget-next-life",closed=false});
+        attempt=helper.Begin("fixture-host",controller,e,e,1,true,"live-frame",null,new byte[]{4},null);helper.Complete(attempt,null);
+        using(var next=JsonDocument.Parse(helper.TryAppend("{}",16384)))Check(next.RootElement.GetProperty("sdkFirstWitnessCoverage").GetProperty("emissionFailures").GetInt64()==4&&next.RootElement.GetProperty("sdkFirstWitnessCoverage").GetProperty("dropped").GetInt64()==1,"next lifetime lost bounded-budget omissions");
+        helper=new HostSdkFirstWitness();helper.BindLifetime(controller,new{lifetimeToken="repeated-throw-budget",closed=false});
+        var repeatedFailure=new InvalidOperationException("observer-only-failure");
+        for(var i=0;i<4;++i){
+            attempt=helper.Begin("fixture-host",controller,e,e,(ulong)i+1,true,"live-frame",null,new byte[512],null);helper.Complete(attempt,repeatedFailure);
+            Check(helper.TryAppend(crowded,1024)==crowded,"repeated failure modified original response");
+        }
+        Check(!helper.HasPending,"repeated throws refunded the same pending batch budget");
+        Pass("FirstSdkWitnessLossAndBudget: first-throw-then-returned,drop-only-coverage,16-sample-batch,4-deferrals,50000 no-allocation frames");
+    }
     private static int Main(string[] args)
     {
         EvidenceDirectory = args[0]; Directory.CreateDirectory(EvidenceDirectory);
@@ -674,7 +743,7 @@ internal static partial class Program
         if (args.Length == 2 && args[1] == "measure-profiles") return MeasureProfiles();
         try
         {
-            ResetOnceAndLateCompletion(); SteamDeckActualBoundary(); SteamDeckRateAndIsolation(); ParametersAndExceptions(); ActualFrameAndNeutral(); DiagnosticFailures(); RateAndWindows(); IsolationAndAllocation(); GlobalQuotaAndArmedTracker(); RotationAndLineBound(); ProfileReadyStates();
+            FirstSdkWitnessReplies(); FirstSdkWitnessLossAndBudget(); ResetOnceAndLateCompletion(); SteamDeckActualBoundary(); SteamDeckRateAndIsolation(); ParametersAndExceptions(); ActualFrameAndNeutral(); DiagnosticFailures(); RateAndWindows(); IsolationAndAllocation(); GlobalQuotaAndArmedTracker(); RotationAndLineBound(); ProfileReadyStates();
             File.WriteAllLines(Path.Combine(EvidenceDirectory, "sdk-parameter-samples.jsonl"), ParameterSamples);
             var result = new { pass = true, tests = Passed, sdkControllersConstructed = 0, devicesRead = 0, productDeployed = false, output = EvidenceDirectory };
             File.WriteAllText(Path.Combine(EvidenceDirectory, "result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));

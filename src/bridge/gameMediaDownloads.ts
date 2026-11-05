@@ -1,3 +1,4 @@
+import {wallpaperPowerBlocked,wallpaperPowerReason,subscribeWallpaperPowerChanged} from './wallpaperPowerPolicy';
 import {invoke,on} from './ipc';
 import {subscribeGameMediaResume} from './gameMediaPreparationPolicy';
 import {getUiSetting,setUiSettings,uiSettingsLoaded} from './uiSettings';
@@ -6,7 +7,7 @@ export function downloadDescription(state:MediaDownloadState){
   const manual=Number(state.manualUntil||0)>Date.now();
   if(state.enabled===false&&!manual){const reason=downloadInterruptionReason(state.reason||'');return '后台下载已关闭'+(reason?' · '+reason:'');}
   if(state.total&&state.remaining===0&&!state.workerPid&&!state.activeCount)return `本轮已处理 · ${state.completed||0} / ${state.total}${state.unavailable?` · ${state.unavailable} 个已跳过，不影响其他游戏`:''}`;
-  const pauses:Record<string,string>={'game-running':'游戏运行中，后台下载已暂停','battery-saver':'节电模式下暂停后台下载','low-battery':'低电量，后台下载已暂停','capacity-unavailable':'正在检查下载条件','media-power-transition':'电源切换中，后台下载已暂停','media-storage-unavailable':'存储暂不可用，等待恢复后继续下载','media-disk-space-low':'磁盘余量不足，后台下载已暂停','media-cache-budget-full':'壁纸缓存已满，后台下载已暂停'};
+  const pauses:Record<string,string>={'wallpaper-on-battery':'离电关闭已生效，壁纸缓存和下载已暂停','wallpaper-power-unknown':'正在确认真实电源，壁纸任务已暂停','game-running':'游戏运行中，后台下载已暂停','battery-saver':'节电模式下暂停后台下载','low-battery':'低电量，后台下载已暂停','capacity-unavailable':'正在检查下载条件','media-power-transition':'电源切换中，后台下载已暂停','media-storage-unavailable':'存储暂不可用，等待恢复后继续下载','media-disk-space-low':'磁盘余量不足，后台下载已暂停','media-cache-budget-full':'壁纸缓存已满，后台下载已暂停'};
   const resource:Record<string,string>={'startup-protection':'启动保护：前 30 秒不自动下载','on-battery':'电池模式，自动下载已停止','power-unknown':'正在确认供电，暂不自动下载','cpu-unknown':'正在检测 CPU 负载','cpu-busy':`CPU 占用超过 ${state.cpuThreshold||15}%，自动下载已暂停`,'cpu-recovering':'CPU 负载下降，稳定后继续下载'};
   if(state.resourcePauseReason)return resource[state.resourcePauseReason]||'后台下载等待恢复';
   if(state.pauseReason&&!(manual&&state.pauseReason==='game-running'))return (pauses[state.pauseReason]||'后台下载已暂停，条件恢复后继续')+(/video-selection-expired/.test(state.reason||'')?' · '+downloadInterruptionReason(state.reason||''):'');
@@ -45,7 +46,7 @@ export function downloadInterruptionReason(reason:string){
   return '';
 }
 interface DownloadPorts {
-  invoke:typeof invoke;enabled:()=>boolean;ready:()=>boolean;threshold:()=>number;
+  workAllowed:()=>boolean;invoke:typeof invoke;enabled:()=>boolean;ready:()=>boolean;threshold:()=>number;
   listen:(listener:(state:MediaDownloadState)=>void)=>()=>void;
   schedule:typeof setTimeout;cancel:typeof clearTimeout;
 }
@@ -58,12 +59,12 @@ export class MediaDownloads {
   private startupTimer:ReturnType<typeof setTimeout>|null=null;private startupChecked=false;private startupDeadline=0;
   private retry:ReturnType<typeof setTimeout>|null=null;private port:DownloadPorts;
   constructor(port:Partial<DownloadPorts>={}){
-    this.port={invoke,enabled:()=>getUiSetting('steamWallpaperBackgroundDownload'),ready:uiSettingsLoaded,threshold:()=>getUiSetting('steamWallpaperDownloadCpuThreshold'),listen:listener=>on<MediaDownloadState>('gameMedia.downloadsChanged',listener),schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),...port};
+    this.port={workAllowed:()=>!wallpaperPowerBlocked(),invoke,enabled:()=>getUiSetting('steamWallpaperBackgroundDownload'),ready:uiSettingsLoaded,threshold:()=>getUiSetting('steamWallpaperDownloadCpuThreshold'),listen:listener=>on<MediaDownloadState>('gameMedia.downloadsChanged',listener),schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),...port};
   }
   private display(state:MediaDownloadState){this.state=state;this.armStartupCheck();for(const listener of this.listeners)listener();}
   private cancelStartupCheck(){if(this.startupTimer!==null)this.port.cancel(this.startupTimer);this.startupTimer=null;}
   private armStartupCheck(){
-    const wanted=this.active&&!this.suspended&&this.port.ready()&&(this.port.enabled()||Number(this.state.manualUntil||0)>Date.now())&&this.state.resourcePauseReason==='startup-protection';
+    const wanted=this.active&&!this.suspended&&this.port.workAllowed()&&this.port.ready()&&(this.port.enabled()||Number(this.state.manualUntil||0)>Date.now())&&this.state.resourcePauseReason==='startup-protection';
     if(!wanted){this.cancelStartupCheck();this.startupChecked=false;this.startupDeadline=0;return;}
     const deadline=Number(this.state.startupProtectionUntil)||0;
     if(deadline!==this.startupDeadline){this.cancelStartupCheck();this.startupChecked=false;this.startupDeadline=deadline;}
@@ -74,7 +75,7 @@ export class MediaDownloads {
     this.startupTimer=this.port.schedule(()=>{this.startupTimer=null;this.startupChecked=true;void this.refresh();},delay);
   }
   refresh():Promise<void>{
-    if(!this.active||this.suspended||!this.port.ready())return Promise.resolve();
+    if(!this.active||this.suspended||!this.port.ready()||!this.port.workAllowed())return Promise.resolve();
     if(this.reading)return this.reading;
     const epoch=this.epoch,generation=this.readGeneration;
     const pending=this.port.invoke<MediaDownloadState>('gameMedia.downloads',{}, {timeoutMs:5000}).then(state=>{
@@ -93,7 +94,7 @@ export class MediaDownloads {
   }
   subscribe(listener:()=>void){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   watchCompleted(refresh:()=>void){let completed=Number(this.state.completed||0);return this.subscribe(()=>{const next=Number(this.state.completed||0);if(next!==completed){completed=next;refresh();}});}
-  policy(reason:string){if(this.pause===reason)return;this.pause=reason;this.sync();}
+  policy(reason:string){if(this.pause===reason)return;this.pause=reason;if(!this.port.workAllowed()){this.cancelStartupCheck();this.cancelRetry();}this.sync();}
   private cancelRetry(){if(this.retry!==null)this.port.cancel(this.retry);this.retry=null;}
   sync(){
     if(!this.active||!this.port.ready())return;
@@ -103,14 +104,15 @@ export class MediaDownloads {
     if(signature===this.applied)return;
     if(this.retry!==null&&signature===this.submitted)return;
     if(signature!==this.submitted)this.failures=0;
-    this.cancelRetry();this.submitted=signature;this.syncing=true;const epoch=this.epoch;
+    this.cancelRetry();this.submitted=signature;this.syncing=true;const epoch=this.epoch,generation=this.readGeneration;
     void this.port.invoke<MediaDownloadState>('gameMedia.background',args,{timeoutMs:5000}).then(state=>{
-      if(!this.active||epoch!==this.epoch)return;
+      if(!this.active||epoch!==this.epoch||generation!==this.readGeneration)return;
       this.applied=signature;this.failures=0;this.accept(state);
     }).catch(()=>{
-      if(!this.active||epoch!==this.epoch)return;
+      if(!this.active||epoch!==this.epoch||generation!==this.readGeneration)return;
       this.applied='';
       this.display({...this.state,phase:'deferred',reason:'host-unavailable'});
+      if(!this.port.workAllowed())return;
       const delays=[1000,5000,20000],delay=delays[Math.min(this.failures++,delays.length-1)];
       this.retry=this.port.schedule(()=>{this.retry=null;if(this.active&&epoch===this.epoch)this.sync();},delay);
     }).finally(()=>{
@@ -119,7 +121,7 @@ export class MediaDownloads {
     });
   }
   recheck():Promise<void>{
-    if(!this.active||this.suspended||!this.port.ready()||!this.port.enabled()&&!(Number(this.state.manualUntil||0)>Date.now()))return Promise.resolve();
+    if(!this.active||this.suspended||!this.port.ready()||!this.port.workAllowed()||!this.port.enabled()&&!(Number(this.state.manualUntil||0)>Date.now()))return Promise.resolve();
     if(this.checking)return this.checking;
     const epoch=this.epoch,generation=this.readGeneration;
     const pending=this.port.invoke<MediaDownloadState>('gameMedia.background',{recheck:true},{timeoutMs:5000}).then(state=>{
@@ -132,6 +134,7 @@ export class MediaDownloads {
     this.checking=pending;return pending;
   }
   private async manualCommand(args:{manual?:boolean;cancelManual?:boolean}){
+    if(!this.port.workAllowed()&&!args.cancelManual)throw Error(wallpaperPowerReason()||'wallpaper-power-paused');
     const epoch=this.epoch,generation=this.readGeneration;
     const value=await this.port.invoke<MediaDownloadState>('gameMedia.background',args,{timeoutMs:8000});
     if(this.active&&!this.suspended&&epoch===this.epoch&&generation===this.readGeneration)this.accept(value);
@@ -143,6 +146,11 @@ export class MediaDownloads {
     if(this.active)return()=>{};
     this.active=true;this.suspended=false;const epoch=++this.epoch;this.applied='';this.submitted='';this.failures=0;
     const off=this.port.listen(state=>{if(this.active&&epoch===this.epoch)this.accept(state);});
+    const power=subscribeWallpaperPowerChanged(blocked=>{
+      ++this.readGeneration;this.reading=this.checking=null;this.cancelStartupCheck();
+      if(blocked){this.cancelRetry();this.policy(wallpaperPowerReason());}
+      else {this.policy('capacity-unavailable');void this.refresh();}
+    });
     const settings=()=>{this.sync();this.armStartupCheck();};
     const visible=()=>{if(typeof document==='undefined'||document.visibilityState!=='hidden')void this.refresh();};
     const suspending=on('power.suspending',()=>{this.suspended=true;++this.readGeneration;this.reading=this.checking=null;this.cancelStartupCheck();});
@@ -150,7 +158,7 @@ export class MediaDownloads {
     window.addEventListener('pageshow',visible);window.addEventListener('focus',visible);
     if(typeof document!=='undefined')document.addEventListener('visibilitychange',visible);
     window.addEventListener('ui-settings:changed',settings);window.addEventListener('ui-settings:loaded',settings);settings();
-    return()=>{if(epoch!==this.epoch)return;this.active=false;++this.epoch;this.checking=this.reading=null;this.syncing=false;this.again=false;this.cancelRetry();this.cancelStartupCheck();off();suspending();resumed();window.removeEventListener('pageshow',visible);window.removeEventListener('focus',visible);if(typeof document!=='undefined')document.removeEventListener('visibilitychange',visible);window.removeEventListener('ui-settings:changed',settings);window.removeEventListener('ui-settings:loaded',settings);};
+    return()=>{if(epoch!==this.epoch)return;this.active=false;++this.epoch;this.checking=this.reading=null;this.syncing=false;this.again=false;this.cancelRetry();this.cancelStartupCheck();power();off();suspending();resumed();window.removeEventListener('pageshow',visible);window.removeEventListener('focus',visible);if(typeof document!=='undefined')document.removeEventListener('visibilitychange',visible);window.removeEventListener('ui-settings:changed',settings);window.removeEventListener('ui-settings:loaded',settings);};
   }
 }
 export const gameMediaDownloads=new MediaDownloads();

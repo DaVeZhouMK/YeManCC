@@ -153,10 +153,59 @@ AMD_DEFAULT_MW = 170000
 #     FireRange(9955HX) 同 CPUID 1Ah/44h → 必须用型号名区分, 纯 CPUID 会误判(历史回归教训)
 #   - Dragon/Fire Range 的 TDP 命令与桌面相同(0x4F/0x3E/0x5F), CO 走 PSMU(0x7/0x6, 未实现通道)
 # BEGIN GENERATED UXTU CAPABILITY DATA
-# Source: capabilities/uxtu-tdp-policy.json; semantic SHA256 ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d
+# Source: capabilities/uxtu-tdp-policy.json; semantic SHA256 4342190630c4bd570d4123feca7fc01c1edcccc41d471b77ec922b13fae207bf
 UXTU_CAPABILITY_LIBRARY_ID = "ymcc.uxtu.tdp"
 UXTU_CAPABILITY_LIBRARY_VERSION = "26.3.1"
-UXTU_CAPABILITY_POLICY_SHA256 = "ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d"
+UXTU_CAPABILITY_POLICY_SHA256 = "4342190630c4bd570d4123feca7fc01c1edcccc41d471b77ec922b13fae207bf"
+YMCC_TDP_COMPATIBILITY = {
+    "revision": 1,
+    "amdStrixHalo": {
+    "id": "ymcc-strix-halo-pm-388-r1",
+    "ownership": "YMCC extension on existing unified capability bus; fixed UXTU 26.3.1 remains the write recipe source",
+    "cpu": {
+    "family": 26,
+    "models": [112],
+},
+    "familyRecipe": "FAM_APU_FT6_NEW",
+    "familyTag": "apu_ft6_new",
+    "writeRoute": "reuse-existing-395-StrixHalo-recipe",
+    "readback": {
+    "tableVersions": [6553868, 6554124],
+    "tableBytes": 3664,
+    "unit": "w",
+    "offsets": {
+    "stapm": 0,
+    "fast": 8,
+    "slow": 16,
+},
+    "toleranceW": 0.05,
+    "minimumLimitW": 0,
+    "maximumPlausibleLimitW": 1000,
+    "mode": "explicit-static-request-only",
+    "unknownTable": "retain-write-receipt-and-unknown-readback",
+    "mismatch": "report-not-reflected-without-write-replay",
+},
+    "sources": [{
+    "path": "capabilities/upstream/ymcc-strix-halo-pm/ryzenadj-api.c",
+    "url": "https://raw.githubusercontent.com/FlyGoat/RyzenAdj/5775fc3e6dbb25c7030ee2d100a1bdd6e8bf2d0a/lib/api.c",
+    "bytes": 59609,
+    "sha256": "0dafa84f39caa06309c713e0011a436dfbe187dc67d49866a954fb7fa0443860",
+}, {
+    "path": "capabilities/upstream/ymcc-strix-halo-pm/ryzen_smu.c",
+    "url": "https://raw.githubusercontent.com/amkillam/ryzen_smu/e39db04cd0056e00b9cd47e7140e4137eaa47464/smu.c",
+    "bytes": 36239,
+    "sha256": "181d69adb7893a90d57836e817c72dac1dd97e08eb122f4504b70495993aee8e",
+}, {
+    "path": "capabilities/upstream/ymcc-strix-halo-pm/RyzenSMU.p",
+    "url": "https://raw.githubusercontent.com/namazso/PawnIO.Modules/24425a5299e84410751da882c121f322fb030b82/RyzenSMU.p",
+    "bytes": 27722,
+    "sha256": "1aed03fe369afc49cf154a83bde104920a34bc37872c68190d686b99f34de7b5",
+}],
+    "hardwareAcceptanceFromDeclaration": False,
+    "scopeEvidence": "0x64010C was hardware-tested on ONEXPLAYER X2Mini PRO AI MAX+ 388; 0x64020C on Strix Halo 395. GPD WIN5 actual table version and effect remain unverified.",
+    "upstreamReplacement": "Remove extension only after a later pinned UXTU supplies equivalent CPU/table/ABI declarations and existing consumers pass; do not auto-switch based on version label.",
+},
+}
 CCD_POLICY = {
     "operation": "process_affinity",
     "effectScope": "global_process_affinity_by_l3_domain",
@@ -173,7 +222,7 @@ UV_POLICY = {
     "amd": {
     "unit": "co_step",
     "minimum": -60,
-    "maximum": 60,
+    "maximum": 0,
     "step": 1,
     "scope": "all_core",
     "readback": False,
@@ -1491,7 +1540,78 @@ def amd_set_pbo(ppt_mw, tdc_ma, edc_ma, dry=False):
             p.close()
 
 
-def amd_set(stapm_mw, fast_mw, slow_mw, dry=False):
+def _amd_tdp_pm_compatibility(cfg):
+    compat = YMCC_TDP_COMPATIBILITY["amdStrixHalo"]
+    return compat if cfg is globals().get(compat["familyRecipe"]) else None
+
+
+def _amd_tdp_readback(p, cfg, requested=None):
+    """Observe known Strix Halo PM limits through the existing module, never write/retry TDP."""
+    compat = _amd_tdp_pm_compatibility(cfg)
+    if compat is None:
+        return None
+    rb = compat["readback"]
+    result = {"schemaVersion": 1, "vendor": "amd", "compatibilityId": compat["id"],
+              "hardwareCommandReturned": "not-observed", "readbackMatched": "not-observed",
+              "readbackState": "unavailable", "physicalPowerVerified": False,
+              "verificationScope": "StrixHalo_PM_table_limit_fields_only", "unit": rb["unit"]}
+    if requested is not None:
+        result["requestedLimitsW"] = dict(requested)
+    try:
+        # Existing PawnIO ABI returns version/base as two QWORDs. Resolve alone
+        # does not refresh telemetry; update precedes the bounded 24-byte read.
+        hr, resolved = p.execute("ioctl_resolve_pm_table", [], 2)
+        if hr != 0 or len(resolved) != 2 or not resolved[1]:
+            result["reason"] = "pm_table_resolve_unavailable"
+            return result
+        version = resolved[0]
+        result["tableVersion"] = "0x%08X" % version
+        if version not in rb["tableVersions"]:
+            result["reason"] = "unknown_pm_table_version"
+            return result
+        hr, _ = p.execute("ioctl_update_pm_table", [], 0)
+        if hr != 0:
+            result["reason"] = "pm_table_refresh_unavailable"
+            return result
+        hr, words = p.execute("ioctl_read_pm_table", [], 3)
+        if hr != 0 or len(words) != 3:
+            result["reason"] = "pm_table_read_unavailable"
+            return result
+        raw = b"".join(struct.pack("<Q", int(word) & 0xFFFFFFFFFFFFFFFF) for word in words)
+        observed = {key: struct.unpack_from("<f", raw, offset)[0] for key, offset in rb["offsets"].items()}
+        if any(not (rb["minimumLimitW"] < value <= rb["maximumPlausibleLimitW"]) for value in observed.values()):
+            result["reason"] = "invalid_pm_table_limits"
+            return result
+        result.update(observedLimitsW=observed, readbackState="observed", reason="")
+        if requested is not None:
+            matched = all(abs(observed[key] - value) <= rb["toleranceW"] for key, value in requested.items())
+            result.update(readbackMatched=matched, readbackState="matched" if matched else "mismatch",
+                          reason="" if matched else "amd_tdp_readback_mismatch")
+        return result
+    except Exception as error:
+        result["reason"] = "pm_table_channel_unavailable"
+        result["detail"] = str(error)[:240]
+        return result
+
+
+def _amd_set_verified_with(p, cfg, stapm_mw, fast_mw, slow_mw):
+    global _TDP_OBSERVATION_LAST
+    rc = amd_set_with(p, cfg, stapm_mw, fast_mw, slow_mw)
+    if rc != 0 or _amd_tdp_pm_compatibility(cfg) is None:
+        return rc
+    requested = dict(zip(("stapm", "fast", "slow"), (value / 1000.0 for value in (stapm_mw, fast_mw, slow_mw))))
+    observed = _amd_tdp_readback(p, cfg, requested)
+    observed["hardwareCommandReturned"] = True
+    _TDP_OBSERVATION_LAST = observed
+    log("YMCC_TDP_OBSERVATION", json.dumps(observed, ensure_ascii=True, separators=(",", ":")))
+    # A mismatch is an explicit outcome, never a reason to replay a hardware write.
+    if observed["readbackMatched"] is False:
+        log("  [AMD TDP] firmware limits did not reflect request: %s" % json.dumps(observed["observedLimitsW"]))
+        return 6
+    return rc
+
+
+def amd_set(stapm_mw, fast_mw, slow_mw, dry=False, verify=False):
     """写 AMD STAPM/FAST/SLOW (mW)。
     完全采用 UXTU/ryzenadj 的 MP1 邮箱直写逻辑: 按家族选用正确的 MP1 地址 + 命令号
     (Strix Halo/Phoenix 用 0x14/0x15/0x16 + 0x3b10928/0x3b10978/0x3b10998;
@@ -1515,7 +1635,8 @@ def amd_set(stapm_mw, fast_mw, slow_mw, dry=False):
             if cfg is FAM_UNKNOWN:
                 log("  [family] Unknown AMD -> 无安全 UXTU 协议, 拒绝写入")
                 return 6
-            return amd_set_with(p, cfg, stapm_mw, fast_mw, slow_mw)
+            writer = _amd_set_verified_with if verify else amd_set_with
+            return writer(p, cfg, stapm_mw, fast_mw, slow_mw)
         finally:
             p.close()
 
@@ -1544,7 +1665,14 @@ def amd_get():
             log("  [family] AMD %s" % cfg["name"])
             if cfg.get("stapm") is None:
                 log("  [family] 该家族无 STAPM/FAST/SLOW 命令, TDP 调节暂不支持 (桌面 17h 走 PBO PPT/EDC/TDC)")
-            if cfg.get("pm_readback"):
+            if _amd_tdp_pm_compatibility(cfg) is not None:
+                observation = _amd_tdp_readback(p, cfg)
+                log("YMCC_TDP_OBSERVATION", json.dumps(observation, ensure_ascii=True, separators=(",", ":")))
+                if "observedLimitsW" in observation:
+                    limits = observation["observedLimitsW"]
+                    log("  [observed limits] STAPM=%.3f W FAST=%.3f W SLOW=%.3f W" %
+                        (limits["stapm"], limits["fast"], limits["slow"]))
+            elif cfg.get("pm_readback"):
                 try:
                     import struct as _struct
                     p.execute("ioctl_resolve_pm_table", [], 0)
@@ -1567,8 +1695,9 @@ def amd_get():
 # CPU 降压 (Undervolt) — AMD Curve Optimizer + Intel MSR 0x150
 # ==========================================================================
 
-UV_AMD_MIN, UV_AMD_MAX = UV_POLICY["amd"]["minimum"], UV_POLICY["amd"]["maximum"]
-UV_INTEL_MIN, UV_INTEL_MAX = UV_POLICY["intel"]["minimum"], UV_POLICY["intel"]["maximum"]
+# YMCC permits undervolting and explicit zero restoration only, even with an older policy.
+UV_AMD_MIN, UV_AMD_MAX = UV_POLICY["amd"]["minimum"], min(0, UV_POLICY["amd"]["maximum"])
+UV_INTEL_MIN, UV_INTEL_MAX = UV_POLICY["intel"]["minimum"], min(0, UV_POLICY["intel"]["maximum"])
 UV_INTEL_PROTOCOL = UV_POLICY["intel"]["protocol"]
 
 MSR_VOLTAGE_CTL = UV_INTEL_PROTOCOL["msr"]
@@ -1829,7 +1958,7 @@ def amd_uv_set_with(p, cfg, offset, diagnostics=None):
 
 
 def amd_uv_set(offset, dry=False, diagnostics=None):
-    """全核 Curve Optimizer。offset: -60~+60；负值降压，0 还原，正值加压。"""
+    """全核 Curve Optimizer。仅允许负偏移降压或显式以 0 还原。"""
     if diagnostics is not None:
         for key in ("failure", "attempts", "route"):
             diagnostics.pop(key, None)
@@ -1928,7 +2057,7 @@ def _uv_describe(vendor, result):
             "available": bool(result.get("supported")),
             "operation": UV_POLICY["operation"],
             "unit": decl["unit"],
-            "offset": {"min": decl["minimum"], "max": decl["maximum"],
+            "offset": {"min": decl["minimum"], "max": min(0, decl["maximum"]),
                        "step": decl["step"], "signed": True},
             "scope": {"kind": "amd_all_core", "planes": []},
             "encoding": cfg.get("co_enc", ""),
@@ -1948,7 +2077,7 @@ def _uv_describe(vendor, result):
             "available": bool(result.get("supported")),
             "operation": UV_POLICY["operation"],
             "unit": decl["unit"],
-            "offset": {"min": decl["minimum"], "max": decl["maximum"],
+            "offset": {"min": decl["minimum"], "max": min(0, decl["maximum"]),
                        "step": decl["step"], "signed": True},
             "scope": {"kind": "intel_fivr_plane", "planes": planes},
             "encoding": decl["encoding"],
@@ -2776,10 +2905,10 @@ def _intel_single_target_limits(watts, intel_delta=1):
     return pl1, pl1 + max(1, int(intel_delta))
 
 
-def apply_tdp(vendor, watts, intel_delta=1, dry=False):
+def apply_tdp(vendor, watts, intel_delta=1, dry=False, verify=False):
     if vendor == "amd":
         mw = int(round(watts * 1000))
-        return amd_set(mw, mw, mw, dry)
+        return amd_set(mw, mw, mw, dry, verify=True) if verify else amd_set(mw, mw, mw, dry)
     if vendor == "intel":
         # YMCC 单值语义：PL1=W，默认 PL2=W+1；不再从持续目标扣除 1W。
         pl1, pl2 = _intel_single_target_limits(watts, intel_delta)
@@ -4999,7 +5128,8 @@ def _daemon_dispatch_request(v, state, req):
         response, stop = _daemon_dispatch_request_observed_core(v, state, req)
         if _TDP_OBSERVATION_LAST is not None:
             try:
-                response.setdefault("result", {})["msrObservation"] = _TDP_OBSERVATION_LAST
+                key = "amdObservation" if _TDP_OBSERVATION_LAST.get("vendor") == "amd" else "msrObservation"
+                response.setdefault("result", {})[key] = _TDP_OBSERVATION_LAST
             except Exception:
                 pass
         return response, stop
@@ -5058,16 +5188,23 @@ def _daemon_dispatch_request_observed_core(v, state, req):
     if state.get("hardware_ready", True) is not True:
         resp["error"] = "hardware_resume_not_ready"
         return resp, False
+    if "verifyTdp" in args and type(args["verifyTdp"]) is not bool:
+        resp["error"] = "invalid_verification_request"
+        return resp, False
     if v == "amd":
         mw = int(round(w * 1000))
-        rc = _daemon_amd_gate_call(lambda: amd_set_with(state.get("p"), state.get("cfg"), mw, mw, mw))
+        writer = _amd_set_verified_with if args.get("verifyTdp") is True else amd_set_with
+        rc = _daemon_amd_gate_call(lambda: writer(state.get("p"), state.get("cfg"), mw, mw, mw))
     elif v == "intel":
         pl1, pl2 = _intel_single_target_limits(w)
         rc = intel_set_pawn(state.get("intel"), pl1, pl2, False)
     else:
         rc = 5
+    error = "" if rc == 0 else "hardware_operation_failed"
+    if rc != 0 and v == "amd" and args.get("verifyTdp") is True and _TDP_OBSERVATION_LAST and _TDP_OBSERVATION_LAST.get("readbackState") == "mismatch":
+        error = "amd_tdp_readback_mismatch: requested=%sW observed=%s" % (w, json.dumps(_TDP_OBSERVATION_LAST["observedLimitsW"]))
     resp.update({"ok": rc == 0, "rc": int(rc),
-                 "error": "" if rc == 0 else "hardware_operation_failed",
+                 "error": error,
                  "result": {"watts": w, "vendor": v}})
     return resp, False
 
@@ -5207,6 +5344,7 @@ def main():
     if not argv:
         log(__doc__); return 2
     dry = bool(parse_opt(argv, "--dry-run", False, has_val=False))
+    verify = bool(parse_opt(argv, "--verify-tdp", False, has_val=False))
     vendor_ov = parse_opt(argv, "--vendor", None)
     intel_delta = int(parse_opt(argv, "--intel-delta", 1))
     # v1 遗留参数: 接受但完全忽略 (调度逻辑已按 Newko 原生方案废弃)
@@ -5368,7 +5506,7 @@ def main():
         log("[set] 目标=%.1fW 厂商=%s (Newko 原生路径, 直接写入)" % (w, v))
         if v not in ("amd", "intel"):
             log("厂商未识别 (可放 AMD.txt / intel.txt 强制指定)"); return 5
-        return apply_tdp(v, w, intel_delta, dry)
+        return apply_tdp(v, w, intel_delta, dry, verify=verify)
 
     log("未知命令:", cmd); return 2
 

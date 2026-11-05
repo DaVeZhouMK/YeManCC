@@ -16,7 +16,7 @@ private:
  std::mutex mutex_;std::condition_variable changed_;std::deque<Task> queue_;
  std::map<std::string,uint64_t> recent_;std::thread thread_;std::function<bool()> foreground_;
  bool stopping_=false;uint64_t generation_=0;Stats stats_;
- bool stale(uint64_t generation){std::lock_guard lock(mutex_);return stopping_||generation!=generation_;}
+ bool stale(uint64_t generation){std::lock_guard lock(mutex_);return stopping_||generation!=generation_||powerPolicy::blocked();}
  void loop(){
   SetThreadPriority(GetCurrentThread(),THREAD_MODE_BACKGROUND_BEGIN);SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_IDLE);
   for(;;){Task task;uint64_t generation=0;
@@ -27,6 +27,7 @@ private:
    }
    bool complete=true,preempted=false;uint64_t bytes=0;
    try{
+    if(powerPolicy::blocked())throw std::runtime_error(powerPolicy::reason());
     std::error_code error;const auto size=fs::file_size(task.path,error);if(error||!size||size>300ull*1024*1024)throw std::runtime_error("prewarm-file-unavailable");
     std::ifstream file(task.path,std::ios::binary);if(!file)throw std::runtime_error("prewarm-file-unavailable");std::array<char,65536> chunk;
     const uint64_t first=(std::min)(size,headBytes),last=size>first?(std::min)(size-first,tailBytes):0;
@@ -48,6 +49,7 @@ public:
  ~CachePrewarmer(){stop();}
  void replace(std::vector<Task> tasks){
   {std::lock_guard lock(mutex_);if(stopping_)return;++generation_;queue_.clear();
+   if(powerPolicy::blocked())tasks.clear();
    if(thread_.joinable())CancelSynchronousIo(thread_.native_handle());
    std::set<std::string> seen;for(auto& task:tasks){if(queue_.size()>=4)break;if(task.key.empty()||!seen.insert(task.key).second)continue;
     const auto root=task.path.root_path();const auto drive=GetDriveTypeW(root.c_str());if(drive==DRIVE_REMOTE||drive==DRIVE_UNKNOWN||drive==DRIVE_NO_ROOT_DIR)continue;queue_.push_back(std::move(task));}

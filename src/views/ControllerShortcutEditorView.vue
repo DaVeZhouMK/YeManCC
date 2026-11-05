@@ -57,6 +57,25 @@ const props = withDefaults(defineProps<{ presetDraft?: ControllerShortcutPresetD
 const emit = defineEmits<{ (event: 'close'): void; (event:'preset-apply',rules:ControllerShortcutRule[]):void }>();
 const dialogEl = ref<HTMLElement | null>(null);
 const overlayEl = ref<HTMLElement | null>(null);
+const previewStageEl = ref<HTMLElement | null>(null);
+let previewResizeObserver: ResizeObserver | null = null;
+let previewStageWidth = -1, previewStageHeight = -1;
+function observePreviewStage(): void {
+  const stage = previewStageEl.value;
+  if (!stage || typeof ResizeObserver !== 'function') return;
+  // ResizeObserver reports unzoomed content-box CSS pixels. Read once per
+  // real resize; per-focus cqw/cqh dependencies made SVG layout iterate.
+  previewResizeObserver = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      if (entry.target !== stage) continue;
+      const { width, height } = entry.contentRect;
+      if (!(width > 0 && height > 0)) continue;
+      if (width !== previewStageWidth) { previewStageWidth = width; stage.style.setProperty('--mirror-stage-width', `${width}px`); }
+      if (height !== previewStageHeight) { previewStageHeight = height; stage.style.setProperty('--mirror-stage-height', `${height}px`); }
+    }
+  });
+  previewResizeObserver.observe(stage);
+}
 const { scale: editorScale, stageStyle } = useControllerEditorViewport(overlayEl);
 const snapshot = ref<InputSettingsSnapshot | null>(null);
 const selectedDiagramPersona = ref('');
@@ -322,6 +341,36 @@ function selectRule(id: string, manage = false): void {
   outputPickerOpen.value=false;creationProblem.value='';
   if (selected) rulePage.value = Math.floor(visibleRules.value.findIndex(rule => rule.id === selected.id) / RULES_PER_PAGE);
   if (selected) recordMode.value = shortcutRecordMode(selected.inputs);
+  if (managementId.value) {
+    const owner = managementId.value;
+    void nextTick(() => {
+      if (!editorDisposed && managementId.value === owner) {
+        focusGamepadElement(dialogEl.value?.querySelector<HTMLElement>('[data-gp-modal="controller-action-management"] [role="switch"]') || null);
+      }
+    });
+  }
+}
+function focusRuleCard(id: string): void {
+  if (editorDisposed) return;
+  const root = dialogEl.value;
+  const card = Array.from(root?.querySelectorAll<HTMLElement>('.rule-row') || []).find(el => el.dataset.ruleId === id);
+  focusGamepadElement(card || root?.querySelector<HTMLElement>('.new-action:not(:disabled)') || null);
+}
+function closeActionManagement(): void {
+  const owner = managementId.value;
+  if (!owner) return;
+  managementId.value = '';
+  void nextTick(() => { if (!managementId.value) focusRuleCard(owner); });
+}
+function managementKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Tab') return;
+  const popup = event.currentTarget as HTMLElement;
+  const controls = Array.from(popup.querySelectorAll<HTMLElement>('button:not(:disabled)'));
+  if (!controls.length) return;
+  const active = (popup.getRootNode() as Document | ShadowRoot).activeElement;
+  const index = controls.indexOf(active as HTMLElement);
+  event.preventDefault();
+  focusGamepadElement(controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length]);
 }
 // Keep explicit repairs apart from normalized-value diffs, and carry them through CAS retry.
 const explicitFields = new Map<string, Set<keyof ControllerShortcutRule>>();
@@ -437,6 +486,7 @@ function removeRule(): void {
   rules.value = rules.value.filter((rule) => rule.id !== current.id);
   selectRule(visibleRules.value[Math.max(0, index - 1)]?.id || '');
   touch();
+  void nextTick(() => focusRuleCard(activeId.value));
 }
 function restoreNativeDefaults(): void {
   newDraft.value=null;creationProblem.value='';
@@ -808,6 +858,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     event.preventDefault();
     if (presetCloseConfirm.value) resumePresetEditing();
+    else if (managementId.value) closeActionManagement();
     else requestClose();
   }
 }
@@ -848,11 +899,13 @@ function onGamepadBack(event: Event): void {
   )).find((el) => root.contains(el));
   if (openTrigger) return;
   event.preventDefault();
+  if (managementId.value) { closeActionManagement(); return; }
   requestClose();
 }
 
 let firstLoadPending = true;
 onMounted(() => {
+  observePreviewStage();
   void setEditorWindowWidth();
   void load()
     .then(() => { if (props.initialActionId) { const existing = rules.value.find(rule => rule.actionId === props.initialActionId); if (existing) selectRule(existing.id); else addRule(); } })
@@ -872,6 +925,7 @@ onMounted(() => {
 });
 onActivated(() => { if (!firstLoadPending && !props.initialActionId && !dirty.value && !recording.value) void load().catch(() => undefined); });
 onBeforeUnmount(() => {
+  previewResizeObserver?.disconnect(); previewResizeObserver = null;
   editorDisposed = true;
   void releaseEditorWindowWidth();
   document.removeEventListener('keydown', onKeydown);
@@ -891,7 +945,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport :to="props.teleportTo">
-    <div ref="overlayEl" class="editor-overlay" data-gp-modal="controller-shortcut-editor" data-gp-scope="controller-shortcut-editor" data-gp-spatial="nearest" @pointerdown.self="requestClose">
+    <div ref="overlayEl" class="editor-overlay" data-gp-modal="controller-shortcut-editor" data-gp-scope="controller-shortcut-editor" data-gp-spatial="nearest" data-gp-pane-bridge @pointerdown.self="requestClose">
       <div class="editor-stage" :style="stageStyle">
       <section ref="dialogEl" class="editor-dialog" :data-controller-editor-scale="editorScale" :inert="presetCloseConfirm || undefined" :data-layout-variant="layoutVariant" :data-global-layout="globalActionsLayout" :data-input-flow="'record'" :data-output-variant="outputActionVariant" role="dialog" aria-modal="true" aria-label="自定义快捷规则编辑器" tabindex="-1">
         <header class="editor-top">
@@ -902,7 +956,7 @@ onBeforeUnmount(() => {
           <aside class="preview-column">
               <section class="card mirror-card" style="--diagram-live-color:#4897d2">
                 <div class="card-head"><div><span class="eyebrow">组合预览</span><h3>{{ previewKind === 'keyboard' ? '键盘' : diagramTitle }}</h3></div><span>{{ previewKind === 'keyboard' ? '键盘输入' : '手柄 / 掌机输入' }}</span></div>
-                <div class="mirror-stage">
+                <div ref="previewStageEl" class="mirror-stage">
                 <ControllerKeyboardPreview v-if="previewKind === 'keyboard'" :inputs="previewKeyboardKeys" :pressed-codes="keyboardLiveCodes" />
                 <GamepadVisualizer v-else :persona="diagramPersona" :settings="gamepad" :highlight-buttons="highlightedButtons" :oem-keys="oemKeys" :highlight-oem-keys="highlightedOemKeys" :show-test-mode="false" minimum-press-feedback />
                 <div v-if="previewKind === 'controller' && previewKeyboardKeys.length" class="handheld-key-bubbles" aria-live="polite"><span v-for="key in previewKeyboardKeys" :key="key.code" :data-handheld-extended="isHandheldExtendedKey(key)" :class="{live:keyboardLiveCodes.includes(key.code)}">{{ isHandheldExtendedKey(key) ? '掌机扩展键' : '混用键盘' }} · {{ formatInputs([key]) }}</span></div>
@@ -917,20 +971,20 @@ onBeforeUnmount(() => {
               <div v-if="!visibleRules.length" class="empty"><p>尚无动作</p></div>
               <div v-else class="rule-list">
                 <div v-for="(rule, index) in pagedRules" :key="rule.id" class="rule-item" :class="{ selected: activeId === rule.id, managing: managementId === rule.id, 'menu-above': index >= pagedRules.length - 2, creating: rule.id===newDraft?.id }">
-                  <button type="button" class="rule-row" :class="{ active: activeId === rule.id, disabled: !rule.enabled, creating: rule.id===newDraft?.id }" :disabled="busy || recording || recordingBusy" :aria-expanded="managementId === rule.id" @mouseenter="previewFocus.enter(rule.id)" @mouseleave="previewFocus.leave(rule.id)" @focus="previewFocus.focus(rule.id)" @blur="previewFocus.blur(rule.id)" @click="selectRule(rule.id, true)">
+                  <button type="button" class="rule-row" :data-rule-id="rule.id" :class="{ active: activeId === rule.id, disabled: !rule.enabled, creating: rule.id===newDraft?.id }" :disabled="busy || recording || recordingBusy" :aria-expanded="managementId === rule.id" @mouseenter="previewFocus.enter(rule.id)" @mouseleave="previewFocus.leave(rule.id)" @focus="previewFocus.focus(rule.id)" @blur="previewFocus.blur(rule.id)" @click="selectRule(rule.id, true)">
                     <span class="rule-copy"><b><template v-if="rule.id===newDraft?.id"><i class="creation-dot" aria-hidden="true"/>正在新建</template><template v-else>{{ outputLabel(rule) }}</template></b><span class="rule-metadata"><small>{{ rule.id===newDraft?.id ? (rule.inputs.length ? '已录制输入 · 等待完成' : '先录制输入') : formatInputs(rule.inputs) || '未录入输入' }}</small><span v-if="rule.id!==newDraft?.id" class="rule-state" :class="{ enabled: rule.enabled }"><i aria-hidden="true" />{{ rule.enabled ? '已启用' : '已停用' }}</span></span></span>
                   </button>
-                  <div v-if="managementId === rule.id && rule.id!==newDraft?.id && layoutVariant !== 'dock'" class="rule-context" :class="{ 'rule-context-popover': layoutVariant === 'popover' }">
+                  <div v-if="managementId === rule.id && rule.id!==newDraft?.id && layoutVariant !== 'dock'" class="rule-context" data-gp-modal="controller-action-management" data-gp-scope="controller-action-management" data-gp-spatial="nearest" role="group" :aria-label="`${outputLabel(rule)}的动作操作`" @keydown="managementKeydown" :class="{ 'rule-context-popover': layoutVariant === 'popover' }">
                     <span v-if="layoutVariant === 'popover'" class="rule-context-title">{{ actionById(rule.actionId)?.label || '动作操作' }}</span>
-                    <ControllerActionControls :name="actionById(rule.actionId)?.label || '当前动作'" :enabled="rule.enabled" :disabled="busy || recording || recordingBusy" @toggle="updateRule({ enabled: !rule.enabled })" @remove="removeRule" @cancel="managementId = ''" />
+                    <ControllerActionControls :name="actionById(rule.actionId)?.label || '当前动作'" :enabled="rule.enabled" :disabled="busy || recording || recordingBusy" @toggle="updateRule({ enabled: !rule.enabled })" @remove="removeRule" @cancel="closeActionManagement" />
                   </div>
                 </div>
               </div>
               <div class="action-list-footer">
-                <div v-if="layoutVariant === 'dock'" class="action-management-dock" :class="{ open: managementId && activeRule }">
+                <div v-if="layoutVariant === 'dock'" class="action-management-dock" :class="{ open: managementId && activeRule }" :data-gp-modal="managementId && activeRule ? 'controller-action-management' : undefined" :data-gp-scope="managementId && activeRule ? 'controller-action-management' : undefined" data-gp-spatial="nearest" @keydown="managementKeydown">
                   <template v-if="managementId && activeRule">
                     <span class="rule-context-title">{{ activeAction?.label || '当前动作' }}</span>
-                    <ControllerActionControls :name="activeAction?.label || '当前动作'" :enabled="activeRule.enabled" :disabled="busy || recording || recordingBusy" @toggle="updateRule({ enabled: !activeRule.enabled })" @remove="removeRule" @cancel="managementId = ''" />
+                    <ControllerActionControls :name="activeAction?.label || '当前动作'" :enabled="activeRule.enabled" :disabled="busy || recording || recordingBusy" @toggle="updateRule({ enabled: !activeRule.enabled })" @remove="removeRule" @cancel="closeActionManagement" />
                   </template>
                   <span v-else class="action-management-hint">选择卡片管理动作</span>
                 </div>
@@ -994,6 +1048,8 @@ onBeforeUnmount(() => {
 .editor-layout{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}
 .edit-column{grid-column:1/-1}
 .preview-column,.rules-column{align-self:stretch}
+/* The fixed preview pane lays out independently while focus changes its labels. */
+.preview-column{contain:layout}
 .preview-column>.card,.rules-column>.card{height:100%;box-sizing:border-box}
 
 /* Keep the rule controls compact and lock the left/right row relationship. */
@@ -1159,7 +1215,7 @@ onBeforeUnmount(() => {
   .edit-column{overflow:auto;scrollbar-gutter:stable;align-content:start}
   .mirror-card{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) 112px}
   .mirror-stage{min-height:0;overflow:visible;container-type:size}
-  .mirror-stage :deep(.device-diagram){width:min(100cqw,calc((100cqh - 112px)*var(--device-ratio)));margin:0 auto}
+  .mirror-stage :deep(.device-diagram){width:min(var(--mirror-stage-width),calc((var(--mirror-stage-height) - 112px)*var(--device-ratio)));margin:0 auto}
   .mirror-selection{min-height:0;box-sizing:border-box;grid-template-rows:14px minmax(0,1fr) 14px}
   .mirror-selection strong{min-height:0;overflow:auto}
   .editor-layout{grid-template-columns:minmax(155px,.65fr) minmax(0,2fr) minmax(285px,1.25fr)}

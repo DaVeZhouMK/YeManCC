@@ -17,8 +17,9 @@ using json=nlohmann::json;
 int main(int argc,char**argv){std::ifstream f(argv[1]);json catalog;f>>catalog;int checks=0,models=0;std::vector<std::string>failures;
 auto check=[&](bool ok,const std::string&id){++checks;if(!ok)failures.push_back(id);};
 for(const auto& d:catalog["devices"]){++models;const std::string cls=d["consumerClass"];
+const bool exactApex=cls=="HandheldCompanion.Devices.OneXPlayerApex";
 check(ymccDeviceClassSupportsLighting(cls)==before::ymccDeviceClassSupportsLighting(cls),cls+":lighting");
-if(cls=="HandheldCompanion.Devices.OneXPlayerX1Mini"){
+if(cls=="HandheldCompanion.Devices.OneXPlayerX1Mini"||exactApex){
  check(before::ymccDeviceClassSupportsSecondColor(cls),cls+":legacy-source-declaration-reference");
  check(!ymccDeviceClassSupportsSecondColor(cls),cls+":exact-consumer-secondary-exclusion");
  bool sourceDeclared=false;for(const auto& flag:d["declared"]["Capabilities"]["minimum"])if(flag=="DynamicLightingSecondLEDColor")sourceDeclared=true;
@@ -26,13 +27,48 @@ if(cls=="HandheldCompanion.Devices.OneXPlayerX1Mini"){
  bool found=false;for(const auto& row:catalog["domains"]["lighting"]["rows"])if(row["deviceClass"]==cls){found=true;check(row.value("sourceDeclaredSecondColor",false)&&!row.value("consumerSecondColor",true)&&!row.at("secondColor").get<bool>(),cls+":source-and-effective-metadata");}
  check(found,cls+":existing-lighting-row-retained");
 }else check(ymccDeviceClassSupportsSecondColor(cls)==before::ymccDeviceClassSupportsSecondColor(cls),cls+":second-color");
-check(ymccDeviceClassLedEffects(cls)==before::ymccDeviceClassLedEffects(cls),cls+":effect-order");
-check(ymcc::lighting::presetImplemented(cls)==before::lighting::presetImplemented(cls),cls+":preset-implementation");
+check(ymccDeviceClassLedEffects(cls)==(exactApex?std::vector<std::string>{"solid","rainbow"}:before::ymccDeviceClassLedEffects(cls)),cls+":effect-order");
+check(ymcc::lighting::presetImplemented(cls)==(exactApex?false:before::lighting::presetImplemented(cls)),cls+":preset-implementation");
 check(ymcc::lighting::presetDeclaredButUnavailable(cls)==before::lighting::presetDeclaredButUnavailable(cls),cls+":preset-source-disabled");
 if(ymccDeviceClassSupportsLighting(cls))check(ymcc::lighting::brightnessImplemented(cls)==before::lighting::brightnessImplemented(cls),cls+":existing-brightness");
 for(const char* action:{"color","brightness","status","off","preset","unknown"})for(const char*mode:{"solid","rainbow","preset","wave","","SOLID"})
 check(ymcc::lighting::useIndependentDeviceCore(cls,action,mode)==before::lighting::useIndependentDeviceCore(cls,action,mode),cls+":backend:"+action+":"+mode);
 }
+const std::string apex="HandheldCompanion.Devices.OneXPlayerApex",apexId="hc.device.OneXPlayerApex",x1="HandheldCompanion.Devices.OneXPlayerX1";
+const auto* apexRoute=ymcc::lighting::resolve(apex);
+check(apexRoute&&apexRoute->registered&&apexRoute->brightness&&!apexRoute->preset&&!apexRoute->declaredPresetWithoutTransport&&
+ apexRoute->provider==ymcc::lighting::NativeProvider::Helper&&apexRoute->colorEffects==5&&apexRoute->fixedSpeed&&!apexRoute->presetSecondColor&&
+ apexRoute->sourceAdapter==ymcc::lighting::SourceAdapter::ApexHidV2,"APEX-original-native-row-exact-effective-route");
+check(ymcc::lighting::sourceAdapter(apex)==ymcc::lighting::SourceAdapter::ApexHidV2&&!ymcc::lighting::usesOneXVendorOwner(apex),"APEX-reviewed-source-adapter-uses-shared-leased-HID-owner");
+check(ymcc::lighting::supportsColorEffect(apex,"solid")&&ymcc::lighting::supportsColorEffect(apex,"rainbow"),"APEX-only-reviewed-color-effects");
+for(const char* mode:{"breathing","wave","wheel","gradient","ambilight","preset"})check(!ymcc::lighting::supportsColorEffect(apex,mode),std::string("APEX-unreviewed-effect-denied:")+mode);
+check(!ymcc::lighting::validPreset(apex,"LEDPreset_OneXPlayerX1_Preset09")&&!ymcc::lighting::presetDeclaredButUnavailable(apex),"APEX-no-preset-declaration-or-serial-consumption");
+check(before::ymccDeviceClassLedEffects(apex)==std::vector<std::string>{"solid","preset"}&&before::lighting::presetImplemented(apex),"APEX-old-X1-consumer-reference-remains-frozen");
+check(catalog["devices"].size()==92&&catalog["domains"]["lighting"]["rows"].size()==47&&catalog["domains"]["lighting"]["extensionRows"].size()==4,"APEX-no-registration-count-growth");
+bool foundApexSource=false,foundApexRow=false;
+for(const auto& d:catalog["devices"])if(d["deviceId"]==apexId){
+ foundApexSource=true;
+ check(d["sourcePath"]=="deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs"&&d["sourceSha256"]=="c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60"&&
+  d["declared"]["DynamicLightingCapabilities"]["minimum"]==json::array({"LEDPreset","SolidColor"}),"APEX-frozen-source-and-declared-effects-retained");
+ for(const auto& alias:d["aliases"]){const std::string actual=alias;
+  check(ymcc::lighting::identityMatches(actual,apex)&&ymcc::lighting::identityMatches(apex,actual),actual+":APEX-canonical-same-device-id-accepted");
+  check(!ymcc::lighting::identityMatches(actual,x1)&&!ymcc::lighting::identityMatches(actual,"hc.device.OneXPlayerX1"),actual+":actualAPEX-expectedX1-rejected");
+  check(ymcc::lighting::sourceAdapter(actual)==ymcc::lighting::SourceAdapter::ApexHidV2,actual+":canonical-adapter-preserved");
+ }
+}
+for(const auto& row:catalog["domains"]["lighting"]["rows"]){
+ if(row["deviceId"]==apexId){foundApexRow=true;const auto& frozen=row.at("frozenConsumer");
+  check(row["sourceAdapter"]=="onex-apex-hid-v2"&&row["brightness"]==true&&row["secondColor"]==false&&row["declaredEffects"]==json::array({"solid","rainbow"})&&
+   row["presetDeclared"]==false&&row["presetAvailable"]==false&&row["statusAvailable"]==false&&row["fixedSpeed"]==true&&row["offAvailable"]==true,"APEX-exact-reviewed-effective-metadata");
+  check(frozen["brightness"]==true&&frozen["secondColor"]==true&&frozen["declaredEffects"]==json::array({"solid","preset"})&&
+   frozen["presetDeclared"]==true&&frozen["presetAvailable"]==true&&frozen["statusAvailable"]==true&&frozen["statusTransportDisabled"]==false,"APEX-frozen-consumer-facts-retained");
+  for(const char* name:{"SetLedColor","SetLedBrightness","SetLedStatus","SetLEDPreset"})
+   check(row["methodSources"][name]==frozen["methodSources"][name]&&row["methodSources"][name]["owner"]=="OneXPlayerX1",std::string("APEX-frozen-method-provenance:")+name);
+ }else for(const auto& target:row["nativeAliasTargets"])check(target!=apexId,"APEX-no-incoming-alias:"+row["name"].get<std::string>());
+}
+check(foundApexSource&&foundApexRow,"APEX-existing-source-and-effective-row-both-retained");
+for(const char* child:{"OneXPlayerX1AMD","OneXPlayerX1Intel","OneXPlayerX1Mini","OneXPlayerX1Pro"})
+ check(ymcc::lighting::identityMatches(std::string("HandheldCompanion.Devices.")+child,x1),std::string("X1-other-child-alias-retained:")+child);
 check(ymcc::lighting::kOneXPresets.size()==before::lighting::kOneXPresets.size(),"preset-count");
 for(size_t i=0;i<ymcc::lighting::kOneXPresets.size();i++){const auto&a=ymcc::lighting::kOneXPresets[i];const auto&b=before::lighting::kOneXPresets[i];check(std::string(a.id)==b.id&&a.hcValue==b.hcValue&&std::string(a.label)==b.label,"preset-value-and-order");}
 check(!ymcc::lighting::brightnessImplemented("Unreviewed.Vendor.ROGAlly"),"unknown-brightness-denied");

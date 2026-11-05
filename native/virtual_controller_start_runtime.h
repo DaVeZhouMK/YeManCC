@@ -11,6 +11,37 @@
 // MSI may await its exact source inside this HELLO-only epoch, before hide proof /
 // PREPARE / NEUTRAL. Execution inspection still proves current-source submission.
 
+// ROG212031: retire only a first-start hold that no longer protects any owner.
+// This is normal admission, before Start; it never recreates a target or renews
+// the player's period. A prior Host epoch or unresolved return always keeps it.
+static bool inputHostRetireUnownedRogWakeHoldForStart() {
+    if(!g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire) ||
+       !g_machineIdentity.resolved || !ymccIsRogFamily())return false;
+    std::unique_lock<InputHostMutex> lock(g_inputHostMx,std::try_to_lock);
+    if(!lock.owns_lock())return false;
+    const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
+    if(!view.requestId || !view.locked || !view.remainingMs || view.phase!="pending" ||
+       view.persona=="disabled" || view.persona!=inputHostConfiguredPersona() ||
+       !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled ||
+       g_inputHostEpoch || !inputHostOwnedCleanupProvenLocked() ||
+       g_inputHostStartBlocked || g_inputHostTransportFault || g_inputHostFaultHoldsStart ||
+       g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) ||
+       g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ||
+       g_inputHostPowerAdmissionRevoked || inputHostExitFenceRaised() || g_exitRequested || g_inputCaptureStop ||
+       g_externalPriorityVirtualSuspended || g_shortcutRecordingActive || physicalReleaseWindowActive() ||
+       g_wakeRescanRequested || g_inputHostLifecycleWorkRequested || g_inputHostLifecycleWorkInFlight ||
+       g_inputHostSwitchExecutionReturnPending || g_inputHostSwitchRecoveryPending ||
+       g_inputHostRecoveryPending || g_inputHostTupleHealPending ||
+       g_msiNativeForegroundCyclePending || g_physicalReleaseWindowDutyActive)return false;
+    if(!g_wakeHoldPhysicalUnhide.exchange(false,std::memory_order_acq_rel))return false;
+    try {appendNativeLifecycleLog("input-host-start-hold-retired",{
+        {"policy","VC-ROG-IDLE-WAKE-HOLD-20261024-R1"},{"origin","normal-start-admission"},
+        {"reason","unowned-first-start-hold-retired"},{"requestId",view.requestId},
+        {"remainingMs",view.remainingMs},{"existingHoldCleared",true},{"newHoldArmed",false},
+        {"deviceWrite",false},{"targetCreated",false}});}catch(...){}
+    return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // GP-MSIG3E-6-LC-R2 §四 R1：inputHostStart 生产入口测试缝辅助。
 // 生产构建下全部退化为对真实实现的一次直接调用（ymStartSeamActive() 恒 false）。
@@ -817,6 +848,7 @@ static bool inputHostStart() {
     // visibility-transaction / explicit-rearm / capture-assets）均已通过，且后续不再有
     // stop 撤销路线。此刻建立 DInput 路线，使下面的物理源准入落在 PID_1902 主游戏接口上。
     // 幂等（已 armed 早退）；非 Claw/未授权板号由 msiClawEnsureDInputRoute 内部早退，零模式写。
+    msiForceGamepadBeforeVirtualStart();
     ymStartEnsureRoute("main");
     // Bind ControllerManager's one selected physical source before an
     // XInput-visible target is created.  HC's VirtualManager can nevertheless
@@ -934,6 +966,12 @@ static bool inputHostStart() {
         } catch (...) { /* missing evidence never rejects HELLO or target preparation */ }
     }
 #endif
+    if(hello && physicalSourcePending && g_machineIdentity.family==YmccFamily::OneXPlayer){
+        const auto waitingEpoch=g_inputHostEpoch;const auto waitingRun=g_inputHostRunId;
+        const int observed=inputHostOneXAwaitPreHideSource(requestTicket,lock);
+        if(observed<0){if(g_inputHostEpoch==waitingEpoch && g_inputHostRunId==waitingRun)inputHostStopLocked("onex-pre-hide-source-context-retired");return false;}
+        if(observed>0){physicalSourceAdmittedAtStart=true;physicalSourcePending=false;}
+    }
     if(hello && physicalSourcePending && !msiSourceRequiredBeforeTarget &&
        ymStartRecoverRogPendingIdentity(requestTicket)) {
         physicalSourceAdmittedAtStart=true;physicalSourcePending=false;
@@ -1073,6 +1111,14 @@ static bool inputHostStart() {
                 inputHostStopLocked("gpd-post-cycle-source-unproven");return false;
             }
         }
+    }
+    // OneX capability adapter is independent of GPD/ROG native-OFF policies.
+    // The optional specialized step cannot change the player's selected target.
+    if(hello && physicalSourceOnlineAtStart && g_machineIdentity.family==YmccFamily::OneXPlayer){
+        const int oneXRefresh=inputHostOneXPostHideBeforeTarget(requestTicket,lock);
+        if(oneXRefresh<0){inputHostStopLocked("onex-post-hide-refresh-unproven");return false;}
+        if(oneXRefresh>0){physicalSourceAdmittedAtStart=ymStartAdmitSource();physicalSourcePending=!physicalSourceAdmittedAtStart;
+            if(physicalSourcePending){inputHostStopLocked("onex-post-refresh-source-unproven");return false;}}
     }
     // 虚拟目标创建（HC 顺序：hide 之后才建虚拟）。PREPARE 失败仍走既有
     // quarantine 流程（护栏不变）；hide 阶段不新建 epoch/多目标（epoch 已在

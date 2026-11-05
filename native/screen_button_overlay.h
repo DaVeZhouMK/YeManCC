@@ -123,6 +123,7 @@ inline unsigned buttonSnapshot() {
 inline void handleButtonCaptureLoss(int index,UINT32 id,bool all=false) {
     if(index<0||index>=7)return;
     AutoHideTouchScope activity{false};
+    if(index==0)activity.enabled=buttonContacts[0]!=0 && (all || buttonContacts[0]==id);
     if(index==1 || index==2) {
         auto& contact=autoHide.specialContacts[index-1];
         if(contact && (all || contact==id)){contact=0;activity.enabled=true;}
@@ -191,6 +192,7 @@ inline LRESULT handleButtonPointer(HWND h,int index,UINT message,UINT32 id,float
     // Reclaim before wake/feedback so the fresh touch owns those states too.
     if(message==WM_POINTERDOWN&&!canceled&&allowed&&inside)retireExpiredMenuContact(index);
     AutoHideTouchScope activity{false};
+    if(index==0 && allowed)activity.enabled=(message==WM_POINTERDOWN && !canceled && !buttonContacts[0] && inside) || buttonContacts[0]==id;
     if((index==1 || index==2) && allowed) {
         auto& contact=autoHide.specialContacts[index-1];
         if(message==WM_POINTERDOWN && !canceled && !contact && inside) {
@@ -446,7 +448,7 @@ inline bool buttonsRefresh(const Config& cfg,const RECT& monitor,const RECT& wor
         if(!current())return false;
         if(show && !ready && !windowError)windowError=ERROR_NOT_READY;
         if(buttonWindows[i])ShowWindow(buttonWindows[i],show && ready?SW_SHOWNOACTIVATE:SW_HIDE);
-        if(buttonOutlines[i])ShowWindow(buttonOutlines[i],show && ready && (!(i==1 || i==2) || !autoHide.hidden)?SW_SHOWNOACTIVATE:SW_HIDE);
+        if(buttonOutlines[i])ShowWindow(buttonOutlines[i],show && ready && (i>2 || !autoHide.hidden)?SW_SHOWNOACTIVATE:SW_HIDE);
     }
     return current();
 }
@@ -456,7 +458,7 @@ inline bool buttonsNeedRefresh(const Config& cfg) {
 #ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
         if(nativeInputCandidateRequested && !nativeButtonSurfaces[i].active())return true;
 #endif
-        if((!autoHide.hidden || (i!=1 && i!=2)) && !IsWindowVisible(buttonOutlines[i]))return true;
+        if((!autoHide.hidden || i>2) && !IsWindowVisible(buttonOutlines[i]))return true;
     }
     return false;
 }

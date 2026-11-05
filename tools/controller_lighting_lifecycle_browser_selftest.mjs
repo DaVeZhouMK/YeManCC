@@ -4,11 +4,30 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-const repo=process.cwd(),out=path.resolve(process.argv[2]);
+const repo=process.cwd(),args=process.argv.slice(2),outputArg=args.shift(),requestedColorCaseIds=[];
+assert(typeof outputArg==='string'&&outputArg.trim()&&!outputArg.startsWith('--'),'A fresh evidence directory is required');
+let componentSource;
+for(let i=0;i<args.length;i++){
+ const option=args[i];
+ assert(option==='--component-source'||option==='--color-case','Unsupported argument: '+option);
+ const value=args[++i];
+ assert(typeof value==='string'&&value.trim()&&!value.startsWith('--'),'Missing or empty value: '+option);
+ if(option==='--component-source'){assert(componentSource===undefined,'Duplicate --component-source');componentSource=value;}
+ else{assert(!requestedColorCaseIds.includes(value),'Duplicate --color-case: '+value);requestedColorCaseIds.push(value);}
+}
+// Expand the original admitted catalog row/effect/height cases before any output or browser execution.
+const catalogPath=path.join(repo,'capabilities/hc-device-catalog.json'),catalogBefore=fs.readFileSync(catalogPath);
+const lightingCatalog=JSON.parse(catalogBefore.toString('utf8').replace(/^\uFEFF/,''));
+const lightingRows=[...lightingCatalog.domains.lighting.rows,...lightingCatalog.domains.lighting.extensionRows];
+const colorCaseIds=[720,800].flatMap(height=>lightingRows.flatMap(row=>row.declaredEffects.filter(mode=>mode!=='preset'||row.presetAvailable).map(mode=>row.name+'-'+mode+'-'+height)));
+for(const id of requestedColorCaseIds)assert(colorCaseIds.includes(id),'Unknown or unavailable --color-case: '+id);
+const directedColorCases=requestedColorCaseIds.length>0;
+const expectedColorCaseIds=directedColorCases?colorCaseIds.filter(id=>requestedColorCaseIds.includes(id)):colorCaseIds;
+assert(expectedColorCaseIds.length>0,'Empty color-case selection');
+const out=path.resolve(outputArg);
 assert(!out.startsWith(repo+path.sep)&&!fs.existsSync(out),'Use a fresh evidence directory outside source');
 fs.mkdirSync(out,{recursive:true});
-const sourceIndex=process.argv.indexOf('--component-source');
-const component=sourceIndex>=0?path.resolve(process.argv[sourceIndex+1]):path.join(repo,'src/components/ControllerFeedbackCapabilitiesCard.vue');
+const component=componentSource===undefined?path.join(repo,'src/components/ControllerFeedbackCapabilitiesCard.vue'):path.resolve(componentSource);
 const sourceBefore=fs.readFileSync(component),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 let script=fs.readFileSync(path.join(repo,'tools/controller_lighting_operations_browser_selftest.mjs'),'utf8');
 const replace=(before,after)=>{assert(script.includes(before),'Baseline fixture changed: '+before);script=script.replace(before,after)};
@@ -49,17 +68,18 @@ const engineFunction=signature=>{const start=engine.indexOf(signature),end=engin
 const navModule=`import{focusGamepadElement,setGamepadFocused,recoverGamepadFocus}from ${JSON.stringify(path.join(repo,'src/gamepad/focus.ts'))};import{spatialNavigationTarget,createSpatialMeasurements,type SpatialMeasurements}from ${JSON.stringify(path.join(repo,'src/gamepad/spatial.ts'))};import{performancePanelTarget}from ${JSON.stringify(path.join(repo,'src/gamepad/performanceNavigation.ts'))};const FOCUSABLE='button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';let sliderEditMode=false;export const isMouseModeSuppressed=()=>false;${engineFunction('function offerPageCommand(')}\n${engineFunction('function activeFanNodeEditor(')}\n${engine.slice(focusStart,focusEnd)}\nexport{moveFocus as testMoveFocus,focusables as testFocusables,focusGamepadElement as testFocus};`;
 replace('const bundle=await build(',`mocks['@/gamepad/focus']=${JSON.stringify('export * from '+JSON.stringify(path.join(repo,'src/gamepad/focus.ts'))+';')};mocks['@/gamepad/engine']=${JSON.stringify(navModule)};\nconst bundle=await build(`);
 replace("import{createApp,h,KeepAlive,ref}from'vue';import Card", "import{createApp,h,KeepAlive,ref}from'vue';import*as Nav from'@/gamepad/engine';window.__lightingNavigation=Nav;import Card");
-// Consume the existing unified rows; this is not a second model capability table.
-const catalogPath=path.join(repo,'capabilities/hc-device-catalog.json'),catalogBefore=fs.readFileSync(catalogPath);
-const lightingCatalog=JSON.parse(catalogBefore.toString('utf8').replace(/^\uFEFF/,''));
-const lightingRows=[...lightingCatalog.domains.lighting.rows,...lightingCatalog.domains.lighting.extensionRows];
+// Reuse the catalog rows resolved above; no separate case registration.
 replace('app=createApp({setup()',`if(window.__lightingRow){const r=window.__lightingRow;window.f.caps={...window.f.caps,ledAvailable:true,brightnessAvailable:r.brightness,supportsSecondColor:r.secondColor,lightingFixedSpeed:r.fixedSpeed===true,presetSupportsSecondColor:r.presetSecondColor===true,ledEffects:r.declaredEffects,ledPresets:r.presetAvailable?(r.presets??Array.from({length:11},(_,i)=>({id:'LEDPreset_OneXPlayerX1_Preset'+String(i+1).padStart(2,'0'),label:'预设 '+(i+1)}))):[],presetDeclared:r.presetDeclared,presetImplemented:r.presetAvailable};Object.assign(window.f.settings.gamepad.feedback.lighting,{mode:window.__lightingMode,color:'#2ea6ff',color2:'#9d7cff'})}app=createApp({setup()`);
 const colorTests=String.raw`
- const colorControls=[];
- const saveColorControls=()=>fs.writeFileSync(path.join(out,'catalog-color-controls.json'),JSON.stringify({status:colorControls.every(c=>c.status==='PASS')?'PASS':'FAIL',cases:colorControls,hardwareIo:false,scope:'Unified catalog rows -> real Vue controls -> production API memory boundary'},null,2));
+ const colorControls=[],actualColorCaseIds=[];
+ const saveColorControls=(final=false)=>{if(directedColorCases&&!final)return;fs.writeFileSync(path.join(out,'catalog-color-controls.json'),JSON.stringify({status:colorControls.every(c=>c.status==='PASS')&&(!directedColorCases||(colorControls.length===expectedColorCaseIds.length&&JSON.stringify(actualColorCaseIds)===JSON.stringify(expectedColorCaseIds)))?'PASS':'FAIL',cases:colorControls,selection:{directed:directedColorCases,requestedCaseIds:requestedColorCaseIds,expectedCaseIds:expectedColorCaseIds,actualCaseIds:actualColorCaseIds},hardwareIo:false,scope:'Unified catalog rows -> real Vue controls -> production API memory boundary'},null,2),directedColorCases?{flag:'wx'}:undefined);};
+ try{
  for(const height of [720,800]){
   await page.setViewportSize({width:1280,height});
   for(const row of LIGHTING_ROWS)for(const mode of row.declaredEffects.filter(m=>m!=='preset'||row.presetAvailable)){
+    const caseId=row.name+'-'+mode+'-'+height;
+    if(directedColorCases&&!expectedColorCaseIds.includes(caseId))continue;
+    actualColorCaseIds.push(caseId);
    await page.evaluate(({row,mode})=>{window.unmount();window.__useKeepAlive=false;window.__deferCaps=false;window.__deferSettings=false;window.__lightingRow=row;window.__lightingMode=mode;window.mount('mini')},{row,mode});
    await page.waitForFunction(()=>window.f.applies.length===1);
    await page.waitForFunction(()=>document.querySelectorAll('[role="listbox"]').length===0);
@@ -69,6 +89,7 @@ const colorTests=String.raw`
    colorControls.push({id:row.name+'-'+mode+'-'+height,actual,expected,status:JSON.stringify(actual)===JSON.stringify(expected)?'PASS':'FAIL',hardwareIo:false});
    saveColorControls();
    assert.deepEqual(actual,expected,'Catalog effect must expose every consumed color: '+row.name+':'+mode);
+    if(directedColorCases)continue;
    if(mode==='preset'){
     await page.locator('.preset-field button').first().click();assert.equal(await page.getByRole('option').count(),(row.presets??Array(11)).length);await page.keyboard.press('Escape');await page.waitForFunction(()=>document.querySelectorAll('[role="listbox"]').length===0);
     if(row.presetSecondColor){
@@ -109,9 +130,12 @@ const colorTests=String.raw`
    }
   }
  }
+ assert.deepEqual(actualColorCaseIds,expectedColorCaseIds,'Exact original base color-case selection');
+ if(directedColorCases){assert.deepEqual(colorControls.map(c=>c.id),expectedColorCaseIds,'Directed execution must contain only requested base cases');cases.push(...actualColorCaseIds);}
+ }finally{if(directedColorCases)saveColorControls(true);}
  await page.evaluate(()=>{window.__lightingRow=undefined;window.unmount()});
 `;
-const tests=colorTests.replace('LIGHTING_ROWS',JSON.stringify(lightingRows.map(({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor})=>({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor}))))+String.raw`
+const tests=' const directedColorCases='+JSON.stringify(directedColorCases)+';\n const requestedColorCaseIds='+JSON.stringify(requestedColorCaseIds)+';\n const expectedColorCaseIds='+JSON.stringify(expectedColorCaseIds)+';\n'+colorTests.replace('LIGHTING_ROWS',JSON.stringify(lightingRows.map(({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor})=>({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor}))))+(directedColorCases?'':String.raw`
  const lifecycle=[];
  const record=(id,height,actual,expected)=>lifecycle.push({id:id+'-'+height,viewport:{width:1280,height},actual,expected,status:JSON.stringify(actual)===JSON.stringify(expected)?'PASS':'FAIL',hardwareIo:false});
  async function resetCase(options={}){
@@ -195,14 +219,23 @@ const tests=colorTests.replace('LIGHTING_ROWS',JSON.stringify(lightingRows.map((
  fs.writeFileSync(path.join(out,'ipc-ledger.json'),JSON.stringify({actualProductionApi:true,calls:ledger,nativeIo:false},null,2));
  fs.writeFileSync(path.join(out,'lifecycle-cases.json'),JSON.stringify({status:lifecycle.every(c=>c.status==='PASS')?'PASS':'FAIL',caseCount:lifecycle.length,failedCount:lifecycle.filter(c=>c.status==='FAIL').length,cases:lifecycle,hardwareIo:false,consumer:'actual Vue component lifecycle -> settings/debounce -> gamepadFeedback.setLed memory boundary'},null,2));
  assert.equal(lifecycle.filter(c=>c.status==='FAIL').length,0,'leaving lighting controls must revoke queued and pending initialization writes');
-`;
+`);
+if(directedColorCases){
+ replace(";window.mount('onex');",';');
+ const start=script.indexOf(" await page.locator('.preset-field').waitFor();"),end=script.indexOf(' assert.deepEqual(errors,[]);',start);
+ assert(start>=0&&end>start,'Baseline operation scenario boundary changed');
+ script=script.slice(0,start)+script.slice(end);
+ replace('JSON.stringify({ok:true,cases,errors,browserPort:','JSON.stringify({ok:true,cases,errors,colorCaseSelection:{requestedCaseIds:requestedColorCaseIds,expectedCaseIds:expectedColorCaseIds,actualCaseIds:actualColorCaseIds},browserPort:');
+ replace(",null,2));console.log('LIGHTING_OPERATIONS_BROWSER_OK",",null,2),{flag:'wx'});console.log('LIGHTING_OPERATIONS_BROWSER_OK");
+}
 replace(' assert.deepEqual(errors,[]);',tests+' assert.deepEqual(errors,[]);');
 replace('}finally{await browser?.close();await new Promise(r=>server.close(r));}',
  '}finally{await browser?.close();await new Promise(r=>server.close(r));stop();}');
-const probe=path.join(out,'browser-probe.mjs');fs.writeFileSync(probe,script);
+const probe=path.join(out,'browser-probe.mjs');fs.writeFileSync(probe,script,{flag:'wx'});
 const child=spawnSync(process.execPath,[probe,out],{cwd:repo,encoding:'utf8',timeout:90000,windowsHide:true,maxBuffer:2<<20});
-fs.writeFileSync(path.join(out,'stdout.log'),child.stdout??'');fs.writeFileSync(path.join(out,'stderr.log'),child.stderr??'');
+fs.writeFileSync(path.join(out,'stdout.log'),child.stdout??'',{flag:'wx'});fs.writeFileSync(path.join(out,'stderr.log'),child.stderr??'',{flag:'wx'});
+const colorReceiptPath=path.join(out,'catalog-color-controls.json'),colorCaseSelection=fs.existsSync(colorReceiptPath)?JSON.parse(fs.readFileSync(colorReceiptPath,'utf8')).selection:null;
 const stable=hash(fs.readFileSync(component))===hash(sourceBefore)&&hash(fs.readFileSync(apiPath))===hash(apiBefore)&&hash(fs.readFileSync(catalogPath))===hash(catalogBefore)&&navigationInputs.every(p=>hash(fs.readFileSync(path.join(repo,p)))===navigationBefore[p]);
-fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({allPassed:child.status===0&&stable,exit:child.status,signal:child.signal,error:child.error?.message,source:component,sourceSha256:hash(sourceBefore),apiSource:apiPath,apiSourceSha256:hash(apiBefore),sourceStable:stable,fixtureBaselineSha256:hash(fs.readFileSync(path.join(repo,'tools/controller_lighting_operations_browser_selftest.mjs'))),hardwareIo:false,installedApplicationStarted:false,scope:'Real Vue/controls and production API wrappers at 1280x720 and 1280x800; only IPC/settings are in memory; no native/physical device acceptance'},null,2));
+fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({allPassed:child.status===0&&stable,exit:child.status,signal:child.signal,error:child.error?.message,source:component,sourceSha256:hash(sourceBefore),apiSource:apiPath,apiSourceSha256:hash(apiBefore),sourceStable:stable,colorCaseSelection,fixtureBaselineSha256:hash(fs.readFileSync(path.join(repo,'tools/controller_lighting_operations_browser_selftest.mjs'))),hardwareIo:false,installedApplicationStarted:false,scope:'Real Vue/controls and production API wrappers at 1280x720 and 1280x800; only IPC/settings are in memory; no native/physical device acceptance'},null,2),{flag:'wx'});
 console.log('LIGHTING_LIFECYCLE',child.status===0&&stable?'PASS':'FAIL','evidence='+out);
 if(child.status!==0||!stable)process.exitCode=1;

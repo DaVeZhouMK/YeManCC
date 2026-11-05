@@ -90,6 +90,7 @@ internal sealed class Controller
     readonly Func<IChargeProvider> open;
     readonly Func<(bool Present,bool Ac,int? Percent)> power;
     readonly Store store;
+    readonly Func<bool> ready;
     readonly string session=Guid.NewGuid().ToString("N");
     Preference? preference;
     Recovery? recovery;
@@ -100,9 +101,10 @@ internal sealed class Controller
     string warning="";
     string verification="unknown";
     int? expectedRaw;
-    public Controller(Identity identity,Store store,Func<Route,IChargeProvider> factory,Func<(bool Present,bool Ac,int? Percent)>? power=null)
+    public Controller(Identity identity,Store store,Func<Route,IChargeProvider> factory,Func<(bool Present,bool Ac,int? Percent)>? power=null,Func<bool>? ready=null)
     {
         this.identity=identity;this.store=store;capability=Policy.ResolveCapability(identity);route=capability?.Consumer;open=()=>factory(route??throw new IOException("未知机型"));this.power=power??WindowsFacts.Power;
+        this.ready=ready??(static ()=>true);
         ReloadStore();
     }
     // Keep known ownership in memory on every failed reload. Missing/corrupt IO
@@ -197,12 +199,74 @@ internal sealed class Controller
     int ResumeRaw=>route?.RouteId=="ayaneo-ceii-bypass"?0x65:0xaa;
     string Fence(Reading? reading)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{session}|{identity.Key}|{revision}|{reading?.Raw}")));
     Snapshot State(bool ok,bool supported,Reading? reading,string reason="")=>new(1,ok,supported,power().Present,identity.BoardProduct,route?.Family??"",route?.Kind??"unsupported",route?.Choices??[],reading?.Limit,preference?.Target,!invalidStore&&(preference?.Managed==true||recovery?.Software==true),verification,Fence(reading),string.IsNullOrEmpty(reason)?warning:reason) {CapabilityId=capability?.Descriptor.DeviceId,CapabilityRuleId=capability?.Descriptor.RuleId,CapabilityOrigin=capability?.Descriptor.Origin,CapabilityDeclaredByFrozenHc=capability?.Descriptor.DeclaredByFrozenHc,CapabilityCatalogSha256=YeManFanBackend.Capabilities.HcBatteryCapabilityCatalog.CatalogSha256};
+    readonly List<IChargeProvider> providerCleanupDebt=new();
+    string providerCleanupReason="";
+    sealed class ProviderLease(Controller owner,IChargeProvider provider) : IChargeProvider
+    {
+        bool closed;
+        public bool CanReadLimit=>provider.CanReadLimit;
+        public Reading Read()=>provider.Read();
+        public void Write(int value,Reading before)
+        {
+            if(provider is IChargeWriteAdmission guarded)guarded.Write(value,before,owner.RequireAvailable);
+            else provider.Write(value,before); // Preserve existing explicit restoration during suspend/stop.
+        }
+        public void Dispose()
+        {
+            if(closed)return;
+            try{provider.Dispose();closed=true;}
+            catch(Exception error)
+            {
+                if(!owner.providerCleanupDebt.Any(other=>ReferenceEquals(other,provider)))owner.providerCleanupDebt.Add(provider);
+                owner.active=false;owner.verification="unknown";
+                owner.providerCleanupReason="硬件通道清理尚未完成："+error.Message;
+                owner.warning=owner.providerCleanupReason;owner.revision++;
+                throw new IOException(owner.providerCleanupReason,error);
+            }
+        }
+    }
+    IChargeProvider OpenOwnedProvider()
+    {
+        if(providerCleanupDebt.Count!=0)throw new IOException("原硬件通道尚未归还，未创建新终端");
+        return new ProviderLease(this,open());
+    }
+    void RetryProviderCleanup()
+    {
+        Exception? first=null;
+        foreach(var provider in providerCleanupDebt.ToArray().Reverse())
+        {
+            try
+            {
+                provider.Dispose();
+                int index=providerCleanupDebt.FindIndex(other=>ReferenceEquals(other,provider));
+                if(index>=0)providerCleanupDebt.RemoveAt(index);
+            }
+            catch(Exception error){first??=error;}
+        }
+        if(first is not null)throw new IOException("原硬件通道仍未确认归还",first);
+        if(!conflict&&warning==providerCleanupReason)warning="";
+        providerCleanupReason="";
+    }
     void RequireAvailable()
     {
         if(route is null)throw new IOException(Policy.Unavailable(identity));
         if(!power().Present)throw new IOException("未检测到内置电池");
-        if(!Policy.FirmwareAllowed(route,identity))throw new IOException("当前 EC 或 BIOS 版本尚未通过充电接口校验");
-        if(suspended)throw new IOException("正在睡眠或恢复，充电设置稍后可用");
+        if(!Policy.FirmwareAllowed(route,identity))
+        {
+            // Reuse the identity facts already collected for this consumer. A
+            // rejected route never opens an EC endpoint merely for diagnostics.
+            TraceLog.Write("firmware-admission-rejected",new {
+                route=route.RouteId,deviceClass=route.Identity.DeviceClass,
+                observed=new {identity.Manufacturer,identity.BoardProduct,identity.SystemProduct,identity.Bios,
+                    identity.EcMajor,identity.EcMinor,
+                    ecMajorKnown=identity.EcMajor>=0&&identity.EcMajor<255,
+                    ecMinorKnown=identity.EcMinor>=0&&identity.EcMinor<255,
+                    source="Win32_BIOS.EmbeddedControllerMajorVersion/EmbeddedControllerMinorVersion;SMBIOSBIOSVersion"},
+                required=route.FirmwareGate,allowed=false,providerOpened=false,
+                scope="firmware-admission-only;no-EC-IO;no-write"});
+            throw new IOException("当前 EC 或 BIOS 版本尚未通过充电接口校验");
+        }
+        if(suspended||!ready())throw new IOException("正在停止、睡眠或恢复，充电设置稍后可用");
     }
     public Snapshot Read()
     {
@@ -210,7 +274,7 @@ internal sealed class Controller
         {
             try
             {
-                EnsureJournal();RequireAvailable();using var p=open();var read=p.Read();
+                EnsureJournal();RequireAvailable();using var p=OpenOwnedProvider();var read=p.Read();
                 if(p.CanReadLimit&&!conflict)verification=read.Limit is null?"unknown":"readback";
                 if(active&&expectedRaw!=read.Raw){active=false;conflict=true;warning="充电状态被其他程序修改，软件限充已暂停";verification="conflict";revision++;}
                 return State(true,!conflict,read);
@@ -226,7 +290,7 @@ internal sealed class Controller
             try
             {
                 EnsureJournal();RequireAvailable();if(route is null||!Policy.ValueAllowed(route,target))return State(false,false,null,"此机型不支持所选充电档位");
-                using var p=open();before=p.Read();
+                using var p=OpenOwnedProvider();before=p.Read();
                 if(fence!=Fence(before))return State(false,!conflict,before,"充电状态已更新，请确认当前值后重新应用");
                 if(conflict)throw new IOException("存在未解决的充电恢复记录，请先停止软件限充或核对厂商设置");
                 if(route.Software)
@@ -244,6 +308,7 @@ internal sealed class Controller
                 if(p.CanReadLimit&&before.Limit==target)
                 {store.Save(SettingsFile,desired);preference=desired;verification="readback";warning="";revision++;return State(true,true,before);}
                 SaveRecovery(new(1,identity.Key,route.RouteId,before.Raw,null,false));
+                RequireAvailable(); // Stop/power changes during pre-read must precede any new firmware write.
                 p.Write(target,before);
                 var after=p.Read();
                 if(p.CanReadLimit&&after.Limit!=target)throw new IOException("写入后回读不一致；显示实际值，请检查厂商软件是否同时控制充电");
@@ -258,7 +323,7 @@ internal sealed class Controller
                 if(before is null)return State(false,false,null,e.Message);
                 warning=e.Message;revision++;
                 if(recovery is not null){active=false;conflict=true;verification=invalidStore?"unknown":"unconfirmed";}
-                try{using var p=open();return State(false,!conflict,p.Read(),warning);}catch{return State(false,false,null,warning);}
+                try{using var p=OpenOwnedProvider();return State(false,!conflict,p.Read(),warning);}catch{return State(false,false,null,warning);}
             }
         }
     }
@@ -270,11 +335,12 @@ internal sealed class Controller
         {
             try
             {
+                RetryProviderCleanup();
                 if(invalidStore){ReloadStore();if(invalidStore)return State(false,false,null,warning);}
                 EnsureJournal();
                 if(recovery is {Software:false}&&route is not null&&recovery.IdentityKey==identity.Key)
                 {
-                    RequireAvailable();using var p=open();_ = p.Read();
+                    RequireAvailable();using var p=OpenOwnedProvider();_ = p.Read();
                     if(preference is not null){var disabled=preference with {Managed=false};store.Save(SettingsFile,disabled);preference=disabled;}
                     ClearRecovery();conflict=false;warning="";revision++;
                 }
@@ -288,7 +354,7 @@ internal sealed class Controller
         EnsureJournal();
         if(recovery is not {Software:true})return;
         if(route is null||recovery.IdentityKey!=identity.Key||recovery.RouteId!=route.RouteId)throw new IOException("恢复记录与当前设备不匹配");
-        using var p=open();var current=p.Read();
+        using var p=OpenOwnedProvider();var current=p.Read();
         if(current.Raw!=recovery.OriginalRaw)
         {
             if(current.Raw!=recovery.OwnedRaw)throw new IOException("电池旁路已被外部修改，未覆盖外部状态");
@@ -312,6 +378,7 @@ internal sealed class Controller
     {
         lock(gate)
         {
+            try{RetryProviderCleanup();}catch(Exception error){return State(false,false,null,error.Message);}
             if(invalidStore){ReloadStore();if(invalidStore)return State(false,false,null,warning);}
             return ReleaseLocked();
         }
@@ -321,7 +388,7 @@ internal sealed class Controller
         if(!active||suspended||route is null||preference is null)return;
         try
         {
-            EnsureJournal();using var p=open();var current=p.Read();
+            EnsureJournal();using var p=OpenOwnedProvider();var current=p.Read();
             if(current.Raw!=expectedRaw)throw new IOException("检测到其他软件改变充电状态，已暂停软件限充");
             var facts=power();int decision=Policy.BypassDecision(facts.Percent,facts.Present&&facts.Ac,preference.Target,current.Paused==true)??0;
             if((current.Paused==true)==(decision==1))return;
@@ -355,7 +422,7 @@ internal sealed class Controller
                 var s=Read();if(!s.Supported)return;
                 // A valid transport with an unknown value allows an explicit user
                 // setting, but cannot authorize unattended startup/resume replay.
-                using(var p=open())if(p.CanReadLimit&&s.CurrentLimit is null){warning="当前充电上限未知，未自动恢复；请手动选择档位后应用";return;}
+                using(var p=OpenOwnedProvider())if(p.CanReadLimit&&s.CurrentLimit is null){warning="当前充电上限未知，未自动恢复；请手动选择档位后应用";return;}
                 _=Apply(s.Fence,preference.Target);
             }
             catch(Exception e){warning=e.Message;}
@@ -372,5 +439,17 @@ internal sealed class Controller
         // Firmware thresholds are not fought against OEM software on resume; software bypass restarts only after cleanup.
         if(route?.Software==true)StartSaved();
     }
-    public void Shutdown(){Suspend();}
+    public void Shutdown()
+    {
+        suspended=true;
+        lock(gate)
+        {
+            RetryProviderCleanup();
+            active=false;
+            try{RestoreOwned();}catch(Exception error){warning=error.Message;conflict=true;}
+            // Restoration debt remains journal-owned. Actual provider/resource
+            // close debt must propagate so the host cannot return its owner.
+            RetryProviderCleanup();
+        }
+    }
 }

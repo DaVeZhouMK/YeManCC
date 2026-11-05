@@ -41,7 +41,7 @@
       "id": "generated-data",
       "name": "派生数据快照",
       "purpose": "Generated identities, metadata or method classification; not availability",
-      "fileCount": 3
+      "fileCount": 4
     },
     {
       "id": "generated-code",
@@ -65,7 +65,7 @@
       "id": "guide",
       "name": "维护入口说明",
       "purpose": "Human/AI navigation; not runtime input",
-      "fileCount": 9
+      "fileCount": 10
     },
     {
       "id": "documentation-snapshot",
@@ -592,6 +592,20 @@
       "group": "source-facts",
       "summary": "Audited protocol and DMI facts; pins primary files, not imported unlicensed implementation or hardware acceptance",
       "editMode": "reviewed-source-facts"
+    },
+    {
+      "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
+      "group": "generated-data",
+      "summary": "全部充电类的固定来源/实际路线/条件/现场失败对照；只读审计，不是运行准入表",
+      "editMode": "generated-by-existing-tool",
+      "generator": "tools/battery-hc-coverage-audit.mjs"
+    },
+    {
+      "path": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
+      "group": "guide",
+      "summary": "OneX 优先的全家族充电复核，链接逐类协议与现有限制",
+      "editMode": "generated-by-existing-tool",
+      "generator": "tools/battery-hc-coverage-audit.mjs"
     }
   ],
   "domains": [
@@ -712,6 +726,63 @@
         },
         "stopAfterCurrentBatch": true,
         "nextBatch": null
+      },
+      "bankedWmiCleanup065": {
+        "executionId": "HC-CODEX-065-ONEX-REMAINING-CONSUMERS",
+        "atHongKong": "2026-11-04T20:14:52.016532+08:00",
+        "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_DELIVERED",
+        "affectedModels": [
+          "HandheldCompanion.Devices.OneXPlayerX2",
+          "HandheldCompanion.Devices.OneXPlayer3"
+        ],
+        "repair": "Actual most-derived WMI Dispose and retained enumerator/endpoint cleanup debt; no generation handoff before actual terminal close",
+        "consumer": "Existing RealHcBackend curve -> catalog session -> PinnedWmiFanTransport -> ReflectionFanWmiMethod",
+        "sourceEdit": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\WMI-PRODUCT-EDIT.json",
+          "bytes": 978,
+          "sha256": "f3fe2f5364681f75134bd4ce50eda8bd1529e99ee38a10dc232dd056b1693c36"
+        },
+        "actualDirectedEvidence": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\tests\\run002\\selected-roundtrip-results.json",
+          "bytes": 12589,
+          "sha256": "3984ee99372c86b1ed95e66e7fbb4ad7b62d196196226c5938abf11655c55a05"
+        },
+        "cases": 6,
+        "checks": 124,
+        "initialCompileFailurePreserved": true,
+        "component": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\FAN-COMPONENT-ADOPTION.json",
+          "bytes": 16995,
+          "sha256": "42cbcae3276de778826a7de91127efdd177bc25d5ed51f29faf329e3f021c4e1"
+        },
+        "fixedRuntimeOrNewModelAliasChanged": false,
+        "hardware": false,
+        "wholeGoalComplete": false,
+        "result": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\RESULT.json",
+          "bytes": 5313,
+          "sha256": "938f9ecbcff55c0a4a778e33b1b4b80d5ef2600a020bcd153da0bfc5ed11cd21"
+        },
+        "publicationBlocker": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\PUBLISH-BLOCKER.json",
+          "bytes": 2905,
+          "sha256": "901f399552692895abea8cec9a722f662337ba2c30fcb70371ec76f1d73f8c87"
+        },
+        "ordinaryPackageDelivered": {
+          "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-202619\\YeManCC.zip",
+          "bytes": 110429656,
+          "sha256": "a5e2758118ea00335829d2fc2c79fb99caef16432dde334b3369fd5c7cd8c1db"
+        },
+        "finalResult": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\FINAL-RESULT.json",
+          "bytes": 6953,
+          "sha256": "9a56816d4d1f5c324f5b8fc5a439dd0bc834d8580a4451e766082165b6ef85f3"
+        },
+        "historicalPublicationBlockerResolvedBy": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\BASELINE-RESOLUTION.json",
+          "bytes": 1627,
+          "sha256": "4ef9356f38407e0ba027caf89c389dbc1ab738e380edcf779549e294de9e5874"
+        }
       }
     },
     {
@@ -849,7 +920,11 @@
         "battery.native-host-roundtrip-consumer",
         "battery.ui-native-recovery-consumer"
       ],
-      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution.",
+      "sourceAudit": [
+        "capabilities/BATTERY-CAPABILITY-AUDIT.json",
+        "capabilities/BATTERY-CAPABILITY-AUDIT.md"
+      ]
     },
     {
       "id": "controller",
@@ -1000,7 +1075,9 @@
       ],
       "policy": [],
       "contracts": [
-        "capabilities/CONTROLLER-CONSUMPTION.json"
+        "capabilities/CONTROLLER-CONSUMPTION.json",
+        "capabilities/ONEX-OEM-CONSUMPTION-20261105.md",
+        "capabilities/ONEX-OEM-CONSUMPTION-20261105.json"
       ],
       "consumers": [
         {
@@ -1404,6 +1481,149 @@
       "newLibraryRuntimeRows": 0,
       "hc063PackageChanged": false,
       "allFamilyComplete": false
+    }
+  },
+  "currentOnexFamilyResume065": {
+    "goalStatus": "active",
+    "wholeGoalComplete": false,
+    "plan": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\\PLAN.json",
+      "bytes": 1739,
+      "sha256": "5386cf9cb4fa43dc5d70ef2d47b55c12b27c1f85aaaf04b8c7ee277b62209d5e"
+    },
+    "priorHc064StopSuperseded": true
+  },
+  "currentHc066": {
+    "executionId": "HC-CODEX-066-OXP3-BATTERY-WMI-CLEANUP",
+    "atHongKong": "2026-11-04T21:19:24.292022+08:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_FIXED_MAINLINE_EPOCH_DELIVERED",
+    "result": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-066-BATTERY-WMI-CLEANUP\\FINAL-RESULT.json",
+      "bytes": 8610,
+      "sha256": "67eadfc207edd02c37466b844ebc99b2e7a4e1af9e156efc81171d4abdb45e55"
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-066-OXP3-BATTERY-WMI-CLEANUP.json",
+      "bytes": 1528,
+      "sha256": "b372d038890c6331d21407feb52b4e180e7eeeb5c8cd0f93ebb1099f81e4f305"
+    },
+    "package": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-210648\\YeManCC.zip",
+      "bytes": 110435764,
+      "sha256": "80c777a5b709054c98e95d33d8d54fe69aa5c5521e7edce9aac7fa72383daf6f"
+    },
+    "packageVersion": "0.0.38",
+    "closedFinding": "BATTERY-WMI-DISPOSE-001",
+    "exactDirectedGroups": 1,
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "sourceEpoch": "Stable original mainline capture20261104-205701; qualified snapshot with two original regenerated battery bindings. Later parallel source work excluded and preserved.",
+    "laterParallelSourceIncluded": false,
+    "laterParallelSourcePreserved": true,
+    "currentCanonicalBatteryPayloadAdopted": false,
+    "remainingIntegrationObservation": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-066-LATER-SOURCE-IDENTITY.json",
+      "bytes": 5068,
+      "sha256": "c13ef93144b82f81b0cf1f921aa7197a18fafbee6aa52a2c8c2dfdfed615da78"
+    },
+    "goalStatus": "active",
+    "wholeGoalComplete": false,
+    "allFamilySoftwareComplete": false,
+    "noNextBatchAssigned": true
+  },
+  "currentHc067": {
+    "executionId": "HC-CODEX-067-ONEX-CONSUMER-SPEED-AND-COVERAGE",
+    "atHongKong": "2026-11-04T22:35:31.132345+08:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_ORDINARY_DELIVERED_FULL_FAMILY_ACTIVE",
+    "result": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\FINAL-RESULT.json",
+      "bytes": 9592,
+      "sha256": "fb41a65e0908250710b73835ec56e886cfc6cd4a0f36b8d318fc8d7a18451417"
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-067-ONEX-CONSUMER-SPEED-AND-COVERAGE.json",
+      "bytes": 2071,
+      "sha256": "c035df91e135688f9744c2cab5e3dc9c498e923352366bad0263af9c5bcdb0e1"
+    },
+    "package": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-Mainline-Quick-TestPackage-20261104-221226\\YeManCC.zip",
+      "bytes": 110454408,
+      "sha256": "ff14e9e24fd842279de00cdee8ab73b5e9e4c70ef83cc3f85d370674ccdd8fd8"
+    },
+    "packageVersion": "0.0.38",
+    "lightingFixedSpeedRows": [
+      "OneXPlayerG1",
+      "OneXPlayerG1AMD",
+      "OneXPlayerG1Intel",
+      "OneXPlayerOneXFly",
+      "OneXPlayerOneXFlyF1Pro",
+      "OneXPlayerX1Mini"
+    ],
+    "exactOriginalBrowserGroups": 12,
+    "sourcePolicyNegativeControls": 4,
+    "selectorNegativeControls": 4,
+    "motionInputDomainCorrections": 34,
+    "motionInputConcreteModels": 17,
+    "canonicalSameSourcePayloadsAdopted": true,
+    "superXChargingImplemented": false,
+    "nextConsumer": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Code-Capability-Upgrade-20261031\\Codex\\HC-CODEX-067-ONEX-SUPERX-CHARGE\\NEXT-BOUNDED-CONSUMER-PLAN.json",
+      "bytes": 4039,
+      "sha256": "64219000869552a820309af9756a23040b1645a78b7a300723e3f5f0a1e08a16"
+    },
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "physicalEffectAcceptance": false,
+    "goalStatus": "active",
+    "wholeGoalComplete": false
+  },
+  "currentBatteryCapabilityAudit": {
+    "dateHongKong": "2026-11-05",
+    "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
+    "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
+    "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+    "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
+    "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
+    "upstreamDeviceFiles": 104,
+    "sourceDeltaSinceF2e58468": 0,
+    "factoryClasses": 90,
+    "candidateChargeClasses": 41,
+    "registeredHcCandidateClasses": 40,
+    "runtimeIdentityRules": 42,
+    "runtimeProtocols": 12,
+    "registrationAuthorityChanged": false,
+    "hardwareProbed": false,
+    "runtimeBehaviorChangedByThisAudit": false,
+    "apexActualFieldFailureStillOpen": true,
+    "verification": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\verification.json",
+      "sha256": "03fbb5f0468a1b45e83bdf2ff2e31dff8da288f22432d4d2e1102df96b81f566",
+      "selectedCasesPassed": 4,
+      "hardwareAcceptance": false
+    },
+    "latestFieldEvidence": {
+      "archive": "G:/YeManCC-Work/日志/其他/YeManCC-logs-20261105-023324-onexplayer3.zip",
+      "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\field-023324\\field-summary.json",
+      "evidenceSha256": "2ac99d75d827ed0bb71495c200c8a01a514be31b2fdf577878dbf64b3b5df693",
+      "sessionTimeHongKong": "2026-11-05T02:33:21.2518085+08:00",
+      "pid": 15104,
+      "build": "Nov 5 2026 02:09:14",
+      "bios": "0.12",
+      "ecMajor": 0,
+      "ecMinor": 12,
+      "knownFirmware": true,
+      "latestGetCount": 2,
+      "latestSetCount": 0,
+      "route": "oxp-x1-amd-ec",
+      "failedCondition": "ecMajor 0 < required majorMin 1; ecMinor 12 passes minorMin 3",
+      "providerOpened": false,
+      "runtimeBehaviorChanged": false,
+      "physicalAcceptance": false,
+      "status": "FIELD_FAILURE_CONFIRMED_NOT_REPAIRED"
+    },
+    "latestFieldVerification": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\field-023324\\verification.json",
+      "sha256": "09142f59a044c2d5ed87de4605c2daef1657fd17a6962097875fa5217bbdf9af"
     }
   }
 }

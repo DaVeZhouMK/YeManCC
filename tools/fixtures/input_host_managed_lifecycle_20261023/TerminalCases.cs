@@ -46,12 +46,13 @@ internal static partial class Program
         Assert(r.ManagedReleaseComplete==success&&r.ReleaseAttempts==attempts&&r.Retried==retry,JsonSerializer.Serialize(r));
         Assert(r.ExitCode==(success?0:Terminal.ReleaseFailedExitCode),"terminal result erased cleanup failure");
     }
-    private static async Task<Dictionary<string,object?>> TerminalPipeCase(string mode,string worker="healthy",bool transient=false)
+    private static async Task<Dictionary<string,object?>> TerminalPipeCase(string mode,string worker="healthy",bool transient=false,int? externalParentPid=null,Func<Dictionary<string,object?>,Task>? beforeFixtureCleanup=null)
     {
+        if(externalParentPid.HasValue&&(externalParentPid.Value<=0||mode!="shutdown"||worker!="output"||transient||beforeFixtureCleanup is null))throw new ArgumentException("External parent is restricted to the retained shutdown output fixture");
         ResetManaged();OwnedWorkers.BlockOutput=worker=="output";OwnedWorkers.BlockClock=worker=="clock";
         TerminalTestPorts.ReleaseOutputAfterTimeout=transient&&worker=="output";TerminalTestPorts.ReleaseClockAfterTimeout=transient&&worker=="clock";
         var s=mode.StartsWith("shutdown-write-")||mode=="shutdown-parent-loss-neutral"?PersonaReady("dualsense-edge"):ManagedReady();var owner=s.Controller!;var callback=owner.CapturedOutput;
-        using var parent=StartOwnedParent();var name="ymcc-terminal23-"+Guid.NewGuid().ToString("N");await using var server=ManagedServer(name);
+        using var parent=externalParentPid.HasValue?Process.GetProcessById(externalParentPid.Value):StartOwnedParent();var name="ymcc-terminal23-"+Guid.NewGuid().ToString("N");await using var server=ManagedServer(name);
         Task<int>? run=null;bool pass=true;string? error=null;int? exit=null;
         try
         {
@@ -111,9 +112,14 @@ internal static partial class Program
         }
         catch(Exception ex){pass=false;error=ex.ToString();}
         var resources=ResourceSnapshot();var receipts=TerminalReceipts.ToArray();var trace=Fixture.Events.ToArray();
-        try{server.Dispose();if(!parent.HasExited)await ExitOwnedParent(parent);if(run is not null)await run.WaitAsync(TimeSpan.FromSeconds(6));OwnedWorkers.Cleanup();}
-        catch(Exception ex){pass=false;error+=" cleanup:"+ex;}
-        return new(){["name"]=$"terminal-{mode}-{worker}-{(transient?"transient":"fixed")}",["pass"]=pass,["error"]=error,["exit"]=exit,["receipts"]=receipts,["actualProductionLogRows"]=ActualLogRows(),["beforeFixtureCleanup"]=resources,["trace"]=trace};
+        var caseResult=new Dictionary<string,object?>{["name"]=$"terminal-{mode}-{worker}-{(transient?"transient":"fixed")}",["pass"]=pass,["error"]=error,["exit"]=exit,["receipts"]=receipts,["actualProductionLogRows"]=ActualLogRows(),["beforeFixtureCleanup"]=resources,["trace"]=trace};
+        try{if(beforeFixtureCleanup is not null)await beforeFixtureCleanup(caseResult);}
+        finally
+        {
+            try{server.Dispose();if(!externalParentPid.HasValue&&!parent.HasExited)await ExitOwnedParent(parent);if(run is not null)await run.WaitAsync(TimeSpan.FromSeconds(6));OwnedWorkers.Cleanup();}
+            catch(Exception ex){pass=false;error+=" cleanup:"+ex;}
+        }
+        caseResult["actualProductionLogRows"]=ActualLogRows();caseResult["pass"]=pass;caseResult["error"]=error;return caseResult;
     }
     private static async Task<Dictionary<string,object?>> TerminalInitializationCase(bool fail)
     {
@@ -138,9 +144,83 @@ internal static partial class Program
         try{OwnedWorkers.Cleanup();}catch(Exception ex){pass=false;error+=" cleanup:"+ex;}
         return new(){["name"]="terminal-initialization-"+(fail?"throws":"healthy"),["pass"]=pass,["error"]=error,["exit"]=exit,["receipts"]=receipts,["costDisposals"]=costDisposals,["costAfterSettle"]=costAfterSettle,["stageCreates"]=TerminalTestPorts.StageCreates,["stageDisposes"]=TerminalTestPorts.StageDisposes,["stageAfterSettle"]=stageAfterSettle,["beforeFixtureCleanup"]=resources,["trace"]=trace};
     }
+    private static async Task<int> RetainedOwnerChild(string proofPath,string nonce,int nativeParentPid)
+    {
+        try
+        {
+            using var nativeParent=Process.GetProcessById(nativeParentPid);
+            using var managed=Process.GetCurrentProcess();
+            var nativeParentBirthUtcTicks=nativeParent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var managedBirthUtcTicks=managed.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if(nativeParent.HasExited)throw new IOException("Native retained-owner parent already exited");
+            await TerminalPipeCase("shutdown","output",false,externalParentPid:nativeParentPid,beforeFixtureCleanup:async caseResult=>
+            {
+                var actual=JsonSerializer.SerializeToElement(caseResult);
+                Assert(actual.GetProperty("name").GetString()=="terminal-shutdown-output-fixed"&&actual.GetProperty("pass").GetBoolean()&&actual.GetProperty("exit").GetInt32()==7,"Retained proof requires the same successful original case and failed terminal result");
+                var receipts=actual.GetProperty("receipts");Assert(receipts.GetArrayLength()==1,"Retained proof requires the original unique terminal receipt");
+                var receipt=receipts[0];
+                Assert(receipt.GetProperty("ExitCode").GetInt32()==7&&!receipt.GetProperty("ManagedReleaseComplete").GetBoolean()&&receipt.GetProperty("ResourceDisposition").GetString()=="owner-retained"&&receipt.GetProperty("ReleaseAttempts").GetInt32()==2&&receipt.GetProperty("DirectReleaseAttempts").GetInt32()==1&&receipt.GetProperty("Retried").GetBoolean(),"Retained proof cannot claim successful managed release");
+                var snapshots=actual.GetProperty("beforeFixtureCleanup").GetProperty("workers");
+                Assert(snapshots.GetArrayLength()==1&&snapshots[0].GetProperty("outputAlive").GetBoolean()&&!snapshots[0].GetProperty("outputCtsClosed").GetBoolean()&&snapshots[0].GetProperty("callbacks").GetInt32()==0&&!snapshots[0].GetProperty("outputFinallyRan").GetBoolean()&&!snapshots[0].GetProperty("sdkDisposedFlag").GetBoolean()&&actual.GetProperty("beforeFixtureCleanup").GetProperty("ContextCalls").GetInt32()==0,"Retained proof requires the real pre-cleanup output and CTS debt");
+                Assert(OwnedWorkers.All.Count==1&&OwnedWorkers.All[0].Output.IsAlive&&!OwnedWorkers.All[0].CtsHandle.IsClosed&&OwnedWorkers.All[0].Controller.SubscriberCount==0&&!OwnedWorkers.All[0].Controller.OutputClosed&&!OwnedWorkers.All[0].Controller.Disposed&&World.ContextCalls==0,"Retained worker changed before publishing proof");
+                Assert(!nativeParent.HasExited&&nativeParent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)==nativeParentBirthUtcTicks,"Native parent identity changed before retained proof");
+                var proof=new{schemaVersion=1,kind="ymcc-managed-retained-proof-v1",nonce,pid=Environment.ProcessId,nativeParentPid,nativeParentBirthUtcTicks,managedBirthUtcTicks,caseResult};
+                var bytes=Encoding.UTF8.GetBytes(JsonSerializer.Serialize(proof));
+                using(var stream=new FileStream(proofPath,FileMode.CreateNew,FileAccess.Write,FileShare.Read)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
+                // Explicit uncooperative child boundary: no gate relief, fixture cleanup,
+                // or success return after proof. The native production owner must terminate us.
+                using var stopObservation=new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                try{await nativeParent.WaitForExitAsync(stopObservation.Token);}
+                catch(OperationCanceledException){throw new TimeoutException("Native owner did not terminate the retained fixture within 30 seconds");}
+                throw new IOException("Native parent exited before terminating its retained child");
+            });
+            Console.Error.WriteLine("Retained fixture unexpectedly returned without native termination");return 1;
+        }
+        catch(Exception ex){Console.Error.WriteLine("RETAINED_OWNER_CHILD_FAILED: "+ex);return 1;}
+    }
     private static async Task<int> Main(string[] args)
     {
         if(args.SequenceEqual(new[]{"--owned-parent"})){Console.WriteLine("READY");Console.In.ReadLine();return 0;}
+        if(args.Length>0&&args[0]=="--retained-owner-child")
+        {
+            int nativeParentPid;
+            try
+            {
+                if(args.Length!=4||!Path.IsPathFullyQualified(args[1])||File.Exists(args[1])||Directory.Exists(args[1])||!Directory.Exists(Path.GetDirectoryName(args[1]))||args[2].Length!=32||!args[2].All(c=>c>='0'&&c<='9'||c>='a'&&c<='f'||c>='A'&&c<='F')||args[3].Length==0||!args[3].All(c=>c>='0'&&c<='9')||!int.TryParse(args[3],out nativeParentPid)||nativeParentPid<=0||nativeParentPid==Environment.ProcessId)
+                {Console.Error.WriteLine("--retained-owner-child requires a new absolute proof path, 32hex nonce and another positive native parent PID");return 2;}
+            }
+            catch(Exception ex){Console.Error.WriteLine("Invalid retained-owner child arguments: "+ex.Message);return 2;}
+            return await RetainedOwnerChild(Path.GetFullPath(args[1]),args[2],nativeParentPid);
+        }
+        if(args.Length!=0&&!args.SequenceEqual(new[]{"--eligibility-only"}))
+        {
+            if(args.Length!=2||args[0]!="--case")
+            {
+                Console.Error.WriteLine("Expected no arguments, --eligibility-only, --owned-parent, --case <terminal-shutdown-healthy-fixed,terminal-read-loss-healthy-fixed>, or --case terminal-shutdown-output-fixed.");
+                return 2;
+            }
+            var selectedCase=args[1];
+            var selectedCases=selectedCase.Split(',');
+            if(selectedCases.Length==0||selectedCases.Any(name=>name!="terminal-shutdown-healthy-fixed"&&name!="terminal-read-loss-healthy-fixed"&&name!="terminal-shutdown-output-fixed")||selectedCases.Distinct(StringComparer.Ordinal).Count()!=selectedCases.Length||(selectedCases.Contains("terminal-shutdown-output-fixed")&&selectedCases.Length!=1))
+            {
+                Console.Error.WriteLine("--case requires a nonempty, unique list of terminal-shutdown-healthy-fixed and/or terminal-read-loss-healthy-fixed, or terminal-shutdown-output-fixed alone.");
+                return 2;
+            }
+            var selectedRows=new List<Dictionary<string,object?>>();
+            foreach(var selectedName in selectedCases)
+            {
+                var row=selectedName=="terminal-shutdown-output-fixed"?await TerminalPipeCase("shutdown","output",false):await TerminalPipeCase(selectedName=="terminal-shutdown-healthy-fixed"?"shutdown":"read-loss");
+                if(!row.TryGetValue("name",out var actualName)||actualName is not string actualCaseName||actualCaseName!=selectedName)
+                {
+                    row["pass"]=false;
+                    row["error"]="Selected terminal receipt name mismatch: "+selectedName;
+                }
+                selectedRows.Add(row);
+            }
+            var selectedPassed=selectedRows.All(row=>row.TryGetValue("pass",out var pass)&&pass is true);
+            Console.WriteLine(JsonSerializer.Serialize(new{passed=selectedPassed,cases=selectedRows,eligibilityOnly=false,productionMainExecuted=false,actualMainTerminalBlockExecuted=true,realSdkAssemblyLoaded=false,realDriverIo=false,selectedCase,selectedCases}));
+            return selectedPassed?0:1;
+        }
         var rows=new List<Dictionary<string,object?>>();
         rows.Add(Case("actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",()=>{
             foreach(var pair in new[]{("terminal-cleanup-complete","resource-settlement"),("terminal-cleanup-failed","resource-settlement"),("shutdown-ordered","orderly"),("parent-exited","parent-lost"),("fatal-exception","fatal"),("read-failed","fatal"),("write-failed","fatal"),("terminal-cleanup-unknown","fatal")})

@@ -19,6 +19,8 @@ static std::string g_mouseBackend="joyxoff",g_inputHostBuildPersona,g_inputHostB
 static bool requestedEnabled=true,joyRunning=false,joyKnown=true,joyAvailable=true,gamebarOn=false;
 static bool joyStartFails=false,joyStopFails=false,gamebarSetFails=false,switchToSdOnStart=false;
 static HRESULT gamebarHr=S_OK;
+enum class YmccFamily { Unknown,AsusRogAllyX,AsusRogAlly,AsusRogAllyClassic,AsusRogAllyXClassic,AsusGeneric };
+static struct {YmccFamily family=YmccFamily::Unknown;} g_machineIdentity;
 static int g_asyncMode=0;
 static std::atomic<int> g_mousePolicyMode{2};
 static unsigned reads=0,writes=0,joyStarts=0,joyStops=0,gamebarStarts=0,gamebarStops=0,saves=0,cases=0;
@@ -73,12 +75,30 @@ static void reset(){
  g_mousePolicy.receipt=json::object();
  savedGamepad=json::object();g_mousePolicyMode=2;
  g_mouseBackend="joyxoff";g_inputHostBuildPersona.clear();g_inputHostBoundPersona="xbox";requestedPersona="xbox";
- requestedEnabled=true;joyRunning=false;joyKnown=true;joyAvailable=true;gamebarOn=false;
+ requestedEnabled=true;joyRunning=false;joyKnown=true;joyAvailable=true;gamebarOn=false;g_machineIdentity.family=YmccFamily::Unknown;
  joyStartFails=joyStopFails=gamebarSetFails=switchToSdOnStart=false;gamebarHr=S_OK;
  readbackAdmissions=joyReadCount=joyUnknownAt=0; reads=writes=joyStarts=joyStops=gamebarStarts=gamebarStops=saves=0;lastEvent=lastFeedback=json::object();
 }
 int main(){try{
  registerMouseHandlers();
+ for(const auto family:{YmccFamily::AsusRogAllyX,YmccFamily::AsusRogAlly,YmccFamily::AsusRogAllyClassic,YmccFamily::AsusRogAllyXClassic}){
+  reset();g_machineIdentity.family=family;const auto rejected=mouseModeSetBackend("gamebar");
+  need(!rejected.value("ok",true)&&rejected.value("reason",std::string{})=="gamebar_model_unsupported"&&writes==0&&reads==0&&saves==0,"all-four-shared-rog-families-block-before-io");
+ }
+ reset();g_machineIdentity.family=YmccFamily::AsusGeneric;need(mouseModeSetBackend("gamebar").value("ok",false),"non-rog-asus-not-blanket-blocked");
+ reset();g_machineIdentity.family=YmccFamily::AsusRogAlly;joyRunning=true;auto model=mouseModeSetBackend("gamebar");
+ need(!model.value("ok",true)&&model.value("reason",std::string{})=="gamebar_model_unsupported","rog-model-selection-must-reject");
+ need(reads==0&&writes==0&&saves==0&&joyRunning&&g_mouseBackend=="joyxoff","rog-rejection-preserves-existing-backend-before-io");
+ reset();g_machineIdentity.family=YmccFamily::AsusRogAlly;g_mouseBackend="gamebar";model=mouseModeApplyState(true);
+ need(!model.value("ok",true)&&model.value("reason",std::string{})=="gamebar_model_unsupported"&&writes==0&&reads==0,"rog-old-saved-microsoft-on-cannot-bypass-guard");
+ reset();g_machineIdentity.family=YmccFamily::AsusRogAlly;g_mouseBackend="gamebar";model=mouseModeToggleState();
+ need(!model.value("ok",true)&&gamebarStarts==0&&writes==0,"rog-toggle-cannot-enable-microsoft");
+ reset();g_machineIdentity.family=YmccFamily::AsusRogAlly;g_mouseBackend="gamebar";gamebarOn=true;model=mouseModeApplyState(false);
+ need(model.value("ok",false)&&!gamebarOn&&gamebarStops==1,"rog-explicit-off-still-releases-microsoft");
+ reset();g_machineIdentity.family=YmccFamily::AsusRogAlly;model=mouseModeApplyState(true);
+ need(model.value("ok",false)&&joyRunning&&joyStarts==1,"rog-joyxoff-remains-available");
+ need(!model.value("gamebarAvailable",true)&&!model.value("gamebarModelSupported",true),"rog-readback-advertises-microsoft-model-restriction");
+
  for(const int mode:{0,1,2}){g_asyncMode=mode;for(const std::string command:{"mouseMode.get","mouseMode.set","mouseMode.toggle","mouseMode.setBackend","mouseMode.releaseJoyxoff"})need(ipc_cmd_async(command),"mouse-io-must-stay-off-ui-in-all-async-modes");}
  for(int target=0;target<3;++target){reset();if(target==0)requestedPersona="steamdeck";if(target==1)g_inputHostBuildPersona="steamdeck";if(target==2)g_inputHostBoundPersona="steamdeck";
   for(const std::string name:{"mouseMode.toggle","mouseMode.setBackend","mouseMode.set"}){

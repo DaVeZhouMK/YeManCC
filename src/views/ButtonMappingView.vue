@@ -28,7 +28,7 @@ import { invoke, on } from '@/bridge/ipc';
 import { gamepadEnvironmentNotice } from '@/bridge/gamepadEnvironmentNotice';
 import type { HidHideSetupSnapshot } from '@/bridge/hidHideSetupPrompt';
 import { normalizeOemKeysSnapshot } from '@/bridge/controllerShortcutRules';
-import { normalizeOemInputUsage, type OemInputUsage } from '@/bridge/controllerFeatureStatus';
+import { normalizeOemInputUsage, oneXOemObservationKeys, type OemInputUsage } from '@/bridge/controllerFeatureStatus';
 import { normalizeGyroTelemetry } from '@/bridge/inputContracts';
 import { VirtualStartProtectionView, VIRTUAL_START_MAX_WAIT_MS } from '@/bridge/virtualStartProtectionView';
 import { reportFrontendTrace } from '@/robust/frontendDiagnostics';
@@ -66,6 +66,7 @@ const physicalGyroSupported = ref<boolean | null>(null);
 const physicalBackButtons = ref<number | null>(null);
 const physicalBackButtonsCaptured = ref<number | null>(null);
 let stopPhysicalGyro: (() => void) | null = null;
+let stopOemObserved: (() => void) | null = null;
 let channelStatusMounted = false;
 let channelWasInactive = false;
 let channelReadEpoch = 0;
@@ -468,6 +469,14 @@ onMounted(() => {
     if (state?.sensorPresent === true || normalizeGyroTelemetry(state)?.gamepadMotionPlane)
       physicalGyroSupported.value = true;
   });
+  // OneX firmware chords can press and release between gamepad.state snapshots.
+  // This receipt only marks observed input; the preview keeps actual held state.
+  stopOemObserved = on<unknown>('oem.keys.observed', receipt => {
+    if (!controllerActive || !channelStatusMounted) return;
+    const keys = oneXOemObservationKeys(receipt, oemUsage.value);
+    if (keys.some(key => !observedOemKeys.value.includes(key)))
+      observedOemKeys.value = [...new Set([...observedOemKeys.value, ...keys])];
+  });
   stopInputSettings = onInputSettingsChanged(() => { void loadTarget().catch(() => undefined); void readPhysicalChannelCapabilities(); });
   stopShortcutRuntime = on<ShortcutRuntimeState>('input.shortcutRuntime', applyShortcutRuntime);
   stopOverride = onGameInputEditorChanged(() => {
@@ -501,6 +510,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   channelStatusMounted = false; ++channelReadEpoch;
   stopPhysicalGyro?.();
+  stopOemObserved?.();
   ++targetSaveEpoch;
   targetOperationDeadline = null; targetOperationEpoch = 0; targetOperationPersona = null;
   if (targetWaitTimer !== undefined) clearTimeout(targetWaitTimer);

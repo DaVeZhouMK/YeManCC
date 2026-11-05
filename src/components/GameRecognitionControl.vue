@@ -22,6 +22,8 @@ type SummonCandidate = {
   path?: string;
   pid?: number;
   summonGeneration?: number;
+  isolationMode?: string;
+  skipGameRegistration?: boolean;
 };
 
 type SummonRegistrationResult = SummonCandidate & {
@@ -197,6 +199,12 @@ function closeGameRuleMenus(): void {
 }
 
 function beginSummonIdentification(detail: SummonCandidate): void {
+  if (detail?.isolationMode === 'light-no-game' || detail?.skipGameRegistration === true) {
+    cancelSummonIdentification();
+    summonCandidate.value = null;
+    refreshAfterIdentification = false;
+    return;
+  }
   if (summonIdentifyTimer !== null) clearTimeout(summonIdentifyTimer);
   const sequence = ++summonIdentifySequence;
   const generation = Number(detail?.summonGeneration);

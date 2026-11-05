@@ -13,9 +13,10 @@ const here=path.dirname(fileURLToPath(import.meta.url)), repo=path.resolve(here,
 const workspace=path.resolve(repo,'../../..');
 const allowed=path.join(workspace,'Testing/YMCC/Evidence/VirtualGamepadSteadyState-20261103/CompactFrameReply');
 const argv=process.argv.slice(2),options={};
-for(let i=0;i<argv.length;i+=2){assert(['--out','--case-group','--budget-ledger'].includes(argv[i])&&!Object.hasOwn(options,argv[i])&&argv[i+1],'Unknown/duplicate/missing option');options[argv[i]]=argv[i+1];}
+for(let i=0;i<argv.length;i+=2){assert(['--out','--case-group','--budget-ledger','--sdk-first-response'].includes(argv[i])&&!Object.hasOwn(options,argv[i])&&argv[i+1],'Unknown/duplicate/missing option');options[argv[i]]=argv[i+1];}
 assert(options['--out']&&path.isAbsolute(options['--out']),'Explicit --out ABS_FRESH_DIR required');
 const caseGroup=options['--case-group']||'all';assert(['all','compact-regressions','request-budget','request-budget-negative'].includes(caseGroup),'Unknown case group');
+assert(!options['--sdk-first-response']||['all','compact-regressions'].includes(caseGroup),'SDK evidence requires the existing compact parser case group');
 let budgetLedger=null,priorChargedMs=0;
 if(options['--budget-ledger']){assert(path.isAbsolute(options['--budget-ledger']));budgetLedger=JSON.parse(fs.readFileSync(options['--budget-ledger'],'utf8'));assert(budgetLedger.budgetMs===120000&&Array.isArray(budgetLedger.charges));for(const x of budgetLedger.charges){assert(Number.isFinite(x.elapsedMs)&&x.elapsedMs>=0&&path.isAbsolute(x.receipt));const bytes=fs.readFileSync(x.receipt);assert(crypto.createHash('sha256').update(bytes).digest('hex')===x.sha256,'Budget receipt changed');priorChargedMs+=x.elapsedMs;}assert(priorChargedMs<120000,'Original budget exhausted');}
 const started=invocationStart-priorChargedMs,deadline=started+120000;
@@ -40,6 +41,13 @@ function freeze(relative){
 function put(relative,text){const dest=path.join(out,relative);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,text,{flag:'wx'});generated.push({path:dest,sha256:hash(dest)});return dest;}
 function unique(s,needle,from=0){const n=s.indexOf(needle,from);assert(n>=0,'Missing source anchor: '+needle);assert(s.indexOf(needle,n+needle.length)<0,'Ambiguous source anchor: '+needle);return n;}
 if(options['--budget-ledger']){const original=path.resolve(options['--budget-ledger']);assert(inside(allowed,original),'Budget ledger must be in this evidence family');const bytes=fs.readFileSync(original);put('inputs/budget-ledger.json',bytes);originals.set(original,{original,sha256:sha(bytes)});}
+if(options['--sdk-first-response']){
+ const original=path.resolve(options['--sdk-first-response']);assert(path.isAbsolute(options['--sdk-first-response']),'SDK evidence path must be absolute');
+ const bytes=fs.readFileSync(original),reply=JSON.parse(bytes.toString('utf8'));
+ assert(Array.isArray(reply.sdkFirstWitnesses)&&reply.sdkFirstWitnesses.length>0&&reply.sdkFirstWitnessCoverage,'Actual SDK first witness reply required');
+ const snapshot=put('inputs/sdk-first-response.json',bytes);
+ originals.set(original,{original,snapshot,bytes:bytes.length,sha256:sha(bytes)});
+}
 let main,diagnosticSource;
 function fragment(label,start,end,source=main,sourceRelative='native/main.cpp'){assert(start>=0&&end>start);const text=source.slice(start,end);fragments.push({label,sourceRelative,start,end,line:1+source.slice(0,start).split('\n').length-1,bytes:Buffer.byteLength(text),sha256:sha(text)});return text;}
 function between(label,a,b){const start=unique(main,a),end=main.indexOf(b,start+a.length);assert(end>start,'Missing end '+b);return fragment(label,start,end);}
@@ -113,6 +121,9 @@ function runStage(name,exe,args,cwd,allowSemanticFailure=false){
  assert(!p.error&&!p.signal&&row.owned&&row.owned.error===''&&!row.owned.timedOut&&row.owned.activeAfterWait===0&&(allowSemanticFailure?(p.status===0||p.status===1):(p.status===0&&row.owned.exitCode===0)),'Stage failed: '+name+' (raw preserved)');return row;
 }
 const directedPlan={"compact":1,"compact-bad-type-value":60,"compact-empty-binding":1,"compact-float-identity":2,"compact-stale-binding":1,"compact-unbound":1,"duplicate-compact-key":10,"duplicate-compact-key-conflict":10,"duplicate-motor-DOM-invalid-sample":6,"dynamic-motor-revision-and-stop":16,"full-old-type-contract":132,"full-original-tuple-missing":14,"full-original-tuple-null":14,"invalid-expected-token":6,"invalid-prepare-old-ACK":5,"invalid-token":6,"missing-compact-key":10,"mixed-any-legacy":14,"mixed-full-compact":1,"mixed-full-marker-only":1,"mixed-full-token-only":1,"motor-range-invalid":7,"new-generation-ACK":1,"numeric-overflow":12,"old-full":1,"old-full-with-binding":1,"old-generation-ACK":1,"partial-motor-invalid-sample":6,"receipt-values":6,"revoked-token-ACK":6,"typed-motor-invalid-sample":30,"unbound-host-compact":1,"unbound-host-full":1,"version-overflow":6,"wrong-request-context":1,"wrong-sequence-context":1,"directed-full-terminal-nul":1,"directed-compact-terminal-nul":1,"directed-compact-nul-suffix":1,"directed-extension-fallback":1,"directed-extension-stale-token":1,"directed-exact-16KiB":1,"directed-over-16KiB":1,"directed-full-default-values":1,"directed-valid-unicode":1,"directed-invalid-unicode":1,"directed-invalid-utf8":1,"private-pipe-full":1,"private-pipe-compact":1,"private-pipe-backpressure":1,"private-pipe-truncated":1,"private-pipe-stale-token":1};
+if(options['--sdk-first-response'])Object.assign(directedPlan,Object.fromEntries([
+ 'logging-sdk-synthetic-witness','logging-sdk-coverage-only','logging-sdk-actual-full','logging-sdk-actual-compact',
+ 'logging-sdk-bad-request','logging-sdk-bad-power','logging-sdk-stale-binding','logging-sdk-private-pipe'].map(name=>[name,1])));
 const requestBudgetPlan={"request-budget-normal-no-diagnostic":1,"request-budget-diagnostic-small":1,"request-budget-diagnostic-exact-limit":1,"request-budget-diagnostic-one-byte-short":1,"request-budget-diagnostic-full-limit":1,"request-budget-diagnostic-over-limit":1,"request-budget-utf8-exact-limit":1,"request-budget-non-frame":1,"request-budget-unbound":1,"request-budget-invalid-token":1,"request-budget-empty":1,"request-budget-missing-terminal-brace":1,"request-budget-negative-old-order":1,"request-budget-no-diagnostic-exact-limit":1};
 try {
   const sourceFiles=['native/main.cpp','native/msi_virtual_report_diagnostic_runtime.h','native/input_host_compact_frame_reply.h','native/game_feedback_receipt.h','deps/json/json.hpp','tools/virtual_ack_parser_contract_selftest.cpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/fixtures/inputhost_compact_reply/native.mjs','tools/fixtures/inputhost_compact_reply/native_cases.cpp'];

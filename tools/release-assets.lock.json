@@ -104,14 +104,14 @@
       "releasePath": "pawnio/YeManTdpCtl.exe",
       "assetPath": "ThirdParty/Bundled/PawnIO-Current/YeManTdpCtl.exe",
       "fallbackPath": "PowerControl/pawnio/YeManTdpCtl.exe",
-      "sha256": "C39DFE4B1DBB3EF44162F4462D45FE4DE580201DF8F786AAF83CAF0E3BA1718F"
+      "sha256": "6EA6AA973DC788B325082F02D1F0748224DE8DF2B3E5A2E1129B0F9236E73EE7"
     },
     {
       "component": "PawnIO",
       "releasePath": "pawnio/_internal/base_library.zip",
       "assetPath": "ThirdParty/Bundled/PawnIO-Current/_internal/base_library.zip",
       "fallbackPath": "PowerControl/pawnio/_internal/base_library.zip",
-      "sha256": "FE574FDE1BCD8B85449164B7CC5DD6D848FF321E5A701A4F14C4230BB6FC241C"
+      "sha256": "E140FEA9BCF4A58B066481401C65416FE23708B8C03E81DB8CACEA60704D96C7"
     },
     {
       "component": "PawnIO",

@@ -1,3 +1,61 @@
+<!-- LIGHT-GAMEPAD-NAVIGATION-LEASE-20261106 -->
+## 无游戏呼出时的轻型手柄隔离（2026-11-06，软件定向通过，未实机验收）
+
+单改前台焦点不能阻止 Steam 手柄导航派发。input.gamepadLease 借用现有导航 manager 的 catch-all，临时拦截按钮、左摇杆方向及连发；不会隐藏或刷新原设备。资格仍仅用原唯一游戏识别，主窗口真实持有前台才续租，轮盘/子程序独立 owner 和有游戏隔离保留。
+
+原 UI 手柄事件/50ms 后备心跳只做廉价到期判断，750ms 通过原 pool 与进程/出生身份/账户绑定的 CDP 续租；同一文档内租约最长3000ms并单次定时解除，退出/失焦/设置/资格撤销主动归还。该期限是四个续租间隔的故障保护设计，不是实机恢复耗时保证。传输或API不可用保留失败诊断，不用旧隐藏流程冒充轻型成功。右杆原始轴、触摸板模拟量及独立原生消费者未由这个导航入口证明覆盖；软件定向验证与真机验收分开。证据 Controller-NonGame-LightIsolation-20261105/LightRework。
+
+临时自有派发wrapper保留原this/参数，仅给catch-all提供原source/controller/button身份。呼出前已观察held的真实UP自然放行，不合成输入；本次拦截DOWN按控制器记账，续租和重入不重新分类。收起后新操作立即放行，只对仍按住的已拦键保留有界释放尾巴，最后真实UP清账后精确注销自有hook/wrapper；未知传输不提前写已归还。63项完整生产JS/Valve消费者定向通过，两个语义负例能抓导航泄露与UP失衡；native尾巴5场景68断言通过。不是原始轴或真机全覆盖证明。
+<!-- /LIGHT-GAMEPAD-NAVIGATION-LEASE-20261106 -->
+
+<!-- DECKY-TDP-ENTRY-FOCUS-20261105 -->
+## Decky 打开YMCC侧栏默认落在TDP行（2026-11-05）
+
+保留原QAM默认100019页选择。Content每次visible开启创建独立焦点机会，Ready且TDP启用/范围可调时，在本页ownerDocument的一次可取消requestAnimationFrame内，通过Steam原SliderField透传的外层SliderControlPanelGroup navRef.TakeFocus定位TDP行。仅TDP注入外层ref，其它滑块保留原生ref；A进入调整、B完成/返回仍由原控件处理，不调用onChange、不合成按键、不改功耗或YMCC设置。
+
+用户已用指针/键盘/原生vgp_onbuttondown导航或选择菜单后，撤销本次自动焦点；snapshot刷新/操作回执不重复抢回。隐藏/卸载/卸载插件清掉帧并用原页面token隔离迟到回调。尚未就绪、禁用/空范围、实际隐藏、DOM脱离或没有原生焦点接口保留Steam默认行为。没有新增轮询或常驻计时器。
+
+原slider TSX/真实client消费者追加entry-focus定向，原其它场景保留；只读提取当前Steam的SliderField/SliderControl源码执行ref转发核对，确认定位外层而非内层编辑器。证据Testing/YMCC/Evidence/DeckyTdpEntryFocus-20261105。软件端口验证与主线插件构建不代替安装版/物理手柄实际焦点验收；未开启/重启真实Steam或修改本机安装。
+<!-- /DECKY-TDP-ENTRY-FOCUS-20261105 -->
+
+<!-- DECKY-MENU-OWNER-20261105 -->
+## Decky 下拉菜单与按钮回调归属（2026-11-05，主线插件已构建）
+
+触摸板/变速菜单原按整页revision取消，性能菜单原按整体sourceRevision取消，正常监控/性能刷新会误收起。现在由Content统一管理一个菜单，按本选项/能力/权限、游戏/运行代次、供电及相关配置判断；无关刷新只更新提交快照，不延长原45秒期限。性能下拉复用同一AnchoredDropdown；旧打开代次的选项/取消回调、禁用控件和重复A/鼠标激活不能写入新菜单。专属配置删除确认也有独立归属，取消/重开/卸载后迟到确认无效。
+
+打开菜单不会取消已接受的2秒TDP/风扇意图；其它即时按钮在待处理期间禁用。电源方案继续要求独立事务，待调节确认前禁用，既不混入TDP补丁也不抹掉该意图。YMCC原host/relay/原设置owner继续承担准入、保存和执行，Decky不新增业务owner。TDP首次落焦、原生A进入调整和B返回保持。
+
+复用原TSX/client消费者174项（49菜单、20首次焦点，均包含在总数内）、原AnchoredDropdown18项、原专属UI18项，真实Edge/React DOM交互8项。原host37、触摸板/帧率37、全局输入26、监控12、风扇/音频29、专属导入删除29、修改器43及小黄鸭所选原22项验证原链路。旧六档动作消费者和小黄鸭默认全组的旧读取恢复断言仍保留FAIL，所选22项不冒充全组通过。主线插件build/check和类型检查通过；原组件/内存端口与浏览器验证不代替安装Steam/物理手柄验收，未部署/未整包/未整轮。证据Testing/YMCC/Evidence/DeckyMenuActionAudit-20261105。
+<!-- /DECKY-MENU-OWNER-20261105 -->
+
+<!-- DECKY-FXSOUND-TIMER-RECEIVER-20261104 -->
+## Decky 进入侧栏后的 Illegal invocation（2026-11-04）
+
+11月4日21:20:31 ROG导出中，20:18:16.673的YMCC前端异常与同次Decky镜像观察启动相邻，随后首份快照ready=true，不能从连接健康排除子观察器已失效。真实Edge用原src/bridge/fxSound.ts和内存IPC复现：retain初读完成后，FxSoundOwner把原生setTimeout保存为成员，再经this.schedule调用导致Illegal invocation，后续1500ms观察计时器未建立；clearTimeout同样需要保留全局调用语义。
+
+最小修正仅将两个默认计时端口改为调用全局timer的包装函数；不更改音质开关、原1500ms观察节奏、YMCC执行所有权或Decky连接恢复政策。原host夹具的fxClock改为校验浏览器接收者，避免宽松箭头假timer漏报。真实Edge原代码FAIL及修正后观察/释放/重进/迟到read无timer与零写入记录，以及原精确readiness case前后记录，均独立保存在Testing/YMCC/Evidence/DeckyLogReview-20261104-212031/IllegalInvocationFix。原日志脱敏堆栈不能证明历史每一条同名异常都来自该函数；本次修的是可复现且属于该调用链的真实缺陷。安装版与实机仍NOT_RUN。
+<!-- /DECKY-FXSOUND-TIMER-RECEIVER-20261104 -->
+
+<!-- WALLPAPER-DC-PAUSE-20261104 -->
+## 动态壁纸离电关闭及后台播放核对（2026-11-04）
+
+YMCC 的 Steam 大屏「动态壁纸」下新增「离电关闭」，持久字段 ui.steamWallpaperPauseOnBattery，默认 OFF，缺字段旧配置同样 OFF。ON 时只依据 Windows 真实电源；DC 或未知供电撤销播放与素材任务，性能页 AC/DC 编辑选择没有授权作用。保留原播放/下载 ON/OFF、缓存、partial 与 sidecar；AC 确认后仍经原前台证明及原下载保护恢复。
+
+复用 App 电源发布与原队列通知，不新增轮询/线程。App 卸载视频并撤销旧回调，Host 只接受当前前台票，Shared 清理定时器及待办。原生设置事件先关闭本进程准入、撤销活动视频 socket，再传播到现有 queue；独立库进程消费持久字段并自行读取电源。队列传播失败不毒化 updating，不让旧副本覆盖权威，不因无关设置保存重复取队列锁。下载监督器核验精确自有子进程退出；缓存原文件保留。
+
+软件证据位于 Testing/YMCC/Evidence/Wallpaper-Foreground-Demand-20261102/dc-pause-20261104，含原 TS/App/native 消费者、活动 Range 关闭、精确子进程回收、两尺寸正式手柄导航及默认值。Steam 后台回放为每场景约900ms：真实视频帧/时间/Range字节无增长，旧回复不能复活播放器；未据此改插件源或加恢复延迟。实际安装版 CPU/GPU/瓦数、物理拔插电源与睡眠仍待实测。
+
+下次授权导出须联合重建主程序 Web/native 与 CustomSteamLibrary.exe，host 来源清单已纳入 native/shared_game_media_power.h；此项没有修改 SteamArtworkLab 源或 Decky 插件源。现有安装版和 canonical binaries 本轮未替换。
+<!-- /WALLPAPER-DC-PAUSE-20261104 -->
+
+<!-- DECKY-BACKGROUND-COMMANDS-20261104 -->
+## Decky 已接受命令不随页面关闭丢失（2026-11-04）
+
+TDP/性能与风扇的末次输入延迟统一为2秒（按释放/停止编辑计时），沿原YMCC owner提交。插件持有队列及状态观察；QAM隐藏/卸载组件只结束该页编辑、撤销旧页面回调权，不取消已接受的值。未完成队列在同模块重进页面时复用，结束后释放。所有页面经MirrorClient已接纳的在途mutation也持有临时状态需求，收到回执/超时后归还；没有待办的隐藏页面继续暂停业务快照，不常驻轮询、不新增EXE或重放写入。真实断线/会话与目标变化/权限失效/插件卸载仍按原规则拒绝或取消。
+
+复用原TSX拖动、client、performance/fan/power消费者，证据位于Testing/YMCC/Evidence/DeckyBackgroundCommands-20261104。旧client整组的无效bootstrap观察断言在修改前后均失败，保留原raw；本轮使用明确command-lifetime小入口，不冒充整组通过。内存传输/虚拟时钟及主线插件构建不代表安装版Steam实测；没有部署、启动或重启Steam/YMCC。
+<!-- /DECKY-BACKGROUND-COMMANDS-20261104 -->
+
 <!-- STEAM-CSS-RECOVERY-AUDIT-20261104 -->
 ## Steam 外观自愈链续审（2026-11-04）
 
@@ -28207,3 +28265,16 @@ Decky WS/官方页面健康不代表每个控制的原读取成功。原 Relay �
 ### 2026-11-04 该修复收口：选择回执与单条读取
 
 mediaSelectVideo现与原mediaEdit/mediaImport一样映射预览URL；前端兼容旧Host的原始回执，仅在同游戏且素材描述完全相同的情况下保留原预览。选后mediaState传`entryOnly:true,key`，原生只返回所指媒体记录及既有下载摘要；旧调用仍保留完整快照。前端只合并当前记录，保留并发库修改及等待期间更新的下载状态。原消费者16项、两比例UI147项和数据链53项通过，证据在上述目录的`receipt-preview-and-targeted-read/REPORT.md`。源码与独立Host构建收口，安装版/完整导出未执行；本项不继续扩大为其它优化。
+
+
+### 2026-11-04 ROG 21:20:31日志：手动视频超时与显示优先级
+
+导出中的手动2215200于15:10预算耗尽；21:20时workerPid=0、无活动下载，历史失败不能当作睡眠时新下载。当前UI复现终止错误被game-running覆盖，改为终止/取消回执优先；有界手动范围的CPU/游戏软门提示沿原生豁免，供电/存储保护保留。只有持久化选择、没有排队回执时不声称已入队。日志同片真实下载也复现持续有字节进展仍被单次180秒截断：明确手动视频现可在单次使用原有360秒每游戏额度，自动180秒单次、360秒累计、重试次数和900秒会话不变，失败按实际较长耗时全额扣减。Worker显式包含其使用的power_source_channel头，无电源逻辑改动。原测试扩展与日志回放、真实下载证据见 `Testing/YMCC/Evidence/CustomLibrary-ROG-212031-20261104/REPORT.md`；不更改用户现场数据，不自动部署/启停/睡眠。
+
+<!-- NETWORK-ACCELERATION-STARTUP-DEFAULT-20261105 -->
+## 2026-11-05 网络加速默认开机启动
+
+网络加速此前仅由 PowerView 创建/删除根任务 Steamcommunity_302，首次启动没有默认导入；startupDesired.steamCommunity 的旧 false 镜像并未接管任务。现在 App 在原隔离检查之后异步初始化一次，缺少 startupDesired.networkAccelerationOnBoot 回执时默认导入任务，并保存选择；之后用户手动开/关均持久保存，不因页面读取或下次启动重新覆盖。原 XML 登录触发、IgnoreNew、开机 BAT 与唤醒恢复 owner 保持；本入口只准备任务，不立即运行加速器，不新增轮询。
+
+任务操作和配置持久化串行，导入后核对任务存在状态，失败不记成功；保存失败在同一配置代次回退本次任务变化，配置读取降级时不自动更改任务。页面消费变更事件并拒绝迟到刷新覆盖。实际 owner 与 settingsRepository 的 11 项隔离内存验证及 vue-tsc --noEmit 通过；未操作本机安装版、真实任务或重启登录。证据：Testing/YMCC/Evidence/NetworkAccelerationStartupDefault-20261105/114635-587953/RESULT.json。
+<!-- /NETWORK-ACCELERATION-STARTUP-DEFAULT-20261105 -->

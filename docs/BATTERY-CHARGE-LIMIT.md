@@ -1,3 +1,7 @@
+<!-- BATTERY-SOLE-CATALOG-20261105 -->
+> **2026-11-05 现势入口：** [唯一能力总库的全家族充电复核](../capabilities/BATTERY-CAPABILITY-AUDIT.md)。当前 42 组身份、12 条协议；以下 10 月 16 日的 40/10、OXP3 禁用及“本轮未改运行代码”均属历史范围。OXP3 WMI 和 Super X 双传输已有独立源码接入；本次 APEX 用户包在 EC 准入前失败仍未解决。最新统计、来源及限制以总库为准，不在本旧研究说明另建登记表。
+<!-- /BATTERY-SOLE-CATALOG-20261105 -->
+
 # YMCC 充电上限：设置、家族能力与验证记录
 
 更新日期：2026-10-16（Asia/Hong_Kong）。

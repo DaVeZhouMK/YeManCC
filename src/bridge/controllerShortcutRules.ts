@@ -33,9 +33,11 @@ export interface OemSpecialKey {
   physicalForm?: OemKeyPhysicalForm; // 采集形态（键盘 VK / HID 按钮 / WMI 事件 / 嵌入式）
   captureImplemented?: boolean; // 缺省沿用旧机型行为；false 仅保留目录展示
   captureReason?: string; // 内部能力原因，不直接展示给用户
+  physicalKeyIds?: string[]; // 同一实体键的组合／长按操作不重复计入硬件数量
 }
 export interface OemKeysSnapshot {
   familyId: string;
+  deviceClass?: string; // Exact catalog identity for asynchronous OEM observations.
   supported: boolean;            // 本机是否有机型库适配
   keys: OemSpecialKey[];         // 机型库的界面顺序，非输入/输出位编号
 }
@@ -61,6 +63,9 @@ export function normalizeOemKeysSnapshot(raw: unknown): OemKeysSnapshot {
             ? { captureImplemented: typeof k.captureImplemented === 'boolean' ? k.captureImplemented : false }
             : {}),
           ...(typeof k.captureReason === 'string' ? { captureReason: k.captureReason } : {}),
+          ...(Array.isArray(k.physicalKeyIds) && k.physicalKeyIds.length > 0 &&
+            k.physicalKeyIds.every((id: unknown) => typeof id === 'string' && id.length > 0)
+            ? { physicalKeyIds: [...new Set(k.physicalKeyIds as string[])] } : {}),
           // native 用 0 表示非背部；统一归一为 null（背部卡牌仅认 1-4）
           backIndex: Number.isFinite(k.backIndex) && Number(k.backIndex) >= 1 && Number(k.backIndex) <= 4 ? Number(k.backIndex) : null,
           triggerCapability: k.triggerCapability === 'click-only' ? 'click-only' as const : 'full' as const,
@@ -69,8 +74,14 @@ export function normalizeOemKeysSnapshot(raw: unknown): OemKeysSnapshot {
             : {}),
         }))
     : [];
+  // Only references to declared keys of the same category can affect counting.
+  // Invalid optional metadata falls back to the original per-key presentation.
+  const byId = new Map(keys.map(key => [key.keyId, key]));
+  for (const key of keys) if (key.physicalKeyIds?.some(id => !byId.has(id) ||
+      (byId.get(id)!.backIndex !== null) !== (key.backIndex !== null))) delete key.physicalKeyIds;
   return {
     familyId: typeof r.familyId === 'string' ? r.familyId : 'unknown',
+    ...(typeof r.deviceClass === 'string' && r.deviceClass ? { deviceClass: r.deviceClass } : {}),
     supported: r.supported === true && keys.length > 0,
     keys,
   };

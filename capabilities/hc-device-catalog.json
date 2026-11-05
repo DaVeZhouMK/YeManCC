@@ -15497,15 +15497,15 @@
           "deviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
           "name": "OneXPlayerApex",
           "brightness": true,
-          "secondColor": true,
+          "secondColor": false,
           "declaredEffects": [
             "solid",
-            "preset"
+            "rainbow"
           ],
-          "presetDeclared": true,
-          "presetAvailable": true,
-          "statusAvailable": true,
-          "statusTransportDisabled": false,
+          "presetDeclared": false,
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "statusTransportDisabled": true,
           "nativeAliasTargets": [],
           "methodSources": {
             "SetLedColor": {
@@ -15558,7 +15558,287 @@
               "constantBooleanReturn": null
             }
           },
-          "independent": null
+          "independent": null,
+          "sourceDeclaredSecondColor": true,
+          "consumerSecondColor": false,
+          "offAvailable": true,
+          "fixedSpeed": true,
+          "consumerFixedSpeed": true,
+          "origin": "reviewed-consumer-override",
+          "sourceAdapter": "onex-apex-hid-v2",
+          "sourcePins": {
+            "huesync": "7176803ce147d8bffef126720c21e4f42e0f3612",
+            "hcWindows": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+          },
+          "sourceDependencies": [
+            {
+              "role": "identity-mapping",
+              "path": "capabilities/upstream/huesync-7176803c/onexplayer_configs.py",
+              "sha256": "8a697b193db3a4f5c7801fb572eba4cadf0855e0ce50387b973c2a70a4e50d24"
+            },
+            {
+              "role": "endpoint-and-brightness",
+              "path": "capabilities/upstream/huesync-7176803c/onex_led_device_hid.py",
+              "sha256": "6ca7e1ab26165d548b8467905530cef3eca1a94243142ee2aadd267cb812ace3"
+            },
+            {
+              "role": "hid-v2-command",
+              "path": "capabilities/upstream/huesync-7176803c/oxp_hid_v2.py",
+              "sha256": "27c2f2b449271ac275e083daa39ae75fe7806f15bb42f0933f672c805d3feb08"
+            },
+            {
+              "role": "windows-wire",
+              "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+              "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+            },
+            {
+              "role": "windows-report",
+              "path": "capabilities/upstream/f2e58468/IDevice.cs",
+              "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+            },
+            {
+              "role": "frozen-device",
+              "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs",
+              "sha256": "c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60"
+            },
+            {
+              "role": "frozen-serial",
+              "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1.cs",
+              "sha256": "9948d5f99ec6b50f93a1c85ee557a309c3b0b6225a1ba50231c9c1e12ee49478"
+            },
+            {
+              "role": "source-facts",
+              "path": "capabilities/upstream/huesync-7176803c/apex-lighting.source-facts.json",
+              "sha256": "dea80706072e504feb51dd22867f154c663fd0719bba31859748c6a3134b4465"
+            }
+          ],
+          "consumerSources": [
+            {
+              "role": "protocol",
+              "path": "FanLab/LightSetter/ApexLightingConsumer.cs",
+              "sha256": "4818d9f5b3a2fe447b472feb50db490f1f6463abc5c8f256af9de7af16b2c973"
+            },
+            {
+              "role": "transport",
+              "path": "FanLab/LightSetter/ApexWindowsHidTransport.cs",
+              "sha256": "2817f7f34e0dcd4082fc21699504ae945bbe525c4426a0f8e413a849e04a15dc"
+            },
+            {
+              "role": "entry",
+              "path": "FanLab/LightSetter/Program.cs",
+              "sha256": "72b0fccbf895432ddbd2c762d22087cba487623a1b393026d52f5d2a7589308c"
+            },
+            {
+              "role": "owner",
+              "path": "FanLab/LightSetter/SuperJoyOwnerLease.cs",
+              "sha256": "8dfe4b4a2bcc632bdfe8d614e87ddf3a8296ccc6a76aac1aabb02b3085ca53b9"
+            }
+          ],
+          "semanticSourceFacts": {
+            "schemaVersion": 1,
+            "mode": "source-bound-existing-apex-consumer-override",
+            "evidence": "HC-CODEX-071-APEX-LIGHTING-PROTOCOL-REVIEW",
+            "deviceId": "hc.device.OneXPlayerApex",
+            "deviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
+            "sourcePins": {
+              "huesync": "7176803ce147d8bffef126720c21e4f42e0f3612",
+              "hcWindows": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+            },
+            "sources": [
+              {
+                "role": "identity-mapping",
+                "path": "capabilities/upstream/huesync-7176803c/onexplayer_configs.py",
+                "sha256": "8a697b193db3a4f5c7801fb572eba4cadf0855e0ce50387b973c2a70a4e50d24"
+              },
+              {
+                "role": "endpoint-and-brightness",
+                "path": "capabilities/upstream/huesync-7176803c/onex_led_device_hid.py",
+                "sha256": "6ca7e1ab26165d548b8467905530cef3eca1a94243142ee2aadd267cb812ace3"
+              },
+              {
+                "role": "hid-v2-command",
+                "path": "capabilities/upstream/huesync-7176803c/oxp_hid_v2.py",
+                "sha256": "27c2f2b449271ac275e083daa39ae75fe7806f15bb42f0933f672c805d3feb08"
+              },
+              {
+                "role": "windows-wire",
+                "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+                "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+              },
+              {
+                "role": "windows-report",
+                "path": "capabilities/upstream/f2e58468/IDevice.cs",
+                "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+              },
+              {
+                "role": "frozen-device",
+                "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs",
+                "sha256": "c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60"
+              },
+              {
+                "role": "frozen-serial",
+                "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1.cs",
+                "sha256": "9948d5f99ec6b50f93a1c85ee557a309c3b0b6225a1ba50231c9c1e12ee49478"
+              }
+            ],
+            "identity": {
+              "product": "ONEXPLAYER APEX",
+              "configuration": "OXP_F1_CONF",
+              "protocol": "HID_V2",
+              "rgb": true,
+              "rgbSecondary": false
+            },
+            "endpoint": {
+              "vendorId": 6700,
+              "productId": 45057,
+              "usagePage": 65281,
+              "usage": 1
+            },
+            "wire": {
+              "linuxCommandBytes": 64,
+              "windowsReportId": 0,
+              "windowsReportBytes": 65,
+              "solidPrefix": [
+                0,
+                7,
+                255,
+                254
+              ],
+              "solidRgbRepetitions": 20,
+              "rainbowPrefix": [
+                0,
+                7,
+                255,
+                3
+              ],
+              "trailingByte": 0
+            },
+            "brightness": {
+              "rounding": "ties-to-even",
+              "divisor": 20,
+              "lowMaximum": 1,
+              "mediumMaximum": 3,
+              "levels": [
+                1,
+                3,
+                4
+              ],
+              "enabled": "percent > 0",
+              "offPercent": 0,
+              "offWindowsPrefix": [
+                0,
+                7,
+                255,
+                253,
+                0,
+                5,
+                1
+              ]
+            },
+            "consumer": {
+              "ledEffects": [
+                "SolidColor",
+                "Rainbow"
+              ],
+              "brightness": true,
+              "secondColor": false,
+              "presetDeclared": false,
+              "presetAvailable": false,
+              "statusAvailable": false,
+              "statusTransportDisabled": true,
+              "offAvailable": true,
+              "fixedSpeed": true
+            },
+            "contract": {
+              "provider": "onex-apex-hid-v2",
+              "sourceAdapter": "ApexHidV2",
+              "commandDelayMs": 300,
+              "owner": "shared-superjoy-leased-hid",
+              "runtimeDescriptorOutputBytes": 65,
+              "physicalEffectVerified": false
+            },
+            "differences": [
+              "HueSync exact product mapping supplies APEX HID_V2 identity; no new model or family alias is admitted.",
+              "HueSync gen_cmd emits a Linux 64-byte command. HC Windows V2 color helpers and IDevice.WithReportID establish report ID 0 plus a 64-byte command, totaling 65 bytes. Linux bytes alone do not establish a Windows descriptor.",
+              "Brightness thresholds and ties-even rounding come from HueSync set_led_color whole-update; gen_brightness supplies the explicit enabled field and levels 1/3/4.",
+              "The reviewed consumer sets enabled=(percent>0). HueSync whole-update currently forces enabled=True and Disabled mode to solid black; that workaround is not claimed equivalent or copied here.",
+              "HC SendV2Brightness always encodes enabled=1 and a clamped level 0..4. Its zero encoding is not used as an off command and is not equated with the HueSync discrete mapping.",
+              "Off requests percent=0 and explicitly sends enabled=0 with the HueSync low level 1; the encoded level byte is not zero. No cached color or serial status/preset is used.",
+              "Brightness/enable is completed before a300ms wait and color/mode; this follows HueSync whole-update processing timing, preserving cancellation and owner rechecks. Solid copies RGB directly twenty times; rainbow consumes mode03; second color and custom speed are unavailable.",
+              "The existing frozen APEX declaration and X1 serial method provenance remain intact. Only its effective lighting consumer is replaced.",
+              "Runtime native ownership and managed transport must both validate the exact current endpoint and 65-byte output descriptor. Software source admission does not assert a physical effect."
+            ]
+          },
+          "frozenConsumer": {
+            "brightness": true,
+            "secondColor": true,
+            "declaredEffects": [
+              "solid",
+              "preset"
+            ],
+            "presetDeclared": true,
+            "presetAvailable": true,
+            "statusAvailable": true,
+            "statusTransportDisabled": false,
+            "methodSources": {
+              "SetLedColor": {
+                "owner": "OneXPlayerX1",
+                "name": "SetLedColor",
+                "line": 349,
+                "signature": "bool SetLedColor(Color mainColor, Color secondaryColor, LEDLevel level, int speed = 100)",
+                "sourceSha256": "ec78229ee1e5193756ba48e1b6d2eeb46a2083f5423d07b0cd98180a60a77f92",
+                "isOverride": true,
+                "returnExpressions": [
+                  "false",
+                  "true"
+                ],
+                "constantBooleanReturn": null
+              },
+              "SetLedBrightness": {
+                "owner": "OneXPlayerX1",
+                "name": "SetLedBrightness",
+                "line": 319,
+                "signature": "bool SetLedBrightness(int brightness)",
+                "sourceSha256": "4c11baf43f1b72b4237e612ad32a5ad650363da372826dd18b419502c26135d5",
+                "isOverride": true,
+                "returnExpressions": [
+                  "true"
+                ],
+                "constantBooleanReturn": null
+              },
+              "SetLedStatus": {
+                "owner": "OneXPlayerX1",
+                "name": "SetLedStatus",
+                "line": 292,
+                "signature": "bool SetLedStatus(bool enable)",
+                "sourceSha256": "64ff6b0f634a08596bf01b04bedb5edcece8172b84b2ab082d7a33797b8ca306",
+                "isOverride": true,
+                "returnExpressions": [
+                  "true"
+                ],
+                "constantBooleanReturn": null
+              },
+              "SetLEDPreset": {
+                "owner": "OneXPlayerX1",
+                "name": "SetLEDPreset",
+                "line": 411,
+                "signature": "bool SetLEDPreset(LEDPreset? preset)",
+                "sourceSha256": "41c28ac07661ffcaf003a45f8b5e1101c3ed193c23abe986a9db830de8a94ca5",
+                "isOverride": true,
+                "returnExpressions": [
+                  "true"
+                ],
+                "constantBooleanReturn": null
+              }
+            }
+          },
+          "requestLimits": [
+            "Override only the already registered exact APEX row; preserve frozen identity, inheritance and original source declarations. No reviewedExtensionModels entry or new alias.",
+            "Exact APEX consumes solid/rainbow, brightness and explicit disabled off only. No preset, serial status, secondary color or speed input.",
+            "Use native shared leased-HID ownership with exact VID1A2C/PIDB001/pageFF01/usage1 and output length65; retain generation, cancellation, deadline, release and parent cleanup. Do not add APEX to usesOneXVendorOwner.",
+            "Windows reports are ID0 plus the64-byte V2 payload. Brightness follows HueSync ties-even whole-update levels1/3/4; percent0 sends disabled/level1. HC always-enabled zero is not the off encoding.",
+            "Source-bound software admission and complete writes do not claim hardware, descriptor capture, physical effects or full-tree snapshot currency."
+          ]
         },
         {
           "deviceId": "hc.device.OneXPlayerG1",
@@ -15629,7 +15909,9 @@
               "constantBooleanReturn": true
             }
           },
-          "independent": null
+          "independent": null,
+          "consumerFixedSpeed": true,
+          "fixedSpeed": true
         },
         {
           "deviceId": "hc.device.OneXPlayerG1AMD",
@@ -15697,7 +15979,9 @@
               "constantBooleanReturn": true
             }
           },
-          "independent": null
+          "independent": null,
+          "consumerFixedSpeed": true,
+          "fixedSpeed": true
         },
         {
           "deviceId": "hc.device.OneXPlayerG1Intel",
@@ -15765,7 +16049,9 @@
               "constantBooleanReturn": true
             }
           },
-          "independent": null
+          "independent": null,
+          "consumerFixedSpeed": true,
+          "fixedSpeed": true
         },
         {
           "deviceId": "hc.device.OneXPlayerOneXFly",
@@ -15835,7 +16121,9 @@
               "constantBooleanReturn": true
             }
           },
-          "independent": null
+          "independent": null,
+          "consumerFixedSpeed": true,
+          "fixedSpeed": true
         },
         {
           "deviceId": "hc.device.OneXPlayerOneXFlyF1Pro",
@@ -15905,7 +16193,9 @@
               "constantBooleanReturn": true
             }
           },
-          "independent": null
+          "independent": null,
+          "consumerFixedSpeed": true,
+          "fixedSpeed": true
         },
         {
           "deviceId": "hc.device.OneXPlayerX1",
@@ -15922,7 +16212,6 @@
           "statusAvailable": true,
           "statusTransportDisabled": false,
           "nativeAliasTargets": [
-            "hc.device.OneXPlayerApex",
             "hc.device.OneXPlayerX1AMD",
             "hc.device.OneXPlayerX1Intel",
             "hc.device.OneXPlayerX1Mini",
@@ -16192,7 +16481,9 @@
               "solid",
               "rainbow"
             ]
-          }
+          },
+          "consumerFixedSpeed": true,
+          "fixedSpeed": true
         },
         {
           "deviceId": "hc.device.OneXPlayerX1Pro",
@@ -17199,6 +17490,146 @@
           "reason": "Exact existing X1 Mini color writers use mainColor at side 0x00 and do not consume secondaryColor. Preserve the inherited source declaration; exclude only effective secondary-color consumption. This constraint adds no route, provider, model alias or write authority."
         }
       ],
+      "consumerFixedSpeed": [
+        {
+          "devices": [
+            "OneXPlayerG1",
+            "OneXPlayerG1AMD",
+            "OneXPlayerG1Intel"
+          ],
+          "consumerFixedSpeed": true,
+          "methodOwner": "OneXPlayerG1",
+          "methodSha256": "a55f55929440781185f9aee497128550adfe66fa8fab4069dc42681cb8e7b38c",
+          "admittedEffects": [
+            "solid",
+            "rainbow"
+          ],
+          "reason": "Effective existing HID v1 consumer fact: solid and built-in flowing rainbow do not consume speed. AMD and Intel inherit this exact writer. No frozen declared capability or model admission is changed."
+        },
+        {
+          "devices": [
+            "OneXPlayerOneXFly",
+            "OneXPlayerOneXFlyF1Pro"
+          ],
+          "consumerFixedSpeed": true,
+          "methodOwner": "OneXPlayerOneXFly",
+          "methodSha256": "ddb4d55f2131fa7011a519b7537ec33d8a41dc49b49ccfd4c8164f868a8aef18",
+          "admittedEffects": [
+            "solid",
+            "rainbow"
+          ],
+          "reason": "Effective existing HID v2 consumer fact: solid and built-in flowing rainbow do not consume speed. F1 Pro inherits this exact writer. No frozen declared capability or model admission is changed."
+        },
+        {
+          "devices": [
+            "OneXPlayerX1Mini"
+          ],
+          "consumerFixedSpeed": true,
+          "methodOwner": "OneXPlayerX1Mini",
+          "methodSha256": "6a343183d894a039d63255e315dd947204d9fbaf61ded1f1498c32447d483798",
+          "admittedEffects": [
+            "solid",
+            "rainbow"
+          ],
+          "reason": "Effective existing consumer fact: both the frozen source writer and pinned independent HID v1 writer ignore speed for solid and rainbow. The inherited unavailable preset and serial status remain excluded. No frozen declared capability or model admission is changed."
+        }
+      ],
+      "reviewedConsumerOverrides": [
+        {
+          "name": "OneXPlayerApex",
+          "deviceId": "hc.device.OneXPlayerApex",
+          "deviceClass": "HandheldCompanion.Devices.OneXPlayerApex",
+          "family": "OneXPlayer",
+          "sourceAdapter": "onex-apex-hid-v2",
+          "sourcePins": {
+            "huesync": "7176803ce147d8bffef126720c21e4f42e0f3612",
+            "hcWindows": "f2e58468d9917189d4be7ccfc242385ce2c3035b"
+          },
+          "sourceDependencies": [
+            {
+              "role": "identity-mapping",
+              "path": "capabilities/upstream/huesync-7176803c/onexplayer_configs.py",
+              "sha256": "8a697b193db3a4f5c7801fb572eba4cadf0855e0ce50387b973c2a70a4e50d24"
+            },
+            {
+              "role": "endpoint-and-brightness",
+              "path": "capabilities/upstream/huesync-7176803c/onex_led_device_hid.py",
+              "sha256": "6ca7e1ab26165d548b8467905530cef3eca1a94243142ee2aadd267cb812ace3"
+            },
+            {
+              "role": "hid-v2-command",
+              "path": "capabilities/upstream/huesync-7176803c/oxp_hid_v2.py",
+              "sha256": "27c2f2b449271ac275e083daa39ae75fe7806f15bb42f0933f672c805d3feb08"
+            },
+            {
+              "role": "windows-wire",
+              "path": "capabilities/upstream/f2e58468/OneXAOKZOE.cs",
+              "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718"
+            },
+            {
+              "role": "windows-report",
+              "path": "capabilities/upstream/f2e58468/IDevice.cs",
+              "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+            },
+            {
+              "role": "frozen-device",
+              "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerApex.cs",
+              "sha256": "c64af412f599b43d337be93f9860fac30cc85a578c5bed727d84ddfc02237e60"
+            },
+            {
+              "role": "frozen-serial",
+              "path": "deps/handheldcompanion-runtime/source/Devices/OneXPlayer/OneXPlayerX1.cs",
+              "sha256": "9948d5f99ec6b50f93a1c85ee557a309c3b0b6225a1ba50231c9c1e12ee49478"
+            },
+            {
+              "role": "source-facts",
+              "path": "capabilities/upstream/huesync-7176803c/apex-lighting.source-facts.json",
+              "sha256": "dea80706072e504feb51dd22867f154c663fd0719bba31859748c6a3134b4465"
+            }
+          ],
+          "consumerSources": [
+            {
+              "role": "protocol",
+              "path": "FanLab/LightSetter/ApexLightingConsumer.cs",
+              "sha256": "4818d9f5b3a2fe447b472feb50db490f1f6463abc5c8f256af9de7af16b2c973"
+            },
+            {
+              "role": "transport",
+              "path": "FanLab/LightSetter/ApexWindowsHidTransport.cs",
+              "sha256": "2817f7f34e0dcd4082fc21699504ae945bbe525c4426a0f8e413a849e04a15dc"
+            },
+            {
+              "role": "entry",
+              "path": "FanLab/LightSetter/Program.cs",
+              "sha256": "72b0fccbf895432ddbd2c762d22087cba487623a1b393026d52f5d2a7589308c"
+            },
+            {
+              "role": "owner",
+              "path": "FanLab/LightSetter/SuperJoyOwnerLease.cs",
+              "sha256": "8dfe4b4a2bcc632bdfe8d614e87ddf3a8296ccc6a76aac1aabb02b3085ca53b9"
+            }
+          ],
+          "ledEffects": [
+            "SolidColor",
+            "Rainbow"
+          ],
+          "brightness": true,
+          "secondColor": false,
+          "presetDeclared": false,
+          "presetAvailable": false,
+          "statusAvailable": false,
+          "statusTransportDisabled": true,
+          "offAvailable": true,
+          "fixedSpeed": true,
+          "requestLimits": [
+            "Override only the already registered exact APEX row; preserve frozen identity, inheritance and original source declarations. No reviewedExtensionModels entry or new alias.",
+            "Exact APEX consumes solid/rainbow, brightness and explicit disabled off only. No preset, serial status, secondary color or speed input.",
+            "Use native shared leased-HID ownership with exact VID1A2C/PIDB001/pageFF01/usage1 and output length65; retain generation, cancellation, deadline, release and parent cleanup. Do not add APEX to usesOneXVendorOwner.",
+            "Windows reports are ID0 plus the64-byte V2 payload. Brightness follows HueSync ties-even whole-update levels1/3/4; percent0 sends disabled/level1. HC always-enabled zero is not the off encoding.",
+            "Source-bound software admission and complete writes do not claim hardware, descriptor capture, physical effects or full-tree snapshot currency."
+          ]
+        }
+      ],
       "brightnessCompatibility": [
         {
           "classes": [
@@ -17243,15 +17674,15 @@
           "reason": "Retain the reviewed in-process MSI command-interface HID writer; exact model registration replaces family-only dispatch"
         }
       ],
-      "catalogSha256": "2b1f4189623fa73ebb828ee7f4fcb368b573982df39ee06646b51668001683ce"
+      "catalogSha256": "7a8f3a5f3d5a33167ce944d9ddae123f14f3f24947032632fdd1f72d524dbde3"
     },
     "battery": {
       "schemaVersion": 1,
       "ruleDocument": "native/BatteryHost/battery-routes.json",
-      "ruleDocumentSha256": "934eaea7bc1d8ef30de93f294bd32428211d9ed391913884c1a52e8e681bca09",
-      "registeredRules": 41,
+      "ruleDocumentSha256": "e698f7735cd307a6b184232419d76b9e5d5a42c85d74d858a77479671869ffe8",
+      "registeredRules": 42,
       "frozenModelRules": 34,
-      "reviewedExtensionRules": 7,
+      "reviewedExtensionRules": 8,
       "providerRoutes": [
         "asus-ally-acpi",
         "lenovo-go-conservation",
@@ -17263,7 +17694,8 @@
         "oxp-x1-intel-ec",
         "oxp3-wmi-ec",
         "valve-deck-firmware",
-        "gpd-win-mini-2025"
+        "gpd-win-mini-2025",
+        "oxp-superx-dual-ec"
       ],
       "disabledSourceModels": [
         {
@@ -18370,6 +18802,34 @@
           },
           "min": 40,
           "kind": "firmware-percent"
+        },
+        {
+          "index": 41,
+          "ruleId": "battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX",
+          "deviceId": "ymcc.device.OneXPlayerSuperX",
+          "deviceClass": "OneXPlayerSuperX",
+          "origin": "reviewed-native-extension",
+          "sourceDeclaredBattery": false,
+          "provider": "oxp-superx-dual-ec",
+          "identity": {
+            "manufacturers": [
+              "ONE-NETBOOK"
+            ],
+            "field": "boardProduct",
+            "values": [
+              "ONEXPLAYER SUPER X"
+            ],
+            "deviceClass": "OneXPlayerSuperX",
+            "manufacturerMatch": "ordinal-contains",
+            "valueMatch": "ordinal-exact"
+          },
+          "firmwareGate": {
+            "kind": "provider-probe-required",
+            "majorMin": 0,
+            "minorMin": 0
+          },
+          "min": 75,
+          "kind": "firmware-percent"
         }
       ],
       "sourceCoverage": [
@@ -19398,20 +19858,28 @@
           "sha256": "3ef95add17b0214d263f0a7c49ebad7ab3be6fbcf6e20e9229ed591456e7f400"
         },
         {
+          "file": "native/BatteryHost/oxp3-battery-route.json",
+          "sha256": "c555faaf6626d174e6a0188748d422f09ac104a645f521ae88711dc6a520a049"
+        },
+        {
+          "file": "native/BatteryHost/superx-charge-route.json",
+          "sha256": "b7739fcca971613740875c1b3ae5a5125ffdec4933164eccfd75e59e913d2fa7"
+        },
+        {
           "file": "tools/battery-charge-generate-routes.mjs",
-          "sha256": "10a773ef8d9b71b433df308d3f8448df4f54050efca95c6da38ae0a22d05a338"
+          "sha256": "09643e31b06f85ac8a116531020123b62dd15f4ba46de940e17e4dd05a481803"
         },
         {
           "file": "native/BatteryHost/Policy.cs",
-          "sha256": "9104651d4386f12e574487ad5cadadaadb26631823bbcc5f3a7dacdc9500f86f"
+          "sha256": "461e28b82236d14b152fbefc646ada06d6df59526d429aada7828866e054148d"
         },
         {
           "file": "native/BatteryHost/Controller.cs",
-          "sha256": "ec4872e44ed4c839f227669da89bfe9b70c40528915ba5b1f9447c6665224e80"
+          "sha256": "6ed67dd8184bb1cd42adaf26c10ecab9fd19ef622d922adba02e91e912f9d1e7"
         },
         {
           "file": "native/BatteryHost/Providers.cs",
-          "sha256": "d7221587741c95965911107682b54efa1ef24662f20652c4538e1f23b707b713"
+          "sha256": "009533f6907162b0683046460130ae92d5e7f44825d9513b45d514a26c2e3aa7"
         },
         {
           "file": "native/BatteryHost/MsiWmi.cs",
@@ -19420,9 +19888,61 @@
         {
           "file": "native/BatteryHost/MsiApProvider.cs",
           "sha256": "206dcf6572758eb7416d922a3dd4dd991b9483ad1281fa443e4a1d633ba5df3d"
+        },
+        {
+          "file": "capabilities/hc-battery-policy.json",
+          "sha256": "aecc37934a23c05c5e39785fae3b0b2c56c4f97fe5e327aa6ff28aedc5a17b27"
+        },
+        {
+          "file": "capabilities/upstream/xmax-6d728795/SuperXCharge.source-facts.json",
+          "sha256": "e564eb505a90f8dd5e04070492ef80c3d8143342668bc6284d9e94660b42f3fb"
+        },
+        {
+          "file": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+          "sha256": "2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027"
+        },
+        {
+          "file": "capabilities/HcBatteryCapabilityCatalog.cs",
+          "sha256": "8a867cd3f43311e13060565371121c43b3a0e6143eeab5bec837030fe5b36f70"
+        },
+        {
+          "file": "tools/lib/hc_battery_catalog.mjs",
+          "sha256": "a29332371f41fa05e82957893de67020cb2759ad8ceb931bc33805a4a62adffb"
+        },
+        {
+          "file": "native/BatteryHost/SuperXUmaChargeReader.cs",
+          "sha256": "a1d0c7f16ac126f4b9b19d34f784ec8b288914e3f9ba5cdb58230fed0a11c4a7"
+        },
+        {
+          "file": "native/BatteryHost/SuperXCheckedEcWriter.cs",
+          "sha256": "28f53daf3f686c79d47cfe87433ecf15dfaa1d99d596104a04ee205d7e78f1de"
+        },
+        {
+          "file": "native/BatteryHost/SuperXChargeProvider.cs",
+          "sha256": "d43745de2fd7b8bbf4f47b6ad693cbd45892b0a02d93e1592a4c1640afa8876f"
+        },
+        {
+          "file": "native/BatteryHost/Oxp3WmiProvider.cs",
+          "sha256": "4ee3ba372500a0b10beb45a41f4fa1a6e366cb806a4c406d71d25e01ee25e8a6"
+        },
+        {
+          "file": "native/BatteryHost/Program.cs",
+          "sha256": "1b6ad82d0532d03b8fffe58f73792e365e00717b204dff028a1097a3c1932936"
+        },
+        {
+          "file": "native/BatteryHost/InProcessEntry.cs",
+          "sha256": "6869ab5bfac294a10ef630da203dbb05327afd606ae4156253d7566dc09ebe4a"
+        },
+        {
+          "file": "native/BatteryHost/HostDomainRouter.cs",
+          "sha256": "4797323df5d2741d55ef99942d6167d925d091767dbeb49268a91d916cb646a4"
+        },
+        {
+          "file": "native/BatteryHost/SecondaryDisplayController.cs",
+          "sha256": "51085b4ae0103107d3f014c72a3f275a3f0764c51aa1b808759aae39c23a4b79"
         }
       ],
-      "catalogSha256": "3ce17e815aa219790abf8ee7bc6c1b494b0452ef31f7b45aa3af77ae71227aa5"
+      "catalogSha256": "ddc97068d887c9e414b137e59e71e6adfbed4ea5f41fdbf6cfda12c3274e3ada"
     },
     "motion": {
       "schemaVersion": 1,
@@ -21235,7 +21755,41 @@
         "virtual output and hiding proof binding"
       ],
       "chassisIdentityUsed": false,
-      "catalogSha256": "f7a85ab5634f71ae8d4e079d6f4cd1f42944265274ee4149bcd984f500a734a2"
+      "catalogSha256": "f7a85ab5634f71ae8d4e079d6f4cd1f42944265274ee4149bcd984f500a734a2",
+      "onexVirtual": {
+        "schemaVersion": 1,
+        "scope": "immutable-OneX-source-identity-only",
+        "legacyCatalog": "capabilities/hc-device-catalog.generated.h",
+        "registeredSourceIdentities": 3,
+        "rows": [
+          {
+            "deviceId": "ymcc.device.OneXPlayerX2",
+            "canonicalClass": "HandheldCompanion.Devices.OneXPlayerX2",
+            "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2.cs",
+            "sourceSha256": "41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b",
+            "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+            "registrationKind": "reviewed-source-only"
+          },
+          {
+            "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+            "canonicalClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+            "sourceFile": "capabilities/upstream/f2e58468/OneXPlayerX2MiniPro.cs",
+            "sourceSha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+            "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+            "registrationKind": "reviewed-source-only"
+          },
+          {
+            "deviceId": "ymcc.device.OneXPlayer3",
+            "canonicalClass": "HandheldCompanion.Devices.OneXPlayer3",
+            "sourceFile": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+            "sourceSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+            "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+            "registrationKind": "reviewed-source-only"
+          }
+        ],
+        "authority": "immutable-class-identity-only;live-internal-root-topology-source-and-Host-owner-remain-runtime-owned",
+        "catalogSha256": "b91b5a6159d6dae7a086c2fa985ede28f4328c71e061138aa9cac1e619aa5722"
+      }
     },
     "controllerConfiguration": {
       "schemaVersion": 1,
@@ -22031,7 +22585,7 @@
       "libraryId": "ymcc.uxtu.tdp",
       "version": "26.3.1",
       "policyFile": "capabilities/uxtu-tdp-policy.json",
-      "policySha256": "ece50ddf62b779ab24a26dc269afefa098d0edba94d1c35a5e6b3c5710edb72d",
+      "policySha256": "4342190630c4bd570d4123feca7fc01c1edcccc41d471b77ec922b13fae207bf",
       "modelBinding": {
         "source": "diagnostics-only; not capability, admission or watt limits",
         "registeredModels": 92,
@@ -22083,7 +22637,7 @@
         "amd": {
           "unit": "co_step",
           "minimum": -60,
-          "maximum": 60,
+          "maximum": 0,
           "step": 1,
           "scope": "all_core",
           "readback": false,
@@ -22157,6 +22711,64 @@
           "cache"
         ],
         "physicalCcdPowerOff": false
+      },
+      "ymccCompatibility": {
+        "revision": 1,
+        "amdStrixHalo": {
+          "id": "ymcc-strix-halo-pm-388-r1",
+          "ownership": "YMCC extension on existing unified capability bus; fixed UXTU 26.3.1 remains the write recipe source",
+          "cpu": {
+            "family": 26,
+            "models": [
+              112
+            ]
+          },
+          "familyRecipe": "FAM_APU_FT6_NEW",
+          "familyTag": "apu_ft6_new",
+          "writeRoute": "reuse-existing-395-StrixHalo-recipe",
+          "readback": {
+            "tableVersions": [
+              6553868,
+              6554124
+            ],
+            "tableBytes": 3664,
+            "unit": "w",
+            "offsets": {
+              "stapm": 0,
+              "fast": 8,
+              "slow": 16
+            },
+            "toleranceW": 0.05,
+            "minimumLimitW": 0,
+            "maximumPlausibleLimitW": 1000,
+            "mode": "explicit-static-request-only",
+            "unknownTable": "retain-write-receipt-and-unknown-readback",
+            "mismatch": "report-not-reflected-without-write-replay"
+          },
+          "sources": [
+            {
+              "path": "capabilities/upstream/ymcc-strix-halo-pm/ryzenadj-api.c",
+              "url": "https://raw.githubusercontent.com/FlyGoat/RyzenAdj/5775fc3e6dbb25c7030ee2d100a1bdd6e8bf2d0a/lib/api.c",
+              "bytes": 59609,
+              "sha256": "0dafa84f39caa06309c713e0011a436dfbe187dc67d49866a954fb7fa0443860"
+            },
+            {
+              "path": "capabilities/upstream/ymcc-strix-halo-pm/ryzen_smu.c",
+              "url": "https://raw.githubusercontent.com/amkillam/ryzen_smu/e39db04cd0056e00b9cd47e7140e4137eaa47464/smu.c",
+              "bytes": 36239,
+              "sha256": "181d69adb7893a90d57836e817c72dac1dd97e08eb122f4504b70495993aee8e"
+            },
+            {
+              "path": "capabilities/upstream/ymcc-strix-halo-pm/RyzenSMU.p",
+              "url": "https://raw.githubusercontent.com/namazso/PawnIO.Modules/24425a5299e84410751da882c121f322fb030b82/RyzenSMU.p",
+              "bytes": 27722,
+              "sha256": "1aed03fe369afc49cf154a83bde104920a34bc37872c68190d686b99f34de7b5"
+            }
+          ],
+          "hardwareAcceptanceFromDeclaration": false,
+          "scopeEvidence": "0x64010C was hardware-tested on ONEXPLAYER X2Mini PRO AI MAX+ 388; 0x64020C on Strix Halo 395. GPD WIN5 actual table version and effect remain unverified.",
+          "upstreamReplacement": "Remove extension only after a later pinned UXTU supplies equivalent CPU/table/ABI declarations and existing consumers pass; do not auto-switch based on version label."
+        }
       }
     }
   }

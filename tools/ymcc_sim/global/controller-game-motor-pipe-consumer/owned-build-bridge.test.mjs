@@ -16,7 +16,7 @@ import {execute as motorWrapper} from './run.mjs';
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const MOTOR='controller.game-motor-private-pipe-consumer',WRITER='controller.game-feedback-writer-consumer';
 const build=fs.realpathSync(path.join(WORKSPACE,'Build'));
-function parent(t){const root=fs.mkdtempSync('D:/ymcc-feedback-bridge-test-');const containers=[];t.after(()=>{for(const container of containers){const actual=fs.realpathSync(container),rel=path.relative(build,actual);assert(!path.isAbsolute(rel)&&!rel.startsWith('..')&&path.basename(actual).startsWith('ymcc-fb-'));fs.rmSync(actual,{recursive:true,force:true});}const actual=fs.realpathSync(root);assert(path.dirname(actual).toLowerCase()==='d:\\'&&path.basename(actual).startsWith('ymcc-feedback-bridge-test-'));fs.rmSync(actual,{recursive:true,force:true});});return{root,track:actualRoot=>containers.push(path.dirname(actualRoot)),out:path.join(root,'evidence')};}
+function parent(t,base='D:/'){const root=fs.mkdtempSync(path.join(base,'ymcc-feedback-bridge-test-'));const containers=[];t.after(()=>{for(const container of containers){const actual=fs.realpathSync(container),rel=path.relative(build,actual);assert(!path.isAbsolute(rel)&&!rel.startsWith('..')&&path.basename(actual).startsWith('ymcc-fb-'));fs.rmSync(actual,{recursive:true,force:true});}const actual=fs.realpathSync(root);assert(path.dirname(actual).toLowerCase()===fs.realpathSync(base).toLowerCase()&&path.basename(actual).startsWith('ymcc-feedback-bridge-test-'));fs.rmSync(actual,{recursive:true,force:true});});return{root,track:actualRoot=>containers.push(path.dirname(actualRoot)),out:path.join(root,'evidence')};}
 // All injected reports below are explicitly schema-only path/archiving tests.
 // They never compile a managed fixture or verify real feedback business cases.
 function sampleProducer(t,p,{id=MOTOR,edit,fail}={}){return async root=>{
@@ -54,3 +54,23 @@ test('global wrappers never silently turn a contract/prototype option into a ful
 test('real repository source rows retain their original path/hash while Build artifacts are archived',async t=>{const p=parent(t),relative='tools/ymcc_sim/global/controller-game-motor-pipe-consumer/owned-build-bridge.mjs';const r=await runOwnedBuildBridge({evidenceDir:p.out,caseId:MOTOR,repo:REPO,workspace:WORKSPACE,produce:sampleProducer(t,p,{edit:r=>r.sourceHashes.push({path:relative,sha256:hash(path.join(REPO,relative))})})});assert(r.sourceHashes.some(row=>row.path===relative&&row.sha256===hash(path.join(REPO,relative))));assert.equal(checkStructuredEvidence(p.root,{resultFiles:['evidence/result.json']},REPO).failed,false);});
 
 test('legacy global evidence below Build keeps working without using it as the producer root',async t=>{const p=parent(t),outerContainer=fs.mkdtempSync(path.join(build,'ymcc-fb-test-'));p.track(path.join(outerContainer,'unused-case'));const out=path.join(outerContainer,'evidence');const r=await runOwnedBuildBridge({evidenceDir:out,caseId:MOTOR,repo:REPO,workspace:WORKSPACE,produce:sampleProducer(t,p)});assert.equal(r.status,'PASS');assert.notEqual(path.dirname(r.executionBridge.actualExecutionRoot),outerContainer);assert.equal(checkStructuredEvidence(outerContainer,{resultFiles:['evidence/result.json']},REPO).failed,false);});
+
+// Same owner/archive checks as the old D evidence route, now at the configured
+// core evidence location. These are schema-only tests, not feedback acceptance.
+for(const id of [MOTOR,WRITER])test('core evidence retains original Build owner and archive closure for '+id,async t=>{
+ const core=path.join(WORKSPACE,'Testing/YMCC/Evidence'),p=parent(t,core);
+ const r=await runOwnedBuildBridge({evidenceDir:p.out,caseId:id,repo:REPO,workspace:WORKSPACE,produce:sampleProducer(t,p,{id})});
+ assert.equal(r.status,'PASS');assert.equal(r.formalGlobalAcceptance,false);
+ assert(r.executionBridge.actualExecutionRoot.startsWith(build+path.sep));
+ assert(r.executionBridge.actualExecutionRoot!==p.out&&!r.executionBridge.actualExecutionRoot.startsWith(p.out+path.sep));
+ const original=r.executionBridge.originalResult;assert(fs.readFileSync(original.actualPath).equals(fs.readFileSync(original.archivedPath)));
+ assert.equal(checkStructuredEvidence(p.root,{resultFiles:['evidence/result.json']},REPO).failed,false);
+ const meta=JSON.parse(fs.readFileSync(r.executionBridge.manifest));const payload=meta.archivedFiles.find(row=>path.basename(row.actualPath)==='payload.dll');
+ fs.appendFileSync(payload.archivedPath,'changed');
+ assert.equal(checkStructuredEvidence(p.root,{resultFiles:['evidence/result.json']},REPO).failed,true,'core path must not bypass archived byte checks');
+});
+test('core evidence rejects siblings and unowned paths before allocating a Build child',()=>{
+ const core=path.join(WORKSPACE,'Testing/YMCC/Evidence');
+ for(const evidenceDir of [core,core+'-sibling/case',path.join(WORKSPACE,'Testing/foreign-case'),'C:/Windows/bridge-case','C:/SOFT/YeMan/bridge-case',REPO+'/.bridge-case','relative-case','\\\\example\\share\\case'])
+  assert.throws(()=>prepareOwnedBuildCase({evidenceDir,caseId:MOTOR,repo:REPO,workspace:WORKSPACE}));
+});

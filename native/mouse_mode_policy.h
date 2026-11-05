@@ -27,7 +27,6 @@ struct Decision {bool on=false;const char* scene="unknown";const char* reason="f
 inline Decision decide(Mode m,const Context& c){
  if(c.steam)return {false,"steam","steamdeck_managed"};
  if(m==Mode::Off)return {false,"off","manual_off"};
- if(m==Mode::On)return {true,"manual","manual_on"};
  if(c.ymcc)return {false,"ymcc","ymcc_foreground_paused"};
  if(!c.window)return {false,"unknown","foreground_unconfirmed"};
  if(!c.customRulesKnown)return {false,"unknown","mouse_rules_unavailable"};
@@ -35,7 +34,8 @@ inline Decision decide(Mode m,const Context& c){
  if(c.customRule>0)return {true,"desktop","mouse_whitelist_foreground"};
  if(c.emulator)return {false,"emulator","emulator_foreground"};
  if(c.gameLibrary)return {false,"game-library","game_library_foreground"};
- if(c.game)return {false,"game","game_foreground"};
+ if(m==Mode::On&&(c.desktop||(c.identityKnown&&!c.foregroundImage.empty())))return {true,"manual","manual_on"};
+ if(m==Mode::Auto&&c.game)return {false,"game","game_foreground"};
  if(c.desktop)return {true,"desktop","desktop_foreground"};
  // Ordinary foreground apps use default allow. A pending/missing shared game
  // observation is diagnostic state, not an exclusion rule for mouse input.
@@ -72,7 +72,7 @@ class Runtime {
    // A foreground HWND can temporarily be NULL during activation. Retain only
    // the last admitted state for a bounded transition; this never enables from
    // an unknown foreground. Real windows, explicit OFF and SD bypass the hold.
-   if(m==Mode::Auto&&!context.window&&!context.steam&&!first){
+   if(m!=Mode::Off&&!context.window&&!context.steam&&!first){
     const auto now=std::chrono::steady_clock::now();
     if(unknownSince==std::chrono::steady_clock::time_point{})unknownSince=now;
     const auto elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-unknownSince).count();
@@ -106,8 +106,8 @@ class Runtime {
     if(!publish(retained,m,context,rev,d,confirmedStateEpoch,false)){first=true;wake();}continue;
    }
    confirmedState=Json::object();
-   if(d.on&&m==Mode::Auto){std::unique_lock lock(mx);if(cv.wait_for(lock,std::chrono::milliseconds(180),[&]{return stopping.load()||revision.load()!=rev;})){first=true;continue;}}
-   auto valid=[this,rev,m,context]{return !stopping.load()&&revision.load()==rev&&selected.load()==m&&(m==Mode::On?!deps.observe().steam:deps.observe()==context)&&decide(m,context).on;};
+   if(d.on&&m!=Mode::Off){std::unique_lock lock(mx);if(cv.wait_for(lock,std::chrono::milliseconds(180),[&]{return stopping.load()||revision.load()!=rev;})){first=true;continue;}}
+   auto valid=[this,rev,m,context]{return !stopping.load()&&revision.load()==rev&&selected.load()==m&&deps.observe()==context&&decide(m,context).on;};
    if(d.on&&!valid()){first=true;wake();continue;}
    Json result;const auto readEpoch=backendEpoch.load();
    try {result=context.steam?deps.release():deps.apply(d.on,valid);}catch(const std::exception& e){result={{"ok",false},{"on",false},{"stateKnown",false},{"error",e.what()}};}

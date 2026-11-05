@@ -320,6 +320,7 @@ export interface MouseModeState {
   gamebarOn?: boolean;
   joyxoffAvailable?: boolean;
   gamebarAvailable?: boolean;
+  gamebarModelSupported?: boolean;
   reason?: 'gameinput_redist_missing' | 'gamebar_interface_error' | string;
   error?: string;
 }

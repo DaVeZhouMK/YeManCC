@@ -346,12 +346,14 @@ export async function invoke(cmd:string,args:any={}){
   if(cmd==='mouseMode.set'||cmd==='mouseMode.toggle'||cmd==='mouseMode.setPolicy'){
    if(base.provider==='steam'){const on=cmd==='mouseMode.set'?args.on:cmd==='mouseMode.setPolicy'?args.mode!=='off':!base.on;const state={...base,on,mode:on?'auto':'off',scene:'steam',verification:'component-readback'};if(f){f.mouseModeState=state;f.mouseWrites=(f.mouseWrites??0)+1;}return state;}
    const mode=cmd==='mouseMode.setPolicy'?args.mode:cmd==='mouseMode.set'?(args.on?'on':'off'):base.mode==='off'?'auto':base.mode==='auto'?'on':'off';
-   const state={...base,mode,on:mode==='on',scene:mode==='auto'?'ymcc':mode==='on'?'manual':'off',verification:mode==='on'?'process-liveness':'backend-state'};
+   const state={...base,mode,on:mode!=='off'&&f?.mouseEffectiveOn===true,scene:mode==='off'?'off':f?.mouseForegroundScene??'ymcc',verification:'backend-state'};
    if(f){f.mouseModeState=state;f.mouseWrites=(f.mouseWrites??0)+1;}return state;
   }
   if(cmd==='mouseMode.setBackend'){
    if(args.backend==='steam')return {...base,ok:false,reason:'steam-desktop-mouse-retired'};
    if(f?.mouseBackendThrow)throw new Error('IPC command timed out: mouseMode.setBackend');
+   if(args.backend==='gamebar'&&f?.mouseRogModel)return {...base,ok:false,mutated:false,reason:'gamebar_model_unsupported',error:'ROG 家族机型暂不支持微软鼠标，请使用 JoyXoff。此限制无法通过安装环境组件解除。'};
+   if(args.backend==='gamebar'&&f?.mouseComponentMissing)return {...base,ok:false,mutated:false,reason:'gameinput_redist_missing',error:'未找到微软鼠标组件'};
    const state={...base,backend:args.backend,provider:'ymcc',on:false,mode:'off',scene:'ymcc',controlAllowed:true,stateKnown:true};
    if(f){f.mouseModeState=state;f.mouseWrites=(f.mouseWrites??0)+1;}return state;
   }

@@ -51,6 +51,23 @@ export function originalReadyConsumer(source,{write=false}={}){
 }
 
 
+// This generated include is used by the original shared preamble too. Bind
+// its exact current product slice rather than trusting a generated filename.
+export function originalCommittedReadyConsumer(source,{write=false}={}){
+ const origin='native/main.cpp',file=path.join(source,origin),text=fs.readFileSync(file,'utf8');
+ const matches=[...text.matchAll(/case WM_POWER_RESUME_COMMIT:[\s\S]*?(?=\n\s*case WM_POWER_INPUT_RECOVER:)/g)];
+ assert.equal(matches.length,1,'ORIGINAL_COMMITTED_READY_EVENT_UNIQUE');const commit=matches[0];
+ assert(commit[0].includes('PowerLifecycle::Ready'),'ORIGINAL_COMMITTED_READY_GUARD_REQUIRED');
+ const direct='g_deckySidebarRuntime.requestBindingRefresh(currentPowerGeneration())',shared='deckySidebarResumeAfterIntent(currentPowerGeneration(),"committed-ready")',call=commit[0].includes(shared)?shared:direct;
+ assert.equal(commit[0].split(call).length-1,1,'ORIGINAL_COMMITTED_READY_CALL_UNIQUE');
+ const begin=commit[0].indexOf('// YMCC Decky:'),end=commit[0].indexOf('ipc_emit("power.resumed"');
+ assert(begin>=0&&end>begin,'ORIGINAL_COMMITTED_READY_SLICE_REQUIRED');
+ const code=commit[0].slice(begin,end).trim(),expected='inline void productionCommittedReady(){\n'+code+'\n}\n';
+ const target=path.join(source,'native/decky_wake_committed_consumer.inc');
+ if(write)fs.writeFileSync(target,expected);assert.equal(fs.readFileSync(target,'utf8'),expected,'ORIGINAL_COMMITTED_READY_CONSUMER_BYTES');
+ return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slice:{begin:commit.index+begin,end:commit.index+end},bytePreserved:true};
+}
+
 // Verify the other generated include compiled by the complete producer. Its
 // bytes are derived only from the pinned main source, never accepted by name.
 export function originalOfflineConsumer(source){
@@ -194,6 +211,7 @@ export async function executeOwnedRuntime({repoRoot=path.resolve(import.meta.dir
   const graph=read(path.join(original,'dependencies.json'));assert.equal(graph.Version,'1.2');
   const frozenFiles=new Map(frozen.files.map(row=>[key(path.join(original,'source',row.path)),row]));
   const readyConsumer=originalReadyConsumer(path.join(original,'source'));frozenFiles.set(key(readyConsumer.path),readyConsumer);report.generatedReadyConsumer=readyConsumer;
+  const committedConsumer=originalCommittedReadyConsumer(path.join(original,'source'));frozenFiles.set(key(committedConsumer.path),committedConsumer);report.generatedCommittedReadyConsumer=committedConsumer;
   const offlineConsumer=originalOfflineConsumer(path.join(original,'source'));frozenFiles.set(key(offlineConsumer.path),offlineConsumer);report.generatedOfflineConsumer=offlineConsumer;
   const managedBackendConsumer=originalManagedBackendConsumer(path.join(original,'source'));frozenFiles.set(key(managedBackendConsumer.path),managedBackendConsumer);report.generatedManagedBackendConsumer=managedBackendConsumer;
   assert.equal(key(graph.Data.Source),key(path.join(original,'source/tools/decky_binding_runtime_selftest.cpp')));

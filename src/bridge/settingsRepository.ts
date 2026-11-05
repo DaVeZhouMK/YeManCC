@@ -195,6 +195,7 @@ const DEFAULTS: UnifiedSettings = {
   ui: {
     theme: 'blue-black',
     dynamicBackgroundEnabled: true,
+    steamWallpaperPauseOnBattery: false,
     backgroundOpacity: 0.7,
     backgroundBlur: 0,
     backgroundPositionX: 50,

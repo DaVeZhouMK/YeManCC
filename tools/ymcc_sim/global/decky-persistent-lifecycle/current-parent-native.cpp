@@ -111,17 +111,24 @@ using namespace rtfixture;
 static ymcc::deckysidebar::Runtime* activeRuntime=nullptr;
 enum class PowerLifecycle {Ready,Suspending,Suspended,Resuming};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
-static unsigned long long generation=1;
+static unsigned long long powerGeneration=1;
 static unsigned watchdogStops=0;
 static Json diagnostics=Json::array();
 static Json fallbackMeasurements=Json::array();
-static unsigned long long currentPowerGeneration(){return generation;}
+static std::atomic<bool> g_exitRequested{false};
+static struct {bool isolated=false;} g_aiFanMockSession;
+struct Session {unsigned pid=41;unsigned long long created=123;std::wstring root=L"C:\\FixtureSteam";};
+static struct {Session sessionSnapshot()const{return {};}} g_steamSettingsObserver;
+static struct {unsigned reads=0;void requestRefresh(const Session&){++reads;}} g_steamModeObserver;
+
+static unsigned long long currentPowerGeneration(){return powerGeneration;}
 static void stopPowerResumeWatchdog(){++watchdogStops;}
 // CSS resume is a separate product boundary. Keep the exact extracted Decky
 // consumer and its assertions; appearance behavior is verified by its own suite.
 static void steamAppearanceResumeCommitted(unsigned long long) {}
 static void deckySidebarDiagnostic(const char* event,const Json& detail,bool){diagnostics.push_back({{"event",event},{"detail",detail}});}
 #define g_deckySidebarRuntime (*activeRuntime)
+#include "decky_wake_ready_consumer.inc"
 #include "current-committed-ready.inc"
 #undef g_deckySidebarRuntime
 inline Json stopAndLate(const std::filesystem::path& output,const std::string& reason,bool late){
@@ -171,23 +178,26 @@ inline Json committedReady(const std::filesystem::path& output){
     harness.start();need(waitFor([&]{return harness.healthyGeneration==1;}),"current-ready-initial-checkpoint");
     activeRuntime=&harness.runtime;const auto originalLoader=harness.runtime.snapshot().pid;
     const auto originalBinding=harness.client->snapshot().processId;const auto before=harness.plans.load();
-    generation=2;g_powerLifecycle=PowerLifecycle::Suspended;consumeCommittedReady();Sleep(40);const auto sleeping=harness.plans.load();
+    powerGeneration=2;g_powerLifecycle=PowerLifecycle::Suspended;consumeCommittedReady();Sleep(40);const auto sleeping=harness.plans.load();
     g_powerLifecycle=PowerLifecycle::Resuming;consumeCommittedReady();Sleep(40);const auto resuming=harness.plans.load();
     g_powerLifecycle=PowerLifecycle::Ready;consumeCommittedReady();
     need(waitFor([&]{return harness.healthyGeneration==2;}),"current-ready-rebound-checkpoint");
     const auto after=harness.plans.load();const auto nextBinding=harness.client->snapshot().processId;
+    const auto acceptedDiagnostics=diagnostics.size();const auto acceptedModeReads=g_steamModeObserver.reads;
     consumeCommittedReady();Sleep(40);const auto duplicate=harness.plans.load();
     const auto finalLoader=harness.runtime.snapshot().pid;
     harness.runtime.shutdown();activeRuntime=nullptr;const auto destroyed=harness.client->snapshot();
     need(before==sleeping&&before==resuming&&after==before+1&&duplicate==after,"original-ready-only-once-and-no-sleeping-rebind");
     need(originalLoader>0&&finalLoader==originalLoader&&originalBinding>0&&nextBinding>0&&nextBinding!=originalBinding,"current-ready-keeps-owned-loader-and-replaces-binding");
-    need(diagnostics.size()==2&&diagnostics[0]["detail"]["bindingRequested"]==true&&diagnostics[1]["detail"]["bindingRequested"]==false,"original-ready-consumer-records-accepted-and-duplicate");
+    need(acceptedDiagnostics==1&&diagnostics.size()==acceptedDiagnostics&&diagnostics[0]["detail"]["bindingRequested"]==true&&
+        diagnostics[0]["detail"]["scope"]=="committed-ready"&&acceptedModeReads==1&&g_steamModeObserver.reads==acceptedModeReads,"shared-ready-consumer-records-once-and-suppresses-duplicate");
     need(destroyed.fullyDestroyed&&beforeHandles==handles()&&context.alive(),"current-ready-destroyed-with-strict-parent-handle-equality");
-    return {{"sleepObserved",true},{"readyGranted",true},{"currentGeneration",generation},
+    return {{"sleepObserved",true},{"readyGranted",true},{"currentGeneration",powerGeneration},
         {"bindingCallsBefore",before},{"bindingCallsSleeping",sleeping},{"bindingCallsResuming",resuming},{"bindingCallsAfterReady",after},{"bindingCallsAfterDuplicate",duplicate},
         {"initialLoaderPid",originalLoader},{"afterLoaderPid",finalLoader},{"initialBindingPid",originalBinding},{"nextBindingPid",nextBinding},
         {"loaderIdentityUnchanged",finalLoader==originalLoader},{"healthObserved",false},{"scope","original native/main.cpp committed-Ready consumer with current typed Runtime; TS health is independently executed"},
-        {"atExit",state(destroyed)},{"beforeHandles",beforeHandles},{"afterHandles",handles()},{"cefUnaffected",context.alive()},{"diagnostics",diagnostics}};
+        {"atExit",state(destroyed)},{"beforeHandles",beforeHandles},{"afterHandles",handles()},{"cefUnaffected",context.alive()},{"diagnostics",diagnostics},
+        {"actualSharedReadyConsumer",true},{"duplicateReadyModeReads",g_steamModeObserver.reads-acceptedModeReads},{"acceptedReadyDiagnostics",acceptedDiagnostics}};
 }
 struct EnvironmentScope {
     const wchar_t* name;std::wstring prior;

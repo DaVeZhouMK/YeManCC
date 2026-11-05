@@ -1,4 +1,4 @@
-import {startOwnedRawProducer,rawProgramLauncherDeclaration} from './raw-owned-producer.mjs';
+import {startOwnedRawProducer,rawProgramLauncherDeclaration,verifyRawProducerBudget} from './raw-owned-producer.mjs';
 export {verifyRawProducerCompletion,startOwnedRawProducer,rawProgramLauncherDeclaration} from './raw-owned-producer.mjs';
 import {STEAM_LEASE_CASES} from '../../../decky_binding_steam_lease_selftest.mjs';
 import {baselineEnvironment} from './baseline-environment.mjs';
@@ -15,7 +15,7 @@ import {getLegacyDeckyPersistentLifecycleAdapters} from './adapter.mjs';
 import {getDeckyUpdateRecoveryAdapters} from '../decky-update-recovery/adapter.mjs';
 import {lifecycleContract} from './contract.mjs';
 import {ownedToolDeclaration,OWNED_INPUTS} from './owned-adapter.mjs';
-import {ORIGINAL_CASES,originalReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
+import {ORIGINAL_CASES,originalReadyConsumer,originalCommittedReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
 import {resourceZero,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {validateTypedRuntimeParentReceipt} from './typed-runtime-parent.mjs';
 import {validateTypedHealthCloseParentReceipt} from './typed-health-close-parent.mjs';
@@ -82,7 +82,20 @@ export function createRequiredStageGuard({cases,recordFailure,recordStop,collect
  };
 }
 // Optional raw launcher is used only for the two independent initial producers.
-// The original guard still consumes their verdicts in native -> baseline order.
+// Successful baseline completion keeps native -> baseline validation order.
+export async function raceInitialProducerFailure(native,baseline){
+ const outcome=(producer,kind)=>producer.wait().then(proof=>({kind,proof}),cause=>({kind,cause,rejected:true}));
+ const first=await Promise.race([outcome(native,'native'),outcome(baseline,'baseline')]);
+ if(first.kind!=='baseline')return null;
+ if(first.rejected)return first;
+ try{naturalExit(first.proof,0);return null;}catch(cause){return {...first,cause};}
+}
+// Shared by the existing parent catch; cancellation always awaits the owned producer.
+export async function collectInitialProducersAfterFailure(producers,recordProof,recordCleanupError){
+ for(const pending of producers)if(pending){
+  try{recordProof(await pending.cancel());}catch(cleanup){recordCleanupError(cleanup);}
+ }
+}
 
 
 
@@ -119,7 +132,10 @@ export function validateCurrentEnvelope(value,process){
  return value;
 }
 export function validateBaselineReceipt(value,process,beforeSources,requiredSources){
- naturalExit(process,0);assert.equal(process.id,'original.plugins.decky-update-recovery');assert.equal(process.originalBudgetMs,240000);assert.equal(process.timeoutMs,240000,'REUSE_REQUIRES_FULL_ORIGINAL_BUDGET');
+ naturalExit(process,0);assert.equal(process.id,'original.plugins.decky-update-recovery');assert.equal(process.originalBudgetMs,240000);if(process.rawExecution!==undefined){
+  const budget=verifyRawProducerBudget(process,BUDGETS.baseline,BUDGETS.parent);assert.equal(budget.allocatedBudgetMs,BUDGETS.baseline,'REUSE_REQUIRES_FULL_ORIGINAL_BUDGET');
+  verifyFile(process.originalResult);assert.deepEqual(value,read(process.originalResult.path),'BASELINE_RAW_RESULT_MISMATCH');
+ }else assert.equal(process.timeoutMs,240000,'REUSE_REQUIRES_FULL_ORIGINAL_BUDGET');
  assert.equal(value.fieldRegression,'decky-update-disconnect-20261020','BASELINE_PRODUCER_IDENTITY');assert(natural(value.nativeChecks)&&value.nativeChecks>0,'BASELINE_NATIVE_ASSERTIONS_REQUIRED');
  assert.equal(value.passed,true,'BASELINE_ORIGINAL_FAIL');assert.equal(value.inputsUnchanged,true);assert(!value.error,'BASELINE_ORIGINAL_ERROR');
  const rows=sourceMap(value.sourceInputs,{duplicates:true});for(const [file,digest]of rows)assert.equal(beforeSources.get(file),digest,'BASELINE_SOURCE_NOT_PREBOUND_OR_CHANGED:'+file);
@@ -255,6 +271,13 @@ export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work){
  for(const c of originalAggregateCases(typed)){const delivered=value.cases.find(r=>r.id===c.id);assert.deepEqual(delivered.measurements,Object.fromEntries(Object.entries(c).filter(([k])=>!['id','passed'].includes(k))));assert.deepEqual(delivered.evidence,original.raw);}
  const frozen=read(original.sourcePins.path);verifySourceRows(frozen.files,parentSources);const frozenMap=new Map();for(const row of frozen.files){const p=ownedFile(work,path.join(frozen.source,row.path));assert.equal(hash(p),row.sha256);frozenMap.set(key(p),{path:p,sha256:row.sha256});}
  const readyConsumer=originalReadyConsumer(frozen.source);frozenMap.set(key(readyConsumer.path),readyConsumer);
+ const generatedCommittedEvidence=[];
+ if(fs.readFileSync(path.join(frozen.source,'tools/decky_binding_runtime_selftest.cpp'),'utf8').includes('#include "decky_wake_committed_consumer.inc"')){
+  const committedReadyConsumer=originalCommittedReadyConsumer(frozen.source);
+  assert.deepEqual(value.generatedCommittedReadyConsumer,committedReadyConsumer,'CURRENT_COMMITTED_READY_GENERATED_PROVENANCE');
+  assert.equal(committedReadyConsumer.originSha256,parentSources.get('native/main.cpp'),'CURRENT_COMMITTED_READY_INCLUDE_SOURCE_CHANGED');
+  ownedFile(work,committedReadyConsumer.path);frozenMap.set(key(committedReadyConsumer.path),committedReadyConsumer);generatedCommittedEvidence.push(pin(committedReadyConsumer.path));
+ }
  // A frozen pre-offline producer has no such include. Current pinned source
  // does, so both its exact generated bytes and reported provenance are required.
  if(fs.readFileSync(path.join(frozen.source,'tools/decky_binding_runtime_selftest.cpp'),'utf8').includes('#include "decky_offline_consumers.inc"')){
@@ -280,15 +303,19 @@ export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work){
  for(const c of n.cases){const delivered=value.cases.find(r=>r.id===c.id);assert.equal(c.passed,true);assert.deepEqual(delivered.measurements,c.measurements);assert.deepEqual(delivered.evidence,current.raw);}
  const nativeRoot=path.dirname(current.raw.path),graph=read(path.join(nativeRoot,'d.json')),actualSources=new Map();
  const currentReadyConsumer=originalReadyConsumer(path.join(nativeRoot,'s'));assert.equal(currentReadyConsumer.originSha256,parentSources.get('native/main.cpp'),'CURRENT_READY_INCLUDE_SOURCE_CHANGED');
+ const currentCommittedReadyConsumer=originalCommittedReadyConsumer(path.join(nativeRoot,'s'));
+ assert.deepEqual(value.generatedCurrentCommittedReadyConsumer,currentCommittedReadyConsumer,'CURRENT_NATIVE_COMMITTED_READY_GENERATED_PROVENANCE');
+ assert.equal(currentCommittedReadyConsumer.originSha256,parentSources.get('native/main.cpp'),'CURRENT_NATIVE_COMMITTED_READY_INCLUDE_SOURCE_CHANGED');
+ ownedFile(work,currentCommittedReadyConsumer.path);generatedCommittedEvidence.push(pin(currentCommittedReadyConsumer.path));
  for(const p of [graph.Data.Source,...graph.Data.Includes])if(within(nativeRoot,p)){
   ownedFile(work,p);assert(within(path.join(nativeRoot,'s'),p),'FROZEN_NATIVE_INPUT_REQUIRED');const sourceRelative=slash(path.relative(path.join(nativeRoot,'s'),p));
-  if(parentSources.has(sourceRelative))assert.equal(hash(p),parentSources.get(sourceRelative),'FROZEN_CURRENT_SOURCE_CHANGED');else assert((key(currentReadyConsumer.path)===key(p)&&currentReadyConsumer.sha256===hash(p))||Object.values(value.nativeExtractions).some(x=>key(x.generated?.path??'')===key(p)&&x.generated.sha256===hash(p)),'UNBOUND_GENERATED_NATIVE_INPUT');actualSources.set(key(p),pin(p));
+  if(parentSources.has(sourceRelative))assert.equal(hash(p),parentSources.get(sourceRelative),'FROZEN_CURRENT_SOURCE_CHANGED');else assert((key(currentReadyConsumer.path)===key(p)&&currentReadyConsumer.sha256===hash(p))||(key(currentCommittedReadyConsumer.path)===key(p)&&currentCommittedReadyConsumer.sha256===hash(p))||Object.values(value.nativeExtractions).some(x=>key(x.generated?.path??'')===key(p)&&x.generated.sha256===hash(p)),'UNBOUND_GENERATED_NATIVE_INPUT');actualSources.set(key(p),pin(p));
  }
  validateGraph(path.join(nativeRoot,'d.json'),actualSources,toolPins);
  for(const x of Object.values(value.nativeExtractions)){verifyFile(x.generated);assert.equal(parentSources.get(relative(x.path)),x.sha256,'EXTRACTION_SOURCE_CHANGED');}
  const consumer=read(path.join(childRoot,'consumer-result.json'));assert.equal(consumer.passed,true);assert.deepEqual(consumer.cases.map(c=>c.id),TS_IDS);assert.equal(consumer.productionHostExecuted,true);assert.equal(consumer.productionRelayExecuted,true);assert.equal(consumer.productionClientExecuted,true);
  for(const c of consumer.cases){assert.deepEqual(value.cases.find(r=>r.id===c.id).measurements,c.measurements);assert.equal(c.passed,true);}
- return [original.raw,original.result,original.sourcePins,...(original.deferredRaw?[original.deferredRaw]:[]),...generatedManagedEvidence,current.raw,pin(path.join(childRoot,'consumer-result.json'))];
+ return [original.raw,original.result,original.sourcePins,...(original.deferredRaw?[original.deferredRaw]:[]),...generatedManagedEvidence,...generatedCommittedEvidence,current.raw,pin(path.join(childRoot,'consumer-result.json'))];
 }
 function history(core){
  const base=path.join(core,'Evidence/DeckyParentMigration-20261023/a1-2547/history'),files=[['result.json','2a7a3f284df641659b691f84600f31335d77947937d827253ac061013dea59a7'],['native-result.json','2850ad18914927f98744ea0c0a31ac90d8a11577e09b093ebbbdeaf7abd22bd1'],['consumer-result.json','ea76797d7142bde1e05dd0422113af3bde1bfec0e939983b37c2e6ea01ca8859']];
@@ -368,10 +395,22 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
    const baseRoot=path.join(core,'Evidence/DB','b-'+crypto.randomUUID().slice(0,8));assert(!fs.existsSync(baseRoot),'FRESH_BASELINE_ROOT_REQUIRED');fs.mkdirSync(baseRoot,{recursive:true});initialBaselineOut=path.join(baseRoot,'decky-update-recovery');
    const rawSources=report.sourceInputs.map(row=>({path:path.join(repo,row.path),sha256:row.sha256}));
    const selectedCompiler=selectedNativeTools().native.compiler,telemetryPath=path.join(path.dirname(selectedCompiler),'vctip.exe'),telemetryPin=toolPins.get(key(telemetryPath));assert(telemetryPin,'RAW_COMPILER_TELEMETRY_NOT_DECLARED');const toolCleanupPolicy={kind:'MSVC_VCTIP_AFTER_ROOT_EXIT',maximumProcesses:1,program:telemetryPin};
-   const launch=(id,argv,budget)=>{const allocation=allocateBudget(startedAt,Date.now(),budget),directory=path.join(out,'processes','raw-'+id);traceStage(id,'launch-requested',{program:processExec,arguments:argv,cwd:repo,timeoutMs:allocation.timeoutMs,parentRemainingBeforeMs:allocation.parentRemainingMs,rawOwnedProducer:true});return startOwnedRawProducer({id,program:processExec,args:argv,cwd:repo,env:process.env,host:path.join(repo,'tools/ymcc_sim/global/host-process.ps1'),powershell:actualPowerShell,ownerStartTicks:rawOwnerTicks,directory,stdoutPath:path.join(out,'processes',id+'.stdout.bin'),stderrPath:path.join(out,'processes',id+'.stderr.bin'),deadlineEpochMs:Date.now()+allocation.timeoutMs,sourceInputs:rawSources,toolArtifacts:report.toolArtifacts,originalBudgetMs:budget,parentRemainingBeforeMs:allocation.parentRemainingMs,toolCleanupPolicy});};
+   const launch=(id,argv,budget)=>{const allocatedAtEpochMs=Date.now(),allocation=allocateBudget(startedAt,allocatedAtEpochMs,budget),directory=path.join(out,'processes','raw-'+id);traceStage(id,'launch-requested',{program:processExec,arguments:argv,cwd:repo,timeoutMs:allocation.timeoutMs,parentRemainingBeforeMs:allocation.parentRemainingMs,rawOwnedProducer:true});return startOwnedRawProducer({id,program:processExec,args:argv,cwd:repo,env:process.env,host:path.join(repo,'tools/ymcc_sim/global/host-process.ps1'),powershell:actualPowerShell,ownerStartTicks:rawOwnerTicks,directory,stdoutPath:path.join(out,'processes',id+'.stdout.bin'),stderrPath:path.join(out,'processes',id+'.stderr.bin'),deadlineEpochMs:allocatedAtEpochMs+allocation.timeoutMs,allocatedAtEpochMs,parentStartedAtEpochMs:startedAt,parentBudgetMs:BUDGETS.parent,sourceInputs:rawSources,toolArtifacts:report.toolArtifacts,originalBudgetMs:budget,parentRemainingBeforeMs:allocation.parentRemainingMs,toolCleanupPolicy});};
    initialNative=launch('current.native.entry',[path.join(repo,MODULE,'current-parent-native.mjs'),'--evidence-dir',childEvidence,'--workspace-dir',childWork],BUDGETS.current);
    initialBaseline=launch('original.plugins.decky-update-recovery',[path.join(repo,'tools/ymcc_sim/global/decky-update-recovery/run.mjs'),'--evidence-dir',initialBaselineOut],BUDGETS.baseline);
    report.initialProducerOverlap={mode:'two-owned-raw-producers',nativeFirstValidation:true,baselineProducerCount:1,physicalOrFullReleaseAcceptance:false};
+  }
+  if(initialNative&&initialBaseline&&!collectAfterFailure){
+   const early=await raceInitialProducerFailure(initialNative,initialBaseline);
+   if(early)await guard('original.plugins.decky-update-recovery',()=>{
+    if(early.proof){
+     const rawPath=path.join(initialBaselineOut,'result.json');
+     if(fs.existsSync(rawPath))early.proof.originalResult=pin(rawPath);
+     persistRaw(early.proof,report.sourceInputs);
+     report.rawEvidence.push(...[early.proof.rawExecution?.terminal,early.proof.rawExecution?.request,early.proof.originalResult].filter(Boolean));
+    }
+    throw early.cause;
+   });
   }
   const current=await guard('current.native.entry',async()=>{
    const process=initialNative?persistRaw(await initialNative.wait()):exec('current.native.entry',processExec,[path.join(repo,MODULE,'current-parent-native.mjs'),'--evidence-dir',childEvidence,'--workspace-dir',childWork],BUDGETS.current,{cwd:repo});
@@ -476,7 +515,9 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
   report.missingEvidence.push(...report.legacyTypedMigration.filter(row=>row.remaining!==null).map(row=>({code:'LEGACY_COMPLETE_INVARIANTS_REQUIRE_TYPED_MIGRATION',source:row.legacySource,remaining:row.remaining,currentCounterparts:row.currentExecutableCounterparts})));
   report.selected25Accepted=current!==null;
  }catch(error){
-  for(const pending of [initialNative,initialBaseline])if(pending){try{const proof=await pending.cancel();if(!report.processes.some(row=>row.id===proof.id)){save(path.join(out,'processes',proof.id+'.json'),proof);report.processes.push(proof);report.rawEvidence.push(proof.rawExecution.terminal);traceStage(proof.id,'cancelled-or-collected-after-required-failure',{exitCode:proof.exitCode,rawOwnedProducer:true});}}catch(cleanup){add('parent.initial-producer-cleanup',false,{error:String(cleanup?.stack??cleanup)});}}
+  await collectInitialProducersAfterFailure([initialNative,initialBaseline],proof=>{
+   if(!report.processes.some(row=>row.id===proof.id)){save(path.join(out,'processes',proof.id+'.json'),proof);report.processes.push(proof);report.rawEvidence.push(proof.rawExecution.terminal);traceStage(proof.id,'cancelled-or-collected-after-required-failure',{exitCode:proof.exitCode,rawOwnedProducer:true});}
+  },cleanup=>add('parent.initial-producer-cleanup',false,{error:String(cleanup?.stack??cleanup)}));
   if(!report.executionControl.stopped)add('parent.preflight-or-execution',false,{error:String(error?.stack??error)});
  }
 

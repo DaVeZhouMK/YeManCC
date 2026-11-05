@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {selectCases,parseOptions} from './cli.mjs';
+import {selectCases,parseOptions,writeFreshJson} from './cli.mjs';
 import {missingCatalogTools} from '../global/cli.mjs';
 const repo=path.resolve(import.meta.dirname,'../../..');
 function noExternalReads(action,allowed=[]){
@@ -91,4 +91,48 @@ test('specialized-only plan ignores malformed specialty candidate configuration 
 });
 test('complete Host contract option is forwarded through the existing option vocabulary',()=>{
  const contract=path.resolve(bugRoot,'candidate-contract.json');assert.equal(parseOptions(['--complete-host-contract',contract]).completeHostContract,contract);
+});
+
+
+test('explicit IDs excluded by profile reject before partial selection or preparation',async t=>noExternalReads(async()=>{
+ const expected=/PROFILE_EXCLUDES_EXPLICIT_TEST:sleep\.host-forms/;
+ for(const mode of ['plan','run']){
+  const args=['--test','fan.curve,sleep.host-forms','--profile','desktop','--mode',mode];
+  if(mode==='run')args.push('--rerun');
+  let observed;
+  const selection=selectCases(parseOptions(args)).then(value=>{observed={mode,requested:value.requested,selectedIds:value.selectedIds};return value;});
+  try{await assert.rejects(selection,expected);}finally{if(observed)t.diagnostic(JSON.stringify(observed));}
+ }
+ await assert.rejects(()=>selectCases(parseOptions(['--test','sleep.host-forms','--profile','desktop','--mode','run','--rerun'])),expected);
+ const valid=await selectCases(parseOptions(['--test','fan.curve,sleep.host-forms','--profile','full','--mode','plan']));
+ assert.deepEqual(valid.selectedIds,['fan.curve','sleep.host-forms']);
+ assert.equal(valid.requested,2);
+ assert.equal(valid.adapters.length+valid.deferred.length,2);
+}));
+
+
+test('optimized receipt writer preserves existing bytes and flushes fresh JSON before success',t=>{
+ const parent='G:/YeManCC-Work/Testing/YMCC/Evidence/CoordinatedFixtureSlices-20261105/OptimizedRawWriter';
+ const root=fs.mkdtempSync(path.join(parent,'owned-'));
+ t.after(()=>{assert.equal(path.dirname(fs.realpathSync(root)),fs.realpathSync(parent));fs.rmSync(root,{recursive:true});});
+ const old=path.join(root,'existing-result.json'),sentinel=Buffer.from('{"status":"FAIL","evidence":"keep original"}\n');
+ fs.writeFileSync(old,sentinel,{flag:'wx'});
+ let error;try{writeFreshJson(old,{status:'PASS'});}catch(caught){error=caught;}
+ const observed=fs.readFileSync(old);
+ t.diagnostic(JSON.stringify({existingBytesPreserved:observed.equals(sentinel),errorCode:error?.code??null}));
+ assert.equal(error?.code,'EEXIST');assert.deepEqual(observed,sentinel);
+ const sync=fs.fsyncSync,close=fs.closeSync,order=[];
+ t.mock.method(fs,'fsyncSync',fd=>{order.push(['sync',fd]);return sync(fd);});
+ t.mock.method(fs,'closeSync',fd=>{order.push(['close',fd]);return close(fd);});
+ const fresh=path.join(root,'fresh-result.json'),value={status:'SCOPED_CONTROL',executedThisRun:false,rows:[{name:'original'}]};
+ writeFreshJson(fresh,value);
+ assert.deepEqual(order.map(row=>row[0]),['sync','close']);assert.equal(order[0][1],order[1][1]);
+ assert.equal(fs.readFileSync(fresh,'utf8'),JSON.stringify(value,null,2)+'\n');
+ const completed=fs.readFileSync(fresh);assert.throws(()=>writeFreshJson(fresh,{status:'PASS'}),{code:'EEXIST'});assert.deepEqual(fs.readFileSync(fresh),completed);
+ // A flush error must propagate, close its descriptor and preserve the created evidence.
+ const failure=path.join(root,'flush-error.json');order.length=0;
+ t.mock.method(fs,'fsyncSync',fd=>{order.push(['failed-sync',fd]);throw Object.assign(Error('fixture flush failure'),{code:'EIO'});});
+ assert.throws(()=>writeFreshJson(failure,{status:'UNKNOWN'}),{code:'EIO'});
+ assert.deepEqual(order.map(row=>row[0]),['failed-sync','close']);assert.equal(order[0][1],order[1][1]);
+ const partial=fs.readFileSync(failure);assert.throws(()=>writeFreshJson(failure,{status:'PASS'}),{code:'EEXIST'});assert.deepEqual(fs.readFileSync(failure),partial);
 });

@@ -48,5 +48,13 @@
     <Compile Include="../../../LightSetterSelfTest/AyaneoSuperJoyConsumerTests.cs" Link="AyaneoSuperJoyConsumerTests.cs" />
     <Compile Include="../../../../capabilities/upstream/f2e58468/AYANEOSuperJoyRgb.cs" Link="AYANEOSuperJoyRgb.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../../FanLab/LightSetter/ApexLightingConsumer.cs" Link="ApexLightingConsumer.cs" />
+    <Compile Include="../../../../FanLab/LightSetter/ApexWindowsHidTransport.cs" Link="ApexWindowsHidTransport.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../../LightSetterSelfTest/ApexLightingTests.cs" Link="ApexLightingTests.cs" />
+  </ItemGroup>
 </Project>
 

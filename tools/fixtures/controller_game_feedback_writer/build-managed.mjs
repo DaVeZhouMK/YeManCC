@@ -42,7 +42,7 @@ export function buildManagedFixture(out,{caseRoot,variant='normal'}={}){
  const commands=[];
  function run(name,args){const r=spawnSync('dotnet',args,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true,env:{...process.env,DOTNET_CLI_TELEMETRY_OPTOUT:'1',DOTNET_NOLOGO:'1',DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:'true'}});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({name,args,exit:r.status,error:r.error?.message??null});need(!r.error&&r.status===0,name+' failed: '+path.join(out,name+'.log'));return r.stdout;}
  try{
- const names=[...MANAGED_SOURCES];need(names.length===24&&new Set(names).size===24,'Exact24 managed sources required');
+ const names=[...MANAGED_SOURCES];need(names.length===26&&new Set(names).size===26,'Exact26 managed sources required');
  const inputs=names.map(relative=>{const p=path.join(repo,relative),bytes=fs.readFileSync(p),snapshot=path.join(out,'input-sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return{path:p,relative,snapshot,sha256:hash(bytes),bytes:bytes.length};});
  if(variant==='stale-revision'){
   const original=inputs.find(r=>r.relative==='InputHost/HostGameOutputObservation.cs');
@@ -105,15 +105,15 @@ export function buildManagedFixture(out,{caseRoot,variant='normal'}={}){
  compatibility=replaceOnce(compatibility,'private sealed class Stage','private sealed partial class Stage');
  compatibility=replaceOnce(compatibility,'public void Decode(string a,ulong b,string c,ulong d,ulong e,string f){}','public void Decode(string a,ulong b,string c,ulong d,ulong e,string f){ManagedDecode(a,b,c,d,e,f);}');
  compatibility=replaceOnce(compatibility,'return Fixture.OutputStops;','return ManagedOutputStopResult(Fixture.OutputStops);');
- const pieces=['private static async Task<int> RunPipeClientAsync(','private sealed class MessageCodec'].map(marker=>({...member(source,marker),marker}));
+ const pieces=['private static async Task<HostTerminalCleanup.LoopResult> RunPipeClientAsync(','private sealed class MessageCodec'].map(marker=>({...member(source,marker),marker}));
  const files={
  'ExtractedHost.cs':fake,'FixtureTerminals.cs':compatibility,'LegacyFixture.cs':legacy,
  'ManagedEntry.cs':read(WRITER+'/ManagedEntry.cs'),
  'ManagedGameMotorFixture.cs':read(WRITER+'/ManagedGameMotorFixture.cs'),
- 'ProductionPipe.cs':'using System.Diagnostics; using System.IO.Pipes; using System.Text;\ninternal static partial class Program {\n'+pieces.map(r=>r.text).join('\n')+'\n}\n',
+ 'ProductionPipe.cs':'using System.Diagnostics; using System.IO.Pipes; using System.Text; using YeManInputHost.Diagnostics;\ninternal static partial class Program {\n'+pieces.map(r=>r.text).join('\n')+'\n}\n',
  'ParentProcessLifetime.cs':read('InputHost/ParentProcessLifetime.cs')
  };
- for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','HostGameOutputObservation.cs','PsEndpointOwnership.cs','HostRuntimeBinaryIdentity.cs'])files[name]=read('InputHost/'+name);
+ for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','HostTerminalCleanup.cs','CompactFrameReplyBinding.cs','HostGameOutputObservation.cs','PsEndpointOwnership.cs','HostRuntimeBinaryIdentity.cs'])files[name]=read('InputHost/'+name);
  if(variant==='stale-revision')files['HostGameOutputObservation.cs']=read(STALE_SOURCE);
  files['HcControllerGameFeedbackCapabilityCatalog.generated.cs']=read('capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs');
  for(const [name,text]of Object.entries(files))fs.writeFileSync(path.join(out,name),text,{flag:'wx'});
@@ -131,7 +131,7 @@ export function buildManagedFixture(out,{caseRoot,variant='normal'}={}){
  run('build',['build',project,'-c','Release','--nologo','-v:minimal']);
  const ledger=fs.readFileSync(path.join(out,'evaluated-inputs.txt'),'utf8').replace(/^\uFEFF/,'');
  const actual=ledger.split(/\r?\n/).filter(Boolean).map(line=>{const [kind,...parts]=line.split('\t'),p=path.resolve(parts.join('\t'));need(['Compile','Reference','Analyzer','Import'].includes(kind)&&fs.existsSync(p),'Unbound actual compile input: '+line);return{kind,path:p,sha256:fileHash(p)};});
- need(actual.filter(r=>r.kind==='Compile').length===19&&actual.some(r=>r.kind==='Reference'),'Exact19 actual compiler inputs required');
+ need(actual.filter(r=>r.kind==='Compile').length===21&&actual.some(r=>r.kind==='Reference'),'Exact21 actual compiler inputs required');
  const observationInput=inputs.find(r=>r.relative===(variant==='stale-revision'?STALE_SOURCE:'InputHost/HostGameOutputObservation.cs'));
  const observationCompile=actual.filter(r=>r.kind==='Compile'&&path.resolve(r.path)===path.resolve(out,'HostGameOutputObservation.cs'));
  need(observationCompile.length===1&&observationCompile[0].sha256===observationInput.sha256,'Observation helper missing or changed in actual compiler inputs');

@@ -16,7 +16,7 @@ const emit = defineEmits<{
     </div>
     <div class="action-control-buttons">
       <button type="button" class="action-delete" :disabled="disabled" @click="emit('remove')">删除动作</button>
-      <button type="button" class="action-manage-cancel" :aria-label="`取消${name}的动作操作`" :disabled="disabled" @click="emit('cancel')">取消</button>
+      <button type="button" class="action-manage-cancel" :aria-label="`取消${name}的动作操作`" :disabled="disabled" @click="emit('cancel')"><strong class="action-cancel-key" aria-hidden="true">B</strong> 取消</button>
     </div>
   </div>
 </template>
@@ -24,9 +24,11 @@ const emit = defineEmits<{
 <style scoped>
 .action-controls{display:grid;gap:9px;min-width:0;color:var(--text);font-size:12px}
 .action-enable-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:24px}
-.action-control-buttons{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.7fr);gap:6px}
+.action-control-buttons{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
 .action-control-buttons button{min-width:0;min-height:32px;padding:5px 7px;border:1px solid rgba(255,255,255,.18);border-radius:7px;background:var(--bg-input);color:var(--text);font:inherit;cursor:var(--cursor-interaction,pointer)}
 .action-control-buttons .action-delete{color:#ffb2b8;border-color:color-mix(in srgb,var(--danger) 40%,transparent);background:color-mix(in srgb,var(--danger) 8%,var(--bg-input))}
+.action-control-buttons .action-manage-cancel{display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
+.action-cancel-key{color:var(--danger);font-weight:800}
 .action-controls button:disabled{opacity:.45;cursor:default}
 @media(pointer:coarse){.action-control-buttons button{min-height:40px}.action-enable-row{min-height:40px}}
 </style>

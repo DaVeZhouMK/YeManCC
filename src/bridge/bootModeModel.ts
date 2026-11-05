@@ -1,6 +1,6 @@
 /** Boot scenes are complete global presets. Game-specific records are never stored here. */
 import { retireBootControllerSnapshots } from './bootModeSharedShortcuts';
-import { screenTouchpadDefaults } from './screenTouchpadDefaults';
+import { screenTouchpadDefaults, normalizeScreenTouchpadSummon } from './screenTouchpadDefaults';
 const XBOX_DEFAULTS_VERSION = 1;
 const AUDIO_DEFAULTS_VERSION = 1;
 const CONTROLLER_DEFAULTS_VERSION = 2;
@@ -111,12 +111,24 @@ function clean(value: unknown, depth = 0): BootValue | undefined {
     return undefined;
 }
 export function normalizeBootConfig(value: unknown): BootConfig { return object(value) ? clean(value) as BootConfig : {}; }
-function overrides(value: unknown): Partial<BootModeSnapshot> {
+function normalizeTouchModule(value: BootConfig, seedMissing=false): BootConfig {
+    const profiles = object(value.profiles) ? { ...value.profiles } : {};
+    for(const persona of ['disabled','steamdeck','dualsense-edge','elite'] as const) {
+        if(object(profiles[persona])) profiles[persona]=normalizeScreenTouchpadSummon(profiles[persona] as BootConfig);
+        else if(seedMissing) {
+            const defaults=screenTouchpadDefaults(persona);
+            profiles[persona]={summonPosition:defaults.summonPosition,summonEnabled:defaults.summonEnabled,
+                summonPlacementVersion:1,autoHideSeconds:defaults.autoHideSeconds};
+        }
+    }
+    return { ...value, profiles };
+}
+function overrides(value: unknown, migrateTouch=true): Partial<BootModeSnapshot> {
     const out: Partial<BootModeSnapshot> = {};
     if (object(value))
         for (const id of BOOT_MODE_MODULES)
             if (object(value[id]))
-                out[id] = normalizeBootConfig(value[id]);
+                out[id] = id === 'touch' && migrateTouch ? normalizeTouchModule(normalizeBootConfig(value[id])) : normalizeBootConfig(value[id]);
     return out;
 }
 // Stored modules are partial intent, so missing fields stay missing. Reject
@@ -138,6 +150,7 @@ const motion: BootShape = { enabled: flag, virtualPadLink: flag, preset: choice(
     motionMode: choice('on', 'off', 'toggle', 'suppress'), motionTrigger: string, outputStick: choice('left', 'right'), outputAxis: choice('xy', 'x', 'y'),
     presets: { '*': nullableRecord }, calibration: nullableRecord };
 const touchProfile: BootShape = { masterEnabled: flag, enabled: flag, specialEnabled: flag, rearEnabled: flag, summonEnabled: flag,
+    summonPosition: choice('off','same','opposite','left','right'), summonPlacementVersion: numeric,
     specialMask: numeric, rearMask: numeric, layout: choice('off', 'single', 'dual'), standaloneSpecialMode: choice('off', 'steamdeck', 'ps5'),
     transparency: numeric, mouseSensitivity: numeric, scale: numeric, autoHideSeconds: numeric };
 const monitorPanel: BootShape = { position: numeric, scale: numeric };
@@ -220,6 +233,7 @@ export function createBootModeDocument(baseline: BootModeSnapshot): BootModeDocu
     assertBootSnapshot(baseline, 'baseline');
     const global = cloneBootValue(baseline), activeSnapshot = cloneBootValue(baseline);
     retireBootControllerSnapshots({ global, activeSnapshot });
+    global.touch=normalizeTouchModule(global.touch,true);
     global.input = { ...global.input, persona: 'disabled',
         outputTarget: { ...normalizeBootConfig(global.input.outputTarget), persona: 'disabled', buttonMappingEnabled: false },
         ...(global.input.mouse === 'steamdeck' ? { mouse: 'off' } : {}) };
@@ -268,7 +282,7 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     // and explicit follow-global choices must never become forced defaults.
     if (legacyControllerDefaults) {
         const oldInput = { persona: 'steamdeck', mouse: 'steamdeck', outputTarget: { persona: 'steamdeck', buttonMappingEnabled: true } };
-        const oldTouch = { profiles: { steamdeck: normalizeBootConfig(screenTouchpadDefaults('steamdeck')) } };
+        const oldTouch = normalizeTouchModule({ profiles: { steamdeck: normalizeBootConfig({ ...screenTouchpadDefaults('steamdeck'), autoHideSeconds: 60 }) } });
         const unversioned = !Number.isSafeInteger(raw.controllerDefaultsVersion) || Number(raw.controllerDefaultsVersion) < 1;
         for (const id of ['xbox', 'steam', 'xbox-steam'] as const) {
             const own = out.scenes[id].overrides;
@@ -304,7 +318,7 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
             }
             out.presets[id] = presets;
         }
-    const active = overrides(raw.activeSnapshot);
+    const active = overrides(raw.activeSnapshot,false);
     // Requested mode defaults are not proof of an applied runtime. Missing
     // legacy receipt fields fall back to the observed baseline, so saving or
     // reopening an editor cannot reclassify a pending default as already run.
@@ -312,6 +326,7 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     for (const [module, value] of Object.entries(active))
         out.activeSnapshot[module as BootModeModule] = mergeBootConfig(baseline[module as BootModeModule], value);
     retireBootControllerSnapshots(out);
+    out.global.touch=normalizeTouchModule(out.global.touch,true);
     return out;
 }
 /** Fill missing fields from the global baseline; arrays remain complete snapshots. */

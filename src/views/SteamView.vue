@@ -9,7 +9,7 @@ import { computed, ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, 
 import Toggle from '@/components/Toggle.vue';
 import SteamWallpaperPlaybackToggle from '@/components/SteamWallpaperPlaybackToggle.vue';
 import Dropdown from '@/components/Dropdown.vue';
-import {getUiSetting} from '@/bridge/uiSettings';
+import {getUiSetting,setUiSettings} from '@/bridge/uiSettings';
 import {sharedGameMedia,steamWallpaperEnabled,setSteamWallpaperEnabled} from '@/bridge/sharedGameMedia';
 import {gameMediaDownloads,backgroundDownloadEnabled,setBackgroundDownloadEnabled,downloadDescription,setDownloadCpuThreshold} from '@/bridge/gameMediaDownloads';
 const downloadCpuThreshold=ref(getUiSetting('steamWallpaperDownloadCpuThreshold'));
@@ -22,10 +22,13 @@ let stopWallpaperDownloads:(()=>void)|null=null;
 async function changeWallpaperDownloads(enabled:boolean){await setBackgroundDownloadEnabled(enabled);wallpaperDownloadEnabled.value=enabled;}
 const wallpaperEnabled=ref(steamWallpaperEnabled());
 const wallpaperBusy=ref(false),wallpaperError=ref('');
+const wallpaperPauseOnBattery=ref(getUiSetting('steamWallpaperPauseOnBattery')===true);
+const wallpaperBatteryBusy=ref(false),wallpaperBatteryError=ref('');
+async function changeWallpaperPauseOnBattery(enabled:boolean){if(wallpaperBatteryBusy.value)return;wallpaperBatteryBusy.value=true;wallpaperBatteryError.value='';try{await setUiSettings({steamWallpaperPauseOnBattery:enabled});}catch(error){wallpaperBatteryError.value=String(error instanceof Error?error.message:error);}finally{wallpaperPauseOnBattery.value=getUiSetting('steamWallpaperPauseOnBattery')===true;wallpaperBatteryBusy.value=false;}}
 const wallpaperPreparation=ref(sharedGameMedia.preparationDescription());
 let stopWallpaperPreparation:(()=>void)|null=null;
 async function changeWallpaper(enabled:boolean){if(wallpaperBusy.value)return;wallpaperBusy.value=true;wallpaperError.value='';try{await setSteamWallpaperEnabled(enabled);wallpaperEnabled.value=enabled;}catch(error){wallpaperError.value=String(error instanceof Error?error.message:error);}finally{wallpaperBusy.value=false;}}
-const syncWallpaper=()=>{wallpaperEnabled.value=steamWallpaperEnabled();wallpaperDownloadEnabled.value=backgroundDownloadEnabled();downloadCpuThreshold.value=getUiSetting('steamWallpaperDownloadCpuThreshold');};
+const syncWallpaper=()=>{wallpaperEnabled.value=steamWallpaperEnabled();wallpaperPauseOnBattery.value=getUiSetting('steamWallpaperPauseOnBattery')===true;wallpaperDownloadEnabled.value=backgroundDownloadEnabled();downloadCpuThreshold.value=getUiSetting('steamWallpaperDownloadCpuThreshold');};
 onMounted(()=>{stopWallpaperDownloads=gameMediaDownloads.subscribe(()=>{wallpaperDownloads.value=gameMediaDownloads.state;});window.addEventListener('ui-settings:changed',syncWallpaper);window.addEventListener('ui-settings:loaded',syncWallpaper);syncWallpaper();stopWallpaperPreparation=sharedGameMedia.subscribe(reason=>{if(reason==='policy')wallpaperPreparation.value=sharedGameMedia.preparationDescription();});});
 onBeforeUnmount(()=>{stopWallpaperDownloads?.();stopWallpaperPreparation?.();window.removeEventListener('ui-settings:changed',syncWallpaper);window.removeEventListener('ui-settings:loaded',syncWallpaper);});
 import SteamAppearanceCard from '@/components/SteamAppearanceCard.vue';
@@ -682,6 +685,8 @@ onBeforeUnmount(() => {
      <section class="steam-group wallpaper-settings" aria-label="动态壁纸与下载设置">
       <div class="steam-group-head"><h3><InlineIcon name="monitor"/>动态壁纸</h3><span>播放与下载</span></div>
       <SteamWallpaperPlaybackToggle :model-value="wallpaperEnabled" :disabled="wallpaperBusy" @update:model-value="changeWallpaper" />
+      <Toggle class="steam-option-row" data-steam-wallpaper-setting="pause-on-battery" :model-value="wallpaperPauseOnBattery" :disabled="wallpaperBatteryBusy" :aria-busy="wallpaperBatteryBusy || undefined" label="离电关闭" description="使用真实电池供电时暂停播放、缓存和下载；接通电源后按原开关恢复。" @update:model-value="changeWallpaperPauseOnBattery" />
+      <p v-if="wallpaperBatteryError" class="steam-section-note" data-steam-wallpaper-error="pause-on-battery" role="alert">离电关闭设置失败：{{wallpaperBatteryError}}</p>
       <p v-if="wallpaperError" class="steam-section-note" role="alert">动态壁纸设置失败：{{wallpaperError}}</p>
       <Toggle class="steam-option-row" data-steam-wallpaper-setting="download" :model-value="wallpaperDownloadEnabled" label="后台下载" description="电池模式暂停，接通电源后继续" @update:model-value="changeWallpaperDownloads" />
       <div class="steam-option-row steam-option-choice" data-steam-wallpaper-setting="cpu">

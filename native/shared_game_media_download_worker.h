@@ -1,4 +1,5 @@
 #pragma once
+#include "power_source_channel.h"
 #include "shared_game_media_download_queue.h"
 #include "shared_game_media_identity_worker.h"
 #include "custom-steam-library/custom_steam_library_network_policy.h"
@@ -378,6 +379,9 @@ inline bool retainedResume(const fs::path &part,const std::string &identity,cons
   }
 
 struct WorkerContext {
+  // All lanes retain the receipt that admitted this worker; a later AC cannot
+  // revive work that crossed an unobserved DC/unknown transition.
+  const powerPolicy::Ticket powerTicket=powerPolicy::ticket();
   std::mutex gate, budget,waitGate;std::condition_variable changed;uint64_t revision=0;
   void wakeLanes(){std::lock_guard lock(waitGate);++revision;changed.notify_all();}
   uint64_t checkedAt=0, diskAt=0, sinceDisk=0, used=0, available=0;
@@ -475,17 +479,18 @@ class Worker {
            lastCheck_ = 0;
   uint64_t bytes_ = 0, taskBudget_ = automaticAttemptMs;
   std::string lastPhase_;
-  void check() {
+  void check(bool force=false) {
     const auto tick=GetTickCount64();
     if(context_->cancelled.load()||WaitForSingleObject(parent_,0)!=WAIT_TIMEOUT) throw std::runtime_error("media-download-cancelled");
     if(taskStarted_&&tick-taskStarted_>=taskBudget_)throw std::runtime_error("media-task-time-budget");
     if(tick-started_>=limits_.session||(taskStarted_&&tick-(std::max)(taskStarted_,taskProgressAt_)>=limits_.task)) throw std::runtime_error("media-task-timeout");
     std::lock_guard lock(context_->gate);
-    if(tick-context_->checkedAt<1000) return;
+    if(!force&&tick-context_->checkedAt<1000) return;
     context_->checkedAt=tick;
-    if(!queue_.allowed(token_)) throw std::runtime_error("media-download-cancelled");
+    if(!powerPolicy::current(context_->powerTicket))throw std::runtime_error("media-stale-wallpaper-power");
     SYSTEM_POWER_STATUS power{};
-    if(!GetSystemPowerStatus(&power)||power.ACLineStatus!=1||power.SystemStatusFlag==1) throw std::runtime_error("media-download-power-paused");
+    if(!ymcc::powerSource::read(power)||power.ACLineStatus!=1||power.SystemStatusFlag==1) throw std::runtime_error("media-download-power-paused");
+    if(!queue_.allowed(token_)) throw std::runtime_error("media-download-cancelled");
   }
   void progress(const std::string &phase, uint64_t bytes, uint64_t total,
                 bool force = false) {
@@ -775,11 +780,13 @@ class Worker {
       }
       if(slot=="dynamic") validateDownloadedVideo(source);
       lease["slot"]=slot;lease["verified"]=true;if(slot=="dynamic"){lease["videoQualityPolicy"]=videoQualityPolicy;if(selectedHeight>0)lease["selectedHeight"]=selectedHeight;else lease.erase("selectedHeight");}
-      progress("publishing",bytes_,bytes_,true);check();
+      progress("publishing",bytes_,bytes_,true);check(true);
       auto published=Store(queue_.root()).publish(lease,source,false);
       clearAssembly();for(const auto &part:parts) discard(part);return published;
     } catch(const std::exception &e) {
-      const std::string reason=e.what();clearAssembly();
+      const std::string reason=e.what();
+      if(powerPolicy::blocked()||reason=="media-download-power-paused")throw; // Retain parts/assembly for AC recovery.
+      clearAssembly();
       const bool invalid=reason=="media-size-invalid"||reason.find("slot-container")!=std::string::npos||reason.find("unsupported-container")!=std::string::npos||
         reason.find("video-structure")!=std::string::npos||reason.find("video-incomplete")!=std::string::npos||
         reason.find("stale")!=std::string::npos;
@@ -927,8 +934,9 @@ class Worker {
     } catch (const std::exception &e) {
       auto reason = std::string(e.what());
       if (reason == "media-download-cancelled" ||
-          reason == "media-download-power-paused") {
-        store.finish(lease);
+          reason == "media-download-power-paused"||reason=="wallpaper-on-battery"||
+          reason=="wallpaper-power-unknown"||reason=="media-stale-wallpaper-power") {
+        store.cancel(lease);
         throw;
       }
       lease["reason"] = reason;
@@ -964,6 +972,7 @@ public:
     if (locked != WAIT_OBJECT_0 && locked != WAIT_ABANDONED)
       return 13;
     try {
+      check(true);
       queue_.cleanupTemporary();
       // The generic age collector does not understand sidecar versions. Keep
       // checkpoint-bearing data until this consumer can validate its protocol.
@@ -1023,8 +1032,9 @@ public:
       return 0;
     } catch (const std::exception &e) {
       const auto reason = std::string(e.what());
-      try{queue_.end(token_, "deferred", reason);}catch(...){return 14;}
-      return reason == "media-download-cancelled" || reason == "media-download-power-paused" ||
+      const bool powerPaused=reason=="media-download-power-paused"||reason=="wallpaper-on-battery"||reason=="wallpaper-power-unknown"||reason=="media-stale-wallpaper-power";
+      try{queue_.end(token_, powerPaused?"paused":"deferred",powerPaused?"download-paused":reason,reason=="media-stale-wallpaper-power");}catch(...){return 14;}
+      return powerPaused || reason == "media-download-cancelled" ||
              reason.find("media-disk-")==0 || reason.find("media-cache-")==0 ||
              reason.find("media-staging-")==0 || reason=="media-storage-unavailable" ? 0 : 14;
     }
@@ -1064,6 +1074,11 @@ inline std::optional<int> backgroundEntrypoint(const fs::path &appRoot) {
     return 11;
   try {
     const auto root = custom_steam_library::defaultDataRoot(appRoot);
+    // The parent HANDLE and birth are verified above. Bind its physical source
+    // before any queue gate; an opted-in cold worker otherwise sees unknown.
+    ymcc::powerSource::channel::Consumer parentPower;
+    parentPower.attach(parent, std::stoull(birth));
+    ymcc::powerSource::channel::Binding powerBinding(parentPower);
     if (!Queue(root).allowed(token))
       return 11;
     SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);

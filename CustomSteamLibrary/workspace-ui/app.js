@@ -3973,18 +3973,29 @@ function setSharedWallpaperDownloadRequest(owner,request){
 }
 function sharedWallpaperDownloadFeedback(entry={},state={},request){
   if(entry.deleted||entry.deletedSlots?.dynamic)return null;
+  if(request?.mediaKey&&request.mediaKey!==entry.key)request=null;
   const key=entry.key,active=state.active?.[key]||(state.current?.key===key?state.current:null);
   const rawItem=state.manualItems?.[key];
   const item=rawItem&&(!request?.revision||Number(rawItem.requestBindingRevision||0)>=request.revision)?rawItem:null;
   const pending=entry.refreshRequested&&entry.refreshSlot!=='static'||entry.selectedVideo&&entry.taskSlots?.includes('dynamic');
-  if(request?.mediaKey&&request.mediaKey!==entry.key)request=null;
   if(request?.phase==='submitting')return {status:'pending',text:'正在提交下载请求…',indeterminate:true};
   if(request?.phase==='error')return {status:'error',text:'下载请求未完成：'+request.error,canSearch:true};
   const replaced=request?.assetId&&entry.assets?.dynamic?.id&&entry.assets.dynamic.id!==request.assetId;
   if(replaced||item?.state==='done'&&!pending)return request||item?{status:'done',text:'动态壁纸已下载并应用',value:1}:null;
   if(!request&&!pending&&!active&&!item)return null;
-  const pauses={'on-battery':'电池模式，等待接通电源后继续','power-unknown':'正在确认供电状态','startup-protection':'启动保护结束后继续','media-disk-space-low':'磁盘余量不足，腾出空间后继续','media-cache-budget-full':'壁纸缓存已满，清理后继续','media-storage-unavailable':'存储暂不可用，恢复后继续','low-battery':'低电量，等待充电后继续','battery-saver':'节电模式下暂停','cpu-busy':'后台负载较高，等待空闲后继续','game-running':'游戏运行中，等待后台下载恢复'};
-  const pause=state.resourcePauseReason||state.pauseReason;
+  const error=item?.lastError||(pending?entry.error:''),stopped=item?.autoStopped||item?.state==='unavailable';
+  // A terminal per-game receipt is not resumable merely because another
+  // policy currently pauses automatic downloads.
+  if(state.manualState==='cancelled'&&item&&!active)return {status:'waiting',text:'本轮下载已停止，所选视频已保留',canSearch:true};
+  if(!active&&(stopped||error==='media-video-selection-expired')){
+    const reason=item?.stopReason||error;
+    const detail=error==='media-video-selection-expired'?'官方视频候选已更新，请重新选择':reason==='automatic-time-budget-exhausted'||error==='media-task-time-budget'?'本轮下载时间预算已用完，可重新选择视频重试':reason==='automatic-attempt-budget-exhausted'?'本轮下载重试次数已用完，可重新选择视频重试':/network|http-429|http-5|truncated|empty/.test(error)?'网络连接持续失败':String(error||reason||'所选视频暂不可用');
+    return {status:'error',text:'下载未完成：'+detail+'；当前壁纸保留',canSearch:true};
+  }
+  const pauses={'on-battery':'电池模式，等待接通电源后继续','wallpaper-on-battery':'已启用离电关闭，等待接通电源后继续','wallpaper-power-unknown':'正在确认供电状态','power-unknown':'正在确认供电状态','startup-protection':'启动保护结束后继续','media-disk-space-low':'磁盘余量不足，腾出空间后继续','media-cache-budget-full':'壁纸缓存已满，清理后继续','media-storage-unavailable':'存储暂不可用，恢复后继续','low-battery':'低电量，等待充电后继续','battery-saver':'节电模式下暂停','cpu-busy':'后台负载较高，等待空闲后继续','cpu-unknown':'正在检测后台负载','cpu-recovering':'等待后台负载稳定后继续','game-running':'游戏运行中，等待后台下载恢复'};
+  const now=Date.now(),manual=Number(state.manualUntil||0)>now&&Number(state.manualUntil)<=now+900000&&(!Array.isArray(state.manualTargets)||state.manualTargets.includes(key));
+  const softPauses=['game-running','cpu-busy','cpu-unknown','cpu-recovering'];
+  const pause=[state.resourcePauseReason,state.pauseReason].find(reason=>reason&&!(manual&&softPauses.includes(reason)));
   if(pauses[pause])return {status:'waiting',text:pauses[pause]+'；当前壁纸保留'};
   if(active){
     if(active.phase==='retrying')return {status:'retrying',text:'网络波动，正在按弱网策略重试…',indeterminate:true};
@@ -3994,9 +4005,6 @@ function sharedWallpaperDownloadFeedback(entry={},state={},request){
     const mb=bytes>0?' · 已下载 '+(bytes/1048576).toFixed(1)+' MB':'';
     return {status:'downloading',text:(active.phase==='downloading'?'正在下载动态壁纸':'正在连接视频来源')+mb,indeterminate:true};
   }
-  if(state.manualState==='cancelled'&&item)return {status:'waiting',text:'本轮下载已停止，所选视频已保留',canSearch:true};
-  const error=item?.lastError||(pending?entry.error:'');
-  const stopped=item?.autoStopped||item?.state==='unavailable';
   if(error){
     if(error==='media-video-selection-expired')return {status:'error',text:'官方视频候选已更新，请重新选择；当前壁纸保留',canSearch:true};
     const network=/network|http-429|http-5|truncated|empty/.test(error),retryAt=Number(item?.retryAt||entry.retryAt||0);
@@ -4004,7 +4012,8 @@ function sharedWallpaperDownloadFeedback(entry={},state={},request){
     const detail=network?'网络连接持续失败':error==='media-video-selection-expired'?'官方视频候选已更新，请重新选择':pauses[error]||String(error);
     return {status:'error',text:'下载未完成：'+detail+'；当前壁纸保留',canSearch:true};
   }
-  if(request?.phase==='queued'||pending||item)return {status:'pending',text:'已加入下载队列，等待处理；当前壁纸保留',indeterminate:true};
+  if(request?.phase==='queued'||item)return {status:'pending',text:'已加入下载队列，等待处理；当前壁纸保留',indeterminate:true};
+  if(pending)return {status:'waiting',text:'壁纸更新尚未完成，等待下载安排；可重新选择视频重试',canSearch:true};
   return null;
 }
 function renderSharedWallpaperDownloadStatus(){
@@ -4126,7 +4135,7 @@ function librarySidebarPage(page='library',restore=true){
 function syncLibrarySidebarDock(){
  const state=librarySidebarState();if(!state)return;
  const management=state.page!=='library';$('#library-dock-select').classList.toggle('hidden',management);$('#library-dock-edit').classList.toggle('hidden',management);
- $('#library-dock-back').querySelector('span').textContent=management?'返回游戏库':'返回';
+ $('#library-dock-back').querySelector('[data-library-back-label]').textContent=management?'返回游戏库':'返回';
  const game=librarySidebarCurrentGame();$('#library-dock-name').textContent=management?(state.page==='sources'?'游戏库来源':'单独添加游戏'):game?gameDisplayName(game):'当前分类没有游戏';
  $('#library-dock-select').disabled=!game||!pageSelectable(game);$('#library-dock-edit').disabled=!game;
 }
@@ -4198,7 +4207,7 @@ function installLibrarySidebar(){
  const management=document.createElement('section');management.id='library-management-page';management.className='library-sidebar-page hidden';management.innerHTML='<header class="library-management-heading"><button id="library-management-back" type="button" class="button ghost"><span class="controller-key sidebar-key key-b" data-controller-key="B">B</span>返回</button><div><div class="eyebrow">YeMan自定义游戏库 / 管理</div><h1 id="library-management-title">游戏库来源</h1></div></header><p id="library-management-description"></p><div id="library-management-content"></div>';
  for(const id of ['directory-settings-panel','manual-game-panel']){const panel=$('#'+id);panel.classList.remove('menu-popover-panel');panel.classList.add('library-management-panel');management.querySelector('#library-management-content').appendChild(panel);}
  workspace.appendChild(management);
- const dock=document.createElement('footer');dock.id='library-sidebar-dock';dock.innerHTML='<div id="library-dock-name"></div><div class="library-dock-actions"><button type="button" id="library-dock-select" class="button ghost"><span class="controller-key sidebar-key key-a" data-controller-key="A">A</span>选择</button><button type="button" id="library-dock-edit" class="button ghost"><span class="controller-key sidebar-key key-x" data-controller-key="X">X</span>编辑 / 单独加入</button><button type="button" id="library-dock-back" class="button ghost"><span class="controller-key sidebar-key key-b" data-controller-key="B">B</span><span>返回</span></button></div>';workspace.appendChild(dock);
+ const dock=document.createElement('footer');dock.id='library-sidebar-dock';dock.innerHTML='<div id="library-dock-name"></div><div class="library-dock-actions"><button type="button" id="library-dock-select" class="button ghost"><span class="controller-key sidebar-key key-a" data-controller-key="A">A</span>选择</button><button type="button" id="library-dock-edit" class="button ghost"><span class="controller-key sidebar-key key-x" data-controller-key="X">X</span>编辑 / 单独加入</button><button type="button" id="library-dock-back" class="button ghost"><span class="controller-key sidebar-key key-b" data-controller-key="B">B</span><span data-library-back-label>返回</span></button></div>';workspace.appendChild(dock);
  root.append(aside,workspace);menu.remove();
  $('#directory-settings-toggle').setAttribute('aria-label','游戏库来源');$('#directory-settings-toggle').firstChild.textContent='游戏库来源 ';
  $('#manual-game-settings-toggle').setAttribute('aria-label','单独添加游戏');$('#manual-game-settings-toggle').firstChild.textContent='单独添加游戏 ';

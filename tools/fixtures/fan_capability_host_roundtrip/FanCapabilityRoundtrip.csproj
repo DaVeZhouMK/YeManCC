@@ -20,6 +20,7 @@
     <Compile Include="PinnedFanSourceChecks.cs" />
     <Compile Include="PinnedFanCurveChecks.cs" />
     <Compile Include="PinnedFanHostConsumerChecks.cs" />
+    <Compile Include="PinnedBankedWmiChecks.cs" />
     <Compile Include="PinnedUmaFanChecks.cs" />
     <Compile Include="HcBinaryAdapter.cs" Condition="'$(HcBinaryAdapterEnabled)' == 'true' and Exists('HcBinaryAdapter.cs')" />
     <Compile Include="../../../FanLab/real-host/*.cs" Link="Host/%(Filename)%(Extension)" />

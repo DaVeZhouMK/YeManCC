@@ -2,6 +2,7 @@
 (async function ymccSteamLive(request) {
   let mutated = false, stage = 'preflight', menuTarget = null, keyDelivered = false, settledNativeReturn = null;
   const token = `${Date.now()}-${Math.random()}`;
+  const lightGamepadLease = request.operation === 'input.gamepadLease';
   const fail = reason => { throw Object.assign(new Error(reason), { reason }); };
   const bounded = async promise => {
     let timer;
@@ -13,8 +14,8 @@
     const end = performance.now() + 3000;
     while (!test()) { if (performance.now() >= end) fail('live-readback-failed'); await new Promise(r => setTimeout(r, 25)); }
   };
-  if (window.__ymccSteamLiveBusy) return { ok: false, reason: 'live-busy', mutated: false, stage };
-  window.__ymccSteamLiveBusy = token;
+  if (!lightGamepadLease && window.__ymccSteamLiveBusy) return { ok: false, reason: 'live-busy', mutated: false, stage };
+  if (!lightGamepadLease) window.__ymccSteamLiveBusy = token;
   try {
     // Only the independent, account/process-bound running-link read may own a
     // transient native subscription. This flag never grants a setter authority.
@@ -257,6 +258,235 @@
       return { ok:true, mutated:false, stage, observedAccount:account, source:'verified-steam-ui-account-read',...privateNativeRecordReply() };
     }
     checkAccount();
+    if (request.operation === 'input.gamepadLease') {
+      stage = 'input-gamepad-lease';
+      const dataField = (object, key) => {
+        const descriptor = object && Object.getOwnPropertyDescriptor(object, key);
+        return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+      };
+      if (typeof request.owner !== 'string' || !/^[a-f0-9]{32}$/.test(request.owner) ||
+          !Number.isSafeInteger(request.serial) || request.serial <= 0 || typeof request.enabled !== 'boolean' ||
+          !Number.isSafeInteger(request.expiresAt)) fail('invalid-gamepad-lease');
+      const monotonicStart = performance.now(), remaining = request.expiresAt - Date.now();
+      if (!Number.isFinite(monotonicStart) || remaining <= 0 || remaining > 3000) fail('gamepad-lease-expired-or-too-long');
+      const previous = dataField(window, '__ymccLightGamepadLease');
+      let carried = null;
+      if (previous && (typeof previous.dispose !== 'function' || typeof previous.remainingMs !== 'function' || typeof previous.receipt !== 'function'))
+        fail('gamepad-lease-state-unavailable');
+      if (previous) {
+        const live = previous.remainingMs() > 0;
+        if (previous.owner !== request.owner) {
+          if (!request.enabled || live) fail('gamepad-lease-owner-mismatch');
+        } else {
+          if (request.serial < previous.serial) fail('gamepad-lease-stale-serial');
+          if (request.serial === previous.serial) {
+            if (request.enabled !== previous.requestedEnabled ||
+                (request.enabled && (request.expiresAt !== previous.expiresAt || !live))) fail('gamepad-lease-stale-serial');
+            const receipt = previous.receipt();
+            if (request.enabled && !receipt.enabled) {
+              mutated = true;
+              if (!previous.dispose()) fail('gamepad-lease-cleanup-failed');
+              fail('gamepad-lease-expired');
+            }
+            if (!live && !previous.dispose()) { mutated = true; fail('gamepad-lease-cleanup-failed'); }
+            return { ok: true, mutated, stage, ...previous.receipt() };
+          }
+          if (live) {
+            if (!(previous.priorUp instanceof Set) || !(previous.blockedDown instanceof Set)) {
+              mutated = true;
+              previous.dispose();
+              fail('gamepad-lease-state-unavailable');
+            }
+            carried = { priorUp: new Set(previous.priorUp), blockedDown: new Set(previous.blockedDown) };
+          }
+        }
+        mutated = Boolean(previous.enabled || previous.releasing || previous.handle || previous.timer !== null || previous.listening);
+        if (!previous.dispose()) fail('gamepad-lease-cleanup-failed');
+      }
+      const document = window.document, ui = dataField(window, 'SteamUIStore');
+      const manager = dataField(ui, 'm_GamepadNavigationManager');
+      const callbacks = dataField(manager, 'm_rgCatchAllGamepadInput');
+      const settings = window.settingsStore, cm = settings?.m_CMInterface, identity = cm?.steamid, account = request.account;
+      const lease = { owner: request.owner, serial: request.serial, expiresAt: request.expiresAt,
+        requestedEnabled: request.enabled, enabled: false, releasing: false, deadline: monotonicStart + remaining,
+        document, pageHidden: previous?.document === document && previous.pageHidden === true,
+        priorUp: carried?.priorUp || new Set(), blockedDown: carried?.blockedDown || new Set(),
+        timer: null, handle: null, listening: false, wrapper: null, dispatch: null };
+      let setter, originalAction, actionDescriptor, actionOwner, inputSources, gamepadType;
+      const sourceBindings = [];
+      const dispatchKey = (source, controller, button) => `${source}:${controller}:${button}`;
+      lease.remainingMs = () => {
+        try {
+          if (!(lease.enabled || lease.releasing) || lease.pageHidden || window.__ymccLightGamepadLease !== lease ||
+              window.closed || !document || window.document !== document || document.defaultView !== window ||
+              window.settingsStore !== settings || settings.m_CMInterface !== cm || cm.steamid !== identity ||
+              identity.GetAccountID() !== account || dataField(window, 'SteamUIStore') !== ui ||
+              dataField(ui, 'm_GamepadNavigationManager') !== manager || manager.SetCatchAllGamepadInput !== setter ||
+              dataField(manager, 'm_rgCatchAllGamepadInput') !== callbacks || !callbacks.includes(lease.callback) ||
+              manager.OnButtonActionInternal !== lease.wrapper ||
+              dataField(manager, 'm_rgGamepadInputSources') !== inputSources || inputSources.length !== sourceBindings.length ||
+              sourceBindings.some((binding, index) => inputSources[index] !== binding.source ||
+                binding.source.GetSourceType !== binding.getType || binding.getType.call(binding.source) !== binding.type ||
+                dataField(binding.source, 'm_rgControllers') !== binding.controllers)) return 0;
+          const now = performance.now(), wallRemaining = lease.expiresAt - Date.now();
+          return Number.isFinite(now) && Number.isFinite(wallRemaining) ? Math.max(0, Math.min(lease.deadline - now, wallRemaining)) : 0;
+        } catch { return 0; }
+      };
+      lease.receipt = () => {
+        const remainingMs = lease.remainingMs();
+        return { enabled: remainingMs > 0 && lease.enabled, releasing: remainingMs > 0 && lease.releasing,
+          pendingReleaseCount: remainingMs > 0 ? lease.blockedDown.size : 0, serial: lease.serial, remainingMs, scope: 'steam-gamepad-navigation' };
+      };
+      lease.dispose = () => {
+        lease.enabled = false;
+        lease.releasing = false;
+        let clean = true;
+        if (lease.timer !== null) {
+          try { clearTimeout(lease.timer); lease.timer = null; } catch { clean = false; }
+        }
+        if (lease.listening) {
+          try { window.removeEventListener('pagehide', lease.pagehide); lease.listening = false; } catch { clean = false; }
+        }
+        if (lease.handle) {
+          try { lease.handle.Unregister(); lease.handle = null; } catch { clean = false; }
+        }
+        if (Array.isArray(callbacks)) {
+          try {
+            let index;
+            while ((index = callbacks.indexOf(lease.callback)) >= 0) callbacks.splice(index, 1);
+          } catch { clean = false; }
+        }
+        try {
+          if (lease.wrapper && manager.OnButtonActionInternal === lease.wrapper) {
+            if (actionOwner === manager && actionDescriptor) Object.defineProperty(manager, 'OnButtonActionInternal', actionDescriptor);
+            else if (!delete manager.OnButtonActionInternal) clean = false;
+          }
+        } catch { clean = false; }
+        return clean;
+      };
+      lease.callback = (button, down, repeat) => {
+        if (lease.remainingMs() <= 0) { lease.dispose(); return false; }
+        const dispatch = lease.dispatch;
+        return Boolean(dispatch && dispatch.button === button && dispatch.down === down && dispatch.repeat === repeat && dispatch.block);
+      };
+      lease.pagehide = () => { lease.pageHidden = true; lease.dispose(); };
+      window.__ymccLightGamepadLease = lease;
+      mutated = true;
+      if (request.enabled || lease.blockedDown.size > 0) {
+        try {
+          setter = manager?.SetCatchAllGamepadInput;
+          for (let cursor = manager; cursor; cursor = Object.getPrototypeOf(cursor)) {
+            const descriptor = Object.getOwnPropertyDescriptor(cursor, 'OnButtonActionInternal');
+            if (descriptor) { actionDescriptor = descriptor; actionOwner = cursor; break; }
+          }
+          originalAction = manager?.OnButtonActionInternal;
+          inputSources = dataField(manager, 'm_rgGamepadInputSources');
+          if (!document || document.defaultView !== window || lease.pageHidden || window.closed ||
+              typeof window.addEventListener !== 'function' || typeof window.removeEventListener !== 'function' ||
+              !Array.isArray(callbacks) || typeof setter !== 'function' || typeof originalAction !== 'function' ||
+              originalAction.length !== 10 || !actionDescriptor || !('value' in actionDescriptor) || actionDescriptor.writable !== true ||
+              (actionOwner === manager && actionDescriptor.configurable !== true) || !Array.isArray(inputSources) || inputSources.length === 0)
+            fail('gamepad-lease-api-unavailable');
+          const controllersSeen = new Set();
+          for (const source of inputSources) {
+            const getType = source?.GetSourceType, controllers = dataField(source, 'm_rgControllers');
+            if (typeof getType !== 'function') fail('gamepad-lease-source-unavailable');
+            const type = getType.call(source);
+            if (!Number.isSafeInteger(type) || type < 0) fail('gamepad-lease-source-unavailable');
+            sourceBindings.push({ source, getType, type, controllers });
+            if (controllers !== undefined) {
+              let entries;
+              try { entries = [...Map.prototype.entries.call(controllers)]; } catch { fail('gamepad-lease-source-unavailable'); }
+              if (gamepadType !== undefined && gamepadType !== type) fail('gamepad-lease-source-unavailable');
+              gamepadType = type;
+              for (const [controller, record] of entries) {
+                if (!Number.isSafeInteger(controller) || controller < -1 || controllersSeen.has(controller)) fail('gamepad-lease-source-unavailable');
+                controllersSeen.add(controller);
+                const activeButtons = dataField(record, 'activeButtons');
+                if (!activeButtons || typeof activeButtons !== 'object') fail('gamepad-lease-source-unavailable');
+                for (const button of Reflect.ownKeys(activeButtons)) {
+                  const held = dataField(activeButtons, button), numericButton = Number(button);
+                  if (typeof button !== 'string' || !/^[1-9][0-9]*$/.test(button) || !Number.isSafeInteger(numericButton) ||
+                      typeof held !== 'boolean') fail('gamepad-lease-source-unavailable');
+                  if (!carried && held) lease.priorUp.add(dispatchKey(type, controller, numericButton));
+                }
+              }
+            }
+          }
+          if (gamepadType === undefined || sourceBindings.some(binding => binding.type === gamepadType && binding.controllers === undefined))
+            fail('gamepad-lease-source-unavailable');
+          lease.wrapper = function(...dispatchArgs) {
+            if (this !== manager) return originalAction.apply(this, dispatchArgs);
+            if (lease.remainingMs() <= 0) { lease.dispose(); return originalAction.apply(this, dispatchArgs); }
+            const [down, button, source, controller, repeatValue] = dispatchArgs, repeat = repeatValue ?? false;
+            let block = false;
+            if (source === gamepadType) {
+              if (typeof down !== 'boolean' || !Number.isSafeInteger(button) || button <= 0 ||
+                  !Number.isSafeInteger(controller) || controller < -1 || typeof repeat !== 'boolean') {
+                lease.dispose(); return originalAction.apply(this, dispatchArgs);
+              }
+              const key = dispatchKey(source, controller, button), prior = lease.priorUp.has(key), blocked = lease.blockedDown.has(key);
+              if (lease.enabled) {
+                block = true;
+                if (down) {
+                  if (!prior) lease.blockedDown.add(key);
+                } else if (prior) {
+                  block = false;
+                  lease.priorUp.delete(key);
+                } else if (blocked) {
+                  block = true;
+                  lease.blockedDown.delete(key);
+                }
+              } else if (lease.releasing) {
+                if (down) {
+                  block = blocked && repeat;
+                  if (!block) {
+                    if (!repeat) lease.blockedDown.delete(key);
+                    lease.priorUp.add(key);
+                  }
+                } else {
+                  if (blocked) {
+                    block = true;
+                    lease.blockedDown.delete(key);
+                  }
+                  lease.priorUp.delete(key);
+                }
+              }
+            }
+            const parentDispatch = lease.dispatch;
+            lease.dispatch = { down, button, repeat, block };
+            try { return originalAction.apply(this, dispatchArgs); }
+            finally {
+              lease.dispatch = parentDispatch;
+              if (lease.releasing && lease.blockedDown.size === 0) lease.dispose();
+            }
+          };
+          const wrapperDescriptor = { ...actionDescriptor, value: lease.wrapper, writable: true, configurable: true };
+          Object.defineProperty(manager, 'OnButtonActionInternal', wrapperDescriptor);
+          lease.handle = setter.call(manager, lease.callback);
+          if (typeof lease.handle?.Unregister !== 'function' || callbacks.filter(callback => callback === lease.callback).length !== 1)
+            fail('gamepad-lease-registration-failed');
+          lease.listening = true;
+          window.addEventListener('pagehide', lease.pagehide);
+          lease.enabled = request.enabled;
+          lease.releasing = !request.enabled;
+          const delay = lease.remainingMs();
+          if (delay <= 0 || request.expiresAt <= Date.now()) fail('gamepad-lease-expired');
+          lease.timer = setTimeout(() => { lease.timer = null; lease.dispose(); }, delay);
+          if (!Number.isSafeInteger(lease.timer) || lease.timer < 0) fail('gamepad-lease-timer-failed');
+          if (lease.remainingMs() <= 0) fail('gamepad-lease-expired');
+        } catch (error) {
+          if (!lease.dispose()) fail('gamepad-lease-cleanup-failed');
+          throw error;
+        }
+      }
+      const receipt = lease.receipt();
+      if ((request.enabled && !receipt.enabled) || (!request.enabled && lease.blockedDown.size > 0 && !receipt.releasing)) {
+        if (!lease.dispose()) fail('gamepad-lease-cleanup-failed');
+        fail('gamepad-lease-expired');
+      }
+      return { ok: true, mutated, stage, ...receipt };
+    }
     if (request.operation === 'diagnostics.apps.api.read') {
       stage = 'apps-api-surface-read';
       // Read property names and descriptor kinds only. Never evaluate getters or
@@ -1231,7 +1461,13 @@
   } catch (error) {
     // A later account/interactive veto must retain a settled bounded native
     // return for diagnosis. It grants no acknowledgment, replay or acceptance.
-    return { ok: false, reason: error.reason || 'live-api-error', stage, mutated,
+    let leaseFields = {};
+    if (request.operation === 'input.gamepadLease') {
+      leaseFields = { enabled: false, releasing: false, pendingReleaseCount: 0,
+        serial: Number.isSafeInteger(request.serial) && request.serial > 0 ? request.serial : 0, remainingMs: 0, scope: 'steam-gamepad-navigation' };
+      try { leaseFields = window.__ymccLightGamepadLease?.receipt() || leaseFields; } catch {}
+    }
+    return { ok: false, reason: error.reason || 'live-api-error', stage, mutated, ...leaseFields,
       ...(settledNativeReturn ? { nativeReturn: settledNativeReturn } : {}), ...(menuTarget ? { menuTarget, keyDelivered } : {}) };
   } finally {
     if (window.__ymccSteamLiveBusy === token) delete window.__ymccSteamLiveBusy;

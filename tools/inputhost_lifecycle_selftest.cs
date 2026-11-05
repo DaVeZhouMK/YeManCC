@@ -55,8 +55,12 @@ internal static partial class Program
         public string TryAppend(string message,int max)=>message;
     }
     private sealed class CostDiagnostic { public CostDiagnostic(bool enabled,string dir){} public void InvalidateController(){} }
+    // Optional diagnostic no-op only; emits no SDK witness or lifecycle evidence.
+    private sealed class HostSdkFirstWitness { public void BindLifetime(object? controller,object? lifetime){}
+        public string TryAppend(string message,int maxBytes)=>message; }
     private sealed class TargetEvidence
     {
+        public object? Capture()=>null;
         public long BeginAttempt()=>0;public void Failure(long attempt){} public void Created(long attempt,HMController controller){}public void ReleaseAttempt(){}
         public string TryAppend(string message,string command,int max)=>Fixture.CompactAppend&&command=="SUBMIT_FRAME"?message[..^1]+",\"fixtureAppend\":true}":message;
     }
@@ -81,6 +85,7 @@ internal static partial class Program
         private readonly bool _msiNonSdReleaseDiagnosticRequested,_msiCostDeferredRequested;
         private readonly CostDiagnostic? _msiCostDiagnostics;
         private TargetEvidence? _targetCreationLifetime;
+        private HostSdkFirstWitness? _sdkFirstWitness;
         private MsiNonSdReleaseDiagnostic? _msiNonSdReleaseDiagnostic;
         private CommandEnvelope? _msiNonSdReleaseDiagnosticBinding,_releaseTimingBinding;
         private HostReleaseTimingEvidence? _releaseTimingEvidence;

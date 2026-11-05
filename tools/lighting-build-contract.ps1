@@ -1,5 +1,5 @@
 # Normal lighting builds use current sources and separate exact candidate evidence.
-function Get-YmccLightingRuntimeNames { @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightSetter.json','YeManLightDeviceCore.dll') }
+function Get-YmccLightingRuntimeNames { @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightSetter.json','YeManLightDeviceCore.dll','LICENSE.HueSync.txt') }
 function Get-YmccLightingFileHash([string]$Path){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()}
 function Resolve-YmccLightingChild([string]$Root,[string]$Relative){
  $base=[IO.Path]::GetFullPath($Root).TrimEnd('\')
@@ -102,13 +102,13 @@ function Assert-YmccLightingBuildCandidate {
  Need ($signal.status -ceq 'PASS' -and $signal.hardwareIo -eq $false -and $actual.actual -ceq $record.helperSha256 -and $actual.expectedReviewedSha256 -ceq $record.helperSha256 -and $actual.behavior.passed -eq $true -and $actual.behavior.actualSha256 -ceq $record.helperSha256 -and $actual.behavior.checksPassed -ge 177 -and $actual.behavior.mainEntryInvoked -eq $false -and @($actual.behavior.nativeAttempts).Count -eq 0 -and @($actual.behavior.dependencyAttempts).Count -eq 0) 'EXACT_ARTIFACT_CONSUMER'
  Need ($actual.catalogBehavior.status -ceq 'PASS' -and $actual.catalogBehavior.artifactMode -eq $true -and $actual.catalogBehavior.assemblySha256 -ceq $record.helperSha256 -and $actual.catalogBehavior.productionEntryPointInvoked -eq $false -and $actual.catalogBehavior.HCAssemblyLoaded -eq $false -and $actual.catalogBehavior.checks -ge 549 -and @($actual.catalogBehavior.failures).Count -eq 0) 'EXACT_CATALOG_CONSUMER'
  foreach($contract in @('boundHidLightingContract','onexRequestCacheContract','onexLightingContract','msiLightingContract')){Need ($signal.$contract.passed -eq $true) 'TRANSPORT_CONSUMER'}
- $names=@(Get-YmccLightingRuntimeNames);Need (@($record.runtimeFiles).Count -eq 6 -and @($record.runtimeFiles|Group-Object name|Where-Object Count -NE 1).Count -eq 0) 'RUNTIME_SET'
+ $names=@(Get-YmccLightingRuntimeNames);Need (@($record.runtimeFiles).Count -eq $names.Count -and @($record.runtimeFiles|Group-Object name|Where-Object Count -NE 1).Count -eq 0) 'RUNTIME_SET'
  $payload=[IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\');$physical=@(Get-ChildItem -LiteralPath $payload -Recurse -File|ForEach-Object {$_.FullName.Substring($payload.Length+1).Replace('\','/')})
  Need (@($physical|Where-Object {$_ -cnotin ($names+@('YeManLightSetter.pdb'))}).Count -eq 0) 'UNEXPECTED_RUNTIME_FILE'
  foreach($name in $names){$files=@($record.runtimeFiles|Where-Object name -CEQ $name);Need ($files.Count -eq 1) 'RUNTIME_BINDING';$file=Resolve-YmccLightingChild $payload $name;Need ((Get-YmccLightingFileHash $file) -ceq $files[0].sha256) 'RUNTIME_BYTES';$built=Resolve-YmccLightingChild $workspace $files[0].path;Need ((Get-YmccLightingFileHash $built) -ceq $files[0].sha256) 'BUILT_RUNTIME_BYTES'}
  Need (@($record.runtimeFiles|Where-Object {$_.name -ceq 'YeManLightSetter.dll' -and $_.sha256 -ceq $record.helperSha256}).Count -eq 1 -and @($record.runtimeFiles|Where-Object {$_.name -ceq 'YeManLightDeviceCore.dll' -and $_.sha256 -ceq $record.coreSha256}).Count -eq 1) 'HELPER_CORE_BINDING'
  if('YeManLightSetter.pdb' -cin $physical){Need ((Get-YmccLightingFileHash (Join-Path $payload 'YeManLightSetter.pdb')) -ceq $source.pdb.sha256) 'PAYLOAD_PDB_BYTES'}
- return [pscustomobject]@{status='PASS';kind=$record.kind;receiptSha256=(Get-YmccLightingFileHash $receipt);helperSha256=$record.helperSha256;coreSha256=$record.coreSha256;runtimeFiles=6;sourceInputs=@($record.sourceInputs).Count;actualArtifactChecks=$actual.behavior.checksPassed;actualCatalogChecks=$actual.catalogBehavior.checks;hardwareAcceptance=$false}
+ return [pscustomobject]@{status='PASS';kind=$record.kind;receiptSha256=(Get-YmccLightingFileHash $receipt);helperSha256=$record.helperSha256;coreSha256=$record.coreSha256;runtimeFiles=$names.Count;sourceInputs=@($record.sourceInputs).Count;actualArtifactChecks=$actual.behavior.checksPassed;actualCatalogChecks=$actual.catalogBehavior.checks;hardwareAcceptance=$false}
 }
 function Assert-YmccLightingCompiledTestPayload {
  [CmdletBinding()]

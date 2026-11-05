@@ -6,6 +6,7 @@ export interface UiSettings {
   theme: 'blue-black' | 'red-black' | 'cyberpunk';
   dynamicBackgroundEnabled: boolean;
   steamDynamicWallpaperEnabled: boolean;
+  steamWallpaperPauseOnBattery: boolean;
   steamWallpaperBackgroundDownload: boolean;
   steamWallpaperDownloadCpuThreshold: number;
   backgroundOpacity: number;
@@ -27,6 +28,8 @@ const DEFAULTS: UiSettings = {
   dynamicBackgroundEnabled: false,
   // Default ON; a saved OFF remains authoritative across restart and wake.
   steamDynamicWallpaperEnabled: true,
+  // Opt in; missing/older settings keep playback available on battery.
+  steamWallpaperPauseOnBattery: false,
   steamWallpaperBackgroundDownload: true,
   steamWallpaperDownloadCpuThreshold: 15,
   backgroundOpacity: 0.64,
@@ -57,6 +60,7 @@ function normalize(input: Partial<UiSettings>): UiSettings {
     theme,
     dynamicBackgroundEnabled: input.dynamicBackgroundEnabled === true,
     steamDynamicWallpaperEnabled: input.steamDynamicWallpaperEnabled !== false,
+    steamWallpaperPauseOnBattery: input.steamWallpaperPauseOnBattery === true,
     steamWallpaperBackgroundDownload: input.steamWallpaperBackgroundDownload !== false,
     steamWallpaperDownloadCpuThreshold: Number.isFinite(Number(input.steamWallpaperDownloadCpuThreshold)) ? Math.max(5,Math.min(90,Math.round(Number(input.steamWallpaperDownloadCpuThreshold)))) : 15,
     backgroundOpacity: Number.isFinite(opacity) ? Math.min(0.8, Math.max(0.2, Math.round(opacity * 100) / 100)) : DEFAULTS.backgroundOpacity,

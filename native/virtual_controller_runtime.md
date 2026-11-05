@@ -4,6 +4,18 @@
 
 本文件是不可执行的源码旁说明。实际行为以生产函数及 `virtual_start_protection.h` 的 `VC-LIFECYCLE-20261020-R3` 为准。不要增加第二套状态机。
 
+## OneX 普通开启接入（2026-11-05）
+
+软件检查点（此前冻结版本，非本次112441修补验收）：原定向40场景／927断言、forbiddenIo0；原实际日志writer161检查／23来源检查通过。完整原生编译、596项编译来源／20项生成输入、12个OneX核心正文和9组实际托管ON→OFF矩阵已核对；实机单手柄、实际内部端口可识别性、驱动／Steam消费与整包验收仍UNKNOWN。当前回执：G:/YeManCC-Work/Testing/YMCC/Evidence/VC-OneXFamily-20261105/VALIDATION.json。
+
+本次112441／HC对齐检查点：原family-lifecycle --family onex完整47场景／1259断言通过，含15组实际私有SDK-free托管开启→关闭及1组截止负例；本轮完整Native夹具明确使用Od功能编译，默认O2及正常产品构建未改，不据此证明优化后性能／等价或硬件。端口external／unknown原ID实际只改变connector metadata，现按精确选中且自有源执行一次刷新并核新鲜返回；其他根拒绝／未知回执不重放负例保留。独立初始selected=A而journal=B未覆盖，真实过滤／Steam单手柄与OFF实体归还仍待现场。原三份依赖编译FAIL及累计费用保留，不退款；回执为G:/YeManCC-Work/Testing/YMCC/Evidence/VC-OneXFamily-20261105/field-112441/repair-R2/VALIDATION.json。
+
+OneX 子步骤在 `native/virtual_controller_onex_start_runtime.h`，位于原 Start 的 HELLO／隐藏之后、PREPARE 之前，仍使用 R3 原 ticket 和 30 秒绝对截止。能力入口为 `capabilities/HcOneXVirtualControllerCapability.h`：沿用 14 个旧目录具体类，并从已审固定源码登记 X2、X2 Mini Pro 和 OneXPlayer3 的三个 source-only 身份，不冒充 DLL factory 类。型号只给身份，不代替当轮已选且归属明确的 USB 根、实际游戏源和槽位反查。
+
+现场 Apex 已观测到 `045E:028E` 游戏源。112441现场报告connector可外接，而精确源已被选择并有完整隐藏责任；固定HC f2e58468的SetTargetController→Hide(true)并无每层USB口内置前提。本轮VC-ONEX-112441-R2将connector分类仅作诊断，刷新权限来自原请求已选的唯一物理游戏源、精确根／稳定位置、槽位反查和原隐藏责任；不把045E:028E或portKind=1/unknown改称内置。刷新返回后，重新发现同根源、核对当前代次的新鲜标准样本，再精确补隐该返回源。未知派发不重发；查询和补隐不转CLI，connect/write/read共用原截止。未选中／归属不明／换根及其他实际游戏ID保留原通用输出；不遍历刷新外接或上游hub，不因该可选步骤不可用封禁整项功能。共用external-priority分类策略保持原语义。
+
+这段属于正常执行，不使用共用自愈预算，也不扩展 OneX 原生 OFF 屏蔽权限或更改玩家选择。背键、体感继续使用既有能力绑定。源码登记／生成、完整原生夹具、托管 pipe／目标生命周期和实机单手柄观察分别核收；详见 `Testing/YMCC/Evidence/VC-OneXFamily-20261105` 的当前交付，未有实机证据时不宣称外部单手柄通过。
+
 ## 当前验证与交付状态（2026-10-22）
 
 生命周期代码契约仍为 `VC-LIFECYCLE-20261020-R3`；R4～R8 是交付/候选批次，版本号不能混用。唯一任务总记录在工作区 `Docs/Tasks/Gamepad/GP-虚拟手柄生命周期复核与CPU优化边界-20261019.md` 及同名 JSON。
@@ -483,3 +495,35 @@ VC-ROGX-AMPM-20261023-R1 保留真实HID/XUSB识别，分离实体停启权限�
 未知或失败保留责任，不授权第二次补齐/循环cycle。日志input-host-rog-hide-continuation区分write accepted/readback/configurationCompleted，仍不把配置读回称作Steam外部抑制证明。共用最终检查和Stop/Start保底由原R3自愈独立维护；非ROG、已有完整隐藏、OFF归还改善与玩家SD/PS5选择保持。
 
 原controller.msi-late-hide-pending在原19个场景中扩ROG/ROG-X反例；旧FAIL与旧437范围保持。新实际检查数和运行身份以后续独立执行回执为准，不能仅凭本注释计PASS。
+
+## 2026-11-05：OneX 开启后迟到拓扑通知的扫描证据接续
+
+163720 的当前进程 PID3200 有9个唯一终态，其中8成功、req5 Elite 原30秒失败。req5 已完成一次 USB cycle、slot0 重新准入及同根新 HID 子节点登记，随后 `onex-post-refresh-same-source` 失败；重确认时边界为88，稍后 late-hide 的 topology 已为89。旧日志没有保留其后的连续 boundary/sample 谓词，不能把单个候选条件宣布为现场唯一根因，也不能把其他目标的新请求成功称作同请求自动自愈。
+
+`VC-ONEX-FAMILY-BOUNDARY-20261105-R1` 只补原 OneX T1 等待中的活性缺口：源已准入而迟到设备通知使四槽扫描证据过期时，`preTargetSlots!=0` 会使普通首次准入入口不再补扫描，原等待又先要求同代扫描，造成逻辑等待至截止。仍在原 Host/current-ticket/缓存/反向槽/唯一物理源/selected 身份围栏内，向原采样 owner 提交该代的一次 `FullScanOnce`；已有 pending 不覆盖起点，不能直接写 `BoundaryScanEpoch` 或 `BoundaryScanned` 成功。请求后走原释放锁及采样机会，下一轮重新核对完整同代边界、fresh sample 和隐藏准入。
+
+不递增 topology/identity，不重发已可能执行的 cycle，不新建 Host、不续原30秒、不改变 persona 或其他家族。扫描请求不是扫描完成；若原采样 owner 不能给出新证据，仍按原 deadline 唯一失败和原清理义务结束。原事件新增 `boundaryScan` 有界诊断，保留 `freshSameRootSource` / `externalSuppressionVerified`，最多4条请求事件及最终累计；其布尔值不代表外部 Steam 收到输入。原47场景身份和原失败保留，新参数执行以独立回执为准，尚未运行时不得引用旧47/1259代替。证据：`Testing/YMCC/Evidence/VC-OneXFamily-20261105/field-163720`。
+## 2026-11-05：OneX 首次刷新前的同根当前 GAME 子节点接续
+
+180756 当前PID10788已运行 BOUNDARY-R1，SD/Edge成功，Elite请求3和5都在PREPARE前以 refresh-unissued-context-retired 到期。hide resolver对已选实体允许完整同根同VID/PID的新child返回，但不更新已resolved的RawInput selected；journal拿IG_00，selected仍为IG_01。family新增的最终精确selected检查因此可以明确拒绝这个正常同根接续。它也防止不同根B借用A的数值槽，所以不删除该守卫、不用忽略大小写或同槽号替代身份。
+
+VC-ONEX-SELECTED-CHILD-20261105-R1在原Start派发前接续selected：仅旧selected和journal同一个完整USB实例根、同GAME能力及VID/PID时，重读共同resolver折叠前的候选；必须完整、单根、去重后唯一child，与journal/current physical的完整identity、interface和base path吻合，并再取原反向槽证明和Root/location。原sampling/cache/raw三锁重验旧selected、库存代、topology/identity/power、同一ticket/Host/意图/未派发与source mask后，发布完整current identity，继续原final exact MayIssue。锁竞争只沿原等待，不增预算。
+
+共同只读resolver新增可选eligibleChildren输出；未传时保留原返回根列表、首选算法和complete语义。一个折叠后的root不当成唯一child证明。多个活GAME child、不完整inventory、跨root、slot复用、上下文变化不获得发布权限；外来A/B仍继续由原final guard拒绝。新诊断selectedCacheAlignment区别接续前/owned child、完整性、是否实际发布；发布selected不是已刷新USB/目标就绪或Steam消费回执。原30秒、至多一次cycle、未知派发不重放、唯一final和归还义务不变。此为普通开启完善，共用自愈未改。
+
+本段参照与实际代码同交付；新夹具参数和产品编译分别留在field-180756/selected-child-repair-r1，未执行不得借旧47/1259或上一轮编译认定本轮覆盖。旧R2/BOUNDARY日志与原失败全部保留。
+## 微星屏蔽下的事件式手柄模式恢复（2026-11-05）
+
+现有 `input.msiControllerShieldEnabled` 同时授权微星固定手柄用途，不新增开关或后台服务。仅既有微星已知板号、屏蔽开启、非隔离运行时接入；ROG和公共隔离不经过本逻辑。
+
+- 首次屏蔽意图生效、YMCC窗口打开，以及已提交唤醒代次，向原输入生命周期线程提交一次事件。
+- MSI固件的LB＋RB切换组合独立观察原physical-read快照，不依赖YMCC呼出、快捷规则、前台或录制准入。完整按下后等3秒；长按和断连不重复武装，需两个肩键释放后再接受下一次。窗口打开不能提前同次肩键请求的3秒期限。
+- 开启虚拟手柄的原 `inputHostStart()` 完成旧Host清理、冷归还、quarantine、visibility、显式重武装与资源门后，在 `ymStartEnsureRoute("main")` 前仅恢复微星官方手柄策略，实际模式由原Ensure直接一次切入mode2，不增加mode1→mode2的两次重枚举；即使肩键3秒未到，也不提前做模式查询或mode1写入。已有DInput源/目标或未结归还责任时，绝不强发mode1；虚拟模式仍由原DInput采集、HID写入与持久归还owner承担。
+
+原生命周期维护仅以原子pending位提前返回，不增加线程、timer、周期模式查询或设备扫描。肩键边沿仅消费已读取按钮；有事件时才读取官方配置、进行一次有界模式查询或模式写入。原3秒延迟在既有worker下一次调度后执行，忙时允许晚于3秒，不提前；过期/跨电源/退出/关闭屏蔽的旧事件不写。查询已经是XInput则不再写；肩键查询不确定或取消I/O未归还时不猜测写入。有效DInput采集保持，只有失源且当前查询报告mode1/mode4时，本次显式事件可用原mode2原语纠偏一次，不扩原自愈重试预算、不新建目标。HID写入回调只读取原子代次与已持锁区内的事实，禁止在命令slot持锁期间获取配置/Host/source锁。
+
+官方策略只在有效32位视图的两项现有REG_SZ均可识别时借用：`Component\User Scenario/AutoSwitchMode=0`、`OsdEditor/ControlModeUserSet=XInput`。不创建缺键、不写64位视图或临时同名键。窄adapter复用原 `PolicySession` 的写前持久化、原值比较、写后回读与反向条件恢复；文件为PowerControl下 `msi-force-gamepad-policy.json`，PID/出生时间、板号绑定及进程间claim拒绝并行未知owner。用户事件重新发现已知外部改值时，先条件释放保留外部值，再重新借用。关闭屏蔽/真正退出时仅恢复仍等于本次自有目标值的配置；恢复失败保留责任，后续事件/进程可继续，不静默丢弃。
+
+官方两项配置语义依据固定研究包，不代表所有MSI版本或全部固件writer已被证明阻断。模式响应无nonce，按原严格0x10/0x27协议识别并保留未知；配置读回、命令ACK与原生编译不当作游戏实际输入/全机型验收。
+
+本轮证据位于 `Testing/YMCC/Evidence/MsiForceGamepad-20261105`：`final-runtime`执行实际runtime与planner、仅I/O/时钟边界内存替换的24项（含前置不双切模式与不提前肩键期限的反例）；`oem-shield-existing`复用原OEM屏蔽484条断言；原生完整TU冻结来源语法检查与策略事务测试另列原始回执。本轮未修改安装版、真实任务/注册表或实际微星硬件，尚未打包部署。

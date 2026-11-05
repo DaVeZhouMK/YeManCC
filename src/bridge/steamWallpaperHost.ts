@@ -1,3 +1,4 @@
+import {wallpaperPowerBlocked} from './wallpaperPowerPolicy';
 import {invoke,on} from './ipc';
 import {subscribeGameMediaResume} from './gameMediaPreparationPolicy';
 import {SteamWallpaperDelivery} from './steamWallpaperDelivery';
@@ -37,7 +38,7 @@ interface WallpaperHostPorts {
   onResume:(handler:(event:{generation?:number})=>void)=>()=>void;
 }
 export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}){
-  const port:WallpaperHostPorts={now:Date.now,schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),invoke,media:sharedGameMedia,enabled:steamWallpaperEnabled,register:registerDeckyMirrorExtension,appearance:()=>({opacity:getBackgroundOpacity(),blur:getBackgroundBlur()}),inventory:()=>sharedGameMedia.changed('inventory'),readForeground:()=>invoke('gameMedia.steamForeground',{}, {timeoutMs:5000}),onForeground:handler=>typeof window==='undefined'?()=>{}:on('gameMedia.steamForegroundChanged',handler),onResume:handler=>typeof window==='undefined'?()=>{}:subscribeGameMediaResume(handler,on),...overrides};
+  const port:WallpaperHostPorts={now:Date.now,schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),invoke,media:sharedGameMedia,enabled:()=>steamWallpaperEnabled()&&!wallpaperPowerBlocked(),register:registerDeckyMirrorExtension,appearance:()=>({opacity:getBackgroundOpacity(),blur:getBackgroundBlur()}),inventory:()=>sharedGameMedia.changed('inventory'),readForeground:()=>invoke('gameMedia.steamForeground',{}, {timeoutMs:5000}),onForeground:handler=>typeof window==='undefined'?()=>{}:on('gameMedia.steamForegroundChanged',handler),onResume:handler=>typeof window==='undefined'?()=>{}:subscribeGameMediaResume(handler,on),...overrides};
   // Scopes local ordering only; peer/runId continue to own transport identity.
   const stateOwner=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   let peer:MirrorPeer|null=null,ended=false,ready=false,epoch=0,announced:boolean|undefined,lastFrame='',settingsStamp='',resumeGeneration=0,inventoryVisible=false,stateRevision=0;

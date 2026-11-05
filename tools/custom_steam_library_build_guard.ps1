@@ -38,7 +38,7 @@ function Get-CustomSteamLibrarySourceIndex {
   )
   $paths += @(Get-ChildItem -LiteralPath $native -Filter '*.h' -File | ForEach-Object { 'native/custom-steam-library/' + $_.Name })
   if ($Kind -eq 'host') {
-    $paths += @('native/opti_catalog_startup.h','native/webview_process_efficiency.h','native/shared_game_media.h','native/shared_game_media_capacity.h',
+    $paths += @('native/opti_catalog_startup.h','native/webview_process_efficiency.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/power_source_state.h','native/power_source_channel.h',
       'native/shared_game_media_download_queue.h','native/shared_game_media_download_worker.h','native/shared_game_media_download_resources.h',
       'native/shared_game_media_shortcut.h','native/shared_game_media_identity_worker.h','native/shared_game_media_video_request.h',
       'deps/webview2/build/native/include/WebView2.h',

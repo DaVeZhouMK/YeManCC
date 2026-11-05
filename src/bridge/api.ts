@@ -81,6 +81,7 @@ export interface WakePasswordState {
   stage?: string;
   changed?: boolean;
   reactivated?: boolean;
+  reactivationError?: number;
   rollbackOk?: boolean;
   preferenceSaved?: boolean;
 }

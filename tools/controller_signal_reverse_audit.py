@@ -22,7 +22,7 @@ EVENTS = {
     "input-host-frame-reject", "input-idle-window", "input-signal-activity",
     "msi-backkey-frame-link", "msi-backkey-edge", "oem-producer-edge",
     "gpd-back-chord-match", "virtual-pad-backbuttons", "msi-wmi-key", "oem-shortcut-click",
-    "rog-oem-key", "machine-identity", "gamepad-setLed", "gamepad-vibrate",
+    "rog-oem-key", "oem-shortcut-dispatch", "machine-identity", "gamepad-setLed", "gamepad-vibrate",
     "gamepad-vibrate-request", "gpd-back-buttons", "oem-key-catalog-query",
 }
 MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -323,7 +323,8 @@ def signal_analysis(records):
         "repeatedSignalRows", "matchedControlDifferences", "matchedControlUnknownRows",
         "matchedSdkArgumentUnknownRows", "sdkReturnedRows", "sdkThrewRows",
         "hostOutcomeUnknownRows", "selectedPadUnknownRows", "selectedPadDifferenceRows",
-        "nativeSemanticNeutralUnknownRows", "supplementalRequestConflicts", "wireBucketGapCandidates"]})
+        "nativeSemanticNeutralUnknownRows", "supplementalRequestConflicts", "wireBucketGapCandidates",
+        "oemShortcutDispatchRows", "oemShortcutDispatchAcceptedRows", "oemShortcutDispatchRejectedRows"]})
     native, hosts, groups = [], [], [collections.defaultdict(list), collections.defaultdict(list)]
     seen = [set(), set()]
     for record in records:
@@ -577,6 +578,13 @@ def analyze_records(records):
                 summary["msiRearPressEvidenceRows"] += 1
             if event == "gpd-back-chord-match" and row.get("reason") == "press":
                 summary["gpdRearChordPressEvidenceRows"] += 1
+        elif event == "oem-shortcut-dispatch":
+            # Queue admission is distinct from execution and game consumption.
+            summary["oemShortcutDispatchRows"] += 1
+            if row.get("accepted") is True:
+                summary["oemShortcutDispatchAcceptedRows"] += 1
+            elif row.get("accepted") is False:
+                summary["oemShortcutDispatchRejectedRows"] += 1
         if event in ["gamepad-setLed", "gamepad-vibrate", "gamepad-vibrate-request"]:
             summary["manualFeedbackRequestRows"] += 1
     links = []
@@ -671,7 +679,7 @@ def main():
         markdown.append("| " + pathlib.Path(row["archive"]).name.replace("|", r"\|") + " | " + " | ".join(str(ss[k]) for k in ["nativeSignalRows", "hostSignalRows", "exactRequestMatches", "unmatchedNativeSignalRows", "unmatchedLiveHostSignalRows", "internalHostSignalRows", "matchedControlDifferences", "matchedControlUnknownRows"]) + " |")
     for row in results:
         markdown += ["", "- " + pathlib.Path(row["archive"]).name + ": " + row["signalEvidence"]["status"] + "; gaps: " + ", ".join(row["signalEvidence"]["gaps"])]
-    markdown += ["", "新日志只按完整 request tuple、protocolPowerGeneration 与 wire sample/tick 精确关联；source.powerGeneration 不作请求代次。source.pad 是 selected-native-source，不能当 raw DInput。内部 touch/idle/neutral 单列，SDK returned 不证明驱动或游戏消费；无 decoder 的实际编码控件及 Host encoded neutral 均为 UNKNOWN。旧包缺少两侧 witness 时保持 unproven，不推断 observer 漏报或未漏报。", "", "计数是去重后的诊断证据行，不是总提交帧数或独立实体按压次数。未静音 ACK 也可能携带零输入，不能当作按键有效。", "", "逐帧反查目前停在物理端点与样本绑定、设备内部样本年龄、同请求实际编码和外部消费的证据边界。窗口缺口只是复核候选，不直接判丢输入；没有按压/灯光/震动测试请求的项目保持待证。"]
+    markdown += ["", "新日志只按完整 request tuple、protocolPowerGeneration 与 wire sample/tick 精确关联；source.powerGeneration 不作请求代次。source.pad 是 selected-native-source，不能当 raw DInput。内部 touch/idle/neutral 单列，SDK returned 不证明驱动或游戏消费；无 decoder 的实际编码控件及 Host encoded neutral 均为 UNKNOWN。旧包缺少两侧 witness 时保持 unproven，不推断 observer 漏报或未漏报。", "", "OneX 的 oem-shortcut-dispatch 只表示动作队列准入/拒绝，不表示动作已经执行或游戏已经消费。\n\n计数是去重后的诊断证据行，不是总提交帧数或独立实体按压次数。未静音 ACK 也可能携带零输入，不能当作按键有效。", "", "逐帧反查目前停在物理端点与样本绑定、设备内部样本年龄、同请求实际编码和外部消费的证据边界。窗口缺口只是复核候选，不直接判丢输入；没有按压/灯光/震动测试请求的项目保持待证。"]
     (output / "signal-detection.md").write_text("\n".join(markdown) + "\n", encoding="utf-8")
     print(json.dumps({"archives": len(results), "output": str(output.resolve()), "localAckArchives": sum(r["proof"]["localHostAckObserved"] for r in results), "hardwareIo": False, "externalConsumptionProven": False}, ensure_ascii=False))
 

@@ -42,7 +42,7 @@ export function buildManagedFixture(out,options={}){
  const commands=[];
  function run(name,args){const r=spawnSync('dotnet',args,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true,env:{...process.env,DOTNET_CLI_TELEMETRY_OPTOUT:'1',DOTNET_NOLOGO:'1',DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:'true'}});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({name,args,exit:r.status,error:r.error?.message??null});need(!r.error&&r.status===0,name+' failed: '+path.join(out,name+'.log'));return r.stdout;}
  try{
- const names=['InputHost/Program.cs','InputHost/PsEndpointOwnership.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs','InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs','InputHost/HostVirtualSignalEvidence.cs','InputHost/SteamDeckPadReportObservation.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','InputHost/CompactFrameReplyBinding.cs','tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.cs','tools/input_lifecycle_managed_fixture.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs'];
+ const names=['InputHost/Program.cs','InputHost/PsEndpointOwnership.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs','InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs','InputHost/HostVirtualSignalEvidence.cs','InputHost/HostSdkFirstWitness.cs','InputHost/TargetCreationLifetimeEvidence.cs','InputHost/SteamDeckPadReportObservation.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','InputHost/CompactFrameReplyBinding.cs','tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.cs','tools/input_lifecycle_managed_fixture.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs'];
  if(options.psOwnershipSelfTest)names.push('tools/ps_endpoint_ownership_selftest.cs','tools/ps_endpoint_ownership_selftest.mjs');
  const inputs=names.map(relative=>{const p=path.join(repo,relative),bytes=fs.readFileSync(p),snapshot=path.join(out,'input-sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return{path:p,relative,snapshot,sha256:hash(bytes),bytes:bytes.length};});
  const read=relative=>fs.readFileSync(inputs.find(r=>r.relative===relative).snapshot,'utf8').replace(/^\uFEFF/,'');
@@ -53,9 +53,17 @@ export function buildManagedFixture(out,options={}){
  // Compile the real passive signal helper and its current session methods.
  // The state type remains an inert SDK terminal; no diagnostic method is stubbed.
  const signalMembers=['private void ResetVirtualSignalEvidenceSafely(','internal HostVirtualSignalEvidence.Attempt BeginVirtualSignalEvidenceSafely(','internal void CompleteVirtualSignalEvidenceSafely('].map(marker=>({...member(source,marker),marker}));
+ // The base extractor supplies an inert reset. Replace only that exact boundary
+ // before injecting the real signal methods; keep one actual HostSession member.
+ const inheritedSignalReset=member(fake,'private void ResetVirtualSignalEvidenceSafely(');
+ need(inheritedSignalReset.text==='private void ResetVirtualSignalEvidenceSafely(){}','Base virtual-signal reset is not the declared inert boundary');
+ fake=replaceOnce(fake,inheritedSignalReset.text,'');
+ generated.receipt=generated.receipt.filter(row=>row.name!=='ResetVirtualSignalEvidenceSafely');
  const signalField=/^        private HostVirtualSignalEvidence\? _virtualSignalEvidence;/m.exec(source);
  need(signalField,'Missing actual virtual signal observer field');
- fake='using HIDMaestro;\n'+replaceOnce(fake,'private sealed partial class HostSession {','private sealed partial class HostSession {\n'+signalField[0]+'\n'+signalMembers.map(r=>r.text).join('\n'));
+ const sdkWitnessField=/^        private HostSdkFirstWitness\? _sdkFirstWitness;/m.exec(source);
+ need(sdkWitnessField,'Missing actual SDK witness observer field');
+ fake='using HIDMaestro;\n'+replaceOnce(fake,'private sealed partial class HostSession {','private sealed partial class HostSession {\n'+signalField[0]+'\n'+sdkWitnessField[0]+'\n'+signalMembers.map(r=>r.text).join('\n'));
  // Preserve actual production protocol/core constants, while the old asset
  // verification endpoint remains a clearly declared fake.
  const constants=['LockedCoreSha256','LockedCoreMvid'].map(name=>{const matches=[...source.matchAll(new RegExp('private const string '+name+'\\s*=\\s*[^;]+;','g'))];need(matches.length===1,'Constant missing: '+name);return matches[0][0];});
@@ -132,8 +140,33 @@ export function buildManagedFixture(out,options={}){
  let legacy=read('tools/msi_steamdeck_release_fence_1726_selftest.cs');
  legacy=replaceOnce(legacy,'internal static class Fixture','internal static partial class Fixture');
  legacy=replaceOnce(legacy,'private static int Main()','private static int UnusedLegacySelfTestEntry()');
- let compatibility=read('tools/inputhost_lifecycle_selftest.cs');
+ let compatibility='using YeManInputHost.Diagnostics;\n'+read('tools/inputhost_lifecycle_selftest.cs');
  compatibility=replaceOnce(compatibility,'private sealed class Stage','private sealed partial class Stage');
+ // The standalone protocol test has a deliberately inert SDK witness terminal.
+ // This composed fixture compiles the real helper and injects its actual session
+ // field above, so the standalone nested type/field must not shadow or duplicate it.
+ if(compatibility.includes('private sealed class HostSdkFirstWitness')){
+  const inherited=member(compatibility,'private sealed class HostSdkFirstWitness');
+  const expected='private sealed class HostSdkFirstWitness { public void BindLifetime(object? controller,object? lifetime){} public string TryAppend(string message,int maxBytes)=>message; }';
+  need(inherited.text.replace(/\s+/g,'')===expected.replace(/\s+/g,''),'Standalone SDK witness is not the reviewed inert boundary');
+  compatibility=replaceOnce(compatibility,inherited.text,'');
+ }
+ const inheritedSdkFields=[...compatibility.matchAll(/^[ \t]*private HostSdkFirstWitness\? _sdkFirstWitness;\r?$/gm)];
+ need(inheritedSdkFields.length<=1,'Standalone SDK witness field is duplicated');
+ if(inheritedSdkFields.length)compatibility=replaceOnce(compatibility,inheritedSdkFields[0][0],'');
+
+ // Preserve the old compact-reply fault seam while forwarding real target-lifetime
+ // methods. The new SDK witness captures actual fixture-object lifetime evidence.
+ compatibility=replaceOnce(compatibility,member(compatibility,'private sealed class TargetEvidence').text,String.raw`private sealed class TargetEvidence {
+  private readonly TargetCreationLifetimeEvidence? _actual=TargetCreationLifetimeEvidence.TryCreate();
+  public TargetCreationLifetimeEvidence.Attempt BeginAttempt()=>_actual?.BeginAttempt()??default;
+  public void Failure(TargetCreationLifetimeEvidence.Attempt attempt)=>_actual?.Failure(attempt);
+  public void Created(TargetCreationLifetimeEvidence.Attempt attempt,HMController controller)=>_actual?.Created(attempt,controller);
+  public void ReleaseAttempt()=>_actual?.ReleaseAttempt();
+  public TargetCreationLifetimeEvidence.Snapshot? Capture()=>_actual?.Capture();
+  public string TryAppend(string message,string command,int max)=>Fixture.CompactAppend&&command=="SUBMIT_FRAME"?message[..^1]+",\"fixtureAppend\":true}":_actual?.TryAppend(message,command,max)??message;
+ }`);
+
  compatibility=replaceOnce(compatibility,'public void Decode(string a,ulong b,string c,ulong d,ulong e,string f){}','public void Decode(string a,ulong b,string c,ulong d,ulong e,string f){ManagedDecode(a,b,c,d,e,f);}');
  compatibility=replaceOnce(compatibility,'return Fixture.OutputStops;','return ManagedOutputStopResult(Fixture.OutputStops);');
  compatibility=replaceOnce(compatibility,'\"injected-reader-stall\"','\"sdk-output-stop-timeout\"');
@@ -147,9 +180,7 @@ namespace HIDMaestro {
  internal enum HMAxis { X,Y,Z,Rx,Ry,Rz,Vx,Vy }
  internal struct HMGamepadState { public HMButton Buttons; public HMHat Hat; public System.Collections.Generic.Dictionary<HMAxis,float>? Axes; }
 }
-// Explicit USB maintenance memory leaves; no system mutex or reboot state is read.
-namespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending => false; } }
-namespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDisposable { internal static UsbipMaintenanceGate? TryEnter(bool required)=>new(); public void Dispose(){} } }
+// USB maintenance memory leaves come solely from createOfflineHostFixture.
 `,
  'ExtractedHost.cs':fake,'FixtureTerminals.cs':compatibility,'LegacyFixture.cs':legacy,
  'ManagedEntry.cs':managedEntry,
@@ -157,7 +188,7 @@ namespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDi
  'ParentProcessLifetime.cs':read('InputHost/ParentProcessLifetime.cs'),
   'PsEndpointOwnership.cs':read('InputHost/PsEndpointOwnership.cs')
  };
- for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','CompactFrameReplyBinding.cs','HostGameOutputObservation.cs','HostVirtualSignalEvidence.cs','SteamDeckPadReportObservation.cs'])files[name]=read('InputHost/'+name);
+ for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','CompactFrameReplyBinding.cs','HostGameOutputObservation.cs','HostVirtualSignalEvidence.cs','HostSdkFirstWitness.cs','TargetCreationLifetimeEvidence.cs','SteamDeckPadReportObservation.cs'])files[name]=read('InputHost/'+name);
  files['HcControllerGameFeedbackCapabilityCatalog.generated.cs']=read('capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs');
  if(options.psOwnershipSelfTest)files['PsEndpointOwnershipTests.cs']=read('tools/ps_endpoint_ownership_selftest.cs');
  for(const [name,text]of Object.entries(files))fs.writeFileSync(path.join(out,name),text,{flag:'wx'});
@@ -207,4 +238,14 @@ namespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDi
  json(path.join(out,'build-result.json'),output);return output;
  }catch(error){json(path.join(out,'failure.json'),{status:'INCOMPLETE',error:error.message,commands,normalHostMainExecuted:false,realSdkLoaded:false,hardwareIo:false});throw error;}
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===self){try{const args=process.argv.slice(2);need([2,4].includes(args.length)&&args[0]==='--out'&&(args.length===2||args[2]==='--mutation'),'Use --out ABS_NEW_DIRECTORY [--mutation omit-recreate-owned-pin]');console.log(JSON.stringify(buildManagedFixture(args[1],{semanticMutation:args[3]??null}),null,2));}catch(error){console.error(error.stack??error.message);process.exitCode=1;}}
+if(process.argv[1]&&path.resolve(process.argv[1])===self){try{
+ const args=process.argv.slice(2);
+ need([2,4,6].includes(args.length)&&args[0]==='--out','Use --out ABS_NEW_DIRECTORY [--mutation omit-recreate-owned-pin] [--evidence-root ABS_EXISTING_OWNED_ROOT]');
+ const selected=new Map();
+ for(let i=2;i<args.length;i+=2){
+  const key=args[i],value=args[i+1];
+  need(['--mutation','--evidence-root'].includes(key)&&!selected.has(key)&&typeof value==='string'&&value.trim()!==''&&!value.startsWith('--'),'Invalid or repeated managed build option');
+  selected.set(key,value);
+ }
+ console.log(JSON.stringify(buildManagedFixture(args[1],{semanticMutation:selected.get('--mutation')??null,...(selected.has('--evidence-root')?{evidenceRoot:selected.get('--evidence-root')}:{})}),null,2));
+}catch(error){console.error(error.stack??error.message);process.exitCode=1;}}

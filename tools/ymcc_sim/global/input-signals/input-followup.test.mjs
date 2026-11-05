@@ -27,6 +27,13 @@ test('all four OEM log sites use the dispatch identity for each action source',a
  }
  assert.equal(result.native.diagnostic.failures.length,0);
 });
+test('OneX queue diagnostics cover all twelve existing operation IDs without claiming action execution',async()=>{
+ const result=await current(),rows=result.native.diagnostic.inputConsumerStateFeedback.filter(r=>r.input.sourceKind==='onex-queue-trace');
+ assert.equal(rows.length,24);
+ assert.deepEqual([...new Set(rows.map(r=>r.input.keyId))].sort(),['turbo','keyboard','orange','orangekb','orangetb','orangelp','l4','r4','special','home','function','gkey'].sort());
+ assert(rows.every(r=>r.state.familyId==='onexplayer'&&r.state.queueAdmissionOnly===true&&r.state.actionExecutionProven===false));
+ for(const key of new Set(rows.map(r=>r.input.keyId)))assert.deepEqual(rows.filter(r=>r.input.keyId===key).map(r=>r.state.accepted),[true,false]);
+});
 test('click accepted/failed/waiting/unconsumed branches remain distinct',async()=>{
  const result=await current(),rows=result.native.diagnostic.inputConsumerStateFeedback.filter(r=>r.input.sourceKind==='uiAction'&&r.feedback.event==='oem-shortcut-click');
  assert.deepEqual(rows.map(r=>r.state.status),['accepted','failed','waiting-double','unconsumed']);
@@ -49,7 +56,7 @@ test('all keyboard options and admitted defaults are source bound',async()=>{
 test('extracted snippets are byte identical to the current product',()=>{
  const source=fs.readFileSync(path.join(repoRoot,'native/main.cpp'),'utf8'),header=fs.readFileSync(path.join(repoRoot,'native/input_shortcut_toggle.h'),'utf8');
  const spans=extractNativeFollowup(source,{inputShortcutHeader:header});
- assert.equal(spans.length,18);
+ assert.equal(spans.length,19);
  for(const span of spans){
   const owner=span.path?header:source;
   assert(owner.includes(span.text),span.name+' extraction rewrote product text');

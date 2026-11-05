@@ -4,9 +4,11 @@ using System.Text.RegularExpressions;
 namespace YeManBatteryHost;
 internal sealed record Identity(string Manufacturer, string BoardProduct, string SystemProduct, string Processor, string Bios, int EcMajor, int EcMinor)
 {
+    public string? BoardManufacturerRaw {get;init;}
+    public string? BoardProductRaw {get;init;}
     public string Key => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{Manufacturer}|{BoardProduct}|{SystemProduct}|{Processor}|{Bios}|{EcMajor}|{EcMinor}")));
 }
-internal sealed record MatchRule(string[] Manufacturers, string Field, string[] Values, string DeviceClass, string? ProcessorPattern);
+internal sealed record MatchRule(string[] Manufacturers, string Field, string[] Values, string DeviceClass, string? ProcessorPattern, string ManufacturerMatch = "normalized-exact", string ValueMatch = "normalized-exact");
 internal sealed record FirmwarePair(int BoardId,int Firmware);
 internal sealed record FirmwareGate(string Kind,int MajorMin,int MinorMin,string? Bios,int EcMajor,int EcMinor,FirmwarePair[]? Pairs);
 internal sealed record Route(string RouteId,string Family,string Kind,MatchRule Identity,FirmwareGate FirmwareGate,int Min)
@@ -29,7 +31,7 @@ internal static class Policy
         capabilityRoutes=YeManFanBackend.Capabilities.HcBatteryCapabilityCatalog.Bind(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)),Routes,r=>r.RouteId,r=>r.Identity.DeviceClass);
     }
     static string Norm(string value)=>value.Trim().ToUpperInvariant();
-    public static YeManFanBackend.Capabilities.BatteryCapabilityBinding<Route>? ResolveCapability(Identity id)=>capabilityRoutes.Resolve(id.Manufacturer,id.BoardProduct,id.SystemProduct,id.Processor);
+    public static YeManFanBackend.Capabilities.BatteryCapabilityBinding<Route>? ResolveCapability(Identity id)=>capabilityRoutes.Resolve(id.BoardManufacturerRaw??id.Manufacturer,id.BoardProductRaw??id.BoardProduct,id.SystemProduct,id.Processor);
     public static Route? Resolve(Identity id)=>ResolveCapability(id)?.Consumer;
     public static bool FirmwareAllowed(Route route,Identity id)
     {

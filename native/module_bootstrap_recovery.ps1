@@ -64,16 +64,19 @@ function Get-YmccBootstrapInstalledProof([string]$Target){
   return $manifest
 }
 function Assert-YmccBootstrapStagesReadable([string]$Root,[string]$Target){
-  $count=0
+  # Called under the existing maintenance lease, after the incoming manifest
+  # was verified. Previous transaction/rollback data is explicitly disposable.
   foreach($item in @(Get-ChildItem -LiteralPath $Root -Filter 'module-bootstrap-*' -Force -ErrorAction Stop)){
-    if(++$count -gt 64 -or !$item.PSIsContainer -or !(Test-YmccBootstrapStageOwned $item.FullName $Target)){throw 'MODULE_BOOTSTRAP_JOURNAL_UNCONFIRMED'}
+    if($item.Name -cnotmatch '^module-bootstrap-[a-f0-9]{32}$'){continue}
+    Move-YmccLegacyUpdateMetadata $Root $item.Name
   }
-  return $count
+  return 0
 }
 function Test-YmccBootstrapReceiptNeedsTransaction([string]$Target,$Manifest){
-  $receipt=Resolve-YmccDeckyPath $Target '.ymcc-input-managed.json'
+  $receipt=Resolve-YmccUpdateFileTarget $Target '.ymcc-input-managed.json'
   if(!(Test-YmccModuleJournalExists $receipt)){return $false}
-  $previous=Read-YmccModuleJournalJson $receipt;Assert-YmccModuleManifest $previous
+  try{$previous=Read-YmccModuleJournalJson $receipt;Assert-YmccModuleManifest $previous}
+  catch{Move-YmccLegacyUpdateMetadata $Target '.ymcc-input-managed.json';return $false}
   return !(Test-YmccModuleInventoryEqual $Manifest $previous)
 }
 function Write-YmccBootstrapStage([string]$Stage, [string]$Target, [string]$PackageVersion, [string]$PayloadSha256, [ValidateSet('preparing','applying','committed')][string]$Phase, [string[]]$ManagedPaths, [string]$PostCommitModuleSha256='', $TransactionPlan=$null, [switch]$SettlePostCommitCleanup) {
@@ -135,6 +138,12 @@ function Write-YmccBootstrapStage([string]$Stage, [string]$Target, [string]$Pack
 function Test-YmccBootstrapPayloadCurrent([string]$Target, $Manifest) {
   Assert-YmccModuleManifest $Manifest
   foreach($entry in $Manifest.files) {
+    # A bad leaf is repairable by the validated new package. Its ancestors must
+    # still be ordinary directories before the slow repair path is selected.
+    $parent=[IO.Path]::GetDirectoryName($entry.path.Replace('/','\')).Replace('\','/')
+    $safeParent=Resolve-YmccDeckyPath $Target $parent
+    $leaf=Get-Item -LiteralPath (Join-Path $safeParent ([IO.Path]::GetFileName($entry.path))) -Force -ErrorAction SilentlyContinue
+    if($leaf -and ($leaf.PSIsContainer -or ($leaf.Attributes -band [IO.FileAttributes]::ReparsePoint))){return $false}
     $file=Resolve-YmccDeckyPath $Target $entry.path
     if (![IO.File]::Exists($file) -or ([IO.FileInfo]$file).Length -ne $entry.bytes -or (Get-YmccDeckyHash $file) -cne $entry.sha256) { return $false }
   }
@@ -252,10 +261,11 @@ function Remove-YmccBootstrapStages([string]$InstallRoot, [string]$Target, [Vali
 }
 function Sync-YmccBootstrapReceipt([string]$Target, $Manifest) {
   Assert-YmccModuleManifest $Manifest
-  $receipt=Resolve-YmccDeckyPath $Target '.ymcc-input-managed.json';$previous=$null
+  $receipt=Resolve-YmccUpdateFileTarget $Target '.ymcc-input-managed.json';$previous=$null
   if(Test-YmccModuleJournalExists $receipt){
-    $previous=Read-YmccModuleJournalJson $receipt;Assert-YmccModuleManifest $previous
-    if(!(Test-YmccModuleInventoryEqual $Manifest $previous)){throw 'MODULE_RECEIPT_OWNERSHIP_CHANGE_REQUIRES_TRANSACTION'}
+    try{$previous=Read-YmccModuleJournalJson $receipt;Assert-YmccModuleManifest $previous}
+    catch{Move-YmccLegacyUpdateMetadata $Target '.ymcc-input-managed.json';$previous=$null}
+    if($previous -and !(Test-YmccModuleInventoryEqual $Manifest $previous)){Move-YmccLegacyUpdateMetadata $Target '.ymcc-input-managed.json';$previous=$null}
   }
   if(!(Test-YmccBootstrapPayloadCurrent $Target $Manifest)){throw 'MODULE_RECEIPT_PAYLOAD_CHANGED'}
   $merged=Merge-YmccModuleManifestAnnotations $Manifest $previous

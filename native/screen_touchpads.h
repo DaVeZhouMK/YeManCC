@@ -28,7 +28,7 @@ inline constexpr UINT kSummonMessage = WM_APP + 173;
 inline constexpr UINT kNativeOutputResetMessage = WM_APP + 179;
 inline constexpr ULONG_PTR kInjectedTag = 0x594d5450;
 enum class Mode { Deck, DualSense, Wasd, Arrows, Mouse, Off };
-enum class SummonPosition { Off, Left, Right };
+enum class SummonPosition { Off, Left, Right, Same, Opposite };
 enum class StandaloneSpecialMode { Off, SteamDeck, PS5 };
 enum class Layout { Dual, Single };
 enum class TouchFeedbackMode { Off, Minimal, Medium, Strong };
@@ -60,11 +60,17 @@ inline bool parseMode(const std::string& s, bool left, Mode& m) {
     else if (left && s == "arrows") m=Mode::Arrows; else return false;
     return true;
 }
-struct Config { bool masterEnabled=true; bool enabled=false; Mode left=Mode::Deck, right=Mode::Deck; int transparency=80; int mouseSensitivity=100; int scale=100; Layout layout=Layout::Dual; Mode single=Mode::Mouse; TouchFeedbackMode touchFeedback=TouchFeedbackMode::Medium; SummonPosition summonPosition=SummonPosition::Off; StandaloneSpecialMode standaloneSpecialMode=StandaloneSpecialMode::Off; unsigned specialMask=0,rearMask=0; bool summonEnabled=false,specialEnabled=false,rearEnabled=false; int autoHideSeconds=60; };
-inline bool validAutoHideSeconds(long long seconds) noexcept {return seconds==0 || seconds==15 || seconds==30 || seconds==45 || seconds==60 || seconds==120;}
-inline const char* summonPositionName(SummonPosition p) {return p==SummonPosition::Left?"left":p==SummonPosition::Right?"right":"off";}
-inline bool parseSummonPosition(const std::string& s,SummonPosition& p) {if(s=="off")p=SummonPosition::Off;else if(s=="left")p=SummonPosition::Left;else if(s=="right")p=SummonPosition::Right;else return false;return true;}
-inline SummonPosition effectiveSummonPosition(const Config& c) {return c.summonPosition!=SummonPosition::Off?c.summonPosition:c.summonEnabled?SummonPosition::Right:SummonPosition::Off;}
+struct Config { bool masterEnabled=true; bool enabled=false; Mode left=Mode::Deck, right=Mode::Deck; int transparency=80; int mouseSensitivity=100; int scale=100; Layout layout=Layout::Dual; Mode single=Mode::Mouse; TouchFeedbackMode touchFeedback=TouchFeedbackMode::Medium; SummonPosition summonPosition=SummonPosition::Opposite; StandaloneSpecialMode standaloneSpecialMode=StandaloneSpecialMode::Off; unsigned specialMask=0,rearMask=0; bool summonEnabled=true,specialEnabled=false,rearEnabled=false; int autoHideSeconds=15; };
+inline bool validAutoHideSeconds(long long seconds) noexcept {return seconds==0 || seconds==1 || seconds==3 || seconds==5 || seconds==10 || seconds==15 || seconds==30 || seconds==45 || seconds==60 || seconds==120;}
+inline const char* summonPositionName(SummonPosition p) {return p==SummonPosition::Same?"same":p==SummonPosition::Opposite?"opposite":p==SummonPosition::Left?"left":p==SummonPosition::Right?"right":"off";}
+inline bool parseSummonPosition(const std::string& s,SummonPosition& p) {if(s=="off")p=SummonPosition::Off;else if(s=="left")p=SummonPosition::Left;else if(s=="right")p=SummonPosition::Right;else if(s=="same")p=SummonPosition::Same;else if(s=="opposite")p=SummonPosition::Opposite;else return false;return true;}
+inline std::atomic<bool> summonWindowOnLeft{false}; // Selected YMCC side; event-updated, no settings reads on input.
+inline SummonPosition effectiveSummonPosition(const Config& c) {
+    const auto position=c.summonPosition!=SummonPosition::Off?c.summonPosition:c.summonEnabled?SummonPosition::Opposite:SummonPosition::Off;
+    if(position==SummonPosition::Same)return summonWindowOnLeft.load()?SummonPosition::Left:SummonPosition::Right;
+    if(position==SummonPosition::Opposite)return summonWindowOnLeft.load()?SummonPosition::Right:SummonPosition::Left;
+    return position;
+}
 inline unsigned effectiveSpecialMask(const Config& c) {return c.specialMask?c.specialMask:(c.specialEnabled?3u:0u);}
 inline unsigned effectiveRearMask(const Config& c) {return c.rearMask?c.rearMask:(c.rearEnabled?15u:0u);}
 inline const char* standaloneSpecialName(StandaloneSpecialMode mode) {
@@ -98,7 +104,7 @@ inline Json buttonVisibilityState(const Config& cfg);
 inline unsigned buttonSnapshot();
 inline Json configJson(const Config& c) {
     const auto summon=effectiveSummonPosition(c);const unsigned special=effectiveSpecialMask(c),rear=effectiveRearMask(c);
-    return {{"summonPosition",summonPositionName(summon)},{"standaloneSpecialMode",standaloneSpecialName(c.standaloneSpecialMode)},{"specialMask",special},{"rearMask",rear},
+    return {{"summonPosition",summonPositionName(c.summonPosition)},{"summonPlacementVersion",1},{"standaloneSpecialMode",standaloneSpecialName(c.standaloneSpecialMode)},{"specialMask",special},{"rearMask",rear},
         {"summonEnabled",summon!=SummonPosition::Off},{"specialEnabled",special!=0},{"rearEnabled",rear!=0},
         {"masterEnabled",c.masterEnabled},{"enabled",c.enabled},{"leftMode",modeName(c.left)},{"rightMode",modeName(c.right)},
         {"transparency",c.transparency},{"mouseSensitivity",c.mouseSensitivity},{"scale",c.scale},
@@ -118,6 +124,8 @@ inline bool parseConfig(const Json& j, const Config& old, Config& c) {
             else {legacyRear=true;next.rearEnabled=value;}
         } else if(key=="summonPosition") {
             if(!v.is_string() || !parseSummonPosition(v.get<std::string>(),next.summonPosition))return false;hasSummon=true;
+        } else if(key=="summonPlacementVersion") {
+            if(!v.is_number_integer() || v!=1)return false;
         } else if(key=="standaloneSpecialMode") {
             if(!v.is_string() || !parseStandaloneSpecial(v.get<std::string>(),next.standaloneSpecialMode))return false;
         } else if(key=="touchFeedback") {
@@ -142,7 +150,7 @@ inline bool parseConfig(const Json& j, const Config& old, Config& c) {
             else {if(n<50||n>200||n%5!=0)return false;next.scale=(int)n;}
         } else return false;
     }
-    if(!hasSummon && legacySummon){if(next.summonEnabled){if(next.summonPosition==SummonPosition::Off)next.summonPosition=SummonPosition::Right;}else next.summonPosition=SummonPosition::Off;}
+    if(!hasSummon && legacySummon){if(next.summonEnabled){if(next.summonPosition==SummonPosition::Off)next.summonPosition=SummonPosition::Opposite;}else next.summonPosition=SummonPosition::Off;}
     if(!hasSpecial && legacySpecial){if(next.specialEnabled && next.specialMask==0)next.specialMask=3;else if(!next.specialEnabled)next.specialMask=0;}
     if(!hasRear && legacyRear){if(next.rearEnabled && next.rearMask==0)next.rearMask=15;else if(!next.rearEnabled)next.rearMask=0;}
     if(hasSummon)next.summonEnabled=next.summonPosition!=SummonPosition::Off;
@@ -170,7 +178,16 @@ struct ProfileBank {
     explicit ProfileBank(const Json& savedSection=Json::object()) {
         Json section=savedSection;ymcc::controllerPersona::migrateSavedScreenProfiles(section);
         for(int i=0;i<4;i++) slots[i]=profileDefault(i);
-        const auto readSaved=[](const Json& saved,Config& slot) {
+        const auto readSaved=[](const Json& source,Config& slot) {
+            Json saved=source;
+            if(saved.is_object()) {
+                const auto position=saved.find("summonPosition"),version=saved.find("summonPlacementVersion");
+                const bool relative=position!=saved.end()&&(*position=="same"||*position=="opposite");
+                if(!relative&&(version==saved.end()||*version!=1)) {
+                    saved["summonPosition"]="opposite";saved["summonEnabled"]=true;
+                }
+                saved["summonPlacementVersion"]=1;
+            }
             Config seed=slot;
             // Before layouts existed, a saved profile was dual (or disabled).
             // Do not reinterpret old PS5 settings as the new single-pad preset.
@@ -445,7 +462,7 @@ inline int surfaceOutlineTransparency(int surface,int transparency) {
 }
 // All auto-hide state belongs to the HWND owner thread, never BUS snapshot().
 struct AutoHideState {
-    bool hidden=false;unsigned visibleMask=0;int seconds=60;
+    bool hidden=false;unsigned visibleMask=0;int seconds=15;
     std::array<UINT32,2> specialContacts{}; // Physical holds, including foreground-suppressed keys.
     ULONGLONG lastTouch=0;HWND timerWindow=nullptr;UINT_PTR timer=0,serial=0x59540000;
     unsigned long long hides=0,wakes=0;
@@ -1121,7 +1138,7 @@ inline Json state() {
     j["controlTargetEnabled"]=controlTargetEnabled.load();j["buttonVisibility"]=buttonVisibilityState(cfg);
     j["persona"]=profileName(appliedProfile.load());j["steamDeckAvailable"]=available.load();j["ps5Available"]=psAvailable.load();
     j["visible"]=(windows[0] && IsWindowVisible(windows[0])) || (windows[1] && IsWindowVisible(windows[1])) || buttonsVisible();
-    j["autoHidden"]=autoHide.hidden;j["autoHideTimerArmed"]=autoHide.timer!=0;
+    j["windowPlacement"]=summonWindowOnLeft.load()?"left":"right";j["autoHidden"]=autoHide.hidden;j["autoHideTimerArmed"]=autoHide.timer!=0;
     j["autoHideTransitions"]=autoHide.hides;j["autoHideWakeups"]=autoHide.wakes;
     j["inputTeardown"]=inputTeardown;j["exitInputWithdrawalVersion"]=1;j["exitInputRelease"]=exitInputReleaseState();j["nativeMousePassRequested"]=nativeInputCandidateRequested;j["nativeMousePassActive"]=false;j["nativeMousePassCompiled"]=false;
 #ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE

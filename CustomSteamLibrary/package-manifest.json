@@ -74,7 +74,7 @@
     "legacyPaths": [
         "D:\\YeMan\\Steam大屏"
     ],
-    "generatedAt": "2026-11-04T08:36:23.988207+00:00",
+    "generatedAt": "2026-11-04T21:45:49.217356+08:00",
     "sourceBuild": {
         "host": "a2b2b0d570a396b1aeaebaa95d2502a2dd869e8f809be17529491d1d75d14205",
         "worker": "c77d5b01b916ebb2eec700b4cdad7c6130c573edee81b7fdb520641ea3586fcd",
@@ -320,13 +320,13 @@
         },
         {
             "path": "workspace-ui/index.html",
-            "bytes": 20233,
-            "sha256": "f4e71a2ec731da5c2f449180356f20441ef3bf38651d6f5f2963faa2cbd386ad"
+            "bytes": 20237,
+            "sha256": "4e833cc8ce5b29f56428dcdca5f0ca9a92a2b8e9a19b7f3e02ebb8518363b58c"
         },
         {
             "path": "workspace-ui/app.js",
-            "bytes": 296513,
-            "sha256": "826a69a3f1910fa01237d6a0e8f5ae0821db8546a60d81e282713b0e58ca3ca5"
+            "bytes": 298058,
+            "sha256": "e53fc4848fd77460ae45fe51518d5bbecb3d33901a5f828fefac3c7cb5e4b513"
         },
         {
             "path": "workspace-ui/styles.css",

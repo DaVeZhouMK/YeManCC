@@ -10,6 +10,7 @@ import {configureCandidateAdapters} from '../global/candidate-options.mjs';
 import {BUNDLED_AUTHORITY_SOURCES,lockBundledNodeTools} from '../global/bundled-node-tool-authority.mjs';
 import {fingerprintCase,inspectCachedResult,deduplicateCases} from './identity-cache.mjs';
 import {simulationCorePath} from '../global/release-host-environment.mjs';
+import {WIRE_ID,wireDescriptorContract} from '../global/controller-lifecycle-pipe/wire-contract.mjs';
 import {selectReleaseBugs,RELEASE_CANDIDATE_PATH_KEYS} from './release-bugs.mjs';
 import {validateSelectionPolicy} from './selection-policy.mjs';
 import {runWithWallBudget,readBudgetWorker,validateWallBudget,MAX_WALL_BUDGET_MS} from './execution-budget.mjs';
@@ -21,7 +22,11 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
 const pin=file=>({path:path.resolve(file),sha256:sha256File(file)});
 const inside=(root,file)=>{const r=path.relative(root,file);return r===''||(!path.isAbsolute(r)&&r!=='..'&&!r.startsWith('..'+path.sep));};
-const write=(file,value)=>fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');
+const write=(file,value)=>{
+ const data=JSON.stringify(value,null,2)+'\n',fd=fs.openSync(file,'wx');
+ try{fs.writeFileSync(fd,data);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+};
+export {write as writeFreshJson};
 export function parseOptions(args){
  const o={mode:'plan',tier:'minimal',profile:'desktop',profileExplicit:false,modules:[],tests:[],fullAcceptance:false,rerun:false};
  const aliases={'complete-host-contract':'completeHostContract','bug-plan':'bugPlan','budget-ms':'budgetMs','out-dir':'outDir','payload-root':'payloadRoot','runtime-root':'runtimeRoot','shared-runtime-root':'sharedRuntimeRoot','lighting-payload-root':'lightingPayloadRoot','expected-helper-sha256':'expectedHelperSha256','hc-profile':'hcProfile','hc-version':'hcVersion','legacy-host-root':'legacyHostRoot','fan-tool-load-plan':'fanToolLoadPlan','fan-tool-load-plan-sha256':'fanToolLoadPlanSha256'};
@@ -65,6 +70,8 @@ export async function selectCases(o,repoRoot=REPO){
  for(const m of o.modules){const c=CONFIG.modules[m];wanted.push(...(o.tier==='minimal'?c.minimum:known.filter(a=>(c.domains??[m]).includes(a.domain)).map(a=>a.id)));}
  if(o.mode==='full'&&!wanted.length)wanted.push(...known.map(a=>a.id));
  const unknown=wanted.filter(id=>!known.some(a=>a.id===id));if(unknown.length)throw Error('UNKNOWN_TEST:'+unknown.join(','));
+ const excludedExplicit=o.tests.filter(id=>!known.find(a=>a.id===id).profiles.includes(o.profile));
+ if(excludedExplicit.length)throw Error('PROFILE_EXCLUDES_EXPLICIT_TEST:'+excludedExplicit.join(','));
  if(bugSelection){
   const excluded=wanted.filter(id=>!known.find(a=>a.id===id)?.profiles.includes(o.profile));
   if(excluded.length)throw Error('BUG_PLAN_PROFILE_EXCLUDES_REQUIRED_TEST:'+excluded.join(','));
@@ -75,8 +82,10 @@ export async function selectCases(o,repoRoot=REPO){
  const core=materialize&&selectedCore.length?[...getAdapters(repoRoot,{selectedIds:selectedCore}),...getSleepAdapters(repoRoot,{selectedIds:selectedCore})]:catalog;
  // Planning never materializes legacy factories/tool graphs. Explicit replay may.
  const deferExtra=o.mode!=='run'||!o.rerun;
- const deferred=deferExtra?selectedExtra.map(id=>extraRows.find(a=>a.id===id)).filter(a=>a.profiles.includes(o.profile)):[];
- const extra=selectedExtra.length&&!deferExtra?(await import('../global/extra-adapters.mjs')).getExtraAdapters(repoRoot,{selectedIds:selectedExtra}):[];
+ const directWire=o.mode==='run'&&selectedExtra.includes(WIRE_ID);
+  const generalExtra=selectedExtra.filter(id=>!directWire||id!==WIRE_ID);
+  const deferred=deferExtra?generalExtra.map(id=>extraRows.find(a=>a.id===id)).filter(a=>a.profiles.includes(o.profile)):[];
+ const extra=[...(generalExtra.length&&!deferExtra?(await import('../global/extra-adapters.mjs')).getExtraAdapters(repoRoot,{selectedIds:generalExtra}):[]),...(directWire?(await import('../global/controller-lifecycle-pipe/adapter.mjs')).getControllerLifecyclePipeAdapters():[])];
  const byId=new Map([...core,...extra].map(a=>[a.id,a]));
  const selected=wanted.map(id=>byId.get(id)).filter(a=>a&&a.profiles.includes(o.profile));
  if(bugSelection){
@@ -102,18 +111,28 @@ function resolutionMembership(paths){
  return [...dirs].filter(d=>inside(REPO,d)).sort().map(d=>({path:path.relative(REPO,d),entries:fs.readdirSync(d,{withFileTypes:true}).map(e=>({name:e.name,type:e.isSymbolicLink()?'link':e.isDirectory()?'dir':'file'})).sort((a,b)=>a.name.localeCompare(b.name))}));
 }
 function environmentIdentity(){return hash(JSON.stringify(Object.entries(process.env).filter(([k])=>/^(PATH|NODE_OPTIONS|ESBUILD_BINARY_PATH|YMCC|YEMAN)/i.test(k)).sort()));}
-function identityFor(a,previous,o,authority){
+function identityFor(a,previous,o,authority,runDir){
+ let wire=null,wireError=null;
+ if(a.id===WIRE_ID)try{wire=wireDescriptorContract(a,path.join(runDir,'cases',a.id,'lifecycle-pipe'),REPO);}catch(error){wireError=error.message;}
  const typed=a.kind==='typescript';const pure=a.kind==='node'&&nodeReview(a);
  const tools=typed?(authority?.tools??[]):[];
- return fingerprintCase({repoRoot:REPO,adapter:a,toolIdentities:tools,options:{closureComplete:(typed&&Boolean(authority))||pure,toolClosureComplete:(typed&&Boolean(authority))||pure,
+ return fingerprintCase({repoRoot:REPO,adapter:a,toolIdentities:tools,options:{closureComplete:(typed&&Boolean(authority))||pure||Boolean(wire),toolClosureComplete:(typed&&Boolean(authority))||pure||Boolean(wire),wireFixedContract:wire,wireContractError:wireError,
   resolvedInputs:[...implementation,...(typed?[...BUNDLED_AUTHORITY_SOURCES,'package.json','pnpm-lock.yaml','tsconfig.json','tsconfig.node.json']:[]),...(PURE_NODE_INPUTS[a.id]??[]),...(previous?.dependencyPaths??[])],
   resolutionMembership:typed?resolutionMembership([a.path,...a.evidenceInputs,...(previous?.dependencyPaths??[])]):[],
   profile:o.profile,payloadRoot:o.payloadRoot??null,environmentIdentity:environmentIdentity(),execArgv:process.execArgv,
-  closureReview:typed?'registered-reviewed-graph-plus-actual-bundle-inputs':pure?'pinned-pure-node-contract':'legacy-dynamic-closure-not-certified'}});
+  closureReview:typed?'registered-reviewed-graph-plus-actual-bundle-inputs':pure?'pinned-pure-node-contract':wire?'fixed-direct-native-wire-tool-environment-and-path-contract':'legacy-dynamic-closure-not-certified'}});
 }
 function evidencePins(result,a){
  const dir=result.evidenceDir;const files=[path.join(dir,'result.json'),path.join(dir,'stdout.log'),path.join(dir,'stderr.log'),...(a.resultFiles??[]).map(f=>path.join(dir,f))];
  for(const field of ['structuredEvidence','bundledOutputs','candidateArtifacts'])for(const r of result[field]??[])files.push(path.resolve(REPO,r.path));
+ if(a.cacheOutputManifest&&fs.existsSync(path.resolve(dir,a.cacheOutputManifest))){
+  const manifestFile=path.resolve(dir,a.cacheOutputManifest);
+  if(!inside(dir,manifestFile))throw Error('CACHE_OUTPUT_MANIFEST_OUTSIDE_CASE');
+  const manifest=read(manifestFile);
+  if(!Array.isArray(manifest.sourceHashes)||manifest.sourceHashes.length>10000)throw Error('CACHE_OUTPUT_GRAPH_INVALID');
+  for(const row of manifest.sourceHashes){const file=path.resolve(REPO,row.path);if(inside(dir,file)){if(sha256File(file)!==row.sha256)throw Error('CACHE_NESTED_OUTPUT_CHANGED:'+file);files.push(file);}}
+ }
+ if(a.cacheOutputManifest&&result.status==='PASS'&&!fs.existsSync(path.resolve(dir,a.cacheOutputManifest)))throw Error('CACHE_PASS_OUTPUT_MANIFEST_MISSING');
  if(result.bundle?.path)files.push(result.bundle.path);
  return [...new Set(files)].filter(f=>fs.existsSync(f)&&fs.statSync(f).isFile()).map(pin);
 }
@@ -140,7 +159,7 @@ async function executePlan(args=process.argv.slice(2),context){
  if(!selection.adapters.length&&!selection.deferred.length)throw Error('EMPTY_PROFILE_SELECTION');const selectionMs=performance.now()-selectionStart;
  const hasTyped=selection.adapters.some(a=>a.kind==='typescript');let authority=null,toolError=null;
  const identityStart=performance.now();if(hasTyped)try{authority=lockBundledNodeTools(REPO);}catch(e){toolError=String(e.message);}
- const plan=[];for(const a of selection.adapters){const file=cacheFile(a),prior=cached(file);const identity=identityFor(a,prior,o,authority);const inspection=inspectCachedResult({identity,cacheEntry:prior});
+ const plan=[];for(const a of selection.adapters){const file=cacheFile(a),prior=cached(file);const identity=identityFor(a,prior,o,authority,runDir);const inspection=inspectCachedResult({identity,cacheEntry:prior});
   plan.push({id:a.id,domain:a.domain,scope:a.scope,source:a.path,timeoutMs:a.timeoutMs,cacheable:identity.cacheable,reasons:inspection.reasons,decision:o.mode==='full'||o.rerun?'RUN_EXPLICIT':inspection.reusable?inspection.status:'RUN_IF_REQUESTED',identity:identity.identity});}
  for(const a of selection.deferred)plan.push({id:a.id,domain:a.domain,scope:null,source:null,decision:o.mode==='full'?'RUN_EXPLICIT':'NOT_RUN_UNPROVEN_CLOSURE',registrationOnly:true,reasons:[o.mode==='full'?'Full delegates this registered ID to global; closure materialization and execution verdict remain unverified':'Legacy descriptor and tool preparation deferred; use explicit single-case Rerun or full acceptance'],executedThisRun:false});
  const identityMs=performance.now()-identityStart;
@@ -159,13 +178,13 @@ async function executePlan(args=process.argv.slice(2),context){
   try{lock=fs.openSync(file+'.lock','wx');fs.writeFileSync(lock,JSON.stringify({pid:process.pid,at:new Date().toISOString(),id:a.id}));}
   catch(e){rows.push({id:a.id,status:'NOT_RUN_BUSY',reason:e.code,executedThisRun:false,actualPassedThisRun:false});continue;}
   try{
-   const prior=cached(file);let identity=identityFor(a,prior,o,authority);const inspection=inspectCachedResult({identity,cacheEntry:prior});
+   const prior=cached(file);let identity=identityFor(a,prior,o,authority,runDir);const inspection=inspectCachedResult({identity,cacheEntry:prior});
    if(inspection.reusable&&!o.rerun){rows.push({id:a.id,status:inspection.status,previousStatus:inspection.previousStatus,reference:prior.result,executedThisRun:false,actualPassedThisRun:false,durationMs:0});continue;}
    if(!identity.cacheable&&!o.rerun){rows.push({id:a.id,status:'NOT_RUN_UNPROVEN_CLOSURE',reason:identity.reasons,executedThisRun:false,actualPassedThisRun:false});continue;}
    const t=performance.now();const result=await executeAdapter(a,{repoRoot:REPO,runDir,powershell:o.powershell??'pwsh.exe',payloadRoot:o.payloadRoot,remainingMs:context?.remainingMs});
    const row={id:a.id,status:result.status,attemptedThisRun:true,executedThisRun:Number.isInteger(result.pid),actualPassedThisRun:result.status==='PASS'&&Number.isInteger(result.pid),durationMs:performance.now()-t,reference:pin(path.join(result.evidenceDir,'result.json'))};rows.push(row);
    const dependencyPaths=(result.dependencyInputs??[]).map(r=>r.path);
-   const after=identityFor(a,{dependencyPaths},o,authority);
+   const after=identityFor(a,{dependencyPaths},o,authority,runDir);
    // Source/tool drift in the original result remains a failure and is not reusable.
    const entry={schemaVersion:1,identity:after.identity,result:row.reference,evidencePins:evidencePins(result,a),dependencyPaths,recordedAt:new Date().toISOString()};
    const currentPins=new Map([...after.manifest.inputs,...after.manifest.tools].map(r=>[r.role+'|'+r.path,r.sha256]));

@@ -18,10 +18,11 @@ from ai_log_reader import iter_log_members, canonical_name
 NATIVE_DETAIL = {
     'rog.hid-discovery', 'input-capture-bus-rate-sample', 'sleep-device-tree-sample',
     'gamepad-xinput-input', 'gamepad-ui-input-emitted', 'system-xinput-heartbeat',
+    'onex-back-buttons', 'onex-oem-input-edge', 'rog-oem-key', 'rog-oem-key-unknown',
     'input-idle-window', 'input-capture-tick-cost', 'input-capture-ui-cost',
 }
 LANES = {
-    'app.log': 'app-low', 'native-lifecycle.log': 'native-low',
+    'model-adaptation.log': 'adaptation-low', 'virtual-adaptation.log': 'virtual-adaptation-bounded', 'app.log': 'app-low', 'native-lifecycle.log': 'native-low',
     'native-detail.log': 'native-detail', 'fan-lifecycle.log': 'fan-low',
     'fan-api.log': 'fan-detail', 'virtual-gamepad.log': 'gamepad-detail',
     'gyro-motion.log': 'gyro-detail', 'input-capture.jsonl': 'input-detail',
@@ -254,10 +255,11 @@ def repeated_guard_successes(records, filename="native-lifecycle.log"):
 
 
 def repeated_frame_observations(records, filename='native-lifecycle.log'):
-    """Legacy v1 signature reconstructed from the emitter, per native PID.
+    """Known v1/v2 context signature reconstructed per native PID.
 
     Excludes rolling frame/timing counters. Unknown or incomplete signatures are
-    not evidence of a repeat. v2 snapshotReason is an explicit producer receipt.
+    not evidence of a repeat. Neutral/nonneutral activity is not a lifecycle
+    transition, including v2 rows whose producer called it state-change.
     """
     previous, boot, repeats = {}, {}, []
     for line, row in records:
@@ -285,10 +287,9 @@ def repeated_frame_observations(records, filename='native-lifecycle.log'):
             continue
         signature = (row['hostSubmission'], *host,
                      *(source[k] for k in ('inputSource', 'powerGeneration', 'topologyGeneration',
-                         'primarySlot', 'admittedMask', 'live', 'readContextStable')),
-                     row['semanticNeutral'])
+                         'primarySlot', 'admittedMask', 'live', 'readContextStable')))
         key = (process, boot.get(process), row['powerGeneration'])
-        if row.get('formatVersion') == 1 and previous.get(key) == signature:
+        if row.get('formatVersion') in (1, 2) and previous.get(key) == signature:
             repeats.append((line, row))
         previous[key] = signature
     return repeats
@@ -380,11 +381,14 @@ def audit_zip(path, policy):
             lane = 'observer-detail' if re.fullmatch(r'msi-controller-visibility(?:-wake-\d+)?\.log', base) else LANES.get(base, 'unclassified')
             entry = {'file': name, 'lane': lane, 'bytes': len(data), 'rotation': base != name, **member_metadata}
             hc_text = bool(re.fullmatch(r'yeman-fan-host[0-9]{8}\.log', base))
-            if base in ('app.log', 'speedhack.log') or hc_text:
+            setup_text = base == 'gamepad-driver-setup.json.hidhide.log'
+            if base in ('app.log', 'speedhack.log') or hc_text or setup_text:
                 lines = data.decode('utf-8-sig', errors='replace').splitlines()
                 hits = [(i, line) for i, line in enumerate(lines, 1) if base == 'app.log' and 'rog.hid-discovery' in line]
                 if hc_text:
                     entry['lane'] = 'hc-text'
+                if setup_text:
+                    entry['lane'] = 'external-installer-text'
                 entry.update({'format': 'plain-text', 'lineCount': len(lines), 'rogDiscoveryRows': len(hits),
                               'processIdentity': 'not-recorded; never attributed to manifest PID'})
                 if len(hits) > 1:
@@ -414,7 +418,7 @@ def audit_zip(path, policy):
             for line, row in rows:
                 event = event_name(row)
                 reason = None
-                if event in NATIVE_DETAIL:
+                if event in NATIVE_DETAIL or (event == 'oem-producer-edge' and row.get('status') == 'queued' and row.get('reason') == 'state-transition') or (event == 'msi-wmi-key' and row.get('reason') == 'queued' and row.get('accepted') is True and row.get('posted') is True):
                     reason = 'known-detail-in-native-low'
                 elif event == 'input-host-command-result' and row.get('command') == 'SUBMIT_FRAME' and row.get('ok') is True:
                     reason = 'successful-frame-in-native-low'

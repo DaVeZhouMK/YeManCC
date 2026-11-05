@@ -1,266 +1,97 @@
 {
-    "schemaVersion":  1,
-    "status":  "CURRENT_MAINLINE_SOURCE_BOUND_CANDIDATE_ADOPTED_NOT_INSTALLED",
-    "builtAtUtc":  "2026-11-03T17:58:26.266736+00:00",
-    "helperSha256":  "c39dfe4b1dbb3ef44162f4462d45fe4de580201df8f786aaf83caf0e3ba1718f",
-    "pythonVersion":  "3.13.14",
-    "pyinstallerVersion":  "6.13.0",
-    "source":  {
-                   "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.py",
-                   "bytes":  237663,
-                   "sha256":  "3ec527ed0e8afdfbe769eada8db315a34815311ac202b36099c64a4c9d467708"
-               },
-    "recipe":  {
-                   "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec",
-                   "bytes":  1018,
-                   "sha256":  "00a502b154896f6f1fc4848f3ff0ee881da66f715107d30da3f2e1539f087e43"
-               },
-    "compiler":  {
-                     "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\UXTU-TdpBuild-20261031\\python313\\tools\\python.exe",
-                     "bytes":  105696,
-                     "sha256":  "ef8f51028ac5329641985112f8efb1c2d4c47c86b8011ddf7e6fae21e2b4e5a1"
-                 },
-    "command":  [
-                    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\UXTU-TdpBuild-20261031\\python313\\tools\\python.exe",
-                    "-m",
-                    "PyInstaller",
-                    "--noconfirm",
-                    "--clean",
-                    "--distpath",
-                    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist",
-                    "--workpath",
-                    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\work",
-                    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\source\\YeManTdpCtl.spec"
-                ],
-    "buildLog":  {
-                     "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ROG-CpuVoltageOffset-20261103\\Z2E-CapabilityAudit\\ConsumptionCompletion-20261104\\candidate-build.stderr.log",
-                     "bytes":  5092,
-                     "sha256":  "a0b3d43533594a81c4d6590a54ded91a1797bb8ac5df4ce0c52888e1cef97b0a"
-                 },
-    "analysisToc":  {
-                        "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\work\\YeManTdpCtl\\Analysis-00.toc",
-                        "bytes":  31350,
-                        "sha256":  "e3aff61c0d48aeabd1b83103c5b9877cf4419c445ab6d472f15bd57c95fc2fc9"
-                    },
-    "sourceBinding":  {
-                          "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ROG-CpuVoltageOffset-20261103\\Z2E-CapabilityAudit\\ConsumptionCompletion-20261104\\CANDIDATE-BUILD-RECEIPT.json",
-                          "bytes":  22237,
-                          "sha256":  "c10e9317922f1d244ea209dce41669e6a857d3bc89370cc38f9da33f25a05b3e"
-                      },
-    "files":  [
-                  {
-                      "name":  "YeManTdpCtl.exe",
-                      "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist\\YeManTdpCtl\\YeManTdpCtl.exe",
-                      "bytes":  1918406,
-                      "sha256":  "c39dfe4b1dbb3ef44162f4462d45fe4de580201df8f786aaf83caf0e3ba1718f"
-                  },
-                  {
-                      "name":  "_internal/base_library.zip",
-                      "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist\\YeManTdpCtl\\_internal\\base_library.zip",
-                      "bytes":  1409329,
-                      "sha256":  "fe574fde1bcd8b85449164b7cc5dd6d848ff321e5a701a4f14c4230bb6fc241c"
-                  },
-                  {
-                      "name":  "_internal/python313.dll",
-                      "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist\\YeManTdpCtl\\_internal\\python313.dll",
-                      "bytes":  6132448,
-                      "sha256":  "3a7a6170ea840bf2a2a76d05b687b946fcdc8d0cfedfe159012b38f1e8959a7c"
-                  }
-              ],
-    "canonicalSourceRelativePath":  "PowerControl/pawnio/YeManTdpCtl.py",
-    "canonicalSourceSha256":  "3ec527ed0e8afdfbe769eada8db315a34815311ac202b36099c64a4c9d467708",
-    "changed":  [
-                    {
-                        "releasePath":  "pawnio/YeManTdpCtl.exe",
-                        "relative":  "YeManTdpCtl.exe",
-                        "beforeSha256":  "cb213d3ccb5b929e044fc8d4418c79275840c2c302df18e710265ac345e73f70",
-                        "afterSha256":  "c39dfe4b1dbb3ef44162f4462d45fe4de580201df8f786aaf83caf0e3ba1718f",
-                        "bytes":  1918406,
-                        "lockOldSha256":  "cb213d3ccb5b929e044fc8d4418c79275840c2c302df18e710265ac345e73f70"
-                    },
-                    {
-                        "releasePath":  "pawnio/_internal/base_library.zip",
-                        "relative":  "_internal/base_library.zip",
-                        "beforeSha256":  "d8ed5754b79ac5a6d3aa846c891b070ca8842c08826298a674aa3f9f92ad1d19",
-                        "afterSha256":  "fe574fde1bcd8b85449164b7cc5dd6d848ff321e5a701a4f14c4230bb6fc241c",
-                        "bytes":  1409329,
-                        "lockOldSha256":  "d8ed5754b79ac5a6d3aa846c891b070ca8842c08826298a674aa3f9f92ad1d19"
-                    }
-                ],
-    "moduleComparison":  [
-                             {
-                                 "name":  "RyzenSMU.bin",
-                                 "source":  {
-                                                "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\_internal\\RyzenSMU.bin",
-                                                "bytes":  39652,
-                                                "sha256":  "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0"
-                                            },
-                                 "candidate":  {
-                                                   "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist\\YeManTdpCtl\\_internal\\RyzenSMU.bin",
-                                                   "bytes":  39652,
-                                                   "sha256":  "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0"
-                                               },
-                                 "sameBytes":  true
-                             },
-                             {
-                                 "name":  "AMDFamily17.bin",
-                                 "source":  {
-                                                "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\_internal\\AMDFamily17.bin",
-                                                "bytes":  9300,
-                                                "sha256":  "099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50"
-                                            },
-                                 "candidate":  {
-                                                   "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist\\YeManTdpCtl\\_internal\\AMDFamily17.bin",
-                                                   "bytes":  9300,
-                                                   "sha256":  "099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50"
-                                               },
-                                 "sameBytes":  true
-                             },
-                             {
-                                 "name":  "IntelMSR.bin",
-                                 "source":  {
-                                                "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\_internal\\IntelMSR.bin",
-                                                "bytes":  5292,
-                                                "sha256":  "5bfda87500160076158befc77300f81a388d72b11df2c794a3939ebe66777098"
-                                            },
-                                 "candidate":  {
-                                                   "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\Z2E-UV-Consumption-20261104\\dist\\YeManTdpCtl\\_internal\\IntelMSR.bin",
-                                                   "bytes":  5292,
-                                                   "sha256":  "5bfda87500160076158befc77300f81a388d72b11df2c794a3939ebe66777098"
-                                               },
-                                 "sameBytes":  true
-                             }
-                         ],
-    "driverOrModuleBytesChanged":  false,
-    "sourceToBuiltCandidateBound":  true,
-    "mainlineRuntimeOrAssetLockPromoted":  true,
-    "helperExecuted":  false,
-    "hardwareAcceptance":  false,
-    "fixtureValidation":  "NOT_RUN",
-    "adoptedAtUtc":  "2026-11-03T18:49:36.0698495+00:00",
-    "adoptedBy":  "HC-CODEX-061-UV-ORDINARY-EXPORT bounded worker",
-    "candidateOrigin":  {
-                            "manifest":  {
-                                             "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ROG-CpuVoltageOffset-20261103\\Z2E-CapabilityAudit\\ConsumptionCompletion-20261104\\CANDIDATE-RUNTIME-MANIFEST.json",
-                                             "bytes":  6379,
-                                             "sha256":  "a3024b207e0173fd23f32d53dbfb72934e75b77a7173a270105e75852173d8fa"
-                                         },
-                            "buildReceipt":  {
-                                                 "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ROG-CpuVoltageOffset-20261103\\Z2E-CapabilityAudit\\ConsumptionCompletion-20261104\\CANDIDATE-BUILD-RECEIPT.json",
-                                                 "bytes":  22237,
-                                                 "sha256":  "c10e9317922f1d244ea209dce41669e6a857d3bc89370cc38f9da33f25a05b3e"
-                                             },
-                            "originalStatus":  "CANDIDATE_SOURCE_BOUND_NOT_PROMOTED_OR_INSTALLED",
-                            "originalMainlineRuntimeOrAssetLockPromoted":  false,
-                            "currentMainlineSourceAdopted":  true,
-                            "installed":  false
-                        },
-    "previousRuntimeManifest":  {
-                                    "identity":  {
-                                                     "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\tdp-runtime-manifest.json",
-                                                     "bytes":  4660,
-                                                     "sha256":  "d29bd090d287409e73e644bcf5624775427a489ef87b510143f717637152cd1c"
-                                                 },
-                                    "archivedPath":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-024813-mainline-quick-test-package\\adoption-before\\tdp-runtime-manifest.json",
-                                    "manifest":  {
-                                                     "schemaVersion":  1,
-                                                     "status":  "CURRENT_MAINLINE_SOURCE_REBUILT_NOT_INSTALLED",
-                                                     "builtAtUtc":  "2026-11-03T16:44:49.2692562Z",
-                                                     "helperSha256":  "cb213d3ccb5b929e044fc8d4418c79275840c2c302df18e710265ac345e73f70",
-                                                     "pythonVersion":  "3.13.14",
-                                                     "pyinstallerVersion":  "6.13.0",
-                                                     "source":  {
-                                                                    "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.py",
-                                                                    "sha256":  "20d22f3f73d3b55f9b69dfec4edee4695c4ccadb512c161c5e16cb4e24ea5a73",
-                                                                    "bytes":  235371
-                                                                },
-                                                     "recipe":  {
-                                                                    "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec",
-                                                                    "sha256":  "00a502b154896f6f1fc4848f3ff0ee881da66f715107d30da3f2e1539f087e43",
-                                                                    "bytes":  1018
-                                                                },
-                                                     "compiler":  {
-                                                                      "path":  "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\UXTU-TdpBuild-20261031\\python313\\tools\\python.exe",
-                                                                      "sha256":  "ef8f51028ac5329641985112f8efb1c2d4c47c86b8011ddf7e6fae21e2b4e5a1",
-                                                                      "bytes":  105696
-                                                                  },
-                                                     "command":  [
-                                                                     "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\UXTU-TdpBuild-20261031\\python313\\tools\\python.exe",
-                                                                     "-m",
-                                                                     "PyInstaller",
-                                                                     "--noconfirm",
-                                                                     "--clean",
-                                                                     "--distpath",
-                                                                     "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TdpHelperRebuild\\dist",
-                                                                     "--workpath",
-                                                                     "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TdpHelperRebuild\\work",
-                                                                     "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec"
-                                                                 ],
-                                                     "buildLog":  {
-                                                                      "path":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\tdp-helper-rebuild.log",
-                                                                      "sha256":  "f25cac26a80616997f7c2cc734801f0af020e5c7a1168e83d74c90e79737be90",
-                                                                      "bytes":  5347
-                                                                  },
-                                                     "analysisToc":  {
-                                                                         "path":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TdpHelperRebuild\\work\\YeManTdpCtl\\Analysis-00.toc",
-                                                                         "sha256":  "e71e0c4994fd408004505de4c259dfbabd7dbfdacea6208e06a1f5929a5137ed",
-                                                                         "bytes":  32089
-                                                                     },
-                                                     "sourceBinding":  {
-                                                                           "path":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TDP-HELPER-EMBEDDED-SOURCE-BINDING.json",
-                                                                           "sha256":  "0087c23b554562d1fb9c0d4d117526580e036c4ec5f33ff0b202a121d62d0549",
-                                                                           "bytes":  889
-                                                                       },
-                                                     "files":  [
-                                                                   {
-                                                                       "name":  "YeManTdpCtl.exe",
-                                                                       "path":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TdpHelperRebuild\\dist\\YeManTdpCtl\\YeManTdpCtl.exe",
-                                                                       "sha256":  "cb213d3ccb5b929e044fc8d4418c79275840c2c302df18e710265ac345e73f70",
-                                                                       "bytes":  1917124
-                                                                   },
-                                                                   {
-                                                                       "name":  "_internal/base_library.zip",
-                                                                       "path":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TdpHelperRebuild\\dist\\YeManTdpCtl\\_internal\\base_library.zip",
-                                                                       "sha256":  "d8ed5754b79ac5a6d3aa846c891b070ca8842c08826298a674aa3f9f92ad1d19",
-                                                                       "bytes":  1409329
-                                                                   },
-                                                                   {
-                                                                       "name":  "_internal/python313.dll",
-                                                                       "path":  "G:\\YeManCC-Work\\Build\\Exports\\20261104-004049-mainline-quick-test-package\\TdpHelperRebuild\\dist\\YeManTdpCtl\\_internal\\python313.dll",
-                                                                       "sha256":  "3a7a6170ea840bf2a2a76d05b687b946fcdc8d0cfedfe159012b38f1e8959a7c",
-                                                                       "bytes":  6132448
-                                                                   }
-                                                               ],
-                                                     "changed":  [
-                                                                     {
-                                                                         "releasePath":  "pawnio/YeManTdpCtl.exe",
-                                                                         "relative":  "YeManTdpCtl.exe",
-                                                                         "beforeSha256":  "e6de0e131fcbc52c111fa01f1cb39d844571bd7f5dc190d7879fbe4c38b6cfcc",
-                                                                         "afterSha256":  "cb213d3ccb5b929e044fc8d4418c79275840c2c302df18e710265ac345e73f70",
-                                                                         "bytes":  1917124,
-                                                                         "lockOldSha256":  "E6DE0E131FCBC52C111FA01F1CB39D844571BD7F5DC190D7879FBE4C38B6CFCC"
-                                                                     },
-                                                                     {
-                                                                         "releasePath":  "pawnio/_internal/base_library.zip",
-                                                                         "relative":  "_internal/base_library.zip",
-                                                                         "beforeSha256":  "b73d38e208753436da813c8c11689c89a4f28217b2fe04da6b95ad80fcc5740d",
-                                                                         "afterSha256":  "d8ed5754b79ac5a6d3aa846c891b070ca8842c08826298a674aa3f9f92ad1d19",
-                                                                         "bytes":  1409329,
-                                                                         "lockOldSha256":  "B73D38E208753436DA813C8C11689C89A4F28217B2FE04DA6B95AD80FCC5740D"
-                                                                     }
-                                                                 ],
-                                                     "driverOrModuleBytesChanged":  false,
-                                                     "sourceToBuiltCandidateBound":  true,
-                                                     "canonicalSourceRelativePath":  "PowerControl/pawnio/YeManTdpCtl.py",
-                                                     "canonicalSourceSha256":  "20d22f3f73d3b55f9b69dfec4edee4695c4ccadb512c161c5e16cb4e24ea5a73",
-                                                     "originalReleaseFileSetRetained":  true,
-                                                     "nonReleasePyInstallerOsCompatibilityFilesNotAdded":  true,
-                                                     "helperExecuted":  false,
-                                                     "hardwareAcceptance":  false,
-                                                     "fixtureValidation":  "NOT_RUN"
-                                                 }
-                                },
-    "originalReleaseFileSetRetained":  true,
-    "nonReleasePyInstallerOsCompatibilityFilesNotAdded":  true,
-    "deployed":  false
+  "schemaVersion": 1,
+  "status": "CURRENT_MAINLINE_REBUILT_SOURCE_BOUND_NOT_INSTALLED",
+  "builtAtUtc": "2026-11-05T18:49:27.7163482Z",
+  "helperSha256": "6ea6aa973dc788b325082f02d1f0748224de8df2b3e5a2e1129b0f9236e73ee7",
+  "pythonVersion": "3.13.14",
+  "pyinstallerVersion": "6.13.0",
+  "source": {
+    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\Workspace\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.py",
+    "sha256": "d4d3128e826be07bd2092976662b2bb9dfd9ea449145cacf49f40f1f586c4d05",
+    "bytes": 245085
+  },
+  "recipe": {
+    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\Workspace\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec",
+    "sha256": "00a502b154896f6f1fc4848f3ff0ee881da66f715107d30da3f2e1539f087e43",
+    "bytes": 1018
+  },
+  "compiler": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\UXTU-TdpBuild-20261031\\python313\\tools\\python.exe",
+    "sha256": "ef8f51028ac5329641985112f8efb1c2d4c47c86b8011ddf7e6fae21e2b4e5a1",
+    "bytes": 105696
+  },
+  "command": [
+    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\UXTU-TdpBuild-20261031\\python313\\tools\\python.exe",
+    "-m",
+    "PyInstaller",
+    "--noconfirm",
+    "--clean",
+    "--distpath",
+    "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist",
+    "--workpath",
+    "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\work",
+    "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\Workspace\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec"
+  ],
+  "buildLog": {
+    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\tdp-helper-rebuild.log",
+    "sha256": "b689573b4a4cea36ec5dcefd002a44f7533ad00198544f1ac4710551f3506e6b",
+    "bytes": 5250
+  },
+  "analysisToc": {
+    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\work\\YeManTdpCtl\\Analysis-00.toc",
+    "sha256": "fe0e62ddc95d996afd00cd9026d290de4ae644661b60c08dde3e81fdac1e0d2f",
+    "bytes": 32022
+  },
+  "sourceBinding": {
+    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TDP-HELPER-EMBEDDED-SOURCE-BINDING.json",
+    "sha256": "7d777bef2e70e019d834e73c927e05e0acb2af074fd93221aee630ae7711954e",
+    "bytes": 870
+  },
+  "files": [
+    {
+      "name": "YeManTdpCtl.exe",
+      "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist\\YeManTdpCtl\\YeManTdpCtl.exe",
+      "sha256": "6ea6aa973dc788b325082f02d1f0748224de8df2b3e5a2e1129b0f9236e73ee7",
+      "bytes": 1922665
+    },
+    {
+      "name": "_internal/base_library.zip",
+      "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist\\YeManTdpCtl\\_internal\\base_library.zip",
+      "sha256": "e140fea9bcf4a58b066481401c65416fe23708b8c03e81db8cacea60704d96c7",
+      "bytes": 1409329
+    },
+    {
+      "name": "_internal/python313.dll",
+      "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist\\YeManTdpCtl\\_internal\\python313.dll",
+      "sha256": "3a7a6170ea840bf2a2a76d05b687b946fcdc8d0cfedfe159012b38f1e8959a7c",
+      "bytes": 6132448
+    }
+  ],
+  "changed": [
+    {
+      "releasePath": "pawnio/YeManTdpCtl.exe",
+      "relative": "YeManTdpCtl.exe",
+      "beforeSha256": "9c25f45dab9a1d87d2b7babcdbbc4e52140513607e33790f2f2b607327cd1240",
+      "afterSha256": "6ea6aa973dc788b325082f02d1f0748224de8df2b3e5a2e1129b0f9236e73ee7",
+      "bytes": 1922665,
+      "lockOldSha256": "9C25F45DAB9A1D87D2B7BABCDBBC4E52140513607E33790F2F2B607327CD1240"
+    },
+    {
+      "releasePath": "pawnio/_internal/base_library.zip",
+      "relative": "_internal/base_library.zip",
+      "beforeSha256": "3a5727c1612992dbebff97edbd5c4256677facb3612519188958069a43444310",
+      "afterSha256": "e140fea9bcf4a58b066481401c65416fe23708b8c03e81db8cacea60704d96c7",
+      "bytes": 1409329,
+      "lockOldSha256": "3A5727C1612992DBEBFF97EDBD5C4256677FACB3612519188958069A43444310"
+    }
+  ],
+  "sourceToBuiltCandidateBound": true,
+  "driverOrModuleBytesChanged": false,
+  "canonicalSourceRelativePath": "PowerControl/pawnio/YeManTdpCtl.py",
+  "canonicalSourceSha256": "d4d3128e826be07bd2092976662b2bb9dfd9ea449145cacf49f40f1f586c4d05",
+  "originalReleaseFileSetRetained": true,
+  "newBinaryDependenciesAdded": false,
+  "helperExecuted": false,
+  "hardwareAcceptance": false,
+  "fixtureValidation": "NOT_RUN"
 }

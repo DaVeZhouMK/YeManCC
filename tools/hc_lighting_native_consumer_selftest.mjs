@@ -6,7 +6,7 @@ let prepareOnly=false,selectedCase=null;
 if(args.length<2||args[0]!=='--out'||!args[1]||args[1].startsWith('--'))throw Error('Usage --out isolated-evidence-directory [--case x2mini-owner] [--prepare-only]');
 for(let i=2;i<args.length;i++){
  if(args[i]==='--prepare-only'&&!prepareOnly)prepareOnly=true;
- else if(args[i]==='--case'&&selectedCase===null){selectedCase=args[++i];if(selectedCase!=='x2mini-owner')throw Error('Unknown or empty --case');}
+ else if(args[i]==='--case'&&selectedCase===null){selectedCase=args[++i];if(!['x2mini-owner','apex-discovery'].includes(selectedCase))throw Error('Unknown or empty --case');}
  else throw Error('Unknown, repeated or unsupported native lighting selection');
 }
 const out=path.resolve(args[1]);if(selectedCase&&fs.existsSync(path.join(out,'selection.json')))throw Error('Existing directed attempt/evidence must not be overwritten');fs.mkdirSync(out,{recursive:true});const mainBytes=fs.readFileSync(path.join(repo,'native/main.cpp')),main=mainBytes.toString('utf8').replace(/\r\n/g,'\n');
@@ -31,17 +31,90 @@ const fragmentHash=text=>createHash('sha256').update(text).digest('hex');
 function extract(text,signature){const a=text.indexOf(signature),b=text.indexOf('\n}',a);if(a<0||b<0)throw Error('Missing function '+signature);return text.slice(a,b+2);}
 function block(signature){const text=extract(main,signature);extractedFunctions.set(signature,fragmentHash(text));return text;}
 
+if(selectedCase==='apex-discovery'){
+ const selected=['no-matching-interface','exact-current-interface','wrong-descriptor','ambiguous-interface','metadata-open-failure','descriptor-unavailable','topology-changed','candidate-report-bound','unrelated-interface-not-probed','context-blocked','aya-receives-no-onex-log','diagnostic-failure-keeps-selection'];
+ const selector=block('static bool superJoyLightingSelectInterface('),context=block('static ymcc::superjoy_owner::Context superJoyLightingContext()'),baseEvent=block('static bool nativeLifecycleEventIsBase(const char* event) {');
+ const globalsStart=main.indexOf('static std::atomic<std::uint64_t> g_superJoyLightingTopology{1};'),globalsEnd=main.indexOf('static ymcc::superjoy_owner::Owner& superJoyLightingOwner()',globalsStart);
+ if(globalsStart<0||globalsEnd<0)throw Error('Actual discovery globals absent');const globals=main.slice(globalsStart,globalsEnd);
+ const ownerHeader=path.join(repo,'native/superjoy_lighting_owner.h'),portsFile=path.join(repo,'tools/fixtures/hc_lighting_catalog/superjoy-native-ports.inc');includedSources.set('native/superjoy_lighting_owner.h',sha(ownerHeader));includedSources.set('tools/fixtures/hc_lighting_catalog/superjoy-native-ports.inc',sha(portsFile));
+ const prefix=String.raw`#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
+#include <setupapi.h>
+#include <hidsdi.h>
+#include <hidpi.h>
+#include <dbt.h>
+#include <atomic>
+#include <functional>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include "json.hpp"
+using json=nlohmann::json;
+static bool powerAllowed=true,g_sjResumeFail=false,logThrows=false;
+static bool hardwareWriteAllowed(){return powerAllowed;}
+static struct {std::string deviceClass;} g_machineIdentity;
+static json logs=json::array();
+static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end());}
+static bool nativeLifecycleEventIsBase(const char*);
+static void appendNativeLifecycleLog(const char* name,const json& body){if(logThrows)throw std::runtime_error("fixture-log-write-error");if(nativeLifecycleEventIsBase(name))logs.push_back({{"event",name},{"body",body}});}
+`+'#include '+JSON.stringify(ownerHeader.replaceAll('\\','/'))+'\n'+fs.readFileSync(portsFile,'utf8')+'\n'+globals+'\n'+baseEvent+'\n'+context+'\n';
+ const tests=String.raw`
+int main(){int checks=0;std::vector<std::string> actual,failures;
+ auto check=[&](bool ok,const char* reason){++checks;if(!ok)throw std::runtime_error(reason);};
+ const std::wstring path=L"\\\\?\\hid#vid_1a2c&pid_b001#memory-rgb";
+ SuperJoyFixtureCandidate good{path,0x1A2C,0xB001,0xFF01,1,65,65};
+ auto reset=[&]{g_machineIdentity.deviceClass="HandheldCompanion.Devices.OneXPlayerApex";powerAllowed=true;g_exitRequested=false;g_superJoyLightingStopped=false;g_superJoyLightingNotifyReady=true;g_sjFixturePower=7;g_superJoyLightingTopology=1;g_sjCandidates.clear();g_sjProbes=g_sjSetsDestroyed=0;g_sjDiscoveryMutation={};logs=json::array();logThrows=false;};
+ auto receipt=[&]() -> json {check(logs.size()==1,"ordinary-log-receipt-required");const auto row=logs[0]["body"];check(logs[0]["event"]=="onex-lighting-discovery","wrong-event");check(!row["hardwareWriteProven"].get<bool>()&&!row["physicalEffectProven"].get<bool>(),"diagnostics-claimed-hardware-success");check(row["candidates"].size()<=4,"candidate-report-unbounded");return row;};
+ auto run=[&](const char* name,auto test){actual.push_back(name);reset();try{test();}catch(const std::exception& e){failures.push_back(std::string(name)+":"+e.what());}};
+ std::wstring selected;std::string reason;
+ run("no-matching-interface",[&]{check(!superJoyLightingSelectInterface(selected,reason)&&selected.empty(),"missing-endpoint-admitted");const auto r=receipt();check(r["reason"]=="superjoy-endpoint-unavailable"&&r["candidateCount"]==0&&r["enumeratedInterfaces"]==0,"missing-endpoint-evidence");check(g_sjProbes==0&&g_sjSetsDestroyed==1,"enumeration-not-reused");});
+ run("exact-current-interface",[&]{g_sjCandidates={good};check(superJoyLightingSelectInterface(selected,reason)&&selected==path,"matching-endpoint-rejected");const auto r=receipt(),c=r["candidates"][0];check(r["selected"]==true&&c["descriptorMatched"]==true,"matching-result-missing");check(c["vid"]==0x1A2C&&c["pid"]==0xB001&&c["usagePage"]==0xFF01&&c["usage"]==1&&c["outputReportBytes"]==65,"descriptor-not-actual");check(g_sjProbes==1&&g_sjSetsDestroyed==1,"extra-hardware-probe");});
+ run("wrong-descriptor",[&]{auto bad=good;bad.page=1;g_sjCandidates={bad};check(!superJoyLightingSelectInterface(selected,reason),"wrong-descriptor-admitted");const auto r=receipt();check(r["candidates"][0]["usagePage"]==1&&r["candidates"][0]["descriptorMatched"]==false,"wrong-descriptor-hidden");});
+ run("ambiguous-interface",[&]{auto second=good;second.path+=L"-other";g_sjCandidates={good,second};check(!superJoyLightingSelectInterface(selected,reason)&&selected.empty(),"ambiguous-admitted");const auto r=receipt();check(r["reason"]=="superjoy-endpoint-ambiguous"&&r["candidateCount"]==2,"ambiguous-evidence");});
+ run("metadata-open-failure",[&]{auto bad=good;bad.readable=false;g_sjCandidates={bad};check(!superJoyLightingSelectInterface(selected,reason),"failed-open-admitted");const auto r=receipt(),c=r["candidates"][0];check(r["reason"]=="superjoy-endpoint-observation-failed"&&c["openedForMetadata"]==false&&c["vid"].is_null()&&c["usage"].is_null(),"unknown-descriptor-fabricated");});
+ run("descriptor-unavailable",[&]{auto bad=good;bad.descriptor=false;g_sjCandidates={bad};check(!superJoyLightingSelectInterface(selected,reason),"missing-caps-admitted");const auto r=receipt(),c=r["candidates"][0];check(r["reason"]=="superjoy-endpoint-descriptor-unavailable"&&c["vid"]==0x1A2C&&c["capsObserved"]==false&&c["outputReportBytes"].is_null(),"missing-caps-not-unknown");});
+ run("topology-changed",[&]{g_sjCandidates={good};g_sjDiscoveryMutation=[]{g_superJoyLightingTopology.fetch_add(1);};check(!superJoyLightingSelectInterface(selected,reason)&&selected.empty(),"changed-context-admitted");check(receipt()["reason"]=="superjoy-owner-context-changed","changed-context-not-logged");});
+ run("candidate-report-bound",[&]{for(int i=0;i<7;i++){auto bad=good;bad.page=1;bad.path+=std::to_wstring(i);g_sjCandidates.push_back(bad);}check(!superJoyLightingSelectInterface(selected,reason),"invalid-candidates-admitted");const auto r=receipt();check(r["candidateCount"]==7&&r["candidates"].size()==4&&r["candidatesOmitted"]==3,"candidate-bound-accounting");check(g_sjProbes==7,"diagnostics-added-probes");});
+ run("unrelated-interface-not-probed",[&]{auto other=good;other.path=L"\\\\?\\hid#vid_1234&pid_5678#other";g_sjCandidates={other};check(!superJoyLightingSelectInterface(selected,reason)&&g_sjProbes==0,"unrelated-interface-probed");const auto r=receipt();check(r["enumeratedInterfaces"]==1&&r["candidateCount"]==0,"unrelated-count-incorrect");});
+ run("context-blocked",[&]{g_superJoyLightingNotifyReady=false;g_sjCandidates={good};check(!superJoyLightingSelectInterface(selected,reason)&&g_sjProbes==0&&g_sjSetsDestroyed==0,"blocked-context-enumerated");check(receipt()["reason"]=="superjoy-owner-context-unavailable","blocked-context-not-reported");});
+ run("aya-receives-no-onex-log",[&]{g_machineIdentity.deviceClass="HandheldCompanion.Devices.AYANEO3";auto aya=good;aya.path=L"\\\\?\\hid#vid_1c4f&pid_0002#aya";aya.vendor=0x1C4F;aya.product=2;aya.page=0xFF00;g_sjCandidates={aya};check(superJoyLightingSelectInterface(selected,reason)&&selected==aya.path,"aya-selection-changed");check(logs.empty()&&g_sjProbes==1,"aya-polluted-by-onex-diagnostics");});
+ run("diagnostic-failure-keeps-selection",[&]{g_sjCandidates={good};logThrows=true;check(superJoyLightingSelectInterface(selected,reason)&&selected==path,"diagnostic-failure-altered-selection");});
+ json result={{"status",failures.empty()?"PASS":"FAIL"},{"cases",actual.size()},{"actual",actual},{"checks",checks},{"failures",failures},{"hardwareIo",false},{"fullProcessHostExecuted",false}};std::cout<<result.dump();return failures.empty()?0:1;}
+`;
+ const code=prefix+selector+'\n'+tests;
+ const begin=selector.indexOf('appendNativeLifecycleLog("onex-lighting-discovery", {'),end=selector.indexOf('});',begin)+3;if(begin<0||end<3)throw Error('Exact diagnostic fault anchor missing');
+ const fault=selector.slice(0,begin)+'throw std::runtime_error("fixture-disabled-discovery-evidence");'+selector.slice(end);
+ const programs=[['candidate',code],['missing-evidence-negative',prefix+fault+'\n'+tests]];const steps=[];
+ const run=(exe,argv,label,expected=0)=>{const started=Date.now(),r=spawnSync(exe,argv,{cwd:out,encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});fs.writeFileSync(path.join(out,label+'.stdout.log'),r.stdout??'',{flag:'wx'});fs.writeFileSync(path.join(out,label+'.stderr.log'),r.stderr??'',{flag:'wx'});steps.push({label,exitCode:r.status,signal:r.signal,error:r.error?String(r.error):null,elapsedMs:Date.now()-started});if(r.status!==expected||r.error)throw Error('Apex discovery step failed: '+label+' '+JSON.stringify(steps.at(-1)));return r.stdout;};
+ fs.writeFileSync(path.join(out,'selection.json'),JSON.stringify({selector:selectedCase,selected,defaultExecuted:false,functions:[...extractedFunctions],includes:[...includedSources],hardwareIo:false},null,2),{flag:'wx'});
+ try{
+  for(const [name,cpp] of programs){fs.writeFileSync(path.join(out,name+'.cpp'),cpp,{flag:'wx'});const recipe=path.join(out,name+'.cmd');fs.writeFileSync(recipe,calibrationToolchainPreamble('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')+`cl /nologo /std:c++20 /utf-8 /EHsc /MT /sourceDependencies "${out}/${name}.dependencies.json" "${out}/${name}.cpp" /I"${repo}/deps/json" /Fo"${out}/${name}.obj" /Fe"${out}/${name}.exe" /link Setupapi.lib Hid.lib User32.lib\r\nexit /b %errorlevel%\r\n`);run('cmd.exe',['/d','/c',recipe],name+'-compile');captureCompilerInputs();}
+  let result={status:'NOT_RUN_PREPARE_ONLY',actual:[],checks:0};
+  if(!prepareOnly){result=JSON.parse(run(path.join(out,'candidate.exe'),[],'candidate-execute'));if(result.status!=='PASS'||JSON.stringify(result.actual)!==JSON.stringify(selected))throw Error('Apex discovery actual selection differs');const negative=JSON.parse(run(path.join(out,'missing-evidence-negative.exe'),[],'missing-evidence-negative-execute',1));if(!negative.failures.some(s=>s.includes('ordinary-log-receipt-required')))throw Error('Missing-evidence fault did not fail the expected assertion');result.semanticNegative={compiled:true,exitCode:1,detected:true,expectedAssertion:'ordinary-log-receipt-required'};}
+  const current=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8').replaceAll('\r\n','\n');for(const [signature,expected] of extractedFunctions)if(fragmentHash(extract(current,signature))!==expected)throw Error('Actual discovery source changed during test: '+signature);if(!current.includes(globals))throw Error('Discovery state changed during test');for(const [relative,expected] of includedSources)if(sha(path.join(repo,relative))!==expected)throw Error('Discovery included source changed: '+relative);for(const input of compilerInputs.values())if(sha(input.path)!==input.sha256)throw Error('Actual compiler dependency changed: '+input.path);
+  fs.writeFileSync(path.join(out,'native-compiler-inputs.json'),JSON.stringify({files:[...compilerInputs.values()],reports:[...dependencyReports]},null,2),{flag:'wx'});
+  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({...result,selector:selectedCase,sourceHash,defaultExecuted:false,steps,elapsedMs:Date.now()-entryStarted,hardwareIo:false,fullProcessHostExecuted:false},null,2),{flag:'wx'});console.log(JSON.stringify({status:result.status,selector:selectedCase,cases:result.cases,checks:result.checks,semanticNegative:result.semanticNegative}));process.exit(0);
+ }catch(error){fs.writeFileSync(path.join(out,'failure.json'),JSON.stringify({status:'FAIL',error:String(error.stack??error),steps,defaultExecuted:false,hardwareIo:false},null,2),{flag:'wx'});throw error;}
+}
+
 const start=main.indexOf('    ipc_on("gamepad.setLed"'),end=main.indexOf('\n    });',start)+8;if(start<0||end<=start)throw Error('Missing actual setLed IPC');const handler=main.slice(start,end);
 const enums=main.slice(main.indexOf('enum class RogAuraMode : BYTE'),main.indexOf('// （g_rogAuraMx'));
 const msiStart=main.indexOf('static constexpr int kMsiLedZoneCount'),msiEnd=main.indexOf('// MSI Claw 灯光应用：',msiStart);if(msiStart<0||msiEnd<0)throw Error('Missing MSI packet builders');
 const include=p=>{includedSources.set(p,sha(path.join(repo,p)));return '#include '+JSON.stringify(path.join(repo,p).replaceAll('\\','/'))+'\n';};
 const ownerFakes=String.raw`
+static std::function<bool()> ownerGetterLockProbe;
+static int ownerGettersOutsideLock=0,ownerGettersInsideLock=0;
+static void observeOwnerGetter(){if(ownerGetterLockProbe){if(ownerGetterLockProbe())++ownerGettersInsideLock;else ++ownerGettersOutsideLock;}}
 namespace ymcc { namespace onex_x2 {
 enum class Phase {Detached,Requested,Live};
 struct Snapshot {Phase phase;std::uint64_t generation;bool writePending;Model requested=Model::OneXPlayer3,bound=Model::OneXPlayer3;bool initialized=true;};
 class WindowsTransport {
 public: Snapshot state{Phase::Live,7,true};bool has=true;bool clearPending=true;int pendingTicks=0;std::wstring path=L"path";int ticks=0;std::function<void(int)> afterTick;
-Snapshot snapshot()const{return state;}bool hasDevice()const{return has;}const std::wstring& devicePath()const{return path;}
+Snapshot snapshot()const{observeOwnerGetter();return state;}bool hasDevice()const{observeOwnerGetter();return has;}const std::wstring& devicePath()const{observeOwnerGetter();return path;}
 void tick(std::uint64_t,bool(*)(),bool(*)(const std::wstring&)){++ticks;if(afterTick)afterTick(ticks);if(clearPending)state.writePending=false;else if(pendingTicks>0&&--pendingTicks==0)state.writePending=false;}
 };}}
 static std::atomic<std::uint64_t> fakeNow{0};static std::uint64_t GetTickCount64(){return ++fakeNow;}
@@ -69,6 +142,7 @@ static std::atomic<bool> g_oxp3OwnerApplyOutstanding{false},g_oxp3OwnerHelperAli
 static HANDLE g_oxp3OwnerRetiredProcess=0;static std::string g_oxp3OwnerRetiredProcessToken;
 static std::atomic<bool> g_oxp3OwnerChildReturnObserved{false};
 static std::atomic<std::uint64_t> g_oxp3OwnerAdmissionSequence{0};
+static std::mutex g_legacyLightSetterDebtMx;static HANDLE g_legacyLightSetterRetiredProcess=0;
 static bool fakeRetiredSignaled=false;static int WaitForSingleObject(HANDLE,DWORD){return fakeRetiredSignaled?0:258;}
 static bool oxp3OwnerDenyWrite(){return false;}static bool oxp3OwnerDenyBind(const std::wstring&){return false;}
 `;
@@ -105,8 +179,9 @@ static const char* ymccFamilyName(YmccFamily){return "memory-identity";}
 static bool hardwareWriteAllowed(){return powerAllowed;}
 static json ymccLightSetterApply(bool,const std::string&,BYTE,BYTE,BYTE,BYTE,BYTE,BYTE,int,int,const std::string&){++helperCalls;return {{"ok",true},{"backend","hc-light-setter"},{"effectApplied",true},{"brightnessApplied",true}};}
 `+include('native/oem_lighting_operations.h')+include('native/oxp3_lighting_owner.h')+include('native/onex_x2_protocol.h')+ownerFakes+[
+ 'static bool legacyLightSetterDebtClass(', 'static bool legacyLightSetterReapReturned()', 'static bool legacyLightSetterHasDebt()',
  'static bool onexX2OwnerWriteAllowed()','static bool onexX2OwnerBindAllowed('
-].map(block).join('\n')+'\n'+
+].map(signature=>{const code=block(signature);return signature.startsWith('static bool legacyLightSetter')?code.replaceAll('nullptr','0'):code;}).join('\n')+'\n'+
 [
  'static std::wstring oxp3OwnerEventNameFor(',
  'static bool oxp3OwnerEnsureHandoff()',
@@ -346,29 +421,45 @@ static json actualAdmissionAndCommand(bool enabled,const std::string& mode,BYTE 
   modelReset();g_oxp3OwnerApplyOutstanding=false;
  }
 `;
+ const snapshotChecks=String.raw`
+ modelReset();ownerGettersOutsideLock=ownerGettersInsideLock=0;
+ ownerGetterLockProbe=[]{return OwnerTrackedMutex::ownerDepth>0;};
+ const bool lockedAdmission=oxp3OwnerAdmit(100,ownerReason);ownerGetterLockProbe={};
+ check(lockedAdmission&&ownerGettersOutsideLock==0&&ownerGettersInsideLock>=6,"x2mini:snapshot-getters-use-owner-lock");
+ check(lockedAdmission&&g_oxp3OwnerLease.interfacePath=="path"&&g_oxp3OwnerInterfacePath==L"path","x2mini:snapshot-path-value-copy-published");
+ modelReset();g_onexX2Transport.afterTick=[](int tick){if(tick==2)g_onexX2Transport.path=L"changed-path";};
+ check(!oxp3OwnerAdmit(100,ownerReason)&&ownerReason=="owner-quiesce-not-live"&&!g_oxp3OwnerLease.active.load(),"x2mini:snapshot-final-path-change-rejected");
+ modelReset();g_onexX2Transport.afterTick=[](int tick){if(tick==2){g_onexX2Transport.state.generation=8;g_onexX2Transport.path=L"pending-new-path";g_onexX2DeviceEpoch=10;g_onexX2Transport.clearPending=false;g_onexX2Transport.state.writePending=true;}};
+ const bool pendingAdmitted=oxp3OwnerAdmit(100,ownerReason);
+ check(!pendingAdmitted&&ownerReason=="owner-pending-write-debt"&&g_oxp3OwnerState==ymcc::oxp3_owner::OwnerState::Retiring&&g_oxp3OwnerLease.generation.load()==8&&g_oxp3OwnerLease.topology.load()==10&&g_oxp3OwnerLease.interfacePath=="pending-new-path"&&g_oxp3OwnerLease.generationToken=="8:10:1","x2mini:snapshot-final-pending-debt-uses-observed-identity");
+ g_onexX2DeviceEpoch=9;modelReset();g_onexX2Transport.state.phase=ymcc::onex_x2::Phase::Detached;
+ check(!oxp3OwnerAdmit(100,ownerReason)&&g_onexX2Transport.ticks==0&&ownerReason=="owner-quiesce-not-live","x2mini:snapshot-detached-admission-does-not-discover");
+`;
  const labels=text=>[...text.matchAll(/"((?:owner:|x2mini:|native-args:)[^"]+)"/g)].map(m=>m[1]);
- const originals=labels(legacyOwner),extra=labels(extraOwner),commands=labels(commandChecks);
+ const originals=labels(legacyOwner),extra=labels(extraOwner),commands=labels(commandChecks),snapshotLabels=labels(snapshotChecks);
  if(originals.length<40||extra.length<15||commands.length<8)throw Error('Missing original/new native assertion selection');
- const nativeSelected=['oxp3','x2mini'].flatMap((group,index)=>[...originals,...extra,...(index===1?commands:[])].map((label,i)=>`${group}:${i}:${label}`));
+ const nativeSelected=['oxp3','x2mini'].flatMap((group,index)=>[...originals,...extra,...(index===1?commands:[]),...snapshotLabels].map((label,i)=>`${group}:${i}:${label}`));
  const selectorControls=[['unknown',['--case','not-a-real-case']],['empty',['--case','']],['duplicate',['--case','x2mini-owner','--case','x2mini-owner']]];
  const selected=[...nativeSelected,...selectorControls.map(([name])=>'selector-reject-'+name)];
  const prefix=cpp.slice(0,cpp.indexOf('int main(int argc,char**argv)'));
- const directedCpp=prefix+commandPorts+String.raw`
+ let directedCpp=prefix+commandPorts+String.raw`
 int main(){int checks=0;std::vector<std::string> failures,actual;std::string group;int index=0;
  auto check=[&](bool ok,const std::string& label){auto name=group+":"+std::to_string(index++)+":"+label;++checks;actual.push_back(name);if(!ok)failures.push_back(name);};
  try {for(const std::string ownerModel:{"HandheldCompanion.Devices.OneXPlayer3","HandheldCompanion.Devices.OneXPlayerX2MiniPro"}){
  group=ownerModel=="HandheldCompanion.Devices.OneXPlayer3"?"oxp3":"x2mini";index=0;
-`+legacyOwner+extraOwner+commandChecks+String.raw`
+`+legacyOwner+extraOwner+commandChecks+snapshotChecks+String.raw`
  }}catch(const std::exception& error){failures.push_back(error.what());}
  json result={{"status",failures.empty()?"PASS":"FAIL"},{"selector","x2mini-owner"},{"checks",checks},{"actual",actual},{"failures",failures},{"hardwareIo",false},{"fullProcessHostExecuted",false}};std::cout<<result.dump();return failures.empty()?0:1;}
 `;
+ // Selected source instrumentation forwards every lock to real std::mutex.
+ directedCpp=directedCpp.replaceAll('std::mutex','OwnerTrackedMutex').replace('using json=nlohmann::json;',"struct OwnerTrackedMutex {\n std::mutex underlying;\n static inline const void* ownerAddress=nullptr;\n static inline thread_local int ownerDepth=0;\n void lock(){underlying.lock();if(this==ownerAddress)++ownerDepth;}\n bool try_lock(){if(!underlying.try_lock())return false;if(this==ownerAddress)++ownerDepth;return true;}\n void unlock(){if(this==ownerAddress)--ownerDepth;underlying.unlock();}\n};\n"+'using json=nlohmann::json;').replace('int main(){','int main(){OwnerTrackedMutex::ownerAddress=&g_onexX2OwnerMx;');
  const preamble=calibrationToolchainPreamble('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat');
  const source=path.join(out,'x2mini-owner.cpp'),recipe=path.join(out,'x2mini-owner-build.cmd'),exe=path.join(out,'x2mini-owner.exe');
  const sessionFile=path.join(repo,'native/onex_x2_session.h'),sessionText=fs.readFileSync(sessionFile,'utf8').replace(/\r\n/g,'\n');
  const snapshotStart=sessionText.indexOf('struct Snapshot {'),snapshotEnd=sessionText.indexOf('\n};',snapshotStart);
  if(snapshotStart<0||snapshotEnd<snapshotStart)throw Error('Actual Snapshot provenance boundary changed');
  const snapshotText=sessionText.slice(snapshotStart,snapshotEnd+3);
- const declared={selector:selectedCase,selected,defaultExecuted:false,fragment:fragmentIdentity,sourceFragments,functions:[...extractedFunctions].map(([signature,sha256])=>({signature,sha256})),ownerFunctions:[...extractedFunctions].filter(([s])=>s.includes('Owner')).map(([signature,sha256])=>({signature,sha256})),actualSnapshot:{file:'native/onex_x2_session.h',sha256:sha(sessionFile),fragmentSha256:fragmentHash(snapshotText)},includes:[...includedSources].map(([file,sha256])=>({file,sha256})),estimateSeconds:[35,100],compilerTimeoutMs:120000,compilerIdentity:'original calibrationToolchainPreamble/vcvars64; sourceDependencies retained',originalDefaultFullHost:'NOT_RUN',hardware:'NOT_RUN'};
+ const declared={selector:selectedCase,selected,defaultExecuted:false,fragment:fragmentIdentity,sourceFragments,functions:[...extractedFunctions].map(([signature,sha256])=>({signature,sha256})),ownerFunctions:[...extractedFunctions].filter(([s])=>s.includes('Owner')).map(([signature,sha256])=>({signature,sha256})),lockInstrumentation:'Selected mutex wrapper forwards actual std::mutex and records only owner-held getter sampling; production function control flow unchanged.',actualSnapshot:{file:'native/onex_x2_session.h',sha256:sha(sessionFile),fragmentSha256:fragmentHash(snapshotText)},includes:[...includedSources].map(([file,sha256])=>({file,sha256})),estimateSeconds:[35,100],compilerTimeoutMs:120000,compilerIdentity:'original calibrationToolchainPreamble/vcvars64; sourceDependencies retained',originalDefaultFullHost:'NOT_RUN',hardware:'NOT_RUN'};
  fs.writeFileSync(path.join(out,'selection.json'),JSON.stringify(declared,null,2)+'\n');fs.writeFileSync(source,directedCpp);
  fs.writeFileSync(recipe,preamble+`cl /nologo /std:c++20 /utf-8 /EHsc /MT /sourceDependencies "${out}/x2mini-owner.dependencies.json" "${source}" /I"${repo}/deps/json" /Fo"${out}/x2mini-owner.obj" /Fe"${exe}"\r\nexit /b %errorlevel%\r\n`);
  const started=entryStarted,steps=[];

@@ -29,6 +29,7 @@ static void resetRoute(const json& rules, const json& input = baseInput()) {
     fixtureAssets = true; fixtureLogs.clear(); fixtureInjections.clear(); fixtureDesktopDown.clear();
     fixtureOemMask = 0; fixtureJobs.clear(); fixtureRefreshes = 0; fixtureJoyxoffCloses = 0;
     g_exitRequested = false; g_shortcutRecordingActive = false;
+    g_shortcutRecordingOemMask=0;g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.deviceClass.clear();g_controllerFrontendIsolationEnabled=true;
     g_inputShortcutRuntime.clear(); g_nativeKeyboardShortcutLastRefresh = 0;
     g_nativeKeyboardShortcutRevision = -1; g_nativeKeyboardShortcuts.clear();
 #if !defined(YMCC_SHORTCUT_SOURCE_SCOPES)
@@ -58,7 +59,9 @@ static void resetRoute(const json& rules, const json& input = baseInput()) {
     for (auto& generation : g_oemProducerGenerations) generation = 0;
     for (auto& authority : g_oemProducerAuthorities) authority = 0;
     g_oemProducerEdgeHead = g_oemProducerEdgeCount = 0; g_oemProducerEdgeSequence = 0;
-    g_legionBack = {}; g_legionSBack = {}; g_gpdBack = {}; g_onexBack = {}; g_msiDinput = {};
+    g_legionBack.~LegionBackSession(); new (&g_legionBack) LegionBackSession;
+    g_legionSBack.~LegionSBackSession(); new (&g_legionSBack) LegionSBackSession;
+    g_gpdBack = {}; g_onexBack = {}; g_msiDinput = {};
     g_oemBackState = g_msiDinputBackBits = 0; g_oemRearMapToL5 = g_oemRearMapToR5 = 0;
     fixtureProducerPosts = fixtureCancelCalls = 0;
 #endif
@@ -283,8 +286,109 @@ static void startF7RetirementCases() {
         "R12 historical defaults retain eight legacy owners without retired Start F7");
 }
 #endif
+// Selected family consumer group: each case executes the existing real rules,
+// physical report/chord parser, queued receipt and serial own-action callback.
+// No real Windows input, HID, motion activation or product process is used.
+#if defined(YMCC_SHORTCUT_ONEX_BINDING_SOURCE)
+static void oneXConsumptionCases() {
+    const auto prepare=[](const std::string& cls,const char* key,const std::string& persona,bool configured=true){
+        resetRoute(configured?json::array({producerRule(key)}):json::array(),baseInput(false,persona));
+        g_machineIdentity.family=YmccFamily::OneXPlayer;g_machineIdentity.deviceClass=cls;
+        g_oemBackProfileId=oemUnifiedInputBindingFor(g_machineIdentity.family,cls).profileId;
+        g_oemHooksWanted=true;g_oemKeyHooksActive=true;
+        fixtureFrontendPersona=g_inputHostBoundPersona=persona;
+        g_inputHostPrepared=persona!="disabled";g_inputHostProcess=g_inputHostPrepared?reinterpret_cast<HANDLE>(1):nullptr;
+        g_realStickTest.virtualTargetEnabled=persona!="disabled";
+        tick(0,fixtureTick);
+    };
+    const auto sendKeyboard=[](uint32_t bits){
+        std::vector<DWORD>keys;
+        uint32_t remaining=bits;
+        for(DWORD vk=1;vk<256;++vk){const auto bit=oemBackHookVkBit(vk);if(bit&&(remaining&bit)){keys.push_back(vk);remaining&=~bit;}}
+        check(remaining==0&&!keys.empty(),"OneX chord is assembled from actual VK decoder");
+        for(const auto vk:keys){++fixtureTick;KBDLLHOOKSTRUCT k{};k.vkCode=vk;oemBackHookProc(HC_ACTION,WM_KEYDOWN,reinterpret_cast<LPARAM>(&k));}
+        for(auto it=keys.rbegin();it!=keys.rend();++it){++fixtureTick;KBDLLHOOKSTRUCT k{};k.vkCode=*it;k.flags=LLKHF_UP;oemBackHookProc(HC_ACTION,WM_KEYUP,reinterpret_cast<LPARAM>(&k));}
+        deliverPhysicalReceipts();
+    };
+    for(const auto& cls:fixtureOneXClasses){
+        const auto& binding=oemUnifiedInputBindingFor(YmccFamily::OneXPlayer,cls);
+        const auto catalog=binding.catalog;
+        const std::string captureClass=binding.model?std::string(binding.model->consumerClass):cls;
+        if(cls.find("OneXPlayerG1")!=std::string::npos){
+            check(catalog.count==0,"OneX G1 missing OEM chords stays explicit: "+cls);continue;
+        }
+        check(catalog.count>0,"OneX consumer has exact real capability binding: "+cls);
+        const auto profile=oemChordProfileFor(binding.profileId);
+        for(int keyIndex=0;keyIndex<catalog.count;++keyIndex){
+            const auto& key=catalog.keys[keyIndex];uint64_t bit=0;
+            check(nativeKeyboardShortcutMaskBit(key.keyId,bit),"OneX real catalog action ID resolves: "+cls+"/"+key.keyId);
+            const OemChordRule* chord=nullptr;
+            for(int i=0;i<profile.count;++i)if(profile.rules[i].bit==bit&&!profile.rules[i].mouseChord){chord=&profile.rules[i];break;}
+            const bool legacyHid=ymcc::capabilities::oem::onex::descriptorFor(captureClass).valid&&
+                (std::string(key.keyId)=="l4"||std::string(key.keyId)=="r4"||std::string(key.keyId)=="special"||
+                 (std::string(key.keyId)=="orange"&&ymcc::capabilities::oem::onex::descriptorFor(captureClass).role21Orange)||
+                 std::string(key.keyId)=="keyboard");
+            const bool x2Family=captureClass=="HandheldCompanion.Devices.OneXPlayerX2"||
+                captureClass=="HandheldCompanion.Devices.OneXPlayer3"||captureClass=="HandheldCompanion.Devices.OneXPlayerX2MiniPro";
+            const bool x2Source=x2Family&&(std::string(key.keyId)=="l4"||std::string(key.keyId)=="r4"||
+                std::string(key.keyId)=="home"||std::string(key.keyId)=="gkey");
+            check(chord||legacyHid||x2Source,"OneX every declared action has a tested input consumer: "+cls+"/"+key.keyId);
+            const auto emit=[&](){
+                if(chord){sendKeyboard(chord->keys);return;}
+                if(legacyHid){
+                    activateProducer(OemProducerId::OneX);g_onexBack.desc=onexCapDescriptorFor(captureClass);
+                    producerSample(OemProducerId::OneX,0);nativeOemProducerDrain();
+                    ++fixtureTick;producerSample(OemProducerId::OneX,bit);++fixtureTick;producerSample(OemProducerId::OneX,0);nativeOemProducerDrain();return;
+                }
+                // The actual device protocol/owner has its own transport tests.
+                // Supply only its published-ready observation, then execute the
+                // real retained publication/dispatch; do not invent a HID packet.
+                g_onexX2PublishedPower=currentPowerGeneration();g_onexX2PublishedTopology=g_onexX2DeviceEpoch.load();g_onexX2PublishedReady=true;
+                if(std::string(key.keyId)=="home"&&captureClass!="HandheldCompanion.Devices.OneXPlayer3"){
+                    const auto generation=oemProducerBegin(OemProducerId::OneXX2Home);
+                    check(oemProducerPublishOnexX2Home(generation,++fixtureTick,0x24),"OneX X2 Home uses actual click publication");
+                }else{
+                    const auto generation=oemProducerBegin(OemProducerId::OneXX2Rear);
+                    check(oemProducerPublish(OemProducerId::OneXX2Rear,generation,0,bit),"OneX held event establishes its own neutral");nativeOemProducerDrain();
+                    ++fixtureTick;check(oemProducerPublish(OemProducerId::OneXX2Rear,generation,bit,bit),"OneX held event publishes press");
+                    ++fixtureTick;check(oemProducerPublish(OemProducerId::OneXX2Rear,generation,0,bit),"OneX held event publishes release");
+                }
+                nativeOemProducerDrain();
+            };
+            for(const std::string persona:{"disabled","steamdeck","elite"}){
+                const std::string label=cls+"/"+key.keyId+"/"+persona;
+                prepare(cls,key.keyId,persona);const json saved=fixtureInput;
+                emit();
+                check(fixtureOwnActions.empty()&&fixtureJobs.size()==1,"OneX action uses one existing serial job: "+label);
+                flushJobs();check(fixtureOwnActions.size()==1,"OneX configured key reaches real own action once: "+label);
+                check(fixtureRefreshes==0&&fixtureInput==saved,"OneX own action preserves virtual intent and durable settings: "+label);
+                nativeOemProducerDrain();tick(0,fixtureTick+1);flushJobs();
+                check(fixtureOwnActions.size()==1,"OneX live neutral does not replay consumed edge: "+label);
+                // The same captured input with no saved action must not grow a binding.
+                prepare(cls,key.keyId,persona,false);
+                emit();flushJobs();check(fixtureOwnActions.empty()&&g_nativeKeyboardShortcuts.empty(),"OneX unbound key creates no automatic action: "+label);
+                for(const char* cancellation:{"recording","exit","rule-epoch"}){
+                    prepare(cls,key.keyId,persona);emit();
+                    check(fixtureJobs.size()==1,"OneX cancellation starts with one admitted action: "+label);
+                    if(std::string(cancellation)=="recording")g_shortcutRecordingActive=true;
+                    else if(std::string(cancellation)=="exit")g_exitRequested=true;
+                    else ++g_oemShortcutEdgeEpoch;
+                    flushJobs();check(fixtureOwnActions.empty(),"OneX queued own action rejects "+std::string(cancellation)+": "+label);
+                }
+            }
+        }
+    }
+}
+
+#endif
 int main() {
     try {
+#if defined(YMCC_SHORTCUT_ONEX_CASE_MODE)
+        oneXConsumptionCases();
+#if YMCC_SHORTCUT_ONEX_CASE_MODE == 1
+        std::cout << "onex consumption: " << passed << " cases passed\n";return 0;
+#endif
+#endif
 #if defined(YMCC_SHORTCUT_SHIELD_CASE_MODE)
         // Source mutations arrive through the original YMCC_SHORTCUT_SOURCE input.
         shortcutSummonActionShieldCases(YMCC_SHORTCUT_SHIELD_CASE_MODE);

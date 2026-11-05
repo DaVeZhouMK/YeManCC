@@ -19,6 +19,9 @@
 //    未接手即Start早拒/退出时由原native owner归还，不通过先解隐再重隐打开实体入口。
 //    供体已隐藏整组先一次持盘，再逐项幂等重隐；部分执行强退时不得遗失未访问尾项责任。
 //    VC-GPD-NATIVE-VIRTUAL-HANDOFF-20261025-R1是T1内的子步骤，不续30秒/10秒、不改ROG/MSI。
+//    OneX普通开启：HELLO/原隐藏后，仅已反查内部标准游戏根可在PREPARE前刷新一次；
+//    同根新鲜输入重准入并精确补隐。VC-ONEX-START-20261105-R1不续期、不改persona、
+//    不取得GPD/ROG原生OFF权限；未知派发不重发，见virtual_controller_onex_start_runtime.h。
 // T2 可用输出：inputCaptureOnGamepad -> focusIsolationPlanTick -> *UiOwnsInput。
 //    YMCC/已有自有子窗口/轮盘接管 => 同一目标的最终完整中性帧；物理采集和YMCC导航保留。
 //    失焦/收起 => 用最新有效样本恢复真实输出；不补播历史，不调用Stop/Start，不重置请求锁。

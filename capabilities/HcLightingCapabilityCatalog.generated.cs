@@ -3,7 +3,7 @@ using System;
 namespace YeManFanBackend.Capabilities;
 public static partial class HcLightingCapabilityCatalog
 {
-    public const string CatalogSha256 = "2b1f4189623fa73ebb828ee7f4fcb368b573982df39ee06646b51668001683ce";
+    public const string CatalogSha256 = "7a8f3a5f3d5a33167ce944d9ddae123f14f3f24947032632fdd1f72d524dbde3";
     private static readonly LightingCapabilityDescriptor[] GeneratedRoutes = {
         new("hc.device.AOKZOEA1", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
         new("hc.device.AOKZOEA1Pro", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
@@ -36,16 +36,16 @@ public static partial class HcLightingCapabilityCatalog
         new("hc.device.LokiMax6800U", false, false, HcSourceLedEffect.SolidColor, false, false, false, false, false),
         new("hc.device.LokiMiniPro", false, false, HcSourceLedEffect.SolidColor, false, false, false, false, false),
         new("hc.device.LokiZero", false, false, HcSourceLedEffect.SolidColor, false, false, false, false, false),
-        new("hc.device.OneXPlayerApex", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.LEDPreset, true, true, true, false, false),
-        new("hc.device.OneXPlayerG1", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
-        new("hc.device.OneXPlayerG1AMD", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
-        new("hc.device.OneXPlayerG1Intel", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
-        new("hc.device.OneXPlayerOneXFly", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
-        new("hc.device.OneXPlayerOneXFlyF1Pro", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
+        new("hc.device.OneXPlayerApex", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, true) { SourceAdapter = LightingSourceAdapter.ApexHidV2, FixedSpeed = true },
+        new("hc.device.OneXPlayerG1", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false) { FixedSpeed = true },
+        new("hc.device.OneXPlayerG1AMD", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false) { FixedSpeed = true },
+        new("hc.device.OneXPlayerG1Intel", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false) { FixedSpeed = true },
+        new("hc.device.OneXPlayerOneXFly", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false) { FixedSpeed = true },
+        new("hc.device.OneXPlayerOneXFlyF1Pro", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false) { FixedSpeed = true },
         new("hc.device.OneXPlayerX1", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.LEDPreset, true, true, true, false, false),
         new("hc.device.OneXPlayerX1AMD", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.LEDPreset, true, true, true, false, false),
         new("hc.device.OneXPlayerX1Intel", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.LEDPreset, true, true, true, false, false),
-        new("hc.device.OneXPlayerX1Mini", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow | HcSourceLedEffect.LEDPreset, false, true, false, true, true),
+        new("hc.device.OneXPlayerX1Mini", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow | HcSourceLedEffect.LEDPreset, false, true, false, true, true) { FixedSpeed = true },
         new("hc.device.OneXPlayerX1Pro", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.LEDPreset, true, true, true, false, false),
         new("hc.device.ROGAlly", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing | HcSourceLedEffect.Rainbow | HcSourceLedEffect.Wheel | HcSourceLedEffect.Ambilight, false, false, false, false, false),
         new("hc.device.ROGAllyX", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing | HcSourceLedEffect.Rainbow | HcSourceLedEffect.Wheel | HcSourceLedEffect.Ambilight, false, false, false, false, false),
@@ -56,13 +56,13 @@ public static partial class HcLightingCapabilityCatalog
     private static readonly string[] GeneratedPresetIds = { "LEDPreset_OneXPlayerX1_Preset01", "LEDPreset_OneXPlayerX1_Preset02", "LEDPreset_OneXPlayerX1_Preset03", "LEDPreset_OneXPlayerX1_Preset04", "LEDPreset_OneXPlayerX1_Preset05", "LEDPreset_OneXPlayerX1_Preset06", "LEDPreset_OneXPlayerX1_Preset07", "LEDPreset_OneXPlayerX1_Preset08", "LEDPreset_OneXPlayerX1_Preset09", "LEDPreset_OneXPlayerX1_Preset10", "LEDPreset_OneXPlayerX1_Preset11" };
     internal static readonly (HcDeviceDescriptor Device, LightingCapabilityDescriptor Consumer)[] GeneratedExtensionRoutes = {
         (new HcDeviceDescriptor("ymcc.device.OneXPlayer3", "HandheldCompanion.Devices.OneXPlayer3", "HandheldCompanion.Devices.OneXPlayer3", "OneXPlayer", "capabilities/upstream/f2e58468/OneXPlayer3.cs", "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc", false, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing | HcSourceLedEffect.LEDPreset, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing | HcSourceLedEffect.LEDPreset),
-         new LightingCapabilityDescriptor("ymcc.device.OneXPlayer3", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing | HcSourceLedEffect.LEDPreset, false, true, true, false, true) { SourceAdapter = LightingSourceAdapter.Oxp3Hid }),
+         new LightingCapabilityDescriptor("ymcc.device.OneXPlayer3", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing | HcSourceLedEffect.LEDPreset, false, true, true, false, true) { SourceAdapter = LightingSourceAdapter.Oxp3Hid, FixedSpeed = true }),
         (new HcDeviceDescriptor("ymcc.device.AYANEO3", "HandheldCompanion.Devices.AYANEO3", "HandheldCompanion.Devices.AYANEO3", "AYANEO", "capabilities/upstream/f2e58468/AYANEO3.cs", "bee53cd4d730013900da5c542c751b018f006ee09b886c55926f0ac7c17ee88b", false, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceLedEffect.SolidColor, HcSourceLedEffect.SolidColor),
-         new LightingCapabilityDescriptor("ymcc.device.AYANEO3", true, true, HcSourceLedEffect.SolidColor, true, false, false, false, false) { SourceAdapter = LightingSourceAdapter.SuperJoyCec }),
+         new LightingCapabilityDescriptor("ymcc.device.AYANEO3", true, true, HcSourceLedEffect.SolidColor, true, false, false, false, false) { SourceAdapter = LightingSourceAdapter.SuperJoyCec, FixedSpeed = false }),
         (new HcDeviceDescriptor("ymcc.device.AYANEONEXT2", "HandheldCompanion.Devices.AYANEONEXT2", "HandheldCompanion.Devices.AYANEONEXT2", "AYANEO", "capabilities/upstream/f2e58468/AYANEONEXT2.cs", "b47a90a52912eebd2568e920da7c1d0a264a286bb06657f9e274feb7f5da91c2", false, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceLedEffect.SolidColor, HcSourceLedEffect.SolidColor),
-         new LightingCapabilityDescriptor("ymcc.device.AYANEONEXT2", true, true, HcSourceLedEffect.SolidColor, true, false, false, false, false) { SourceAdapter = LightingSourceAdapter.SuperJoyCec }),
+         new LightingCapabilityDescriptor("ymcc.device.AYANEONEXT2", true, true, HcSourceLedEffect.SolidColor, true, false, false, false, false) { SourceAdapter = LightingSourceAdapter.SuperJoyCec, FixedSpeed = false }),
         (new HcDeviceDescriptor("ymcc.device.OneXPlayerX2MiniPro", "HandheldCompanion.Devices.OneXPlayerX2MiniPro", "HandheldCompanion.Devices.OneXPlayerX2MiniPro", "OneXPlayer", "capabilities/upstream/f2e58468/OneXPlayerX2MiniPro.cs", "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67", false, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceCapability.DynamicLighting | HcSourceCapability.DynamicLightingBrightness | HcSourceCapability.DynamicLightingSecondLEDColor, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing),
-         new LightingCapabilityDescriptor("ymcc.device.OneXPlayerX2MiniPro", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing, false, true, false, true, true) { SourceAdapter = LightingSourceAdapter.OneXX2MiniHid }),
+         new LightingCapabilityDescriptor("ymcc.device.OneXPlayerX2MiniPro", true, true, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Breathing, false, true, false, true, true) { SourceAdapter = LightingSourceAdapter.OneXX2MiniHid, FixedSpeed = true }),
     };
     internal static readonly (string DeviceId, string Id, int Value)[] GeneratedExtensionPresets = {
         ("ymcc.device.OneXPlayer3", "LEDPreset_OneXPlayerX1_Preset01", 0xd),
@@ -89,7 +89,6 @@ public static partial class HcLightingCapabilityCatalog
         ("hc.device.AynLoki", "hc.device.LokiZero"),
         ("hc.device.OneXPlayerG1", "hc.device.OneXPlayerG1AMD"),
         ("hc.device.OneXPlayerG1", "hc.device.OneXPlayerG1Intel"),
-        ("hc.device.OneXPlayerX1", "hc.device.OneXPlayerApex"),
         ("hc.device.OneXPlayerX1", "hc.device.OneXPlayerX1AMD"),
         ("hc.device.OneXPlayerX1", "hc.device.OneXPlayerX1Intel"),
         ("hc.device.OneXPlayerX1", "hc.device.OneXPlayerX1Mini"),

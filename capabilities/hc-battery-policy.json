@@ -14,7 +14,8 @@
     "oxp-x1-intel-ec",
     "oxp3-wmi-ec",
     "valve-deck-firmware",
-    "gpd-win-mini-2025"
+    "gpd-win-mini-2025",
+    "oxp-superx-dual-ec"
   ],
   "reviewedExtensionModels": [
     "AYANEO3",
@@ -23,7 +24,8 @@
     "AYANEOFlip11",
     "AYANEONEXT2",
     "AYANEOAIRPlusNxx",
-    "OneXPlayer3"
+    "OneXPlayer3",
+    "OneXPlayerSuperX"
   ],
   "disabledSourceModels": [
     {
@@ -32,5 +34,24 @@
       "reason": "Inherited EC bypass protocol is a research candidate; Windows route was explicitly withheld in the reviewed allowlist."
     }
   ],
-  "admission": "Exact reviewed identity rules select existing consumers; firmware, independent readback, conflict ownership and recovery remain consumer-owned."
+  "admission": "Exact reviewed identity rules select existing consumers; firmware, independent readback, conflict ownership and recovery remain consumer-owned.",
+  "reviewedRouteOverlays": [
+    "native/BatteryHost/oxp3-battery-route.json",
+    "native/BatteryHost/superx-charge-route.json"
+  ],
+  "sourceProvenance": [
+    "capabilities/hc-battery-policy.json",
+    "capabilities/upstream/xmax-6d728795/SuperXCharge.source-facts.json",
+    "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+    "capabilities/HcBatteryCapabilityCatalog.cs",
+    "tools/lib/hc_battery_catalog.mjs",
+    "native/BatteryHost/SuperXUmaChargeReader.cs",
+    "native/BatteryHost/SuperXCheckedEcWriter.cs",
+    "native/BatteryHost/SuperXChargeProvider.cs",
+    "native/BatteryHost/Oxp3WmiProvider.cs",
+    "native/BatteryHost/Program.cs",
+    "native/BatteryHost/InProcessEntry.cs",
+    "native/BatteryHost/HostDomainRouter.cs",
+    "native/BatteryHost/SecondaryDisplayController.cs"
+  ]
 }

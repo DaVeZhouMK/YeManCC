@@ -11,6 +11,6 @@ export function getOemConsumerAdapters(){return [{
   'tools/hc_oem_input_consumer_selftest.mjs','tools/fixtures/unified_oem_input/generate.mjs','tools/fixtures/unified_oem_input/harness.cpp',
   'tools/lib/hc_oem_input_fixture.mjs','tools/fixtures/hc_remaining_model_capabilities/expectations.mjs',
   'tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/ymcc_sim/global/controller-priority/adapter.mjs','native/main.cpp','deps/json/json.hpp',
-  'capabilities/HcOemInputCapabilityBinding.h','capabilities/hc-device-catalog.generated.h','capabilities/hc-device-catalog.json',
+  'capabilities/HcOemInputCapabilityBinding.h','capabilities/HcOneXVendorInputContract.h','capabilities/hc-device-catalog.generated.h','capabilities/hc-device-catalog.json',
  ],artifactInputs:[...compilerArtifacts(),process.execPath,'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe','C:/Windows/System32/cmd.exe','C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat'],
 }];}

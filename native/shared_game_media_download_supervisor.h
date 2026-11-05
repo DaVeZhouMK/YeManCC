@@ -254,7 +254,7 @@ class Supervisor {
     if (!failure.empty()) {
       TerminateJobObject(job, 16);
       WaitForSingleObject(child.hProcess, 2000);
-      if (WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0)
+      if (WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0&&!powerPolicy::blocked())
         try { queue_.cleanupTemporary(); } catch (...) {}
       // A durable end may race the last wait/probe or a nonzero process exit.
       // Recheck after teardown; accepted results/history/retry debt stay intact.

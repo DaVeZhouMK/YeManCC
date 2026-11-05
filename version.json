@@ -1,12 +1,7 @@
-﻿{
-    "version":  "0.0.38",
-    "notes":  "0.0.38：新增键盘顺序动作与独立触控鼠标页，完善机型输入和灯光、TS性能模拟与手动CPU设置、Steam/Decky和睡眠恢复，以及配置、更新和USB/IP维护。",
-    "sha256":  "6AA9D466DE5E1494B511217B8489E6F799DE486E0421FB79A9891DC5F220660B",
-    "publishedAt":  "2026-11-04",
-    "buildId":  "ff5d4259e65f83ce3a222cfce5bc7446ff62782933e17f3f6048a0c240bce681",
-    "nativeSha256":  "fbe3a928f51098b62a639fa52644dee9e816c548ab1f63598b1d6a2b38322c00",
-    "pluginSha256":  "b2434791ca8a97df630df6c14bd166e4e99feede9cf7d9d6707855a7672b6659",
-    "package":  "Packages/YeManCC.zip",
-    "releaseMode":  "fast",
-    "fixtureValidation":  "NOT_RUN"
+{
+  "version": "0.0.39",
+  "notes": "0.0.39：修复旧升级数据阻断安装与模块残留，完善失败恢复、手柄操作、降压试用保存、CCD调度、Strix Halo功耗兼容、动态壁纸离电关闭与机型功能。",
+  "package": "Packages/YeManCC.zip",
+  "releaseMode": "fast",
+  "fixtureValidation": "NOT_RUN"
 }

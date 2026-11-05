@@ -10,9 +10,8 @@ try {
   Assert-YmccModuleManifest $manifest
   $bootstrapLease=Enter-YmccModuleMaintenance -WaitMilliseconds 10000
   $knownStages=Assert-YmccBootstrapStagesReadable $root $pc
-  $receiptNeedsTransaction=Test-YmccBootstrapReceiptNeedsTransaction $pc $manifest
   $postCommitStage=Register-YmccPostCommitHcCleanup $root $pc $manifest $manifestPath $UpdateCommitState $UpdateOwnerPid
-  if (!(Test-YmccBootstrapPayloadCurrent $pc $manifest) -or $receiptNeedsTransaction) {
+  if (!(Test-YmccBootstrapPayloadCurrent $pc $manifest)) {
     if($knownStages -ge 64){throw 'MODULE_BOOTSTRAP_STAGE_BUDGET'}
     if($manifest.compatibility.sourceKind -cne 'full-package-v1' -or $manifest.compatibility.payloadHashScope -cne 'manifest-files-v1'){throw 'MODULE_FULL_PACKAGE_SOURCE_CONTRACT_REQUIRED'}
     if([string]::IsNullOrWhiteSpace($SourceArchive)){$SourceArchive=Join-Path $root 'Packages/YeManCC.zip'}
@@ -56,6 +55,17 @@ try {
     [IO.Directory]::CreateDirectory($payloadRoot) | Out-Null
     Move-Item -LiteralPath (Join-Path $bootstrapStage 'feature-assets') -Destination $payloadRoot
     $plan=Get-YmccModulePlan $payloadRoot $pc $manifest ([string]$manifest.packageVersion)
+  } else {
+    # Matching incoming files alone do not prove that old owned DLLs are gone.
+    # Reuse the same transaction planner, without demanding a redundant ZIP.
+    $plan=Get-YmccModulePlan $pc $pc $manifest ([string]$manifest.packageVersion) -InstalledPayload
+    if($plan.entries.Count){
+      $bootstrapStage=Resolve-YmccDeckyPath $root ('module-bootstrap-'+[guid]::NewGuid().ToString('N'))
+      [IO.Directory]::CreateDirectory($bootstrapStage)|Out-Null
+      Write-YmccBootstrapStage $bootstrapStage $pc ([string]$manifest.packageVersion) ([string]$manifest.compatibility.payloadSha256) 'preparing' @($manifest.files.path)
+    }
+  }
+  if($bootstrapStage){
     Write-YmccBootstrapStage $bootstrapStage $pc ([string]$manifest.packageVersion) ([string]$manifest.compatibility.payloadSha256) 'applying' @($manifest.files.path) -TransactionPlan $plan
     $bootstrapMutationStarted=$true
     $transaction=Install-YmccModulePackage $plan (Join-Path $bootstrapStage 'rollback')

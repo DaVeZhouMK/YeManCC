@@ -1,6 +1,6 @@
 // One trailing-edge UI intent, never a hardware timer or resident policy.
 import type { ClientState, MirrorSnapshot } from './mirrorClient';
-export const POWER_CHOICE_DELAY_MS = 3000;
+export const POWER_CHOICE_DELAY_MS = 2000;
 export interface PendingPowerChoice { field: 'acMode' | 'dcMode'; value: string; snapshot: MirrorSnapshot; }
 export class PowerChoiceDebounce {
   private pending: PendingPowerChoice | null = null;
@@ -22,7 +22,7 @@ export class PowerChoiceDebounce {
   observe(state: ClientState) {
     if (!this.pending) return;
     if (!this.valid(this.pending, state)) { this.cancel(); return; }
-    // Keep the user's three-second deadline across unrelated publications.
+    // Keep the user's two-second deadline across unrelated publications.
     // The selected power field stays unchanged; send against the current revision.
     if (state.snapshot!.revision > this.pending.snapshot.revision) this.pending.snapshot = structuredClone(state.snapshot!);
   }

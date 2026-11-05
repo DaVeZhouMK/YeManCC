@@ -2,10 +2,11 @@
 import { computed, useId } from 'vue';
 import GyroStatusPreview from './GyroStatusPreview.vue';
 import {formatGyroAxis} from '@/bridge/gyroAxisFormat';
+import {useStickPresentation} from '@/bridge/stickPresentation';
 const props=defineProps<{
  persona:string;trigger:string;mode:'off'|'suppress'|'on'|'toggle';aimingTrigger:string;
  inputLabel:string;outputStick:string;outputAxis:string;steam:boolean;
- motion:{x:number;y:number};receiving:boolean;outputShape?:string;
+ motion:{x:number;y:number};receiving:boolean;outputShape?:string;sampleReceivedAt?:number;
  axes:{x:number;y:number;z:number};connected:boolean;power:'on'|'off'|'unknown';
  calibration:'uncalibrated'|'waiting-still'|'calibrating'|'already-calibrated';calibrationText:string;calibrationError:string;
 }>();
@@ -14,18 +15,21 @@ const triggerText=computed(()=>props.steam?'Steam 内设置':props.mode==='on'?'
 const outputText=computed(()=>props.steam?'Steam 体感':`${props.outputStick==='left'?'左摇杆':'右摇杆'} · ${props.outputAxis==='x'?'横向':'双轴'}`);
 const squareOutput=computed(()=>props.outputShape==='square');
 const available=computed(()=>props.receiving&&!props.steam);
-// Keep the admitted native contribution as this view's only position source.
+// Native AxisModifiers/weight contribution is the sole position source.
 // The calibration page supplies the visual, not a second correction algorithm.
 const point=computed(()=>({x:available.value?Math.max(-1,Math.min(1,props.motion.x)):0,y:available.value&&props.outputAxis!=='x'?Math.max(-1,Math.min(1,props.motion.y)):0}));
+const displayed=useStickPresentation(()=>available.value?point.value:null,()=>available.value,
+ ()=>`${props.persona}|${props.outputStick}|${props.outputAxis}|${props.outputShape}`,80,
+ ()=>props.sampleReceivedAt ?? performance.now());
 const coordinate=(v:number)=>available.value?`${v>=0?'+':''}${(v*100).toFixed(0)}%`:'—';
 </script>
 <template>
  <div class="gyro-input-output-preview" :class="{receiving:available,external:steam}">
   <div class="gyro-preview-layout">
-   <div class="gyro-stick-preview" :aria-label="`摇杆预览，${outputText}`">
+   <div class="gyro-stick-preview" :aria-label="`权重后体感映射预览，${outputText}`">
     <GyroStatusPreview :axes="axes" :connected="connected" :power="power" :calibration="calibration" :calibration-text="calibrationText" :calibration-error="calibrationError">
      <template #power>
-    <svg class="stick-visual" viewBox="0 0 220 178" role="img" :aria-label="`陀螺仪摇杆输出，X ${coordinate(point.x)}，Y ${coordinate(point.y)}`">
+    <svg class="stick-visual" :data-sample-x="point.x" :data-sample-y="point.y" viewBox="0 0 220 178" role="img" :aria-label="`权重后体感映射预览，X ${coordinate(point.x)}，Y ${coordinate(point.y)}`">
      <defs>
       <radialGradient :id="gradient+'-recess'"><stop stop-color="#182638"/><stop offset=".76" stop-color="#111b29"/><stop offset="1" stop-color="#293a50"/></radialGradient>
       <linearGradient :id="gradient+'-cap'" x2=".3" y2="1"><stop stop-color="#455970"/><stop offset="1" stop-color="#192738"/></linearGradient>
@@ -37,15 +41,15 @@ const coordinate=(v:number)=>available.value?`${v>=0?'+':''}${(v*100).toFixed(0)
      <circle v-else cx="110" cy="88" r="70" fill="none" stroke="var(--accent)" stroke-width=".8" opacity=".7"/>
      <path d="M33 88H187M110 11V165" class="axis-guide"/>
      <circle cx="110" cy="88" r="35" class="mid-ring"/>
-     <path :d="`M110 88L${110+point.x*36} ${88-point.y*36}`" stroke="#172230" stroke-width="20" stroke-linecap="round"/>
-     <g :transform="`translate(${110+point.x*36} ${88-point.y*36})`">
+     <path :d="`M110 88L${110+displayed.x*36} ${88-displayed.y*36}`" stroke="#172230" stroke-width="20" stroke-linecap="round"/>
+     <g :transform="`translate(${110+displayed.x*36} ${88-displayed.y*36})`">
       <ellipse cy="5" rx="29" ry="27" fill="#050b13" opacity=".65"/>
       <circle r="29" :fill="`url(#${gradient}-cap)`" stroke="#5a6c80" stroke-width="1"/>
       <circle r="23" :fill="`url(#${gradient}-face)`" stroke="#152130" stroke-width="1.2"/>
       <path d="M-16 -7Q0 -20 16 -7" stroke="#6a7f97" stroke-width="1" fill="none" opacity=".45"/>
       <path d="M-7 0H7M0 -7V7" stroke="#93a3b4" stroke-width="1" opacity=".35"/>
      </g>
-     <circle v-if="available" :cx="110+point.x*70" :cy="88-point.y*70" r="3.8" fill="var(--accent)" stroke="#07101e" stroke-width="1"/>
+     <circle v-if="available" :cx="110+displayed.x*70" :cy="88-displayed.y*70" r="3.8" fill="var(--accent)" stroke="#07101e" stroke-width="1"/>
      <text x="199" y="92" class="axis-letter">X</text><text x="106" y="9" class="axis-letter">Y</text>
     </svg>
      </template>
@@ -55,7 +59,7 @@ const coordinate=(v:number)=>available.value?`${v>=0?'+':''}${(v*100).toFixed(0)
    <div class="gyro-flow-summary" aria-label="当前陀螺仪输入输出关系">
     <div class="gyro-info-row"><span class="gyro-info-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M4 12V8a6 6 0 0 1 12 0v4M4 8h12M7 15h6M10 12v5"/></svg></span><div><small>触发</small><strong>{{triggerText}}</strong></div></div>
     <div class="gyro-info-row"><span class="gyro-info-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 3v14M3 10h14M10 3l-2 3m2-3 2 3M17 10l-3-2m3 2-3 2"/><circle cx="10" cy="10" r="6"/></svg></span><div><small>输入</small><strong>{{inputLabel}}</strong></div></div>
-    <div class="gyro-info-row"><span class="gyro-info-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="8" r="4"/><path d="M10 12v3M5 16h10M3 18h14M8 8h4m-2-2v4"/></svg></span><div><small>输出</small><strong>{{outputText}}</strong></div></div>
+    <div class="gyro-info-row"><span class="gyro-info-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="8" r="4"/><path d="M10 12v3M5 16h10M3 18h14M8 8h4m-2-2v4"/></svg></span><div><small>映射预览</small><strong>{{outputText}}</strong></div></div>
    </div>
   </div>
  </div>

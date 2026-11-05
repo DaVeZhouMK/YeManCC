@@ -1,5 +1,5 @@
 // Global touchpad profile slots only. Never uses an EXE or game-override persona.
-import { SCREEN_TOUCHPAD_LAYOUTS, SCREEN_SUMMON_POSITIONS, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES, STANDALONE_SPECIAL_MODES,
+import { SCREEN_TOUCHPAD_LAYOUTS, screenSummonPositions, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES, STANDALONE_SPECIAL_MODES,
   screenTouchpadProfile, type ScreenTouchpadState, type ScreenTouchpadConfig } from './screenTouchpads';
 import type { MirrorField } from '../../decky-plugin/src/mirrorClient';
 import type { PowerLifecycleState } from './api';
@@ -20,7 +20,7 @@ export function touchpadMirrorFields(persona:string,virtualEnabled:boolean,state
     singleMode:field(state.singleMode,modes(SINGLE_TOUCHPAD_MODES),state.layout==='single'),
     leftMode:field(state.leftMode,modes(LEFT_TOUCHPAD_MODES),state.layout==='dual'),
     rightMode:field(state.rightMode,modes(RIGHT_TOUCHPAD_MODES),state.layout==='dual'),
-    summonPosition:field(state.summonPosition,SCREEN_SUMMON_POSITIONS.map(o=>({data:o.value,label:o.label}))),
+    summonPosition:field(state.summonPosition,screenSummonPositions(state.windowPlacement).map(o=>({data:o.value,label:o.label}))),
     specialMask:field(String(profile==='elite'?state.specialMask&1:state.specialMask),specials.map(([data,label])=>({data,label})),profile!=='disabled'),
     rearMask:field(String(state.rearMask),rear.map(([data,label])=>({data,label})),profile==='steamdeck'||profile==='dualsense-edge'),
     // The disabled slot uses its original independent-key setting, never a virtual button mask.
@@ -31,7 +31,7 @@ export function touchpadMirrorFields(persona:string,virtualEnabled:boolean,state
 export function touchpadMirrorSource(persona:string,virtualEnabled:boolean,state:ScreenTouchpadState):string {
   // Exclude runtime event/repaint/visible counters, include only saved config and capability gates.
   return JSON.stringify({persona,virtualEnabled,layout:state.layout,singleMode:state.singleMode,leftMode:state.leftMode,rightMode:state.rightMode,
-    summonPosition:state.summonPosition,standaloneSpecialMode:state.standaloneSpecialMode,specialMask:state.specialMask,rearMask:state.rearMask,scale:state.scale,transparency:state.transparency,mouseSensitivity:state.mouseSensitivity,
+    summonPosition:state.summonPosition,windowPlacement:state.windowPlacement,standaloneSpecialMode:state.standaloneSpecialMode,specialMask:state.specialMask,rearMask:state.rearMask,scale:state.scale,transparency:state.transparency,mouseSensitivity:state.mouseSensitivity,
     enabled:state.enabled,summonEnabled:state.summonEnabled,specialEnabled:state.specialEnabled,rearEnabled:state.rearEnabled,
     ok:state.ok,available:state.available,deck:state.steamDeckAvailable,ps5:state.ps5Available});
 }

@@ -3,14 +3,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import OverflowGameName from './OverflowGameName.vue';
 import AppIcon from '@/components/AppIcon.vue';
 import GameTrainerMenu from '@/components/GameTrainerMenu.vue';
+import GameLosslessMenu from '@/components/GameLosslessMenu.vue';
+import losslessAppIcon from '@/assets/apps/lossless-scaling.png';
 import { OPTI_OFFLINE_GUIDE, optiAntiCheatWarning, optiMayOfferLaunch } from '@/bridge/optiImportPolicy';
 import GameCustomProfilePanel from '@/components/GameCustomProfilePanel.vue';
 import GameRulePanel from '@/components/GameRulePanel.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import SwitchControl from '@/components/SwitchControl.vue';
-import {losslessProgramLabel,losslessToggleValue,losslessToggleLabel,type LosslessProgramState} from '@/bridge/losslessProgramState';
+import {losslessToggleValue,type LosslessProgramState} from '@/bridge/losslessProgramState';
 import {retainLosslessObservation,readLosslessProgram} from '@/bridge/losslessRuntimeState';
-import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
+import { focusGamepadElement } from '@/gamepad/focus';
+import { getOptiDialogPlacement } from './optiDialogLayout';
 import { getCurrentGame, isCurrentGameTarget, refreshGameStatusStrict, validateGameTarget, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { GameTrainerCancelledError, openOrSearchGameTrainer, cancelGameTrainerPreparation, getReadyGameTrainer, getGameTrainerState, subscribeGameTrainerState } from '@/bridge/gameTrainer';
 import {
@@ -76,9 +79,10 @@ let fsrTargetGuard: { target: LockedGameTarget; allowExit: boolean; invalidated:
 let stopLosslessState: (() => void) | null = null;
 let stopLosslessObservation:(()=>void)|null=null;
 const losslessProgram=ref<LosslessProgramState|null>(null);
-const losslessHint=computed(()=>losslessProgramLabel(losslessProgram.value));
+const losslessHint=computed(()=>!losslessProgram.value?.known?'LosslessScaling状态待确认':losslessProgram.value.running?'LosslessScaling已运行':'LosslessScaling未运行');
+const losslessMenuTarget=ref<DetectedGame|null>(null);
 const losslessNext=computed(()=>losslessToggleValue(losslessState.value));
-const losslessButtonLabel=computed(()=>losslessToggleLabel(losslessNext.value));
+
 let taskViewActionSequence = 0;
 const paused = ref(false);
 const statusMsg = ref('');
@@ -407,6 +411,7 @@ function syncCurrentTarget(next: DetectedGame | null): void {
   ++losslessReadEpoch;
   trainerCancelRequested.value = true;
   trainerMenuOpen.value = false;
+  losslessMenuTarget.value = null;
   rulesOpen.value = false;
   paused.value = false;
   speedFactor.value = 1;
@@ -499,15 +504,33 @@ async function refreshLosslessState(): Promise<void> {
     if (epoch === losslessReadEpoch) losslessState.value = null;
   } finally { if (epoch === losslessReadEpoch) losslessReading.value = false; }
 }
-async function runLosslessScaling(remove=false): Promise<void> {
+function onLosslessClick(): void {
+  if (disabledForAction.value || !targetGame.value || losslessReading.value || losslessState.value?.pending || !losslessState.value?.controlAvailable) return;
+  if (losslessNext.value === 'off') losslessMenuTarget.value = { ...targetGame.value };
+  else void runLosslessScaling('on');
+}
+function closeLosslessMenu(): void { losslessMenuTarget.value = null; }
+async function onLosslessMenuAction(action: 'off' | 'remove'): Promise<void> {
+  const target = losslessMenuTarget.value;
+  closeLosslessMenu();
+  // Menu actions belong to the game for which it was opened, never a new target.
+  if (!target || !isTargetCurrent(target)) return;
+  await runLosslessScaling(action);
+  await nextTick();
+  if (props.open && isTargetCurrent(target) && document.activeElement === document.body && !document.querySelector('[data-gp-game-quick-dialog]')) {
+    focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-control="lossless-scaling"]'));
+  }
+}
+async function runLosslessScaling(action: 'on' | 'off' | 'remove'): Promise<void> {
+  const remove = action === 'remove';
   if (disabledForAction.value || !targetGame.value || losslessReading.value || losslessState.value?.pending || !losslessState.value?.controlAvailable || (remove && !losslessState.value.profile)) return;
-  const enabled=losslessNext.value==='on';
+  const enabled=action==='on';
   const release = tryAcquireQuickAction('top-lossless');
   if (!release) { status('', '已有其它快捷操作正在执行，请稍候'); return; }
   const epoch = targetEpoch;
   let target: LockedGameTarget | null = null;
   busy.value = true;
-  status(remove?'正在解除此游戏的小黄鸭绑定…':enabled?'正在开启当前游戏的小黄鸭…':'正在关闭当前游戏的小黄鸭…');
+  status(remove?'正在删除此游戏的小黄鸭配置…':enabled?'正在开启当前游戏的小黄鸭…':'正在关闭当前游戏的小黄鸭…');
   try {
     target = await ensureTarget();
     const captured = target;
@@ -519,11 +542,11 @@ async function runLosslessScaling(remove=false): Promise<void> {
     checkpoint();
     status(result.notice);
   } catch (error) {
-    if (epoch === targetEpoch && !disposed && (!target || isActionTargetCurrent(target))) status('', (remove?'解除此游戏失败：':'小黄鸭开关操作失败：') + (error as Error).message);
+    if (epoch === targetEpoch && !disposed && (!target || isActionTargetCurrent(target))) status('', (remove?'删除此游戏配置失败：':'小黄鸭开关操作失败：') + (error as Error).message);
   } finally {
     busy.value = false;
     release();
-    if (!disposed) void refreshLosslessState();
+    if (!disposed) await refreshLosslessState();
   }
 }
 
@@ -534,15 +557,24 @@ function openDialog(title: string, description: string, confirmLabel = '确认',
   fsrDialogConfirmLabel.value = confirmLabel;
   fsrDialogCancelLabel.value = cancelLabel;
   fsrDialogOpen.value = true;
-  const anchor = document.querySelector<HTMLElement>('[data-gp-game-control="fsr-import"]')?.getBoundingClientRect()
-    || document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
-  const placement = getGamepadPopupPlacement(anchor, Math.min(420, window.innerWidth - 16), 260, 8);
-  fsrDialogAbove.value = placement.above;
-  fsrDialogStyle.value = placement.style;
-  nextTick(() => focusGamepadElement(confirmFirst ? fsrDialogConfirmEl.value : fsrDialogCancelEl.value));
+  positionOptiDialog();
+  nextTick(() => { positionOptiDialog(); focusGamepadElement(confirmFirst ? fsrDialogConfirmEl.value : fsrDialogCancelEl.value); });
   return new Promise<boolean>((resolve) => {
     fsrResolve = (value) => resolve(value === true);
   });
+}
+
+function positionOptiDialog(): void {
+  if (!fsrDialogOpen.value) return;
+  const trigger = document.querySelector<HTMLElement>('[data-gp-game-control="fsr-import"]');
+  const placement = getOptiDialogPlacement(trigger, fsrDialogPanelEl.value);
+  fsrDialogAbove.value = placement.above;
+  fsrDialogStyle.value = placement.style;
+}
+
+function resizeOptiDialog(): void {
+  positionOptiDialog();
+  if (fsrDialogOpen.value) nextTick(positionOptiDialog);
 }
 
 function openBackendDialog(): Promise<OptiAction | null> {
@@ -553,12 +585,8 @@ function openBackendDialog(): Promise<OptiAction | null> {
   fsrDialogConfirmLabel.value = '确认方案并继续';
   fsrDialogCancelLabel.value = '取消';
   fsrDialogOpen.value = true;
-  const anchor = document.querySelector<HTMLElement>('[data-gp-game-control="fsr-import"]')?.getBoundingClientRect()
-    || document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
-  const placement = getGamepadPopupPlacement(anchor, Math.min(420, window.innerWidth - 16), 300, 8);
-  fsrDialogAbove.value = placement.above;
-  fsrDialogStyle.value = placement.style;
-  nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-quick-dialog] .quick-opti-option-btn')));
+  positionOptiDialog();
+  nextTick(() => { positionOptiDialog(); focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-quick-dialog] .quick-opti-option-btn')); });
   return new Promise<OptiAction | null>((resolve) => {
     fsrResolve = (value) => resolve(value === 'fsr' || value === 'xess' || value === 'client' || value === 'uninstall' || value === 'help' ? value : null);
   });
@@ -747,7 +775,7 @@ function onRulesChanged(value: { currentBlacklisted?: boolean }): void {
   }
 }
 
-watch(() => props.open, (open) => { ++menuStateEpoch; if (open) void refreshMenuState(); else { ++controlStateEpoch; trainerMenuOpen.value = false; } });
+watch(() => props.open, (open) => { ++menuStateEpoch; if (open) void refreshMenuState(); else { ++controlStateEpoch; trainerMenuOpen.value = false; closeLosslessMenu(); } });
 watch(() => [props.open, targetGame.value?.pid, targetGame.value?.processCreated, targetGame.value?.path, targetGame.value?.identityGeneration], () => { stopLosslessObservation?.();stopLosslessObservation=props.open?retainLosslessObservation():null;void refreshLosslessState(); });
 
 onMounted(() => {
@@ -757,6 +785,7 @@ onMounted(() => {
   stopTrainerState = subscribeGameTrainerState(() => { trainerStateRevision.value += 1; });
   stopPolicyGame = subscribePolicyGameStatus(syncCurrentTarget);
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
+  window.addEventListener('resize', resizeOptiDialog);
   window.addEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
   window.addEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
   window.addEventListener('game-quick-target-lost', onTargetLost);
@@ -774,6 +803,7 @@ onBeforeUnmount(() => {
   stopTrainerState?.();
   stopPolicyGame?.();
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
+  window.removeEventListener('resize', resizeOptiDialog);
   window.removeEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
   window.removeEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
   window.removeEventListener('game-quick-target-lost', onTargetLost);
@@ -825,21 +855,18 @@ onBeforeUnmount(() => {
       <button type="button" class="quick-action quick-fsr" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
         <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
       </button>
-      <button type="button" class="quick-action quick-lossless" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" data-gp-game-control="lossless-scaling"
-        :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable" @click="runLosslessScaling(false)">
-        <AppIcon name="rocket" /><span class="quick-lossless-text"><strong>{{ losslessButtonLabel }}</strong><small role="status" title="仅表示程序运行状态"><span class="lossless-program-dot" :class="{ running:losslessProgram?.known && losslessProgram.running,unknown:!losslessProgram?.known }" aria-hidden="true"></span>{{ losslessHint }}</small></span>
+      <button type="button" class="quick-action quick-lossless" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" data-gp-game-control="lossless-scaling"
+        :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable" :aria-expanded="!!losslessMenuTarget" :aria-haspopup="losslessNext==='off' ? 'dialog' : undefined" @click="onLosslessClick">
+        <img class="lossless-app-icon" :src="losslessAppIcon" alt="" aria-hidden="true" /><span class="quick-lossless-text"><strong>一键插帧-小黄鸭</strong><small role="status" title="仅表示程序运行状态"><span class="lossless-program-dot" :class="{ running:losslessProgram?.known && losslessProgram.running,unknown:!losslessProgram?.known }" aria-hidden="true"></span>{{ losslessHint }}</small></span>
       </button>
-      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1" data-gp-game-control="lossless-remove"
-        :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable || !losslessState?.profile" @click="runLosslessScaling(true)">
-        <AppIcon name="close" /><span><strong>解除此游戏</strong></span>
-      </button>
-      <button type="button" class="quick-action" data-gp-game-row="actions-3" data-gp-row="3" data-gp-col="0" data-gp-game-control="trainer-menu" :disabled="disabledForAction" :aria-expanded="trainerMenuOpen" aria-haspopup="dialog" @click="trainerMenuOpen = true">
+      <GameLosslessMenu v-if="losslessMenuTarget" :game-name="targetName" :removable="!!losslessState?.profile" :disabled="disabledForAction || losslessReading || !!losslessState?.pending || !losslessState?.controlAvailable" @close="closeLosslessMenu" @action="onLosslessMenuAction" />
+      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" data-gp-game-control="trainer-menu" :disabled="disabledForAction" :aria-expanded="trainerMenuOpen" aria-haspopup="dialog" @click="trainerMenuOpen = true">
         <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>{{ trainerButtonLabel }}</strong><small>{{ trainerButtonHint }}</small></span>
       </button>
       <GameTrainerMenu v-if="trainerMenuOpen" :game="targetGame" :game-name="targetName" :has-game="!!targetGame" :busy="trainerBusy" :hint="trainerButtonHint" @close="closeTrainerMenu" @launch="runTrainer" @status="onCustomStatus" />
-      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-3" data-gp-row="3" data-gp-col="1">
+      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1">
         <span class="quick-speed-title"><AppIcon name="speed" /> 游戏变速</span>
-        <Dropdown :model-value="speedFactor" :options="speedOptions" placeholder="待确认" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="3" gp-col="1" @change="(v) => runSpeed(Number(v))" />
+        <Dropdown :model-value="speedFactor" :options="speedOptions" placeholder="待确认" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="2" gp-col="1" @change="(v) => runSpeed(Number(v))" />
       </div>
     </div>
 
@@ -915,9 +942,10 @@ onBeforeUnmount(() => {
 .quick-action span { display: grid; gap: 2px; min-width: 0; }
 .quick-action strong { font-size: 11px; }
 .quick-action small, .quick-speed-title { color: var(--text-dim); font-size: 9px; }
-.quick-fsr { grid-column: 1 / -1; }
+.lossless-app-icon { width:16px;height:16px;object-fit:contain;flex:0 0 16px; }
 .quick-lossless-text { flex: 1; }
-.lossless-program-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#c4c4c4; margin-right:6px; }
+.quick-action .quick-lossless-text small { display:flex;align-items:center;gap:6px; }
+.quick-action .lossless-program-dot { display:inline-block;flex:0 0 7px; width:7px; height:7px; border-radius:50%; background:#c4c4c4; }
 .lossless-program-dot.running { background:#4cc38a; }
 .lossless-program-dot.unknown { background:#d6a34c; }
 .quick-action.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
@@ -941,18 +969,18 @@ onBeforeUnmount(() => {
 .quick-game-controls button.danger { color: var(--danger); }
 .quick-status { color: var(--ok); font-size: 10px; line-height: 1.35; white-space: pre-line; }
 .quick-status.error { color: var(--danger); }
-.quick-dialog { box-sizing: border-box; overflow-y: auto; padding: 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: color-mix(in srgb, var(--bg-solid) 96%, #101722); box-shadow: 0 16px 40px rgba(0,0,0,.55); z-index: 1000; }
-.quick-dialog-title { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 13px; }
-.quick-dialog-title :deep(svg) { width: 16px; height: 16px; color: var(--accent); }
-.quick-dialog p { white-space: pre-line; color: var(--text-dim); font-size: 11px; line-height: 1.5; margin: 8px 0; }
-.quick-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.quick-dialog-actions button { min-height: 34px; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: var(--bg-input); color: var(--text); cursor: pointer; }
+.quick-dialog { box-sizing: border-box; overflow-y: auto; padding: 1.14em; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: color-mix(in srgb, var(--bg-solid) 96%, #101722); box-shadow: 0 16px 40px rgba(0,0,0,.55); z-index: 1000; }
+.quick-dialog-title { display: flex; align-items: center; gap: .5em; font-weight: 700; font-size: 1.14em; }
+.quick-dialog-title :deep(svg) { width: 1.25em; height: 1.25em; color: var(--accent); }
+.quick-dialog p { white-space: pre-line; color: var(--text-dim); font-size: 1em; line-height: 1.5; margin: .7em 0; }
+.quick-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7em; }
+.quick-dialog-actions button { min-width: 0; min-height: 3.14em; padding: .5em; font-size: 1em; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: var(--bg-input); color: var(--text); cursor: pointer; }
 .quick-dialog-actions button:first-child { background: var(--accent); color: #07131d; font-weight: 700; }
-.quick-opti-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 8px 0; }
-.quick-opti-maintenance { margin: 8px 0; }
+.quick-opti-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7em; margin: .7em 0; }
+.quick-opti-maintenance { margin: .7em 0; }
 .quick-opti-maintenance .quick-opti-option-btn { width: 100%; }
-.quick-opti-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 8px 0; }
-.quick-opti-option-btn { min-height: 38px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
+.quick-opti-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7em; margin: .7em 0; }
+.quick-opti-option-btn { min-width: 0; min-height: 3.14em; padding: .5em; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 1em; font-weight: 700; cursor: pointer; }
 .quick-opti-option-btn:hover, .quick-opti-option-btn.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-input)); color: var(--accent); }
 .quick-opti-option-btn.uninstall { color: var(--danger); }
 .quick-opti-option-btn.uninstall:hover, .quick-opti-option-btn.uninstall.selected { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--bg-input)); }

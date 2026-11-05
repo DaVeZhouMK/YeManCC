@@ -691,7 +691,7 @@ refresh();
      </div>
      <div class="sleep-group">
       <div class="sleep-group-head"><h3><InlineIcon name="sleep"/>系统保护</h3><span>按需开启</span></div>
-      <Toggle :model-value="wakePasswordOn" label="唤醒需要密码" description="唤醒后验证登录身份" :disabled="busy" @update:model-value="onWakePassword" />
+      <Toggle :model-value="wakePasswordOn" label="唤醒需要密码" description="无效时可能受系统组策略限制" :disabled="busy" @update:model-value="onWakePassword" />
       <Toggle :model-value="sleepPowerPlanOptimizationEnabled" label="睡眠电源修复" description="启动及电源变动时修正睡眠设置" :disabled="busy||!!staticWakePendingRequest" @update:model-value="onSleepPowerPlanOptimization" />
       <div class="sleep-static-wake">
        <Toggle :model-value="staticWakeAutoScanEnabled" label="自动扫描并屏蔽" description="开启后及开机、唤醒1分钟后单次扫描" :disabled="busy||staticWakePreferenceLoading||!!staticWakePendingRequest" aria-describedby="sleep-static-wake-status" @update:model-value="onStaticWakeAutoScan" />

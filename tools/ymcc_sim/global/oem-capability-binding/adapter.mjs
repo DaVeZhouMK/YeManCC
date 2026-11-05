@@ -8,7 +8,7 @@ export const CASE_ID='controller.unified-oem-input-binding';
 export function evidenceSources(){
  return [...new Set([
   ...['adapter.mjs','output-evidence.mjs','fixture.mjs','run.mjs','Compile-Original.ps1'].map(name=>MODULE+'/'+name),
-  'capabilities/HcOemInputCapabilityBinding.h','capabilities/hc-device-catalog.generated.h','capabilities/hc-device-catalog.json','native/main.cpp',
+  'capabilities/HcOemInputCapabilityBinding.h','capabilities/HcOneXVendorInputContract.h','capabilities/hc-device-catalog.generated.h','capabilities/hc-device-catalog.json','native/main.cpp',
   'tools/lib/hc_oem_input_fixture.mjs','tools/lib/hc_motion_matrix_guard.mjs',
   'tools/fixtures/hc_remaining_model_capabilities/expectations.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs',
   'tools/ymcc_sim/global/controller-priority/adapter.mjs','tools/ymcc_sim/global/host-process.ps1','tools/ymcc_sim/global/runner.mjs',

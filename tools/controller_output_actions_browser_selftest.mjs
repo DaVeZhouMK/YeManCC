@@ -50,6 +50,14 @@ try{
    await page.locator('.keyboard-hit-layer button[data-key-code="KeyA"]').evaluate(n=>n.dispatchEvent(new CustomEvent('gp:spatial-edit',{bubbles:true,cancelable:true,detail:{dx:1,dy:0}})));
    await page.waitForFunction(()=>document.activeElement?.getAttribute('data-key-code')==='KeyS');
    check(await page.locator('.keyboard-hit-layer button[data-key-code="KeyS"]').evaluate(n=>n.getRootNode().activeElement===n),variant+' uses the actual controller spatial-edit event to move A→S');
+   await page.locator('.keyboard-hit-layer button[data-key-code="KeyA"]').focus();
+   const consumed=await page.locator('.keyboard-output-dialog').evaluate(node=>{const event=new CustomEvent('gp:spatial-edit',{bubbles:true,cancelable:true,detail:{dx:1,dy:0}});node.dispatchEvent(event);return event.defaultPrevented});
+   check(consumed,variant+' keyboard consumes inline directions dispatched on the container by the production engine');
+   await page.waitForFunction(()=>document.activeElement?.getAttribute('data-key-code')==='KeyS');
+   check(true,variant+' container dispatch follows keyboard layout A→S');
+   await page.locator('.keyboard-close').focus();
+   check(await page.locator('.keyboard-output-dialog').evaluate(node=>{const event=new CustomEvent('gp:spatial-edit',{bubbles:true,cancelable:true,detail:{dx:1,dy:0}});node.dispatchEvent(event);return !event.defaultPrevented}),variant+' toolbar focus keeps normal controller navigation');
+
    await page.screenshot({path:out+'/'+variant+'-keyboard-popup-1280x'+height+'.png'});
    await page.locator('.keyboard-hit-layer button[data-key-code="KeyK"]').click();check((await page.locator('.output-summary').innerText()).includes('键盘 · K'),variant+' selection returns to prominent output summary');
    rule=await save();check(rule.actionId==='keyboard.letter'&&rule.params.key==='KeyK',variant+' reuses original keyboard action ID and parameter');

@@ -24,11 +24,15 @@ import { invoke, on } from '@/bridge/ipc';
 import { readGameInputEditor, onGameInputEditorChanged, type GameInputEditor } from '@/bridge/gameInputEditor';
 import {saveGyroEditorPatch} from '@/bridge/gyroPresetSave';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
-import { createGyroPresentationGate } from '@/bridge/gyroPresentation';
+import { createGyroPresentationGate, gyroStickPreviewSample } from '@/bridge/gyroPresentation';
 
 const simulationOpen = ref(false);
 const simulationSettings = ref<HTMLElement | null>(null);
 const simulationMotion = ref({x:0,y:0});
+const stickPreviewMotion = ref({x:0,y:0});
+const stickPreviewAdmitted = ref(false);
+const stickPreviewTarget = ref('');
+const stickPreviewReceivedAt = ref(-Infinity);
 const simulationAdmitted = ref(false);
 function closeSimulation() {
   simulationSettings.value=null;simulationOpen.value=false;
@@ -600,14 +604,14 @@ function applyPreset(raw: string | number): void {
   } else if (next === 'fps') {
     // FPS 默认权重倍率 1.3（2026-11-04）；已有预设记忆由原加载分支保留。
     gyroWeight.value = 1.3;
-    // 用户裁决（2026-09-29）：FPS 射击预设触发模式默认「常开」。
-    motionMode.value = 'on';
-    motionTrigger.value = '';
+    // FPS 默认按住 LT 触发（2026-11-05）；native 的 off 表示按住触发。
+    motionMode.value = 'off';
+    motionTrigger.value = 'LT';
     outputStick.value = 'right';
     outputAxis.value = 'xy';
     motionInput.value = 'local-space';
-    // 用户裁决（2026-09-29）：FPS 射击预设的变速触发键默认 LT。
-    aimingSightsTrigger.value = 'LT';
+    // LT 负责触发体感，默认不绑定变速触发键。
+    aimingSightsTrigger.value = '';
   } else if (next === 'racing') {
     motionMode.value = 'on';
     motionTrigger.value = '';
@@ -713,6 +717,13 @@ function applyTelemetry(detail: NonNullable<ReturnType<typeof normalizeGyroTelem
   // mapping or use combined output (which can contain ordinary stick input).
   simulationAdmitted.value = detail.motionAdmission === 'hc-motion-admitted' && !!detail.motionContribution;
   simulationMotion.value = simulationAdmitted.value ? {...detail.motionContribution!} : {x:0,y:0};
+  // The drawing uses the native weighted/modified contribution. The game
+  // simulation retains its separate MotionManager input without a second gain.
+  const stickPreview = gyroStickPreviewSample(detail, outputStick.value);
+  stickPreviewAdmitted.value = stickPreview !== null;
+  stickPreviewTarget.value = detail.targetStick ?? '';
+  stickPreviewReceivedAt.value = _receivedAt;
+  stickPreviewMotion.value = stickPreview ?? {x:0,y:0};
   sampleSequence.value = detail.sequence;
   sampleTimestamp.value = detail.timestampUtc;
 }
@@ -812,7 +823,7 @@ async function load(): Promise<void> {
     // 无该预设记忆：老配置零迁移——顶层参数归当前预设（其余预设待首次切换建默认）。
     // 2026-10-04 用户裁决：但若顶层完全是「未配置」默认（陀螺仪未开 + 按住触发 +
     // 无触发键 + 无变速触发键），视为全新/无数据配置，改用该预设自身默认，
-    // 保证 FPS 射击预设默认=触发方式「常开」+ 变速触发键「LT」。
+    // FPS 当前默认=按住 LT 触发，变速触发键无（2026-11-05）。
     const unconfigured = !enabled.value
       && motionMode.value === 'off'
       && motionTrigger.value === ''
@@ -872,14 +883,14 @@ function applyDefaultParamsForPreset(kind: 'fps' | 'racing' | 'steam' | 'custom'
   if (kind === 'fps') {
     // FPS 默认权重倍率 1.3（2026-11-04）；已有预设记忆由原加载分支保留。
     gyroWeight.value = 1.3;
-    // 用户裁决（2026-09-29）：FPS 射击预设触发模式默认「常开」。
-    motionMode.value = 'on';
-    motionTrigger.value = '';
+    // FPS 默认按住 LT 触发（2026-11-05）；native 的 off 表示按住触发。
+    motionMode.value = 'off';
+    motionTrigger.value = 'LT';
     outputStick.value = 'right';
     outputAxis.value = 'xy';
     motionInput.value = 'local-space';
-    // 用户裁决（2026-09-29）：FPS 射击预设的变速触发键默认 LT。
-    aimingSightsTrigger.value = 'LT';
+    // LT 负责触发体感，默认不绑定变速触发键。
+    aimingSightsTrigger.value = '';
   } else if (kind === 'racing') {
     motionMode.value = 'on';
     motionTrigger.value = '';
@@ -1185,7 +1196,7 @@ async function detectMotionSources(): Promise<void> {
 
     <section class="card gyro-workflow-card" aria-label="陀螺仪预览、输入和输出">
       <h3 class="card-title"><InlineIcon name="rotate" /> 陀螺仪控制</h3>
-      <GyroInputOutputPreview :persona="virtualPersona" :trigger="motionTrigger" :mode="motionMode" :aiming-trigger="aimingSightsTrigger" :input-label="motionInputOptions.find(option=>option.value===motionInput)?.label || motionInput" :output-stick="outputStick" :output-axis="outputAxis" :steam="preset==='steam'" :motion="simulationMotion" :receiving="gyroConnected && enabled && simulationAdmitted" :output-shape="outputShape" :axes="gyroAxes" :connected="gyroConnected" :power="gyroPowerState" :calibration="calibUiStatus" :calibration-text="calibStatusText" :calibration-error="calibError" />
+      <GyroInputOutputPreview :persona="virtualPersona" :trigger="motionTrigger" :mode="motionMode" :aiming-trigger="aimingSightsTrigger" :input-label="motionInputOptions.find(option=>option.value===motionInput)?.label || motionInput" :output-stick="outputStick" :output-axis="outputAxis" :steam="preset==='steam'" :motion="stickPreviewMotion" :receiving="gyroConnected && enabled && stickPreviewAdmitted && stickPreviewTarget===outputStick" :sample-received-at="stickPreviewReceivedAt" :output-shape="outputShape" :axes="gyroAxes" :connected="gyroConnected" :power="gyroPowerState" :calibration="calibUiStatus" :calibration-text="calibStatusText" :calibration-error="calibError" />
       <div class="gyro-workflow-section gyro-input-section">
         <h4>输入</h4>
         <div v-if="preset !== 'steam'" class="gyro-trigger-fields">

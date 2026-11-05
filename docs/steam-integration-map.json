@@ -1,4 +1,66 @@
 {
+  "lightGamepadNavigationLease20261106": {
+    "date": "2026-11-06",
+    "status": "SOURCE_SCOPED_SOFTWARE_VERIFIED_NOT_DEPLOYED",
+    "source": ["native/steam_live.js", "native/steam_live_cdp.h", "native/steam_light_gamepad_runtime.h", "native/main.cpp", "native/msi_native_foreground_isolation_runtime.h"],
+    "operation": "input.gamepadLease",
+    "authority": "Existing unique no-game proof and actual YMCC foreground ownership; exact Steam PID/birth/root/account",
+    "consumer": "Existing SteamUIStore.m_GamepadNavigationManager.SetCatchAllGamepadInput callback; normal buttons and left-stick navigation directions/repeats",
+    "lifecycle": "Temporary foreground-only lease, original gamepad event/timer lane and pool; 750ms renewal, 3000ms watchdog, explicit release on focus/session/settings/exit changes; original held real-UP passes, blocked new-down tails are keyed by source/controller/button and drain without delaying new input",
+    "limits": "Not raw-axis/SteamInput mapping filtering; transport or API failure is reported, not a proof of suppression. No physical hide/unhide/cycle for qualified light main-window sessions.",
+    "evidence": "Testing/YMCC/Evidence/Controller-NonGame-LightIsolation-20261105/LightRework"
+  },
+  "networkAccelerationStartupDefault20261105": {
+    "date": "2026-11-05",
+    "status": "SOURCE_AND_SCOPED_TESTS_READY_NOT_DEPLOYED",
+    "source": [
+      "src/bridge/networkAccelerationStartup.ts",
+      "src/App.vue",
+      "src/views/PowerView.vue"
+    ],
+    "default": true,
+    "receipt": "startupDesired.networkAccelerationOnBoot",
+    "taskAuthority": "Root Steamcommunity_302 task; existing import/delete path, original XML and IgnoreNew policy",
+    "migration": "Missing receipt initializes ON once; legacy steamCommunity mirror was not a recorded manual choice. Later explicit ON/OFF is retained.",
+    "failurePolicy": "No task change on runtime-fallback settings; import/readback/save must succeed before receipt; newly changed task rolls back on save failure in same settings generation.",
+    "lifecycle": "App startup only, outside isolated CPU/fan sessions; no new polling, task run, executable launch or wake recovery owner",
+    "validation": "11 actual owner/repository memory scenarios passed; vue-tsc --noEmit passed. Actual scheduled task creation and Windows logon not exercised.",
+    "evidence": "Testing/YMCC/Evidence/NetworkAccelerationStartupDefault-20261105/114635-587953/RESULT.json"
+  },
+  "wallpaperDcPause20261104": {
+    "status": "SOURCE_AND_SCOPED_TESTS_READY_NOT_PACKAGED",
+    "setting": "ui.steamWallpaperPauseOnBattery",
+    "default": false,
+    "source": [
+      "src/views/SteamView.vue",
+      "src/bridge/wallpaperPowerPolicy.ts",
+      "src/bridge/sharedGameMedia.ts",
+      "src/bridge/dynamicBackground.ts",
+      "src/bridge/steamWallpaperHost.ts",
+      "src/bridge/gameMediaDownloads.ts",
+      "src/App.vue",
+      "native/shared_game_media_power.h",
+      "native/shared_game_media.h",
+      "native/shared_game_media_server.h",
+      "native/shared_game_media_download_queue.h",
+      "native/shared_game_media_download_worker.h",
+      "native/shared_game_media_download_supervisor.h",
+      "native/main.cpp steamWallpaperForegroundPreference/sharedGameMediaPowerChanged",
+      "tools/custom_steam_library_build_guard.ps1"
+    ],
+    "physicalPower": "Win32 ACLineStatus 0=DC,1=AC,unknown denied only when setting is ON; independent of performance profile editing",
+    "cancellation": "revoke foreground/work leases, abort active video sockets, release App decoder/timers, reap exact owned download child; retain cache/partial/user intent",
+    "crossProcess": "existing durable download queue and its existing notifications; no new business-settings polling",
+    "backgroundPlayback": "original real-video browser consumer: eight directed cases, frames/time/Range bytes stable during 900ms inactivity; no plugin source patch or added restoration delay",
+    "newPollingOrResidentThreads": false,
+    "evidence": "Testing/YMCC/Evidence/Wallpaper-Foreground-Demand-20261102/dc-pause-20261104",
+    "requiredDelivery": [
+      "main Web/native",
+      "CustomSteamLibrary.exe",
+      "new native/shared_game_media_power.h in host source identity"
+    ],
+    "installedOrPhysicalAcceptance": false
+  },
   "customLibraryVideoChoice20261104": {
     "status": "SOURCE_AND_SCOPED_TESTS_READY_NOT_INSTALLED",
     "source": [
@@ -26,6 +88,17 @@
         "merge only the requested game media; retain concurrent library edits and newer download events"
       ],
       "newPersistentTimersOrThreads": false
+    },
+    "rogLog212031Review": {
+      "evidence": "Testing/YMCC/Evidence/CustomLibrary-ROG-212031-20261104",
+      "scope": [
+        "terminal failure and cancellation take precedence over automatic pause labels",
+        "manual progress follows native CPU/game soft-gate exemption; power/storage remain authoritative",
+        "persisted selection without queue acknowledgement cannot claim admission",
+        "live explicit video attempt may consume existing six-minute game allowance; automatic attempt stays three minutes and total game/session/retry limits unchanged",
+        "worker declares power_source_channel dependency directly"
+      ],
+      "installedAcceptance": false
     }
   },
   "steamAppearanceRecoveryAudit20261104": {
@@ -13133,6 +13206,7 @@
       "anchors": [
         "native/steam_live.js",
         "native/steam_live_cdp.h",
+        "native/steam_light_gamepad_runtime.h",
         "native/steam_session_observer.h",
         "native/steam_window_event_budget.h",
         "native/main.cpp",
@@ -13153,6 +13227,7 @@
       ],
       "sourcePatterns": [
         "native/steam_live*",
+        "native/steam_light_gamepad_runtime.h",
         "native/steam_session_observer.h",
         "native/steam_window_event_budget.h",
         "native/steam_link_admission.h",
@@ -13402,6 +13477,7 @@
         "src/views/SteamView.vue",
         "src/bridge/steamUi.ts",
         "src/bridge/yeman.ts",
+      "src/bridge/networkAccelerationStartup.ts",
         "native/steam_ui_mode.h",
         "PowerControl/YeManSteam.bat",
         "PowerControl/YeManSteam.vbs",
@@ -13449,6 +13525,7 @@
         "native/boot_mode_platform.h",
         "native/input_startup_policy.h",
         "src/bridge/bootMode*.ts",
+      "src/bridge/networkAccelerationStartup.ts",
         "src/components/BootMode*.vue",
         "tools/boot_modes_fixture/**"
       ],
@@ -13609,6 +13686,47 @@
     },
     {
       "id": "decky",
+      "menuActionOwnership20261105": {
+        "sources": ["decky-plugin/src/index.tsx", "decky-plugin/src/AnchoredDropdown.tsx", "decky-plugin/src/PerformanceControls.tsx", "decky-plugin/src/GameProfileControls.tsx"],
+        "behavior": "One Content menu follows its relevant source rather than whole-sidebar revisions. Unrelated refresh updates the snapshot without extending the original 45-second deadline. Performance choices share the same owner.",
+        "callbacks": "Opening lifetime and exact parent owner fence duplicate activation, stale select/cancel, disabled or unmounted callbacks. Dedicated deletion confirmation is also consumed once and revoked on cancel.",
+        "pendingIntents": "Opening menus never erases accepted TDP/fan work. Unrelated one-shot actions wait. Power scheme waits for pending edits and submits only its standalone field under the unchanged YMCC owner.",
+        "verification": "Original TSX/client174 includes menu49 and entry-focus20; anchored18, profile UI18, real Edge/React DOM8; original host/action owners executed with inert IO. Legacy six-tier consumer and lossless default read-backoff assertion remain failed, with relevant current actions independently covered.",
+        "installedAcceptance": "NOT_RUN",
+        "evidence": "Testing/YMCC/Evidence/DeckyMenuActionAudit-20261105"
+      },
+      "tdpEntryFocus20261105": {
+        "sources": [
+          "decky-plugin/src/index.tsx",
+          "decky-plugin/src/PerformanceControls.tsx"
+        ],
+        "behavior": "Each visible YMCC QAM opening requests native TDP row focus once after ready, enabled and actually rendered. Original native A/B and slider edit ownership remain. No value writes/activation.",
+        "authority": "Same Content visibility token, native outer SliderControlPanelGroup navRef, target owner document and a single cancellable animation frame. Other slider refs untouched.",
+        "cancellation": "Pointer/key/native vgp_onbuttondown input or menu selection claims the opening. Hide/unmount/unload fence late frames. Hidden/disabled/missing/unknown native targets retain default Steam focus. Refreshes never re-focus once claimed.",
+        "verification": "Existing slider TSX/client consumer includes entry-focus cases; current Steam native SliderField/SliderControl source verified read-only for outer-ref forwarding. Software ports are memory-only; installed physical-controller acceptance NOT_RUN.",
+        "evidence": "Testing/YMCC/Evidence/DeckyTdpEntryFocus-20261105"
+      },
+      "audioObservationTimerReceiver20261104": {
+        "sources": [
+          "src/bridge/fxSound.ts",
+          "src/bridge/deckyMirrorHost.ts",
+          "tools/fixtures/decky_mirror_host_fixture.mjs"
+        ],
+        "trigger": "Decky mirror snapshot demand retains FxSound observation; initial read succeeds then original this.schedule(raw setTimeout) throws Illegal invocation in the YMCC WebView.",
+        "fix": "Default schedule/cancel wrap global timer calls, retaining the browser Window semantics when invoked as owner members. Existing read, mutation, polling interval and demand lifecycle unchanged.",
+        "proof": "Real Edge actual FxSound source red then green with memory IPC/native timers; original host consumer uses strict receiver checks for both scheduling and cancellation.",
+        "evidence": "Testing/YMCC/Evidence/DeckyLogReview-20261104-212031/IllegalInvocationFix",
+        "installedAcceptance": "NOT_RUN"
+      },
+      "backgroundCommands20261104": {
+        "sources": ["decky-plugin/src/index.tsx", "decky-plugin/src/mirrorClient.ts", "decky-plugin/src/performanceIntentQueue.ts", "decky-plugin/src/fanChoiceDebounce.ts", "decky-plugin/src/powerChoiceDebounce.ts"],
+        "trailingIntentMs": 2000,
+        "ownership": "Plugin-owned per-view intent queues survive hide/unmount; detached work is reused on reentry and disposed after settlement. View callback authority is separately fenced.",
+        "transport": "Temporary explicit intent demand and any admitted pending mutation retain business snapshots until settlement, never fake QAM visibility. Idle hidden views pause snapshots again.",
+        "boundaries": "Original identity/source/readiness/permission checks remain; disconnect/bootstrap change/unload never replays uncertain writes. No persistent background business polling, native timer or new executable.",
+        "verification": "Existing real TSX/client/queue consumers with memory WebSocket and virtual clock; installed Steam acceptance NOT_RUN.",
+        "evidence": "Testing/YMCC/Evidence/DeckyBackgroundCommands-20261104"
+      },
       "wallpaperFailureHandoff20261101": {
         "reviewedAt": "2026-11-01",
         "sources": [

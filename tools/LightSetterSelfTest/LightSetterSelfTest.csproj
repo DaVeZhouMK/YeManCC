@@ -8,6 +8,9 @@
   <Compile Include="../../FanLab/LightSetter/AyaneoCeWindowsEcTransport.cs" Link="AyaneoCeWindowsEcTransport.cs" />
   <Compile Include="SuperJoyOwnerLeaseTests.cs" />
   <Compile Include="SuperJoyNativeCompositionChild.cs" />
+  <Compile Include="ApexLightingTests.cs" />
+  <Compile Include="../../FanLab/LightSetter/ApexLightingConsumer.cs" Link="ApexLightingConsumer.cs" />
+  <Compile Include="../../FanLab/LightSetter/ApexWindowsHidTransport.cs" Link="ApexWindowsHidTransport.cs" />
   <Compile Include="../../FanLab/LightSetter/SuperJoyOwnerLease.cs" Link="SuperJoyOwnerLease.cs" />
   <Compile Include="SuperJoyWindowsTransportTests.cs" />
   <Compile Include="../../FanLab/LightSetter/SuperJoyWindowsHidTransport.cs" Link="SuperJoyWindowsHidTransport.cs" />

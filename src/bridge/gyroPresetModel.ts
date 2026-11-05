@@ -12,7 +12,7 @@ export function isGyroPresetKey(value: unknown): value is GyroPresetKey {
  * （陀螺仪页调整预设默认时，这里要同步。）
  */
 const GYRO_PRESET_DEFINING_FIELDS: Record<GyroPresetKey, Record<string, unknown>> = {
-  fps: { motionMode: 'on', motionTrigger: '', outputStick: 'right', outputAxis: 'xy', motionInput: 'local-space', aimingSightsTrigger: 'LT', gyroWeight: 1.3 },
+  fps: { motionMode: 'off', motionTrigger: 'LT', outputStick: 'right', outputAxis: 'xy', motionInput: 'local-space', aimingSightsTrigger: '', gyroWeight: 1.3 },
   racing: { motionMode: 'on', motionTrigger: '', outputStick: 'left', outputAxis: 'x', motionInput: 'joystick-steering' },
   steam: { motionMode: 'on', motionTrigger: '', motionInput: 'local-space' },
   custom: { motionMode: 'on', motionTrigger: '' },

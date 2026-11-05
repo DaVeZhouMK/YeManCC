@@ -71,6 +71,8 @@ const mouseBackendNotice = ref('');
 const gameInputRepairOpen = ref(false);
 const gameInputRepairBusy = ref(false);
 const gameInputRepairStatus = ref('');
+const gameInputModelWarning = ref('');
+const gameInputWarningTitle = computed(()=>gameInputModelWarning.value?'微软鼠标不可用':'修复微软鼠标组件');
 const gameInputRepairTriggerEl = ref<HTMLElement | null>(null);
 const gameInputRepairPanelEl = ref<HTMLElement | null>(null);
 const gameInputRepairCancelEl = ref<HTMLElement | null>(null);
@@ -189,7 +191,8 @@ function applyMouseBackend(result: MouseModeState): void {
   window.dispatchEvent(new CustomEvent('mouse-mode:backend-changed', { detail: { backend: result.backend } }));
   window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { ...result } }));
 }
-function openGameInputRepair(): void {
+function openGameInputRepair(modelWarning=''): void {
+  gameInputModelWarning.value=modelWarning;
   const placement = getGamepadPopupPlacement(gameInputRepairTriggerEl.value?.getBoundingClientRect() ?? null, Math.min(420, window.innerWidth - 16), 250, 10);
   gameInputRepairStyle.value = placement.style;
   gameInputRepairAbove.value = placement.above;
@@ -210,7 +213,7 @@ async function waitForGameInputRepair(): Promise<boolean> {
   return false;
 }
 async function confirmGameInputRepair(): Promise<void> {
-  if (gameInputRepairBusy.value) return;
+  if (gameInputRepairBusy.value || gameInputModelWarning.value) return;
   gameInputRepairBusy.value = true;
   gameInputRepairStatus.value = '正在请求管理员权限并安装 Microsoft GameInput Redist…';
   try {
@@ -238,13 +241,14 @@ function onGamepadBack(event: Event): void {
   closeGameInputRepair();
 }
 async function onMouseBackend(backend: MouseBackend): Promise<void> {
-  if (props.disabled || props.steamDeckActive || mouseBackendBusy.value || gamepad.value.mouseBackend === backend) return;
+  if (props.disabled || props.steamDeckActive || mouseBackendBusy.value || (gamepad.value.mouseBackend === backend && backend !== 'gamebar')) return;
   mouseBackendBusy.value = true;
   mouseBackendNotice.value = '';
   const before = gamepad.value.mouseBackend;
   try {
     const result = await setMouseBackend(backend);
     if (!result.ok) {
+      if (backend === 'gamebar' && result.reason === 'gamebar_model_unsupported') { openGameInputRepair(result.error || 'ROG 家族机型暂不支持微软鼠标，请使用 JoyXoff。'); return; }
       if (backend === 'gamebar' && result.reason === 'gameinput_redist_missing') { openGameInputRepair(); return; }
       gamepad.value = { ...gamepad.value, mouseBackend: before };
       const message = result.error || '模拟鼠标方案不可用';
@@ -321,15 +325,16 @@ onBeforeUnmount(() => {
     <button v-if="nativeSyncPending" type="button" class="shortcut-editor-open" :disabled="busy" @click="retryNativeSync">重试同步</button>
   </section>
 
-  <Teleport to="body"><Transition name="gameinput-repair-pop"><div v-if="gameInputRepairOpen" ref="gameInputRepairPanelEl" class="gameinput-repair-confirm" :class="{ above: gameInputRepairAbove }" :style="gameInputRepairStyle" role="alertdialog" aria-modal="true" aria-label="修复微软鼠标组件" data-gp-modal @pointerdown.stop @keydown.esc.prevent="closeGameInputRepair">
-    <div class="gameinput-repair-title"><InlineIcon name="warning" size="20px" />修复微软鼠标组件</div>
-    <p class="gameinput-repair-desc">当前系统缺少 Microsoft GameInput Redist。确认后将从微软官方源下载并安装所需组件，完成后自动切换。</p>
+  <Teleport to="body"><Transition name="gameinput-repair-pop"><div v-if="gameInputRepairOpen" ref="gameInputRepairPanelEl" class="gameinput-repair-confirm" :class="{ above: gameInputRepairAbove }" :style="gameInputRepairStyle" role="alertdialog" aria-modal="true" :aria-label="gameInputWarningTitle" data-gp-modal @pointerdown.stop @keydown.esc.prevent="closeGameInputRepair">
+    <div class="gameinput-repair-title"><InlineIcon name="warning" size="20px" />{{gameInputWarningTitle}}</div>
+    <p class="gameinput-repair-desc">{{gameInputModelWarning || '当前系统缺少 Microsoft GameInput Redist。确认后将从微软官方源下载并安装所需组件，完成后自动切换。'}}</p>
     <p v-if="gameInputRepairStatus" class="gameinput-repair-status">{{ gameInputRepairStatus }}</p>
-    <div class="gameinput-repair-actions" data-gp-group="gameinput-repair-confirm"><button ref="gameInputRepairCancelEl" type="button" data-gp-group="gameinput-repair-confirm" :disabled="gameInputRepairBusy" @click="closeGameInputRepair">取消 <small>B</small></button><button type="button" data-gp-group="gameinput-repair-confirm" class="danger" :disabled="gameInputRepairBusy" @click="confirmGameInputRepair">{{ gameInputRepairBusy ? '正在修复…' : '确认修复' }}</button></div>
+    <div class="gameinput-repair-actions" :class="{'model-warning':!!gameInputModelWarning}" data-gp-group="gameinput-repair-confirm"><button ref="gameInputRepairCancelEl" type="button" data-gp-group="gameinput-repair-confirm" :disabled="gameInputRepairBusy" @click="closeGameInputRepair">{{gameInputModelWarning?'知道了':'取消'}} <small>B</small></button><button v-if="!gameInputModelWarning" type="button" data-gp-group="gameinput-repair-confirm" class="danger" :disabled="gameInputRepairBusy" @click="confirmGameInputRepair">{{ gameInputRepairBusy ? '正在修复…' : '确认修复' }}</button></div>
   </div></Transition></Teleport>
 </template>
 
 <style scoped>
+.gameinput-repair-actions.model-warning{grid-template-columns:1fr!important}
 .mouse-settings-card .backend-bubble{display:block;margin:0;padding:10px}
 .mouse-settings-card .mouse-mode-backends{display:flex;flex-direction:column;align-items:stretch;gap:8px}
 .mouse-settings-card .mouse-backend-control{width:100%}

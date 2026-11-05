@@ -5,6 +5,8 @@
 #undef CloseHandle
 #undef TerminateProcess
 #include <map>
+#include <fstream>
+#include <string_view>
 #include <objbase.h>
 #include "input_capture_completion.h"
 // OS windows/message/COM leaves are explicit in-memory ports, no User32/COM IO.
@@ -86,6 +88,19 @@ static void stopTopMonitorForExit(DWORD){leaf("top-monitor");}
 static bool sgCleanupBeforeExit(bool){leaf("sleep-cleanup");return true;}
 static void inputHostRaiseExitFence(const char*){leaf("exit-fence-already-raised-before-fixture");}
 static void recoverySnapSetExitIntent(){leaf("exit-intent-already-raised");}
+// Typed memory leaves for current callers; these grant no device/producer proof.
+// Post-hide writer is explicitly unarmed in this original local-owner fixture.
+static bool msiPostHideCleanupWorkCurrentLocked(std::string_view) noexcept{return true;}
+static void msiPostHideCleanupWorkRetiredLocked(std::string_view,const char*) noexcept{}
+static bool msiPostHideCancelForStop(const char*){leaf("MSI-post-hide-no-writer-armed");return true;}
+static void inputHostDeferredPhysicalHideClear(){leaf("deferred-hide-memory-port");}
+static bool inputHostSwitchExecutionCarryColdOffLocked(std::uint64_t){leaf("cold-OFF-carry-not-executed");return false;}
+static json inputHostCleanupEvidenceLocked() noexcept{return nullptr;}
+static void physicalSourceReaderStop() noexcept{leaf("physical-source-reader-memory-port");}
+static std::wstring yemancc_data_dir(){return L"";}
+namespace ymcc::batterycharge {
+inline json shutdown(const std::wstring&){leaf("battery-shutdown-memory-port");return {{"scope","unexecuted-memory-leaf"}};}
+}
 struct RecoveryStateBusyGuard {explicit RecoveryStateBusyGuard(const char*){leaf("controller-recovery-busy-scope");}};
 struct InputHostVirtualIntentMutation{~InputHostVirtualIntentMutation(){leaf("virtual-intent-mutation-scope");}};
 static bool g_realStickTestAdmissionLogged=false;
@@ -129,8 +144,131 @@ constexpr UINT WM_APP_EXIT_READY=WM_USER+7;
 #undef WaitForSingleObject
 #undef CloseHandle
 #undef TerminateProcess
+
+// Explicit opt-in bridge: retain the original private-child scenario while the
+// child executes the existing managed terminal consumer before native OS return.
+static std::wstring managedChildEnv(const wchar_t* name){
+    wchar_t value[32768]{};const DWORD length=GetEnvironmentVariableW(name,value,32768);
+    need(length<32768,"managed child environment too long");return length?std::wstring(value,length):std::wstring{};
+}
+static bool managedChildRequested(){return !managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROGRAM").empty();}
+static void configureManagedChild(std::wstring& application,std::wstring& command){
+    const auto program=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROGRAM");if(program.empty())return;
+    const auto assembly=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_ASSEMBLY"),proof=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROOF"),nonce=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_NONCE");
+    const auto quote=[](const std::wstring& value){need(!value.empty()&&value.find(L'"')==std::wstring::npos&&value.back()!=L'\\',"managed child explicit file argument");return L"\""+value+L"\"";};
+    need(nonce.size()==32&&std::all_of(nonce.begin(),nonce.end(),[](wchar_t c){return (c>=L'0'&&c<=L'9')||(c>=L'a'&&c<=L'f');}),"managed child nonce format");
+    application=program;command=quote(program)+L" "+quote(assembly)+L" --retained-owner-child "+quote(proof)+L" "+nonce+L" "+std::to_wstring(GetCurrentProcessId());
+}
+static unsigned long long managedBirthTicks(HANDLE process){
+    FILETIME birth{},exit{},kernel{},user{};need(GetProcessTimes(process,&birth,&exit,&kernel,&user)!=FALSE,"managed handoff process creation time");
+    ULARGE_INTEGER value{};value.HighPart=birth.dwHighDateTime;value.LowPart=birth.dwLowDateTime;
+    return value.QuadPart+504911232000000000ULL;
+}
+static json readManagedRetainedProof(HANDLE process){
+    const auto file=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROOF");const auto started=::GetTickCount64();
+    while(::GetTickCount64()-started<8000){
+        HANDLE input=CreateFileW(file.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        if(input==INVALID_HANDLE_VALUE){
+            const auto error=GetLastError();need(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND||error==ERROR_SHARING_VIOLATION,"managed retained proof open");
+            need(::WaitForSingleObject(process,0)==WAIT_TIMEOUT,"managed child exited before retained proof");::Sleep(10);continue;
+        }
+        BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{};
+        const bool valid=GetFileInformationByHandle(input,&info)&&!(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)&&GetFileSizeEx(input,&size)&&size.QuadPart>0&&size.QuadPart<=1024*1024;
+        if(!valid){::CloseHandle(input);need(false,"managed retained proof bounded regular file");}
+        std::string bytes(static_cast<std::size_t>(size.QuadPart),'\0');DWORD count=0;
+        const bool read=ReadFile(input,bytes.data(),static_cast<DWORD>(bytes.size()),&count,nullptr)!=FALSE;
+        const bool closed=::CloseHandle(input)!=FALSE;need(read&&closed&&count==bytes.size(),"managed retained proof complete read and close");
+        return json::parse(bytes);
+    }
+    throw std::runtime_error("managed retained proof deadline");
+}
+static void verifyManagedRetainedProof(const json& delivered,HANDLE process){
+    json proof=delivered;const auto mutation=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROOF_MUTATION");
+    need(mutation.empty()||mutation==L"nonce","unknown managed retained proof mutation");
+    if(mutation==L"nonce")proof["nonce"]="deliberately-wrong-native-consumer-nonce";
+    const auto expected=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_NONCE");
+    need(proof.at("schemaVersion")==1&&proof.at("kind")=="ymcc-managed-retained-proof-v1","managed retained proof contract");
+    std::string expectedAscii;for(const auto c:expected)expectedAscii.push_back(static_cast<char>(c));
+    need(proof.at("nonce")==expectedAscii,"managed retained proof nonce rejected");
+    need(proof.at("pid")==GetProcessId(process)&&proof.at("nativeParentPid")==GetCurrentProcessId(),"managed retained proof exact process owners");
+    need(std::stoull(proof.at("managedBirthUtcTicks").get<std::string>())==managedBirthTicks(process)&&std::stoull(proof.at("nativeParentBirthUtcTicks").get<std::string>())==managedBirthTicks(GetCurrentProcess()),"managed retained proof exact creation identities");
+    const auto& result=proof.at("caseResult");
+    need(result.at("name")=="terminal-shutdown-output-fixed"&&result.at("pass")==true&&result.at("exit")==7,"managed original terminal error preserved");
+    const auto& receipts=result.at("receipts");need(receipts.is_array()&&receipts.size()==1,"managed original single terminal receipt");
+    const auto& receipt=receipts.at(0);
+    need(receipt.at("ManagedReleaseComplete")==false&&receipt.at("ResourceDisposition")=="owner-retained"&&receipt.at("ExitCode")==7&&receipt.at("ReleaseAttempts")==2&&receipt.at("DirectReleaseAttempts")==1&&receipt.at("Retried")==true,"managed retained terminal debt not success");
+    const auto& resources=result.at("beforeFixtureCleanup");const auto& workers=resources.at("workers");
+    need(workers.is_array()&&!workers.empty()&&resources.at("ContextCalls")==0,"managed original live owner resource snapshot");
+    for(const auto& worker:workers)need(worker.at("outputAlive")==true&&worker.at("outputCtsClosed")==false&&worker.at("outputFinallyRan")==false&&worker.at("sdkDisposedFlag")==false&&worker.at("callbacks")==0,"managed retained worker not fixture-released");
+    need(::WaitForSingleObject(process,0)==WAIT_TIMEOUT,"managed retained process still owned and live");
+}
+
 @@PRIVATE_CHILD@@
 static bool open(HANDLE value){DWORD flags=0;return value&&GetHandleInformation(value,&flags)!=FALSE;}
+// Reuse the coordinator's original test-side consumer; no second implementation.
+namespace coordinatorObserverFixture {
+static std::vector<HANDLE> fullPipeChildObservers;
+static std::vector<std::wstring> fullPipeReceipts;
+static std::vector<std::pair<bool,std::string>> checks;
+static void check(bool good,const char* message){checks.emplace_back(good,message);}
+@@COORDINATOR_OBSERVER_CONSUMER@@
+}
+struct ScopedObserverOracle {
+    HANDLE value=nullptr;
+    ~ScopedObserverOracle(){
+        DWORD flags=0;
+        if(value&&GetHandleInformation(value,&flags)){
+            SetHandleInformation(value,HANDLE_FLAG_PROTECT_FROM_CLOSE,0);
+            ::CloseHandle(value); // failure cleanup only; never a passing oracle
+        }
+    }
+};
+static json coordinatorObserverCloseCase(){
+    namespace observer=coordinatorObserverFixture;
+    Child child;child.exitByThread();
+    need(::WaitForSingleObject(child.primary,2000)==WAIT_OBJECT_0,"observer test private primary exited before helper");
+    wchar_t directory[32768]{};const DWORD length=GetCurrentDirectoryW(32768,directory);
+    need(length>0&&length<32768,"observer test cwd is original private profile directory");
+    const std::wstring receipt=std::wstring(directory)+L"\\coordinator-observer-receipt.json";
+    const char body[]="{\"status\":\"OBSERVED\",\"failure\":null,\"scope\":\"fixture-observer-only-no-managed-behavior\"}";
+    HANDLE file=CreateFileW(receipt.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    need(file!=INVALID_HANDLE_VALUE,"observer private receipt CreateNew");DWORD written=0;
+    const BOOL wrote=WriteFile(file,body,static_cast<DWORD>(sizeof(body)-1),&written,nullptr);const BOOL flushed=FlushFileBuffers(file);const BOOL fileClosed=::CloseHandle(file);
+    need(wrote&&written==sizeof(body)-1&&flushed&&fileClosed,"observer private receipt durable write and checked close");
+    observer::fullPipeReceipts.push_back(receipt);
+    ScopedObserverOracle normal;
+    need(DuplicateHandle(GetCurrentProcess(),child.process,GetCurrentProcess(),&normal.value,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"normal observation duplicate");
+    observer::fullPipeChildObservers.push_back(normal.value);
+    const auto normalResult=observer::fullPipeChildOutcome();
+    need(observer::fullPipeChildObservers.empty()&&!open(normal.value),"successful close must retire exact observation owner");normal.value=nullptr;
+    ScopedObserverOracle protectedOwner;
+    need(DuplicateHandle(GetCurrentProcess(),child.process,GetCurrentProcess(),&protectedOwner.value,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"protected observation duplicate");
+    need(SetHandleInformation(protectedOwner.value,HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE)!=FALSE,"protect only own observation HANDLE");
+    observer::fullPipeChildObservers.push_back(protectedOwner.value);
+    const auto failedResult=observer::fullPipeChildOutcome();
+    need(observer::fullPipeChildObservers.size()==1&&observer::fullPipeChildObservers.front()==protectedOwner.value&&open(protectedOwner.value),"failed close lost sole observation owner");
+    need(failedResult.at("nativeObserverCloseSucceeded")==false&&failedResult.at("nativeObserverCloseError").get<DWORD>()!=ERROR_SUCCESS,"failed close must preserve actual Win32 error");
+    need(normalResult.at("nativeObserverCloseSucceeded")==true&&normalResult.at("nativeObserverCloseError")==ERROR_SUCCESS,"normal close receipt must reflect actual success");
+    const auto retainedErrors=std::count_if(observer::checks.begin(),observer::checks.end(),[](const auto& row){return !row.first;});
+    need(retainedErrors==1&&std::any_of(observer::checks.begin(),observer::checks.end(),[](const auto& row){return !row.first&&row.second=="owned managed Host observation handle checked closed";}),"original check must record exactly one protected-close failure");
+    need(SetHandleInformation(protectedOwner.value,HANDLE_FLAG_PROTECT_FROM_CLOSE,0)!=FALSE,"remove only fixture observation protection");
+    const auto retried=observer::fullPipeChildOutcome();
+    need(observer::fullPipeChildObservers.empty()&&!open(protectedOwner.value),"same retained owner retry must really close before removal");protectedOwner.value=nullptr;
+    need(retried.at("nativeObserverCloseSucceeded")==true&&retried.at("nativeObserverCloseError")==ERROR_SUCCESS,"same-owner retry receipt must show actual close");
+    DWORD exitCode=99;need(GetExitCodeProcess(child.process,&exitCode)&&exitCode==0,"private process exit is actual fixture preparation");
+    const HANDLE process=child.process,primary=child.primary,release=child.release,job=child.job;
+    need(::CloseHandle(process)&&::CloseHandle(primary)&&::CloseHandle(release)&&::CloseHandle(job),"close only remaining fixture-owned child preparation handles");
+    child.process=nullptr;child.primary=nullptr;child.release=nullptr;child.job=nullptr;
+    const bool closed=!open(process)&&!open(primary)&&!open(release)&&!open(job);
+    need(closed,"observer-only private preparation handles closed before RAII cleanup");
+    json observedChecks=json::array();for(const auto& item:observer::checks)observedChecks.push_back({{"passed",item.first},{"assertion",item.second}});
+    return {{"scopedLocalOwnerPass",true},{"scenario","coordinator-observer-close"},{"originalConsumerOnly",true},
+      {"normalClose",normalResult},{"protectedClose",failedResult},{"sameOwnerRetry",retried},{"originalCheckRows",observedChecks},
+      {"protectedCloseFailureExpected",true},{"sameRetainedHandleRetried",true},{"originalDefaultCasesExecuted",false},
+      {"privateChildExitPreparation","existing private child release thread; child already exited before observer checks; not product release proof"},
+      {"fixtureCleanup",{{"privateHandlesClosed",closed},{"childKillOrEventBackstop",false},{"observerGuardFallbackUsedForSuccess",false}}},
+      {"assertionsPassed",fixtureAssertionCount.load()},{"actualProductExitExecuted",false},{"fullApplicationExitAccepted",false}};
+}
 static json logData(const char* event){for(auto it=ports.logs.rbegin();it!=ports.logs.rend();++it)if(it->at("event")==event)return it->at("data");throw std::runtime_error("missing actual production log");}
 static json pipeSnapshot(){
     auto* owner=ymcc::inputHost::pipeTransport::existingProcessRuntime();
@@ -375,8 +513,10 @@ int wmain(int argc,wchar_t** argv){
     json result;
     try{
         need(argc==2,"explicit current scenario required");const std::wstring scenario=argv[1];
+        if(scenario==L"coordinator-observer-close"){result=coordinatorObserverCloseCase();std::cout<<result.dump()<<"\n";return 0;}
         const bool protectedDebt=scenario==L"protected-primary-pipe",healthy=scenario==L"healthy-ordinary";
         need(healthy||protectedDebt||scenario==L"unprotected-uncooperative"||isR8Case(scenario)||scenario==L"busy-pipe-independent-force","unknown scenario");
+        const bool managedMode=managedChildRequested();need(!managedMode||scenario==L"unprotected-uncooperative","managed bridge only existing unprotected scenario");
         Child child;const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release;
         HANDLE processOracle=nullptr,primaryOracle=nullptr;
         need(DuplicateHandle(GetCurrentProcess(),originalProcess,GetCurrentProcess(),&processOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"process oracle duplicate");
@@ -404,6 +544,12 @@ int wmain(int argc,wchar_t** argv){
         if(isR8Case(scenario)){
             result=r8BudgetCase(scenario,child,processOracle,primaryOracle,pipe);
             std::cout<<result.dump()<<"\n";return 0;
+        }
+        if(managedMode){
+            result["managedRetainedOwnerProof"]=readManagedRetainedProof(originalProcess);
+            verifyManagedRetainedProof(result.at("managedRetainedOwnerProof"),originalProcess);
+            need(!inputHostExitLocalOwnershipReleased()&&readyPosts.load()==0&&!g_inputHostExitForceSpent,"managed debt cannot be returned or ready before native owner");
+            need(g_inputHostProcess==originalProcess&&g_inputHostPrimaryThread==originalPrimary&&g_inputHostServerPipe==pipe,"same actual managed lifetime handed to original native owner");
         }
         need(tryStartExitCleanupWorker(g_hwnd),"actual cleanup worker creation");
         HANDLE cleanupOracle=nullptr;need(DuplicateHandle(GetCurrentProcess(),g_exitCleanupThread,GetCurrentProcess(),&cleanupOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"cleanup observation duplicate");
@@ -447,6 +593,7 @@ int wmain(int argc,wchar_t** argv){
         unsigned forceReceipts=0;for(const auto& item:ports.logs)if(item.at("event")=="input-host-exit-ownership"&&item.at("data").at("forceAttempted")==true)++forceReceipts;
         need(forceReceipts==(healthy?0u:1u),"force budget not expected zero/once");
         const auto lastOwned=logData("input-host-exit-ownership");
+        const auto managedProof=managedMode?result.at("managedRetainedOwnerProof"):json(nullptr);
         result={{"scopedLocalOwnerPass",true},{"scenario",healthy?"healthy-ordinary":protectedDebt?"protected-primary-pipe":"unprotected-uncooperative"},
           {"beforeFixtureFaultRelief",beforeRelief},{"actualExitCleanup",{{"stage",g_exitCleanupStage.load()},{"readyPosts",readyPosts.load()},{"cleanupCode",workerCode},{"cleanupCompleted",g_exitCleanupCompleted}}},
           {"actualEnsure",{{"returned",true},{"actualLocalGetter",inputHostExitLocalOwnershipReleased()},{"wholeMainAndWmAppReadyExecuted",false}}},
@@ -454,6 +601,13 @@ int wmain(int argc,wchar_t** argv){
           {"businessOwned",inputHostOwnedCleanupProvenLocked()},{"businessDutyRetained",g_inputHostReleaseQuarantined||g_hidHideVisibilityJournal.active},{"endpointAndPhysicalReleaseProven",false},
           {"lastExitOwnershipReceipt",lastOwned},{"actualLogs",ports.logs},{"noncontrollerMemoryLeaves",memoryLeaves},
           {"permanentOsBlockStatus","UNKNOWN; fixture fault relief is conditional progress, not permanent fault destruction"}};
+        if(managedMode){
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION account{};
+            const auto jobWaitStarted=::GetTickCount64();
+            do{need(QueryInformationJobObject(child.job,JobObjectBasicAccountingInformation,&account,sizeof(account),nullptr)!=FALSE,"managed subtree accounting");if(account.ActiveProcesses==0)break;::Sleep(10);}while(::GetTickCount64()-jobWaitStarted<1000);
+            need(account.ActiveProcesses==0,"managed subtree actually gone before observation close");
+            result["managedRetainedOwnerHandoff"]={{"proof",managedProof},{"originalTerminalBlockExecuted",true},{"fixtureGateOpenedBeforeRetirement",false},{"sameOwnedProcessAndPrimary",true},{"nativeOriginalExitOwnerExecuted",true},{"jobActiveProcessesBeforeClose",account.ActiveProcesses},{"forcedOnce",forceReceipts==1},{"fullHostOrSdkAccepted",false}};
+        }
         // Product already closed originals. Fixture releases only independent
         // observation duplicates and its unsignaled test event, after joining.
         child.process=nullptr;child.primary=nullptr;

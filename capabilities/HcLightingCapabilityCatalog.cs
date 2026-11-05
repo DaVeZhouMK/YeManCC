@@ -7,12 +7,13 @@ using System.Collections.ObjectModel;
 using System.Linq;
 namespace YeManFanBackend.Capabilities;
 
-public enum LightingSourceAdapter { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid }
+public enum LightingSourceAdapter { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid, ApexHidV2 }
 
 public sealed record LightingCapabilityDescriptor(string DeviceId, bool Brightness, bool SecondColor,
     HcSourceLedEffect DeclaredEffects, bool StatusAvailable, bool PresetDeclared, bool PresetAvailable, bool IndependentCore, bool StatusTransportDisabled)
 {
     public LightingSourceAdapter SourceAdapter { get; init; } = LightingSourceAdapter.FrozenHc;
+    public bool FixedSpeed { get; init; }
 }
 public sealed record LightingCapabilityOperation(HcDeviceDescriptor Device, LightingCapabilityDescriptor Capabilities,
     string Action, string Level, string PreferredProvider)
@@ -72,7 +73,11 @@ public static partial class HcLightingCapabilityCatalog
             _ => false };
         if (!allowed) throw new NotSupportedException("LIGHTING_OPERATION_UNAVAILABLE: " + action + ":" + effect);
         var independent = c.IndependentCore && GeneratedIndependentActionAllowed(binding.Device.DeviceId, action, effect);
-        return new(binding.Device, c, action, effect, c.SourceAdapter == LightingSourceAdapter.SuperJoyCec ? "superjoy-cec-v1" : independent ? IndependentProvider : "hc-device-core");
+        var provider = c.SourceAdapter switch {
+            LightingSourceAdapter.ApexHidV2 => "onex-apex-hid-v2",
+            LightingSourceAdapter.SuperJoyCec => "superjoy-cec-v1",
+            _ => independent ? IndependentProvider : "hc-device-core" };
+        return new(binding.Device, c, action, effect, provider);
     }
     public static bool TryResolveExtensionPreset(string deviceId, string presetId, out int value)
     {

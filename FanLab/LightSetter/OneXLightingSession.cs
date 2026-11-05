@@ -101,16 +101,8 @@ internal sealed class OneXLightingSession : IDisposable
         var discover = utils.GetMethod("GetSerialDevices", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null)
             ?? throw new MissingMethodException(utils.FullName, "GetSerialDevices");
         var rows = discover.Invoke(null, null) as IEnumerable ?? throw new InvalidOperationException("OneX serial discovery failed");
-        var ports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in rows)
-        {
-            var name = row?.GetType().GetProperty("Name")?.GetValue(row) as string;
-            if (name is null || !name.Contains(descriptor, StringComparison.Ordinal)) continue;
-            var match = Regex.Match(name, @"(?:^|\W)(COM[1-9]\d*)(?:\W|$)");
-            if (match.Success) ports.Add(match.Groups[1].Value);
-        }
-        if (ports.Count != 1) throw new InvalidOperationException(ports.Count == 0 ? "OneX lighting serial port not found" : "OneX lighting serial port ambiguous");
-        var settings = new object?[] { ports.Single(), Field(family,"SerialPortBaudRate").GetValue(device),
+        var port = SelectSerialPort(rows, descriptor);
+        var settings = new object?[] { port, Field(family,"SerialPortBaudRate").GetValue(device),
             Field(family,"SerialPortParity").GetValue(device), Field(family,"SerialPortDataBits").GetValue(device), Field(family,"SerialPortStopBits").GetValue(device) };
         var serial = Activator.CreateInstance(serialField.FieldType, settings)
             ?? throw new InvalidOperationException("OneX lighting serial construction failed");
@@ -126,6 +118,53 @@ internal sealed class OneXLightingSession : IDisposable
         }
         catch { session.Dispose(); throw; }
     }
+    // Keep discovery selection identical to the inline path; diagnostics never admit another transport.
+    internal static string SelectSerialPort(IEnumerable rows, string descriptor)
+    {
+        var ports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var observedNames = new List<string>();
+        var observedHardware = new List<object>();
+        var rowCount = 0;
+        foreach (var row in rows)
+        {
+            rowCount++;
+            var name = row?.GetType().GetProperty("Name")?.GetValue(row) as string;
+            if (observedNames.Count < 8) observedNames.Add("\"" + SerialDiagnosticText(name) + "\"");
+            // Read only fields already present on the frozen discovery row.
+            // A localized generic Name never grants transport admission.
+            if (rowCount <= 8) {
+                var deviceId = SerialDiagnosticProperty(row, "DeviceId");
+                var vid = SerialDiagnosticProperty(row, "VID");
+                var pid = SerialDiagnosticProperty(row, "PID");
+                if (deviceId is not null || vid is not null || pid is not null)
+                    observedHardware.Add(new { row = rowCount,
+                        deviceId = SerialDiagnosticText(deviceId, true),
+                        vid = SerialDiagnosticText(vid), pid = SerialDiagnosticText(pid),
+                        protocolAdmitted = false });
+            }
+            if (name is null || !name.Contains(descriptor, StringComparison.Ordinal)) continue;
+            var match = Regex.Match(name, @"(?:^|\W)(COM[1-9]\d*)(?:\W|$)");
+            if (match.Success) ports.Add(match.Groups[1].Value);
+        }
+        if (ports.Count != 1)
+        {
+            var reason = ports.Count == 0 ? "OneX lighting serial port not found" : "OneX lighting serial port ambiguous";
+            // Frozen HC swallows query exceptions, so zero rows cannot prove an empty inventory.
+            throw new InvalidOperationException(reason + "; expectedDescriptor=\"" + SerialDiagnosticText(descriptor) +
+                "\"; rowCount=" + rowCount + "; matchedPortsCount=" + ports.Count +
+                "; observedHardware=" + System.Text.Json.JsonSerializer.Serialize(observedHardware) +
+                "; observedNames=[" + string.Join(", ", observedNames) + "]; discovery=" +
+                (rowCount == 0 ? "empty-or-query-failed" : "rows-observed"));
+        }
+        return ports.Single();
+    }
+    private static string? SerialDiagnosticProperty(object? row, string property) {
+        try { return row?.GetType().GetProperty(property)?.GetValue(row) as string; }
+        catch { return "<read-error>"; } // Diagnostics cannot mask the original refusal.
+    }
+    private static string SerialDiagnosticText(string? value, bool path = false) => new string((value ?? "<null>").Take(100)
+        .Select(c => char.IsControl(c) || char.IsSurrogate(c) || c is '"' or '\u2028' or '\u2029' ||
+            (!path && c == '\\') || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format ? '?' : c).ToArray());
     public void Dispose()
     {
         var serial = ownedPort; ownedPort = null;

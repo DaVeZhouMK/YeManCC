@@ -74,6 +74,7 @@ export class MirrorClient {
   private visible = false;
   private readonly defaultVisibilityOwner = {};
   private readonly visibleOwners = new Set<object>();
+  private readonly intentOwners = new Set<object>();
   private passive = false;
   private passiveConsumers=new Set<string>();
   private extraListeners = new Set<(message:unknown)=>void>();
@@ -159,7 +160,7 @@ export class MirrorClient {
     if(this.disposed||value===this.passive)return;
     this.passive=value;
     if(value&&!this.socket&&this.retry===null){this.attempt=0;this.connect();}
-    else if(!this.visible&&!this.passive){this.disconnect('被动显示已关闭');if(this.bootstrapWaiters.size)this.recoverConnection();}
+    else if(!this.snapshotWanted()&&!this.passive){this.disconnect('被动显示已关闭');if(this.bootstrapWaiters.size)this.recoverConnection();}
   }
   // All passive consumers share the original connection owner/backoff. A send
   // failure invalidates that socket, but never queues/replays the uncertain
@@ -215,7 +216,8 @@ export class MirrorClient {
   }
   updaterSupported(){return this.binding?.updaterProtocol===1;}
   updaterRunId(){return this.binding?.runId;}
-  private transportWanted(){return this.visible||this.passive;}
+  private snapshotWanted(){return this.visible||this.intentOwners.size>0||this.pending!==null;}
+  private transportWanted(){return this.snapshotWanted()||this.passive;}
   private wanted(){return this.transportWanted()||this.bootstrapWaiters.size>0;}
   private passiveRecoveryWanted(){return this.passiveConsumers.has('connection')||this.passiveConsumers.has('hud')&&this.binding?.hudProtocol===1||this.passiveConsumers.has('wallpaper')&&this.binding?.wallpaperProtocol===1||this.passiveConsumers.has('updater')&&this.binding?.updaterProtocol===1;}
   private now(){return this.deps.now?.()??Date.now();}
@@ -224,18 +226,36 @@ export class MirrorClient {
     if(!this.passiveConsumers.has('hud')||!this.state.connected||!this.socket||this.binding?.hudProtocol!==1)return false;
     return this.sendPassive({command,runId:this.binding.runId,status,...(ok===undefined?{}:{ok})});
   }
+  // Delayed accepted user intent owns business snapshots only until it settles.
+  // Closing a QAM view is not a disconnect/cancel boundary. Real unload, binding
+  // and source changes still use the original invalidation and never replay writes.
+  setIntentPending(owner:object, active:boolean) {
+    if(this.disposed)return;
+    const wanted=this.snapshotWanted();
+    if(active)this.intentOwners.add(owner);else this.intentOwners.delete(owner);
+    this.syncSnapshotDemand(wanted);
+  }
+  private syncSnapshotDemand(wasWanted:boolean) {
+    const wanted=this.snapshotWanted();
+    if(wanted===wasWanted)return;
+    if(wanted){
+      this.attempt=0;
+      if(this.socket&&this.state.connected&&this.binding)this.requestSnapshot(this.socket,this.binding.runId);
+      else this.connect();
+    }else if(!this.passive){this.disconnect('侧栏已隐藏');if(this.bootstrapWaiters.size)this.recoverConnection();}
+    else {this.pauseSnapshotDemand();this.publish({snapshot:null});}
+  }
   setVisible(visible: boolean, owner: object = this.defaultVisibilityOwner) {
     if(this.disposed)return;
+    const wanted=this.snapshotWanted();
     // QAM can mount more than one Content. A hidden page must not revoke
-    // another page's authenticated snapshot or in-flight mutation.
+    // another page's authenticated snapshot or an accepted background command.
     if(visible)this.visibleOwners.add(owner);else this.visibleOwners.delete(owner);
     visible=this.visibleOwners.size>0;
-    if (visible === this.visible) return;
-    this.visible = visible;
+    if(visible===this.visible)return;
+    this.visible=visible;
     if(!visible)this.finishProbe(undefined,'侧栏已隐藏');
-    if (visible) { this.attempt = 0; if(this.socket&&this.state.connected&&this.binding)this.requestSnapshot(this.socket,this.binding.runId);else this.connect(); }
-    else if(!this.passive){this.disconnect('侧栏已隐藏');if(this.bootstrapWaiters.size)this.recoverConnection();}
-    else {this.pauseSnapshotDemand();this.rejectPending('侧栏已隐藏；不重放未确认操作');this.publish({snapshot:null});}
+    this.syncSnapshotDemand(wanted);
   }
   bootstrapChanged(): void {
     if (!this.wanted() || this.disposed) return;
@@ -334,13 +354,13 @@ export class MirrorClient {
     // A requested state must eventually answer even when the socket remains OPEN.
     // Arm before send so a synchronous reply can cancel it; repeated demand never
     // postpones this deadline. There is no periodic healthy-state probe.
-    if(this.visible&&this.socket===socket&&this.connectDeadline===null&&this.snapshotDeadline===null){
+    if(this.snapshotWanted()&&this.socket===socket&&this.connectDeadline===null&&this.snapshotDeadline===null){
       const epoch=this.epoch,pending={timer:null as unknown as ReturnType<typeof setTimeout>};
       this.snapshotDeadline=pending;
       // A valid reply can retire a deadline without changing this socket epoch.
       // Old dispatched callbacks must not clear a newer read's timer or lease.
       pending.timer=this.deps.schedule(()=>{
-        if(this.snapshotDeadline!==pending||epoch!==this.epoch||this.socket!==socket||!this.visible)return;
+        if(this.snapshotDeadline!==pending||epoch!==this.epoch||this.socket!==socket||!this.snapshotWanted())return;
         this.snapshotDeadline=null;
         this.disconnect('YMCC 状态响应超时；正在重新连接，不重放未确认操作');
         this.recoverConnection();
@@ -398,7 +418,7 @@ export class MirrorClient {
         // of whether the sidebar has received its business snapshot yet.
         this.publish({connected:true,snapshot:null,notice:''});
       }
-      if(epoch===this.epoch&&this.visible)this.requestSnapshot(socket,boot.runId);
+      if(epoch===this.epoch&&this.snapshotWanted())this.requestSnapshot(socket,boot.runId);
     });
     socket.addEventListener('message', (event: MessageEvent) => {
       if (epoch !== this.epoch || !this.wanted() || typeof event.data !== 'string') return;
@@ -410,7 +430,7 @@ export class MirrorClient {
       if (message.type === 'snapshot') {
         // A restored YMCC renderer can briefly resume its prior demand. A hidden
         // sidebar explicitly pauses that business stream while the HUD stays linked.
-        if(!this.visible){this.pauseSnapshotDemand();return;}
+        if(!this.snapshotWanted()){this.pauseSnapshotDemand();return;}
         const snap = message.snapshot as MirrorSnapshot;
         if (!validSnapshot(snap, boot.runId)) { this.disconnect('镜像身份无效'); this.recoverConnection(); return; }
         if (this.state.snapshot && snap.revision < this.state.snapshot.revision) return;
@@ -422,7 +442,7 @@ export class MirrorClient {
         this.publish({ connected: true, snapshot: snap, notice: this.pending && this.state.busy ? this.state.notice : this.operationError?.notice ?? snap.notice ?? '' });
         if(message.probeId===this.probe?.id&&this.probe)this.finishProbe(snap);
       } else if((message.type==='hud'||message.type==='hud-ready')&&this.passiveConsumers.has('hud')&&boot.hudProtocol===1){
-        if(message.type==='hud-ready'){if(this.visible)this.requestSnapshot(socket,boot.runId);else this.pauseSnapshotDemand();}
+        if(message.type==='hud-ready'){if(this.snapshotWanted())this.requestSnapshot(socket,boot.runId);else this.pauseSnapshotDemand();}
         for(const listener of this.extraListeners){try{listener(message);}catch{}}
       } else if((message.type==='wallpaper'||message.type==='wallpaper-ready')&&this.passiveConsumers.has('wallpaper')&&boot.wallpaperProtocol===1){
         const pending=this.wallpaperDeadline;
@@ -441,6 +461,7 @@ export class MirrorClient {
         this.operationError=error&&this.state.snapshot?{notice:error,runId:boot.runId,generation:this.state.snapshot.generation,identity:this.state.snapshot.game?.identity??''}:null;
         this.publish({ busy: false, notice: message.ok ? (message.notice ?? '') : error });
         if (message.ok) pending.resolve(message.result); else pending.reject(new Error(message.error ?? '操作失败'));
+        this.syncSnapshotDemand(true);
       }
     });
     let lost = false;
@@ -473,7 +494,7 @@ export class MirrorClient {
     const snap = this.state.snapshot;
     const independentFan = (command === 'fan.setEnabled' || command === 'fan.setPreset' || command === 'fan.setChoice')
       && snap?.actions?.fan === true && snap.fan.canToggle === true;
-    if (!this.visible || !this.state.connected || !this.socket || !snap || (!snap.ready && !independentFan) || this.pending) return Promise.reject(new Error('当前不可操作'));
+    if (!this.snapshotWanted() || !this.state.connected || !this.socket || !snap || (!snap.ready && !independentFan) || this.pending) return Promise.reject(new Error('当前不可操作'));
     if (expected && (expected.runId !== snap.runId || expected.generation !== snap.generation || expected.revision !== snap.revision ||
       ((command === 'game.setField' || command === 'frame.setField' || command === 'performance.setControls') && expected.game?.identity !== snap.game?.identity))) {
       this.publish({ notice: '调节时状态已变化，请确认当前游戏后重试' });
@@ -502,8 +523,9 @@ export class MirrorClient {
         const retained=command==='game.setField'&&args.field==='losslessScaling'?structuredClone(this.state.snapshot):null;
         if(retained?.game?.fields.losslessScaling)retained.game.fields.losslessScaling={...retained.game.fields.losslessScaling,value:'unknown',supported:false};
         this.publish({ busy: false, snapshot:retained, notice: speedRequest ? '游戏变速结果未确认（等待已达 2 秒）；正在重新读取状态，不自动重试' : '结果未确认；正在重新读取状态，不重发操作' });
-        try { if(ownsTransport()&&this.visible&&this.pending===null)this.requestSnapshot(transport,snap.runId); } catch {}
+        try { if(ownsTransport()&&this.snapshotWanted()&&this.pending===null)this.requestSnapshot(transport,snap.runId); } catch {}
         reject(new Error('操作结果未确认'));
+        this.syncSnapshotDemand(true);
       }, command==='audioOptimization.setEnabled'?40000:speedRequest ? 2000 : (command === 'game.setField' && args.field === 'losslessScaling' || command === 'monitor.setEnabled') ? (command === 'monitor.setEnabled' ? 30000 : 18000) : (command==='performance.setControls'||command==='game.setField'&&args.field==='profile')?15000:4000);
       const ownedPending={id,timer,resolve,reject}; this.pending=ownedPending; this.publish({ busy: true, notice:speedRequest?'游戏变速正在处理，等待执行结果（最多 2 秒）':command==='game.setField'&&args.field==='losslessScaling'?'LosslessScaling 正在处理；等待配置与程序状态确认，最长 15 秒，不自动重复操作':this.state.notice });
       // Busy listeners may synchronously hide Content or replace the broker.
@@ -519,5 +541,5 @@ export class MirrorClient {
       }
     });
   }
-  dispose() { this.disposed = true; for(const waiter of this.bootstrapWaiters.values())waiter.active=false;this.bootstrapWaiters.clear(); this.visibleOwners.clear(); this.visible = false; this.passive = false; this.passiveConsumers.clear(); this.disconnect('插件已卸载'); this.listeners.clear(); this.connectionListeners.clear(); this.extraListeners.clear(); }
+  dispose() { this.disposed = true; for(const waiter of this.bootstrapWaiters.values())waiter.active=false;this.bootstrapWaiters.clear(); this.visibleOwners.clear(); this.intentOwners.clear(); this.visible = false; this.passive = false; this.passiveConsumers.clear(); this.disconnect('插件已卸载'); this.listeners.clear(); this.connectionListeners.clear(); this.extraListeners.clear(); }
 }

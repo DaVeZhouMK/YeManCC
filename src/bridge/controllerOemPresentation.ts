@@ -28,3 +28,17 @@ export function formatControllerShortcutDisplayInputs(
     ? displayed.keys.find(key => key.keyId === input.code)?.label || input.code
     : formatControllerShortcutInput(input)).join(' + ');
 }
+
+/** Hardware preview only. Gesture IDs remain in the full recording/action catalog. */
+export function controllerOemPhysicalKeys(catalog: OemKeysSnapshot) {
+  return catalog.keys.filter(key => !key.physicalKeyIds?.length ||
+    (key.physicalKeyIds.length === 1 && key.physicalKeyIds[0] === key.keyId));
+}
+
+export function controllerOemPhysicalPressedKeys(pressed: readonly string[], catalog: OemKeysSnapshot): string[] {
+  const byId = new Map(catalog.keys.map(key => [key.keyId, key]));
+  return [...new Set(pressed.flatMap(id => {
+    const key = byId.get(id);
+    return key?.physicalKeyIds?.length ? key.physicalKeyIds : [id];
+  }))];
+}

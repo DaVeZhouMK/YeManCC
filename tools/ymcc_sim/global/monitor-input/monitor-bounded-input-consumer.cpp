@@ -95,6 +95,53 @@ int wmain(int argc,wchar_t** argv){
     s->ready=s->armed=s->layout=true;s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->viewportKey=Carrier::viewportInfo(*s).dump();s->crosshair=true;s->drag.position={.1,.1,true,false,1};
     auto controller=Microsoft::WRL::Make<NoticeControllerRecorder>();s->controller=controller;carrier.current=s;carrier.refresh(s);return std::pair{s,controller};
    };
+   {
+    HWND anchor=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"YMCCBoundedLower",L"",WS_POPUP,0,0,300,600,nullptr,nullptr,cls.hInstance,nullptr);
+    need(anchor!=nullptr,"Private summon anchor unavailable");
+    Config placementConfig=cfg;placementConfig.anchor=anchor;Carrier positioned;positioned.initialize(nullptr,placementConfig);
+    auto [d,drecord]=create(positioned,92);d->crosshair=false;d->drag.position.placed=false;
+    RECT work{};need(Carrier::monitorArea(*d,work),"Private placement viewport unavailable");
+    const int width=(work.right-work.left)/3;RECT reserved{work.left,work.top,work.left+width,work.bottom};
+    SetWindowPos(anchor,nullptr,reserved.left,reserved.top,width,reserved.bottom-reserved.top,SWP_NOZORDER|SWP_NOACTIVATE);positioned.refresh(d);
+    const auto avoids=[&]{RECT overlap{};return !IntersectRect(&overlap,&d->panel,&reserved);};
+    check("first placement avoids hidden left-side YMCC summon window",!IsWindowVisible(anchor)&&avoids()&&IsWindowVisible(d->hwnd));
+    const RECT first=d->panel;ShowWindow(anchor,SW_SHOWNOACTIVATE);positioned.refresh(d);
+    check("summoning YMCC does not move the reserved default monitor",EqualRect(&first,&d->panel)&&avoids());
+    RECT input{};GetWindowRect(d->inputWindow,&input);check("default avoidance moves native input with the displayed panel",EqualRect(&input,&d->panel));
+    reserved={work.right-width,work.top,work.right,work.bottom};SetWindowPos(anchor,nullptr,reserved.left,reserved.top,width,reserved.bottom-reserved.top,SWP_NOZORDER|SWP_NOACTIVATE);
+    d->position=2;positioned.refresh(d);check("first placement also avoids right-side YMCC summon window",avoids());
+    ShowWindow(anchor,SW_MINIMIZE);positioned.refresh(d);
+    check("minimized YMCC reserves its restore bounds for initial monitor placement",IsIconic(anchor)&&avoids());
+    ShowWindow(anchor,SW_SHOWNOACTIVATE);positioned.refresh(d);
+    d->crosshair=true;positioned.refresh(d);const auto hint=positioned.renderPlacement(*d);
+    check("crosshair canvas receives the same automatic panel coordinates as native input",hint.contains("dragX")&&hint.contains("dragY")&&
+      work.left+(int)std::lround(hint["dragX"].get<double>()*(work.right-work.left))==d->panel.left&&
+      work.top+(int)std::lround(hint["dragY"].get<double>()*(work.bottom-work.top))==d->panel.top);
+    d->position=1;positioned.refresh(d);RECT full{},workForCrosshair{};need(Carrier::screenRects(*d,full,workForCrosshair),"Crosshair screen unavailable");
+    const POINT center{full.left+(full.right-full.left)/2,full.top+(full.bottom-full.top)/2};
+    HRGN region=CreateRectRgn(0,0,0,0);need(region!=nullptr,"Crosshair region probe unavailable");
+    const int regionType=GetWindowRgn(d->hwnd,region);
+    bool boundedRegion=regionType!=ERROR&&PtInRegion(region,center.x-full.left,center.y-full.top);
+    RECT glyph{(full.right-full.left-32)/2,(full.bottom-full.top-32)/2,(full.right-full.left-32)/2+32,(full.bottom-full.top-32)/2+32};
+    for(int row=0;row<9;++row)for(int col=0;col<9;++col){POINT local{(full.right-full.left)*col/9,(full.bottom-full.top)*row/9},screenPoint{full.left+local.x,full.top+local.y};
+      if(!PtInRect(&d->panel,screenPoint)&&!PtInRect(&glyph,local)&&PtInRegion(region,local.x,local.y))boundedRegion=false;}
+    check("crosshair visual window has no full-screen native hit region",boundedRegion);DeleteObject(region);
+    check("crosshair remains disabled layered transparent and non-activating",hudinput::inert(d->hwnd)&&SendMessageW(d->hwnd,WM_NCHITTEST,0,MAKELPARAM(center.x,center.y))==HTTRANSPARENT&&SendMessageW(d->hwnd,WM_MOUSEACTIVATE,0,0)==MA_NOACTIVATE&&SendMessageW(d->hwnd,WM_POINTERACTIVATE,0,0)==PA_NOACTIVATE);
+    TOUCH_HIT_TESTING_INPUT crosshairTouch{};crosshairTouch.pointerId=102;crosshairTouch.point=center;crosshairTouch.boundingBox={center.x-12,center.y-12,center.x+12,center.y+12};crosshairTouch.nonOccludedBoundingBox=crosshairTouch.boundingBox;
+    check("crosshair center explicitly rejects touch targeting",SendMessageW(d->hwnd,WM_TOUCHHITTESTING,0,reinterpret_cast<LPARAM>(&crosshairTouch))==hudinput::rejectTouchHitTest(reinterpret_cast<LPARAM>(&crosshairTouch)));
+    HWND underneath=CreateWindowExW(WS_EX_NOACTIVATE,L"YMCCBoundedLower",L"",WS_POPUP|WS_VISIBLE,center.x-40,center.y-40,80,80,nullptr,nullptr,cls.hInstance,nullptr);
+    need(underneath!=nullptr,"Crosshair underlying target unavailable");SetWindowPos(underneath,HWND_NOTOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+    check("Windows mouse hit selection passes through the crosshair to the underlying window",WindowFromPoint(center)==underneath);
+    DestroyWindow(underneath);
+    const auto regionUploads=d->input.uploads;const RECT stable=d->panel;for(int i=0;i<20;++i)positioned.refresh(d);
+    check("steady crosshair frames keep panel geometry and input bitmap stable",EqualRect(&stable,&d->panel)&&regionUploads==d->input.uploads);
+    check("automatic avoidance does not become a saved manual position",!d->drag.position.placed&&!positioned.placement(*d).contains("dragX"));
+    bool automaticallySaved=false;for(const auto& e:events)if(e.value("name",std::string{})=="desktopHud.placement"&&e["value"].value("id",0)==d->id)automaticallySaved=true;
+    check("automatic placement never sends a settings persistence event",!automaticallySaved);
+    d->drag.position={static_cast<double>(work.right-width-work.left)/(work.right-work.left),.1,true,false,7};positioned.refresh(d);
+    check("saved manual monitor position overrides automatic avoidance",!avoids()&&d->drag.position.revision==7);
+    positioned.close(d->id,d->nonce);check("placement test closes owned monitor windows",!IsWindow(d->hwnd)&&!d->inputWindow);DestroyWindow(anchor);
+   }
    auto [s,record]=create(owner,7);need(s->inputWindow&&s->input.active(),"Bounded native input unavailable");
    auto reset=[&]{owner.stopInteraction(s);s->drag.position.locked=false;s->drag.position.placed=true;s->drag.position.x=.1;s->drag.position.y=.1;++s->drag.position.revision;s->expires=wallNow()+60000;s->armed=s->layout=true;s->visibility=hudvisibility::Mode::Always;owner.refresh(s);};
    auto mouse=[&](UINT m,WPARAM buttons,int x,int y){SendMessageW(s->inputWindow,m,buttons,MAKELPARAM(x,y));};
@@ -126,6 +173,33 @@ int wmain(int argc,wchar_t** argv){
    mouse(WM_MOUSEMOVE,MK_LBUTTON,54,37);mouse(WM_LBUTTONUP,0,30,25);
    check("native mouse dragging follows the pointer without capture",std::abs(s->panel.left-initial.left-24)<=1&&std::abs(s->panel.top-initial.top-12)<=1&&!s->drag.contact()&&GetCapture()!=s->inputWindow);
    GetWindowRect(s->inputWindow,&input);check("input stays with the actual moved panel",EqualRect(&input,&s->panel));
+   // A single MOVE can pass even if a reentrant native region notification
+   // cancels the contact. Verify one held press across repeated native moves.
+   const auto placementCount=[&]{unsigned count=0;for(const auto& e:events)if(e.value("name",std::string{})=="desktopHud.placement"&&e["value"].value("id",0)==s->id)++count;return count;};
+   for(bool crosshair:{false,true})for(auto type:{PT_MOUSE,PT_TOUCH,PT_PEN}){
+    reset();s->crosshair=crosshair;owner.refresh(s);const RECT start=s->panel;const auto commits=placementCount(),switchesBefore=templateCount();
+    const auto sendContact=[&](UINT mouseMessage,UINT pointerMessage,int x,int y,POINTER_FLAGS flags,POINTER_BUTTON_CHANGE_TYPE change=POINTER_CHANGE_NONE){
+      if(type==PT_MOUSE)mouse(mouseMessage,mouseMessage==WM_LBUTTONUP?0:MK_LBUTTON,x,y);else pointer(pointerMessage,105,type,x,y,flags,change);
+    };
+    sendContact(WM_LBUTTONDOWN,WM_POINTERDOWN,30,25,POINTER_FLAG_DOWN|POINTER_FLAG_INCONTACT|POINTER_FLAG_FIRSTBUTTON,POINTER_CHANGE_FIRSTBUTTON_DOWN);
+    bool held=s->drag.contact(),aligned=true,continuous=true;Json steps=Json::array();
+    for(int step=1;step<=8;++step){
+      sendContact(WM_MOUSEMOVE,WM_POINTERUPDATE,48,34,POINTER_FLAG_UPDATE|POINTER_FLAG_INCONTACT|POINTER_FLAG_FIRSTBUTTON);
+      RECT inputRect{},displayRect{};GetWindowRect(s->inputWindow,&inputRect);GetWindowRect(s->hwnd,&displayRect);
+      const bool ownerActive=s->drag.contact()&&s->drag.dragging()&&(type==PT_MOUSE?s->mouseContact:s->touchContact);
+      held=held&&ownerActive;aligned=aligned&&EqualRect(&inputRect,&s->panel)&&Carrier::displayPlacementMatches(*s);
+      continuous=continuous&&std::abs(s->panel.left-start.left-step*18)<=1&&std::abs(s->panel.top-start.top-step*9)<=1;
+      steps.push_back({{"step",step},{"contact",ownerActive},{"panel",rectangle(s->panel)},{"commits",placementCount()-commits}});
+    }
+    const Json detail={{"crosshair",crosshair},{"pointerType",type},{"steps",steps}};
+    check("one held drag remains active across eight native moves",held,detail);
+    check("continuous held drag reaches every requested position",continuous,detail);
+    check("held drag keeps displayed and bounded input rectangles aligned",aligned,detail);
+    check("held drag never saves or switches templates before release",placementCount()==commits&&templateCount()==switchesBefore,detail);
+    sendContact(WM_LBUTTONUP,WM_POINTERUP,30,25,POINTER_FLAG_UP,POINTER_CHANGE_FIRSTBUTTON_UP);
+    check("continuous drag release clears contact and commits once",!s->drag.contact()&&!s->mouseContact&&!s->touchContact&&placementCount()==commits+1&&GetCapture()!=s->inputWindow,detail);
+   }
+   reset();s->crosshair=true;owner.refresh(s);
    reset();const auto switches=templateCount();for(int i=0;i<2;++i){mouse(WM_LBUTTONDOWN,MK_LBUTTON,30,25);mouse(WM_LBUTTONUP,0,30,25);}
    check("mouse double click switches A/B exactly once without locking",templateCount()==switches+1&&!s->drag.position.locked&&!s->drag.contact());
    reset();mouse(WM_LBUTTONDOWN,MK_LBUTTON,30,25);check("missing remote UP cannot leave desktop capture",s->drag.contact()&&GetCapture()!=s->inputWindow);

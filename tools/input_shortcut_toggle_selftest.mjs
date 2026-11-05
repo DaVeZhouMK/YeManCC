@@ -24,7 +24,7 @@ const inlineHeaders=['oem_vendor_stack.h','shortcut_feedback_native.h','shortcut
   'virtual_controller_ui_output_runtime.h','msi_native_foreground_isolation_runtime.h','msi_foreground_isolation_runtime.h','screen_touchpads.h'];
 const compileHeaders=['keyboard_shortcut_sequence.h','input_shortcut_toggle.h','shortcut_window_toggle.h','shortcut_frontend_button.h','shortcut_action_protocol.h',
   'keyboard_modifier_event_evidence.h','screen_special_actions.h','virtual_target_policy.h','controller_persona.h',
-  'boot_mode_shortcuts.h','radial_release.h','virtual_start_protection.h','msi_qs_keyboard_mirror.h','msi_rear_protocol.h'];
+  'boot_mode_shortcuts.h','radial_release.h','virtual_start_protection.h','msi_qs_keyboard_mirror.h','msi_rear_protocol.h','legion_motion_activation.h'];
 const pendingHeaders=[...inlineHeaders,...compileHeaders].map(file=>path.join(root,'native',file));
 pendingHeaders.push(path.join(root,'capabilities/HcOemInputCapabilityBinding.h'));
 const visitedHeaders=new Set();
@@ -55,7 +55,7 @@ for (const header of ['msi_native_foreground_isolation_runtime.h','msi_foregroun
   source += '\n' + fs.readFileSync(path.join(root, 'native', header), 'utf8');
 }
 const cases = process.env.YMCC_SHORTCUT_CASES || 'all';
-assert(['all','retired-start-f7','baseline-without-retirement','summon-action-shield','summon-action-shield-custom','summon-action-shield-ordinary-key'].includes(cases), 'Unknown shortcut case selection');
+assert(['all','retired-start-f7','baseline-without-retirement','summon-action-shield','summon-action-shield-custom','summon-action-shield-ordinary-key','onex-consumption'].includes(cases), 'Unknown shortcut case selection');
 const shieldMode = {'summon-action-shield':0,'summon-action-shield-custom':1,'summon-action-shield-ordinary-key':2}[cases];
 const fieldInput = process.env.YMCC_SHORTCUT_FIELD_SETTINGS ? JSON.parse(fs.readFileSync(process.env.YMCC_SHORTCUT_FIELD_SETTINGS, 'utf8').replace(/^\uFEFF/, '')).input : null;
 function extract(name) {
@@ -94,11 +94,14 @@ const functions = [...(hasReadSlots ? ['oemHidReadTakeCompletion','oemHidReadFin
   ...(hasWmi ? ['msiWmiGenerationCurrent','msiWmiShortcutAuthoritative','msiWmiWithdrawGeneration','msiWmiTryPopClick','msiWmiHandleEvent','msiWmiSubscriptionComplete','msiWmiReapThreadLocked','msiWmiStartLocked','msiWmiStart','msiWmiSetEnabled','msiWmiPump','nativeOemKeyMask','nativeKeyboardShortcutDispatch','nativeMsiWmiShortcutDrain'] : []),
   ...(hasProducer ? ['oemProducerName','oemProducerCurrent','oemProducerAuthorityMask','oemProducerTokensCurrent','oemProducerTokensFor','oemProducerBegin','oemProducerCancel','oemProducerActionMask','oemProducerPhysicalMask','oemProducerPhysicalBackState','oemProducerPublish',...(hasRogClick ? ['oemProducerPublishRogClick','nativeRogClickDispatch','rogOemKeyParse','rogOemKeyClose','rogOemKeyExpirePulse'] : []),'oemProducerTryPop','nativeOemKeyboardActionMask','nativeOemProducerDrain','oemBackMergedKeyMask','oemBackMergedDisplayState','oemLiveBackBits','oemHidClear','legionBackParse','legionSBackParse','gpdBackParse','onexBackParse','legionBackClose','legionSBackClose','gpdBackClose','onexBackClose','onexBackFinalizeClose','onexBackRetireStuck','onexBackRetireReadStuck','onexBackRequestReinit','msiDinputShortcutCancel','msiDinputShortcutBeginRead','msiDinputShortcutPublish'] : []),
   ...(source.includes('static bool msiQsKeyboardMirrorSourceCurrent(')?['msiQsKeyboardMirrorSourceCurrent']:[]), 'nativeInputShortcutToggle', ...(source.includes('static bool nativeYmccShortcutAction(') ? ['nativeYmccShortcutAction', 'nativeYmccShortcutDelta', 'nativeYmccShortcutSubmit', 'nativeYmccShortcutSummon', 'nativeFrontendButtonTargetEpoch', 'nativeFrontendButtonReceipt', 'nativeFrontendButtonSendGamebar', 'nativeYmccShortcutEmit'] : []), ...(source.includes('static int nativeShortcutLegacyDefaultSlot(') ? ['nativeShortcutLegacyDefaultSlot','nativeShortcutLegacyTemplateMatches','nativeShortcutLegacyDefaultAllowed'] : []),
-  ...(source.includes('static std::vector<std::wstring> oemVendorServiceNamesForFamily(') ? ['oemVendorServiceNamesForFamily','oemVendorStackFamilySupported','oemVendorStackFrontMask','oemVendorStackRuleCanTakeover'] : []), 'nativeKeyboardShortcutsRefresh', ...(source.includes('static void nativeOemKeyboardConsumePublish(') ? ['nativeOemKeyboardConsumePublish', 'nativeOemKeyboardConsumeMaintain'] : []), 'nativeKeyboardShortcutsEvaluate', ...(source.includes('static void nativeKeyboardShortcutHandleOemEdge(') ? ['nativeKeyboardShortcutHandleOemEdge'] : [])];
+  ...(source.includes('static std::vector<std::wstring> oemVendorServiceNamesForFamily(') ? ['oemVendorServiceNamesForFamily','oemVendorStackFamilySupported','oemVendorStackFrontMask','oemVendorStackRuleCanTakeover'] : []), 'gamepadUiOutputIsolationEligible', 'nativeKeyboardShortcutsRefresh', ...(source.includes('static void nativeOemKeyboardConsumePublish(') ? ['nativeOemKeyboardConsumePublish', 'nativeOemKeyboardConsumeMaintain'] : []), 'nativeKeyboardShortcutsEvaluate', ...(source.includes('static void nativeKeyboardShortcutHandleOemEdge(') ? ['nativeKeyboardShortcutHandleOemEdge'] : [])];
 const familyStart = source.indexOf('enum class YmccFamily');
 const familyEnum = source.slice(familyStart, source.indexOf('};',familyStart)+2);
 const catalogDeclarations = source.slice(source.indexOf('enum class OemKeyForm'),source.indexOf('static OemCatalogRef oemCatalogForFamily('));
 functions.push('legionHcInputReportView','oemCatalogForFamily');
+const hasOneXBindingConsumer=['oemChordProfileIdFor','oemUnifiedInputBindingFor','onexCapDescriptorFor','oemProducerPublishOnexX2Home'].every(name=>source.includes(name+'('));
+if(hasOneXBindingConsumer)functions.push('oemChordProfileIdFor','oemUnifiedInputBindingFor','onexCapDescriptorFor','oemProducerPublishOnexX2Home');
+if(cases==='onex-consumption')assert(hasOneXBindingConsumer,'Selected OneX group requires the actual OneX capability/publication consumer; unsupported sources are not a pass');
 for (const name of ['nativeKeyboardShortcutAllInputs','nativeKeyboardShortcutClickMatches',
   'oemVendorTaskNamesForFamily','oemVendorProcessNamesForFamily','onexX2HomeDisplayMask','nativeOnexX2HomeDispatch',
   'nativeShortcutFeedback','nativeShortcutUnixMs','nativeShortcutUiDispatch','nativeShortcutTdpEvent',
@@ -139,8 +142,14 @@ ${shieldEffective}
     return focusIsolationAssembleFrame(effectiveContent);
 }
 `;
+const oneXModelClasses=new Set();
+for(const match of fs.readFileSync(path.join(root,'capabilities/hc-device-catalog.generated.h'),'utf8').matchAll(/\{"hc\.device\.[^"]+", "([^"]+)", "([^"]+)"/g))
+ if(match[2].includes('OneXPlayer'))for(const cls of [match[1],match[2]])oneXModelClasses.add(cls);
+for(const cls of ['OneXPlayerX2','OneXPlayer3','OneXPlayerX2MiniPro'])oneXModelClasses.add('HandheldCompanion.Devices.'+cls);
 const prelude = `${capabilityPreamble}${hasReadSlots ? "#define YMCC_HID_READ_SLOT_SOURCE\n" : ""}${hasRogClick ? "#define YMCC_ROG_CLICK_SOURCE\n" : ""}${hasProducer ? "#define YMCC_PRODUCER_EDGE_SOURCE\n" : ""}${hasWmi ? "#define YMCC_WMI_CLICK_SOURCE\n" : ""}${source.includes("static void nativeKeyboardShortcutHandleOemEdge(") ? "#define YMCC_SHORTCUT_EDGE_SOURCE\n" : ""}${source.includes("bool controllerAllowed = true") ? "#define YMCC_SHORTCUT_SOURCE_SCOPES\n" : ""}${source.includes("g_msiQsKeyboardMirrorPolicy")?"#define YMCC_MSI_QS_MIRROR_SOURCE":""}
 #define YMCC_SHORTCUT_FIXTURE
+${hasOneXBindingConsumer ? "#define YMCC_SHORTCUT_ONEX_BINDING_SOURCE" : ""}
+${hasOneXBindingConsumer && cases === "onex-consumption" ? "#define YMCC_SHORTCUT_ONEX_CASE_MODE 1" : hasOneXBindingConsumer && cases === "all" ? "#define YMCC_SHORTCUT_ONEX_CASE_MODE 0" : ""}
 ${shieldMode === undefined ? "" : "#define YMCC_SHORTCUT_SHIELD_CASE_MODE " + shieldMode}
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -171,6 +180,13 @@ ${shieldMode === undefined ? "" : "#define YMCC_SHORTCUT_SHIELD_CASE_MODE " + sh
 #include "boot_mode_shortcuts.h"
 #include "radial_release.h"
 #include "virtual_start_protection.h"
+#include "legion_motion_activation.h"
+// Motion activation is a separate module; never perform its device I/O here.
+namespace ymcc::legion_activation { struct Win32Port {
+ DWORD error=0;bool open(HANDLE,unsigned){throw std::runtime_error("MOTION_ACTIVATION_IO_FORBIDDEN_IN_SHORTCUT_FIXTURE");}
+ template<class Command>Completion submit(const Command&){throw std::runtime_error("MOTION_ACTIVATION_IO_FORBIDDEN_IN_SHORTCUT_FIXTURE");}
+ Completion poll(){return Completion::Failed;}void cancel(){}bool release(){return true;}
+}; }
 #include <chrono>
 #include <cstring>
 ${source.includes("g_msiQsKeyboardMirrorPolicy")?'#include "msi_qs_keyboard_mirror.h"':''}
@@ -184,6 +200,8 @@ static std::string inputHostTargetKey(const json&);
 static ymcc::VirtualStartProtection::Admission inputHostTargetAdmission(
     const std::string&,const std::string&,const char*) { return {true,0,false}; }
 ${familyEnum}
+static const std::vector<std::string>fixtureOneXClasses=${JSON.stringify([...oneXModelClasses]).replace(/^\[/,"{").replace(/\]$/,"}")};
+static struct {YmccFamily family=YmccFamily::Unknown;std::string deviceClass;}g_machineIdentity;
 ${catalogDeclarations}
 static json fixtureInput;
 static const json fixtureFieldInput = json::parse(R"FIELD(${JSON.stringify(fieldInput)})FIELD");
@@ -265,12 +283,23 @@ static bool fixtureAssets = true;
 static bool fixtureJobAccept = true;
 static int fixtureRefreshes = 0, fixtureJoyxoffCloses = 0;
 static std::atomic<bool> g_exitRequested{false}, g_shortcutRecordingActive{false};
+static std::atomic<uint64_t> g_shortcutRecordingOemMask{0};
+static std::atomic<bool>g_controllerFrontendIsolationEnabled{true};
+static bool gamepadUiOutputIsolationEligible();
 // Power, platform identity and evidence sinks are memory-only fixture boundaries.
 enum class PowerLifecycle : uint8_t { Ready, Suspending, Suspended, Resuming };
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static unsigned long long currentPowerGeneration() { return 1; }
 static std::atomic<bool> g_inputReleaseRequired{false};
 static bool customSteamLibraryInputSuppressed() { return false; }
+// Observation/recording ports do not own parser, evaluator or dispatch policy.
+template<class... A>static void modelAdaptationChord(A&&...){}
+template<class... A>static void modelAdaptationOnexReport(A&&...){}
+template<class... A>static void modelAdaptationRogReport(A&&...){}
+template<class... A>static void modelAdaptationProducer(A&&...){}
+static void modelAdaptationFlush(){}
+static void nativeOneXOemObserve(uint64_t,const char*){}
+static void nativeShortcutRecordingStop(bool=true){throw std::runtime_error("RECORDING_LIFECYCLE_NOT_EXECUTED_IN_SHORTCUT_FIXTURE");}
 static const char* inputHostMachineTargetRejectionReason(const std::string& persona) noexcept {
     return ymcc::input::virtualTargetPolicy::rejectionReason(false, persona);
 }
@@ -393,6 +422,12 @@ source.match(/static constexpr BYTE kLegionSBackBitRight[^\n]*\n/)[0] +
 source.match(/static constexpr BYTE kGpdBackMask[^\n]*\n/)[0] +
 source.slice(source.indexOf("static constexpr BYTE kOnexBackFrame"), source.indexOf("static OnexCapDescriptor onexCapDescriptorFor(")) +
 source.slice(source.indexOf("struct OnexBackSession {"), source.indexOf("static OnexBackSession g_onexBack;")+"static OnexBackSession g_onexBack;".length) + `
+// Device identity observation for the separately tested motion activation
+// owner is a memory boundary. It cannot open or reconfigure a device here.
+static std::string legionMotionResolveActivationIdentity(const std::wstring& path, SP_DEVINFO_DATA*, HDEVINFO) {
+ return path.empty()?std::string{}:std::string("fixture-motion-identity");
+}
+static void legionMotionActivationTick(LegionBackSession&) {}
 static void onexBackFinalizeClose();
 static void rogOemKeyClose();
 static void legionBackClose();
@@ -616,9 +651,9 @@ console.log('PASS Guide integration shares existing frame/target lock, source/ne
 
 assert(sourceBinding.every(row=>createHash('sha256').update(fs.readFileSync(row.path)).digest('hex')===row.sha256),
   'Source or declared dependency changed during shortcut consumer verification');
-const passCount=Number((run.stdout||'').match(/(?:summon action shield|input shortcut native model\/real route|retired Start F7 real consumer): (\d+) cases passed/)?.[1]||0);
+const passCount=Number((run.stdout||'').match(/(?:summon action shield|input shortcut native model\/real route|retired Start F7 real consumer|onex consumption): (\d+) cases passed/)?.[1]||0);
 fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify({status:'PASS',selectedCases:cases,checks:passCount,
   elapsedMs:Date.now()-invocationStarted,sourceStable:true,sourceBinding,normalProductStarted:false,deviceIo:false,
-  scope:'Real shortcut parser/evaluator/dispatch/summon/UI ownership and final-frame consumers with declared memory OS/Host ports'},null,2)+'\n');
+  scope:cases==='onex-consumption'?'Selected OneX real binding/profile/hook/HID/evaluator/dispatch/serial-action consumers; OS/Host, recording, model audit and motion boundaries are memory-only; common full suite not accepted':'Real shortcut parser/evaluator/dispatch/summon/UI ownership and final-frame consumers with declared memory OS/Host ports'},null,2)+'\n');
 
 }

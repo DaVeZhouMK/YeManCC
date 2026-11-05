@@ -23,6 +23,36 @@ const fresh=async()=>m.createBootModeDocument(await baseline());
 const stored=doc=>{p.settings.extensions.bootModes=structuredClone(doc);};
 const opNames=()=>p.calls.map(c=>c.op);
 const changes=()=>p.calls.filter(c=>c.op!=='settings.update'&&c.op!=='ipc.bootMode.startup.identity');
+await test('touch summon relative defaults and migration across four boot modes',async()=>{
+ const base=await baseline();base.touch={profiles:{}};const doc=m.createBootModeDocument(base);
+ for(const id of m.BOOT_MODE_IDS)for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
+  const profile=m.resolveBootMode(doc,id).touch.profiles[persona];assert.equal(profile.summonPosition,'opposite');assert.equal(profile.summonEnabled,true);assert.equal(profile.autoHideSeconds,15);
+ }
+ const legacy=structuredClone(doc);
+ for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){const profile=legacy.global.touch.profiles[persona];delete profile.summonPlacementVersion;profile.summonPosition='right';profile.summonEnabled=false;profile.scale=135;}
+ legacy.scenes.xbox.overrides.touch={profiles:{elite:{summonPosition:'off',summonEnabled:false,scale:125}}};
+ const normalized=m.normalizeBootModeDocument(legacy,base);
+ for(const id of m.BOOT_MODE_IDS)for(const persona of ['disabled','steamdeck','dualsense-edge','elite'])assert.equal(m.resolveBootMode(normalized,id).touch.profiles[persona].summonPosition,'opposite');
+ assert.equal(normalized.global.touch.profiles.steamdeck.scale,135);assert.equal(normalized.scenes.xbox.overrides.touch.profiles.elite.scale,125);
+ for(const persona of ['disabled','steamdeck','dualsense-edge','elite'])normalized.global.touch.profiles[persona].summonPosition='same';
+ for(const id of ['xbox','steam','xbox-steam'])delete normalized.scenes[id].overrides.touch;
+ const saved=m.normalizeBootModeDocument(normalized,base);for(const id of m.BOOT_MODE_IDS)for(const persona of ['disabled','steamdeck','dualsense-edge','elite'])assert.equal(m.resolveBootMode(saved,id).touch.profiles[persona].summonPosition,'same');
+ saved.global.touch.profiles.disabled.summonPosition='off';saved.global.touch.profiles.disabled.summonEnabled=false;
+ assert.equal(m.normalizeBootModeDocument(saved,base).global.touch.profiles.disabled.summonPosition,'off');
+ const runtime=[];
+ for(const id of m.BOOT_MODE_IDS){
+  p.reset();for(const persona of ['disabled','steamdeck','dualsense-edge','elite'])p.state.touch[persona]={...p.screenTouchpadDefaults(persona),summonPosition:'same',summonPlacementVersion:1,summonEnabled:true,autoHideSeconds:60};
+  const runtimeBase=await baseline();runtimeBase.touch={profiles:{}};const template=m.createBootModeDocument(runtimeBase);stored(template);
+  const applied=await startMode(id,template);
+  for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
+   assert.equal(p.state.touch[persona].autoHideSeconds,15);
+   assert.equal(p.state.touch[persona].summonPosition,'opposite');
+  }
+  for(const call of p.calls.filter(call=>call.op==='touch.set'))for(const key of ['layout','leftMode','rightMode','singleMode'])assert.equal(call.value.patch[key],undefined);
+  runtime.push({mode:id,touchWrites:p.calls.filter(call=>call.op==='touch.set').length,errors:applied.receipt.pending.filter(item=>item.includes('屏幕触摸'))});
+ }
+ return {bootModes:4,personaProfiles:4,oldAbsoluteAndOffMigrated:true,newPlayerEditsPreserved:true,runtime};
+});
 await test('sleep guard timeout config preserves legacy defaults, partial saves and boot snapshots',async()=>{
  const {compileSettingsConsumer,createSettingsFixture}=await import('./fixtures/settings_baseline.mjs');
  const code=await compileSettingsConsumer(process.cwd());

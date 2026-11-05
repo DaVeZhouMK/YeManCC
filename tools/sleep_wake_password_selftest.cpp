@@ -58,9 +58,9 @@ int wmain(int argc, wchar_t** argv) {
             check(api.reads == 0 && api.writes == 0 && !Snapshot{}.enabled(), "No constructor/default IO");
             cases.push_back("Default state is off and constructing the domain performs zero system reads or writes");
             const auto result = apply(api, true);
-            check(result.ok && result.state.ac == 1 && result.state.dc == 1 && result.reactivated && api.activations == 1, "Enable AC/DC=1");
+            check(result.ok && result.state.ac == 1 && result.state.dc == 1 && result.reactivated && api.queries == 1 && api.activations == 1, "Enable AC/DC=1");
             check(api.written == std::vector<std::pair<bool, DWORD>>{{true, 1}, {false, 1}}, "Exactly AC and DC written");
-            cases.push_back("User enable writes AC=DC=1, reads both back and reapplies only an already-active YMCC scheme");
+            cases.push_back("User enable stores AC=DC=1, reads back and reapplies the already active YMCC plan once");
             const auto disabled = apply(api, false);
             check(disabled.ok && !disabled.state.enabled() && api.ac == 0 && api.dc == 0, "Disable AC/DC=0");
             cases.push_back("User disable writes AC=DC=0 (no password)");
@@ -75,8 +75,8 @@ int wmain(int argc, wchar_t** argv) {
         }
         {
             FakePowerApi api; const auto result = apply(api, false);
-            check(result.ok && !result.changed && api.writes == 0 && api.queries == 0 && api.activations == 0, "No unnecessary apply");
-            cases.push_back("An explicit user operation already matching AC/DC avoids all writes and activation");
+            check(result.ok && !result.changed && api.writes == 0 && api.queries == 1 && api.activations == 1, "No unnecessary apply");
+            cases.push_back("An explicit matching request avoids writes but reapplies the active YMCC plan once");
         }
         {
             FakePowerApi api; api.dc = 1;
@@ -111,14 +111,20 @@ int wmain(int argc, wchar_t** argv) {
         {
             FakePowerApi api; api.failActivateAt = 1;
             const auto result = apply(api, true);
-            check(!result.ok && std::string(result.stage) == "apply" && result.rollbackOk && api.ac == 0 && api.dc == 0 && api.activations == 2, "Activation rollback");
-            cases.push_back("YMCC reactivation failure restores/reapplies original indices");
+            check(result.ok && api.ac == 1 && api.dc == 1 && !result.reactivated && result.reactivationError == ERROR_ACCESS_DENIED && api.activations == 1, "Confirmed stored indices are independent of activation refusal");
+            cases.push_back("Activation refusal is reported separately; confirmed saved indices are not rolled back or retried");
         }
         {
             FakePowerApi api; api.failReadAt = 5;
             const auto result = apply(api, true);
-            check(!result.ok && std::string(result.stage) == "final-readback" && result.rollbackOk && api.ac == 0 && api.dc == 0, "Final readback failure");
-            cases.push_back("Final readback failure also rolls back, so UI never reports unverified success");
+            check(!result.ok && std::string(result.stage) == "final-readback" && result.rollbackOk && api.ac == 0 && api.dc == 0, "Readback failure rollback");
+            cases.push_back("Saved-value readback failure rolls back instead of issuing an unverified success");
+        }
+        {
+            FakePowerApi api; api.failWriteAt = 1;
+            const auto result = apply(api, true);
+            check(!result.ok && result.rollbackOk && api.writes == 1 && api.ac == 0 && api.dc == 0, "Unchanged rejection needs no rollback writes");
+            cases.push_back("Rejected unchanged AC write does not falsely report failed rollback or issue extra writes");
         }
         {
             FakePowerApi api; api.ac = 2;
@@ -126,7 +132,7 @@ int wmain(int argc, wchar_t** argv) {
             cases.push_back("Invalid/unsupported indices are rejected without writes");
         }
         // The only live-system action in this selftest is reading the fixed plan.
-        // There are deliberately no calls to WindowsPowerApi::write/reactivate.
+        // There are deliberately no calls to WindowsPowerApi::write or any scheme activation.
         WindowsPowerApi system;
         const auto live = read(system);
         cases.push_back("Actual Windows fixed-plan AC/DC snapshot is read-only; no installed power values are changed");

@@ -33,7 +33,12 @@ static json fullPipeChildOutcome(HANDLE exactChild=nullptr,const std::wstring& e
  DWORD exit=999;if(wait==WAIT_OBJECT_0)GetExitCodeProcess(observation,&exit);
  json child;std::ifstream file(exactReceipt.empty()?fullPipeReceipts.back():exactReceipt);if(file)file>>child;check(child.is_object()&&child.value("status","")=="OBSERVED"&&child["failure"].is_null(),"managed final receipt binds actual loop/session execution and source identities");
  if(child.is_object()){child["nativeObservedProcessExit"]=wait==WAIT_OBJECT_0;child["nativeObservedExitCode"]=exit;}
- CloseHandle(observation);fullPipeChildObservers.erase(std::find(fullPipeChildObservers.begin(),fullPipeChildObservers.end(),observation));return child;
+ const bool nativeObserverCloseSucceeded=CloseHandle(observation)!=FALSE;
+ const DWORD nativeObserverCloseError=nativeObserverCloseSucceeded?0:GetLastError();
+ if(child.is_object()){child["nativeObserverCloseSucceeded"]=nativeObserverCloseSucceeded;child["nativeObserverCloseError"]=nativeObserverCloseError;}
+ check(nativeObserverCloseSucceeded,"owned managed Host observation handle checked closed");
+ if(nativeObserverCloseSucceeded)fullPipeChildObservers.erase(std::find(fullPipeChildObservers.begin(),fullPipeChildObservers.end(),observation));
+ return child;
 }
 // Poll and dispatch actual queued quarantine work. Only the clock becoming due
 // is a fixture input; no quarantine/start-blocked state is cleared by the fixture.

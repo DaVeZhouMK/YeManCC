@@ -43,6 +43,7 @@ internal static partial class Program
         internal readonly record struct Attempt(long Generation, int Reason, long Ordinal, Sample? Snapshot)
         {
             internal long ParameterWindowId { get; init; }
+            internal HostSdkFirstWitness.Attempt SdkFirstWitness { get; init; }
             internal ControlPoint Parameters { get; init; }
         }
         internal sealed record Sample(long Tick, string Selection, object Binding, object Canonical,

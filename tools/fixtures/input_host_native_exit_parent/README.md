@@ -21,7 +21,9 @@ Run with a fresh output and explicitly captured main identity:
 python tools/input_host_native_exit_parent_selftest.py --out G:/YeManCC-Work/Testing/YMCC/Evidence/VC-NativeExitOwned23/parent/next --expected-main-sha256 <sha256>
 ```
 
-Release/Checked each run three fresh private executable instances:
+The original three base families below run as fresh private executable instances.
+The default selection currently has eleven original scenarios including the R8
+retained-budget cases; use explicit `--scenarios` for a bounded directed run:
 
 - Healthy ordinary: explicit successful protocol shutdown releases the child's
   inherited event; actual process/primary exit and production closes are observed
@@ -61,3 +63,18 @@ All known private owners are joined/closed before test exit; this is not a claim
 that every runtime resource or permanently blocked OS operation is destroyed.
 Permanent OS Close/pending-IO remains UNKNOWN. Existing 34/95 tools, global and
 native production remain read-only in this task.
+
+Optional fixture-owner regression uses `--scenarios coordinator-observer-close`
+alone. It compiles the original `fullPipeChildOutcome` from `pipe_cases.inc` into
+this existing small fixture and checks a real private process observation HANDLE:
+successful close removes its owner, protected close fails with an actual Win32
+error and retains the same owner, and retry after removing only test protection
+closes that same HANDLE. The child exits as fixture setup before this helper is
+called; its tiny receipt is an explicit test input, not managed Host behavior.
+This option does not execute native product exit or the default eleven scenarios.
+The default selection and global minimum remain unchanged.
+
+`--coordinator-observer-reference ABS_FROZEN_PIPE_CASES_INC` is accepted only with
+that single option for a source-bound historical negative. It does not rewrite
+current sources or the exit-owner header. Original source, executed function
+bytes, private resource facts and expected failure must be recorded separately.

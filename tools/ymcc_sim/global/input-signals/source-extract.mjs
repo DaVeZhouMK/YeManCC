@@ -22,7 +22,9 @@ export function extractNativeFollowup(source,{inputShortcutHeader}={}){
  const declaration=(name,signature)=>{const at=unique(source,signature);return add(name,at,source.indexOf(';',at)+1,'actual-product-declaration');};
  declaration('producerEnum','enum class OemProducerId : unsigned');
  declaration('producerCount','static constexpr size_t kOemProducerCount =');
- declaration('oemBits','static constexpr uint64_t kOemBitClaw =');
+ const bitsAt=unique(source,'static constexpr uint64_t kOemBitM1 =');
+ add('oemBits',bitsAt,source.indexOf(';',unique(source,'static constexpr uint64_t kOemBitLegionFrontL ='))+1,'actual-product-OEM-canonical-bit-declarations');
+ func('familyEnum','enum class YmccFamily :');rows.at(-1).text+=';';rows.at(-1).sha256=hash(rows.at(-1).text);
  func('producerTokens','struct OemProducerTokens {');rows.at(-1).text+=';';rows.at(-1).sha256=hash(rows.at(-1).text);
  func('ruleStruct','struct NativeKeyboardShortcutRule {');rows.at(-1).text+=';';rows.at(-1).sha256=hash(rows.at(-1).text);
  func('dispatch','static bool nativeKeyboardShortcutDispatch(');

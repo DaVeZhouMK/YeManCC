@@ -1,3 +1,65 @@
+# HC079：OXP3 WMI 最终准入与 OXP3／MiniPro 灯光取样锁已修，普通主线包已导出
+
+更新 2026-11-05T07:41:05.273+08:00（香港时间）。本批 PARTIAL，明确方法级软件范围及实际普通包身份 ACCEPTED_SOFTWARE_SCOPE；全家族未完成。
+
+精确 Intel OneXPlayer3 的 WMI 阈值写入在最终预读后复核原准入，原WMI组105断言通过，旧实现被shutdown零写入断言拒绝；不向APEX借用该协议，不启用旁路。OXP3／X2 Mini Pro 灯光共享owner在原短锁内取得一致状态/路径副本，最终匹配与Active发布同事务，真实未归还操作保留准确身份；原owner定向191检查通过，旧函数被锁及债务身份断言拒绝。旧切片缺符号、整数HANDLE适配编译失败及准备错误均保留，未冒称业务通过。
+
+普通包0.0.38：`G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261105-071507-hc079-oxp3-wmi-final-admission-ordinary\YeManCC.zip`，110513513 B，SHA256 `9db50648693f649c964b4d53c2e1151ec1680b105848520e9c45067583550c5b`；617文件、114 DLL名，固定HC/共享运行库零变化。实际电池PE/PDB25源码文档、30灯光来源、1674声明构建来源（1672冻结+2原版本输出）及ZIP已核；声明来源不冒称完整编译闭包。新电池组件已采用回主线。Fan45来源不变，未改Fan业务或跑Fan夹具。
+
+APEX灯光实机效果、0.12固件充电拒绝和全家族确切协议缺额仍开放；无新机型别名、寄存器替换、固件放门或EC8启用。整包夹具NOT_RUN、formalReleaseAccepted=false、未部署、无硬件/应用操作。结果 `G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-079-ONEX-UPSTREAM-CONSUMER-AUDIT\FINAL-RESULT.json`；裁决 `G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-079-ONEX-WMI-AND-LIGHTING-OWNER.json`。本段为导出后导航更新，不改冻结快照或旧结论。以下历史保留。
+
+---
+
+# HC078：现有 EC 阈值写入补最终准入，已入普通主线包；APEX 充电与全家族继续
+
+更新 2026-11-05T07:05:48.311+08:00（香港时间）。本批 PARTIAL，方法级软件验证及实际整包身份 ACCEPTED_SOFTWARE_SCOPE。EcProvider 在总线等待和最终预读之后、真正阈值写入之前复用现有准入；软件旁路停止/挂起归还原语义保留。原 OneX 组165断言通过，旧实现被 open/stop 断言预期拒绝；没有全包夹具或硬件验收。
+
+当前普通包 0.0.38：`G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261105-063606-hc078-ec-write-admission-ordinary-r2\YeManCC.zip`，SHA256 `195deecf90210f059aaa7d39f6eca93e053947c70be539d355c2cc3f48e6764d`，110512898 B；617文件、114 DLL名，无固定HC/共享运行库差异。新电池PE/PDB25份源码文档已核对，实际组件已同步主线。Fan45份现选来源不变，未重编Fan、未跑Fan夹具。
+
+APEX HIDv2灯光单色/彩虹/亮度/关闭仍在包中，等待新实机日志；当前0.12固件充电拒绝未放松，没有启用EC8或替换寄存器。Super X已消费风扇/充电从整机未映射摘要中排除，灯光与其它型号逐域缺口仍开放。原首次总库stale前门FAIL及旧码反例保留。
+
+结果：`G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-078-ONEX-REMAINING-SOURCE-AUDIT\FINAL-RESULT.json`；裁决：`G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-078-ONEX-EC-FINAL-WRITE-ADMISSION.json`。本段为导出后导航更新，不改冻结源码快照或旧结果。以下历史保留。
+
+---
+
+<!-- BATTERY-CAPABILITY-AUDIT-20261105 -->
+> **2026-11-05 充电域现势：** [全部充电能力复核](BATTERY-CAPABILITY-AUDIT.md)及[逐类来源/条件/现场证据](BATTERY-CAPABILITY-AUDIT.json)已进入本唯一能力总库。当前 42 组身份、12 条协议；新 HC 90 个可识别类中 41 个充电候选、40 个有 YMCC 路线，另补 GPD Mini 与 Super X；SuiPlay Windows 未开放。OXP3 WMI、Super X 75–100% 双传输已存在于源码，不沿用旧“未适配”结论。最新 02:33 用户包名虽为 onexplayer3，DMI 上报 APEX，已明确 BIOS/EC=0.12；新会话 2 次查询因 EC 主版本 0 不满足继承 X1 的 >=1 条件而在 provider 打开前拒绝。旧包 12 次查询及当时缺版本的证据保留；Linux Apex ACPI8 0xE5 与 HC X1 EC16 0x04A3 仍不可互推，此实机失败保持 open。ROG/MSI 按用户反馈保留，不扩大为全型号实测。审计表不参与运行准入；仍由原 battery policy → routes → 生成总库 → 原 Controller/provider 消费。
+<!-- /BATTERY-CAPABILITY-AUDIT-20261105 -->
+
+# HC067：OneX 消费事实修正已入当前普通主线包，全家族继续
+
+更新 2026-11-04T22:35:31.132345+08:00（香港时间）。本批 **ACCEPTED_SOFTWARE_SCOPE**；原全家族目标 active/未完成。
+
+G1 基类/AMD/Intel、OneXFly/F1Pro、X1Mini 共6条既有彩虹目录事实，按实际 writer 标为固定速度；5个具体型号+1个来源基类，没有改 frozen 声明位或新增型号/路线。原浏览器12场景在720/800精确通过，选择负例4项与来源策略坏例4项检出。首轮SVG加载准备失败为0场景，修原loader后仅续作同12项；旧失败/费用保留，未跑无关生命周期/整组。
+
+17个具体型号的34项体感/标准输入描述已注明真实WinRT/SensorAPI/XInput消费者，9 Reviewed/8 Legacy优先owner保持；实际端点、样本、提交与物理验收仍UNKNOWN，不新增OneX控制器HID IMU。
+
+普通包 `G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261104-221226\YeManCC.zip`，0.0.38，110454408 B，SHA256 `ff14e9e24fd842279de00cdee8ab73b5e9e4c70ef83cc3f85d370674ccdd8fd8`。一次原ordinary自然exit0，独立核616实际文件、1645声明来源（1643冻结字节+2原版本生成输出）、90固定HC/模块、114 DLL名称，Fan45来源/57归档。Fan只重编灯光目录摘要常量配套组件，未重跑旧Fan业务；原灯光Core924576…复用，实际helper/PDB来源与载荷核对。当前同源电池及灯光成品已机械采用回主线，不再次编译；电池原生成器当前实际29输入包含native/power_source_state.h，不能复用旧28输入假设。普通fixtureValidation=NOT_RUN、formalReleaseAccepted=false，无部署/硬件操作。
+
+新Linux primary493f34ea补证Air/新X1Mini Pro的board vendor/name谓词，Windows HID caps/report映射仍未知；Linux8位EC与Windows16位SIO不互推。SuperX充电固定LpcIO模块/API已核，实际Windows读UMA04A3、写SIO04A3且范围75..100；公共void写包装丢弃失败回执，尚需checked双传输消费者。没有启用该充电路线。下一有界实现 `G:\YeManCC-Work\Testing\YMCC\Evidence\HC-Code-Capability-Upgrade-20261031\Codex\HC-CODEX-067-ONEX-SUPERX-CHARGE\NEXT-BOUNDED-CONSUMER-PLAN.json`，Codex执行，Trae/旧goal/定时任务不恢复。
+
+结果 `G:\YeManCC-Work\Testing\YMCC\Evidence\HC-Code-Capability-Upgrade-20261031\Codex\HC-CODEX-067-ONEX-SUPERX-CHARGE\FINAL-RESULT.json`；裁决 `G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-067-ONEX-CONSUMER-SPEED-AND-COVERAGE.json`。以下历史保留，不将局部通过标为全家族完成。
+
+---
+
+# HC066 OXP3 电池 WMI 清理修正已入普通包，本轮收口
+
+更新 2026-11-04T21:19:24.292022+08:00（香港时间）。本批 **ACCEPTED_SOFTWARE_SCOPE**；全家族仍 active/未完成，本轮不再分配新批次。
+
+既有 OXP3 selector 在歧义、空对象、重复引用和枚举失败时显式执行具体 ManagementObject.Dispose；原精确 1 组含新 hidden-Dispose 边界通过，保留旧拒绝/清理断言。实际 WMI 关闭拒绝、硬件与性能仍 UNKNOWN/NOT_RUN。
+
+普通包 `G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261104-210648\YeManCC.zip`（0.0.38，110435764 B），SHA256 `80c777a5b709054c98e95d33d8d54fe69aa5c5521e7edce9aac7fa72383daf6f`。已独立核 616 实际文件、1644 声明构建来源、90 固定 HC/模块、114 DLL 名称及实际电池载荷来源。来源是 20:57 已冻结且总库一致的主线批次，加原生成器精确重建的两份电池绑定；后续并行原生电池读取/Providers/测试改动保留在当前主线，未宣称入本包，也未用本包旧来源电池 DLL 覆盖它。Fan45 来源组件与既有灯光核心复用，没有重跑其业务验证。普通夹具 fixtureValidation=NOT_RUN、formalReleaseAccepted=false，无部署/硬件操作。
+
+两次失败原件与费用保留；首轮来源归因已由 FIRST-FAILURE-ATTRIBUTION-ERRATUM.json 精确校正：native/battery_charge_client.h 在生成绑定后更新，复原旧头正好得到原9b457431…标识；Providers/InProcess 属更晚并行版本。后续版本要按原工具依赖顺序同步总库/消费者/电池身份，见 Codex/observations/HC-CODEX-066-LATER-SOURCE-IDENTITY.json；不恢复 Trae、goal 或定时任务。
+
+结果 `G:\YeManCC-Work\Testing\YMCC\Evidence\HC-Code-Capability-Upgrade-20261031\Codex\HC-CODEX-066-BATTERY-WMI-CLEANUP\FINAL-RESULT.json`；裁决 `G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-066-OXP3-BATTERY-WMI-CLEANUP.json`。Air/新 X1Mini Pro 的 Windows 端点身份/报告长度及消费缺口继续保留，未把局部交付标为全家族完成。下文历史原样保留。
+
+---
+
+<!-- HC065-BANKED-WMI-CURRENT -->
+**2026-11-04 X2/OneXPlayer3 风扇WMI释放修正已入普通主线包，全家族继续。** 实际公开Dispose、保留原端点/枚举器与代次责任经原精确6项/124检查通过；Fan组件45来源/43编译输入已采用，未为本次发布重跑风扇用例或构建。原发布的设置基线失败经审查已有可选字段的补缺合同解决：默认值快照只加false，原门未改，旧开/关及未知值保留的3项实际内存消费者通过。一次新source epoch普通publisher自然exit0；旧失败原样保留。包 `G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261104-202619\YeManCC.zip`，SHA256 `a5e2758118ea00335829d2fc2c79fb99caef16432dde334b3369fd5c7cd8c1db`；616实际文件/114 DLL名字/90固定HC与模块已核。1643编译输入中1641与初始冻结字节一致，另2份是原版本生成器对冻结0.0.38输入的精确输出，原manifest不改。完整结果 `G:\YeManCC-Work\Testing\YMCC\Evidence\HC-Code-Capability-Upgrade-20261031\Codex\HC-CODEX-065-ONEX-REMAINING-CONSUMERS\FINAL-RESULT.json`。普通导出仍NOT_RUN/formalReleaseAccepted=false，未部署或测硬件。Air/新MiniPro的Windows身份/report证据及OXP3充电WMI拒绝清理缺口继续处理，未声明全家族完成。
+<!-- /HC065-BANKED-WMI-CURRENT -->
+
 <!-- HC064-SUPERX-UMA-CURRENT -->
 **2026-11-04 Super X 风扇当前批已入普通主线包，按用户要求收口停手。** 原 FanCapabilityCatalog 保留九条 HC 基线及原匹配，新增独立来源 Super X，仅消费风扇。真实 Host 曲线、原 source session、UMAInterface 原始 EC16 地址、唯一端点、严格字节与写后读回已接通；清理失败保留原资源/代次。原夹具18个精确身份、572条通过检查来自保留前10项和后8项续作，原失败保留，不宣称一次整组通过。来源绑定 Fan 组件 candidate-onex-superx-uma-20261104 已构建采用；45份来源、1640冻结编译输入、616包内实际文件已核对，90份固定HC/模块、114 DLL名字保持。包 `G:\YeManCC-Work\Deliverables\YMCC-Mainline-Quick-TestPackage-20261104-165414\YeManCC.zip`，SHA256 `0e4be09038d463714b75515e1ddd367e9a45764fd18a671af40000dd86a4d1bb`。来源事实见 `upstream/xmax-6d728795/SuperXFan.source-facts.json`；正式记录 G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-064-ONEX-SUPERX-UMA-ORDINARY-EXPORT.json。普通包仍 fixtureValidation=NOT_RUN/formalReleaseAccepted=false；未部署，实机风扇效果与全家族未验收；未启用Super X充电/灯光/RPM，不再安排后继批。
 <!-- /HC064-SUPERX-UMA-CURRENT -->
@@ -62,6 +124,8 @@
 更新：2026-11-02；原统计快照为2026-10-20，Asia/Hong_Kong。本指南整理现有入口，不新增运行时目录、分配器或验收门。机器可读索引：[AI-INDEX.json](AI-INDEX.json)；任务关系与数量口径：[OVERVIEW.md](OVERVIEW.md)。
 
 当前虚拟手柄修复支持：[适配说明](CONTROLLER-REPAIR-SUPPORT.md) · [机型、路线与来源快照](CONTROLLER-REPAIR-SUPPORT.json) · [全部102条源码/扩展覆盖](CONTROLLER-MODEL-COVERAGE.md)。覆盖 Win5、OneX、AYA 的已有入口及驱动／屏蔽证据边界；只供维护检索，不是新的运行分配表或验收证书。
+
+2026-11-05 OneX 背键／专用键消费核查：[现场 APEX 与最新 OP3 分支、已修漏项、实机边界](ONEX-OEM-CONSUMPTION-20261105.md) · [机器可读交接](ONEX-OEM-CONSUMPTION-20261105.json)。用户包名不覆盖 DMI；APEX 已有 HID 背键须进原总库目录，OP3 Home／G-Key 保留真实按下与松开。 用户已按 Keyboard／前端键而 UI 未识别：旧日志已找到 0～16ms 组合；OneX 短边沿已接录制与独立观察反馈，常规导出查 onex-oem-input-edge；02:33新日志确认背键可识别。三颗实体键与六个固件操作现用physicalKeyIds分开，组合／长按保留，计数3/3待新包确认。 灯光串口拒绝已补同次DeviceId/VID/PID普通日志，原准入不变；实体震动原76/381两模式通过，完整游戏链仍受旧native夹具上下文阻塞，续作见OP3Light1105/INTAKE.json。 后续计数/日志核查见同一报告：内置APEX操作自检6→8，OneX队列日志补齐Turbo/组合/长按/Home/G-Key并加家族边界；30项UI与8次原生执行通过，原诊断工具门BLOCKED单列，补充原生737检查及旧源84项反例不冒充注册PASS；原源码轮未打包；后续已复用正常结束的普通主线包，79份OneX运行源／617包文件身份通过，114 DLL名单不变。当前交付 G:\YeManCC-Work\Deliverables\YMCC-OneX-CountTrace-TestPackage-20261105-070219\YeManCC.zip；新包实机四项仍待普通日志及用户观察，完整诊断工具BLOCKED不改判。
 
 ## 1. 最短阅读顺序
 

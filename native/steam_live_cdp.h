@@ -227,11 +227,14 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
     // Fixed read operations and click-bound QAM follow-ups use a short budget.
     const auto readOperation = request.value("operation", std::string{});
     const bool runningLinkRead = isRunningLinkRead(request);
-    const bool shortRead = shortReadMs && (readOperation.rfind("menu.qam.",0)==0 || readOperation == "ui.mode.get" || readOperation == "sleep.session.inspect" || runningLinkRead);
+    const bool lightGamepadLease = readOperation == "input.gamepadLease";
+    const bool shortRead = shortReadMs && (lightGamepadLease || readOperation.rfind("menu.qam.",0)==0 || readOperation == "ui.mode.get" || readOperation == "sleep.session.inspect" || runningLinkRead);
     std::unique_lock<std::mutex> serial(transportMutex, std::defer_lock);
-    if (shortRead || readOperation == "desktopMouse.get" || readOperation == "desktopMouse.set") {
-        if (!serial.try_lock()) return {{"ok", false}, {"reason", "live-busy"}, {"mutated", false}};
-    } else serial.lock();
+    if (!lightGamepadLease) {
+        if (shortRead || readOperation == "desktopMouse.get" || readOperation == "desktopMouse.set") {
+            if (!serial.try_lock()) return {{"ok", false}, {"reason", "live-busy"}, {"mutated", false}};
+        } else serial.lock();
+    }
     const ULONGLONG deadline = shortRead ? GetTickCount64() + std::min<DWORD>(shortReadMs, 4000) : 0;
     const auto remaining = [&]() -> DWORD {
         const auto now = GetTickCount64();
@@ -246,7 +249,8 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
     };
     const auto operation = request.value("operation", std::string{});
     const bool sleepOperation = operation == "sleep.session.inspect" || operation == "sleep.inspect" || operation == "sleep.reconcile" || operation == "sleep.input-resume";
-    const DWORD expectedSteamPid = sleepOperation ? request.value("sleepSessionProcess", Json::object()).value("pid", DWORD{0}) : 0;
+    const DWORD expectedSteamPid = lightGamepadLease ? request.value("lightSessionProcess", Json::object()).value("pid", DWORD{0}) :
+        sleepOperation ? request.value("sleepSessionProcess", Json::object()).value("pid", DWORD{0}) : 0;
     bool sent = false;
     try {
         const auto candidates = listeners(steam, expectedSteamPid);
@@ -291,7 +295,7 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
         if (!socket) throw std::runtime_error("live-transport-failed");
         BoundedSocket bounded(socket, socketBudget);
         if (!stillOwned(steam, endpoint, expectedSteamPid)) throw std::runtime_error("live-debug-owner-mismatch");
-        const std::string expression = std::string(operation == "ui.mode.get" ? kUiModeScript : kScript) + "(" + request.dump() + ")";
+        const std::string expression = std::string(lightGamepadLease ? kLightGamepadScript : operation == "ui.mode.get" ? kUiModeScript : kScript) + "(" + request.dump() + ")";
         const std::string message = Json{{"id", 1}, {"method", "Runtime.evaluate"}, {"params", {
             {"expression", expression}, {"returnByValue", true}, {"awaitPromise", true}, {"timeout", shortRead ? remaining() : 14000}}}}.dump();
         // Recheck event/config/power admission after discovery and socket setup.
@@ -323,7 +327,7 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
             return remote["value"];
         }
     } catch (const std::exception& e) {
-        const bool uncertainMutation=sent&&(!shortRead||readOperation=="menu.qam.retry");
+        const bool uncertainMutation=sent&&(!shortRead||lightGamepadLease||readOperation=="menu.qam.retry");
         return {{"ok", false}, {"reason", uncertainMutation ? "live-transport-uncertain" : e.what()}, {"mutated", uncertainMutation}};
     }
 }

@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "route": "oxp-superx-dual-ec",
+  "family": "OneXPlayer Super X",
+  "kind": "firmware-percent",
+  "min": 75,
+  "identity": {
+    "manufacturers": [
+      "ONE-NETBOOK"
+    ],
+    "field": "boardProduct",
+    "values": [
+      "ONEXPLAYER SUPER X"
+    ],
+    "deviceClass": "OneXPlayerSuperX",
+    "manufacturerMatch": "ordinal-contains",
+    "valueMatch": "ordinal-exact"
+  },
+  "firmwareGate": {
+    "kind": "provider-probe-required",
+    "majorMin": 0,
+    "minorMin": 0
+  },
+  "source": {
+    "facts": "capabilities/upstream/xmax-6d728795/SuperXCharge.source-facts.json",
+    "sha256": "e564eb505a90f8dd5e04070492ef80c3d8143342668bc6284d9e94660b42f3fb",
+    "repository": "the-reengineers/XmaX",
+    "commit": "6d728795511c2f9f683d1757e72481236de9b23a"
+  },
+  "protocol": {
+    "limitRegister": "0x04A3",
+    "readTransport": "wmi-uma-ec16",
+    "writeTransport": "checked-it87-superio-ec16",
+    "reader": "native/BatteryHost/SuperXUmaChargeReader.cs",
+    "writer": "native/BatteryHost/SuperXCheckedEcWriter.cs",
+    "provider": "native/BatteryHost/SuperXChargeProvider.cs"
+  },
+  "limits": {
+    "min": 75,
+    "max": 100,
+    "step": 5
+  }
+}

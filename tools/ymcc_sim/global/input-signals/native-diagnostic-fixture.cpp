@@ -18,6 +18,8 @@
 #include "native/keyboard_shortcut_sequence.h"
 using json=nlohmann::json;
 #include "current-native-types.inc"
+// Current startup identity supplied in memory, never read from the host machine.
+static struct { YmccFamily family = YmccFamily::Unknown; std::string deviceClass; } g_machineIdentity;
 static json logs=json::array();
 static std::string dispatched;
 static bool dispatchAccepted=true;
@@ -106,6 +108,43 @@ int main(int argc,char** argv){
    checkEdge(true,false,true,true,true,"oem-shortcut-emit");
    checkEdge(true,false,true,false,true,"");checkEdge(false,true,true,true,false,"");
   }
+  // OneX uses several shared OEM bits. Exercise the unchanged real dispatcher
+  // for every existing dedicated/rear/gesture ID and for non-OneX identities.
+  const std::vector<std::pair<std::string,uint64_t>> onexKeys={
+   {"turbo",kOemBitTurbo},{"keyboard",kOemBitKeyboard},{"orange",kOemBitOrange},
+   {"orangekb",kOemBitOrangeKb},{"orangetb",kOemBitOrangeTb},{"orangelp",kOemBitOrangeLp},
+   {"l4",kOemBitL4},{"r4",kOemBitR4},{"special",kOemBitSpecial},
+   {"home",kOemBitHome},{"function",kOemBitFunction},{"gkey",kOemBitGKey},
+   {"not-oem",1},{"neutral",0}};
+  for(const auto family:{YmccFamily::OneXPlayer,YmccFamily::Gpd,YmccFamily::AsusRogAlly,
+      YmccFamily::MsiClaw,YmccFamily::Ayanero,YmccFamily::Unknown}){
+   g_machineIdentity.family=family;
+   g_machineIdentity.deviceClass=family==YmccFamily::OneXPlayer?
+    "HandheldCompanion.Devices.OneXPlayerApex":"fixture-other-family";
+   for(const auto& item:onexKeys)for(const bool accepted:{true,false}){
+    NativeKeyboardShortcutRule rule;rule.requiredMask=item.second;rule.ownAction="power.tdpUp";
+    dispatchAccepted=accepted;dispatched.clear();logs.clear();
+    const bool actual=nativeKeyboardShortcutDispatch(rule,4,0,0);
+    diagnostic.check(actual==accepted&&dispatched==rule.ownAction,"OneX tracing preserves queue action and result: "+item.first);
+    const bool shouldTrace=family==YmccFamily::OneXPlayer&&item.second>1;
+    diagnostic.check(logs.size()==(shouldTrace?1u:0u),"OneX-only complete operation coverage: "+item.first);
+    if(shouldTrace&&logs.size()==1){
+     const auto& detail=logs.at(0).at("detail");
+     diagnostic.check(logs.at(0).at("event")=="oem-shortcut-dispatch"&&detail.at("accepted")==accepted,
+      "OneX queue result logged without changing admission");
+     diagnostic.check(detail.at("requiredMask")==item.second&&detail.at("sourceEpoch")==4&&
+      detail.at("actionId")==rule.ownAction&&detail.at("stage")=="queue-result","OneX queue identity retained");
+     diagnostic.check(detail.value("familyId","")=="onexplayer"&&detail.value("deviceClass","")==g_machineIdentity.deviceClass,
+      "OneX queue trace binds cached machine identity");
+     diagnostic.check(detail.value("queueAdmissionOnly",false)==true&&detail.value("actionExecutionProven",true)==false,
+      "OneX queue acceptance never claims physical action or game consumption");
+     diagnostic.evidence.push_back({{"input",{{"sourceKind","onex-queue-trace"},{"keyId",item.first},{"accepted",accepted}}},
+      {"consumer","actual-native-dispatch"},{"state",detail},
+      {"feedback",{{"event","oem-shortcut-dispatch"},{"physicalSuppressionConfirmed",false}}}});
+    }
+   }
+  }
+  g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.deviceClass.clear();
   // Isolated extra defect: uiAction-only change must refresh the real digest.
   NativeKeyboardShortcutRule ui;ui.requiredMask=kOemBitClaw;ui.uiAction="monitor.toggle";g_nativeKeyboardShortcuts={ui};++g_nativeShortcutLegacyOverrideMask;
   logs.clear();runSummary();ui.uiAction="display.frameRateControl";g_nativeKeyboardShortcuts={ui};logs.clear();runSummary();

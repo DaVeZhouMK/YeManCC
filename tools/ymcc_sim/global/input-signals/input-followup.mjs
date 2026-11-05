@@ -44,7 +44,7 @@ async function bundleRun(scope,source,entryFile){
 function nativeIncludes(spans){
  const by=Object.fromEntries(spans.map(s=>[s.name,s]));
  const include=names=>names.map(name=>`#line ${by[name].startLine} "${by[name].path??"product-native-main.cpp"}"\n${by[name].text}\n`).join('\n');
- return {'current-native-types.inc':include(['producerEnum','producerCount','oemBits','producerTokens','ruleStruct']),
+ return {'current-native-types.inc':include(['producerEnum','producerCount','oemBits','familyEnum','producerTokens','ruleStruct']),
   'current-native-dispatch.inc':include(['dispatch']),
   'current-native-mapping.inc':include(['desktopMapping','actionMapping','inputFlags']),
   'current-native-string.inc':include(['inputString']),

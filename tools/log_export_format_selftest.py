@@ -35,7 +35,7 @@ TESTS=r'''
 int wmain(int argc,wchar_t** argv){
  if(argc!=2)return 2;const fs::path root=argv[1];fs::create_directories(root);
  using namespace ymcc::logexport;
- for(const char* name:{"native-lifecycle.log.12","native-detail.log.previous","input-capture.jsonl.prev",
+ for(const char* name:{"model-adaptation.log","virtual-adaptation.log","native-lifecycle.log.12","native-detail.log.previous","input-capture.jsonl.prev",
      "input-host-cost.log.pending","input-host-signal.log.prev","input-host-report-chain.log",
      "steam-original-recovery.jsonl","steam-original-recovery.jsonl.1","steam-original-recovery.jsonl.previous",
      "yeman-fan-host-runtime.1.log","yeman-fan-host-runtime.12.log","yeman-fan-host-runtime.previous.log",
@@ -131,6 +131,8 @@ int wmain(int argc,wchar_t** argv){
  const auto clocks=stagedFileEvidence(clockSeed,"sleep-facts.log");
  check("staged-sleep-prefers-explicit-UTC-and-reports-field",clocks["firstTime"]=="2026-10-25T15:20:11.820Z"&&clocks["firstTimeField"]=="timestampUtc"&&clocks["lastTimeField"]=="timestampUtc");
  const auto guide=aiReadingGuide();
+ check("virtual-evidence-budget-and-proof-guide",std::string(aiEvidenceLane("virtual-adaptation.log"))=="resident"&&guide["virtualAdaptation"].contains("proofBoundary")&&guide["virtualAdaptation"].contains("generation"));
+ check("adaptation-log-resident-and-replay-guide",std::string(aiEvidenceLane("model-adaptation.log"))=="resident"&&guide["modelAdaptation"]["file"]=="model-adaptation.log"&&guide["modelAdaptation"].contains("replay"));
  check("cost-export-inventory-guide-points-to-actual-export-receipt",guide["retention"]["costArchiveExportInventory"].get<std::string>().find("log-export-availability.json costArchiveDiscovery.exportSelection")==0);
  check("ai-guide-warns-about-untrusted-input-and-inspection-scope",guide.contains("instructionTrust")&&guide.contains("inspection")&&guide.contains("clockRules")&&guide.contains("identityRules")&&guide.contains("sleepFacts"));
  unsigned failures=0;for(const auto& item:checks)if(!item["pass"].get<bool>())++failures;

@@ -47,9 +47,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {wireProjectionForManifest,wireIdentityManifest,verifyWireProjectionReference} from '../global/controller-lifecycle-pipe/cache-projection.mjs';
 
 const SCHEMA_VERSION = 1;
 const SELF = fileURLToPath(import.meta.url);
+// Every consumer loads this fixed import graph, even when projection is off.
+export const CACHE_ENGINE_DEPENDENCIES=Object.freeze([
+  '../global/controller-lifecycle-pipe/cache-projection.mjs',
+  '../global/controller-lifecycle-pipe/source-projection.mjs',
+  '../../fixtures/legion_motion_consumer/extract_main.mjs',
+  '../../fixtures/hc_remaining_model_capabilities/expectations.mjs',
+  '../../lib/hc_controller_motion_fixture.mjs',
+  '../../lib/hc_motion_matrix_guard.mjs'
+].map(relative=>fileURLToPath(new URL(relative,import.meta.url))));
 const SHA = /^[a-f0-9]{64}$/i;
 const FAILURE_STATUSES = new Set(['FAIL', 'UNKNOWN', 'BLOCKED', 'TIMEOUT', 'INCOMPLETE', 'NOT_RUN']);
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
@@ -172,30 +182,35 @@ export function fingerprintCase({ repoRoot, adapter, toolIdentities = [], option
   if (Array.isArray(options?.resolvedInputs)) for (const entry of options.resolvedInputs) add(entry, 'options.resolvedInputs', 'resolved-input');
   add(process.execPath, 'runtime.node', 'node', true);
   add(SELF, 'runtime.engine', 'cache-engine', true);
+  for(const file of CACHE_ENGINE_DEPENDENCIES)add(file,'runtime.engineDependency','cache-engine',true);
   if (Array.isArray(toolIdentities)) for (const entry of toolIdentities) add(entry, 'toolIdentities', 'tool', true);
   const unique = rows => [...new Map(rows.map(row => [stable(row), row])).values()].sort((a, b) => compare(stable(a), stable(b)));
   const manifest = { schemaVersion: SCHEMA_VERSION, repoRoot: root, adapter: description, options: normalizedOptions,
     runtime: { node: process.version, platform: process.platform, arch: process.arch }, inputs: unique(inputs), tools: unique(tools) };
-  return { schemaVersion: SCHEMA_VERSION, identity: reasons.length ? null : digest(stable(manifest)), cacheable: reasons.length === 0, reasons, manifest };
+  try { const projection=wireProjectionForManifest(manifest); if(projection)manifest.sourceProjection=projection; }
+  catch(error){reasons.push(problem(error.code??error.message,'sourceProjection'));}
+  return { schemaVersion: SCHEMA_VERSION, identity: reasons.length ? null : digest(stable(wireIdentityManifest(manifest))), cacheable: reasons.length === 0, reasons, manifest };
 }
 
 function identityProblems(identity, adapter) {
-  const reasons = [];
+  // Reuse bytes only within this validation; each role still reopens and checks its descriptor.
+  const reasons = [], byteCache = new Map();
   try {
     if (identity?.schemaVersion !== SCHEMA_VERSION || identity.cacheable !== true || !Array.isArray(identity.reasons) || identity.reasons.length ||
-        !SHA.test(identity.identity) || digest(stable(identity.manifest)) !== identity.identity) throw new Error('INVALID_IDENTITY');
+        !SHA.test(identity.identity) || digest(stable(wireIdentityManifest(identity.manifest))) !== identity.identity) throw new Error('INVALID_IDENTITY');
     const m = identity.manifest;
     if (m.schemaVersion !== SCHEMA_VERSION || m.options?.closureComplete !== true || m.options?.toolClosureComplete !== true ||
         !Array.isArray(m.options.resolvedInputs) || !Array.isArray(m.inputs) || !Array.isArray(m.tools) ||
         stable(m.runtime) !== stable({ node: process.version, platform: process.platform, arch: process.arch })) throw new Error('INCOMPLETE_IDENTITY');
     if (fs.realpathSync(m.repoRoot) !== m.repoRoot) throw new Error('REPOSITORY_CHANGED');
+    if(stable(wireProjectionForManifest(m))!==stable(m.sourceProjection??null))throw new Error('SOURCE_PROJECTION_CHANGED');
     if (adapter && stable(executionDescription(adapter)) !== stable(m.adapter)) throw new Error('ADAPTER_IDENTITY_MISMATCH');
-    for (const [role, file] of [['node', process.execPath], ['cache-engine', SELF]]) {
+    for (const [role, file] of [['node', process.execPath], ['cache-engine', SELF], ...CACHE_ENGINE_DEPENDENCIES.map(file=>['cache-engine',file])]) {
       if (!m.tools.some(row => row.role === role && row.path === file)) throw new Error('RUNTIME_IDENTITY_MISSING');
     }
     for (const row of [...m.inputs, ...m.tools]) {
       const root = ['artifact', 'node', 'cache-engine', 'tool'].includes(row.role) ? undefined : m.repoRoot;
-      const current = snapshot(row, { role: row.role, root });
+      const current = snapshot(row, { role: row.role, root, byteCache });
       if (stable(current) !== stable(row)) throw new Error('IDENTITY_FILE_CHANGED');
     }
   } catch (error) { reasons.push(problem(error.code ?? error.message, 'identity')); }
@@ -207,10 +222,12 @@ export function inspectCachedResult({ identity, cacheEntry } = {}) {
   const outcome = { hit: false, reusable: false, status: 'CACHE_MISS', previousStatus: null,
     executedThisRun: false, actualPassedThisRun: false, reasons: [], reference: null };
   if (identity?.cacheable !== true) return { ...outcome, status: 'UNCACHEABLE', reasons: identity?.reasons ?? [problem('INPUT_CLOSURE_UNPROVEN')] };
-  outcome.reasons.push(...identityProblems(identity));
-  if (outcome.reasons.length) return outcome;
+  // An absent/mismatched entry can only be rejected; fresh input/evidence
+  // validation remains mandatory below before any reference is reused.
   if (!cacheEntry) return { ...outcome, reasons: [problem('CACHE_ENTRY_MISSING')] };
   if (cacheEntry.identity !== identity.identity) return { ...outcome, reasons: [problem('IDENTITY_MISMATCH')] };
+  outcome.reasons.push(...identityProblems(identity));
+  if (outcome.reasons.length) return outcome;
   try {
     if (!cacheEntry.result || !SHA.test(cacheEntry.result.sha256 ?? '')) throw new Error('RESULT_PIN_REQUIRED');
     if (!Array.isArray(cacheEntry.evidencePins) || cacheEntry.evidencePins.length === 0) throw new Error('EVIDENCE_PINS_REQUIRED');
@@ -226,10 +243,11 @@ export function inspectCachedResult({ identity, cacheEntry } = {}) {
       if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('ABSOLUTE_EVIDENCE_PATH_REQUIRED');
       const pin = pins.get(path.resolve(file));
       if (!pin || (expected !== undefined && (!SHA.test(expected) || pin.sha256 !== expected.toLowerCase()))) throw new Error('REQUIRED_EVIDENCE_PIN_MISSING_OR_MISMATCHED');
+      return pin;
     };
     requirePin(resultPin.path, resultPin.sha256);
     const caseDir = path.dirname(resultPin.path);
-    for (const file of ['stdout.log', 'stderr.log', ...(identity.manifest.adapter.resultFiles ?? [])]) {
+    for (const file of ['stdout.log', 'stderr.log']) {
       const absolute = path.resolve(caseDir, file);
       if (!inside(caseDir, absolute)) throw new Error('RESULT_FILE_OUTSIDE_CASE');
       requirePin(absolute);
@@ -240,6 +258,12 @@ export function inspectCachedResult({ identity, cacheEntry } = {}) {
     const raw = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('INVALID_RAW_RESULT');
     if (raw.status !== 'PASS' && !FAILURE_STATUSES.has(raw.status)) throw new Error('UNSUPPORTED_PREVIOUS_STATUS');
+    // A failed run may legitimately lack its success-only output graph. Keep
+    // the pinned failure; every recorded input still needs its full SHA below.
+    for(const file of identity.manifest.adapter.resultFiles??[]){
+      const absolute=path.resolve(caseDir,file);if(!inside(caseDir,absolute))throw new Error('RESULT_FILE_OUTSIDE_CASE');
+      if(raw.status==='PASS'||pins.has(absolute)||fs.existsSync(absolute))requirePin(absolute);
+    }
     if (raw.source !== undefined && raw.source !== identity.manifest.adapter.path) throw new Error('RESULT_SOURCE_MISMATCH');
     if (raw.scope !== undefined && raw.scope !== identity.manifest.adapter.scope) throw new Error('RESULT_SCOPE_MISMATCH');
     for (const field of ['structuredEvidence', 'bundledOutputs']) {
@@ -248,11 +272,31 @@ export function inspectCachedResult({ identity, cacheEntry } = {}) {
     }
     if (raw.bundle !== undefined) requirePin(raw.bundle?.path, raw.bundle?.sha256 ?? '');
     const declared = new Map([...identity.manifest.inputs, ...identity.manifest.tools].map(row => [row.path, row]));
+    let sourceEquivalence=null;
+    if(raw.status==='PASS'&&identity.manifest.adapter.cacheOutputManifest!==undefined){
+      const relative=identity.manifest.adapter.cacheOutputManifest;
+      if(typeof relative!=='string'||path.isAbsolute(relative)||!identity.manifest.adapter.resultFiles?.includes(relative))throw new Error('INVALID_CACHE_OUTPUT_MANIFEST');
+      const manifestFile=path.resolve(caseDir,relative);if(!inside(caseDir,manifestFile))throw new Error('CACHE_OUTPUT_MANIFEST_OUTSIDE_CASE');
+      requirePin(manifestFile);
+      const graph=JSON.parse(fs.readFileSync(manifestFile,'utf8').replace(/^\uFEFF/,''));
+      if(!Array.isArray(graph.sourceHashes)||graph.sourceHashes.length<1||graph.sourceHashes.length>10000)throw new Error('CACHE_OUTPUT_GRAPH_INVALID');
+      sourceEquivalence=verifyWireProjectionReference({manifest:identity.manifest,graph,caseDir,requirePin});
+      for(const row of graph.sourceHashes){
+        if(typeof row?.path!=='string'||!SHA.test(row.sha256??''))throw new Error('CACHE_OUTPUT_GRAPH_ROW_INVALID');
+        const file=path.resolve(identity.manifest.repoRoot,row.path);
+        if(inside(caseDir,file))requirePin(file,row.sha256);
+        else if((sourceEquivalence?.get(file)??declared.get(file))?.sha256!==row.sha256)throw new Error('CACHE_OUTPUT_GRAPH_UNDECLARED_INPUT');
+      }
+    }
+    if(raw.status!=='PASS'&&identity.manifest.sourceProjection){
+      const main=path.resolve(identity.manifest.repoRoot,identity.manifest.sourceProjection.source);
+      if(!raw.sourceInputs?.some(row=>typeof row?.path==='string'&&path.resolve(identity.manifest.repoRoot,row.path)===main&&row.sha256===declared.get(main)?.sha256))throw new Error('FAILURE_FULL_SOURCE_IDENTITY_MISSING_OR_CHANGED');
+    }
     for (const field of ['sourceInputs', 'referenceInputs', 'dependencyInputs', 'toolDependencyInputs', 'candidateArtifacts']) {
       if (raw[field] !== undefined && !Array.isArray(raw[field])) throw new Error('INVALID_RESULT_INPUTS');
       for (const row of raw[field] ?? []) {
         const absolute = typeof row?.path === 'string' ? path.resolve(identity.manifest.repoRoot, row.path) : '';
-        const expected = declared.get(absolute) ?? pins.get(absolute);
+        const expected = sourceEquivalence?.get(absolute) ?? declared.get(absolute) ?? pins.get(absolute);
         if (!expected || !SHA.test(row?.sha256 ?? '') || expected.sha256 !== row.sha256.toLowerCase() ||
             (row.status !== undefined && row.status !== 'OK')) throw new Error('UNDECLARED_OR_CHANGED_RESULT_INPUT');
       }

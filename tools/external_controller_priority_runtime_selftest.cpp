@@ -8,6 +8,7 @@
 #include <initguid.h>
 #include <usbioctl.h>
 #include <usbiodef.h>
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <functional>
@@ -67,7 +68,13 @@ struct Device {
     std::string location, parentRoot = "USB\\ROOT_HUB30\\OFFLINE";
     int portKind = -1; unsigned slot = 4;
     bool fresh = true, reverse = true;
+    ULONG address = 1, addressType = REG_DWORD, addressBytes = sizeof(ULONG);
+    CONFIGRET addressResult = CR_SUCCESS;
+    DWORD deniedAccessMask = 0, openError = ERROR_ACCESS_DENIED, queryError = ERROR_NOT_SUPPORTED;
+    ULONG connectorLength = sizeof(USB_PORT_CONNECTOR_PROPERTIES);
 };
+struct HubOpen { std::string root; DWORD desiredAccess = 0, error = ERROR_SUCCESS; };
+struct HubQuery { std::string root; ULONG port = 0; DWORD desiredAccess = 0, capacity = 0; };
 struct Child { bool completed = false; DWORD code = 0; };
 struct World {
     ULONGLONG now = 1000; std::uint64_t power = 1;
@@ -80,6 +87,8 @@ struct World {
     int resolves = 0, snapshots = 0, saves = 0, launches = 0, stops = 0, refreshes = 0, resets = 0, reprobes = 0;
     int loads = 0, pnpQueries = 0, settingsReads = 0; bool settingsThrow = false;
     std::string queryRoot; std::vector<std::string> events; std::vector<json> logs;
+    std::vector<HubOpen> hubOpens; std::vector<HubQuery> hubQueries;
+    bool hubOpen = false; DWORD hubDesiredAccess = 0; int hubCloses = 0;
     std::map<std::uintptr_t, Child> children; std::uintptr_t nextHandle = 100;
     std::function<void()> onStop, onReverse, onSnapshot, onSave, onLoad;
 };
@@ -87,6 +96,8 @@ World w;
 constexpr const char* builtinRoot = "USB\\VID_0DB0&PID_1902\\BUILTIN";
 constexpr const char* mode1Root = "USB\\VID_0DB0&PID_1901\\BUILTIN";
 constexpr const char* externalRoot = "USB\\VID_045E&PID_028E\\EXTERNAL";
+// A CM-style physical leaf for the OneX topology parameter consumer, not family authority.
+constexpr const char* onexTopologyLeaf = "USB\\VID_045E&PID_028E\\7&1A2B3C4D&0&4";
 constexpr const char* builtinLocation = "PCIROOT(0)#USBROOT(0)#USB(1)";
 constexpr const char* externalLocation = "PCIROOT(0)#USBROOT(0)#USB(3)";
 constexpr const wchar_t* modulePath = L"C:\\offline-fixture\\YeManCC.Native.exe";
@@ -110,7 +121,11 @@ void once(std::function<void()>& callback) { auto f = std::move(callback); callb
 HANDLE handle(std::uintptr_t value) { return reinterpret_cast<HANDLE>(value); }
 ULONGLONG tick() { return w.now; }
 DWORD pid() { return 4242; }
-BOOL close(HANDLE h) { CHECK(h == handle(17) || h == handle(18) || w.children.count(reinterpret_cast<std::uintptr_t>(h)) != 0); return TRUE; }
+BOOL close(HANDLE h) {
+    CHECK(h == handle(17) || h == handle(18) || w.children.count(reinterpret_cast<std::uintptr_t>(h)) != 0);
+    if (h == handle(17)) { CHECK(w.hubOpen); w.hubOpen = false; ++w.hubCloses; }
+    return TRUE;
+}
 DWORD wait(HANDLE h, DWORD) {
     const auto it = w.children.find(reinterpret_cast<std::uintptr_t>(h)); CHECK(it != w.children.end());
     return it->second.completed ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
@@ -131,8 +146,11 @@ CONFIGRET locate(PDEVINST node, DEVINSTID_W id, ULONG) {
     ++w.pnpQueries; w.queryRoot = W2U(id); if (!byRoot(w.queryRoot)) return CR_NO_SUCH_DEVNODE; *node = 1; return CR_SUCCESS;
 }
 CONFIGRET parent(PDEVINST out, DEVINST, ULONG) { *out = 2; return CR_SUCCESS; }
-CONFIGRET property(DEVINST, ULONG, PULONG, PVOID buffer, PULONG bytes, ULONG) {
-    *static_cast<ULONG*>(buffer) = 1; *bytes = sizeof(ULONG); return CR_SUCCESS;
+CONFIGRET property(DEVINST node, ULONG name, PULONG type, PVOID buffer, PULONG bytes, ULONG) {
+    CHECK(node == 1); CHECK(name == CM_DRP_ADDRESS); CHECK(type != nullptr); CHECK(*bytes >= sizeof(ULONG));
+    const auto d = byRoot(w.queryRoot); CHECK(d != nullptr);
+    *type = d->addressType; *static_cast<ULONG*>(buffer) = d->address; *bytes = d->addressBytes;
+    return d->addressResult;
 }
 CONFIGRET deviceId(DEVINST, PWSTR out, ULONG size, ULONG) {
     const auto d = byRoot(w.queryRoot); CHECK(d != nullptr); const auto id = U2W(d->parentRoot);
@@ -146,14 +164,30 @@ BOOL interfaceDetail(HDEVINFO, PSP_DEVICE_INTERFACE_DATA, PSP_DEVICE_INTERFACE_D
     wcscpy_s(detail->DevicePath, 32, L"offline-hub"); return TRUE;
 }
 BOOL destroySet(HDEVINFO) { return TRUE; }
-HANDLE file(LPCWSTR path, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE) {
-    CHECK(std::wstring(path) == L"offline-hub"); return handle(17);
+HANDLE file(LPCWSTR path, DWORD desiredAccess, DWORD sharing, LPSECURITY_ATTRIBUTES, DWORD creation, DWORD, HANDLE) {
+    CHECK(std::wstring(path) == L"offline-hub");
+    CHECK(sharing == (FILE_SHARE_READ | FILE_SHARE_WRITE)); CHECK(creation == OPEN_EXISTING); CHECK(!w.hubOpen);
+    const auto d = byRoot(w.queryRoot); CHECK(d != nullptr);
+    const DWORD error = (desiredAccess & d->deniedAccessMask) ? d->openError : ERROR_SUCCESS;
+    w.hubOpens.push_back({w.queryRoot, desiredAccess, error}); SetLastError(error);
+    if (error != ERROR_SUCCESS) return INVALID_HANDLE_VALUE;
+    w.hubOpen = true; w.hubDesiredAccess = desiredAccess; return handle(17);
 }
-BOOL ioctl(HANDLE h, DWORD code, LPVOID, DWORD, LPVOID output, DWORD, LPDWORD returned, LPOVERLAPPED) {
+BOOL ioctl(HANDLE h, DWORD code, LPVOID input, DWORD inputBytes, LPVOID output, DWORD outputBytes, LPDWORD returned, LPOVERLAPPED) {
     CHECK(h == handle(17)); CHECK(code == IOCTL_USB_GET_PORT_CONNECTOR_PROPERTIES);
-    const auto d = byRoot(w.queryRoot); CHECK(d != nullptr); if (d->portKind < 0) return FALSE;
-    auto* p = static_cast<USB_PORT_CONNECTOR_PROPERTIES*>(output); p->UsbPortProperties.PortIsUserConnectable = d->portKind == 1;
-    *returned = sizeof(USB_PORT_CONNECTOR_PROPERTIES); return TRUE;
+    CHECK(w.hubOpen); CHECK(input == output); CHECK(inputBytes >= sizeof(USB_PORT_CONNECTOR_PROPERTIES));
+    CHECK(outputBytes >= sizeof(USB_PORT_CONNECTOR_PROPERTIES));
+    const auto d = byRoot(w.queryRoot); CHECK(d != nullptr);
+    auto* p = static_cast<USB_PORT_CONNECTOR_PROPERTIES*>(output);
+    const ULONG port = p->ConnectionIndex; CHECK(port == d->address);
+    w.hubQueries.push_back({w.queryRoot, port, w.hubDesiredAccess, outputBytes});
+    *returned = 0;
+    if (d->portKind < 0) { SetLastError(d->queryError); return FALSE; }
+    // Support the production zero-access size negotiation without replacing its algorithm.
+    p->ConnectionIndex = port; p->ActualLength = d->connectorLength;
+    p->UsbPortProperties.PortIsUserConnectable = d->portKind == 1;
+    *returned = (std::min)(outputBytes, static_cast<DWORD>(d->connectorLength));
+    SetLastError(ERROR_SUCCESS); return TRUE;
 }
 DWORD userIndex(LPCWSTR path, BYTE* index) {
     const auto d = byPath(W2U(path)); if (!d || d->slot >= 4) return ERROR_DEVICE_NOT_CONNECTED;
@@ -172,6 +206,11 @@ json ymSettingsSection(const char*) {
     ++offline::w.settingsReads;
     if (offline::w.settingsThrow) throw std::runtime_error("Unified settings read failed: 5");
     return offline::w.settings;
+}
+json ymSettingsField(const char* section, const char* field) {
+    const auto settings = ymSettingsSection(section);
+    if (!settings.is_object()) return nullptr;
+    const auto value = settings.find(field); return value == settings.end() ? json(nullptr) : *value;
 }
 std::uint64_t currentPowerGeneration() {
     const auto overridePower = g_offlinePowerOverride.load();
@@ -404,7 +443,18 @@ int main() {
         reset(); auto dock = device("USB\\VID_1111&PID_2222\\DOCK", "DOCK-PORT", 1);
         w.devices[1].portKind = 0; w.devices[1].parentRoot = dock.identity.baseContainerDeviceInstanceId; w.devices.push_back(dock);
         CHECK(externalPriorityUsbPortKind(externalRoot) == 1);
+        json evidence;
+        CHECK(externalPriorityUsbPortKindWithEvidence(externalRoot, &evidence, 0) == 1);
+        CHECK(evidence["portKind"] == 1); CHECK(evidence["reason"] == "user-connectable-hop");
+        CHECK(evidence["desiredAccess"] == 0); CHECK(evidence["hops"].size() == 2);
+        CHECK(evidence["hops"][0]["node"] == externalRoot); CHECK(evidence["hops"][0]["portKind"] == 0);
+        CHECK(evidence["hops"][1]["node"] == dock.identity.baseContainerDeviceInstanceId);
+        CHECK(evidence["hops"][1]["portKind"] == 1);
         w.devices.back().portKind = -1; CHECK(externalPriorityUsbPortKind(externalRoot) == -1);
+        CHECK(externalPriorityUsbPortKindWithEvidence(externalRoot, &evidence, 0) == -1);
+        CHECK(evidence["portKind"] == -1); CHECK(evidence["reason"] == "hop-unproven"); CHECK(evidence["hops"].size() == 2);
+        CHECK(evidence["hops"][1]["reason"] == "connector-query-failed");
+        CHECK(evidence["hops"][1]["queryError"] == ERROR_NOT_SUPPORTED); CHECK(!w.hubOpen);
     });
     run("neutral takeover canonical stop WAL before hides exact root cycle", [] {
         reset(); takeover(); CHECK(w.stops == 1); CHECK(w.resets >= 2); CHECK(g_externalPrioritySourceMask.load() == 1);
@@ -958,6 +1008,133 @@ int main() {
               reported = snapshotOnReaderThread()["enabled"].get<bool>(); }
             CHECK(reported == !enabled); CHECK(noMutations()); CHECK(!g_externalPriorityVirtualSuspended.load());
         }
+    });
+    run("OneX topology parameter consumes zero access on physical leaf while legacy writes stay denied", [] {
+        reset(); w.devices = {device(onexTopologyLeaf, builtinLocation, 0, 0)};
+        w.devices.front().deniedAccessMask = GENERIC_WRITE; w.devices.front().address = 7;
+        CHECK(externalPriorityUsbPortKind(onexTopologyLeaf) == -1);
+        CHECK(w.hubOpens.size() == 1); CHECK(w.hubOpens.back().desiredAccess == GENERIC_WRITE);
+        CHECK(w.hubOpens.back().error == ERROR_ACCESS_DENIED); CHECK(w.hubQueries.empty());
+        json denied;
+        CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &denied, GENERIC_WRITE) == -1);
+        CHECK(denied["reason"] == "hop-unproven"); CHECK(denied["portKind"] == -1);
+        CHECK(denied["desiredAccess"] == GENERIC_WRITE); CHECK(denied["hops"].size() == 1);
+        CHECK(denied["hops"][0]["reason"] == "hub-open-failed");
+        CHECK(denied["hops"][0]["openError"] == ERROR_ACCESS_DENIED);
+        json hop;
+        CHECK(externalPriorityUsbHopKind(onexTopologyLeaf, &hop) == -1);
+        CHECK(hop["desiredAccess"] == GENERIC_WRITE); CHECK(hop["openError"] == ERROR_ACCESS_DENIED);
+        json evidence; SetLastError(ERROR_ACCESS_DENIED);
+        CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &evidence, 0) == 0);
+        CHECK(evidence["portKind"] == 0); CHECK(evidence["desiredAccess"] == 0);
+        CHECK(evidence["reason"] == "internal-through-root-hub"); CHECK(evidence["hops"].size() == 1);
+        const auto& leaf = evidence["hops"][0];
+        CHECK(leaf["node"] == onexTopologyLeaf); CHECK(leaf["parent"] == w.devices.front().parentRoot);
+        CHECK(leaf["port"] == 7); CHECK(leaf["desiredAccess"] == 0); CHECK(leaf["portKind"] == 0);
+        CHECK(leaf["addressType"] == REG_DWORD); CHECK(leaf["addressBytes"] == sizeof(ULONG));
+        CHECK(leaf["reason"] == "non-user-connectable"); CHECK(leaf["queryError"] == ERROR_SUCCESS);
+        CHECK(w.hubOpens.size() == 4); CHECK(w.hubOpens.back().root == onexTopologyLeaf);
+        CHECK(w.hubOpens.back().desiredAccess == 0); CHECK(w.hubOpens.back().error == ERROR_SUCCESS);
+        CHECK(w.hubQueries.size() == 1); CHECK(w.hubQueries.front().port == 7);
+        CHECK(w.hubQueries.front().desiredAccess == 0); CHECK(w.hubCloses == 1); CHECK(!w.hubOpen);
+        CHECK(noMutations()); CHECK(w.visibility.hidden.empty()); CHECK(!g_externalPriorityVirtualSuspended.load());
+    });
+    run("OneX topology parameter retains unknown connector query and exact error on physical leaf", [] {
+        reset(); w.devices = {device(onexTopologyLeaf, builtinLocation, -1, 0)};
+        w.devices.front().deniedAccessMask = GENERIC_WRITE; w.devices.front().queryError = ERROR_NOT_SUPPORTED;
+        CHECK(externalPriorityUsbPortKind(onexTopologyLeaf) == -1); CHECK(w.hubQueries.empty());
+        json evidence; SetLastError(ERROR_ACCESS_DENIED);
+        CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &evidence, 0) == -1);
+        CHECK(evidence["portKind"] == -1); CHECK(evidence["reason"] == "hop-unproven");
+        CHECK(evidence["desiredAccess"] == 0); CHECK(evidence["hops"].size() == 1);
+        const auto& hop = evidence["hops"][0];
+        CHECK(hop["node"] == onexTopologyLeaf); CHECK(hop["portKind"] == -1); CHECK(hop["desiredAccess"] == 0);
+        CHECK(hop["reason"] == "connector-query-failed"); CHECK(hop["queryError"] == ERROR_NOT_SUPPORTED);
+        CHECK(w.hubOpens.size() == 2); CHECK(w.hubOpens.back().desiredAccess == 0);
+        CHECK(w.hubQueries.size() == 1); CHECK(w.hubCloses == 1); CHECK(!w.hubOpen); CHECK(noMutations());
+    });
+    run("OneX topology parameter consumes external leaf and same VID external upstream without internal grant", [] {
+        for (const bool upstream : {false, true}) {
+            reset(); w.devices = {device(onexTopologyLeaf, builtinLocation, upstream ? 0 : 1, 0)};
+            if (upstream) {
+                const std::string root = "USB\\VID_045E&PID_028E\\REMOVABLE-UPSTREAM";
+                w.devices.front().parentRoot = root; w.devices.push_back(device(root, "DOCK-PORT", 1));
+            }
+            CHECK(externalPriorityUsbPortKind(onexTopologyLeaf) == 1);
+            w.hubOpens.clear(); w.hubQueries.clear(); w.hubCloses = 0;
+            for (auto& d : w.devices) d.deniedAccessMask = GENERIC_WRITE;
+            json evidence;
+            CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &evidence, 0) == 1);
+            CHECK(evidence["portKind"] == 1); CHECK(evidence["reason"] == "user-connectable-hop");
+            CHECK(evidence["hops"].size() == (upstream ? 2u : 1u));
+            CHECK(evidence["hops"].back()["node"] == w.devices.back().identity.baseContainerDeviceInstanceId);
+            CHECK(evidence["hops"].back()["portKind"] == 1);
+            for (const auto& open : w.hubOpens) { CHECK(open.desiredAccess == 0); CHECK(open.error == ERROR_SUCCESS); }
+            CHECK(w.hubQueries.size() == evidence["hops"].size()); CHECK(!w.hubOpen); CHECK(noMutations());
+        }
+    });
+    run("OneX topology parameter rejects wrong property type size zero port and unknown address in both access paths", [] {
+        for (unsigned scenario = 0; scenario < 5; ++scenario) {
+            reset(); w.devices = {device(onexTopologyLeaf, builtinLocation, 0, 0)};
+            auto& d = w.devices.front();
+            if (scenario == 0) d.addressType = REG_SZ;
+            if (scenario == 1) d.addressType = REG_BINARY;
+            if (scenario == 2) d.addressBytes = sizeof(ULONG) - 1;
+            if (scenario == 3) d.address = 0;
+            if (scenario == 4) d.addressResult = CR_FAILURE;
+            CHECK(externalPriorityUsbPortKind(onexTopologyLeaf) == -1);
+            json evidence;
+            CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &evidence, 0) == -1);
+            CHECK(evidence["portKind"] == -1); CHECK(evidence["reason"] == "hop-unproven");
+            CHECK(evidence["hops"].size() == 1); const auto& hop = evidence["hops"][0];
+            CHECK(hop["reason"] == "port-address-unproven"); CHECK(hop["portKind"] == -1);
+            CHECK(hop["addressType"] == d.addressType); CHECK(hop["addressBytes"] == d.addressBytes);
+            CHECK(hop["addressConfigRet"] == d.addressResult); CHECK(hop["desiredAccess"] == 0);
+            CHECK(w.hubOpens.empty()); CHECK(w.hubQueries.empty()); CHECK(!w.hubOpen); CHECK(noMutations());
+        }
+    });
+    run("OneX topology parameter keeps ancestor evidence bounded at sixteen unproven hops", [] {
+        reset(); w.devices.clear();
+        for (unsigned index = 0; index < 17; ++index) {
+            auto d = device("USB\\VID_045E&PID_028E\\HOP" + std::to_string(index), builtinLocation, 0);
+            d.parentRoot = "USB\\VID_045E&PID_028E\\HOP" + std::to_string(index + 1);
+            w.devices.push_back(d);
+        }
+        json evidence;
+        CHECK(externalPriorityUsbPortKindWithEvidence(w.devices.front().identity.baseContainerDeviceInstanceId, &evidence, 0) == -1);
+        CHECK(evidence["portKind"] == -1); CHECK(evidence["reason"] == "ancestor-depth-exhausted");
+        CHECK(evidence["desiredAccess"] == 0); CHECK(evidence["hops"].size() == 16);
+        CHECK(w.hubOpens.size() == 16); CHECK(w.hubQueries.size() == 16); CHECK(w.hubCloses == 16); CHECK(!w.hubOpen);
+        for (std::size_t index = 0; index < evidence["hops"].size(); ++index) {
+            CHECK(evidence["hops"][index]["node"] == w.devices[index].identity.baseContainerDeviceInstanceId);
+            CHECK(evidence["hops"][index]["portKind"] == 0); CHECK(w.hubQueries[index].desiredAccess == 0);
+        }
+        CHECK(noMutations());
+    });
+    run("OneX topology parameter negotiates larger connector reply once and preserves legacy single query", [] {
+        for (const ULONG length : {static_cast<ULONG>(sizeof(USB_PORT_CONNECTOR_PROPERTIES) + 64), 65536UL}) {
+            reset(); w.devices = {device(onexTopologyLeaf, builtinLocation, 0, 0)};
+            w.devices.front().connectorLength = length; w.devices.front().address = 7;
+            CHECK(externalPriorityUsbPortKind(onexTopologyLeaf) == 0);
+            CHECK(w.hubQueries.size() == 1); CHECK(w.hubQueries.front().desiredAccess == GENERIC_WRITE);
+            w.hubQueries.clear(); w.hubCloses = 0; w.devices.front().deniedAccessMask = GENERIC_WRITE;
+            json evidence;
+            CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &evidence, 0) == 0);
+            CHECK(evidence["portKind"] == 0); CHECK(evidence["hops"].size() == 1);
+            CHECK(evidence["hops"][0]["queryAttempts"] == 2); CHECK(evidence["hops"][0]["queryError"] == ERROR_SUCCESS);
+            CHECK(w.hubQueries.size() == 2); CHECK(w.hubQueries[0].capacity == sizeof(USB_PORT_CONNECTOR_PROPERTIES));
+            CHECK(w.hubQueries[1].capacity == length); CHECK(w.hubQueries[1].capacity <= 65536);
+            for (const auto& query : w.hubQueries) { CHECK(query.port == 7); CHECK(query.desiredAccess == 0); }
+            CHECK(w.hubCloses == 1); CHECK(!w.hubOpen); CHECK(noMutations());
+        }
+        reset(); w.devices = {device(onexTopologyLeaf, builtinLocation, 0, 0)};
+        w.devices.front().connectorLength = 65537;
+        json evidence;
+        CHECK(externalPriorityUsbPortKindWithEvidence(onexTopologyLeaf, &evidence, 0) == -1);
+        CHECK(evidence["portKind"] == -1); CHECK(evidence["reason"] == "hop-unproven");
+        CHECK(evidence["hops"][0]["reason"] == "connector-query-failed");
+        CHECK(evidence["hops"][0]["queryError"] == ERROR_INVALID_DATA);
+        CHECK(w.hubQueries.size() == 1); CHECK(w.hubCloses == 1); CHECK(!w.hubOpen); CHECK(noMutations());
     });
     std::cout << "EXTERNALPAD_RUNTIME_SUMMARY passed=" << passed << " total=" << total << " assertions=" << assertions
               << " hardwareAccess=false productRun=false productionHeader=true operations=faked-external-effects ledgerReads=private-temp-fixtures\n";

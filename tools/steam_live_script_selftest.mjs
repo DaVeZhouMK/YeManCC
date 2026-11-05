@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const source = fs.readFileSync('native/steam_live.js', 'utf8').replace(/\r\n/g,'\n');
+import { createHash } from 'node:crypto';
+const args = process.argv.slice(2);
+assert(args.length === 0 || (args.length === 2 && args[0] === '--case-filter' && args[1] === 'light-gamepad-lease'), 'unsupported steam live case filter or arguments');
+const caseFilter = args[1] ?? null;
+const sourceOverride = Boolean(process.env.YMCC_STEAM_LIVE_SOURCE);
+assert(!sourceOverride || caseFilter === 'light-gamepad-lease', 'YMCC_STEAM_LIVE_SOURCE requires --case-filter light-gamepad-lease');
+const sourcePath = process.env.YMCC_STEAM_LIVE_SOURCE || 'native/steam_live.js';
+const sourceBytes = fs.readFileSync(sourcePath);
+const source = sourceBytes.toString('utf8').replace(/\r\n/g,'\n');
 function sleepOperationSource() {
   // Delimit on the owned sleep footer, not another task's changing menu syntax.
   const start=source.indexOf("    if (request.operation === 'sleep.inspect'");
@@ -25,11 +33,463 @@ function fixture(options = {}) {
   const settings = { clientSettings:{enable_overlay:false,overlay_fps_counter_corner:0,overlay_fps_counter_detail_level:1,overlay_fps_counter_scale_factor:1,overlay_fps_counter_saturation_factor:1,overlay_fps_counter_bgopacity:1},m_CMInterface:{steamid:{GetAccountID:()=>account}},GetClientSetting(key) {assert(key in this.clientSettings);return [this.clientSettings[key],async value=>{stats.overlayWrites++;this.clientSettings[key]=value;}];} };
   const window = {controllerConfiguratorStore:s,ControllerStore:{GetControllers:()=>('controllers' in options)?options.controllers:[{eControllerType:type,nControllerIndex:index}],GetControllerTypeString:value=>value===type?'controller_neptune':'controller_generic'},settingsStore:settings};
   const steamClient={Settings:{SetSetting(){}}};
-  const fn=vm.runInNewContext(source,{window,get location(){return window.location;},SteamClient:steamClient,performance,setTimeout:(cb,n)=>setTimeout(cb,Math.min(n,20)),clearTimeout,console});
+  const fn=vm.runInNewContext(options.source ?? source,{window,get location(){return window.location;},SteamClient:steamClient,performance,setTimeout:(cb,n)=>setTimeout(cb,Math.min(n,20)),clearTimeout,console,...options.globals});
   const request = {operation:'mouse.set',controllerType:'controller_neptune',path:layoutPath,account,baseline:145,percent:137};
   return {fn,request,stats,s,cfg,group,window,settings,steamClient};
 }
-async function test(name,body) {await body();results.push(name);}
+async function test(name,body) {
+  try { await body(); results.push(name); }
+  catch (error) {
+    if (caseFilter === 'light-gamepad-lease') console.error(JSON.stringify({caseFilter, passed:results.length, cases:results, failedCase:name, defaultGroupExecuted:false}));
+    throw error;
+  }
+}
+let directedEvidence;
+if (caseFilter === 'light-gamepad-lease') {
+  const started = performance.now(), owner = 'a'.repeat(32), otherOwner = 'b'.repeat(32);
+  const spPath = process.env.YMCC_STEAM_SP_JS;
+  assert(spPath, 'light-gamepad-lease requires YMCC_STEAM_SP_JS pointing to a local Valve steamui/sp.js');
+  const spBytes = fs.readFileSync(spPath), sp = spBytes.toString('utf8');
+  const extract = (name, next, text = sp) => {
+    const matches = [...text.matchAll(new RegExp(`\\b${name}\\([^)]*\\)\\{[\\s\\S]*?\\}(?=${next}\\()`, 'g'))];
+    assert.equal(matches.length, 1, `ambiguous or unavailable Valve ${name}`);
+    return matches[0][0];
+  };
+  const setterSource = extract('SetCatchAllGamepadInput', 'TakeFocusChangingIFrame');
+  const actionSource = extract('OnButtonActionInternal', 'OnButtonDown');
+  const managerActionOffset = sp.indexOf(actionSource);
+  const managerActionTail = sp.slice(managerActionOffset, sp.indexOf('OnNavigationTypeChange(', managerActionOffset));
+  const downSource = extract('OnButtonDown', 'OnButtonUp', managerActionTail), upSource = extract('OnButtonUp', 'BatchedUpdate', managerActionTail);
+  const registerSource = extract('RegisterInputSource', 'UpdateSourceToGamepad');
+  const sourceTypeMethod = extract('GetSourceType', 'SetControllerActive');
+  const nativeInputMatches = [...sp.matchAll(/\bHandleControllerInputMessages\([^)]*\)\{[\s\S]*?\}(?=\}c\(\[)/g)];
+  assert.equal(nativeInputMatches.length, 1, 'Valve native controller input method unavailable or ambiguous');
+  const nativeInputMethod = nativeInputMatches[0][0];
+  assert.match(registerSource, /\.GetSourceType\(\)==\w+\.Vz\.GAMEPAD/);
+  assert.match(nativeInputMethod, /activeButtons\[\w+\]=!1,this\.OnButtonUp\(/);
+  const keyboardEnumOffset = sp.indexOf('.KEYBOARD_SIMULATOR=');
+  assert(keyboardEnumOffset >= 0, 'Valve navigation source enum boundary unavailable');
+  const sourceEnum = sp.slice(sp.lastIndexOf('UNKNOWN=', keyboardEnumOffset), keyboardEnumOffset + 300);
+  const gamepadTypeMatch = sourceEnum.match(/\b\w+\[\w+\.GAMEPAD=(\d+)\]="GAMEPAD"/);
+  const keyboardTypeMatch = sourceEnum.match(/\b\w+\[\w+\.KEYBOARD_SIMULATOR=(\d+)\]="KEYBOARD_SIMULATOR"/);
+  assert(gamepadTypeMatch && keyboardTypeMatch, 'Valve navigation source enum unavailable');
+  const gamepadType = Number(gamepadTypeMatch[1]), keyboardType = Number(keyboardTypeMatch[1]);
+  const buttons = Object.fromEntries(['OK', 'CANCEL', 'DIR_UP', 'DIR_DOWN', 'DIR_LEFT', 'DIR_RIGHT'].map(name => {
+    const match = sp.match(new RegExp(`\\w+\\[\\w+\\.${name}=(\\d+)\\]="${name}"`));
+    assert(match, `Valve button ${name} unavailable`);
+    return [name, Number(match[1])];
+  }));
+  const receipts = {}, negativeControls = [];
+  let buttonBalance;
+  function leaseFixture(code = source) {
+    const timers = new Map(), scheduled = [], events = [], listeners = new Set();
+    const clock = { wall: 1800000000000, mono: 100, next: 1, timerFailure: false, cancelFailure: false };
+    const globals = {
+      Date: class extends Date { static now() { return clock.wall; } },
+      performance: { now: () => clock.mono },
+      setTimeout(callback, delay) {
+        if (clock.timerFailure === 'throw') throw Error('timer-port-failed');
+        if (clock.timerFailure === 'undefined') return undefined;
+        assert(Number.isFinite(delay) && delay > 0 && delay <= 3000);
+        const timer = { id: clock.next++, callback, due: clock.mono + delay, delay };
+        timers.set(timer.id, timer); scheduled.push(timer);
+        assert(timers.size <= 1, 'lease accumulated timers');
+        return timer.id;
+      },
+      clearTimeout(id) { if (clock.cancelFailure) throw Error('cancel-port-failed'); timers.delete(id); }
+    };
+    const f = fixture({ source: code, globals });
+    f.window.document = { defaultView: f.window };
+    f.window.addEventListener = function(type, callback) {
+      assert.equal(this, f.window); assert.equal(type, 'pagehide'); listeners.add(callback);
+      if (clock.listenerFailure) throw Error('listener-port-failed');
+    };
+    f.window.removeEventListener = function(type, callback) {
+      assert.equal(this, f.window); assert.equal(type, 'pagehide'); listeners.delete(callback);
+    };
+    const methods = vm.runInNewContext(`({${setterSource},${actionSource},${downSource},${upSource}})`, {
+      pt() {}, Gt: assert, f: { pR: Object.fromEntries(Object.entries(buttons).map(([name, value]) => [value, name])) },
+      c: { AE: (target, type, detail) => events.push({ target, type, ...detail }) }
+    });
+    const foreign = () => false;
+    const sourceMethods = vm.runInNewContext(`({${sourceTypeMethod},${nativeInputMethod}})`, {
+      f:Object.fromEntries(Object.values(buttons).map(button => [button, button])), e:{pR:buttons}, i:{Hh:{}} });
+    const gamepadSource = { ...sourceMethods, m_eNavigationSourceType:gamepadType, m_rgControllers: new Map([[1, { activeButtons: {} }]]) };
+    const keyboardSource = { GetSourceType:sourceMethods.GetSourceType, m_eNavigationSourceType:keyboardType };
+    const managerMethods = Object.create(null);
+    for (const name of ['SetCatchAllGamepadInput', 'OnButtonActionInternal', 'OnButtonDown', 'OnButtonUp'])
+      Object.defineProperty(managerMethods, name, { value: methods[name], writable: true, configurable: true, enumerable: false });
+    const manager = Object.create(managerMethods);
+    Object.assign(manager, { m_rgGamepadInputSources: [gamepadSource, keyboardSource], m_rgCatchAllGamepadInput: [foreign],
+      GetEventTarget: () => [{ className: 'fixture-target' }, { BIsGamepadInputSuppressed: () => false }],
+      ChangeNavigationSource() {}, BatchedUpdate: callback => callback() });
+    f.window.SteamUIStore = { m_GamepadNavigationManager: manager };
+    Object.defineProperty(f.window.SteamUIStore, 'NavigationManager', { get() { throw Error('lazy NavigationManager getter used'); } });
+    const request = (serial, enabled = true, extra = {}) => ({ operation: 'input.gamepadLease', account: 42, owner, serial, enabled, expiresAt: clock.wall + 3000, ...extra });
+    const send = (serial, enabled = true, extra = {}) => f.fn(request(serial, enabled, extra));
+    const advance = (milliseconds, fire = true) => {
+      clock.mono += milliseconds; clock.wall += milliseconds;
+      if (fire) for (const timer of [...timers.values()]) if (timer.due <= clock.mono && timers.delete(timer.id)) timer.callback();
+    };
+    gamepadSource.GetController = controller => {
+      if (!gamepadSource.m_rgControllers.has(controller)) gamepadSource.m_rgControllers.set(controller, {activeButtons:{}});
+      return gamepadSource.m_rgControllers.get(controller);
+    };
+    gamepadSource.OnButtonDown = (button, controller) => manager.OnButtonDown(button, gamepadSource.GetSourceType(), controller, false);
+    gamepadSource.OnButtonUp = (button, controller) => manager.OnButtonUp(button, gamepadSource.GetSourceType(), controller);
+    const dispatch = (down, button, source = gamepadType, controller = 1, repeat = false, target = manager) => {
+      if (source === gamepadType) gamepadSource.GetController(controller).activeButtons[button] = down;
+      target.OnButtonActionInternal(down, button, source, controller, repeat, undefined, undefined, false, undefined, undefined);
+    };
+    const probe = (target = manager, source = gamepadType) => {
+      for (const button of Object.values(buttons)) for (const [down, repeat] of [[true, false], [true, true], [false, false]])
+        dispatch(down, button, source, 1, repeat, target);
+    };
+    const assertSuppressed = () => {
+      const before = events.length; probe();
+      assert.equal(events.length, before, 'actual Valve consumer leaked navigation events');
+    };
+    const assertReleased = () => {
+      const before = events.length; probe(); assert.equal(events.length - before, Object.keys(buttons).length * 3);
+      assert.deepEqual(manager.m_rgCatchAllGamepadInput, [foreign]); assert.equal(timers.size, 0); assert.equal(listeners.size, 0);
+      assert.equal(f.stats.edits + f.stats.saves + f.stats.overlayWrites + f.stats.loads, 0);
+    };
+    return { ...f, clock, timers, scheduled, events, listeners, manager, foreign, gamepadSource, keyboardSource, gamepadType, keyboardType, request, send, advance, dispatch, probe, assertSuppressed, assertReleased };
+  }
+  const receipt = result => {
+    assert.equal(result.scope, 'steam-gamepad-navigation');
+    assert.equal(typeof result.ok, 'boolean'); assert.equal(typeof result.mutated, 'boolean');
+    assert.equal(typeof result.stage, 'string'); assert.equal(typeof result.enabled, 'boolean');
+    assert.equal(typeof result.releasing, 'boolean');
+    assert(Number.isSafeInteger(result.pendingReleaseCount) && result.pendingReleaseCount >= 0);
+    assert(Number.isSafeInteger(result.serial) && result.serial >= 0);
+    assert(Number.isFinite(result.remainingMs) && result.remainingMs >= 0 && result.remainingMs <= 3000);
+    assert.equal(result.enabled || result.releasing, result.remainingMs > 0);
+    assert(!(result.enabled && result.releasing));
+    return result;
+  };
+  await test('light-gamepad-lease: actual Valve button down/up/repeat and four directions are intercepted', async () => {
+    const f = leaseFixture(); f.probe(); assert.equal(f.events.length, 18);
+    const result = receipt(await f.send(1)); assert(result.ok && result.mutated && result.enabled); assert.equal(result.remainingMs, 3000);
+    receipts.acquire = result; f.assertSuppressed(); assert.equal(f.manager.m_rgCatchAllGamepadInput.length, 2);
+    assert.equal(f.timers.size, 1); assert.equal(f.listeners.size, 1); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: exact release and duplicate release retain tombstone and foreign catchall', async () => {
+    const f = leaseFixture(); await f.send(1); const old = f.window.__ymccLightGamepadLease;
+    const result = receipt(await f.send(2, false)); assert(result.ok && result.mutated && !result.enabled); receipts.release = result;
+    f.assertReleased(); const duplicate = receipt(await f.send(2, false)); assert(duplicate.ok && !duplicate.mutated);
+    assert.equal(f.window.__ymccLightGamepadLease.serial, 2); assert.equal(f.window.__ymccLightGamepadLease.owner, owner);
+    assert.equal(old.callback(), false); f.assertReleased();
+  });
+  await test('light-gamepad-lease: one-shot crash timeout expires without any later input or polling', async () => {
+    const f = leaseFixture(); await f.send(1); f.advance(2999); f.assertSuppressed(); f.advance(1);
+    assert.equal(f.window.__ymccLightGamepadLease.enabled, false); assert.equal(f.scheduled.length, 1); f.assertReleased();
+    const result = receipt(await f.send(1)); assert(!result.ok); assert.equal(f.window.__ymccLightGamepadLease.serial, 1);
+  });
+  await test('light-gamepad-lease: expired callback fails open before delayed timeout and cleans only itself', async () => {
+    const f = leaseFixture(); await f.send(1); f.advance(3001, false); f.assertReleased();
+    assert.equal(f.window.__ymccLightGamepadLease.owner, owner); assert.equal(f.window.__ymccLightGamepadLease.serial, 1);
+  });
+  await test('light-gamepad-lease: delayed request keeps native remaining TTL and wall rollback cannot extend it', async () => {
+    const f = leaseFixture(), request = f.request(1); f.advance(1200); const result = receipt(await f.fn(request));
+    assert(result.ok); assert.equal(result.remainingMs, 1800); assert.equal(f.scheduled[0].delay, 1800);
+    f.clock.wall -= 100000; f.advance(1800); f.assertReleased();
+  });
+  await test('light-gamepad-lease: wall-clock forward jump expires at the consumer even before monotonic deadline', async () => {
+    const f = leaseFixture(); await f.send(1); f.clock.wall += 3001; f.assertReleased();
+  });
+  await test('light-gamepad-lease: duplicate ON cannot extend TTL or allocate a timer', async () => {
+    const f = leaseFixture(), request = f.request(1); await f.fn(request); f.advance(750);
+    const result = receipt(await f.fn(request)); assert(result.ok && !result.mutated); assert.equal(result.remainingMs, 2250);
+    assert.equal(f.scheduled.length, 1); assert(!(await f.send(1)).ok); f.advance(2250); f.assertReleased();
+  });
+  await test('light-gamepad-lease: serial renewal cancels old timer and old callbacks cannot revoke a new lease', async () => {
+    const f = leaseFixture(); await f.send(1); const old = f.window.__ymccLightGamepadLease, oldTimer = f.scheduled[0]; f.advance(750);
+    const result = receipt(await f.send(2)); assert(result.ok && result.enabled); receipts.renew = result;
+    assert.equal(f.timers.size, 1); assert.equal(f.manager.m_rgCatchAllGamepadInput.length, 2); assert.equal(f.listeners.size, 1);
+    oldTimer.callback(); old.pagehide(); assert.equal(old.callback(), false); f.assertSuppressed();
+    for (const enabled of [true, false]) assert(!(await f.send(1, enabled)).ok);
+    await f.send(3, false); assert(!(await f.send(2)).ok); assert(!(await f.send(3)).ok);
+    assert((await f.send(4)).ok); f.assertSuppressed(); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: cancellation before ON records tombstone and repeated cancellation is idempotent', async () => {
+    const f = leaseFixture(); assert((await f.send(5, false)).ok); assert(!(await f.send(4)).ok); assert(!(await f.send(5)).ok);
+    const result = receipt(await f.send(5, false)); assert(result.ok && !result.mutated); f.assertReleased();
+    assert((await f.send(6)).ok); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: release without a manager never evaluates a lazy navigation getter', async () => {
+    const f = leaseFixture(); delete f.window.SteamUIStore.m_GamepadNavigationManager;
+    const result = receipt(await f.send(1, false)); assert(result.ok && !result.enabled); f.assertReleased();
+  });
+  await test('light-gamepad-lease: a foreign catchall installed later survives owned timeout cleanup', async () => {
+    const f = leaseFixture(); await f.send(1); const foreign = () => false;
+    const handle = f.manager.SetCatchAllGamepadInput(foreign); f.advance(3000);
+    assert.deepEqual(f.manager.m_rgCatchAllGamepadInput, [f.foreign, foreign]); handle.Unregister(); f.assertReleased();
+  });
+  await test('light-gamepad-lease: foreign owner is rejected while live and can acquire after expiry with its own serial', async () => {
+    const f = leaseFixture(); await f.send(20);
+    for (const enabled of [true, false]) assert(!(await f.send(1, enabled, { owner: otherOwner })).ok);
+    f.assertSuppressed(); f.advance(3000); assert((await f.send(1, true, { owner: otherOwner })).ok);
+    const current = f.window.__ymccLightGamepadLease;
+    assert(!(await f.send(100, false)).ok); assert.equal(f.window.__ymccLightGamepadLease, current);
+    f.assertSuppressed(); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: expired release never advances tombstone or clears a newer owner', async () => {
+    const f = leaseFixture(); await f.send(1); const expired = f.request(999, false); f.advance(3000);
+    const before = f.window.__ymccLightGamepadLease;
+    assert(!(await f.fn(expired)).ok); assert.equal(f.window.__ymccLightGamepadLease, before); assert.equal(before.serial, 1);
+    assert((await f.send(1, true, { owner: otherOwner })).ok); const current = f.window.__ymccLightGamepadLease;
+    assert(!(await f.fn(expired)).ok); assert.equal(f.window.__ymccLightGamepadLease, current); assert.equal(current.serial, 1);
+    assert(!(await f.send(500, false, { owner: otherOwner, expiresAt: f.clock.wall })).ok);
+    f.assertSuppressed(); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: malformed fields and TTL bounds preserve the live owner and serial', async () => {
+    const f = leaseFixture(); await f.send(1); const current = f.window.__ymccLightGamepadLease;
+    for (const extra of [{owner:'A'.repeat(32)}, {owner:'a'.repeat(31)}, {owner:null}, {serial:0}, {serial:-1}, {serial:1.5},
+      {serial:Number.MAX_SAFE_INTEGER+1}, {serial:'2'}, {enabled:1}, {enabled:'false'}, {expiresAt:NaN}, {expiresAt:'1800000003000'},
+      {expiresAt:f.clock.wall-1}, {expiresAt:f.clock.wall}, {expiresAt:f.clock.wall+3001}, {expiresAt:f.clock.wall+1.5}]) {
+      const result = receipt(await f.send(2, true, extra)); assert(!result.ok && !result.mutated);
+      assert.equal(f.window.__ymccLightGamepadLease, current); assert.equal(current.serial, 1);
+    }
+    f.assertSuppressed(); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: original account gate rejects without replacing the lease', async () => {
+    const f = leaseFixture(); const denied = receipt(await f.send(1, true, {account:99})); assert(!denied.ok && !denied.mutated);
+    assert.equal(f.window.__ymccLightGamepadLease, undefined); await f.send(1); const current = f.window.__ymccLightGamepadLease;
+    assert(!(await f.send(2, false, {account:99})).ok); assert.equal(f.window.__ymccLightGamepadLease, current);
+    f.assertSuppressed(); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: another operation busy allows lease renewal and release without clearing its owner', async () => {
+    const f = leaseFixture(); await f.send(1); f.window.__ymccSteamLiveBusy = 'parallel-settings-owner'; f.advance(750);
+    const renew = receipt(await f.send(2)); assert(renew.ok && renew.enabled && renew.remainingMs === 3000);
+    assert.equal(f.window.__ymccSteamLiveBusy, 'parallel-settings-owner'); f.assertSuppressed();
+    const ordinary = await f.fn({operation:'overlay.set',account:42,value:1});
+    assert(!ordinary.ok && !ordinary.mutated && ordinary.reason === 'live-busy'); assert.equal(f.stats.overlayWrites, 0);
+    assert(!(await f.send(3, false, {account:99})).ok); assert.equal(f.window.__ymccSteamLiveBusy, 'parallel-settings-owner');
+    const release = receipt(await f.send(3, false)); assert(release.ok && !release.enabled);
+    assert.equal(f.window.__ymccSteamLiveBusy, 'parallel-settings-owner'); f.assertReleased();
+    assert((await f.send(3, false)).ok); assert.equal(f.window.__ymccSteamLiveBusy, 'parallel-settings-owner');
+  });
+  for (const change of ['account', 'identity', 'cm', 'settings', 'manager', 'store', 'document', 'defaultView', 'closed', 'callback-list', 'setter'])
+    await test(`light-gamepad-lease: ${change} identity change fails open at the actual consumer`, async () => {
+      const f = leaseFixture(); await f.send(1); const old = f.window.__ymccLightGamepadLease;
+      if (change === 'account') f.settings.m_CMInterface.steamid.GetAccountID = () => 43;
+      if (change === 'identity') f.settings.m_CMInterface.steamid = {GetAccountID:()=>42};
+      if (change === 'cm') f.settings.m_CMInterface = {steamid:f.settings.m_CMInterface.steamid};
+      if (change === 'settings') f.window.settingsStore = {...f.settings};
+      if (change === 'manager') f.window.SteamUIStore.m_GamepadNavigationManager = {...f.manager};
+      if (change === 'store') f.window.SteamUIStore = {...f.window.SteamUIStore};
+      if (change === 'document') f.window.document = {defaultView:f.window};
+      if (change === 'defaultView') f.window.document.defaultView = {};
+      if (change === 'closed') f.window.closed = true;
+      if (change === 'callback-list') f.manager.m_rgCatchAllGamepadInput = [...f.manager.m_rgCatchAllGamepadInput];
+      if (change === 'setter') f.manager.SetCatchAllGamepadInput = () => {throw Error('replaced');};
+      f.probe(); assert.equal(f.events.length, 18); assert.equal(old.enabled, false);
+      assert.equal(f.timers.size, 0); assert.equal(f.listeners.size, 0); assert.equal(old.callback(), false);
+      assert.deepEqual(f.manager.m_rgCatchAllGamepadInput, [f.foreign]);
+      assert.equal(f.window.__ymccLightGamepadLease.serial, 1);
+    });
+  await test('light-gamepad-lease: pagehide cancels timeout and hook and cannot reenable the same document', async () => {
+    const f = leaseFixture(); await f.send(1); const old = f.window.__ymccLightGamepadLease;
+    for (const callback of [...f.listeners]) callback(); old.pagehide(); f.assertReleased();
+    assert(!(await f.send(2)).ok); f.assertReleased(); assert.equal(f.window.__ymccLightGamepadLease.serial, 2);
+  });
+  for (const missing of ['manager-data', 'setter', 'callback-data', 'document'])
+    await test(`light-gamepad-lease: unavailable ${missing} refuses without invoking lazy getters`, async () => {
+      const f = leaseFixture();
+      if (missing === 'manager-data') Object.defineProperty(f.window.SteamUIStore, 'm_GamepadNavigationManager', {get(){throw Error('manager getter used');}});
+      if (missing === 'setter') f.manager.SetCatchAllGamepadInput = undefined;
+      if (missing === 'callback-data') Object.defineProperty(f.manager, 'm_rgCatchAllGamepadInput', {get(){throw Error('callback getter used');}});
+      if (missing === 'document') delete f.window.document;
+      const result = receipt(await f.send(1)); assert(!result.ok && !result.enabled); assert.equal(f.timers.size, 0); assert.equal(f.listeners.size, 0);
+    });
+  for (const failure of ['throw-after-push', 'bad-handle', 'no-registration', 'double-registration'])
+    await test(`light-gamepad-lease: registration ${failure} removes only its own hook`, async () => {
+      const f = leaseFixture(), setter = f.manager.SetCatchAllGamepadInput;
+      f.manager.SetCatchAllGamepadInput = function(callback) {
+        if (failure === 'no-registration') return {Unregister(){}};
+        const handle = setter.call(this, callback);
+        if (failure === 'throw-after-push') throw Error('registration-failed');
+        if (failure === 'bad-handle') return {};
+        if (failure === 'double-registration') setter.call(this, callback);
+        return handle;
+      };
+      const result = receipt(await f.send(1)); assert(!result.ok && !result.enabled); f.assertReleased();
+    });
+  for (const failure of ['throw', 'undefined'])
+    await test(`light-gamepad-lease: timer ${failure} unregisters the hook and tombstones the attempt`, async () => {
+      const f = leaseFixture(); f.clock.timerFailure = failure;
+      const result = receipt(await f.send(1)); assert(!result.ok && !result.enabled); f.assertReleased();
+      f.clock.timerFailure = false; assert(!(await f.send(1)).ok); assert((await f.send(2)).ok); f.advance(3000); f.assertReleased();
+    });
+  await test('light-gamepad-lease: listener failure and registration overrun return failure with no hook residue', async () => {
+    const f = leaseFixture(); f.clock.listenerFailure = true;
+    assert(!receipt(await f.send(1)).ok); f.assertReleased();
+    f.clock.listenerFailure = false; const setter = f.manager.SetCatchAllGamepadInput;
+    f.manager.SetCatchAllGamepadInput = function(callback) { const handle = setter.call(this, callback); f.advance(3000); return handle; };
+    assert(!receipt(await f.send(2)).ok); f.assertReleased();
+  });
+  await test('light-gamepad-lease: account changes during the final receipt cannot report successful acquisition', async () => {
+    const f = leaseFixture(); let reads = 0;
+    f.settings.m_CMInterface.steamid.GetAccountID = () => ++reads < 4 ? 42 : 43;
+    const result = receipt(await f.send(1)); assert(!result.ok && !result.enabled); f.assertReleased();
+  });
+  await test('light-gamepad-lease: cancellation failure never reports success and a late timer cannot revoke a successor', async () => {
+    const f = leaseFixture(); await f.send(1); const late = f.scheduled[0]; f.clock.cancelFailure = true;
+    const result = receipt(await f.send(2, false)); assert(!result.ok && result.mutated && !result.enabled); assert.equal(f.manager.m_rgCatchAllGamepadInput.length, 1);
+    f.clock.cancelFailure = false; assert((await f.send(2, false)).ok); assert((await f.send(3)).ok);
+    late.callback(); f.assertSuppressed(); f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: unregister exception is failure even when owned-callback fallback succeeds', async () => {
+    const f = leaseFixture(), setter = f.manager.SetCatchAllGamepadInput;
+    f.manager.SetCatchAllGamepadInput = function(callback) { setter.call(this, callback); return {Unregister(){throw Error('unregister-failed');}}; };
+    assert((await f.send(1)).ok); const result = receipt(await f.send(2, false)); assert(!result.ok && result.mutated && !result.enabled); f.assertReleased();
+  });
+  await test('light-gamepad-lease: pre-hook down is naturally released without synthesized input', async () => {
+    const f = leaseFixture(); f.dispatch(true, buttons.OK);
+    assert.equal(f.events.length, 1); assert.equal(f.events[0].type, 'vgp_onbuttondown');
+    await f.send(1); f.dispatch(false, buttons.OK);
+    assert.equal(f.events.length, 2); assert.equal(f.events[1].type, 'vgp_onbuttonup');
+    await f.send(2, false); assert.equal(f.events.length, 2);
+    buttonBalance = { status:'RESOLVED_NATURAL_UP', priorDownDispatched:1, hookedUpDispatched:1, syntheticEvents:0 };
+    f.assertReleased();
+  });
+  await test('light-gamepad-lease: disabled-hook negative control is caught by actual Valve consumer leakage', async () => {
+    const hook = 'dispatch.repeat === repeat && dispatch.block'; assert.equal(source.split(hook).length, 2);
+    const f = leaseFixture(source.replace(hook, 'dispatch.repeat === repeat && false'));
+    assert((await f.send(1)).ok);
+    assert.throws(f.assertSuppressed, error => error instanceof assert.AssertionError && /actual Valve consumer leaked/.test(error.message));
+    assert.equal(f.events.length, 18); negativeControls.push({ name:'disabled-hook', detected:true, actualConsumerLeakedEvents:f.events.length });
+    f.advance(3000); f.assertReleased();
+  });
+  await test('light-gamepad-lease: actual native input consumer updates held state before the natural prior UP', async () => {
+    const f = leaseFixture(); f.gamepadSource.HandleControllerInputMessages(1, buttons.OK, true, 0, 0);
+    assert.equal(f.events.length, 1); assert.equal(f.gamepadSource.m_rgControllers.get(1).activeButtons[buttons.OK], true);
+    assert((await f.send(1)).ok); assert.equal(f.events.length, 1);
+    f.gamepadSource.HandleControllerInputMessages(1, buttons.OK, false, 0, 0);
+    assert.equal(f.gamepadSource.m_rgControllers.get(1).activeButtons[buttons.OK], false);
+    assert.equal(f.events.length, 2); assert.equal(f.events[1].type, 'vgp_onbuttonup');
+    f.dispatch(false, buttons.OK); assert.equal(f.events.length, 2, 'prior UP can be allowed only once');
+    assert((await f.send(2, false)).ok); assert.equal(f.events.length, 2); f.assertReleased();
+  });
+  await test('light-gamepad-lease: controller-specific prior UP never pays another controller blocked DOWN', async () => {
+    const f = leaseFixture(); f.dispatch(true, buttons.OK, gamepadType, 1); assert((await f.send(1)).ok);
+    f.dispatch(true, buttons.OK, gamepadType, 2); assert.equal(f.events.length, 1);
+    f.dispatch(false, buttons.OK, gamepadType, 2); assert.equal(f.events.length, 1);
+    f.dispatch(true, buttons.OK, gamepadType, 1, true); assert.equal(f.events.length, 1);
+    f.dispatch(false, buttons.OK, gamepadType, 1); assert.equal(f.events.length, 2);
+    const release = receipt(await f.send(2, false)); assert(release.ok && !release.releasing); f.assertReleased();
+  });
+  await test('light-gamepad-lease: keyboard mouse and VR dispatch sources pass unchanged through actual action', async () => {
+    const f = leaseFixture(); assert((await f.send(1)).ok);
+    for (const sourceType of [keyboardType, 3, 99]) { const before = f.events.length; f.probe(f.manager, sourceType); assert.equal(f.events.length - before, 18); }
+    assert.equal(f.window.__ymccLightGamepadLease.blockedDown.size, 0); f.assertSuppressed();
+    assert((await f.send(2, false)).ok); f.assertReleased();
+  });
+  await test('light-gamepad-lease: tail blocks only held blocked repeats and UP while new gamepad keys work', async () => {
+    const f = leaseFixture(); assert((await f.send(1)).ok); f.dispatch(true, buttons.OK);
+    const tail = receipt(await f.send(2, false)); assert(tail.ok && !tail.enabled && tail.releasing && tail.pendingReleaseCount === 1);
+    receipts.tail = tail; assert.equal(f.events.length, 0);
+    f.dispatch(true, buttons.OK, gamepadType, 1, true); assert.equal(f.events.length, 0);
+    f.dispatch(true, buttons.CANCEL); f.dispatch(false, buttons.CANCEL); assert.equal(f.events.length, 2);
+    f.dispatch(false, buttons.OK); assert.equal(f.events.length, 2, 'blocked DOWN matching UP must not leak');
+    const settled = receipt(await f.send(2, false)); assert(settled.ok && !settled.enabled && !settled.releasing && settled.pendingReleaseCount === 0);
+    assert.equal(Object.hasOwn(f.manager, 'OnButtonActionInternal'), false); f.assertReleased();
+  });
+  await test('light-gamepad-lease: tail keeps two controllers separate and settles only after both matching UPs', async () => {
+    const f = leaseFixture(); await f.send(1); f.dispatch(true, buttons.OK, gamepadType, 1); f.dispatch(true, buttons.OK, gamepadType, 2);
+    let result = receipt(await f.send(2, false)); assert(result.releasing && result.pendingReleaseCount === 2);
+    f.dispatch(false, buttons.OK, gamepadType, 2); assert.equal(f.events.length, 0);
+    result = receipt(await f.send(2, false)); assert(result.releasing && result.pendingReleaseCount === 1);
+    f.dispatch(false, buttons.OK, gamepadType, 1); assert.equal(f.events.length, 0); f.assertReleased();
+  });
+  await test('light-gamepad-lease: ON renewal carries held sets without reclassifying blocked DOWN as prior UP', async () => {
+    const f = leaseFixture(); f.dispatch(true, buttons.CANCEL); await f.send(1); f.dispatch(true, buttons.OK);
+    f.advance(750); assert((await f.send(2)).ok); const current = f.window.__ymccLightGamepadLease;
+    assert.equal(current.priorUp.size, 1); assert.equal(current.blockedDown.size, 1);
+    f.dispatch(true, buttons.CANCEL, gamepadType, 1, true); assert.equal(current.blockedDown.size, 1);
+    f.dispatch(false, buttons.OK); assert.equal(f.events.length, 1);
+    f.dispatch(false, buttons.CANCEL); assert.equal(f.events.length, 2);
+    assert((await f.send(3, false)).ok); f.assertReleased();
+  });
+  await test('light-gamepad-lease: repeated OFF and OFF renewal retain tail and a bounded single watchdog', async () => {
+    const f = leaseFixture(); await f.send(1); f.dispatch(true, buttons.OK); const off = f.request(2, false);
+    assert(receipt(await f.fn(off)).releasing); f.advance(750);
+    const duplicate = receipt(await f.fn(off)); assert(duplicate.releasing && !duplicate.mutated && duplicate.remainingMs === 2250);
+    const renewed = receipt(await f.send(3, false)); assert(renewed.releasing && renewed.remainingMs === 3000 && renewed.pendingReleaseCount === 1);
+    assert.equal(f.timers.size, 1); assert.equal(f.listeners.size, 1); assert.equal(f.manager.m_rgCatchAllGamepadInput.length, 2);
+    const current = f.window.__ymccLightGamepadLease;
+    assert(!(await f.send(99, false, {expiresAt:f.clock.wall})).ok); assert.equal(f.window.__ymccLightGamepadLease, current);
+    assert(!(await f.send(1, true, {owner:otherOwner})).ok);
+    f.dispatch(false, buttons.OK); assert.equal(f.events.length, 0); f.assertReleased();
+  });
+  await test('light-gamepad-lease: tail reentry carries old blocked keys and newly allowed held keys', async () => {
+    const f = leaseFixture(); await f.send(1); f.dispatch(true, buttons.OK); assert(receipt(await f.send(2, false)).releasing);
+    f.dispatch(true, buttons.CANCEL); assert.equal(f.events.length, 1);
+    assert(receipt(await f.send(3)).enabled); const current = f.window.__ymccLightGamepadLease;
+    assert.equal(current.blockedDown.size, 1); assert.equal(current.priorUp.size, 1);
+    f.dispatch(false, buttons.OK); assert.equal(f.events.length, 1);
+    f.dispatch(false, buttons.CANCEL); assert.equal(f.events.length, 2);
+    assert((await f.send(4, false)).ok); f.assertReleased();
+  });
+  await test('light-gamepad-lease: prior UP never forces a release tail and foreign catchalls can still veto', async () => {
+    const f = leaseFixture(); f.dispatch(true, buttons.OK); await f.send(1);
+    const foreign = f.manager.SetCatchAllGamepadInput(() => true);
+    f.dispatch(false, buttons.OK); assert.equal(f.events.length, 1); assert.equal(f.window.__ymccLightGamepadLease.priorUp.size, 0);
+    foreign.Unregister(); const settled = receipt(await f.send(2, false)); assert(!settled.releasing); f.assertReleased();
+    const g = leaseFixture(); g.dispatch(true, buttons.OK); await g.send(1);
+    assert(!receipt(await g.send(2, false)).releasing); assert.equal(g.events.length, 1);
+    g.dispatch(false, buttons.OK); assert.equal(g.events.length, 2); g.assertReleased();
+  });
+  for (const stop of ['timeout', 'pagehide', 'account']) await test(`light-gamepad-lease: ${stop} clears a live tail hook wrapper timer and listener`, async () => {
+    const f = leaseFixture(); await f.send(1); f.dispatch(true, buttons.OK); assert(receipt(await f.send(2, false)).releasing);
+    if (stop === 'timeout') f.advance(3000);
+    if (stop === 'pagehide') for (const callback of [...f.listeners]) callback();
+    if (stop === 'account') { f.settings.m_CMInterface.steamid.GetAccountID = () => 43; f.dispatch(false, buttons.OK); }
+    assert.equal(Object.hasOwn(f.manager, 'OnButtonActionInternal'), false); f.assertReleased();
+  });
+  await test('light-gamepad-lease: exact own action descriptor is restored after release', async () => {
+    const f = leaseFixture(), original = f.manager.OnButtonActionInternal;
+    Object.defineProperty(f.manager, 'OnButtonActionInternal', {value:original,writable:true,configurable:true,enumerable:false});
+    const descriptor = Object.getOwnPropertyDescriptor(f.manager, 'OnButtonActionInternal');
+    assert((await f.send(1)).ok); assert((await f.send(2, false)).ok);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(f.manager, 'OnButtonActionInternal'), descriptor); f.assertReleased();
+  });
+  await test('light-gamepad-lease: external replacement wrapping ours survives while ours becomes inert', async () => {
+    const f = leaseFixture(); await f.send(1); const ours = f.manager.OnButtonActionInternal;
+    const foreign = function(...args) { return ours.apply(this,args); }; f.manager.OnButtonActionInternal = foreign;
+    f.dispatch(true, buttons.OK); f.dispatch(false, buttons.OK); assert.equal(f.events.length, 2);
+    assert.equal(f.manager.OnButtonActionInternal, foreign); assert.equal(f.window.__ymccLightGamepadLease.enabled, false);
+    f.assertReleased(); assert.equal(f.manager.OnButtonActionInternal, foreign);
+  });
+  for (const kind of ['sources', 'type-method', 'controllers', 'held-schema']) await test(`light-gamepad-lease: unsupported ${kind} fails without retaining owned resources`, async () => {
+    const f = leaseFixture();
+    if (kind === 'sources') delete f.manager.m_rgGamepadInputSources;
+    if (kind === 'type-method') { f.gamepadSource.GetType = () => gamepadType; delete f.gamepadSource.GetSourceType; }
+    if (kind === 'controllers') f.gamepadSource.m_rgControllers = {};
+    if (kind === 'held-schema') f.gamepadSource.m_rgControllers.get(1).activeButtons[buttons.OK] = 1;
+    const result = receipt(await f.send(1)); assert(!result.ok && !result.enabled && !result.releasing);
+    assert.equal(Object.hasOwn(f.manager, 'OnButtonActionInternal'), false);
+    assert.equal(f.manager.m_rgCatchAllGamepadInput.length, 1); assert.equal(f.timers.size, 0); assert.equal(f.listeners.size, 0);
+  });
+  await test('light-gamepad-lease: missing prior UP exception negative control catches actual consumer imbalance', async () => {
+    const exception = 'block = false;\n                  lease.priorUp.delete(key);'; assert.equal(source.split(exception).length, 2);
+    const f = leaseFixture(source.replace(exception, 'block = true;\n                  lease.priorUp.delete(key);'));
+    f.dispatch(true, buttons.OK); assert((await f.send(1)).ok); f.dispatch(false, buttons.OK);
+    assert.throws(() => assert.equal(f.events.length, 2, 'actual prior UP balance failed'), error => error instanceof assert.AssertionError);
+    assert.equal(f.events.length, 1); negativeControls.push({name:'missing-prior-up',detected:true,actualDownEvents:1,actualUpEvents:0});
+    f.advance(3000); f.assertReleased();
+  });
+  directedEvidence = { caseFilter, defaultGroupExecuted:false, productionExecution:`complete ${sourcePath}`, sourcePath, sourceOverride,
+    sourceSha256:createHash('sha256').update(sourceBytes).digest('hex'), executedSourceSha256:createHash('sha256').update(source).digest('hex'),
+    selftestSha256:createHash('sha256').update(fs.readFileSync('tools/steam_live_script_selftest.mjs')).digest('hex'),
+    consumer:{path:spPath, bytes:spBytes.length, sha256:createHash('sha256').update(spBytes).digest('hex'),
+      methods:['OnButtonActionInternal','SetCatchAllGamepadInput','OnButtonDown','OnButtonUp','GetSourceType','HandleControllerInputMessages'],
+      inspectedMethods:['RegisterInputSource'], gamepadType, keyboardType,
+      methodsSha256:createHash('sha256').update([setterSource,actionSource,downSource,upSource,sourceTypeMethod,nativeInputMethod,registerSource].join('\n')).digest('hex'), buttons},
+    receipts, negativeControls, buttonBalance, elapsedMs:performance.now()-started, node:process.version,
+    scope:'steam-gamepad-navigation', deviceOperations:0, unknown:['raw-axis-and-other-consumers','physical-input','all-SteamInput','all-analog-stick-APIs','real-Steam','native-CDP-integration','generated-header-not-run'] };
+} else {
 await test('actual embedded script is in sync',async()=>{const header=fs.readFileSync('native/steam_live_script.h','utf8');const chunks=[...header.split('inline constexpr const char kUiModeScript')[0].matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(m=>m[1]);assert.equal(chunks.join(''),source.trimEnd());assert(chunks.every(c=>Buffer.byteLength(c)<=8192));});
 await test('native edits/save use exact Steam desktop source/setting and preserve unrelated values',async()=>{const f=fixture(),r=await f.fn(f.request);assert(r.ok);assert(r.saved);assert.equal(r.percent,137);assert.equal(r.controllerIndex,4);assert.equal(f.stats.edits,1);assert.equal(f.stats.saves,1);assert.equal(f.group.settings[1].int_value,77);assert(!f.window.__ymccSteamLiveBusy);});
 await test('read and same-value write do not modify or save',async()=>{const f=fixture();assert((await f.fn({...f.request,operation:'mouse.get'})).ok);assert((await f.fn({...f.request,percent:145})).ok);assert.equal(f.stats.edits,0);assert.equal(f.stats.saves,0);});
@@ -667,4 +1127,5 @@ await test('failed account-hook installation does not accumulate callback regist
  f.steamClient.User={RegisterForCurrentUserChanges:cb=>{count++;cb({strSteamID:'76561197960265770'});},RegisterForLoginStateChange:()=>{throw Error('native-hook-unavailable');}};
  for(let i=0;i<100;i++){const r=await f.fn({operation:'ui.mode.get'});assert(r.ok&&!r.deckyAccountWatchAvailable);}assert.equal(count,1);
 });
-console.log(JSON.stringify({suite:'Steam live production JS mocked',passed:results.length,cases:results,hardwareOperations:0},null,2));
+}
+console.log(JSON.stringify({suite:'Steam live production JS mocked',passed:results.length,cases:results,hardwareOperations:0,...directedEvidence},null,2));

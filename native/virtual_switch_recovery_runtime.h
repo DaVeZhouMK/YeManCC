@@ -9,6 +9,14 @@
 // request fields and shared budgets use g_inputHostMx; only Pending is atomic.
 namespace ymcc::inputHost::switchRecoveryRuntime {
 using Tick = std::uint64_t;
+static const char* localFaultName(InputHostSwitchLocalFault kind) noexcept {
+    switch(kind) {
+    case InputHostSwitchLocalFault::DeferredPhysicalHide:return "deferred-physical-hide";
+    case InputHostSwitchLocalFault::OwnedHiddenTargetMissing:return "owned-hidden-target-missing";
+    case InputHostSwitchLocalFault::OwnedRootRefreshIncomplete:return "owned-root-refresh-incomplete";
+    default:return "none";
+    }
+}
 static bool executionInspectionCompleteLocked(Tick now) {
     return g_virtualStartProtection.executionInspectionComplete(now);
 }
@@ -21,16 +29,21 @@ static void logLocked(const char* stage, const char* reason,
         const InputHostSwitchRecoveryRequest& request, bool startReturned = false, const char* exceptionDetail = nullptr) noexcept {
     try {
         const auto view = g_virtualStartProtection.view(inputHostStartProtectionNow());
+        const bool beforeTransition = std::strcmp(stage,"resolved")==0 &&
+            std::strcmp(reason,"ordinary-execution-repaired-before-fallback")==0;
         appendNativeLifecycleLog("input-host-switch-recovery", {
+            {"stateSnapshotPhase",beforeTransition?"before-transition":"at-log-call"},
             {"stage",stage},{"reason",reason},{"requestId",request.requestId},
             {"lifecycleVersion",ymcc::VirtualStartProtection::lifecycleVersion},
             {"fallbackAttempts",view.requestId==request.requestId?json(view.fallbackAttempts):json(nullptr)},
             {"executionInspectionRemainingMs",view.requestId==request.requestId?json(view.verificationRemainingMs):json(nullptr)},
             {"powerGeneration",request.power},{"hostEpoch",request.hostEpoch},
             {"deadline",request.deadline},{"error",static_cast<unsigned long>(request.error)},
-            {"faultKind",request.localFault==InputHostSwitchLocalFault::DeferredPhysicalHide?"deferred-physical-hide":
-                (request.localFault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing?"owned-hidden-target-missing":
-                    (request.tupleFault?"tuple-receipt":"transport"))},{"persona",request.persona},
+            {"faultKind",request.localFault!=InputHostSwitchLocalFault::None?localFaultName(request.localFault):
+                (request.tupleFault?"tuple-receipt":"transport")},{"persona",request.persona},
+            {"ownedRoot",request.localRoot},{"ownedTargetCount",request.localTargets.size()},
+            {"configurationRevision",request.localConfigurationRevision},{"intentRevision",request.localIntentRevision},
+            {"stageDeadline",request.localStageDeadline},
             {"pending",request.pending},{"queued",request.queued},{"spent",request.spent},{"resolved",request.resolved},
             {"awaitingCleanup",request.awaitingCleanup},{"stopInvoked",request.stopInvoked},
             {"executionCleanup",request.executionCleanup},
@@ -159,17 +172,37 @@ static void awaitCleanupLocked(const char* reason) noexcept {
     g_inputHostSwitchRecoveryPending.store(true,std::memory_order_release);
     if (first) logLocked("held",reason,request);
 }
+// Advance the SAME unspent local offer as ordinary execution progresses from
+// missing hide to complete configuration. This neither rearms its ticket nor
+// grants a fresh inspection window, target or fallback budget.
+static bool pinRootStageLocked(InputHostSwitchRecoveryRequest& request) {
+    if(request.spent || request.resolved || !request.requestId)return false;
+    InputHostDeferredPhysicalHide stage;
+    if(!inputHostSwitchRootRefreshSnapshotLocked(request.requestId,stage) ||
+        request.hostEpoch!=stage.hostGen || request.stoppedRunId!=stage.runId ||
+        request.power!=stage.powerGen || request.persona!=stage.persona)return false;
+    request.localFault=InputHostSwitchLocalFault::OwnedRootRefreshIncomplete;
+    request.deadline=(std::min)(request.deadline,stage.deadline);request.localStageDeadline=stage.deadline;
+    request.localPhysicalIdentity=stage.configurationPhysicalIdentity;request.localRoot=stage.configurationRoot;
+    request.localTargets=stage.configurationTargets;request.localConfigurationRevision=g_inputHostConfigRevision;
+    request.localIntentRevision=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+    return true;
+}
 // Ordinary execution may have repaired this fact while the fallback waited.
 // UNKNOWN/stale reads never mean resolved. A queued duplicate cannot reuse a
 // resolved offer, and a spent attempt is never reset by this observation.
 static bool localFaultReadyLocked(InputHostSwitchRecoveryRequest& request) {
     if(request.localFault==InputHostSwitchLocalFault::None)return true;
+    if(!request.spent && !request.resolved && request.localFault!=InputHostSwitchLocalFault::OwnedRootRefreshIncomplete &&
+        pinRootStageLocked(request))logLocked("advanced","same-offer-configuration-complete-refresh-pending",request);
     if(inputHostSwitchLocalFaultResolvedLocked(request.requestId,request.localFault)) {
         logLocked("resolved","ordinary-execution-repaired-before-fallback",request);
         request.pending=false;request.queued=false;request.resolved=true;
         g_inputHostSwitchRecoveryPending.store(false,std::memory_order_release);
         return false;
     }
+    if(request.localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete)
+        return inputHostSwitchRootRefreshOfferCurrentLocked(request);
     return inputHostSwitchLocalFaultCurrentLocked(request.requestId)==request.localFault;
 }
 } // namespace ymcc::inputHost::switchRecoveryRuntime
@@ -211,6 +244,9 @@ static void inputHostSwitchRecoveryOfferLocked(std::uint64_t ticket,
     request.persona = view.persona;
     request.tupleFault = tupleFault;
     request.localFault = localFault;
+    if(localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete && !runtime::pinRootStageLocked(request)) {
+        request={};return;
+    }
     request.pending = true;
     g_inputHostSwitchRecoveryPending.store(true,std::memory_order_release);
     // A real failed execution supplies Tc. Admission elapsed time alone can
@@ -257,6 +293,12 @@ static void inputHostSwitchRecoveryMaintenanceLocked() {
             return;
         }
     }
+    // Ordinary configuration/refresh continuation keeps priority throughout
+    // inspection. Enter the same lifecycle queue only after its current owner
+    // is idle; Perform rechecks the proof before reserving the sole fallback.
+    if(request.localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete &&
+        (g_inputHostLifecycleWorkRequested.load(std::memory_order_acquire) ||
+         g_inputHostLifecycleWorkInFlight.load(std::memory_order_acquire)))return;
     const auto reason = "switch-recovery:" + std::to_string(request.requestId);
     request.queued = true; // Pending/atomic remain true while this token is queued.
     try {
@@ -276,6 +318,23 @@ static void inputHostPerformSwitchRecovery(std::uint64_t ticket) {
     bool startReturned = false;
     const char* result = "start-failed";
     std::string exceptionDetail;
+    // Stop's bounded waits and the eventual Start share the original period.
+    // Expiry still leaves unfinished cleanup with its existing return owner.
+    struct RecoveryDeadlineScope {
+        std::uint64_t deadline=g_inputHostSwitchRecoveryStartDeadline;
+        std::uint64_t requestId=g_inputHostSwitchRecoveryStartRequestId,power=g_inputHostSwitchRecoveryStartPower;
+        bool bound=false;
+        void bind(const InputHostSwitchRecoveryRequest& attempt) {
+            g_inputHostSwitchRecoveryStartDeadline=deadline && deadline<attempt.deadline?deadline:attempt.deadline;
+            g_inputHostSwitchRecoveryStartRequestId=attempt.requestId;g_inputHostSwitchRecoveryStartPower=attempt.power;
+            bound=true;
+        }
+        ~RecoveryDeadlineScope() {
+            if(!bound)return;
+            g_inputHostSwitchRecoveryStartDeadline=deadline;g_inputHostSwitchRecoveryStartRequestId=requestId;
+            g_inputHostSwitchRecoveryStartPower=power;
+        }
+    } deadlineScope;
     try {
         {
             std::lock_guard<InputHostMutex> lock(g_inputHostMx);
@@ -307,6 +366,9 @@ static void inputHostPerformSwitchRecovery(std::uint64_t ticket) {
                     return;
                 }
             }
+            InputHostDeferredPhysicalHide rootStage;
+            const bool takeRootStage=!continuation && request.localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete;
+            if(takeRootStage && !inputHostSwitchRootRefreshOfferCurrentLocked(request,&rootStage))return;
             if (!request.spent) {
                 const auto recoveryNow = GetTickCount64();
                 if (runtime::budgetBlockedLocked(recoveryNow) ||
@@ -318,6 +380,13 @@ static void inputHostPerformSwitchRecovery(std::uint64_t ticket) {
                 inputHostRecoveryChargeAttemptLocked(recoveryNow);
                 attempt = request;
                 runtime::logLocked("started",continuation ? "classified-reopen-after-execution-cleanup" : "classified-stop-reopen",attempt);
+            }
+            deadlineScope.bind(request);
+            if(takeRootStage && !inputHostDeferredPhysicalHideRetireForRecoveryLocked(rootStage)) {
+                // Reservation is never refunded, including a late stage refusal.
+                // No Stop, source write or second fallback may leave this path.
+                runtime::retireLocked("blocked","ordinary-refresh-stage-takeover-refused");
+                return;
             }
             if (!continuation) {
                 // Same Host lock as final validation; cleanup is never cut short.
@@ -351,23 +420,6 @@ static void inputHostPerformSwitchRecovery(std::uint64_t ticket) {
             // its fault hold. Ownership debt and shared budgets remain untouched.
             g_inputHostFaultHoldsStart.store(false,std::memory_order_release);
         }
-        struct StartDeadlineScope {
-            std::uint64_t deadline, requestId, power;
-            explicit StartDeadlineScope(const InputHostSwitchRecoveryRequest& attempt)
-                : deadline(g_inputHostSwitchRecoveryStartDeadline),
-                  requestId(g_inputHostSwitchRecoveryStartRequestId),
-                  power(g_inputHostSwitchRecoveryStartPower) {
-                g_inputHostSwitchRecoveryStartDeadline = deadline && deadline < attempt.deadline
-                    ? deadline : attempt.deadline;
-                g_inputHostSwitchRecoveryStartRequestId = attempt.requestId;
-                g_inputHostSwitchRecoveryStartPower = attempt.power;
-            }
-            ~StartDeadlineScope() {
-                g_inputHostSwitchRecoveryStartDeadline = deadline;
-                g_inputHostSwitchRecoveryStartRequestId = requestId;
-                g_inputHostSwitchRecoveryStartPower = power;
-            }
-        } deadlineScope(attempt);
         startReturned = inputHostStart();
         // Main's verifier owns candidate evidence and the only final result/unlock.
         result = startReturned ? "start-returned-candidate-awaiting-verification" : "start-failed";

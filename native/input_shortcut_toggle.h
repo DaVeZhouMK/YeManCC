@@ -53,7 +53,8 @@ inline InputShortcutJson inputShortcutGyroParams(const InputShortcutJson& motion
             {"antiDeadzone", 20}, {"autoCalibrate", true}};
         if (preset == "fps") {
             params["outputStick"] = "right"; params["outputAxis"] = "xy";
-            params["motionInput"] = "local-space"; params["aimingSightsTrigger"] = "LT";
+            params["motionInput"] = "local-space"; params["aimingSightsTrigger"] = "";
+            params["motionMode"] = "off"; params["motionTrigger"] = "LT";
             params["gyroWeight"] = 1.3;
         } else if (preset == "racing") {
             params["outputStick"] = "left"; params["outputAxis"] = "x";

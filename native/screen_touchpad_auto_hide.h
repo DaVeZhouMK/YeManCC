@@ -12,7 +12,7 @@ inline void autoHideStop() {
 inline bool autoHideContactHeld() {
     {std::lock_guard<std::mutex> lock(mutex);
         if(core.pads[0].down || core.pads[1].down || feedbackOnlyContacts.mask())return true;}
-    return autoHide.specialContacts[0]!=0 || autoHide.specialContacts[1]!=0 || buttonContacts[1]!=0 || buttonContacts[2]!=0;
+    return buttonContacts[0]!=0 || autoHide.specialContacts[0]!=0 || autoHide.specialContacts[1]!=0 || buttonContacts[1]!=0 || buttonContacts[2]!=0;
 }
 inline unsigned autoHideVisibleMask(const Config& cfg) {
     unsigned mask=0;
@@ -21,7 +21,7 @@ inline unsigned autoHideVisibleMask(const Config& cfg) {
         if(cfg.layout==Layout::Single && side!=0)continue;
         if(permitted(surfaceMode(cfg,side)) && windows[side] && outlines[side] && IsWindowVisible(windows[side]))mask|=1u<<side;
     }
-    for(int i=1;i<=2;++i)if(buttonPermitted(cfg,i) && buttonWindows[i] && buttonOutlines[i] && IsWindowVisible(buttonWindows[i]))mask|=1u<<(i+1);
+    for(int i=0;i<=2;++i)if(buttonPermitted(cfg,i) && buttonWindows[i] && buttonOutlines[i] && IsWindowVisible(buttonWindows[i]))mask|=i==0?16u:1u<<(i+1);
     return mask;
 }
 inline void autoHideSetHidden(bool hidden) {
@@ -36,8 +36,8 @@ inline void autoHideSetHidden(bool hidden) {
         const bool ready=wanted && ymcc::screeninput::ensureDisplay(outlines[side]) && renderOutline(side,cfg.transparency);
         ShowWindow(outlines[side],ready?SW_SHOWNOACTIVATE:SW_HIDE);
     }
-    for(int i=1;i<=2;++i)if(buttonOutlines[i]) {
-        const bool wanted=!hidden && (autoHide.visibleMask&(1u<<(i+1)));
+    for(int i=0;i<=2;++i)if(buttonOutlines[i]) {
+        const bool wanted=!hidden && (autoHide.visibleMask&(i==0?16u:1u<<(i+1)));
         const bool ready=wanted && ymcc::screeninput::ensureDisplay(buttonOutlines[i]) && renderButton(i,cfg.transparency);
         ShowWindow(buttonOutlines[i],ready?SW_SHOWNOACTIVATE:SW_HIDE);
     }

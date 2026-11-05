@@ -57,7 +57,7 @@ internal sealed class SuperJoyOwnerLease : IDisposable
     internal static SuperJoyOwnerLease Acquire(SuperJoyIdentity identity,string admission,CancellationToken cancellationToken=default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if(!identity.MatchesProtocol)throw new ArgumentException("SUPERJOY_OWNER_IDENTITY_REQUIRED");
+        if(!identity.MatchesProtocol && !ApexLightingConsumer.MatchesOwnerIdentity(identity))throw new ArgumentException("SUPERJOY_OWNER_IDENTITY_REQUIRED");
         var parts=ParseToken(admission);
         if((ulong)identity.Generation!=parts[2])throw new ArgumentException("SUPERJOY_OWNER_GENERATION_MISMATCH");
         if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("SuperJoy native handoff requires Windows");

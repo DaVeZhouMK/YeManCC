@@ -22,6 +22,9 @@
 #include "json.hpp"
 #include "virtual_target_return_record.h"
 static unsigned forbiddenIo=0,inertXinputReads=0;
+static unsigned fixtureExcludedSteamWallpaperNotifications=0;
+static void fixtureObserveWallpaperNotification() noexcept;
+static void fixtureCountForbiddenIo(const char* reason) noexcept;
 // Explicit read-only OS capability/monotonic-clock leaves. Defaults preserve
 // every existing case; PC wake cases advance real time without freezing IO.
 static bool fixturePcPowerCapabilities=false;
@@ -30,7 +33,9 @@ static ULONGLONG fixturePowerClockOffset=0;
 // for every other case; production producer/worker bodies remain unchanged.
 static std::function<void()> fixtureMonotonicInterleave;
 static thread_local bool fixtureInsideMonotonicInterleave=false;
+static ULONGLONG fixtureOneXTick();
 static ULONGLONG fixtureMonotonicTick(){
+ const auto oneXTick=fixtureOneXTick();if(oneXTick)return oneXTick;
  if(fixtureMonotonicInterleave&&!fixtureInsideMonotonicInterleave){
   const auto observer=fixtureMonotonicInterleave;fixtureInsideMonotonicInterleave=true;
   try{observer();}catch(...){fixtureInsideMonotonicInterleave=false;throw;}
@@ -42,6 +47,9 @@ static BOOLEAN fixtureGetPwrCapabilities(PSYSTEM_POWER_CAPABILITIES caps){
  if(fixturePcPowerCapabilities){if(!caps)return FALSE;*caps={};caps->SystemS3=TRUE;caps->AoAc=FALSE;return TRUE;}
  return ::GetPwrCapabilities(caps);
 }
+static const auto fixtureOneXRealSleep=&::Sleep;
+static void WINAPI fixtureOneXSleep(DWORD);
+#define Sleep fixtureOneXSleep
 #define GetTickCount64 fixtureMonotonicTick
 #define GetPwrCapabilities fixtureGetPwrCapabilities
 static thread_local bool fixtureHealthInventoryRead=false;
@@ -51,6 +59,53 @@ static std::uint64_t startProtectionClock=100000;
 static const char* throwLogEvent=nullptr;
 static std::vector<nlohmann::json> fixtureEvents;
 static bool fixtureFullPipe=false;
+
+// OneX directed helper scope only. These seven explicit OS/dispatch leaves do
+// not replace Current, MayIssue, the helper, source admission or final outcomes.
+static bool fixtureOneXEnabled=false;
+static std::string fixtureOneXShape;
+static unsigned fixtureOneXLocationsReads=0,fixtureOneXDispatchCalls=0,fixtureOneXIssues=0;
+static bool fixtureOneXReplayAdmitted=false;
+static bool fixtureOneXInitialForeign=false;
+static unsigned fixtureOneXForeignSlot=1;
+static unsigned fixtureOneXMayIssueCalls=0;
+static bool fixtureOneXStaleClockObserving=false;
+static std::size_t fixtureOneXStaleTraceBegin=0;
+static std::uint64_t fixtureOneXStaleSequence=0;
+static std::uint64_t fixtureOneXDeadline=0;
+// Parameters of existing managed Start/deadline cases; OS events and waits only.
+static std::string fixtureOneXBoundaryVariant;
+// Existing Apex/elite parameters. Inventory is observation-only in this scope.
+static std::string fixtureOneXSelectedVariant,fixtureOneXSelectedInventoryVariant;
+static bool fixtureOneXSelectedHideObserved=false;
+static bool fixtureOneXBoundaryObserving=false,fixtureOneXLateArrivalApplied=false;
+static unsigned fixtureOneXBoundaryDeferrals=0;
+static std::size_t fixtureOneXReadmissionTraceBegin=0;
+static nlohmann::json fixtureOneXIo=nlohmann::json::array();
+struct HidHidePhysicalIdentity;
+static bool fixtureOneXInitialPending=false;
+static unsigned fixtureOneXInitialOwnerReads=0;
+static bool fixtureOneXReturned=false,fixtureOneXOwnerReading=false,fixtureOneXSelectingRehide=false;
+static unsigned fixtureOneXOwnerReads=0,fixtureOneXVisibilityReads=0,fixtureOneXRehideSelections=0;
+static bool fixtureOneXReturnedGuardProven=false,fixtureOneXExternalSourceRejected=false,fixtureOneXExternalTargetRejected=false;
+static bool fixtureOneXHideSeam(bool,const std::string&,bool);
+static bool fixtureOneXReadPhysical(std::vector<HidHidePhysicalIdentity>&);
+static void fixtureOneXPipeStage(const char*,bool,DWORD);
+static bool fixtureOneXFreshMode(){return fixtureOneXShape=="flow"||fixtureOneXShape=="returned-stale"||fixtureOneXShape=="fresh-positive"||fixtureOneXShape=="external"||fixtureOneXShape=="unknown-port"||fixtureOneXShape=="owned-prehidden"||fixtureOneXShape=="initial-pending"||fixtureOneXShape=="rehide-switch-source"||fixtureOneXShape=="rehide-context-changed";}
+struct HidHidePhysicalIdentity;
+struct HidHideVisibilitySnapshot;
+static std::vector<std::wstring> fixtureOneXLocations(const std::string&);
+static int fixtureOneXPortKind(const std::string&);
+static bool fixtureOneXSourceSlot(const HidHidePhysicalIdentity&,unsigned&);
+static bool fixtureOneXRootStarted(const std::string&);
+static bool fixtureOneXResolveSources(std::vector<HidHidePhysicalIdentity>&,bool*);
+static bool fixtureOneXResolveSelectedChildren(std::vector<HidHidePhysicalIdentity>&,bool*);
+static bool fixtureOneXVisibility(HidHideVisibilitySnapshot&);
+static bool inputHostOneXVisibility(HidHideVisibilitySnapshot&);
+namespace ymcc::targetReturn::physicalPath {struct Result;}
+static ymcc::targetReturn::physicalPath::Result fixtureOneXVerifyPhysicalPath(const std::string&,const std::string&);
+static bool fixtureOneXCycle(const std::wstring&,const char*,DWORD);
+
 // Test-only existing log endpoint: producer arrives after empty token0 decision.
 static std::function<void()> fixtureLateHideAfterEmptyDecision;
 // Deterministic BUS preemption at an existing log I/O endpoint, never a product hook.
@@ -80,13 +135,17 @@ static std::string fixtureRogDeferredCycleResult="success";
 static nlohmann::json fixtureRogDeferredHideRecords=nlohmann::json::array();
 static nlohmann::json fixtureRogDeferredCycles=nlohmann::json::array();
 static std::function<void()> fixtureRogDeferredAfterHide,fixtureRogDeferredCycleCallback;
+// At the existing inert cycle I/O leaf, immediately before actual issue admission.
+static std::function<void()> fixtureRogDeferredBeforeCycleIssue;
+static nlohmann::json fixtureRogDeferredIssueGuards=nlohmann::json::array();
+static nlohmann::json fixtureRogDeferredSnapshots=nlohmann::json::array();
 static bool fixtureRogDeferredHideSeam(bool,const std::string&,bool);
 static bool fixtureRogDeferredCycle(const std::wstring&,const char*,DWORD);
 static int fixtureRogDeferredPortKind=0;
 static nlohmann::json fixtureRogDeferredPortQueries=nlohmann::json::array();
 static std::function<void()> fixtureRogDeferredPortCallback;
 static int fixtureRogDeferredUsbPortKind(const std::string& root){
- if(!fixtureRogDeferredCycleEnabled){++forbiddenIo;throw std::logic_error("unexpected-USB-topology-query");}
+ if(!fixtureRogDeferredCycleEnabled){fixtureCountForbiddenIo("unexpected-USB-topology-query");throw std::logic_error("unexpected-USB-topology-query");}
  fixtureRogDeferredPortQueries.push_back({{"root",root},{"portKind",fixtureRogDeferredPortKind}});
  auto callback=std::move(fixtureRogDeferredPortCallback);fixtureRogDeferredPortCallback={};if(callback)callback();
  return fixtureRogDeferredPortKind;
@@ -133,9 +192,11 @@ static void fixturePipeBudgetPort(const char* stage,bool ok,DWORD timeout,void* 
  if(!fixturePipeBudgetEnabled)return;
  if(std::strcmp(stage,"write")==0){const auto request=nlohmann::json::parse(std::string(static_cast<char*>(data),size),nullptr,false);fixturePipeBudgetCurrentCommand=request.is_object()?request.value("command",""):"";
   fixturePipeBudgetActive=fixturePipeBudgetCurrentCommand==fixturePipeBudgetCommand||
-   (fixturePipeBudgetCommand=="initial-start"&&(fixturePipeBudgetCurrentCommand=="HELLO"||fixturePipeBudgetCurrentCommand=="PREPARE_TARGET"||fixturePipeBudgetCurrentCommand=="SUBMIT_NEUTRAL"));}
+   (fixturePipeBudgetCommand=="initial-start"&&(fixturePipeBudgetCurrentCommand=="HELLO"||fixturePipeBudgetCurrentCommand=="PREPARE_TARGET"||fixturePipeBudgetCurrentCommand=="SUBMIT_NEUTRAL"))||
+   (fixtureOneXEnabled&&(fixtureOneXShape=="deadline-read-stage"||fixtureOneXShape=="returned-stale")&&fixturePipeBudgetCurrentCommand=="HIDHIDE_CYCLE");}
  if(!fixturePipeBudgetActive)return;
  fixturePipeBudgetStages.push_back({{"stage",stage},{"command",fixturePipeBudgetCurrentCommand},{"activeExecutionDeadline",fixtureActiveExecutionDeadline()},{"ok",ok},{"timeoutMs",timeout},{"clock",startProtectionClock},{"originalDeadline",fixturePipeBudgetDeadline},{"remainingMs",fixturePipeBudgetDeadline>startProtectionClock?fixturePipeBudgetDeadline-startProtectionClock:0}});
+ fixtureOneXPipeStage(stage,ok,timeout);
  if(ok&&!fixturePipeBudgetAdvanced&&(fixturePipeBudgetAdvancePhase==stage||fixturePipeBudgetAdvancePhase==fixturePipeBudgetCurrentCommand+":"+stage)){startProtectionClock+=fixturePipeBudgetAdvanceMs;fixturePowerClockOffset+=fixturePipeBudgetAdvanceMs;fixturePipeBudgetAdvanced=true;}
 }
 static bool fixtureExitSweep=false;
@@ -192,6 +253,422 @@ static bool fixtureGpdPostHidePhysicalIdentities(std::vector<HidHidePhysicalIden
 #include "main.inert.cpp"
 #undef GetExitCodeProcess
 
+// Read-only copy of the sample actually published by the synchronous owner below.
+// The OS clock must not acquire source/sample mutexes recursively inside a guard.
+// Boundary parameters inject only the same dirty event as a late OS arrival;
+// all scan completion, admission and freshness decisions remain production code.
+static InputCaptureGamepadSnapshot fixtureOneXStaleOwnerSample;
+static ULONGLONG fixtureOneXTick(){
+ // OS time leaf only: never rewrite a sample or the production freshness verdict.
+ // The first freshSlot assignment follows the helper's real ymStartAdmitSource.
+ const auto* e=t_inputHostOneXStartWrite;
+ if(fixtureOneXEnabled&&!fixtureOneXBoundaryVariant.empty()&&fixtureOneXBoundaryVariant!="original-fresh"&&
+    !fixtureOneXLateArrivalApplied&&!fixtureOneXOwnerReading&&!fixtureOneXBoundaryObserving&&
+    e&&e->issueReserved&&e->returnedTick&&e->freshSlot<4){
+  struct Observing {Observing(){fixtureOneXBoundaryObserving=true;}~Observing(){fixtureOneXBoundaryObserving=false;}} observing;
+  const bool readmitted=fixtureOneXReadmissionTraceBegin<=g_startEntrySeam.trace.size()&&g_startEntrySeam.admitResult&&
+   std::find(g_startEntrySeam.trace.begin()+fixtureOneXReadmissionTraceBegin,g_startEntrySeam.trace.end(),"admit:true")!=g_startEntrySeam.trace.end();
+  const auto& sample=fixtureOneXStaleOwnerSample;
+  const bool fresh=inputHostOneXFreshSample(*e,sample,e->freshSlot);
+  if(readmitted&&fresh&&inputHostOneXStartCurrent()&&inputHostOneXSameReturnedSource(*e,g_hidHidePhysicalIdentity)&&
+     fixtureXinputSourceLive&&g_xinputPreTargetSlots&&!g_xinputSourceReconfirmMask&&
+     !g_xinputSlotFullScanOnce.load()&&!g_inputHostPrepared&&!g_inputHostPrepareMayHaveReachedHost){
+   const auto boundary=g_xinputBoundaryScanEpoch.load(),topology=g_xinputTopologyEpoch.load();
+   fixtureOneXLateArrivalApplied=true;
+   xinputSlotsMarkDiscoveryDirty(); // OS arrival: no sample/scan epoch, admission or request flag is written here.
+   fixtureOneXIo.push_back({{"leaf","late-topology-arrival"},{"variant",fixtureOneXBoundaryVariant},
+    {"requestId",e->ticket},{"deadline",e->deadline},{"clock",startProtectionClock},{"runId",e->runId},{"hostEpoch",e->epoch},
+    {"readmitted",readmitted},{"freshSampleBeforeArrival",fresh},
+    {"oldBoundaryEpoch",boundary},{"topologyBefore",topology},{"currentEpoch",g_xinputTopologyEpoch.load()},
+    {"boundaryAfterArrival",g_xinputBoundaryScanEpoch.load()},{"fullScanPending",g_xinputSlotFullScanOnce.load()},
+    {"sourceLiveAtOsLeaf",fixtureXinputSourceLive},{"sourceLocked",static_cast<bool>(g_xinputPhysicalSourceLocked)},
+    {"preTargetSlots",static_cast<unsigned>(g_xinputPreTargetSlots)},{"sourceMask",static_cast<unsigned>(g_xinputPhysicalSourceMask)},
+    {"connectedMask",static_cast<unsigned>(xinputNonVirtualConnectedMask())},{"reconfirmMask",static_cast<unsigned>(g_xinputSourceReconfirmMask.load())},
+    {"sampleSequence",sample.readAttemptSequence},{"sampleTopology",sample.readTopologyGeneration},
+    {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});
+  }
+ }
+ if(fixtureOneXEnabled&&fixtureOneXShape=="returned-stale"&&!fixtureOneXOwnerReading&&
+    !fixtureOneXStaleClockObserving&&e&&e->issueReserved&&e->returnedTick&&e->freshSlot<4){
+  const auto& sample=fixtureOneXStaleOwnerSample;
+  if(sample.readAttemptSequence>e->baselineSequence&&sample.readCompletedTick>=e->returnedTick&&
+      sample.readAttemptSequence!=fixtureOneXStaleSequence){
+    struct Observing {Observing(){fixtureOneXStaleClockObserving=true;}~Observing(){fixtureOneXStaleClockObserving=false;}} observing;
+    const auto before=startProtectionClock;const auto aged=sample.readCompletedTick+201;
+    if(startProtectionClock<aged){const auto delta=aged-startProtectionClock;startProtectionClock+=delta;fixturePowerClockOffset+=delta;}
+    const bool readmitted=fixtureOneXStaleTraceBegin<=g_startEntrySeam.trace.size()&&g_startEntrySeam.admitResult&&
+     std::find(g_startEntrySeam.trace.begin()+fixtureOneXStaleTraceBegin,g_startEntrySeam.trace.end(),"admit:true")!=g_startEntrySeam.trace.end();
+    const auto slot=e->freshSlot;const bool nonAgeProof=slot<4&&g_xinputPhysicalSourceLocked&&g_xinputPrimarySlot==slot&&
+     g_xinputPhysicalSourceMask==(1u<<slot)&&xinputNonVirtualConnectedMask()==(1u<<slot)&&!g_xinputSlotUnknownMask&&
+     g_xinputPreTargetBoundaryScanned&&g_xinputBoundaryScanEpoch.load()==g_xinputTopologyEpoch.load()&&
+     g_xinputTopologyEpoch.load()==e->freshTopology&&g_xinputSlotIdentityEpoch.load()==e->freshIdentity&&
+     sample.live&&sample.readContextStable&&sample.primarySlot==slot&&sample.readContinuityGeneration&&
+     sample.readContinuityGeneration!=(std::numeric_limits<uint64_t>::max)()&&sample.readStartedTick>=e->returnedTick&&
+     sample.readCompletedTick>=sample.readStartedTick&&sample.readPowerGeneration==e->power&&
+     sample.readTopologyGeneration==e->freshTopology&&sample.readIdentityGeneration==e->freshIdentity&&
+     inputCaptureBindStandardInput(&sample).known();
+    fixtureOneXIo.push_back({{"leaf","returned-sample-age"},{"clockBefore",before},{"clock",startProtectionClock},
+     {"deadline",e->deadline},{"requestId",e->ticket},{"originalRoot",e->root},{"originalHid",e->sourceInstance},
+     {"returnedRoot",e->freshSource.baseContainerDeviceInstanceId},{"returnedHid",e->freshSource.deviceInstanceId},
+     {"returnedIdentity",e->freshSource.physicalIdentity},{"sampleFromActualCanonicalOwner",true},
+     {"readmitted",readmitted},{"admitTraceBegin",fixtureOneXStaleTraceBegin},{"admitTraceEnd",g_startEntrySeam.trace.size()},
+     {"sampleSequence",sample.readAttemptSequence},{"baselineSequence",e->baselineSequence},{"sampleStarted",sample.readStartedTick},
+     {"sampleCompleted",sample.readCompletedTick},{"returnedTick",e->returnedTick},{"sampleAgeMs",startProtectionClock-sample.readCompletedTick},
+     {"nonAgeProof",nonAgeProof},{"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});
+    fixtureOneXStaleSequence=sample.readAttemptSequence;
+  }
+ }
+ return fixtureOneXEnabled?startProtectionClock:0;
+}
+// Yield to the real canonical reader after the helper released its Host mutex
+// and suspended scoped write permissions. Discovery itself never samples.
+static void WINAPI fixtureOneXSleep(DWORD millis){
+ if(fixtureOneXEnabled && fixtureOneXShape=="initial-pending" && !fixtureOneXReturned && g_inputHostProcess && g_inputHostHello &&
+    !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost && !g_inputHostActive &&
+    !g_inputHostMx.ownedByCurrentThread() && !g_hidHideVisibilityJournal.active && !t_inputHostOneXStartWrite){
+  startProtectionClock+=millis;fixturePowerClockOffset+=millis;
+  fixtureXinputSourceLive=true;fixtureOneXInitialPending=false;
+  gamepadReadState(false);gamepadReadState(false);fixtureOneXInitialOwnerReads+=2;
+  fixtureOneXIo.push_back({{"leaf","yield-pre-hide-to-canonical-owner"},{"sourceBecameLiveAtOsLeaf",true},
+   {"hostLockOwned",false},{"prepared",g_inputHostPrepared},{"admissionNotForged",true}});return;
+ }
+
+ if(fixtureOneXEnabled&&!fixtureOneXSelectedVariant.empty()&&!fixtureOneXReturned&&fixtureOneXDispatchCalls&&
+    g_inputHostProcess&&g_inputHostHello&&!g_inputHostPrepared&&!g_inputHostPrepareMayHaveReachedHost&&
+    !g_inputHostMx.ownedByCurrentThread()&&!t_inputHostOneXStartWrite){
+  const auto before=startProtectionClock;
+  const auto delta=fixtureOneXDeadline>before?(std::min)(static_cast<std::uint64_t>(millis),fixtureOneXDeadline-before):0;
+  startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+  if(fixtureOneXDispatchCalls>=3&&startProtectionClock<fixtureOneXDeadline){
+   const auto remaining=fixtureOneXDeadline-startProtectionClock;startProtectionClock+=remaining;fixturePowerClockOffset+=remaining;
+  }
+  fixtureOneXIo.push_back({{"leaf","pre-cycle-unissued-owner-wait"},{"clockBefore",before},{"clock",startProtectionClock},
+   {"deadline",fixtureOneXDeadline},{"cycleLeafCalls",fixtureOneXDispatchCalls},{"issuedRefreshes",fixtureOneXIssues},
+   {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});return;
+ }
+ if(fixtureOneXEnabled && fixtureOneXFreshMode() && fixtureOneXReturned && !fixtureOneXOwnerReading &&
+    g_inputHostProcess && g_inputHostHello && !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost &&
+    !g_inputHostActive && g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+    !g_inputHostMx.ownedByCurrentThread() && !t_inputHostOneXStartWrite){
+  if(fixtureOneXShape=="returned-stale"&&fixtureOneXDeadline>startProtectionClock&&
+     fixtureOneXDeadline-startProtectionClock<=static_cast<std::uint64_t>(millis)+201){
+   // Do not publish a fresh sample in the final <201ms interval. The last real
+   // sample remains stale while this OS wait reaches the original deadline.
+   const auto before=startProtectionClock;const auto delta=fixtureOneXDeadline-before;
+   startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+   fixtureOneXIo.push_back({{"leaf","returned-stale-deadline-wait"},{"clockBefore",before},
+    {"clock",startProtectionClock},{"deadline",fixtureOneXDeadline}});return;
+  }
+  const bool pending=g_xinputSlotFullScanOnce.load();
+  const auto requestedEpoch=g_xinputSlotFullScanEpochStart.load(),boundaryBefore=g_xinputBoundaryScanEpoch.load();
+  if(fixtureOneXLateArrivalApplied&&pending&&
+     (fixtureOneXBoundaryVariant=="boundary-scan-not-consumed"||fixtureOneXBoundaryDeferrals<2)){
+   // A controlled OS scheduling delay leaves the real pending request untouched.
+   // Re-enter the original same-epoch loop before letting its owner consume it.
+   ++fixtureOneXBoundaryDeferrals;startProtectionClock+=millis;fixturePowerClockOffset+=millis;
+   if(fixtureOneXBoundaryVariant=="boundary-scan-not-consumed"&&fixtureOneXBoundaryDeferrals>=3&&startProtectionClock<fixtureOneXDeadline){
+    const auto delta=fixtureOneXDeadline-startProtectionClock;startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+   }
+   fixtureOneXIo.push_back({{"leaf","boundary-owner-deferred"},{"clock",startProtectionClock},{"deadline",fixtureOneXDeadline},
+    {"pending",g_xinputSlotFullScanOnce.load()},{"requestedEpoch",g_xinputSlotFullScanEpochStart.load()},
+    {"boundaryEpoch",g_xinputBoundaryScanEpoch.load()},{"topologyEpoch",g_xinputTopologyEpoch.load()},
+    {"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"sequence",g_inputHostSequence},
+    {"cycles",fixtureOneXIssues},{"preTargetSlots",static_cast<unsigned>(g_xinputPreTargetSlots)},
+    {"sourceLocked",static_cast<bool>(g_xinputPhysicalSourceLocked)},{"reconfirmMask",static_cast<unsigned>(g_xinputSourceReconfirmMask.load())},
+    {"hostLockOwned",g_inputHostMx.ownedByCurrentThread()},{"scopedWriteInherited",t_inputHostOneXStartWrite!=nullptr},
+    {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});return;
+  }
+  struct Reading {Reading(){fixtureOneXOwnerReading=true;}~Reading(){fixtureOneXOwnerReading=false;}} reading;
+  startProtectionClock+=millis;fixturePowerClockOffset+=millis;
+  unsigned polls[4];for(unsigned slot=0;slot<4;++slot)polls[slot]=fixtureXinputLivePolls[slot];
+  gamepadReadState(false);++fixtureOneXOwnerReads;
+  const bool pendingAfterRead=g_xinputSlotFullScanOnce.load();const auto boundaryAfterRead=g_xinputBoundaryScanEpoch.load();
+  nlohmann::json actualPolls=nlohmann::json::array();for(unsigned slot=0;slot<4;++slot)actualPolls.push_back(fixtureXinputLivePolls[slot]-polls[slot]);
+  gamepadReadState(false);++fixtureOneXOwnerReads;
+  if(fixtureOneXShape=="returned-stale"||!fixtureOneXBoundaryVariant.empty()){
+   std::lock_guard<std::mutex> snapshot(g_inputCaptureGamepadSnapshotMx);fixtureOneXStaleOwnerSample=g_inputCaptureGamepadSnapshot;
+  }
+  if(fixtureOneXLateArrivalApplied&&pending){
+   const auto& sample=fixtureOneXStaleOwnerSample;
+   fixtureOneXIo.push_back({{"leaf","boundary-consumed-by-canonical-owner"},{"clock",startProtectionClock},{"deadline",fixtureOneXDeadline},
+    {"requestedEpoch",requestedEpoch},{"boundaryBeforeRead",boundaryBefore},{"boundaryAfterFirstRead",boundaryAfterRead},
+    {"pendingAfterFirstRead",pendingAfterRead},{"topologyEpoch",g_xinputTopologyEpoch.load()},{"actualSlotPolls",actualPolls},
+    {"sampleSequence",sample.readAttemptSequence},{"sampleTopology",sample.readTopologyGeneration},
+    {"sampleLive",sample.live},{"sampleContextStable",sample.readContextStable},{"sampleKnown",inputCaptureBindStandardInput(&sample).known()},
+    {"sampleCompleted",sample.readCompletedTick},{"hostLockOwned",false},{"scopedWriteInherited",false},
+    {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});
+  }
+  fixtureOneXIo.push_back({{"leaf","yield-to-canonical-owner"},{"hostLockOwned",false},
+   {"scopedWriteInherited",false},{"ownerReads",fixtureOneXOwnerReads}});
+  if(fixtureOneXOwnerReads>8&&fixtureOneXShape!="returned-stale"){const auto delta=fixtureOneXDeadline>startProtectionClock?fixtureOneXDeadline-startProtectionClock:0;
+   startProtectionClock+=delta;fixturePowerClockOffset+=delta;}
+  return;
+ }
+ fixtureOneXRealSleep(millis);
+}
+static const std::string& fixtureOneXRoot(){
+ static const std::string value="USB\\VID_045E&PID_028E\\ONEX-INTERNAL";
+ static const std::string ownedB="USB\\VID_045E&PID_028E\\ONEX-OWNED-B";
+ return fixtureOneXInitialForeign?ownedB:value;
+}
+static HidHidePhysicalIdentity fixtureOneXSource(){
+ HidHidePhysicalIdentity source;source.resolved=true;source.vendorId=0x045e;source.productId=0x028e;
+ source.usagePage=1;source.usage=5;source.baseContainerDeviceInstanceId=fixtureOneXRoot();
+ source.deviceInstanceId=fixtureOneXInitialForeign?"HID\\VID_045E&PID_028E&IG_00\\ONEX-OWNED-B":"HID\\VID_045E&PID_028E&IG_00\\ONEX-GAME";
+ if(fixtureFullPipe&&fixtureOneXReturned)source.deviceInstanceId+="-RETURNED";
+ source.sourcePath=source.deviceInstanceId;source.physicalIdentity=source.deviceInstanceId+"|"+source.baseContainerDeviceInstanceId;
+ return source;
+}
+static HidHidePhysicalIdentity fixtureOneXStaleSelectedChild(const HidHidePhysicalIdentity& source){
+ auto selected=source;const auto collection=selected.deviceInstanceId.find("&IG_00");
+ if(collection==std::string::npos)throw std::logic_error("OneX selected-child fixture requires its original IG_00 descriptor");
+ selected.deviceInstanceId.replace(collection,6,"&IG_01");selected.sourcePath=selected.deviceInstanceId;
+ selected.physicalIdentity=selected.deviceInstanceId+"|"+selected.baseContainerDeviceInstanceId;
+ return selected;
+}
+static json fixtureOneXIdentityObservation(const HidHidePhysicalIdentity& source){
+ return {{"resolved",source.resolved},{"root",source.baseContainerDeviceInstanceId},{"hid",source.deviceInstanceId},
+  {"identity",source.physicalIdentity},{"sourcePath",source.sourcePath},{"interface",source.baseContainerDevicePath},
+  {"vendorId",source.vendorId},{"productId",source.productId},
+  {"usagePage",source.usagePage},{"usage",source.usage}};
+}
+static ymcc::targetReturn::physicalPath::Result fixtureOneXVerifyPhysicalPath(const std::string& root,const std::string& target){
+ // Exact private CM node inventory only. Execute the original ancestry verifier;
+ // no fabricated ownership/return/source verdict and no access to real devices.
+ struct Reader {
+  std::wstring root,child;
+  CONFIGRET locate(PDEVINST node,DEVINSTID_W id,ULONG){
+   if(!id){*node=3;return CR_SUCCESS;}
+   if(root==id){*node=1;return CR_SUCCESS;}if(child==id){*node=2;return CR_SUCCESS;}
+   return CR_NO_SUCH_DEVNODE;
+  }
+  CONFIGRET deviceId(DEVINST node,PWCHAR id,ULONG count,ULONG){
+   const std::wstring tree=L"HTREE\\ROOT\\ONEX-FIXTURE";
+   const auto* text=node==1?&root:node==2?&child:node==3?&tree:nullptr;
+   if(!text)return CR_NO_SUCH_DEVNODE;if(count<=text->size())return CR_BUFFER_SMALL;
+   std::copy(text->begin(),text->end(),id);id[text->size()]=0;return CR_SUCCESS;
+  }
+  CONFIGRET parent(PDEVINST out,DEVINST node,ULONG){if(node==2){*out=1;return CR_SUCCESS;}
+   if(node==1){*out=3;return CR_SUCCESS;}return CR_NO_SUCH_DEVNODE;}
+ } reader{U2W(fixtureOneXRoot()),U2W(fixtureOneXSource().deviceInstanceId)};
+ const auto proof=ymcc::targetReturn::physicalPath::verify(root,target,reader);
+ fixtureOneXIo.push_back({{"leaf","exact-private-CM-ancestry"},{"root",root},{"target",target},
+  {"state",ymcc::targetReturn::physicalPath::stateName(proof.state)}});
+ return proof;
+}
+static std::vector<std::wstring> fixtureOneXLocations(const std::string& root){
+ ++fixtureOneXLocationsReads;
+ if(root!=fixtureOneXRoot() || fixtureOneXShape=="unknown-root")return {};
+ const bool changed=fixtureOneXShape=="locations-changed"&&fixtureOneXLocationsReads>=3;
+ return {changed?L"PCIROOT(0)#USBROOT(0)#USB(9)":L"PCIROOT(0)#USBROOT(0)#USB(4)"};
+}
+static int fixtureOneXPortKind(const std::string& root){
+ if(root!=fixtureOneXRoot() || fixtureOneXShape=="unknown-port")return -1;
+ return fixtureOneXShape=="external"?1:0;
+}
+static bool fixtureOneXSourceSlot(const HidHidePhysicalIdentity& source,unsigned& slot){
+ slot=4;const bool bound=!(fixtureOneXShape=="unbound-slot"&&!fixtureOneXInitialForeign) &&
+  source.baseContainerDeviceInstanceId==fixtureOneXRoot() && source.physicalIdentity==fixtureOneXSource().physicalIdentity;
+ if(bound)slot=fixtureOneXInitialForeign?fixtureOneXForeignSlot:0;
+ if(fixtureOneXShape=="unbound-slot")fixtureOneXIo.push_back({{"leaf","reverse-binding"},
+  {"stage",t_inputHostOneXStartWrite&&t_inputHostOneXStartWrite->slot<4?"pre-dispatch-root-slot-proof":"initial-root-slot-proof"},
+  {"root",source.baseContainerDeviceInstanceId},{"hid",source.deviceInstanceId},{"physicalIdentity",source.physicalIdentity},
+  {"bound",bound},{"slot",slot}});
+ return bound;
+}
+static bool fixtureOneXRootStarted(const std::string& root){
+ if(fixtureOneXFreshMode()&&root==fixtureOneXRoot())return true;
+ fixtureOneXIo.push_back({{"leaf","root-started"},{"root",root},{"started",false},{"deadline",fixtureOneXDeadline}});
+ if(startProtectionClock<fixtureOneXDeadline){const auto delta=fixtureOneXDeadline-startProtectionClock;
+  startProtectionClock+=delta;fixturePowerClockOffset+=delta;}
+ return false;
+}
+// This separate OS leaf models the NEW pre-collapse current-child inventory.
+// It must not route through fixtureOneXResolveSources or publish raw selection.
+static bool fixtureOneXResolveSelectedChildren(std::vector<HidHidePhysicalIdentity>& out,bool* complete){
+ const auto source=fixtureOneXSource();out={source};
+ if(fixtureOneXSelectedInventoryVariant=="same-root-two-live-children")out.push_back(fixtureOneXStaleSelectedChild(source));
+ const bool inventoryComplete=fixtureOneXSelectedInventoryVariant!="same-root-incomplete-inventory";
+ if(complete)*complete=inventoryComplete;
+ json children=json::array();for(const auto& child:out)children.push_back(fixtureOneXIdentityObservation(child));
+ std::lock_guard<std::mutex> identity(g_hidHidePhysicalIdentityMx);
+ fixtureOneXIo.push_back({{"leaf","selected-child-inventory"},{"wrapper","inputHostOneXResolveSelectedChildren"},
+  {"complete",inventoryComplete},{"count",out.size()},{"children",children},
+  {"selectedAtLeafReturn",fixtureOneXIdentityObservation(g_hidHidePhysicalIdentity)},{"leafPublishesSelected",false},
+  {"topologyEpoch",g_xinputTopologyEpoch.load()},{"identityEpoch",g_xinputSlotIdentityEpoch.load()}});
+ return true;
+}
+static bool fixtureOneXResolveSources(std::vector<HidHidePhysicalIdentity>& out,bool* complete){
+ out.clear();if(complete)*complete=false;
+ if(!fixtureOneXFreshMode()){fixtureOneXIo.push_back({{"leaf","resolve-sources"},{"complete",false}});return false;}
+ const auto source=fixtureOneXSource();
+ if(fixtureOneXSelectingRehide){
+  ++fixtureOneXRehideSelections;
+  fixtureOneXReturnedGuardProven=inputHostOneXReturnedSourceCurrent();
+  out={source};
+  if(fixtureOneXShape=="rehide-switch-source"){
+   out.front().baseContainerDeviceInstanceId="USB\\VID_045E&PID_028E\\ONEX-EXTERNAL-B";
+   out.front().deviceInstanceId="HID\\VID_045E&PID_028E&IG_00\\EXTERNAL-B";
+   out.front().physicalIdentity=out.front().deviceInstanceId+"|"+out.front().baseContainerDeviceInstanceId;
+   fixtureOneXExternalSourceRejected=!inputHostOneXRefreshSourcesCurrent(out);
+   const auto sequence=g_inputHostSequence;
+   fixtureOneXExternalTargetRejected=!inputHostHidHideApplyViaPipeLocked(L"hide",U2W(out.front().deviceInstanceId))&&g_inputHostSequence==sequence;
+  }
+  fixtureOneXIo.push_back({{"leaf","rehide-source-selection"},{"root",out.front().baseContainerDeviceInstanceId},
+   {"returnedSourceCurrentBeforeSelection",fixtureOneXReturnedGuardProven},
+   {"externalSourceRejected",fixtureOneXExternalSourceRejected},{"externalTargetRejectedBeforeCommand",fixtureOneXExternalTargetRejected}});
+ }else{
+  // Selected-alignment parameters must expose the production stale selection:
+  // an inventory query returns the current child, never publishes that child.
+  if(!fixtureOneXReturned&&fixtureOneXSelectedVariant.empty()&&fixtureOneXSelectedInventoryVariant.empty()){
+   std::lock_guard<std::mutex> identity(g_hidHidePhysicalIdentityMx);g_hidHidePhysicalIdentity=source;
+  }
+  out={source};
+ }
+ if(complete)*complete=true;return true;
+}
+static bool fixtureOneXReadPhysical(std::vector<HidHidePhysicalIdentity>& out){
+ struct Selection {bool previous=fixtureOneXSelectingRehide;Selection(){fixtureOneXSelectingRehide=t_inputHostOneXStartWrite&&t_inputHostOneXStartWrite->refreshing;}~Selection(){fixtureOneXSelectingRehide=previous;}} selection;
+ bool complete=false;return inputHostOneXResolveSources(out,&complete)&&complete;
+}
+static bool fixtureOneXVisibility(HidHideVisibilitySnapshot& snapshot){
+ ++fixtureOneXVisibilityReads;snapshot={};snapshot.valid=true;snapshot.cloaking=fixtureOneXShape!="cloak-off";
+ snapshot.inverseRaw=fixtureOneXShape=="inverse-unknown"?"":"--inv-off";
+ if(fixtureOneXShape!="app-missing")snapshot.applications={hidHideCurrentModulePath()};
+ const auto& journal=g_hidHideVisibilityJournal;
+ snapshot.hidden=journal.hiddenByUs;
+ if(snapshot.hidden.empty())snapshot.hidden={U2W(journal.physical.deviceInstanceId),U2W(journal.physical.baseContainerDeviceInstanceId)};
+ if(fixtureOneXShape=="root-not-hidden")snapshot.hidden={U2W(journal.physical.deviceInstanceId)};
+ if(fixtureOneXShape=="rehide-context-changed"&&fixtureOneXVisibilityReads==3){
+  fixtureOneXReturnedGuardProven=inputHostOneXReturnedSourceCurrent();g_virtualStartProtection.cancel(startProtectionClock);
+ }
+ return fixtureOneXShape!="configuration-unknown";
+}
+static bool fixtureOneXHideSeam(bool success,const std::string& transactionId,bool){
+ if(!success)return false;
+ const auto source=fixtureOneXSource();auto& journal=g_hidHideVisibilityJournal;journal=HidHideVisibilityJournal{};
+ journal.active=true;journal.transactionId=transactionId;journal.physical=source;journal.physicalSources={source};
+ journal.before.valid=true;journal.before.cloaking=false;journal.before.inverseRaw="--inv-off";
+ journal.hiddenByUs={U2W(source.deviceInstanceId),U2W(source.baseContainerDeviceInstanceId)};
+ {
+  std::lock_guard<std::mutex> identity(g_hidHidePhysicalIdentityMx);
+  if(fixtureOneXSelectedVariant.empty())g_hidHidePhysicalIdentity=source;
+  else if(!fixtureOneXSelectedHideObserved){
+   // Controlled first-hide OS input only. Preserve the already-live canonical
+   // slot/mask; the owned journal is IG_00 while RawInput still names IG_01.
+   auto selected=source;
+   if(fixtureOneXSelectedVariant=="same-root-current-child-stale-selected"){
+    selected=fixtureOneXStaleSelectedChild(source);
+   }
+   g_hidHidePhysicalIdentity=selected;fixtureOneXSelectedHideObserved=true;
+   const auto view=g_virtualStartProtection.view(startProtectionClock);
+   fixtureOneXIo.push_back({{"leaf","first-hide-selected-child-input"},{"variant",fixtureOneXSelectedVariant},
+    {"selected",fixtureOneXIdentityObservation(selected)},{"journalPhysical",fixtureOneXIdentityObservation(journal.physical)},
+    {"requestId",view.requestId},{"originalDeadline",startProtectionClock+view.remainingMs},{"clock",startProtectionClock},
+    {"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"power",currentPowerGeneration()},
+    {"topologyEpoch",g_xinputTopologyEpoch.load()},{"identityEpoch",g_xinputSlotIdentityEpoch.load()},
+    {"sourceLiveAtOsLeaf",fixtureXinputSourceLive},{"sourceLocked",static_cast<bool>(g_xinputPhysicalSourceLocked)},
+    {"primarySlot",static_cast<unsigned>(g_xinputPrimarySlot)},{"sourceMask",static_cast<unsigned>(g_xinputPhysicalSourceMask)},
+    {"connectedMask",static_cast<unsigned>(xinputNonVirtualConnectedMask())},{"preTargetSlots",static_cast<unsigned>(g_xinputPreTargetSlots)},
+    {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});
+  }
+ }
+ return true;
+}
+static void fixtureOneXPipeStage(const char* stage,bool ok,DWORD timeout){
+ if(!fixtureOneXEnabled||(fixtureOneXShape!="deadline-read-stage"&&fixtureOneXShape!="returned-stale")||!ok)return;
+ const bool cycle=t_inputHostOneXStartWrite!=nullptr;
+ const bool hello=!cycle&&(std::strcmp(stage,"connect")==0||fixturePipeBudgetCurrentCommand=="HELLO");
+ if(!cycle&&!hello)return;
+ const unsigned delta=fixtureOneXShape=="returned-stale"?0:cycle?(std::strcmp(stage,"write")==0?500:std::strcmp(stage,"read")==0?1000:0):
+  std::strcmp(stage,"connect")==0?500:250;
+ fixtureOneXIo.push_back({{"leaf","actual-pipe-stage"},{"stage",stage},{"command",cycle?"HIDHIDE_CYCLE":"HELLO"},
+  {"timeoutMs",timeout},{"clockBefore",startProtectionClock},{"deadline",fixtureOneXDeadline},{"elapsedMs",delta}});
+ startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+}
+static bool fixtureOneXCycle(const std::wstring& root,const char* phase,DWORD budget){
+ ++fixtureOneXDispatchCalls;
+ if(!fixtureOneXEnabled || !t_inputHostOneXStartWrite || root!=U2W(fixtureOneXRoot()) ||
+  !phase || std::strcmp(phase,"onex-start-post-hide")!=0 || !budget || budget>5000)
+  throw std::logic_error("unadmitted-OneX-cycle-leaf");
+ const auto ticket=t_inputHostOneXStartWrite->ticket;
+ if(!fixtureOneXDeadline)fixtureOneXDeadline=inputHostOneXStartDeadline();
+ if(fixtureFullPipe){
+  // Owned actual managed pipe and original final transport guard. The existing
+  // managed fixture's fake HidHide endpoint supplies its SDK-only response.
+  if(!fixtureOneXSelectedVariant.empty()){
+   const auto* episode=t_inputHostOneXStartWrite;
+   std::lock_guard<std::mutex> identity(g_hidHidePhysicalIdentityMx);
+   fixtureOneXIo.push_back({{"leaf","selected-child-before-cycle-transport"},{"variant",fixtureOneXSelectedVariant},
+    {"selected",fixtureOneXIdentityObservation(g_hidHidePhysicalIdentity)},
+    {"journalPhysical",fixtureOneXIdentityObservation(g_hidHideVisibilityJournal.physical)},
+    {"originalSelectedExact",inputHostOneXOriginalSelectedSource(*episode,g_hidHidePhysicalIdentity)},
+    {"requestId",ticket},{"episodeDeadline",inputHostOneXStartDeadline()},{"clock",startProtectionClock},
+    {"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"power",currentPowerGeneration()},
+    {"topologyEpoch",g_xinputTopologyEpoch.load()},{"proofTopology",episode->topology},
+    {"identityEpoch",g_xinputSlotIdentityEpoch.load()},{"proofIdentity",episode->identity},
+    {"candidateSlot",episode->slot},{"primarySlot",static_cast<unsigned>(g_xinputPrimarySlot)},
+    {"sourceLocked",static_cast<bool>(g_xinputPhysicalSourceLocked)},{"sourceMask",static_cast<unsigned>(g_xinputPhysicalSourceMask)},
+    {"connectedMask",static_cast<unsigned>(xinputNonVirtualConnectedMask())},
+    {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost}});
+  }
+  json reply;const bool ok=inputHostRequestLocked("HIDHIDE_CYCLE",{{"path",W2U(root)}},"hidhide-cycle",budget,&reply);
+  const bool issued=t_inputHostOneXStartWrite->issueReserved;
+  if(issued)++fixtureOneXIssues;
+  const auto detail=reply.value("detail",std::string{});
+  fixtureOneXReturned=ok&&(detail=="true"||detail.rfind("true;",0)==0);
+  if(fixtureOneXShape=="returned-stale"&&fixtureOneXReturned)fixtureOneXStaleTraceBegin=g_startEntrySeam.trace.size();
+  if(!fixtureOneXBoundaryVariant.empty()&&fixtureOneXReturned)fixtureOneXReadmissionTraceBegin=g_startEntrySeam.trace.size();
+  fixtureOneXIo.push_back({{"leaf","cycle-dispatch"},{"requestId",ticket},{"episodeDeadline",inputHostOneXStartDeadline()},
+   {"issueReserved",issued},{"managedCommandPath",true},{"ack",reply}});
+  return fixtureOneXReturned;
+ }
+ if(fixtureOneXShape=="ticket-at-write"){
+  g_virtualStartProtection.cancel(startProtectionClock);
+  const auto cooling=g_virtualStartProtection.view(startProtectionClock).remainingMs;
+  startProtectionClock+=cooling;fixturePowerClockOffset+=cooling;
+  const auto newer=g_virtualStartProtection.admit("steamdeck",startProtectionClock);
+  if(!newer.accepted || newer.requestId==ticket)throw std::logic_error("fixture-new-ticket-not-admitted-after-settle");
+ }else if(fixtureOneXShape=="off-at-write"){
+  g_realStickTest.virtualTargetEnabled=false;g_realStickTest.virtualTargetPersona="disabled";
+ }else if(fixtureOneXShape=="cancel-at-write")g_virtualStartProtection.cancel(startProtectionClock);
+ else if(fixtureOneXShape=="power-at-write")++g_powerGeneration;
+ else if(fixtureOneXShape=="root-at-write")g_hidHideVisibilityJournal.physical.baseContainerDeviceInstanceId+="-OTHER";
+ else if(fixtureOneXShape=="mask-at-write")g_xinputPhysicalSourceMask=2;
+ else if(fixtureOneXShape=="deadline-at-write"){
+  const auto delta=fixtureOneXDeadline-startProtectionClock;startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+ }
+ const bool currentBeforeIssue=inputHostOneXStartCurrent();
+ ++fixtureOneXMayIssueCalls;
+ const bool admitted=inputHostOneXStartMayIssue();
+ if(admitted){++fixtureOneXIssues;++fixtureOneXMayIssueCalls;fixtureOneXReplayAdmitted=inputHostOneXStartMayIssue();}
+ fixtureOneXIo.push_back({{"leaf","cycle-dispatch"},{"root",W2U(root)},{"phase",phase},{"budgetMs",budget},
+  {"requestId",ticket},{"episodeDeadline",inputHostOneXStartDeadline()},{"admitted",admitted},
+  {"issueReserved",t_inputHostOneXStartWrite->issueReserved},{"secondIssueAdmitted",fixtureOneXReplayAdmitted},{"managedCommandPath",false},
+  {"stage","final-StartMayIssue-before-dispatch"},{"startCurrentBeforeMayIssue",currentBeforeIssue},
+  {"candidateSlot",t_inputHostOneXStartWrite->slot},{"primarySlot",static_cast<unsigned>(g_xinputPrimarySlot)}});
+ // Retire this simulated observation only after the real final guard refused.
+ // A wrongly admitted foreign candidate still spends the issue and fails below.
+ if(!admitted){if((fixtureOneXShape=="mask-at-write"||fixtureOneXInitialForeign)&&startProtectionClock<fixtureOneXDeadline){
+   const auto delta=fixtureOneXDeadline-startProtectionClock;startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+  }return false;}
+ if(fixtureOneXShape=="off-after-issue")g_realStickTest.virtualTargetEnabled=false;
+ if(fixtureOneXShape=="deadline-after-issue"){
+  const auto delta=fixtureOneXDeadline-startProtectionClock;startProtectionClock+=delta;fixturePowerClockOffset+=delta;
+ }
+ fixtureOneXReturned=fixtureOneXShape=="source-missing"||fixtureOneXFreshMode();return fixtureOneXReturned;
+}
+
+static json fixtureRogDeferredDebtState(){
+ std::lock_guard<std::mutex> guard(g_inputHostDeferredPhysicalHideMx);
+ const auto& debt=g_inputHostDeferredPhysicalHide;
+ return {{"runId",debt.runId},{"hostGen",debt.hostGen},{"powerGen",debt.powerGen},
+  {"requestId",debt.requestId},{"deadline",debt.deadline},{"configurationApplied",debt.configurationApplied},
+  {"configurationReady",debt.configurationReady},{"configurationPhysicalIdentity",debt.configurationPhysicalIdentity},
+  {"configurationRoot",debt.configurationRoot},{"configurationTargets",debt.configurationTargets},
+  {"configurationTargetCount",debt.configurationTargets.size()},{"continuationRetired",debt.continuationRetired},
+  {"refreshAttempted",debt.refreshAttempted},{"sourcePending",g_inputHostDeferredPhysicalHideSourcePending.load()}};
+}
 static const std::string& fixtureRogDeferredRoot(){
  static const std::string root="USB\\VID_0B05&PID_1B4C\\FIXTURE_ROG131128";return root;
 }
@@ -202,6 +679,7 @@ static void fixtureRogDeferredSeedJournal(const std::string& transactionId){
  source.usagePage=1;source.usage=5;
  source.deviceInstanceId="HID\\VID_0B05&PID_1B4C&MI_02\\FIXTURE_ROG131128_GAMEPAD";
  source.sourcePath=source.deviceInstanceId;source.baseContainerDeviceInstanceId=fixtureRogDeferredRoot();
+ source.physicalIdentity=source.deviceInstanceId+"|"+source.baseContainerDeviceInstanceId;
  auto& journal=g_hidHideVisibilityJournal;journal=HidHideVisibilityJournal{};
  journal.active=true;journal.transactionId=transactionId;journal.physical=source;
  journal.physicalSources={source};journal.hiddenByUs={U2W(source.baseContainerDeviceInstanceId),U2W(source.deviceInstanceId)};
@@ -227,7 +705,7 @@ static bool fixtureRogDeferredHideSeam(bool success,const std::string& transacti
   // this explicit environment identity at the successful HELLO/hide boundary;
   // the production capture/publish/epoch/run validators remain unmodified.
   g_inputHostHostInstanceId="fixture-native-event-"+std::to_string(g_inputHostEpoch)+"-"+g_inputHostRunId;
-  auto& journal=g_hidHideVisibilityJournal;journal.physical.physicalIdentity=journal.physical.deviceInstanceId;
+  auto& journal=g_hidHideVisibilityJournal;
   journal.physicalSources={journal.physical};}
  if(!fixtureRogDeferredJournalSeed || !t_inputHostDeferredPhysicalHideWrite)return success;
  fixtureRogDeferredHideRecords.push_back({{"success",success},{"powerCycle",powerCycle},
@@ -238,30 +716,57 @@ static bool fixtureRogDeferredHideSeam(bool success,const std::string& transacti
  return success;
 }
 static bool fixtureRogPartialSnapshot(HidHideVisibilitySnapshot& value){
- ++fixtureRogPartialSnapshotReads;const bool after=fixtureRogPartialStage>1;
+ ++fixtureRogPartialSnapshotReads;
+ // Ordinary successful ROG hide uses a complete list too. Partial-hide scenarios
+ // keep their original first/second read shape and opt-in fault parameters.
+ const bool after=!fixtureRogPartialEnabled || fixtureRogPartialStage>1;
  value={};value.valid=true;value.cloaking=true;value.inverseRaw="--inv-off";
  value.applications={hidHideCurrentModulePath()};
  const auto& j=g_hidHideVisibilityJournal;
  value.hidden={U2W(j.physical.deviceInstanceId)};
  if((after&&fixtureRogPartialShape!="retry-failed") || fixtureRogPartialShape=="already-complete")value.hidden.push_back(U2W(j.physical.baseContainerDeviceInstanceId));
  if(fixtureRogPartialShape=="none-hidden")value.hidden.clear();
- if(fixtureRogPartialShape=="root-only"&&!after)value.hidden={U2W(j.physical.baseContainerDeviceInstanceId)};
+ if(fixtureRogPartialShape=="child-only")value.hidden={U2W(j.physical.deviceInstanceId)};
+ if(fixtureRogPartialShape=="root-only"&&(!fixtureRogPartialEnabled || !after))value.hidden={U2W(j.physical.baseContainerDeviceInstanceId)};
  if(fixtureRogPartialShape=="cloak-off" || (after&&fixtureRogPartialShape=="after-cloak-off"))value.cloaking=false;
  if(fixtureRogPartialShape=="app-missing" || (after&&fixtureRogPartialShape=="after-app-missing"))value.applications.clear();
  if(fixtureRogPartialShape=="inverse-unknown")value.inverseRaw.clear();
  if(fixtureRogPartialShape=="inverse-on")value.inverseRaw="--inv-on";
  if(after&&fixtureRogPartialShape=="after-still-missing")value.hidden={U2W(j.physical.deviceInstanceId)};
  if(fixtureRogPartialShape=="invalid")value.valid=false;
+ const bool known=fixtureRogPartialShape!="unknown" && !(after&&fixtureRogPartialShape=="after-unknown");
+ std::vector<std::string> hidden,applications;
+ for(const auto& path:value.hidden)hidden.push_back(W2U(path));
+ for(const auto& path:value.applications)applications.push_back(W2U(path));
+ const auto before=fixtureRogDeferredDebtState();
  if(fixtureRogPartialDuringSnapshot)fixtureRogPartialDuringSnapshot(fixtureRogPartialSnapshotReads);
- return fixtureRogPartialShape!="unknown" && !(after&&fixtureRogPartialShape=="after-unknown");
+ fixtureRogDeferredSnapshots.push_back({{"read",fixtureRogPartialSnapshotReads},{"shape",fixtureRogPartialShape},
+  {"known",known},{"valid",value.valid},{"cloaking",value.cloaking},{"inverseRaw",value.inverseRaw},
+  {"hidden",hidden},{"applications",applications},{"debtBefore",before},{"debtAfter",fixtureRogDeferredDebtState()}});
+ return known;
 }
 static bool fixtureRogDeferredCycle(const std::wstring& root,const char* phase,DWORD budget){
- if(!fixtureRogDeferredCycleEnabled){++forbiddenIo;throw std::logic_error("unexpected-physical-cycle");}
+ if(!fixtureRogDeferredCycleEnabled){fixtureCountForbiddenIo("unexpected-physical-cycle");throw std::logic_error("unexpected-physical-cycle");}
+ bool admitted=true;
+ if(t_inputHostDeferredPhysicalHideRefreshIssueActive){
+  const auto before=fixtureRogDeferredDebtState();
+  auto beforeIssue=std::move(fixtureRogDeferredBeforeCycleIssue);fixtureRogDeferredBeforeCycleIssue={};
+  if(beforeIssue)beforeIssue();
+  // Simulate the production final WriteFile guard before actual dispatch.
+  // Inactive refresh scopes retain the original cycle I/O leaf behavior.
+  admitted=inputHostDeferredPhysicalHideReserveRefreshIssue();
+  fixtureRogDeferredIssueGuards.push_back({{"root",W2U(root)},{"phase",phase?phase:""},
+   {"admitted",admitted},{"issueActive",t_inputHostDeferredPhysicalHideRefreshIssueActive},
+   {"debtBefore",before},{"debtAfter",fixtureRogDeferredDebtState()},
+   {"contextReason",t_inputHostDeferredPhysicalHideFirstRefusal?t_inputHostDeferredPhysicalHideFirstRefusal:""}});
+  if(!admitted)return false;
+ }
  ymStartSeamTrace(std::string("hidhide-cycle:")+(phase?phase:""));
  const auto* debt=t_inputHostDeferredPhysicalHideWrite;
  fixtureRogDeferredCycles.push_back({{"root",W2U(root)},{"phase",phase?phase:""},{"budgetMs",budget},
   {"clockBefore",startProtectionClock},{"result",fixtureRogDeferredCycleResult},
   {"tlsDebt",debt!=nullptr},{"deadline",debt?debt->deadline:0},{"requestId",debt?debt->requestId:0},
+  {"issueGuardAdmitted",admitted},{"issueActive",t_inputHostDeferredPhysicalHideRefreshIssueActive},
   {"executionDeadline",g_inputHostSwitchRecoveryStartDeadline},
   {"executionRequestId",g_inputHostSwitchRecoveryStartRequestId},{"executionPower",g_inputHostSwitchRecoveryStartPower}});
  auto callback=std::move(fixtureRogDeferredCycleCallback);fixtureRogDeferredCycleCallback={};if(callback)callback();
@@ -368,7 +873,7 @@ static bool fixturePersistOffCheckpoints=false;
 static void fixtureOffCheckpoint(const char* stage,const char* assertion=nullptr,int passed=-1){
  if(!fixturePersistOffCheckpoints)return;
  const auto owner=cases.empty()?std::string("bootstrap"):cases.back().value("name","");
- const json row={{"stage",stage},{"case",owner},{"checkIndex",checks},{"failureCount",failures.size()},
+ const json row={{"stage",stage},{"case",owner},{"checkIndex",checks},{"failureCount",failures.size()},{"forbiddenIo",forbiddenIo},{"excludedSteamWallpaperNotifications",fixtureExcludedSteamWallpaperNotifications},
   {"assertion",assertion?json(assertion):json(nullptr)},{"passed",passed<0?json(nullptr):json(passed!=0)},
   {"requestId",g_virtualStartProtection.view(startProtectionClock).requestId},
   {"nativeClock",startProtectionClock},{"hostPresent",g_inputHostProcess!=nullptr},
@@ -377,6 +882,17 @@ static void fixtureOffCheckpoint(const char* stage,const char* assertion=nullptr
  if(!checkpoint)throw std::runtime_error("private OFF checkpoint open failed");
  checkpoint<<row.dump()<<'\n';checkpoint.flush();
  if(!checkpoint)throw std::runtime_error("private OFF checkpoint write failed");
+}
+// Diagnostics only: preserve exactly one counter increment and the caller's
+// original exception/return. A swallowed OS-leaf exception still leaves a reason.
+static void fixtureCountForbiddenIo(const char* reason) noexcept {
+ ++forbiddenIo;
+ try {fixtureOffCheckpoint("forbidden-io",reason,0);}catch(...){}
+ try {std::cerr<<"fixture-forbidden-io: "<<(reason?reason:"unknown")<<" count="<<forbiddenIo<<'\n';}catch(...){}
+}
+static void fixtureObserveWallpaperNotification() noexcept {
+ ++fixtureExcludedSteamWallpaperNotifications;
+ try {fixtureOffCheckpoint("excluded-steam-wallpaper-postcommit");}catch(...){}
 }
 static json assertionTrace=json::array();
 static void fixtureOffFatalCheckpoint(const char* kind,const char* what) noexcept {
@@ -431,13 +947,25 @@ static void fixtureResetSwitchAudit(){
  audit.throttledCount=0;audit.settleLoggedReason.clear();audit.throttleLoggedWindow=0;
 }
 static void seed(){
+ fixtureOneXEnabled=false;fixtureOneXShape.clear();fixtureOneXLocationsReads=fixtureOneXDispatchCalls=fixtureOneXIssues=0;
+ fixtureOneXReplayAdmitted=false;fixtureOneXInitialForeign=false;fixtureOneXForeignSlot=1;fixtureOneXMayIssueCalls=0;
+ fixtureOneXStaleClockObserving=false;fixtureOneXStaleTraceBegin=0;fixtureOneXStaleSequence=0;fixtureOneXStaleOwnerSample={};
+ fixtureOneXDeadline=0;fixtureOneXIo=nlohmann::json::array();
+ fixtureOneXBoundaryVariant.clear();fixtureOneXBoundaryObserving=fixtureOneXLateArrivalApplied=false;
+ fixtureOneXSelectedVariant.clear();fixtureOneXSelectedInventoryVariant.clear();fixtureOneXSelectedHideObserved=false;
+ fixtureOneXBoundaryDeferrals=0;fixtureOneXReadmissionTraceBegin=0;
+ fixtureOneXInitialPending=false;fixtureOneXInitialOwnerReads=0;
+ fixtureOneXReturned=fixtureOneXOwnerReading=fixtureOneXSelectingRehide=false;
+ fixtureOneXOwnerReads=fixtureOneXVisibilityReads=fixtureOneXRehideSelections=0;
+ fixtureOneXReturnedGuardProven=fixtureOneXExternalSourceRejected=fixtureOneXExternalTargetRejected=false;
  inputHostDeferredPhysicalHideClear(); // fresh fixture process; never used as evidence of physical return
  fixtureRogInitialIdentityEnabled=false;fixtureRogInitialDiscoveryComplete=true;fixtureRogInitialDiscoveryReads=0;fixtureRogInitialDiscoveryCallback={};fixtureRogInitialShape="valid";
  fixtureSwitchOwnedHideSeed=false;fixtureSwitchSourceAtEnsure={};
  fixtureRogDeferredJournalSeed=fixtureRogDeferredCycleEnabled=false;fixtureRogDeferredCycleResult="success";
  fixtureRogPartialEnabled=false;fixtureRogPartialShape="valid";fixtureRogPartialStage=fixtureRogPartialSnapshotReads=0;fixtureRogPartialAfterFirst={};fixtureRogPartialDuringRetry={};fixtureRogPartialDuringSnapshot={};
  fixtureRogDeferredHideRecords=json::array();fixtureRogDeferredCycles=json::array();
- fixtureRogDeferredAfterHide={};fixtureRogDeferredCycleCallback={};
+ fixtureRogDeferredAfterHide={};fixtureRogDeferredCycleCallback={};fixtureRogDeferredBeforeCycleIssue={};
+ fixtureRogDeferredIssueGuards=json::array();fixtureRogDeferredSnapshots=json::array();
  fixtureRogDeferredPortKind=0;fixtureRogDeferredPortQueries=json::array();fixtureRogDeferredPortCallback={};
  g_hidHideCycleInFlight=false;g_hidHideCycleBusySinceTick=0;
 
@@ -687,7 +1215,8 @@ static void switchRecoveryCases(){
   std::scoped_lock lock(g_gamepadReadMx,g_hidHidePhysicalIdentityMx);
   HidHidePhysicalIdentity source;source.resolved=true;source.vendorId=0x0b05;source.productId=0x1b4c;source.usagePage=1;source.usage=5;
   source.deviceInstanceId="HID\\VID_0B05&PID_1B4C&MI_02\\FIXTURE_ROG131128_GAMEPAD";
-  source.sourcePath=source.deviceInstanceId;source.physicalIdentity=source.deviceInstanceId;source.baseContainerDeviceInstanceId=fixtureRogDeferredRoot();
+  source.sourcePath=source.deviceInstanceId;source.baseContainerDeviceInstanceId=fixtureRogDeferredRoot();
+  source.physicalIdentity=source.deviceInstanceId+"|"+source.baseContainerDeviceInstanceId;
   g_hidHidePhysicalIdentity=source;g_xinputPrimarySlot=0;g_xinputSemanticSlot=0;
   g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=g_xinputAdmittedMask=g_xinputConnectedMask=g_xinputPreTargetSlots=1;
   g_xinputSlotUnknownMask=g_xinputVirtualEndpointMask=0;g_xinputSourceReconfirmMask=0;g_xinputSlotReprobeMask=0;
@@ -699,8 +1228,8 @@ static void switchRecoveryCases(){
   check(ack.value("hostSubmission",std::string{})=="frame-accepted"&&!ack.value("focusIsolationSemanticNeutral",true)&&g_inputHostActive,
    "local visibility scenario consumes an actual current physical source frame ACK");
  };
- const auto startLocalOwned=[&](const std::string& persona="steamdeck",bool acceptFrames=true){
-  prepare(persona);fixtureSwitchOwnedHideSeed=true;fixtureRogDeferredCycleEnabled=true;fixtureFrameFirstAck=acceptFrames;fixtureSwitchSourceAtEnsure=selectLocalPhysicalSource;selectLocalPhysicalSource();
+ const auto startLocalOwned=[&](const std::string& persona="steamdeck",bool acceptFrames=true,bool rootStage=false){
+  prepare(persona);if(rootStage)g_machineIdentity.product="ROG Ally X RC72LA";fixtureSwitchOwnedHideSeed=true;fixtureRogDeferredCycleEnabled=true;fixtureFrameFirstAck=acceptFrames;fixtureSwitchSourceAtEnsure=selectLocalPhysicalSource;selectLocalPhysicalSource();
   check(inputHostStart(),"local visibility scenario starts its actual owned prepared target");
   check(traced("hidhide-apply")&&g_inputHostProcess&&g_inputHostHello&&g_inputHostPrepared&&g_inputHostNeutralized&&
    g_inputHostBoundPersona==persona&&g_inputHostBoundPowerGeneration==currentPowerGeneration()&&g_hidHideVisibilityJournal.active&&
@@ -738,7 +1267,39 @@ static void switchRecoveryCases(){
    !g_inputHostSwitchRecovery.tupleFault&&!g_inputHostTransportFault&&!g_inputHostTupleFault.requestId,
    "local obligation offers the original recovery owner without fabricated tuple or transport failure");
  };
- const auto finishLocalCase=[&](){cases.back()["events"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["cleanup"]=cleanup();fixtureFrameFirstAck=false;};
+ const auto finishLocalCase=[&](){cases.back()["events"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["cleanup"]=cleanup();
+  cases.back()["controlledIoObservation"]={{"forbiddenIoThroughCase",forbiddenIo},{"scope","cumulative fixture rejection counter; not device IO or hardware proof"}};fixtureFrameFirstAck=false;};
+ struct LocalDeferredWriteScope {
+  const InputHostDeferredPhysicalHide* previous=t_inputHostDeferredPhysicalHideWrite;
+  bool refreshIssue=t_inputHostDeferredPhysicalHideRefreshIssueActive;
+  explicit LocalDeferredWriteScope(const InputHostDeferredPhysicalHide& stage){t_inputHostDeferredPhysicalHideWrite=&stage;}
+  ~LocalDeferredWriteScope(){t_inputHostDeferredPhysicalHideWrite=previous;t_inputHostDeferredPhysicalHideRefreshIssueActive=refreshIssue;}
+ };
+ const auto captureRootStage=[](){std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);return g_inputHostDeferredPhysicalHide;};
+ const auto startRootRefreshStage=[&](){
+  const auto candidate=startLocalOwned("steamdeck",true,true);const auto deadline=startProtectionClock+candidate.remainingMs;
+  // Controlled deferred-obligation input after actual Start. Run the REAL normal
+  // configuration helper through the existing snapshot I/O leaf; this does not
+  // claim that the normal worker or a physical USB refresh ran.
+  inputHostDeferredPhysicalHideArm(true,g_inputHostRunId,g_inputHostEpoch,currentPowerGeneration(),"steamdeck",deadline,candidate.requestId);
+  fixtureRogDeferredJournalSeed=true;const auto beforeReads=fixtureRogPartialSnapshotReads;
+  const auto initial=captureRootStage();
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);LocalDeferredWriteScope write(initial);
+   const bool configured=inputHostDeferredPhysicalHideConfigurationLocked(true);
+   check(configured,"real normal configuration helper accepts the exact journal through controlled snapshot I/O");
+   if(!configured)throw std::runtime_error("root stage fixture configuration preparation failed; retain checkpoints without unsafe target mutation");}
+  publishLocalReadback(false);
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);InputHostDeferredPhysicalHide stage;
+   const bool captured=inputHostSwitchRootRefreshSnapshotLocked(candidate.requestId,stage);
+   check(captured&&stage.configurationApplied&&stage.configurationReady&&
+    !stage.refreshAttempted&&!stage.continuationRetired&&stage.deadline==deadline&&stage.configurationTargets.size()==2&&
+    g_hidHideVisibilityJournal.physicalSources.size()==1&&fixtureRogPartialSnapshotReads>beforeReads&&fixtureRogDeferredCycles.empty(),
+    "shared root snapshot consumes actual normal configuration progress and fresh positive bound readback without a refresh");
+   if(!captured || stage.configurationTargets.size()!=2)throw std::runtime_error("root stage fixture proof unavailable; refuse downstream target mutation");}
+  cases.back()["stageInput"]="controlled deferred obligation; real normal configuration helper; controlled snapshot I/O; actual bound readback publication";
+  cases.back()["normalConfigurationSnapshots"]=fixtureRogDeferredSnapshots;
+  return candidate;
+ };
  {
  cases.push_back({{"name","central-switch-lifecycle-version-and-single-fallback-clock"}});
  using Cycle=ymcc::VirtualStartProtection;Cycle cycle;const Cycle::Tick admittedAt=100000,candidateAt=admittedAt+2500;
@@ -1520,6 +2081,248 @@ static void switchRecoveryCases(){
   "fault observation before the first frame performs no Stop Start or charge inside execution inspection");
  finishLocalCase();
  }
+ {
+ cases.push_back({{"name","actual-owned-root-refresh-original-clock-single-fallback"}});
+ const auto candidate=startRootRefreshStage();const auto ticket=candidate.requestId;const auto power=currentPowerGeneration();
+ const auto deadline=startProtectionClock+candidate.remainingMs;const auto settings=ymSettingsReadRaw(YM_SETTINGS_FILE);
+ const auto stage=captureRootStage();offerLocal(ticket,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);
+ check(g_inputHostSwitchRecovery.deadline==deadline&&g_inputHostSwitchRecovery.persona=="steamdeck"&&
+  g_inputHostSwitchRecovery.localRoot==stage.configurationRoot&&g_inputHostSwitchRecovery.localTargets==stage.configurationTargets&&
+  g_inputHostSwitchRecovery.localConfigurationRevision==g_inputHostConfigRevision&&
+  g_inputHostSwitchRecovery.localIntentRevision==g_inputHostVirtualIntentRevision.load(),
+  "root offer pins original deadline persona exact normal root targets and configuration intent revisions");
+ startProtectionClock+=9999;readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);
+ check(stopCount()==0&&createCount()==1&&queuedRecoveryCount()==0&&!g_inputHostSwitchRecovery.spent&&
+  g_inputHostRecoveryEpisodeAttempts.load()==0&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0&&
+  !captureRootStage().continuationRetired,"root refresh at9999 neither retires normal continuation nor queues Stops or spends fallback");
+ ++startProtectionClock;readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1&&!g_inputHostSwitchRecovery.spent,
+  "root refresh queues the original unspent offer at exactly10000");
+ fullPipeDrainQueuedLifecycle();if(g_inputHostSwitchRecovery.awaitingCleanup)fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();
+ const auto stopped=std::find(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),"stop:switch-recovery");
+ check(stopCount()==1&&createCount()==2&&stopped!=g_startEntrySeam.trace.end()&&
+  std::find(stopped,g_startEntrySeam.trace.end(),"create-process")!=g_startEntrySeam.trace.end()&&
+  g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized&&g_inputHostBoundPersona=="steamdeck"&&
+  g_inputHostSwitchRecovery.spent&&g_inputHostRecoveryEpisodeAttempts.load()==1&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==1,
+  "actual lifecycle dispatcher takes over then Stops cleans up and Starts the same SD persona with one shared fallback");
+ check(currentPowerGeneration()==power&&ymSettingsReadRaw(YM_SETTINGS_FILE)==settings&&g_virtualStartProtection.view(startProtectionClock).requestId==ticket&&
+  g_inputHostSwitchRecovery.deadline==deadline&&g_virtualStartProtection.view(startProtectionClock).remainingMs==20000,
+  "root takeover preserves the original player ticket power settings and thirty-second absolute deadline");
+ inputHostDeferredPhysicalHideArm(true,g_inputHostRunId,g_inputHostEpoch,power,"steamdeck",deadline,ticket);
+ const auto replacement=captureRootStage();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);LocalDeferredWriteScope write(replacement);
+  check(inputHostDeferredPhysicalHideConfigurationLocked(true),"replacement normal stage is established by its actual configuration helper");}
+ readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);InputHostDeferredPhysicalHide proof;
+  check(inputHostSwitchRootRefreshSnapshotLocked(ticket,proof),"spent replay probe has a genuine fresh replacement root stage");
+  inputHostSwitchRecoveryOfferLocked(ticket,power,ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(stopCount()==1&&createCount()==2&&g_inputHostSwitchRecovery.spent&&g_inputHostRecoveryEpisodeAttempts.load()==1&&
+  g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==1&&!captureRootStage().continuationRetired,
+  "spent original ticket cannot replay takeover or retire a fresh replacement normal stage");
+ timeline("owned-root-single-fallback-final");finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-owned-root-refresh-ordinary-repair-revokes-unspent-offer"}});
+ const auto candidate=startRootRefreshStage();const auto ticket=candidate.requestId;const auto deadline=startProtectionClock+candidate.remainingMs;
+ offerLocal(ticket,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);const auto stage=captureRootStage();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);LocalDeferredWriteScope write(stage);const char* outcome=nullptr;
+  check(inputHostDeferredPhysicalHideRefreshLocked(&outcome)&&outcome&&std::string(outcome)=="owned-root-refreshed",
+   "actual normal refresh helper completes through the controlled cycle I/O leaf before fallback");}
+ check(captureRootStage().refreshAttempted&&fixtureRogDeferredCycles.size()==1,
+  "ordinary completion records a possibly issued refresh before clearing its original debt");
+ inputHostDeferredPhysicalHideClear(); // Actual normal completion helper, not physical-return evidence.
+ acceptLocalFrames();publishLocalReadback(false);startProtectionClock+=candidate.verificationRemainingMs;readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(inputHostSwitchLocalFaultResolvedLocked(ticket,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete),
+   "actual accepted output positive readback and completed normal debt prove repair before fallback");
+  inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(g_inputHostSwitchRecovery.resolved&&!g_inputHostSwitchRecovery.pending&&!g_inputHostSwitchRecovery.spent&&
+  g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.deadline==deadline,
+  "ordinary repair revokes the unspent offer while retaining original ticket deadline and resolved state");
+ inputHostDeferredPhysicalHideArm(true,g_inputHostRunId,g_inputHostEpoch,currentPowerGeneration(),"steamdeck",deadline,ticket);
+ const auto again=captureRootStage();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);LocalDeferredWriteScope write(again);
+  check(inputHostDeferredPhysicalHideConfigurationLocked(true),"resolved replay probe has a genuine current normal configuration stage");}
+ publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);InputHostDeferredPhysicalHide proof;
+  check(inputHostSwitchRootRefreshSnapshotLocked(ticket,proof),"resolved replay is rejected with positive current root evidence");
+  inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(g_inputHostSwitchRecovery.resolved&&!g_inputHostSwitchRecovery.spent,"resolved root offer cannot be renewed by later same-ticket configuration progress");
+ noRecovery("ordinary repair and resolved replay use zero fallback queues Stops Starts and recovery budget");finishLocalCase();
+ }
+ for(const std::string condition:{"refresh-issued","refresh-result-unknown","configuration-unapplied","configuration-not-ready","continuation-retired",
+  "refresh-not-required","unknown-readback","cloak-off","stale-readback","foreign-readback","stage-targets-changed","stage-root-changed","stage-identity-changed",
+  "journal-targets-changed","journal-root-changed","journal-owner-changed","journal-source-count","journal-source-mismatch",
+  "old-host","old-run","old-request","old-power","old-persona","expired-stage","source-mask-absent","source-mask-extra","source-not-admitted","pretarget-absent"}){
+ cases.push_back({{"name",std::string("actual-owned-root-refresh-guard/")+condition}});
+ const auto candidate=startRootRefreshStage();const auto ticket=candidate.requestId;
+ {std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);auto& stage=g_inputHostDeferredPhysicalHide;
+  if(condition=="refresh-issued"||condition=="refresh-result-unknown")stage.refreshAttempted=true;
+  if(condition=="configuration-unapplied")stage.configurationApplied=false;
+  if(condition=="configuration-not-ready")stage.configurationReady=false;
+  if(condition=="continuation-retired")stage.continuationRetired=true;
+  if(condition=="refresh-not-required")stage.refreshRequired=false;
+  if(condition=="stage-targets-changed")stage.configurationTargets.back()+="-OTHER";
+  if(condition=="stage-root-changed")stage.configurationRoot+="-OTHER";
+  if(condition=="stage-identity-changed")stage.configurationPhysicalIdentity+="-OTHER";
+  if(condition=="old-host")++stage.hostGen;
+  if(condition=="old-run")stage.runId+="-OTHER";
+  if(condition=="old-request")++stage.requestId;
+  if(condition=="old-power")++stage.powerGen;
+  if(condition=="old-persona")stage.persona="elite";
+  if(condition=="expired-stage")stage.deadline=startProtectionClock;
+ }
+ if(condition=="unknown-readback")publishLocalReadback(false,false,true);
+ if(condition=="cloak-off")publishLocalReadback(false,true,false);
+ if(condition=="stale-readback")fixturePowerClockOffset+=1001;
+ if(condition=="foreign-readback"){std::lock_guard<InputHostMutex> lock(g_inputHostMx);++g_inputHostOwnedVisibilityReadback.hostEpoch;}
+ if(condition=="journal-targets-changed")g_hidHideVisibilityJournal.hiddenByUs.back()+=L"-OTHER";
+ if(condition=="journal-root-changed")g_hidHideVisibilityJournal.physical.baseContainerDeviceInstanceId+="-OTHER";
+ if(condition=="journal-owner-changed")g_hidHideVisibilityJournal.transactionId+="-OTHER";
+ if(condition=="journal-source-count")g_hidHideVisibilityJournal.physicalSources.push_back(g_hidHideVisibilityJournal.physical);
+ if(condition=="journal-source-mismatch")g_hidHideVisibilityJournal.physicalSources.front().physicalIdentity+="-OTHER";
+ {std::lock_guard<std::mutex> lock(g_gamepadReadMx);
+  if(condition=="source-mask-absent")g_xinputPhysicalSourceMask=0;
+  if(condition=="source-mask-extra")g_xinputPhysicalSourceMask=3;
+  if(condition=="source-not-admitted")g_xinputAdmittedMask=0;
+  if(condition=="pretarget-absent")g_xinputPreTargetSlots=0;
+ }
+ const auto commands=g_inputHostSequence;const auto io=forbiddenIo;const auto reads=inertXinputReads;
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);InputHostDeferredPhysicalHide stage;
+  check(!inputHostSwitchRootRefreshSnapshotLocked(ticket,stage)&&inputHostSwitchLocalFaultCurrentLocked(ticket)==InputHostSwitchLocalFault::None,
+   "incomplete issued retired unknown stale mismatched owner journal or source cannot diagnose root refresh");
+  inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);}
+ startProtectionClock+=candidate.verificationRemainingMs;
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(g_inputHostSequence==commands&&forbiddenIo==io&&inertXinputReads==reads&&fixtureRogDeferredCycles.empty(),
+  "rejected root stage performs no command source read or physical refresh");
+ noRecovery("rejected root stage cannot offer queue Stop Start retire continuation or consume fallback");finishLocalCase();
+ }
+ for(const std::string condition:{"refresh-issued","configuration-not-ready","continuation-retired","stage-targets-changed","stage-root-changed",
+  "stage-owner-changed","configuration-revision","intent-revision","unknown-readback","replacement-root-and-targets"}){
+ cases.push_back({{"name",std::string("actual-owned-root-refresh-offered-stage-change/")+condition}});
+ const auto candidate=startRootRefreshStage();const auto ticket=candidate.requestId;const auto deadline=startProtectionClock+candidate.remainingMs;
+ offerLocal(ticket,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);
+ startProtectionClock+=candidate.verificationRemainingMs;readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1,"stage-change probe begins with one real queued unspent root fallback");
+ {std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);auto& stage=g_inputHostDeferredPhysicalHide;
+  if(condition=="refresh-issued")stage.refreshAttempted=true;
+  if(condition=="configuration-not-ready")stage.configurationReady=false;
+  if(condition=="continuation-retired")stage.continuationRetired=true;
+  if(condition=="stage-targets-changed")stage.configurationTargets.back()+="-OTHER";
+  if(condition=="stage-root-changed")stage.configurationRoot+="-OTHER";
+  if(condition=="stage-owner-changed")stage.runId+="-OTHER";
+ }
+ if(condition=="configuration-revision")++g_inputHostConfigRevision;
+ if(condition=="intent-revision")g_inputHostVirtualIntentRevision.fetch_add(1);
+ if(condition=="configuration-revision"||condition=="intent-revision")publishLocalReadback(false);
+ if(condition=="unknown-readback")publishLocalReadback(false,false,true);
+ if(condition=="replacement-root-and-targets"){
+  const auto oldRoot=g_hidHideVisibilityJournal.physical.baseContainerDeviceInstanceId;
+  const auto oldChild=g_hidHideVisibilityJournal.physical.deviceInstanceId;
+  const auto root=oldRoot+"-REPLACED",child=oldChild+"-REPLACED";
+  auto& journal=g_hidHideVisibilityJournal;journal.physical.baseContainerDeviceInstanceId=root;
+  journal.physical.deviceInstanceId=journal.physical.physicalIdentity=child;journal.physicalSources={journal.physical};
+  journal.hiddenByUs={U2W(root),U2W(child)};
+  {std::lock_guard<std::mutex> lock(g_hidHidePhysicalIdentityMx);g_hidHidePhysicalIdentity=journal.physical;}
+  // A replacement controlled normal stage must still pass its REAL helper.
+  {std::lock_guard<std::mutex> lock(g_inputHostDeferredPhysicalHideMx);auto& stage=g_inputHostDeferredPhysicalHide;
+   stage.configurationApplied=stage.configurationReady=false;stage.configurationPhysicalIdentity.clear();stage.configurationRoot.clear();stage.configurationTargets.clear();}
+  const auto replacement=captureRootStage();
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);LocalDeferredWriteScope write(replacement);
+   check(inputHostDeferredPhysicalHideConfigurationLocked(true),"replacement exact root and target set obtains actual normal configuration proof");}
+  publishLocalReadback(false);
+ }
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);InputHostDeferredPhysicalHide stage;
+  if(condition=="replacement-root-and-targets"||condition=="configuration-revision"||condition=="intent-revision")
+   check(inputHostSwitchRootRefreshSnapshotLocked(ticket,stage),"changed offer binding is tested with a genuinely current positive root snapshot");
+  check(!inputHostSwitchRootRefreshOfferCurrentLocked(g_inputHostSwitchRecovery),"offered exact stage or revision cannot borrow subsequent normal progress");}
+ const auto commands=g_inputHostSequence;fullPipeDrainQueuedLifecycle();inputHostPerformSwitchRecovery(ticket);
+ check(stopCount()==0&&createCount()==1&&g_inputHostSequence==commands&&!g_inputHostSwitchRecovery.spent&&
+  g_inputHostRecoveryEpisodeAttempts.load()==0&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0&&
+  g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.deadline==deadline,
+  "stage mutation after queue dispatch refuses Stop and budget while preserving the original offer ticket and deadline");
+ finishLocalCase();
+ }
+ {
+ cases.push_back({{"name","actual-owned-hidden-offer-advances-root-after-source-wait"}});
+ const auto candidate=startLocalOwned("steamdeck",true,true);const auto ticket=candidate.requestId;const auto deadline=startProtectionClock+candidate.remainingMs;
+ const auto inspectionDeadline=startProtectionClock+candidate.verificationRemainingMs;
+ publishLocalReadback();offerLocal(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+ inputHostDeferredPhysicalHideArm(true,g_inputHostRunId,g_inputHostEpoch,currentPowerGeneration(),"steamdeck",deadline,ticket);
+ startProtectionClock+=2500;fixtureRogDeferredJournalSeed=true;const auto original=captureRootStage();
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);LocalDeferredWriteScope write(original);
+  check(hidHideApplyPhysicalTransaction(g_inputHostRunId,false)&&inputHostDeferredPhysicalHideConfigurationLocked(true),
+   "same normal owner completes configuration through controlled hide and actual configuration helper");}
+ readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<std::mutex> lock(g_gamepadReadMx);g_xinputPhysicalSourceMask=0;}
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(!ymcc::inputHost::switchRecoveryRuntime::localFaultReadyLocked(g_inputHostSwitchRecovery)&&
+   !inputHostSwitchLocalFaultResolvedLocked(ticket,InputHostSwitchLocalFault::OwnedHiddenTargetMissing)&&
+   g_inputHostSwitchRecovery.pending&&!g_inputHostSwitchRecovery.resolved&&!g_inputHostSwitchRecovery.spent&&
+   g_inputHostSwitchRecovery.localFault==InputHostSwitchLocalFault::OwnedHiddenTargetMissing,
+   "positive hidden readback with outstanding root debt and unknown source cannot resolve or strand the old hidden offer");}
+ check(stopCount()==0&&g_inputHostRecoveryEpisodeAttempts.load()==0&&g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+  "source-paused promotion retains the original pending offer without consuming fallback");
+ selectLocalPhysicalSource();readVerifiedCurrent();publishLocalReadback(false);
+ startProtectionClock=inspectionDeadline-1;
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(!g_inputHostSwitchRecovery.queued&&stopCount()==0,"normal configuration progress does not shorten the original ten-second inspection");
+ ++startProtectionClock;readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();
+  check(g_inputHostSwitchRecovery.localFault==InputHostSwitchLocalFault::OwnedRootRefreshIncomplete&&
+   g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.deadline==deadline&&
+   g_inputHostSwitchRecovery.queued&&!g_inputHostSwitchRecovery.spent&&
+   g_virtualStartProtection.view(startProtectionClock).verificationRemainingMs==0&&
+   inputHostSwitchRootRefreshOfferCurrentLocked(g_inputHostSwitchRecovery),
+   "source recovery advances the SAME unspent hidden offer to exact root proof at its original inspection deadline");}
+ fullPipeDrainQueuedLifecycle();if(g_inputHostSwitchRecovery.awaitingCleanup)fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();
+ check(stopCount()==1&&createCount()==2&&g_inputHostSwitchRecovery.spent&&g_inputHostRecoveryEpisodeAttempts.load()==1&&
+  g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==1&&g_virtualStartProtection.view(startProtectionClock).requestId==ticket&&
+  g_inputHostSwitchRecovery.deadline==deadline&&g_inputHostBoundPersona=="steamdeck",
+  "same-offer root promotion performs exactly one fallback without renewing request persona deadline or inspection");
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+  check(!ymcc::inputHost::switchRecoveryRuntime::pinRootStageLocked(g_inputHostSwitchRecovery),
+   "spent continuation cannot use normal stage promotion to rearm the offer");}
+ finishLocalCase();
+ }
+ for(const std::string condition:{"queued-original-deadline","stop-reaches-original-deadline"}){
+ cases.push_back({{"name",std::string("actual-owned-root-refresh-deadline/")+condition}});
+ const auto candidate=startRootRefreshStage();const auto ticket=candidate.requestId;const auto deadline=startProtectionClock+candidate.remainingMs;
+ offerLocal(ticket,InputHostSwitchLocalFault::OwnedRootRefreshIncomplete);
+ startProtectionClock+=candidate.verificationRemainingMs;readVerifiedCurrent();publishLocalReadback(false);
+ {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchRecoveryMaintenanceLocked();}
+ check(g_inputHostSwitchRecovery.queued&&queuedRecoveryCount()==1,"deadline probe begins with the exact root offer queued before the cap");
+ bool advancedDuringStop=false;std::uint64_t stopExecutionDeadline=0;
+ const auto previousObserver=std::move(fixtureMonotonicInterleave);
+ if(condition=="queued-original-deadline")startProtectionClock=deadline;
+ else fixtureMonotonicInterleave=[&](){if(!advancedDuringStop&&stopCount()==1){
+  stopExecutionDeadline=fixtureActiveExecutionDeadline();startProtectionClock=deadline;advancedDuringStop=true;}};
+ fullPipeDrainQueuedLifecycle();fixtureMonotonicInterleave=previousObserver;
+ const auto expired=g_virtualStartProtection.view(startProtectionClock);
+ if(condition=="queued-original-deadline")
+  check(stopCount()==0&&expired.fallbackAttempts==0&&g_inputHostRecoveryEpisodeAttempts.load()==0,
+   "old queued root offer at the original thirty-second cap cannot Stop or spend fallback");
+ else check(advancedDuringStop&&stopExecutionDeadline==deadline&&stopCount()==1&&g_inputHostSwitchRecovery.spent&&
+  expired.fallbackAttempts==1&&g_inputHostRecoveryEpisodeAttempts.load()==1,
+  "existing monotonic I/O hook advances actual Stop to the same absolute deadline without refunding its reservation");
+ check(expired.phase=="expired"&&expired.remainingMs==0&&createCount()==1&&g_inputHostSwitchRecovery.deadline==deadline&&
+  fixtureActiveExecutionDeadline()==0,"expiry before dispatch or inside Stop never creates a replacement Host and restores the borrowed scope");
+ const auto next=g_virtualStartProtection.admit("steamdeck",startProtectionClock);
+ check(next.accepted&&next.requestId!=ticket,"deadline replay probe has an independently admitted newer request");
+ inputHostPerformSwitchRecovery(ticket);fullPipeDrainQueuedLifecycle();
+ check(createCount()==1&&g_virtualStartProtection.view(startProtectionClock).requestId==next.requestId&&
+  g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,"old queued recovery cannot borrow a newer ticket after its original period");
+ finishLocalCase();
+ }
  cases.push_back({{"name","actual-unique-OFF-verification-exit"}});prepare();
  startProtectionClock+=30000;g_virtualStartProtection.admit("disabled",startProtectionClock);g_realStickTest.virtualTargetEnabled=false;g_realStickTest.virtualTargetPersona="disabled";
  inputHostStop("virtual-target-disabled");const auto closing=g_virtualStartProtection.view(startProtectionClock);
@@ -1563,6 +2366,6 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"focus-recovery"){focusRecoveryCases();ok=failures.empty();}
  else if(mode==L"full-pipe"){fullPipeCases();fixtureTargetReturnFullPipeCases();ok=failures.empty();}
  else return 2;
- const auto report=json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"assertionTrace",assertionTrace},{"cases",cases},{"failures",failures},{"expectedFailure",expectedFailure},{"forbiddenIo",forbiddenIo},{"inertXinputReads",inertXinputReads},{"targetReturnObservations",fixtureTargetReturnObservations},{"targetReturnCaptureModel","full-pipe: real107 parent+managed-child; native-only: event Host has explicit controlled PID/birth"},{"fullTranslationUnit",true},{"normalProductMainExecuted",false},{"realDeviceIo",false}};
- std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<report.dump(2);if(mode==L"full-pipe")std::cout<<json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"failures",failures}}.dump()<<'\n';else std::cout<<report.dump(2)<<'\n';return ok&&forbiddenIo==0?0:1;
+ const auto report=json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"assertionTrace",assertionTrace},{"cases",cases},{"failures",failures},{"expectedFailure",expectedFailure},{"forbiddenIo",forbiddenIo},{"inertXinputReads",inertXinputReads},{"excludedSteamWallpaperNotifications",fixtureExcludedSteamWallpaperNotifications},{"targetReturnObservations",fixtureTargetReturnObservations},{"targetReturnCaptureModel","full-pipe: real107 parent+managed-child; native-only: event Host has explicit controlled PID/birth"},{"fullTranslationUnit",true},{"normalProductMainExecuted",false},{"realDeviceIo",false}};
+ std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<report.dump(2);if(mode==L"full-pipe"||mode==L"late-hide-pending"||mode==L"switch-recovery")std::cout<<json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"failures",failures}}.dump()<<'\n';else std::cout<<report.dump(2)<<'\n';return ok&&forbiddenIo==0?0:1;
  }catch(const std::exception& e){try{const auto report=json{{"status","INCOMPLETE"},{"exception",e.what()},{"checks",checks},{"assertionTrace",assertionTrace},{"cases",cases},{"failures",failures},{"nativeEvents",fixtureEvents},{"state",state()},{"forbiddenIo",forbiddenIo},{"normalProductMainExecuted",false},{"realDeviceIo",false}};std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-exception.json")<<report.dump(2);}catch(...){}std::cerr<<e.what()<<'\n';return 3;}}

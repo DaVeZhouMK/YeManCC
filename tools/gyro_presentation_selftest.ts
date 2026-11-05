@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createGyroPresentationGate } from '../src/bridge/gyroPresentation';
+import { createGyroPresentationGate, createStickPresentation, gyroStickPreviewSample } from '../src/bridge/gyroPresentation';
 import { normalizeGyroTelemetry } from '../src/bridge/inputContracts';
 import { formatGyroAxis } from '../src/bridge/gyroAxisFormat';
 let checks = 0;
@@ -82,4 +82,56 @@ for (let i = 0; i < 5000; i++) {
 }
 modeled.dispose(); disposed = true; jobs.clear(); modeled.push(frame(++seq), seq); modeled.setActive(true); modeled.setVisible(true);
 check(disposed && jobs.size === 0, 'final model dispose is terminal');
+// Display interpolation uses exact endpoints without feeding controller output.
+let displayTime = 0, displayId = 0;
+const displayJobs = new Map<number, () => void>(), displayCallbacks = new Map<number, () => void>();
+let point = { x: 0, y: 0 }, paints = 0;
+const display = createStickPresentation({ durationMs: 80, now: () => displayTime,
+  present: value => { point = value; paints++; },
+  requestFrame: fn => { const id = displayId++; displayJobs.set(id, fn); displayCallbacks.set(id, fn); return id; },
+  cancelFrame: id => { displayJobs.delete(id); } });
+function drawAt(time: number) { displayTime = time; const jobs = [...displayJobs.values()]; displayJobs.clear(); for (const job of jobs) job(); }
+display.push({ x: 1, y: 1 }); check(paints === 0 && displayJobs.size === 0, 'closed display cannot schedule');
+display.setActive(true); display.push({ x: 0, y: 0 });
+check(point.x === 0 && displayJobs.size === 0, 'first current sample snaps without inventing travel');
+display.push({ x: 1, y: -1 });check(displayJobs.size === 1, 'finite animation owns one RAF including ticket zero');
+drawAt(20);check(point.x === .25 && point.y === -.25, '80ms interval interpolates at screen cadence without extra gain');
+drawAt(40);check(point.x === .5 && point.y === -.5, 'midpoint preserves both signs and square diagonal amplitude');
+drawAt(80);check(point.x === 1 && point.y === -1 && displayJobs.size === 0, 'exact full endpoint terminates RAF');
+display.push({ x: 1, y: -1 });check(displayJobs.size === 0, 'identical stationary samples have no ongoing RAF');
+display.push({ x: -1, y: 1 });drawAt(100);check(point.x === .5 && point.y === -.5, 'direction reversal has no overshoot');
+displayTime = 120;display.push({ x: .8, y: .4 });drawAt(160);
+check(Math.abs(point.x - .4) < 1e-12 && Math.abs(point.y - .2) < 1e-12, 'retarget uses actual elapsed position, not a queued backlog');
+drawAt(200);check(point.x === .8 && point.y === .4 && displayJobs.size === 0, 'retarget lands on exact current endpoint');
+display.push({ x: -.5, y: .7 });const staleId = displayId - 1;display.setActive(false);
+check(point.x === 0 && point.y === 0 && displayJobs.size === 0, 'OFF cancels motion immediately instead of easing old input');
+display.setActive(true);display.push({ x: -.2, y: .1 });display.push({ x: .6, y: -.3 });const currentId = displayId - 1;
+displayCallbacks.get(staleId)!();check(displayJobs.has(currentId), 'late canceled RAF cannot erase a new display ticket');
+display.reset();check(point.x === 0 && displayJobs.size === 0, 'new source resets old interpolation');
+display.push({ x: -.4, y: .9 });check(point.x === -.4 && point.y === .9, 'new source first sample does not animate across devices');
+display.push({ x: NaN, y: Infinity }, true);check(point.x === 0 && point.y === 0, 'invalid display axes fail to zero');
+display.push({ x: 2, y: -2 }, true);check(point.x === 1 && point.y === -1, 'display safety clamp does not normalize square corners');
+display.push({ x: 0, y: 0 });display.dispose();const afterDispose = paints;for (const job of [...displayCallbacks.values()]) job();
+check(paints === afterDispose && displayJobs.size === 0, 'unmounted display cannot repaint from delayed callbacks');
+for (const duration of [80,100]) {
+  let clock = 0; const jobs = new Map<number,()=>void>(); let last = {x:0,y:0};let id=0;
+  const p = createStickPresentation({ durationMs:duration, now:()=>clock, present:v=>{last=v;},
+    requestFrame:fn=>{jobs.set(++id,fn);return id;},cancelFrame:id=>{jobs.delete(id);} });
+  p.setActive(true);p.push({x:0,y:0});p.push({x:-.75,y:.5});
+  clock=duration;for(const job of [...jobs.values()]){jobs.clear();job();}
+  check(last.x===-.75 && last.y===.5 && jobs.size===0, 'gyro/calibration exact endpoint '+duration);p.dispose();
+}
+const mapped = normalizeGyroTelemetry({sequence:1,timestampUtc:'2026-11-04T00:00:00Z',gyro:{x:1,y:0,z:0},
+  outputKind:'native-canonical-pipe-frame',targetStick:'right',motionAdmission:'hc-motion-admitted',
+  motionContribution:{x:.25,y:-.1},layoutContribution:{x:.325,y:-.13},output:{x:0,y:0}})!;
+check(gyroStickPreviewSample(mapped,'right')?.x===.325, 'preview consumes native 1.3-weighted contribution, not unweighted .25');
+check(gyroStickPreviewSample(mapped,'right')?.y===-.13, 'weighted preview preserves Y sign without extra sensitivity');
+check(gyroStickPreviewSample(mapped,'left')===null, 'old target frame cannot move a different target preview');
+check(gyroStickPreviewSample({...mapped,outputKind:'unknown'},'right')===null, 'unknown output origin cannot claim a native preview');
+check(gyroStickPreviewSample({...mapped,motionAdmission:'safe-zero'},'right')===null, 'closed native motion admission cannot animate');
+check(gyroStickPreviewSample({...mapped,layoutContribution:undefined},'right')===null, 'missing weighted field never falls back to invented gain');
+check(gyroStickPreviewSample({...mapped,timestampUtc:''},'right')===null, 'timestamp-free frame is not made fresh by display');
+check(gyroStickPreviewSample({...mapped,layoutContribution:{x:NaN,y:0}},'right')===null, 'invalid weighted source is unavailable');
+check(mapped.output.x===0 && mapped.motionContribution?.x===.25 && mapped.layoutContribution?.x===.325,
+  'foreground zero and simulation input remain untouched by mapping preview');
 console.log(`gyro presentation selftest PASS ${checks} checks`);

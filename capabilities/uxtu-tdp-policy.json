@@ -94,7 +94,7 @@
     "amd": {
       "unit": "co_step",
       "minimum": -60,
-      "maximum": 60,
+      "maximum": 0,
       "step": 1,
       "scope": "all_core",
       "readback": false,
@@ -1232,5 +1232,63 @@
         "name": "ArrowLake-U"
       }
     ]
+  },
+  "ymccCompatibility": {
+    "revision": 1,
+    "amdStrixHalo": {
+      "id": "ymcc-strix-halo-pm-388-r1",
+      "ownership": "YMCC extension on existing unified capability bus; fixed UXTU 26.3.1 remains the write recipe source",
+      "cpu": {
+        "family": 26,
+        "models": [
+          112
+        ]
+      },
+      "familyRecipe": "FAM_APU_FT6_NEW",
+      "familyTag": "apu_ft6_new",
+      "writeRoute": "reuse-existing-395-StrixHalo-recipe",
+      "readback": {
+        "tableVersions": [
+          6553868,
+          6554124
+        ],
+        "tableBytes": 3664,
+        "unit": "w",
+        "offsets": {
+          "stapm": 0,
+          "fast": 8,
+          "slow": 16
+        },
+        "toleranceW": 0.05,
+        "minimumLimitW": 0,
+        "maximumPlausibleLimitW": 1000,
+        "mode": "explicit-static-request-only",
+        "unknownTable": "retain-write-receipt-and-unknown-readback",
+        "mismatch": "report-not-reflected-without-write-replay"
+      },
+      "sources": [
+        {
+          "path": "capabilities/upstream/ymcc-strix-halo-pm/ryzenadj-api.c",
+          "url": "https://raw.githubusercontent.com/FlyGoat/RyzenAdj/5775fc3e6dbb25c7030ee2d100a1bdd6e8bf2d0a/lib/api.c",
+          "bytes": 59609,
+          "sha256": "0dafa84f39caa06309c713e0011a436dfbe187dc67d49866a954fb7fa0443860"
+        },
+        {
+          "path": "capabilities/upstream/ymcc-strix-halo-pm/ryzen_smu.c",
+          "url": "https://raw.githubusercontent.com/amkillam/ryzen_smu/e39db04cd0056e00b9cd47e7140e4137eaa47464/smu.c",
+          "bytes": 36239,
+          "sha256": "181d69adb7893a90d57836e817c72dac1dd97e08eb122f4504b70495993aee8e"
+        },
+        {
+          "path": "capabilities/upstream/ymcc-strix-halo-pm/RyzenSMU.p",
+          "url": "https://raw.githubusercontent.com/namazso/PawnIO.Modules/24425a5299e84410751da882c121f322fb030b82/RyzenSMU.p",
+          "bytes": 27722,
+          "sha256": "1aed03fe369afc49cf154a83bde104920a34bc37872c68190d686b99f34de7b5"
+        }
+      ],
+      "hardwareAcceptanceFromDeclaration": false,
+      "scopeEvidence": "0x64010C was hardware-tested on ONEXPLAYER X2Mini PRO AI MAX+ 388; 0x64020C on Strix Halo 395. GPD WIN5 actual table version and effect remain unverified.",
+      "upstreamReplacement": "Remove extension only after a later pinned UXTU supplies equivalent CPU/table/ABI declarations and existing consumers pass; do not auto-switch based on version label."
+    }
   }
 }

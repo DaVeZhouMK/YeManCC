@@ -891,5 +891,28 @@
       "minorMin": 0
     },
     "min": 40
+  },
+  {
+    "route": "oxp-superx-dual-ec",
+    "family": "OneXPlayer Super X",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER SUPER X"
+      ],
+      "deviceClass": "OneXPlayerSuperX",
+      "manufacturerMatch": "ordinal-contains",
+      "valueMatch": "ordinal-exact"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required",
+      "majorMin": 0,
+      "minorMin": 0
+    },
+    "min": 75
   }
 ]
